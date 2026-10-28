@@ -5,7 +5,7 @@ use integration_testkit::scenario::{DispatchedMessage, HandlerInput, ScenarioHan
 
 use super::handlers::{
     global_envelope, global_handler, handler_context, namespace_envelope_with_targets,
-    namespace_handler, stale_edge_task,
+    namespace_handler,
 };
 
 pub struct SdlcScenarioHandlers;
@@ -41,7 +41,6 @@ impl ScenarioHandlers for SdlcScenarioHandlers {
                     .await
                     .unwrap();
             }
-            "stale_edge_reconciliation" => stale_edge_task(ctx).run().await.unwrap(),
             other => panic!("unknown scenario handler '{other}'"),
         }
         Vec::new()

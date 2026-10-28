@@ -169,9 +169,6 @@ schedule:
       cron: "0 0 3 * * *"
     migration-completion:
       cron: "0 */1 * * * *"
-    stale-edge-reconciliation:
-      cron: "0 */30 * * * *"
-      lookback_secs: 3600
     namespace-freshness:
       cron: "0 */5 * * * *"
 

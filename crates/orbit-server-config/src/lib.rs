@@ -37,7 +37,7 @@ pub use engine::{
     GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
     NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, NamespaceFreshnessConfig,
     ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
-    StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
+    SubscriptionConfig, TableCleanupConfig,
 };
 pub use features::{Feature, FeatureScope, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};

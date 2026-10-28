@@ -68,8 +68,7 @@ use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
     CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
-    NamespaceDeletionScheduler, NamespaceDispatcher, NamespaceFreshness, Scheduled,
-    StaleEdgeReconciliation, TableCleanup,
+    NamespaceDeletionScheduler, NamespaceDispatcher, NamespaceFreshness, Scheduled, TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
@@ -386,15 +385,6 @@ pub async fn run_dispatcher(
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.namespace_deletion.clone(),
-        )),
-        Box::new(StaleEdgeReconciliation::new(
-            clients.graph.clone(),
-            &ontology,
-            Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                clients.graph.clone(),
-            ))),
-            metrics.clone(),
-            config.schedule.tasks.stale_edge_reconciliation.clone(),
         )),
         Box::new(NamespaceFreshness::new(
             clients.graph.clone(),

@@ -856,9 +856,6 @@
         "migration-completion": {
           "$ref": "#/$defs/MigrationCompletionConfig"
         },
-        "stale-edge-reconciliation": {
-          "$ref": "#/$defs/StaleEdgeReconciliationConfig"
-        },
         "namespace-freshness": {
           "$ref": "#/$defs/NamespaceFreshnessConfig"
         }
@@ -872,7 +869,6 @@
         "table-cleanup",
         "namespace-deletion",
         "migration-completion",
-        "stale-edge-reconciliation",
         "namespace-freshness"
       ]
     },
@@ -986,25 +982,6 @@
       },
       "required": [
         "cron"
-      ]
-    },
-    "StaleEdgeReconciliationConfig": {
-      "description": "Tombstones edges a node's pipeline stopped emitting, off the indexing path.",
-      "type": "object",
-      "properties": {
-        "cron": {
-          "$ref": "#/$defs/CronSchedule"
-        },
-        "lookback_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "cron",
-        "lookback_secs"
       ]
     },
     "NamespaceFreshnessConfig": {

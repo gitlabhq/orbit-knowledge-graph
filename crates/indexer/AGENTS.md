@@ -82,26 +82,17 @@ are also dropped. These are rename-orphans like `v56_gl_edge_v2` and removed ent
 applies: an object survives if its base name (after stripping the `v<N>_` prefix) matches a
 `gc_preserve_patterns` regex from the ontology settings.
 
-### Stale FK-edge reconciliation
+### FK edge retirement
 
-`orchestrator::scheduled::StaleEdgeReconciliation` is a DispatchIndexing-mode `ScheduledTask` that tombstones
-stale FK-derived edges. A mutable-FK "latest" edge (e.g. `HAS_LATEST_DIFF`) orphans its old row when
-the FK changes. The reason: `target_id` is part of the `ReplacingMergeTree` identity. So the prior
-`(source, old_target)` row is never replaced. A deleted node also strands every FK edge it emitted.
-Siphon replicates a delete as the lake key plus defaults, so the tombstone has no FK. The edge
-transform then writes no edge tombstone. The task runs one idempotent `INSERT … SELECT` per
-`(rule, FK-owner, edge table, endpoint)` group. The rule splits one owner's mappings in two.
-Mappings marked `mutable: true` retire an older edge on any newer owner row, live or deleted. Every
-other FK mapping retires its edges only when the owner's latest row is deleted. So a merge request's
-`AUTHORED` and `REVIEWER` edges on `(MergeRequest, gl_edge, target_id)` run as two statements. Each statement reads
-the owners whose latest row is within the lookback (`_version >= cursor`) once, as a materialized
-CTE. A dual `IN` on the edge PK prunes the edge read to that set. When a deleted owner is the edge
-target, the delete rule takes each kind's parent key from the owner's surviving live rows. It then reads
-edges by their exact `(traversal_path, relationship_kind, source_id, target_id)`. It falls back to `target_id` only for owners with no live row left. The tombstone is stamped one
-microsecond below the owner's version, so an edge the indexer writes at that version always wins.
-The groups and their metadata are ontology-derived. It runs directly in the dispatcher (not dispatched to indexer workers):
-one cheap global sweep, off the insert hot path. See
-the [pre-rewrite SDLC indexing doc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md) ("Stale FK-edge reconciliation").
+A node row emits one FK edge per mapping. `target_id` is part of the `ReplacingMergeTree` identity,
+so a new key writes a new edge row and the old one stays live. A delete arrives from siphon as the
+lake key plus defaults, so its FK columns are empty and the transform writes no edge tombstone.
+`modules::sdlc::edge_diff::EdgeDiff` closes both gaps at write time. Before a node page is written,
+it reads back the stored row each page row replaces, keyed by `(traversal_path, id)`. That row is
+the latest version older than the page row. It computes the FK edge keys both rows emit from the ontology
+mappings, including derived kinds. Every key the stored row emitted that the page row does not gets
+a tombstone at the page row's version, in the same page write. Array-valued mappings such as
+`REVIEWER` are not diffed, because the node row does not store the array.
 
 ### Entry point
 

@@ -426,21 +426,6 @@ pub struct NamespaceFreshnessConfig {
     pub schedule: ScheduleConfiguration,
 }
 
-/// Tombstones edges a node's pipeline stopped emitting, off the indexing path.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct StaleEdgeReconciliationConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-    pub lookback_secs: u64,
-}
-
-impl StaleEdgeReconciliationConfig {
-    pub fn lookback(&self) -> chrono::TimeDelta {
-        chrono::TimeDelta::seconds(self.lookback_secs as i64)
-    }
-}
-
 /// Typed per-task configuration for all registered scheduled tasks.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -453,7 +438,6 @@ pub struct ScheduledTasksConfiguration {
     pub table_cleanup: TableCleanupConfig,
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
     pub migration_completion: MigrationCompletionConfig,
-    pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
     pub namespace_freshness: NamespaceFreshnessConfig,
 }
 
@@ -642,10 +626,6 @@ mod tests {
         assert_eq!(
             tasks.table_cleanup.schedule.cron.expression(),
             "0 0 3 * * 0"
-        );
-        assert_eq!(
-            tasks.stale_edge_reconciliation.schedule.cron.expression(),
-            "0 */30 * * * *"
         );
     }
 

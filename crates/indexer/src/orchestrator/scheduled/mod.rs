@@ -6,7 +6,6 @@ pub mod global;
 pub mod migration_completion;
 pub mod namespace;
 pub mod namespace_deletion;
-pub mod stale_edge_reconciliation;
 pub mod table_cleanup;
 
 pub use backfill_sweep::CodeBackfillSweep;
@@ -16,7 +15,6 @@ pub use metrics::ScheduledTaskMetrics;
 pub use migration_completion::MigrationCompletionChecker;
 pub use namespace::{NamespaceDispatcher, NamespaceFreshness};
 pub use namespace_deletion::NamespaceDeletionScheduler;
-pub use stale_edge_reconciliation::StaleEdgeReconciliation;
 pub use table_cleanup::TableCleanup;
 
 use std::sync::Arc;

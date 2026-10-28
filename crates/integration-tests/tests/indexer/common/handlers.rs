@@ -189,35 +189,6 @@ pub fn namespace_envelope_with_targets(
     )
 }
 
-pub fn stale_edge_task(
-    ctx: &TestContext,
-) -> indexer::orchestrator::scheduled::StaleEdgeReconciliation {
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-    let checkpoint_store = Arc::new(indexer::checkpoint::ClickHouseCheckpointStore::new(
-        Arc::new(ctx.config.build_client("graph")),
-    ));
-    let mut config = orbit_server_config::AppConfig::embedded_defaults()
-        .schedule
-        .tasks
-        .stale_edge_reconciliation;
-    config.lookback_secs = (Utc::now() - stale_edge_lookback_floor())
-        .num_seconds()
-        .unsigned_abs();
-    indexer::orchestrator::scheduled::StaleEdgeReconciliation::new(
-        ctx.config.build_client("graph"),
-        &ontology,
-        checkpoint_store,
-        indexer::orchestrator::scheduled::ScheduledTaskMetrics::new(),
-        config,
-    )
-}
-
-fn stale_edge_lookback_floor() -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc)
-}
-
 pub fn global_envelope() -> Envelope {
     TestEnvelopeFactory::simple(
         &serde_json::json!({
