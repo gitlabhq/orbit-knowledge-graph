@@ -123,7 +123,7 @@ tests:
   - name: "Two interfaces in same namespace indexed as Interface"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Interface'
+      WHERE d.kind = 'Interface'
         AND d.fqn IN ['App\Contracts\UserRepositoryInterface',
                       'App\Contracts\LoggerInterface']
       RETURN d.fqn AS fqn
@@ -135,7 +135,7 @@ tests:
   - name: "Interface method declarations indexed as Method under the interface FQN"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method'
+      WHERE d.kind = 'Method'
         AND d.fqn IN ['App\Contracts\UserRepositoryInterface\find',
                       'App\Contracts\UserRepositoryInterface\all',
                       'App\Contracts\LoggerInterface\info',
@@ -222,7 +222,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Http\Controllers\UserController'
-        AND d.definition_type = 'Class'
+        AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -232,7 +232,7 @@ tests:
   - name: "Interface-typed properties on UserController indexed by bare name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Property'
+      WHERE d.kind = 'Property'
         AND d.fqn IN ['App\Http\Controllers\UserController\users',
                       'App\Http\Controllers\UserController\logger']
       RETURN d.fqn AS fqn
@@ -243,7 +243,7 @@ tests:
   - name: "Top-level bootApp function FQN under namespace App"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'App\bootApp'
+      WHERE d.kind = 'Function' AND d.fqn = 'App\bootApp'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

@@ -35,7 +35,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'TRIPLE'
-      RETURN d.definition_type AS dt
+      RETURN d.kind AS dt
     assert:
       - { row_count: 1 }
       - { row: { dt: "Lambda" } }
@@ -44,7 +44,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/callables.rb'
-        AND d.definition_type = 'Lambda'
+        AND d.kind = 'Lambda'
       RETURN d.name AS name
     assert:
       - { row_count: 5 }
@@ -58,7 +58,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'handler'
-      RETURN d.definition_type AS dt
+      RETURN d.kind AS dt
     assert:
       - { row_count: 1 }
       - { row: { dt: "Lambda" } }
@@ -67,7 +67,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'AUTH'
-      RETURN d.fqn AS fqn, d.definition_type AS dt
+      RETURN d.fqn AS fqn, d.kind AS dt
     assert:
       - { row_count: 1 }
       - { row: { fqn: "Middleware::AUTH", dt: "Lambda" } }
@@ -76,7 +76,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'MAX_RETRIES'
-      RETURN d.definition_type AS dt
+      RETURN d.kind AS dt
     assert:
       - { row_count: 1 }
       - { row: { dt: "Constant" } }
@@ -85,7 +85,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'BUILDER'
-      RETURN d.definition_type AS dt
+      RETURN d.kind AS dt
     assert:
       - { row_count: 1 }
       - { row: { dt: "Constant" } }
@@ -93,7 +93,7 @@ tests:
   - name: "callable constants are not double-emitted as Constants"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Constant'
+      WHERE d.kind = 'Constant'
         AND d.name IN ['TRIPLE', 'DOUBLE', 'VALIDATE_EMAIL', 'MAKER', 'AUTH', 'handler']
       RETURN count(d) AS n
     assert:
@@ -107,7 +107,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Middleware::initialize'
         AND callee.fqn = 'Middleware::AUTH'
-      RETURN callee.definition_type AS dt
+      RETURN callee.kind AS dt
     assert:
       - { row_count: 1 }
       - { row: { dt: "Lambda" } }

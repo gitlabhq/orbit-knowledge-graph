@@ -18,7 +18,7 @@ tests:
   - name: Exactly 3 definitions
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'main.js' AND d.definition_type = 'Function'
+      WHERE d.file_path = 'main.js' AND d.kind = 'Function'
       RETURN d.name AS name, d.fqn AS fqn
       ORDER BY name
     assert:

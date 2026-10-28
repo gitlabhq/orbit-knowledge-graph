@@ -51,7 +51,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path IN ['frontend/src/App.js', 'backend/coverage/prettify.js']
         AND d.fqn IN ['App', 'generated']
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.kind AS type
       ORDER BY file_path, fqn
     assert:
       - { row_count: 2 }

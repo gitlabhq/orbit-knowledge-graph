@@ -7,10 +7,10 @@ config:
     gl_definition:
       - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: audit_caller, fqn: audit_caller }
       - { id: 99001, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: audit_target, fqn: audit_target }
-    gl_imported_symbol:
+    gl_import:
       - { id: 12001, traversal_path: "1/100/1000/", project_id: 1000, branch: main }
     gl_code_edge:
-      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: ImportedSymbol }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Import }
       - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 99001, target_kind: Definition }
 
 query:

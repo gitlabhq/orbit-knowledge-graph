@@ -49,33 +49,33 @@ fixtures:
       end
 
 tests:
-  - name: "include emits one ImportedSymbol per module"
+  - name: "include emits one Import per module"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(s:Import)
       WHERE f.path = 'app/models/report.rb'
-        AND s.import_type = 'Include'
-      RETURN s.identifier_name AS name, s.import_path AS path
+        AND s.language_kind = 'Include'
+      RETURN s.name AS name, s.import_path AS path
     assert:
       - { row_count: 2 }
       - { row: { name: "Auditable", path: "" } }
       - { row: { name: "Tracking", path: "Gitlab" } }
 
-  - name: "extend emits a module ImportedSymbol"
+  - name: "extend emits a module Import"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(s:Import)
       WHERE f.path = 'app/models/report.rb'
-        AND s.import_type = 'Extend'
-      RETURN s.identifier_name AS name, s.import_path AS path
+        AND s.language_kind = 'Extend'
+      RETURN s.name AS name, s.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { name: "Cacheable", path: "" } }
 
-  - name: "prepend emits a module ImportedSymbol"
+  - name: "prepend emits a module Import"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(s:Import)
       WHERE f.path = 'app/models/report.rb'
-        AND s.import_type = 'Prepend'
-      RETURN s.identifier_name AS name, s.import_path AS path
+        AND s.language_kind = 'Prepend'
+      RETURN s.name AS name, s.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { name: "Instrumentation", path: "" } }

@@ -32,8 +32,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.rs'
-        AND d.definition_type IN ['Struct', 'Function', 'Method', 'Function']
-      RETURN d.name AS name, d.definition_type AS type
+        AND d.kind IN ['Struct', 'Function', 'Method', 'Function']
+      RETURN d.name AS name, d.kind AS type
       ORDER BY name
     assert:
       - { no_nulls: name }

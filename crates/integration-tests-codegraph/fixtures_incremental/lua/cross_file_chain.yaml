@@ -43,7 +43,7 @@ tests:
 
   - name: "each require call is an import"
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path IN ['b.lua', 'c.lua']
       RETURN i.file_path AS file, i.import_path AS path
     assert:

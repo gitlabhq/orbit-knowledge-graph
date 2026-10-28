@@ -142,7 +142,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN ['Model::name', 'Model::email']
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 2 }
       - { row: { fqn: "Model::name", type: Property } }
@@ -152,7 +152,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Model::valid?'
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -161,7 +161,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Model::greet'
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -170,7 +170,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN ['Presenter::name', 'Presenter::email', 'Presenter::greet']
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -232,7 +232,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN ['Post::comments', 'Post::author', 'Post::featured_image']
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -246,7 +246,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN ['Post::published', 'Post::recent']
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 2 }
       - { row: { fqn: "Post::published", type: Method } }
@@ -260,7 +260,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Post::max_length'
-        AND d.definition_type = 'Property'
+        AND d.kind = 'Property'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -363,7 +363,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Dynamic::some_variable'
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 0 }

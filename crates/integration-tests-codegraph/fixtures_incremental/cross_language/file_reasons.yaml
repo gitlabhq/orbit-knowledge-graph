@@ -23,12 +23,12 @@ fixtures:
 tests:
   - name: every file has a row and the reason production would give it
     query: |
-      MATCH (f:File) RETURN f.path AS path, f.reason AS reason
+      MATCH (f:File) RETURN f.path AS path, f.skip_reason AS skip_reason
       ORDER BY path
     assert:
       - { row_count: 5 }
-      - { row: { path: README.md, reason: "" } }
-      - { row: { path: dist/bundle.min.js, reason: skip_excluded_extension } }
-      - { row: { path: logo.png, reason: skip_excluded_extension } }
-      - { row: { path: package.json, reason: "" } }
-      - { row: { path: src/index.ts, reason: "" } }
+      - { row: { path: README.md, skip_reason: "" } }
+      - { row: { path: dist/bundle.min.js, skip_reason: skip_excluded_extension } }
+      - { row: { path: logo.png, skip_reason: skip_excluded_extension } }
+      - { row: { path: package.json, skip_reason: "" } }
+      - { row: { path: src/index.ts, skip_reason: "" } }

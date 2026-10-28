@@ -158,7 +158,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.kind AS type
       ORDER BY file_path
     assert:
       - { row_count: 3 }
@@ -171,7 +171,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
         AND d.fqn IN ['App', 'IndexPage', 'getStaticProps', 'handler']
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.kind AS type
       ORDER BY file_path, fqn
     assert:
       - { row_count: 4 }
@@ -183,9 +183,9 @@ tests:
   - name: Next pages router local imports resolve
     skip: true
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      RETURN i.file_path AS file_path, i.import_path AS path, i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
       ORDER BY file_path, path, name
     assert:
       - { row_count: 4 }
@@ -197,10 +197,10 @@ tests:
   - name: Next pages router package type imports remain unresolved
     skip: true
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/api/users.ts']
         AND i.import_path IN ['next/app', 'next']
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.is_type_only AS is_type_only
+      RETURN i.file_path AS file_path, i.import_path AS path, i.name AS name, i.is_type_only AS is_type_only
       ORDER BY file_path, path, name
     assert:
       - { row_count: 3 }
@@ -210,7 +210,7 @@ tests:
 
   - name: Next pages router package type imports have no local targets
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/api/users.ts']
         AND i.import_path IN ['next/app', 'next']
       RETURN i.import_path AS path, d.fqn AS target
@@ -253,7 +253,7 @@ tests:
         'pages/shop/[[...filters]].tsx',
         'pages/api/users/[id].ts'
       ]
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.kind AS type
       ORDER BY file_path
     assert:
       - { row_count: 8 }
@@ -291,7 +291,7 @@ tests:
           'ShopPage',
           'userHandler'
         ]
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.kind AS type
       ORDER BY file_path, fqn
     assert:
       - { row_count: 10 }
@@ -333,10 +333,10 @@ tests:
 
   - name: Next pages router document imports stay external
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'pages/_document.tsx'
         AND i.import_path = 'next/document'
-      RETURN i.import_path AS path, i.identifier_name AS name
+      RETURN i.import_path AS path, i.name AS name
       ORDER BY name
     assert:
       - { row_count: 4 }
@@ -347,7 +347,7 @@ tests:
 
   - name: Next pages router document imports have no local targets
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'pages/_document.tsx'
         AND i.import_path = 'next/document'
       RETURN i.import_path AS path, d.fqn AS target

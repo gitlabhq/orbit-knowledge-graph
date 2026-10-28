@@ -536,7 +536,7 @@ fn every_file_becomes_a_row_with_its_reason() {
                 "name",
                 "extension",
                 "size_bytes",
-                "reason",
+                "skip_reason",
                 "project_id",
                 "branch"
             ]
@@ -596,7 +596,7 @@ fn definitions_imports_and_edges_export_as_ontology_rows() {
     assert_eq!(
         rows(
             table(&exported, "gl_definition"),
-            &["fqn", "name", "definition_type", "file_path", "start_line"]
+            &["fqn", "name", "kind", "file_path", "start_line"]
         ),
         [
             strs(&["main.run", "run", "Function", "main.py", "4"]),
@@ -607,8 +607,8 @@ fn definitions_imports_and_edges_export_as_ontology_rows() {
     );
     assert_eq!(
         rows(
-            table(&exported, "gl_imported_symbol"),
-            &["identifier_name", "import_path", "import_type", "file_path"]
+            table(&exported, "gl_import"),
+            &["name", "import_path", "language_kind", "file_path"]
         ),
         [
             strs(&["Store", "utils", "NamedImport", "main.py"]),
@@ -619,7 +619,7 @@ fn definitions_imports_and_edges_export_as_ontology_rows() {
     let edges = table(&exported, "gl_edge");
     let import_to_def = rows(edges, &["source_kind", "relationship_kind", "target_kind"])
         .iter()
-        .filter(|r| r == &&strs(&["ImportedSymbol", "IMPORTS", "Definition"]))
+        .filter(|r| r == &&strs(&["Import", "IMPORTS", "Definition"]))
         .count();
     assert_eq!(
         import_to_def, 2,
@@ -638,12 +638,8 @@ fn definitions_imports_and_edges_export_as_ontology_rows() {
             ("Definition".into(), "DEFINES".into(), "Definition".into()),
             ("Directory".into(), "CONTAINS".into(), "File".into()),
             ("File".into(), "DEFINES".into(), "Definition".into()),
-            ("File".into(), "IMPORTS".into(), "ImportedSymbol".into()),
-            (
-                "ImportedSymbol".into(),
-                "IMPORTS".into(),
-                "Definition".into()
-            ),
+            ("File".into(), "IMPORTS".into(), "Import".into()),
+            ("Import".into(), "IMPORTS".into(), "Definition".into()),
         ]
     );
 }
@@ -659,7 +655,7 @@ fn ids_depend_on_content_not_on_the_run() {
     let first = export_repo(repo.path());
     let second = export_repo(repo.path());
 
-    for name in ["gl_file", "gl_definition", "gl_imported_symbol", "gl_edge"] {
+    for name in ["gl_file", "gl_definition", "gl_import", "gl_edge"] {
         let columns: &[&str] = if name == "gl_edge" {
             &["source_id", "target_id"]
         } else {
@@ -711,7 +707,7 @@ fn emit_hands_every_table_to_the_sink_and_keeps_the_graph() {
             "gl_directory",
             "gl_edge",
             "gl_file",
-            "gl_imported_symbol"
+            "gl_import"
         ]
     );
     let empty: Vec<_> = seen
@@ -826,7 +822,7 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
     );
     assert!(!rows(table(&partial, "gl_definition"), &definition).is_empty());
     let mut ids: Vec<String> = Vec::new();
-    for name in ["gl_definition", "gl_file", "gl_imported_symbol"] {
+    for name in ["gl_definition", "gl_file", "gl_import"] {
         ids.extend(column(table(&partial, name), "id"));
     }
     let edge = ["source_id", "relationship_kind", "target_id"];

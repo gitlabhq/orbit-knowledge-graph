@@ -3,7 +3,7 @@ name: "Python: relative re-exports through a package __init__.py"
 # A package __init__.py *is* its package, so a one-dot relative import there
 # resolves against the package itself (no module leaf to drop). Re-exports
 # written this way (`from .base import X`, `from .helpers import *`) must bind
-# callers to the underlying definition rather than an unresolved ImportedSymbol.
+# callers to the underlying definition rather than an unresolved Import.
 
 fixtures:
   - path: app/registry/base.py
@@ -63,7 +63,7 @@ fixtures:
           return Thing()
 
   # Over-resolution guard: an external import with no local definition must stay
-  # an ImportedSymbol even though the importing file is a package __init__.py.
+  # an Import even though the importing file is a package __init__.py.
   - path: ext/__init__.py
     content: |
       from thirdparty import Widget
@@ -86,9 +86,9 @@ tests:
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
           WHERE caller.fqn = 'app.consumer.build'
-            AND sym.identifier_name = 'BaseRegistry'
+            AND sym.name = 'BaseRegistry'
           RETURN caller.fqn AS caller
         assert:
           - { empty: true }
@@ -120,11 +120,11 @@ tests:
     assert:
       - { row_count: 1 }
 
-  - name: "external re-export from a package __init__ stays an ImportedSymbol"
+  - name: "external re-export from a package __init__ stays an Import"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'ext.caller.build_widget'
-        AND sym.identifier_name = 'Widget'
+        AND sym.name = 'Widget'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

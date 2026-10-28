@@ -26,8 +26,8 @@ fixtures:
 tests:
   - name: "every imported binding remains cataloged"
     query: |
-      MATCH (i:ImportedSymbol) WHERE i.file_path = 'main.ts'
-      RETURN i.identifier_name AS name, i.identifier_alias AS alias
+      MATCH (i:Import) WHERE i.file_path = 'main.ts'
+      RETURN i.name AS name, i.alias AS alias
     assert:
       - { row_count: 6 }
       - { row: { name: "default", alias: "DefaultClient" } }
@@ -39,9 +39,9 @@ tests:
 
   - name: "type-only names still resolve to their definitions"
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
-      WHERE i.file_path = 'main.ts' AND i.identifier_name IN ['Client', 'default']
-      RETURN i.identifier_alias AS alias, d.name AS target
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'main.ts' AND i.name IN ['Client', 'default']
+      RETURN i.alias AS alias, d.name AS target
     assert:
       - { row_count: 3 }
       - { row: { alias: "DefaultClient", target: "DefaultClient" } }
@@ -58,7 +58,7 @@ tests:
 
   - name: "type-only bindings never fall back to runtime imports"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(i:ImportedSymbol)
-      WHERE caller.name = 'run' RETURN i.identifier_name
+      MATCH (caller:Definition)-[:CALLS]->(i:Import)
+      WHERE caller.name = 'run' RETURN i.name
     assert:
       - { empty: true }

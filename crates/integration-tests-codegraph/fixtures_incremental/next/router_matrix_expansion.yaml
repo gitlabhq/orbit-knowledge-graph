@@ -191,7 +191,7 @@ tests:
     query: |
       MATCH (file:File)-[:DEFINES]->(d:Definition)
       WHERE file.path IN ['src/app/loading.tsx', 'src/app/error.tsx', 'src/app/not-found.tsx', 'src/app/template.tsx', 'src/app/default.tsx', 'src/app/@modal/(.)login/page.tsx']
-      RETURN file.path AS file, d.name AS name, d.definition_type AS type
+      RETURN file.path AS file, d.name AS name, d.kind AS type
     assert:
       - { row_count: 6 }
       - { row: { file: "src/app/loading.tsx", name: Loading, type: Function } }
@@ -239,7 +239,7 @@ tests:
         'GET', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS',
         'runtime', 'dynamic', 'revalidate'
       ]
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
       ORDER BY fqn
     assert:
       - { row_count: 12 }
@@ -258,7 +258,7 @@ tests:
 
   - name: Next jsconfig baseUrl paths aliases and barrels resolve imports
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN [
         'src/app/(marketing)/blog/[...slug]/page.tsx',
         'src/app/shop/[[...filters]]/page.tsx',
@@ -266,25 +266,25 @@ tests:
         'src/app/api/items/[id]/route.ts',
         'src/app/client-panel.tsx'
       ]
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.import_type AS import_type, d.fqn AS target
+      RETURN i.file_path AS file_path, i.import_path AS path, i.name AS name, i.language_kind AS language_kind, d.fqn AS target
       ORDER BY file_path, path, name
     assert:
       - { row_count: 9 }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Banner", import_type: "NamedImport", target: "Banner" } }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Nav", import_type: "NamedImport", target: "Nav" } }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@features/dashboard", name: "default", import_type: "DefaultImport", target: "Dashboard" } }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@lib", name: "getMarketing", import_type: "NamedImport", target: "getMarketing" } }
-      - { row: { file_path: "src/app/@modal/(.)login/page.tsx", path: "@components/Banner", name: "Banner", import_type: "NamedImport", target: "Banner" } }
-      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "getItem", import_type: "NamedImport", target: "getItem" } }
-      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "updateItem", import_type: "NamedImport", target: "updateItem" } }
-      - { row: { file_path: "src/app/client-panel.tsx", path: "./actions", name: "savePost", import_type: "NamedImport", target: "savePost" } }
-      - { row: { file_path: "src/app/shop/[[...filters]]/page.tsx", path: "components", name: "*", import_type: "NamespaceImport", target: "Nav" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Banner", language_kind: "NamedImport", target: "Banner" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Nav", language_kind: "NamedImport", target: "Nav" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@features/dashboard", name: "default", language_kind: "DefaultImport", target: "Dashboard" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@lib", name: "getMarketing", language_kind: "NamedImport", target: "getMarketing" } }
+      - { row: { file_path: "src/app/@modal/(.)login/page.tsx", path: "@components/Banner", name: "Banner", language_kind: "NamedImport", target: "Banner" } }
+      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "getItem", language_kind: "NamedImport", target: "getItem" } }
+      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "updateItem", language_kind: "NamedImport", target: "updateItem" } }
+      - { row: { file_path: "src/app/client-panel.tsx", path: "./actions", name: "savePost", language_kind: "NamedImport", target: "savePost" } }
+      - { row: { file_path: "src/app/shop/[[...filters]]/page.tsx", path: "components", name: "*", language_kind: "NamespaceImport", target: "Nav" } }
 
   - name: Next namespace imports retain their binding alongside component calls
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'src/app/shop/[[...filters]]/page.tsx'
-      RETURN i.import_path AS path, i.identifier_name AS name, i.import_type AS type, i.identifier_alias AS alias
+      RETURN i.import_path AS path, i.name AS name, i.language_kind AS type, i.alias AS alias
     assert:
       - { row_count: 1 }
       - { row: { path: components, name: "*", type: NamespaceImport, alias: Components } }
@@ -354,10 +354,10 @@ tests:
 
   - name: Next external package imports remain external in expanded matrix
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path IN ['src/app/api/items/[id]/route.ts', 'src/app/client-panel.tsx']
         AND i.import_path IN ['next/server', 'next/navigation']
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name
+      RETURN i.file_path AS file_path, i.import_path AS path, i.name AS name
       ORDER BY file_path, path, name
     assert:
       - { row_count: 3 }
@@ -367,7 +367,7 @@ tests:
 
   - name: Next external package imports have no local targets in expanded matrix
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN ['src/app/api/items/[id]/route.ts', 'src/app/client-panel.tsx']
         AND i.import_path IN ['next/server', 'next/navigation']
       RETURN i.import_path AS path, d.fqn AS target
@@ -376,9 +376,9 @@ tests:
 
   - name: Next external package calls target imported symbols
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE sym.import_path IN ['next/server', 'next/navigation']
-      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name
       ORDER BY caller, path, name
     assert:
       - { row_count: 4 }
@@ -389,16 +389,16 @@ tests:
 
   - name: Next type-only imports do not emit imported-symbol fallback
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
-      WHERE sym.identifier_name = 'NextRequest'
-      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+      WHERE sym.name = 'NextRequest'
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name
     assert:
       - { empty: true }
 
   - name: Next local route helpers do not emit imported-symbol fallback
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE sym.import_path IN ['@lib', './actions']
-      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name
     assert:
       - { empty: true }

@@ -11,7 +11,7 @@ fixtures:
 tests:
   - name: Implicit java.lang constructor does not bind unrelated wildcard
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name = 'run'
       RETURN target.import_path
     assert:

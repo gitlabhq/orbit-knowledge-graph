@@ -76,7 +76,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
         AND d.fqn IN ['inventory::Pair::0', 'inventory::Pair::1']
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 2 }
       - { row: { fqn: "inventory::Pair::0", type: "Field" } }
@@ -92,7 +92,7 @@ tests:
           'inventory::Packet::Tuple::0',
           'inventory::Packet::Tuple::1'
         ]
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 4 }
       - { row: { fqn: "inventory::Packet::Record::code", type: "Field" } }
@@ -110,7 +110,7 @@ tests:
           'inventory::Runner::run',
           'inventory::Runner::build'
         ]
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 4 }
       - { row: { fqn: "inventory::Runner::KIND", type: "Constant" } }
@@ -129,7 +129,7 @@ tests:
           'inventory::Service::build',
           'inventory::Service::inherent'
         ]
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 5 }
       - { row: { fqn: "inventory::Service::KIND", type: "Constant" } }
@@ -140,10 +140,10 @@ tests:
 
   - name: "variant imports and aliases retain their metadata"
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'src/lib.rs'
-        AND i.identifier_alias IN ['PacketKind', 'RecordPacket']
-      RETURN i.import_path AS path, i.identifier_alias AS alias, i.import_type AS type
+        AND i.alias IN ['PacketKind', 'RecordPacket']
+      RETURN i.import_path AS path, i.alias AS alias, i.language_kind AS type
     assert:
       - { row_count: 2 }
       - { row: { path: "crate::inventory::Packet", alias: "PacketKind", type: "UseGroup" } }
@@ -151,8 +151,8 @@ tests:
 
   - name: "public glob re-exports are retained as imports"
     query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'ReExportGlob'
+      MATCH (i:Import)
+      WHERE i.file_path = 'src/lib.rs' AND i.language_kind = 'ReExportGlob'
       RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
@@ -160,9 +160,9 @@ tests:
 
   - name: "extern crate aliases are retained as imports"
     query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'AliasedExternCrate'
-      RETURN i.import_path AS path, i.identifier_alias AS alias
+      MATCH (i:Import)
+      WHERE i.file_path = 'src/lib.rs' AND i.language_kind = 'AliasedExternCrate'
+      RETURN i.import_path AS path, i.alias AS alias
     assert:
       - { row_count: 1 }
       - { row: { path: "core", alias: "rust_core" } }

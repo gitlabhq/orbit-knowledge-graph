@@ -145,10 +145,10 @@ fixtures:
 
 tests:
   # ── Enum and case definitions ──────────────────────────────────
-  - name: "All enums indexed with Enum definition_type"
+  - name: "All enums indexed with Enum kind"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Enum'
+      WHERE d.kind = 'Enum'
         AND d.fqn IN ['App\Domain\Status', 'App\Domain\Priority',
                       'App\Domain\Direction', 'App\Domain\Tier']
       RETURN d.fqn AS fqn
@@ -159,7 +159,7 @@ tests:
   - name: "Backed string enum cases get EnumCase + namespace-qualified FQN"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumCase'
+      WHERE d.kind = 'EnumCase'
         AND d.fqn IN ['App\Domain\Status\Active', 'App\Domain\Status\Inactive', 'App\Domain\Status\Archived']
       RETURN d.fqn AS fqn
     assert:
@@ -169,7 +169,7 @@ tests:
   - name: "Backed int enum cases get EnumCase definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumCase'
+      WHERE d.kind = 'EnumCase'
         AND d.fqn IN ['App\Domain\Priority\Low', 'App\Domain\Priority\Medium', 'App\Domain\Priority\High']
       RETURN d.fqn AS fqn
     assert:
@@ -178,7 +178,7 @@ tests:
   - name: "Pure enum cases (no backing) are still indexed as EnumCase"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumCase'
+      WHERE d.kind = 'EnumCase'
         AND d.fqn IN ['App\Domain\Direction\North', 'App\Domain\Direction\South',
                       'App\Domain\Direction\East', 'App\Domain\Direction\West']
       RETURN d.fqn AS fqn
@@ -188,7 +188,7 @@ tests:
   - name: "Enum methods scoped under the enum FQN"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method'
+      WHERE d.kind = 'Method'
         AND d.fqn IN ['App\Domain\Status\label', 'App\Domain\Status\format',
                       'App\Domain\Status\defaultStatus', 'App\Domain\Priority\describe',
                       'App\Domain\Direction\opposite', 'App\Domain\Tier\announce']
@@ -200,7 +200,7 @@ tests:
   - name: "Const declared inside an enum is indexed as Constant under the enum"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Constant'
+      WHERE d.kind = 'Constant'
         AND d.fqn IN ['App\Domain\Status\DEFAULT', 'App\Domain\Priority\MAX']
       RETURN d.fqn AS fqn
     assert:

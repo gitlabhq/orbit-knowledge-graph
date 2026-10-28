@@ -24,7 +24,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN ['Explicit.first', 'Explicit.second']
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -35,7 +35,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN ['Explicit.Nested.first', 'Other.first']
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -45,7 +45,7 @@ tests:
   - name: "An overload with parameters keeps the implicit accessor"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'Overloaded.value' AND d.definition_type = 'Method'
+      WHERE d.fqn = 'Overloaded.value' AND d.kind = 'Method'
       RETURN d.start_line AS line
     assert:
       - { row_count: 2 }
@@ -55,7 +55,7 @@ tests:
   - name: "An annotated accessor exports the full declaration range"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'Annotated.value' AND d.definition_type = 'Method'
+      WHERE d.fqn = 'Annotated.value' AND d.kind = 'Method'
       RETURN d.start_line AS start_line, d.end_line AS end_line,
         d.start_char AS start_char, d.end_char AS end_char
     assert:

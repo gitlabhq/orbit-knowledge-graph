@@ -19,7 +19,7 @@ fixtures:
 tests:
   - name: Static standard call does not fall back to wildcard
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name = 'standard'
       RETURN target.import_path
     assert:

@@ -24,7 +24,7 @@ tests:
 
   - name: Both builtin spellings remain external
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name = 'run'
       RETURN target.import_path AS path
     assert:

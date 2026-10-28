@@ -143,8 +143,8 @@ tests:
   - name: "CI root keys become CiJob (hidden, quoted, flow, multi-document); stages and variables are namespaced; keywords are skipped"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['CiJob', 'CiStage', 'CiVariable']
-      RETURN d.definition_type AS type, d.fqn AS fqn, d.file_path AS file
+      WHERE d.kind IN ['CiJob', 'CiStage', 'CiVariable']
+      RETURN d.kind AS type, d.fqn AS fqn, d.file_path AS file
     assert:
       - { row_count: 12 }
       - { unique: fqn }
@@ -163,8 +163,8 @@ tests:
 
   - name: "Every import: all include flavors plus trigger.include, ArgoCD sources, Helm dependencies; include under a job and MyChart.yaml yield none"
     query: |
-      MATCH (i:ImportedSymbol)
-      RETURN i.import_type AS type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias
+      MATCH (i:Import)
+      RETURN i.language_kind AS type, i.import_path AS path, i.name AS name, i.alias AS alias
     assert:
       - { row_count: 10 }
       - { row: { type: CiLocalInclude, path: "/ci/lint.gitlab-ci.yml", name: null, alias: null } }
@@ -181,9 +181,9 @@ tests:
   - name: "ArgoCD, Helm chart, Helm values (every key once, sequence items collapsed), and Compose definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['ArgoCdApplication', 'HelmChart', 'HelmValue', 'ComposeService', 'ComposeVolume', 'ComposeNetwork']
+      WHERE d.kind IN ['ArgoCdApplication', 'HelmChart', 'HelmValue', 'ComposeService', 'ComposeVolume', 'ComposeNetwork']
         AND d.file_path <> 'chart/values-deep.yaml'
-      RETURN d.definition_type AS type, d.fqn AS fqn, d.file_path AS file
+      RETURN d.kind AS type, d.fqn AS fqn, d.file_path AS file
     assert:
       - { row_count: 10 }
       - { row: { type: ArgoCdApplication, fqn: gkg, file: "apps/gkg.yaml" } }
@@ -201,7 +201,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path IN ['config/default.yaml', 'config/MyChart.yaml', 'apps/plain.yaml']
-      RETURN d.definition_type AS type, d.fqn AS fqn, d.file_path AS file
+      RETURN d.kind AS type, d.fqn AS fqn, d.file_path AS file
     assert:
       - { row_count: 1 }
       - { row: { type: Anchor, fqn: base, file: "config/default.yaml" } }

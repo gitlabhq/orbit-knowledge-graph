@@ -17,7 +17,7 @@ tests:
   - name: Exactly 3 definitions with correct types
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'main.rs' AND d.definition_type = 'Function'
+      WHERE d.file_path = 'main.rs' AND d.kind = 'Function'
       RETURN d.name AS name, d.fqn AS fqn
       ORDER BY name
     assert:
@@ -47,7 +47,7 @@ tests:
 
   - name: No imports in single-file fixture
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       RETURN count(i) AS n
     assert:
       - { row_count: 1 }

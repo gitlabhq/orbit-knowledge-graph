@@ -60,7 +60,7 @@ tests:
   - name: module_lambda exists
     query: |
       MATCH (d:Definition) WHERE d.name = 'module_lambda'
-      RETURN d.definition_type AS dt
+      RETURN d.kind AS dt
     assert:
       - { row_count: 1 }
       - { row: { dt: "Lambda" } }

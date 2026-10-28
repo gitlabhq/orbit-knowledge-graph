@@ -164,7 +164,7 @@ fixtures:
 tests:
   - name: "imported macro invocations do not become external function calls"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(sym:Import)
       WHERE caller.name IN ['external_imported_calls', 'qualified_external_imported_calls']
         AND sym.import_path IN ['tracing::info', 'serde_json::json', 'external_macros']
       RETURN caller.name AS caller, sym.import_path AS path
@@ -198,9 +198,9 @@ tests:
 
   - name: "external imported Rust calls target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.name = 'external_imported_calls'
-      RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
+      RETURN caller.name AS caller, sym.import_path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path, name, alias
     assert:
       - { row_count: 2 }
@@ -209,17 +209,17 @@ tests:
 
   - name: "local callable shadowing does not target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.name = 'local_callable_shadows_external_import'
-      RETURN sym.identifier_name AS name
+      RETURN sym.name AS name
     assert:
       - { empty: true }
 
   - name: "function-scoped imports stay local while out-of-scope calls use the wildcard"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.name IN ['scoped_import_user', 'another_scoped_import_user', 'scoped_import_out_of_scope']
-      RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
+      RETURN caller.name AS caller, sym.import_path AS path, sym.name AS name
       ORDER BY caller
     assert:
       - { row_count: 3 }
@@ -229,9 +229,9 @@ tests:
 
   - name: "function-scoped Rust imports shadow top-level imports with the same name"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.name IN ['top_level_import_user', 'scoped_import_shadows_top_level']
-      RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
+      RETURN caller.name AS caller, sym.import_path AS path, sym.name AS name
       ORDER BY caller
     assert:
       - { row_count: 2 }
@@ -240,9 +240,9 @@ tests:
 
   - name: "qualified Rust external imports target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.name = 'qualified_external_imported_calls'
-      RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
+      RETURN caller.name AS caller, sym.import_path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path, alias
     assert:
       - { row_count: 2 }
@@ -251,7 +251,7 @@ tests:
 
   - name: "resolved Rust aliases and local dispatch do not emit imported-symbol fallback"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.name IN [
         'module_alias_call',
         'fn_pointer_from_assoc',
@@ -260,27 +260,27 @@ tests:
         'inherent_call',
         'local_method_same_name_as_external_import'
       ]
-      RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
+      RETURN caller.name AS caller, sym.import_path AS path, sym.name AS name
     assert:
       - { empty: true }
 
   - name: "Rust built-ins and bare references do not emit imported-symbol fallback"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.name IN [
         'builtin_macro_and_std_calls',
         'imported_function_reference_only',
         'imported_module_constant_reference'
       ]
-      RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
+      RETURN caller.name AS caller, sym.import_path AS path, sym.name AS name
     assert:
       - { empty: true }
 
   - name: "std calls target the std import they name"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.name IN ['external_only', 'explicit_std_import_user']
-      RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
+      RETURN caller.name AS caller, sym.import_path AS path, sym.name AS name
     assert:
       - { row_count: 3 }
       - { row: { caller: external_only, path: "std::mem", name: size_of } }
@@ -289,9 +289,9 @@ tests:
 
   - name: "a call only a wildcard import can supply targets that import"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.name = 'wildcard_external_import_user'
-      RETURN sym.import_path AS path, sym.identifier_name AS name
+      RETURN sym.import_path AS path, sym.name AS name
     assert:
       - { row_count: 1 }
       - { row: { path: external_actions, name: "*" } }
@@ -300,7 +300,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'fn_pointer_from_assoc' AND callee.name = 'new'
-      RETURN caller.file_path AS src, callee.fqn AS fqn, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.fqn AS fqn, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/lib.rs", fqn: "dep::Service::new", type: "Function" } }
@@ -309,7 +309,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'generic_trait_bound' AND callee.name = 'trait_ping'
-      RETURN callee.fqn AS fqn, callee.definition_type AS type
+      RETURN callee.fqn AS fqn, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "dep::Pinger::trait_ping", type: "Method" } }
@@ -318,7 +318,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'trait_default_dispatch' AND callee.name = 'defaulted'
-      RETURN callee.fqn AS fqn, callee.definition_type AS type
+      RETURN callee.fqn AS fqn, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "dep::Pinger::defaulted", type: "Method" } }
@@ -327,7 +327,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'dep::Pinger::defaulted' AND callee.name = 'helper'
-      RETURN callee.fqn AS fqn, callee.definition_type AS type
+      RETURN callee.fqn AS fqn, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "dep::helper", type: "Function" } }
@@ -336,7 +336,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'inherent_call' AND callee.name = 'inherent_ping'
-      RETURN callee.fqn AS fqn, callee.definition_type AS type
+      RETURN callee.fqn AS fqn, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "dep::Service::inherent_ping", type: "Method" } }

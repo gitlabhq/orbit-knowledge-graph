@@ -2,10 +2,10 @@ name: Denormalized pushdown preserves every predicate on one property
 
 query:
   json: |
-    {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[1],"filters":{"definition_type":[{"eq":"function"},{"eq":"class"}]}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"aggregations":[{"count":"b","as":"n"}]}
+    {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[1],"filters":{"kind":[{"eq":"function"},{"eq":"class"}]}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"aggregations":[{"count":"b","as":"n"}]}
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)
-    WHERE a.definition_type = 'function' AND a.definition_type = 'class'
+    WHERE a.kind = 'function' AND a.kind = 'class'
     RETURN count(b) AS n
 
 logical:
@@ -16,4 +16,4 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:function'], _orbit_edge_0.source_tags HAS ANY ['definition_type:class'], ... (_))
+        - (Filter _orbit_edge_0.source_tags HAS ANY ['kind:function'], _orbit_edge_0.source_tags HAS ANY ['kind:class'], ... (_))

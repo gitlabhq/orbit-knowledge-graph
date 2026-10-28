@@ -92,7 +92,7 @@ tests:
   - name: "All class definitions with correct FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Class'
+      WHERE d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -106,7 +106,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'MyApp.Models.Role'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: MyApp.Models.Role, type: Enum } }
@@ -115,7 +115,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'MyApp.Models.IPermission'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: MyApp.Models.IPermission, type: Interface } }
@@ -123,9 +123,9 @@ tests:
   - name: "Method definitions with correct FQNs and types"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method'
+      WHERE d.kind = 'Method'
         AND d.fqn STARTS WITH 'MyApp.'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 8 }
       - { unique: fqn }
@@ -140,8 +140,8 @@ tests:
   - name: "Property definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Property'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      WHERE d.kind = 'Property'
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 2 }
       - { row: { fqn: MyApp.Models.User.Name, type: Property } }
@@ -150,7 +150,7 @@ tests:
   - name: "Enum members with correct FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumVariant'
+      WHERE d.kind = 'EnumVariant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }

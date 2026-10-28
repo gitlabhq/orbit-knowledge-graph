@@ -223,11 +223,11 @@ fixtures:
 tests:
   # ── Record definitions ────────────────────────────────────────────
 
-  - name: "Simple record is extracted as definition_type Record"
+  - name: "Simple record is extracted as kind Record"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.records.Point'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { name: "Point", type: "Record" } }
@@ -236,7 +236,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.records.Range'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Record" } }
@@ -245,7 +245,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.records.Vector'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Record" } }
@@ -253,7 +253,7 @@ tests:
   - name: "All ten records (eight top-level plus nested Swap and Inner) are indexed"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Record'
+      WHERE d.kind = 'Record'
         AND d.fqn STARTS WITH 'com.example.records.'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
@@ -267,7 +267,7 @@ tests:
     query: |
       MATCH (r:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
-        AND c.definition_type = 'Constructor'
+        AND c.kind = 'Constructor'
       RETURN c.name AS name
     assert:
       - { row_count: 1 }
@@ -277,7 +277,7 @@ tests:
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Bounds' AND m.name = 'Bounds'
-        AND m.definition_type = 'Constructor'
+        AND m.kind = 'Constructor'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -288,7 +288,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.records.Range.length'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Method" } }
@@ -297,7 +297,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.records.Vector.magnitude'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Method" } }
@@ -306,7 +306,7 @@ tests:
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Point'
-        AND m.definition_type = 'Method'
+        AND m.kind = 'Method'
       RETURN m.name AS name, m.start_line AS line
       ORDER BY name
     assert:
@@ -322,7 +322,7 @@ tests:
     query: |
       MATCH (r:Definition)-[e:DEFINES]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
-        AND c.definition_type = 'Constructor'
+        AND c.kind = 'Constructor'
       RETURN c.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -342,7 +342,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.records.Pair.Swap'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Record" } }
@@ -469,7 +469,7 @@ tests:
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Wrapped' AND m.name = 'raw'
-        AND m.definition_type = 'Method'
+        AND m.kind = 'Method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -479,7 +479,7 @@ tests:
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Wrapped'
         AND m.name IN ['toString', 'equals']
-        AND m.definition_type = 'Method'
+        AND m.kind = 'Method'
       RETURN m.name AS name
       ORDER BY name
     assert:

@@ -24,9 +24,9 @@ fixtures:
 tests:
   - name: Re-export barrels connect consumers to original definitions
     query: |
-      MATCH (symbol:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (symbol:Import)-[:IMPORTS]->(d:Definition)
       WHERE symbol.file_path = 'consumer.ts'
-      RETURN symbol.identifier_name AS imported, d.name AS name, d.file_path AS file, d.definition_type AS type
+      RETURN symbol.name AS imported, d.name AS name, d.file_path AS file, d.kind AS type
       ORDER BY name
     assert:
       - { row_count: 2 }
@@ -47,7 +47,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/widget.ts'
         AND d.name IN ['Widget', 'WidgetImpl', 'VERSION', 'make', 'bootstrap', 'privateHelper']
-      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type
       ORDER BY name
     assert:
       - { row_count: 6 }

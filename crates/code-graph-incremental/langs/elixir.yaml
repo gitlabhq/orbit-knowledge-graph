@@ -226,7 +226,7 @@ display:
     rules:
       - match: '(__import)'
         tag:
-          entity: ImportedSymbol
+          entity: Import
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
       - match: '(__name)'

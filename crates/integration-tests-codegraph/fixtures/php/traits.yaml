@@ -217,7 +217,7 @@ tests:
                       'App\Concerns\HasVersion', 'App\Concerns\Base',
                       'App\Concerns\Composer', 'App\Speakers\Left',
                       'App\Speakers\Right']
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 9 }
       - { unique: fqn }
@@ -229,7 +229,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Concerns\Greeter\name'
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -237,7 +237,7 @@ tests:
   - name: "Static trait methods are indexed under their trait"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method'
+      WHERE d.kind = 'Method'
         AND d.fqn IN ['App\Concerns\Counter\tick', 'App\Concerns\Counter\reset']
       RETURN d.fqn AS fqn
     assert:
@@ -248,7 +248,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Concerns\HasVersion\VERSION'
-        AND d.definition_type = 'Constant'
+        AND d.kind = 'Constant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

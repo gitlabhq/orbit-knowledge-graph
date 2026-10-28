@@ -1227,7 +1227,7 @@ fn calls_to_imported_symbol_variant_compiles() {
         "query_type": "traversal",
         "nodes": [
             {"id": "caller", "entity": "Definition", "node_ids": [1], "columns": ["name"]},
-            {"id": "sym", "entity": "ImportedSymbol", "columns": ["identifier_name"]}
+            {"id": "sym", "entity": "Import", "columns": ["name"]}
         ],
         "relationships": [{"type": "CALLS", "from": "caller", "to": "sym"}],
         "limit": 10

@@ -842,7 +842,7 @@ e20_definitions_by_type:
   category: aggregation
   query: |
     MATCH (d:Definition {project_id: {{KG_PROJECT_ID}}})
-    RETURN d.definition_type, count(d) AS n
+    RETURN d.kind, count(d) AS n
     ORDER BY n DESC
 
 e21_approvals_per_user_project:
@@ -1016,7 +1016,7 @@ i01_file_definitions:
   category: code_graph
   query: |
     MATCH (f:File {id: {{FILE_ID}}})-[:DEFINES]->(d:Definition)
-    RETURN d.name, d.definition_type
+    RETURN d.name, d.kind
 
 i02_def_callers:
   desc: "Definition callers"
@@ -1054,8 +1054,8 @@ i06_file_imports:
   desc: "File imports"
   category: code_graph
   query: |
-    MATCH (f:File {id: {{FILE_ID}}})-[:IMPORTS]->(s:ImportedSymbol)
-    RETURN s.import_path, s.identifier_name
+    MATCH (f:File {id: {{FILE_ID}}})-[:IMPORTS]->(s:Import)
+    RETURN s.import_path, s.name
 
 i07_defs_fqn_contains:
   desc: "Definitions FQN contains"

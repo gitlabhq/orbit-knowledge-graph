@@ -63,9 +63,9 @@ tests:
 
   - name: Python imports are 1-indexed
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'pkg/imports.py'
-      RETURN i.import_path AS path, i.identifier_name AS name, i.start_line AS sl, i.end_line AS el, i.start_char AS sc, i.start_byte AS sb
+      RETURN i.import_path AS path, i.name AS name, i.start_line AS sl, i.end_line AS el, i.start_char AS sc, i.start_byte AS sb
       ORDER BY sl
     assert:
       - { row_count: 2 }
@@ -76,7 +76,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/user.rb' AND d.name = 'User'
-        AND d.definition_type = 'Class'
+        AND d.kind = 'Class'
       RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
     assert:
       - { row_count: 1 }
@@ -95,7 +95,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'user.go' AND d.name = 'User'
-        AND d.definition_type = 'Struct'
+        AND d.kind = 'Struct'
       RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
     assert:
       - { row_count: 1 }
@@ -114,7 +114,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'User.java' AND d.name = 'User'
-        AND d.definition_type = 'Class'
+        AND d.kind = 'Class'
       RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
     assert:
       - { row_count: 1 }
@@ -124,7 +124,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/user.rs' AND d.name = 'User'
-        AND d.definition_type = 'Struct'
+        AND d.kind = 'Struct'
       RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
     assert:
       - { row_count: 1 }

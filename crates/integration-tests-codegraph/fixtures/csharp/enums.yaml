@@ -1,6 +1,6 @@
 name: "C# enums — members, explicit values, typed base, [Flags] enum"
 
-# Coverage note: csharp.rs maps enum_declaration to definition_type "Enum"
+# Coverage note: csharp.rs maps enum_declaration to kind "Enum"
 # (scope("enum_declaration", "Enum")) and enum_member_declaration to "EnumMember"
 # (scope("enum_member_declaration", "EnumMember").no_scope()). csharp/edge_cases.yaml
 # touches a single EnumMember; there was no focused fixture for enum extraction,
@@ -48,11 +48,11 @@ fixtures:
       }
 
 tests:
-  - name: "Enum Status is extracted as definition_type Enum"
+  - name: "Enum Status is extracted as kind Enum"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Models.Status'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { name: "Status", type: "Enum" } }
@@ -61,7 +61,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Models.Priority'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Enum" } }
@@ -70,7 +70,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Models.Permissions'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Enum" } }
@@ -79,7 +79,7 @@ tests:
     query: |
       MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Status'
-        AND m.definition_type = 'EnumMember'
+        AND m.kind = 'EnumMember'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -93,7 +93,7 @@ tests:
     query: |
       MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Priority'
-        AND m.definition_type = 'EnumMember'
+        AND m.kind = 'EnumMember'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -107,7 +107,7 @@ tests:
     query: |
       MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Permissions'
-        AND m.definition_type = 'EnumMember'
+        AND m.kind = 'EnumMember'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -122,7 +122,7 @@ tests:
     query: |
       MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Status'
-        AND m.definition_type = 'EnumMember'
+        AND m.kind = 'EnumMember'
         AND m.name = 'Active'
       RETURN m.name AS name
     assert:

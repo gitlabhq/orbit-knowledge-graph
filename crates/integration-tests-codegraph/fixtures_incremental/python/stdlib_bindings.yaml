@@ -46,7 +46,7 @@ tests:
 
   - name: Builtins do not produce unknown wildcard calls
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name = 'run_builtin'
       RETURN target.import_path
     assert:

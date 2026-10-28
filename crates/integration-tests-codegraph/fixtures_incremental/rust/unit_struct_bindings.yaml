@@ -100,7 +100,7 @@ tests:
   - name: "Unit declarations do not execute their own initializer"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
-      WHERE caller.definition_type = 'Struct'
+      WHERE caller.kind = 'Struct'
       RETURN caller.name, target.name
     assert:
       - { empty: true }
@@ -137,7 +137,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name IN ['lowercase_receiver', 'uppercase_receiver']
-        AND callee.definition_type = 'Struct'
+        AND callee.kind = 'Struct'
       RETURN callee.name AS target
     assert:
       - { row_count: 2 }
@@ -157,8 +157,8 @@ tests:
 
   - name: "Unresolved imported references do not become calls"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(callee:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Import)
       WHERE caller.name IN ['external_reference', 'unknown_value', 'imported_reference']
-      RETURN callee.identifier_name
+      RETURN callee.name
     assert:
       - { empty: true }

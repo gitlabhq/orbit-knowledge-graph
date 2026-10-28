@@ -115,7 +115,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.weather.model.Forecast'
-        AND d.definition_type = 'Record'
+        AND d.kind = 'Record'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -124,7 +124,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.weather.formatter.Formatter.Format'
-        AND d.definition_type = 'Enum'
+        AND d.kind = 'Enum'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -133,7 +133,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.weather.Main'
-        AND d.definition_type = 'Class'
+        AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -141,7 +141,7 @@ tests:
   - name: "Method definitions exist"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method'
+      WHERE d.kind = 'Method'
         AND d.fqn IN ['com.example.weather.Main.run',
                        'com.example.weather.cli.Cli.parse',
                        'com.example.weather.service.WeatherService.fetch']
@@ -189,40 +189,40 @@ tests:
   # ── Imports ────────────────────────────────────────────────────
   - name: "Cli imports PrintStream"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(i:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(i:Import)
       WHERE f.path = 'src/main/java/com/example/weather/cli/Cli.java'
         AND i.import_path = 'java.io'
-        AND i.identifier_name = 'PrintStream'
-      RETURN f.path AS file, i.identifier_name AS import
+        AND i.name = 'PrintStream'
+      RETURN f.path AS file, i.name AS import
     assert:
       - { row_count: 1 }
 
   - name: "Cli imports Arrays"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(i:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(i:Import)
       WHERE f.path = 'src/main/java/com/example/weather/cli/Cli.java'
         AND i.import_path = 'java.util'
-        AND i.identifier_name = 'Arrays'
-      RETURN f.path AS file, i.identifier_name AS import
+        AND i.name = 'Arrays'
+      RETURN f.path AS file, i.name AS import
     assert:
       - { row_count: 1 }
 
   - name: "WeatherService imports Collectors"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(i:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(i:Import)
       WHERE f.path = 'src/main/java/com/example/weather/service/WeatherService.java'
         AND i.import_path = 'java.util.stream'
-        AND i.identifier_name = 'Collectors'
-      RETURN f.path AS file, i.identifier_name AS import
+        AND i.name = 'Collectors'
+      RETURN f.path AS file, i.name AS import
     assert:
       - { row_count: 1 }
 
   - name: "Main imports Forecast"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(i:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(i:Import)
       WHERE f.path = 'src/main/java/com/example/weather/Main.java'
         AND i.import_path = 'com.example.weather.model'
-        AND i.identifier_name = 'Forecast'
-      RETURN f.path AS file, i.identifier_name AS import
+        AND i.name = 'Forecast'
+      RETURN f.path AS file, i.name AS import
     assert:
       - { row_count: 1 }

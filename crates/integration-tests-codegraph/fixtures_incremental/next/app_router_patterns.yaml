@@ -136,7 +136,7 @@ tests:
         'app/api/health/route.ts'
       ]
         AND d.fqn IN ['RootLayout', 'HomePage', 'BlogPost', 'generateMetadata', 'GET', 'POST']
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.kind AS type
       ORDER BY file_path, fqn
     assert:
       - { row_count: 6 }
@@ -149,14 +149,14 @@ tests:
 
   - name: Next app router tsconfig aliases resolve local imports
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN [
         'app/layout.tsx',
         'app/page.tsx',
         'app/blog/[slug]/page.tsx',
         'app/api/health/route.ts'
       ]
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      RETURN i.file_path AS file_path, i.import_path AS path, i.name AS name, d.fqn AS target
       ORDER BY file_path, path, name
     assert:
       - { row_count: 6 }
@@ -169,10 +169,10 @@ tests:
 
   - name: Next app router external Next imports remain unresolved
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path IN ['app/layout.tsx', 'app/api/health/route.ts']
         AND i.import_path IN ['next', 'next/server']
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name
+      RETURN i.file_path AS file_path, i.import_path AS path, i.name AS name
       ORDER BY file_path, path, name
     assert:
       - { row_count: 2 }
@@ -181,7 +181,7 @@ tests:
 
   - name: Next app router external Next imports have no local targets
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN ['app/layout.tsx', 'app/api/health/route.ts']
         AND i.import_path IN ['next', 'next/server']
       RETURN i.import_path AS path, d.fqn AS target

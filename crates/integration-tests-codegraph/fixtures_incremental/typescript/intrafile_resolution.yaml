@@ -26,8 +26,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.ts'
-        AND d.definition_type IN ['Function', 'Class', 'Method']
-      RETURN d.name AS name, d.definition_type AS type
+        AND d.kind IN ['Function', 'Class', 'Method']
+      RETURN d.name AS name, d.kind AS type
       ORDER BY name
     assert:
       - { row_count: 8 }
@@ -77,7 +77,7 @@ tests:
 
   - name: No imports in a single-file suite
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       RETURN count(i) AS n
     assert:
       - { row_count: 1 }

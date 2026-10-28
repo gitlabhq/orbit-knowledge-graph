@@ -266,7 +266,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Zoo.Services.Outer.Inner'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: Zoo.Services.Outer.Inner, type: Class } }
@@ -275,7 +275,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Zoo.Services.Outer.Inner.InnerMethod'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: Zoo.Services.Outer.Inner.InnerMethod, type: Method } }
