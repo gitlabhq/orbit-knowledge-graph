@@ -7,7 +7,7 @@
 //! Renamed here to `batches`, `redactions`, and `result_set.rows`.
 
 use crate::MetricSpec;
-use crate::buckets::{LATENCY, LATENCY_FAST_FINE, MEMORY_BYTES, QUERY_LATENCY, ROW_COUNT};
+use crate::buckets::{LATENCY_FAST_FINE, MEMORY_BYTES, QUERY_LATENCY, ROW_COUNT};
 
 pub mod labels {
     pub const QUERY_TYPE: &str = "query_type";
@@ -51,7 +51,7 @@ pub const EXECUTE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Time spent executing the compiled query against ClickHouse.",
     Some("s"),
     &[labels::QUERY_TYPE],
-    LATENCY,
+    QUERY_LATENCY,
     DOMAIN,
 );
 
@@ -60,7 +60,7 @@ pub const AUTHORIZATION_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Time spent on authorization exchange with Rails.",
     Some("s"),
     &[labels::QUERY_TYPE],
-    LATENCY,
+    QUERY_LATENCY,
     DOMAIN,
 );
 
