@@ -1,9 +1,10 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use circuit_breaker::{CircuitBreaker, CircuitBreakerError, CircuitConfig};
 use orbit_log_fields::warn;
 use orbit_observability::resilience::MetricsObserver;
+use parking_lot::Mutex;
 use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderName, HeaderValue};
 use reqwest::{RequestBuilder, Response, StatusCode};
 use secrecy::ExposeSecret;
@@ -21,6 +22,7 @@ const CIRCUIT_CONFIG: CircuitConfig = CircuitConfig {
     window: Duration::from_secs(30),
     cooldown: Duration::from_secs(15),
 };
+const FAIL_OPEN_WINDOW: Duration = Duration::from_secs(600);
 
 pub(crate) enum QuotaAuth {
     AdminToken { user: String, token: String },
@@ -51,12 +53,14 @@ pub(crate) enum FailureReason {
     Unreachable,
     ServerError,
     CircuitOpen,
+    ProlongedOutage,
+    RequestError,
     Unauthorized,
     UnexpectedResponse,
 }
 
 impl FailureReason {
-    pub(crate) fn is_outage(self) -> bool {
+    pub(crate) fn is_brief_outage(self) -> bool {
         matches!(
             self,
             Self::Unreachable | Self::ServerError | Self::CircuitOpen
@@ -64,9 +68,18 @@ impl FailureReason {
     }
 }
 
-enum Outage {
-    Unreachable(reqwest::Error),
+enum SendFailure {
     ServerError(Box<Response>),
+    Error(reqwest::Error),
+}
+
+impl SendFailure {
+    fn is_outage(&self) -> bool {
+        match self {
+            Self::ServerError(_) => true,
+            Self::Error(e) => is_unreachable(e),
+        }
+    }
 }
 
 pub(crate) struct QuotaClient {
@@ -75,6 +88,7 @@ pub(crate) struct QuotaClient {
     default_ttl: Duration,
     license_auth: bool,
     circuit_breaker: CircuitBreaker,
+    last_answer: Mutex<Instant>,
 }
 
 impl QuotaClient {
@@ -115,6 +129,7 @@ impl QuotaClient {
                 CIRCUIT_CONFIG,
                 Arc::new(MetricsObserver::new()),
             ),
+            last_answer: Mutex::new(Instant::now()),
         })
     }
 
@@ -124,7 +139,34 @@ impl QuotaClient {
         self
     }
 
+    #[cfg(test)]
+    fn with_last_answer(self, at: Instant) -> Self {
+        *self.last_answer.lock() = at;
+        self
+    }
+
     pub(crate) async fn check(&self, request: &CdotRequest) -> QuotaOutcome {
+        let outcome = self.ask_customers_dot(request).await;
+        let mut last_answer = self.last_answer.lock();
+        match outcome {
+            QuotaOutcome::Decided { .. } => {
+                *last_answer = Instant::now();
+                outcome
+            }
+            QuotaOutcome::Failed {
+                reason,
+                block_reason,
+            } if reason.is_brief_outage() && last_answer.elapsed() > FAIL_OPEN_WINDOW => {
+                QuotaOutcome::Failed {
+                    reason: FailureReason::ProlongedOutage,
+                    block_reason,
+                }
+            }
+            outcome => outcome,
+        }
+    }
+
+    async fn ask_customers_dot(&self, request: &CdotRequest) -> QuotaOutcome {
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), CDOT_QUOTA_PATH);
         let params = request.as_query_params();
 
@@ -155,18 +197,26 @@ impl QuotaClient {
 
         let response = match self
             .circuit_breaker
-            .call(|| send_with_one_retry(builder, request))
+            .call_with_filter(
+                || send_with_one_retry(builder, request),
+                SendFailure::is_outage,
+            )
             .await
         {
             Ok(response) => response,
-            Err(CircuitBreakerError::Inner(Outage::ServerError(response))) => *response,
+            Err(CircuitBreakerError::Inner(SendFailure::ServerError(response))) => *response,
             Err(CircuitBreakerError::Open { .. }) => {
                 return QuotaOutcome::Failed {
                     reason: FailureReason::CircuitOpen,
                     block_reason: None,
                 };
             }
-            Err(CircuitBreakerError::Inner(Outage::Unreachable(e))) => {
+            Err(CircuitBreakerError::Inner(SendFailure::Error(e))) => {
+                let reason = if is_unreachable(&e) {
+                    FailureReason::Unreachable
+                } else {
+                    FailureReason::RequestError
+                };
                 warn!(
                     safe(ERROR_TYPE) = "quota_request",
                     expanded(ERROR_MESSAGE) = %e,
@@ -175,10 +225,11 @@ impl QuotaClient {
                     safe(UNIQUE_INSTANCE_ID) = request.key.unique_instance_id.as_str(),
                     safe(FEATURE_QUALIFIED_NAME) = request.key.feature_qualified_name.as_str(),
                     safe(CORRELATION_ID) = request.correlation_id.as_str(),
+                    safe(REASON) = <&str>::from(reason),
                     "quota check request failed"
                 );
                 return QuotaOutcome::Failed {
-                    reason: FailureReason::Unreachable,
+                    reason,
                     block_reason: None,
                 };
             }
@@ -214,7 +265,7 @@ impl QuotaClient {
         );
         let reason = match status {
             StatusCode::UNAUTHORIZED => FailureReason::Unauthorized,
-            status if status.is_server_error() => FailureReason::ServerError,
+            status if is_outage_status(status) => FailureReason::ServerError,
             _ => FailureReason::UnexpectedResponse,
         };
         QuotaOutcome::Failed {
@@ -227,16 +278,19 @@ impl QuotaClient {
 async fn send_with_one_retry(
     builder: RequestBuilder,
     request: &CdotRequest,
-) -> Result<Response, Outage> {
+) -> Result<Response, SendFailure> {
     let retry = builder.try_clone();
     let first = send(builder).await;
-    let (Some(retry), Err(outage)) = (retry, &first) else {
+    let (Some(retry), Err(failure)) = (retry, &first) else {
         return first;
     };
+    if !failure.is_outage() {
+        return first;
+    }
 
-    let (status, error) = match outage {
-        Outage::ServerError(response) => (Some(response.status().as_u16()), None),
-        Outage::Unreachable(e) => (None, Some(e.to_string())),
+    let (status, error) = match failure {
+        SendFailure::ServerError(response) => (Some(response.status().as_u16()), None),
+        SendFailure::Error(e) => (None, Some(e.to_string())),
     };
     warn!(
         safe(ERROR_TYPE) = "quota_request",
@@ -249,18 +303,29 @@ async fn send_with_one_retry(
         safe(CORRELATION_ID) = request.correlation_id.as_str(),
         "quota check failed transiently; retrying once"
     );
-    tokio::time::sleep(RETRY_BACKOFF).await;
+    tokio::time::sleep(RETRY_BACKOFF.mul_f64(0.5 + rand::random::<f64>())).await;
     send(retry).await
 }
 
-async fn send(builder: RequestBuilder) -> Result<Response, Outage> {
+async fn send(builder: RequestBuilder) -> Result<Response, SendFailure> {
     match builder.send().await {
-        Ok(response) if response.status().is_server_error() => {
-            Err(Outage::ServerError(Box::new(response)))
+        Ok(response) if is_outage_status(response.status()) => {
+            Err(SendFailure::ServerError(Box::new(response)))
         }
         Ok(response) => Ok(response),
-        Err(e) => Err(Outage::Unreachable(e)),
+        Err(e) => Err(SendFailure::Error(e)),
     }
+}
+
+fn is_outage_status(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT
+    )
+}
+
+fn is_unreachable(e: &reqwest::Error) -> bool {
+    e.is_connect() || e.is_timeout()
 }
 
 #[derive(Deserialize)]
@@ -542,9 +607,70 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn open_circuit_skips_cdot() {
-        let (url, calls) = sequenced_server(vec![AxumStatus::BAD_GATEWAY]).await;
-        let breaker = CircuitBreaker::new(
+    async fn non_outage_failures_never_open_the_circuit() {
+        let (url, calls) = sequenced_server(vec![AxumStatus::UNAUTHORIZED]).await;
+        let client = license_client(url).with_circuit_breaker(eager_breaker());
+
+        for _ in 0..3 {
+            assert_eq!(
+                client.check(&license_request()).await,
+                failed(FailureReason::Unauthorized)
+            );
+        }
+        assert_eq!(*calls.lock().unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn malformed_url_fails_closed_as_request_error() {
+        install_crypto();
+        let client = QuotaClient::new(
+            "not a url".into(),
+            admin_auth(),
+            Duration::from_millis(500),
+            Duration::from_secs(3600),
+        )
+        .unwrap()
+        .with_circuit_breaker(eager_breaker());
+
+        for _ in 0..2 {
+            assert_eq!(
+                client.check(&sample_request()).await,
+                failed(FailureReason::RequestError)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn outage_without_recent_answer_is_prolonged() {
+        let (url, _) = sequenced_server(vec![AxumStatus::BAD_GATEWAY]).await;
+        let long_ago = Instant::now()
+            .checked_sub(FAIL_OPEN_WINDOW + Duration::from_secs(1))
+            .unwrap();
+        let client = license_client(url).with_last_answer(long_ago);
+
+        assert_eq!(
+            client.check(&license_request()).await,
+            failed(FailureReason::ProlongedOutage)
+        );
+    }
+
+    #[tokio::test]
+    async fn answer_restarts_the_fail_open_window() {
+        let (url, _) = sequenced_server(vec![AxumStatus::OK, AxumStatus::BAD_GATEWAY]).await;
+        let long_ago = Instant::now()
+            .checked_sub(FAIL_OPEN_WINDOW + Duration::from_secs(1))
+            .unwrap();
+        let client = license_client(url).with_last_answer(long_ago);
+
+        client.check(&license_request()).await;
+        assert_eq!(
+            client.check(&license_request()).await,
+            failed(FailureReason::ServerError)
+        );
+    }
+
+    fn eager_breaker() -> CircuitBreaker {
+        CircuitBreaker::new(
             "customers_dot-test",
             CircuitConfig {
                 failure_threshold: 1,
@@ -552,8 +678,13 @@ mod tests {
                 cooldown: Duration::from_secs(60),
             },
             Arc::new(circuit_breaker::NoopObserver),
-        );
-        let client = license_client(url).with_circuit_breaker(breaker);
+        )
+    }
+
+    #[tokio::test]
+    async fn open_circuit_skips_cdot() {
+        let (url, calls) = sequenced_server(vec![AxumStatus::BAD_GATEWAY]).await;
+        let client = license_client(url).with_circuit_breaker(eager_breaker());
 
         assert_eq!(
             client.check(&license_request()).await,
@@ -567,11 +698,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_errors_are_not_retried() {
+    async fn non_outage_statuses_are_not_retried() {
         for status in [
             AxumStatus::PAYMENT_REQUIRED,
             AxumStatus::UNAUTHORIZED,
             AxumStatus::FORBIDDEN,
+            AxumStatus::INTERNAL_SERVER_ERROR,
+            AxumStatus::NOT_IMPLEMENTED,
         ] {
             let (url, calls) = sequenced_server(vec![status, AxumStatus::OK]).await;
             license_client(url).check(&license_request()).await;

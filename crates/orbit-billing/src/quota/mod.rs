@@ -14,7 +14,7 @@ use tonic_types::{ErrorDetails, StatusExt};
 
 use crate::constants::{QUOTA_MAX_CACHE_ENTRIES, REALM_SAAS, normalize_realm};
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
-use client::{QuotaAuth, QuotaClient};
+use client::{FailureReason, QuotaAuth, QuotaClient};
 pub use inputs::QuotaCheckInputs;
 use key::CdotRequest;
 
@@ -36,6 +36,13 @@ pub struct QuotaService {
 struct QuotaServiceInner {
     cache: QuotaCache,
     auth_mode: QuotaAuthMode,
+}
+
+impl QuotaServiceInner {
+    // Self-managed operators control egress to CustomersDot, so only GitLab.com fails open.
+    fn fails_open(&self, reason: FailureReason) -> bool {
+        self.auth_mode == QuotaAuthMode::AdminToken && reason.is_brief_outage()
+    }
 }
 
 impl QuotaService {
@@ -140,7 +147,16 @@ impl QuotaService {
         };
 
         let (gate_decision, cache_outcome) = inner.cache.check(request).await;
-        record_decision(&gate_decision, cache_outcome, &inputs.source_type);
+        let fail_open = matches!(
+            gate_decision,
+            QuotaGateDecision::Failed(reason, _) if inner.fails_open(reason)
+        );
+        record_decision(
+            &gate_decision,
+            fail_open,
+            cache_outcome,
+            &inputs.source_type,
+        );
 
         match gate_decision {
             QuotaGateDecision::Allow => {
@@ -158,7 +174,7 @@ impl QuotaService {
                 );
                 Ok(())
             }
-            QuotaGateDecision::Failed(reason, _) if reason.is_outage() => {
+            QuotaGateDecision::Failed(reason, _) if fail_open => {
                 warn!(
                     safe(GL_USER_ID) = inputs.user_id,
                     safe(REALM) = realm,
@@ -224,7 +240,12 @@ fn record_skipped(source_type: &str) {
     record(SKIPPED, MISS, source_type);
 }
 
-fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &str) {
+fn record_decision(
+    gate: &QuotaGateDecision,
+    fail_open: bool,
+    cache: CacheOutcome,
+    source_type: &str,
+) {
     use orbit_observability::billing::quota::values::{
         ALLOW, DENY, FAIL_CLOSED, FAIL_OPEN, HIT, MISS,
     };
@@ -232,7 +253,7 @@ fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &
     let decision_label = match gate {
         QuotaGateDecision::Allow => ALLOW,
         QuotaGateDecision::Deny(_) => DENY,
-        QuotaGateDecision::Failed(reason, _) if reason.is_outage() => FAIL_OPEN,
+        QuotaGateDecision::Failed(..) if fail_open => FAIL_OPEN,
         QuotaGateDecision::Failed(..) => FAIL_CLOSED,
     };
     let cache_label = match cache {
@@ -512,6 +533,8 @@ mod tests {
             AxumStatus::UNAUTHORIZED,
             AxumStatus::FORBIDDEN,
             AxumStatus::UNPROCESSABLE_ENTITY,
+            AxumStatus::INTERNAL_SERVER_ERROR,
+            AxumStatus::NOT_IMPLEMENTED,
         ] {
             let (url, counter) = counting_server(status).await;
             let svc = service_for(url);
@@ -540,9 +563,9 @@ mod tests {
     #[tokio::test]
     async fn fails_open_uncached_on_server_errors() {
         for status in [
-            AxumStatus::INTERNAL_SERVER_ERROR,
             AxumStatus::BAD_GATEWAY,
             AxumStatus::SERVICE_UNAVAILABLE,
+            AxumStatus::GATEWAY_TIMEOUT,
         ] {
             let (url, counter) = counting_server(status).await;
             let svc = service_for(url);
@@ -562,6 +585,56 @@ mod tests {
         install_crypto();
         let svc = service_for("http://127.0.0.1:1".into());
         assert!(svc.check(&inputs_with_source("mcp")).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn license_mode_fails_closed_when_cdot_is_down() {
+        let (url, _) = counting_server(AxumStatus::SERVICE_UNAVAILABLE).await;
+        let svc = license_service_for(url);
+        let err = svc.check(&license_inputs("mcp")).await.unwrap_err();
+        assert_eq!(err.message(), CHECK_FAILED_MESSAGE);
+
+        install_crypto();
+        let svc = license_service_for("http://127.0.0.1:1".into());
+        let err = svc.check(&license_inputs("mcp")).await.unwrap_err();
+        assert_eq!(err.message(), CHECK_FAILED_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn open_circuit_keeps_cached_deny() {
+        install_crypto();
+        let app = Router::new().route(
+            crate::constants::CDOT_QUOTA_PATH,
+            get(|uri: axum::http::Uri| async move {
+                let denied_user = uri
+                    .query()
+                    .unwrap_or_default()
+                    .split('&')
+                    .any(|p| p == "user_id=1");
+                if denied_user {
+                    AxumStatus::PAYMENT_REQUIRED
+                } else {
+                    AxumStatus::BAD_GATEWAY
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let svc = service_for(format!("http://{addr}"));
+        let denied = inputs_with_source("mcp");
+        let other = QuotaCheckInputs {
+            user_id: 2,
+            ..inputs_with_source("mcp")
+        };
+
+        let err = svc.check(&denied).await.unwrap_err();
+        assert_eq!(err.message(), CREDITS_EXHAUSTED_MESSAGE);
+        for _ in 0..3 {
+            assert!(svc.check(&other).await.is_ok());
+        }
+        let err = svc.check(&denied).await.unwrap_err();
+        assert_eq!(err.message(), CREDITS_EXHAUSTED_MESSAGE);
     }
 
     #[tokio::test]
