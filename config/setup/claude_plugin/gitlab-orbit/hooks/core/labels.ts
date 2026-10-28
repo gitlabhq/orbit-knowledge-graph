@@ -45,6 +45,10 @@ export default {
       "done": "Listed repos",
       "running": "Listing repos"
     },
+    "workspace reset": {
+      "done": "Reset local graph",
+      "running": "Resetting local graph"
+    },
     "index": {
       "done": "Indexed repo",
       "running": "Indexing repo"

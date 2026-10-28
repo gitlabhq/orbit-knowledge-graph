@@ -10,6 +10,8 @@ toc_hide: true
 
 Accepted
 
+Amended by [ADR 022](022_queries_in_rails.md): Rails now runs the query stream, and Workhorse only proxies the request.
+
 ## Date
 
 2026-03-26

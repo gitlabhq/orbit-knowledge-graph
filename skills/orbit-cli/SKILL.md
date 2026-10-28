@@ -1,7 +1,7 @@
 ---
 name: orbit-cli
 description: >
-  Index and query a local checkout offline with the Orbit CLI (`orbit`, or
+  Index and query a local checkout offline with the GitLab Orbit CLI (`orbit`, or
   `glab orbit`). Reach for it when a question names a symbol or spans code
   structure. Examples: who calls or extends this, where it is defined, what
   a file defines, how definitions are distributed. One call replaces many
@@ -9,26 +9,23 @@ description: >
   Works on the working tree and unpushed branches, and also searches and reads
   the project's GitLab. Not a fit: reading one known file, or counts and
   relationships across GitLab (use the `orbit` skill).
-version: 0.32.0
+version: 0.33.0
 license: MIT
-compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
+compatibility: Requires the GitLab Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
   audience: developers
-  keywords: orbit, orbit-cli, orbit-local, knowledge-graph, code-graph, duckdb, sql, workspace
+  keywords: orbit, orbit-cli, local-graph, knowledge-graph, code-graph, workspace
   workflow: ai
   source-project: gitlab-org/orbit/knowledge-graph
   source-path: skills/orbit-cli
 ---
 
-# Orbit local CLI skill
+# GitLab Orbit CLI skill
 
-The local CLI parses a checkout into a DuckDB property graph. `grep` finds
+The GitLab Orbit CLI parses a checkout into a local graph. `grep` finds
 every matching line in code, tests, config, and docs, labeled with its enclosing definition. `context` reads their source and relationships. Both
 index the working tree on first use and refresh the index when it is stale, so
-you never need to index by hand. `workspace sql` and `workspace schema` index
-the current repository first when it was never indexed, even if other
-repositories are, and run read-only aggregations. A new commit alone does not
-trigger an index.
+you never need to index by hand. A new commit alone does not trigger an index.
 A read waits up to 10 minutes for a running index and then exits with code 75.
 To index ahead of time without blocking a short shell timeout, run
 `workspace index --async`, which returns once the background index holds its locks.
@@ -36,11 +33,11 @@ It prints `{"status": ...}` with `indexing`, `indexed`, or `queued` (another ind
 of the repository already runs). If open readers hold the locks for 30 s, it exits
 with code 75 while the background index keeps waiting.
 `workspace index --wait` waits for a running index (`--timeout SECONDS`) and then
-indexes in the foreground, which is the default. For production data, use the `orbit` skill.
+indexes in the foreground, which is the default. For GitLab data across projects, use the `orbit` skill, which queries the GitLab Orbit API.
 
 The binary is `orbit`, or `glab orbit` through the wrapper. In non-interactive
 shells, put glab's `--yes` before the subcommand so glab skips its install and
-run prompts: `glab orbit --yes workspace sql "..."`. The binary rejects `--yes` after
+run prompts: `glab orbit --yes grep "..."`. The binary rejects `--yes` after
 other subcommands. Only `setup` and `uninstall` take their own `--yes`
 (`glab orbit --yes setup --yes`). Run `orbit <command> --help` before you guess
 a flag. Run `orbit skills` to list available skills. Use
@@ -118,30 +115,17 @@ Line ranges show only the numbered lines.
 
 - `orbit grep 'a|b'` searches code, tests, config, and docs and labels each match with its enclosing definition. A plain query also searches the GitLab group behind `origin`.
 - `orbit context <name> <path>:<lines> mr:42 job:9` reads several targets in one call. Definitions come with their callers and tests, and GitLab merge requests, issues, branches, pipelines, and jobs come with the local code they point at. A bare `orbit context` reads the current branch's merge request and CI failures.
-- `orbit query` answers relationship and aggregation questions across GitLab entities, such as who reviewed which merge requests or which changes to an area failed CI. Write the query in the language below.
-- `orbit workspace sql` aggregates over the local code graph, and `orbit workspace schema` lists its tables.
+- `orbit query` answers relationship and aggregation questions across GitLab entities through the GitLab Orbit API. Examples: who reviewed which merge requests, or which changes to an area failed CI. Write the query in the language below.
 
 ```shell
 orbit grep 'retry_backoff|RetryBackoff'
 orbit context src/retry.rs:40-90 retry_backoff mr:42
-orbit workspace sql "SELECT definition_type, count(*) n FROM gl_definition GROUP BY 1 ORDER BY n DESC"
 ```
 
 <!-- /orbit:section -->
-
-Gotchas:
-
-- Queries are SQL against `gl_definition`, `gl_edge`, `gl_file`,
-  `gl_directory`, and `gl_imported_symbol`. They are not the JSON DSL, which
-  belongs to Orbit Remote.
-- `definition_type` values are capitalized. `WHERE definition_type='function'`
-  returns zero rows.
-- `workspace sql` queries all indexed revisions by default. Use `--repo .` for the current
-  checkout revision, or `--db PATH` for one file. Index a commit before querying it.
 
 ## References
 
 | Topic | Location |
 |---|---|
 | CLI wrapper flags, config keys, pass-through args | [`references/cli.md`](references/local/cli.md) |
-| DuckDB tables and paste-ready SQL recipes | [`references/sql.md`](references/local/sql.md) |

@@ -4,6 +4,7 @@ description: The checks and reviews that run next to the tests.
 order: 8
 authors:
   - michaelangeloio
+  - snachnolkar
 ---
 
 Every merge request runs static analysis, schema checks, freshness

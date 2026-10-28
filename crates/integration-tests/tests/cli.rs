@@ -765,6 +765,68 @@ fn a_busy_graph_is_reported_in_one_line() {
     );
 }
 
+#[test]
+fn reset_removes_the_graph_and_keeps_settings() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+    std::fs::write(data_dir.path().join("graph.duckdb"), b"earlier release").unwrap();
+    let (_, stderr, ok) = run_cmd(
+        &["config", "set", "telemetry.enabled", "false"],
+        data_dir.path(),
+    );
+    assert!(ok, "{stderr}");
+
+    let (_, stderr, ok) = run_cmd(&["workspace", "reset", "--yes"], data_dir.path());
+
+    assert!(ok, "{stderr}");
+    for removed in ["local", "var", "graph.duckdb"] {
+        assert!(!data_dir.path().join(removed).exists(), "{removed} remains");
+    }
+    assert!(data_dir.path().join("settings.json").is_file());
+    assert!(orbit_index(&repo.path, data_dir.path()));
+    assert_eq!(indexed_repo_paths(data_dir.path()).len(), 1);
+}
+
+#[test]
+fn reset_dry_run_lists_the_graph_and_removes_nothing() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+
+    let (_, stderr, ok) = run_cmd(&["workspace", "reset", "--dry-run"], data_dir.path());
+
+    assert!(ok, "{stderr}");
+    assert!(stderr.contains("local"), "{stderr}");
+    assert_eq!(indexed_repo_paths(data_dir.path()).len(), 1);
+}
+
+#[test]
+fn reset_waits_for_open_readers_and_gives_up_without_removing() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+    let manifest = orbit_sql("SELECT database_path FROM _orbit_manifest", data_dir.path());
+    let reader = std::fs::File::open(format!(
+        "{}.lock",
+        manifest[0]["database_path"].as_str().unwrap()
+    ))
+    .unwrap();
+    reader.lock_shared().unwrap();
+
+    let out = orbit_cmd()
+        .args(["workspace", "reset", "--yes"])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .env("ORBIT_WAIT_TIMEOUT_MS", "200")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(75), "{stderr}");
+    assert!(stderr.contains("gave up waiting"), "{stderr}");
+    assert_eq!(indexed_repo_paths(data_dir.path()).len(), 1);
+}
+
 fn indexed_repo_paths(data_dir: &std::path::Path) -> Vec<String> {
     let (stdout, stderr, ok) = run_cmd(&["workspace", "list", "-F", "json"], data_dir);
     assert!(ok, "orbit workspace list failed: {stderr}");
@@ -1163,13 +1225,13 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
     assert!(manifest.status.success());
     let manifest = String::from_utf8(manifest.stdout).unwrap();
     assert!(manifest.contains("name: orbit-cli"));
-    assert!(manifest.contains("references/local/sql.md"));
+    assert!(manifest.contains("references/local/cli.md"));
     assert!(
         manifest.contains("`orbit skills get orbit [path]`"),
         "served manifest must tell binary users the version-matched access path"
     );
 
-    for path in ["SKILL.md", "references/local/sql.md"] {
+    for path in ["SKILL.md", "references/local/cli.md"] {
         let out = hermetic_skills_cmd(cache.path())
             .args(["skills", "get", "orbit", path])
             .output()
@@ -1185,15 +1247,15 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
     }
 
     let canonical = hermetic_skills_cmd(cache.path())
-        .args(["skills", "get", "orbit", "references/local/sql.md"])
+        .args(["skills", "get", "orbit", "references/local/cli.md"])
         .output()
         .unwrap();
     let named_alias = hermetic_skills_cmd(cache.path())
-        .args(["skills", "orbit", "references/local/sql.md"])
+        .args(["skills", "orbit", "references/local/cli.md"])
         .output()
         .unwrap();
     let path_alias = hermetic_skills_cmd(cache.path())
-        .args(["skills", "references/local/sql.md"])
+        .args(["skills", "references/local/cli.md"])
         .output()
         .unwrap();
     assert!(canonical.status.success());
@@ -1248,13 +1310,13 @@ fn skills_reject_unknown_names_and_paths() {
     assert!(!error.contains("embedded local skill"));
 
     let path_as_name = hermetic_skills_cmd(cache.path())
-        .args(["skills", "get", "references/local/sql.md"])
+        .args(["skills", "get", "references/local/cli.md"])
         .output()
         .unwrap();
     assert!(!path_as_name.status.success());
     assert!(path_as_name.stdout.is_empty());
     let error = String::from_utf8(path_as_name.stderr).unwrap();
-    assert!(error.contains("invalid skill name \"references/local/sql.md\""));
+    assert!(error.contains("invalid skill name \"references/local/cli.md\""));
     assert!(!error.contains("path shorthand"));
 
     for path in [

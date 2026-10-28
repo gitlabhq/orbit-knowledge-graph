@@ -19,8 +19,7 @@ use crate::input::{
 };
 use crate::query_limits::{
     MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTER_STRING_LEN, MAX_HOPS_CAP,
-    MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT, MAX_PREDICATE_DEPTH, MAX_PREDICATE_LEAVES,
-    MAX_SKIP,
+    MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT, MAX_PREDICATE_DEPTH, MAX_SKIP,
 };
 #[cfg(test)]
 use ontology::Ontology;
@@ -565,11 +564,10 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
     /// Enforce query limits for every frontend, including counts across input fields.
     pub fn check_depth(&self, input: &Input) -> Result<()> {
         use crate::query_limits::{
-            MAX_COLUMNS, MAX_DEPTH_CAP, MAX_HOPS_CAP, MAX_IN_VALUES, MAX_NODE_IDS, MAX_NODES_CAP,
-            MAX_PREDICATES, MAX_REL_TYPES, MAX_RELS_CAP,
+            MAX_AGGREGATIONS, MAX_COLUMNS, MAX_DEPTH_CAP, MAX_GROUP_BY_KEYS, MAX_HOPS_CAP,
+            MAX_IN_VALUES, MAX_NODE_IDS, MAX_NODES_CAP, MAX_PREDICATES, MAX_REL_TYPES,
+            MAX_RELS_CAP,
         };
-        const MAX_AGGS_CAP: usize = 10;
-        const MAX_GROUP_BY_KEYS: usize = 4;
 
         let predicate_count = input.conditions().count()
             + input
@@ -616,9 +614,9 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 input.relationships.len()
             )));
         }
-        if input.aggregation.metrics.len() > MAX_AGGS_CAP {
+        if input.aggregation.metrics.len() > MAX_AGGREGATIONS {
             return Err(QueryError::Validation(format!(
-                "aggregations count ({}) must not exceed {MAX_AGGS_CAP}",
+                "aggregations count ({}) must not exceed {MAX_AGGREGATIONS}",
                 input.aggregation.metrics.len()
             )));
         }

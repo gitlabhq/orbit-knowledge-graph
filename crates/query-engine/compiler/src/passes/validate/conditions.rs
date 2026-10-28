@@ -12,11 +12,6 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
                 "conditions must not nest deeper than {MAX_PREDICATE_DEPTH} levels"
             )));
         }
-        if input.conditions().count() > MAX_PREDICATE_LEAVES {
-            return Err(QueryError::Validation(format!(
-                "a query must not combine more than {MAX_PREDICATE_LEAVES} conditions"
-            )));
-        }
         for root in &input.predicates {
             match root.relationship_type() {
                 Some((condition, _)) => self.check_relationship_type(condition)?,
