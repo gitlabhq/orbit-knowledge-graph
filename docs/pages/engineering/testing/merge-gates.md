@@ -21,6 +21,7 @@ owners add a second check for security, performance, and billing.
 - Schema checks validate the ontology, the named queries, the migration
   ledger, and the scenario files.
 - Freshness checks fail when a generated file does not match its source.
+- A contract check compares the redaction settings in the ontology with the GitLab permission policies of the pinned GitLab commit. It runs on main and on merge requests that change the ontology, the pins, or the check itself, and it blocks a merge.
 - Version checks fail when a change to the query language, the response
   format, the agent skills, or the prompts does not bump its version.
 - Documentation checks run style, Markdown, and link checks on the user

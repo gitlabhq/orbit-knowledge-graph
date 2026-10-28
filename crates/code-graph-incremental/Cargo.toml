@@ -34,6 +34,7 @@ smallvec = { workspace = true }
 stacker = { workspace = true }
 strum = { workspace = true }
 toml = { workspace = true }
+twox-hash = { version = "2.1", default-features = false, features = ["xxhash3_64", "xxhash3_128"] }
 zstd = "0.14"
 tree-sitter = "0.26.3"
 tree-sitter-bash = "0.25.1"

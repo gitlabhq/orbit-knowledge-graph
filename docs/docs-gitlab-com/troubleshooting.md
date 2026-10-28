@@ -300,11 +300,17 @@ To resolve this issue, search for a shorter term, or remove options that narrow 
 
 ### Files marked `(edited since index)`
 
-`grep` marks a file `(edited since index)`, and its definitions might not match the file.
+`grep` marks a file `(edited since index)` and does not show its definitions.
+`context` prints a note that its definitions come from the last indexed commit.
 
-This issue occurs when `grep` cannot index the edited file, because another `orbit` process is writing the local graph.
+This issue occurs when you edited the file after the last index, and `grep` or `context` could not index the edit in time.
+For example:
 
-To resolve this issue, wait for the other process to finish, then run `grep` again.
+- Indexing the edit took longer than two seconds. Indexing continues in the background.
+- Indexing the edit failed, for example because another `orbit` process is writing the local graph.
+
+To resolve this issue, wait a few seconds, then run the command again.
+If the file is still marked, wait for other `orbit` processes to finish, then run the command again.
 
 ### Warning: `ignoring unsupported flag`
 

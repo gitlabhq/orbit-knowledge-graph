@@ -47,7 +47,7 @@ colima stop gkg
 ```
 
 For the other `mise test:integration:*` tasks, see
-[Container tests](../../docs/pages/engineering/testing/infrastructure.md).
+[Container tests](../../docs/pages/engineering/testing/integration/containers.md).
 
 To run specific suites or tests directly:
 

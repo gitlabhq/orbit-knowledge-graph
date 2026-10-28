@@ -1,3 +1,5 @@
+use cynic::GraphQlError;
+
 pub(crate) const EXIT_GENERIC: i32 = 1;
 pub(crate) const EXIT_UNAVAILABLE: i32 = 2;
 const EXIT_UNAUTHENTICATED: i32 = 3;
@@ -36,15 +38,7 @@ impl From<anyhow::Error> for RemoteError {
 pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
     match status {
         404 => match parse_missing_resource(body) {
-            Some(resource) => RemoteError::new(
-                EXIT_UNAVAILABLE,
-                format!(
-                    "{resource} not found\n\n\
-                     The Orbit API found no {resource_lower} with this path or ID, or you\n\
-                     are not a member of it.",
-                    resource_lower = resource.to_lowercase()
-                ),
-            ),
+            Some(resource) => build_not_found_error(&resource),
             None => RemoteError::new(
                 EXIT_UNAVAILABLE,
                 "Orbit endpoint not available\n\n\
@@ -93,6 +87,33 @@ pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
             format!("Orbit API error (HTTP {status}){}", body_suffix(body)),
         ),
     }
+}
+
+pub(crate) fn build_not_found_error(resource: &str) -> RemoteError {
+    RemoteError::new(
+        EXIT_UNAVAILABLE,
+        format!(
+            "{resource} not found\n\n\
+             The Orbit API found no {resource_lower} with this path or ID, or you\n\
+             are not a member of it.",
+            resource_lower = resource.to_lowercase()
+        ),
+    )
+}
+
+pub(crate) fn build_graphql_error<E>(context: &str, errors: &[GraphQlError<E>]) -> RemoteError {
+    RemoteError::new(
+        EXIT_GENERIC,
+        format!("{context}: {}", join_messages(errors)),
+    )
+}
+
+fn join_messages<E>(errors: &[GraphQlError<E>]) -> String {
+    errors
+        .iter()
+        .map(|error| error.message.as_str())
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn parse_missing_resource(body: &str) -> Option<String> {
