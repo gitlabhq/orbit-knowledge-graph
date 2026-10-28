@@ -44,6 +44,7 @@ uv = "0.9.28"
 bun = "1.4.4"
 lychee = "0.23"
 vale = "3.14.1"
+rumdl = "0.2.69"
 lefthook = "2.1.3"
 protoc = "34.1"
 jq = "1.7"
@@ -501,6 +502,10 @@ description = "Build, typecheck, and test the JavaScript workspace packages"
 run = "bun x markdownlint-cli2 '*.md' 'docs/**/*.md' 'docs-locale/**/*.md'"
 description = "Run markdownlint on all markdown files"
 
+[tasks."lint:rumdl"]
+run = "rumdl check --config docs/.rumdl/rumdl.toml docs"
+description = "Run rumdl on all markdown files"
+
 [tasks."lint:vale"]
 run = "vale --minAlertLevel error *.md docs docs-locale"
 description = "Run Vale prose linting on markdown files"
@@ -534,7 +539,7 @@ run = "uv run --quiet scripts/linting/comment_check_test.py"
 description = "Run the comment check's unit tests"
 
 [tasks."lint:docs"]
-depends = ["lint:markdown", "lint:vale", "lint:links"]
+depends = ["lint:markdown", "lint:rumdl", "lint:vale", "lint:links"]
 run = "echo 'All doc linters passed'"
 description = "Run all documentation linters"
 

@@ -31,6 +31,9 @@ config/dev.local.yaml
 tmp/
 *.sql.tmp
 
+# rumdl cache
+.rumdl_cache
+
 # Proto gem build output
 _build/
 
