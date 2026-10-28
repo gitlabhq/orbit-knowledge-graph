@@ -49,6 +49,10 @@ settings:
         - {name: source_kind, type: string}
         - {name: target_id, type: int64}
         - {name: target_kind, type: string}
+        - {name: lines, type: "int64[]"}
+        - {name: resolution, type: string}
+        - {name: access, type: string}
+        - {name: usage, type: string}
       storage:
         index_granularity: 1024
         primary_key: [traversal_path, relationship_kind, project_id, branch]
@@ -61,6 +65,10 @@ settings:
           - {name: relationship_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
           - {name: target_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+          - {name: lines, type: "Array(Int64)", default: "[]", codec: ["ZSTD(1)"]}
+          - {name: resolution, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+          - {name: access, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+          - {name: usage, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
         indexes:
           - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
@@ -140,7 +148,7 @@ settings:
     # --- Branch ---
     - {node: Branch, property: is_default}
     # --- Definition ---
-    - {node: Definition, property: definition_type}
+    - {node: Definition, property: kind}
     # --- Deployment ---
     - {node: Deployment, property: status}
     - {node: Deployment, property: tag}
@@ -157,8 +165,8 @@ settings:
     - {node: Finding, property: deduplicated}
     # --- Group ---
     - {node: Group, property: visibility_level}
-    # --- ImportedSymbol ---
-    - {node: ImportedSymbol, property: import_type}
+    # --- Import ---
+    - {node: Import, property: import_kind}
     # --- Job ---
     - {node: Job, property: status}
     - {node: Job, property: tag}
@@ -269,7 +277,7 @@ settings:
         exclude_properties: []
       - name: Definition
         exclude_properties: []
-      - name: ImportedSymbol
+      - name: Import
         exclude_properties: []
     edge_table:
       name: gl_edge
@@ -280,6 +288,10 @@ settings:
         - {name: target_id, type: int64}
         - {name: target_kind, type: string}
         - {name: traversal_path, type: string}
+        - {name: lines, type: "int64[]"}
+        - {name: resolution, type: string}
+        - {name: access, type: string}
+        - {name: usage, type: string}
   auxiliary_tables:
     - name: namespace_storage_snapshot
       versioned: false
@@ -396,7 +408,7 @@ domains:
       Directory: nodes/source_code/directory.yaml
       File: nodes/source_code/file.yaml
       Definition: nodes/source_code/definition.yaml
-      ImportedSymbol: nodes/source_code/imported_symbol.yaml
+      Import: nodes/source_code/import.yaml
   packages:
     description: "Entities related to packages published to the package registry."
     nodes:
@@ -443,10 +455,16 @@ edges:
   CLOSES: edges/closes.yaml
   HAS_NOTE: edges/has_note.yaml
   DEFINES: edges/defines.yaml
-  IMPORTS: edges/imports.yaml
+  RESOLVES_TO: edges/resolves_to.yaml
+  DEPENDS_ON: edges/depends_on.yaml
   CALLS: edges/calls.yaml
+  INSTANTIATES: edges/instantiates.yaml
+  USES_VALUE: edges/uses_value.yaml
+  USES_TYPE: edges/uses_type.yaml
   EXTENDS: edges/extends.yaml
-  ON_BRANCH: edges/on_branch.yaml
+  IMPLEMENTS: edges/implements.yaml
+  OVERRIDES: edges/overrides.yaml
+  ANNOTATED_BY: edges/annotated_by.yaml
   OCCURRENCE_OF: edges/occurrence.yaml
   SCANS: edges/scans.yaml
   RAN_BY: edges/ran_by.yaml

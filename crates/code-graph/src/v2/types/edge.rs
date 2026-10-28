@@ -7,7 +7,7 @@ use strum::{AsRefStr, Display, EnumIter, EnumString};
 pub enum EdgeKind {
     Contains,
     Defines,
-    Imports,
+    ResolvesTo,
     Calls,
     Extends,
 }
@@ -17,7 +17,7 @@ pub enum NodeKind {
     Directory,
     File,
     Definition,
-    ImportedSymbol,
+    Import,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -34,27 +34,23 @@ const STRUCTURAL_LABELS: &[(NodeKind, NodeKind, &str)] = &[
     (NodeKind::Directory, NodeKind::Directory, "DIR_CONTAINS_DIR"),
     (NodeKind::Directory, NodeKind::File, "DIR_CONTAINS_FILE"),
     (NodeKind::File, NodeKind::Definition, "FILE_DEFINES"),
-    (NodeKind::File, NodeKind::ImportedSymbol, "FILE_IMPORTS"),
+    (NodeKind::File, NodeKind::Import, "FILE_IMPORTS"),
     (
         NodeKind::Definition,
-        NodeKind::ImportedSymbol,
+        NodeKind::Import,
         "DEFINES_IMPORTED_SYMBOL",
     ),
     (
-        NodeKind::ImportedSymbol,
-        NodeKind::ImportedSymbol,
+        NodeKind::Import,
+        NodeKind::Import,
         "IMPORTED_SYMBOL_TO_IMPORTED_SYMBOL",
     ),
     (
-        NodeKind::ImportedSymbol,
+        NodeKind::Import,
         NodeKind::Definition,
         "IMPORTED_SYMBOL_TO_DEFINITION",
     ),
-    (
-        NodeKind::ImportedSymbol,
-        NodeKind::File,
-        "IMPORTED_SYMBOL_TO_FILE",
-    ),
+    (NodeKind::Import, NodeKind::File, "IMPORTED_SYMBOL_TO_FILE"),
 ];
 
 impl Relationship {
@@ -114,7 +110,7 @@ mod tests {
     fn edge_kind_display() {
         assert_eq!(EdgeKind::Contains.to_string(), "CONTAINS");
         assert_eq!(EdgeKind::Defines.to_string(), "DEFINES");
-        assert_eq!(EdgeKind::Imports.to_string(), "IMPORTS");
+        assert_eq!(EdgeKind::ResolvesTo.to_string(), "RESOLVES_TO");
         assert_eq!(EdgeKind::Calls.to_string(), "CALLS");
     }
 
@@ -128,7 +124,7 @@ mod tests {
     #[test]
     fn node_kind_display() {
         assert_eq!(NodeKind::Directory.to_string(), "Directory");
-        assert_eq!(NodeKind::ImportedSymbol.to_string(), "ImportedSymbol");
+        assert_eq!(NodeKind::Import.to_string(), "Import");
     }
 
     #[test]

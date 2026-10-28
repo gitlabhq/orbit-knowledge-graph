@@ -1,0 +1,26 @@
+description: What an imported name points at in the index
+
+properties:
+  resolution:
+    type: enum
+    enum_type: string
+    source: resolution
+    nullable: false
+    description: "How the engine found the target, from the strongest rule to the weakest."
+    values:
+      0: local
+      1: import
+      2: declared_type
+      3: inferred_type
+      4: wildcard_import
+
+variants:
+  - from_node: { type: Import, id: id }
+    to_node: { type: Definition, id: id }
+    scope: prune_to_source
+    description: "Imported name resolves to a definition."
+
+  - from_node: { type: Import, id: id }
+    to_node: { type: File, id: id }
+    scope: prune_to_source
+    description: "Imported module resolves to a file."

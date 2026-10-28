@@ -143,8 +143,8 @@ pub fn attach_resolution_edges(
             target_node,
             GraphEdge {
                 relationship: Relationship {
-                    edge_kind: EdgeKind::Imports,
-                    source_node: NodeKind::ImportedSymbol,
+                    edge_kind: EdgeKind::ResolvesTo,
+                    source_node: NodeKind::Import,
                     target_node: target_node_kind,
                     source_def_kind: None,
                     target_def_kind,
@@ -568,7 +568,7 @@ fn add_unresolved_imported_call_edges(
                     relationship: Relationship {
                         edge_kind: EdgeKind::Calls,
                         source_node: source.node_kind,
-                        target_node: NodeKind::ImportedSymbol,
+                        target_node: NodeKind::Import,
                         source_def_kind: source.def_kind,
                         target_def_kind: None,
                     },

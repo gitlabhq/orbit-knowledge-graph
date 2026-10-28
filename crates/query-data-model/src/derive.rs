@@ -64,8 +64,8 @@ mod tests {
         for (source, target, table) in [
             ("Definition", "Definition", "gl_code_edge"),
             ("File", "Definition", "gl_edge"),
-            ("Definition", "ImportedSymbol", "gl_code_edge"),
-            ("File", "ImportedSymbol", "gl_edge"),
+            ("Definition", "Import", "gl_code_edge"),
+            ("File", "Import", "gl_edge"),
         ] {
             let variant = remote
                 .graph()

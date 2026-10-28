@@ -1897,7 +1897,7 @@ mod tests {
 
         // They must all route to the same edge table so traversals can JOIN
         // them with edges from other code-graph relationships.
-        for kind in ["CALLS", "EXTENDS", "DEFINES", "IMPORTS"] {
+        for kind in ["CALLS", "EXTENDS", "DEFINES", "RESOLVES_TO"] {
             let entries = ontology
                 .get_edge(kind)
                 .unwrap_or_else(|| panic!("{kind} should be registered"));
@@ -2933,7 +2933,7 @@ properties:
         assert!(local.contains(&"Directory"));
         assert!(local.contains(&"File"));
         assert!(local.contains(&"Definition"));
-        assert!(local.contains(&"ImportedSymbol"));
+        assert!(local.contains(&"Import"));
         assert!(!local.contains(&"User"));
     }
 
@@ -3382,18 +3382,18 @@ properties:
     }
 
     #[test]
-    fn imported_symbol_edges_stop_propagation_at_the_resolved_definition() {
+    fn import_edges_stop_propagation_at_the_resolved_definition() {
         let o = Ontology::load_embedded().unwrap();
         assert!(
-            o.is_scope_preserving_triple("CALLS", "Definition", "ImportedSymbol"),
-            "a call site and its imported symbol live in one repository"
+            o.is_scope_preserving_triple("CALLS", "Definition", "Import"),
+            "a call site and its import live in one repository"
         );
         assert!(
-            o.is_scope_preserving_triple("IMPORTS", "File", "ImportedSymbol"),
-            "an import site and its imported symbol live in one repository"
+            o.is_scope_preserving_triple("DEFINES", "File", "Import"),
+            "an import site and its import live in one repository"
         );
         assert_eq!(
-            o.edge_scope_for("IMPORTS", "ImportedSymbol", "Definition"),
+            o.edge_scope_for("RESOLVES_TO", "Import", "Definition"),
             Some(EdgeVariantScope::PruneToSource),
             "the resolved definition may live in another repository"
         );
@@ -3417,7 +3417,7 @@ properties:
         assert!(!o.is_scope_preserving_triple("CONTAINS", "User", "Project"));
         assert!(!o.is_scope_preserving_triple("CONTAINS", "WorkItem", "WorkItem"));
         assert!(o.is_scope_preserving_triple("CALLS", "Definition", "Definition"));
-        assert!(o.is_scope_preserving_triple("CALLS", "Definition", "ImportedSymbol"));
+        assert!(o.is_scope_preserving_triple("CALLS", "Definition", "Import"));
         assert!(!o.is_scope_preserving_triple("CLOSES", "MergeRequest", "WorkItem"));
         assert!(!o.is_scope_preserving_triple("HAS_NOTE", "MergeRequest", "Note"));
     }

@@ -313,7 +313,7 @@ mod tests {
         let sql = edge_sweep("v9_gl_edge", "v9_cp");
         assert!(
             sql.contains(
-                "s.source_kind IN ('Branch', 'Directory', 'File', 'Definition', 'ImportedSymbol')"
+                "s.source_kind IN ('Branch', 'Directory', 'File', 'Definition', 'Import')"
             ),
             "{sql}"
         );

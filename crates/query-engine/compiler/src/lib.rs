@@ -1450,7 +1450,7 @@ mod tests {
     #[test]
     fn equality_without_text_index_or_with_a_sort_key_filter_stays_plain() {
         for query in [
-            "MATCH (d:Definition) WHERE d.definition_type = 'Function' RETURN d.name",
+            "MATCH (d:Definition) WHERE d.kind = 'Function' RETURN d.name",
             "MATCH (d:Definition) WHERE d.name <> 'compile' RETURN d.name",
             "MATCH (d:Definition) WHERE d.project_id = 9 AND d.name = 'compile' RETURN d.name",
         ] {

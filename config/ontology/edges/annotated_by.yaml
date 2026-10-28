@@ -1,0 +1,19 @@
+description: A definition carries a decorator, an annotation, or an attribute
+
+properties:
+  lines:
+    type: int64[]
+    source: lines
+    nullable: false
+    description: "Sorted 1-based lines of each use between the two nodes; at most 64 entries."
+
+variants:
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Definition, id: id }
+    scope: same_namespace
+    description: "Definition carries a decorator, annotation, or attribute that is a definition in the index."
+
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Import, id: id }
+    scope: same_namespace
+    description: "Definition carries an imported decorator, annotation, or attribute."

@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS gl_branch (
     project_id Int64 CODEC(T64, ZSTD(1)),
     name String CODEC(ZSTD(1)),
     is_default Bool DEFAULT true,
+    commit_sha String DEFAULT '' CODEC(ZSTD(1)),
+    indexed_at DateTime64(6, 'UTC') DEFAULT toDateTime64(0, 6, 'UTC') CODEC(Delta(8), ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_deleted _deleted TYPE minmax GRANULARITY 1,
@@ -115,9 +117,21 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     branch String CODEC(ZSTD(1)),
     commit_sha String DEFAULT '' CODEC(ZSTD(1)),
     file_path String CODEC(ZSTD(9)),
+    language LowCardinality(String) DEFAULT '' CODEC(LZ4),
     fqn String CODEC(ZSTD(9)),
     name String CODEC(ZSTD(9)),
-    definition_type LowCardinality(String) CODEC(LZ4),
+    signature String DEFAULT '' CODEC(ZSTD(9)),
+    parameters Array(String) DEFAULT [] CODEC(ZSTD(9)),
+    return_type Nullable(String) CODEC(ZSTD(9)),
+    declared_type Nullable(String) CODEC(ZSTD(9)),
+    doc_comment String DEFAULT '' CODEC(ZSTD(9)),
+    category LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    kind LowCardinality(String) CODEC(LZ4),
+    language_kind LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    scope LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    modifiers Array(LowCardinality(String)) DEFAULT [] CODEC(ZSTD(1)),
+    visibility LowCardinality(Nullable(String)) CODEC(LZ4),
+    generated_by Nullable(String) CODEC(ZSTD(3)),
     start_line Int64 CODEC(T64, ZSTD(1)),
     end_line Int64 CODEC(T64, ZSTD(1)),
     start_byte Int64 CODEC(T64, ZSTD(1)),
@@ -135,7 +149,12 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     INDEX idx_fqn_ngram lower(fqn) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_file_path lower(file_path) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_file_path_ngram lower(file_path) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_definition_type definition_type TYPE set(20) GRANULARITY 2
+    INDEX idx_signature lower(signature) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_doc_comment lower(doc_comment) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_kind kind TYPE set(20) GRANULARITY 2,
+    INDEX idx_category category TYPE set(8) GRANULARITY 2,
+    INDEX idx_language_kind language_kind TYPE set(128) GRANULARITY 2,
+    INDEX idx_scope scope TYPE set(4) GRANULARITY 2
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1;
@@ -258,7 +277,10 @@ CREATE TABLE IF NOT EXISTS gl_file (
     extension LowCardinality(String) CODEC(LZ4),
     language LowCardinality(String) CODEC(LZ4),
     size_bytes Int64 DEFAULT 0 CODEC(T64, ZSTD(1)),
-    reason LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    skip_reason LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    is_test Bool DEFAULT false,
+    is_generated Bool DEFAULT false,
+    is_vendored Bool DEFAULT false,
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_deleted _deleted TYPE minmax GRANULARITY 1,
@@ -323,17 +345,20 @@ CREATE TABLE IF NOT EXISTS gl_group (
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1, add_minmax_index_for_temporal_columns = 1;
 
-CREATE TABLE IF NOT EXISTS gl_imported_symbol (
+CREATE TABLE IF NOT EXISTS gl_import (
     id Int64 CODEC(T64, ZSTD(1)),
     traversal_path String CODEC(ZSTD(1)),
     project_id Int64 CODEC(T64, ZSTD(1)),
     branch String CODEC(ZSTD(1)),
     commit_sha String DEFAULT '' CODEC(ZSTD(1)),
     file_path String CODEC(ZSTD(9)),
-    import_type LowCardinality(String) CODEC(LZ4),
+    import_kind LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    language_kind LowCardinality(String) CODEC(LZ4),
     import_path String CODEC(ZSTD(9)),
-    identifier_name String DEFAULT '' CODEC(ZSTD(9)),
-    identifier_alias String DEFAULT '' CODEC(ZSTD(9)),
+    name String DEFAULT '' CODEC(ZSTD(9)),
+    alias String DEFAULT '' CODEC(ZSTD(9)),
+    fqn Nullable(String) CODEC(ZSTD(9)),
+    is_external Bool DEFAULT false,
     start_line Int64 CODEC(T64, ZSTD(1)),
     end_line Int64 CODEC(T64, ZSTD(1)),
     start_byte Int64 CODEC(T64, ZSTD(1)),
@@ -345,12 +370,14 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     INDEX idx_deleted _deleted TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_identifier_name identifier_name TYPE bloom_filter(0.0001) GRANULARITY 1,
+    INDEX idx_name name TYPE bloom_filter(0.0001) GRANULARITY 1,
+    INDEX idx_fqn fqn TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_file_path lower(file_path) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_file_path_ngram lower(file_path) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_import_path lower(import_path) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_import_path_ngram lower(import_path) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_import_type import_type TYPE set(10) GRANULARITY 2
+    INDEX idx_import_kind import_kind TYPE set(8) GRANULARITY 2,
+    INDEX idx_language_kind language_kind TYPE set(64) GRANULARITY 2
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1;
@@ -1059,6 +1086,10 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
     relationship_kind LowCardinality(String) CODEC(LZ4),
     target_id Int64 CODEC(T64, ZSTD(1)),
     target_kind LowCardinality(String) CODEC(LZ4),
+    lines Array(Int64) DEFAULT [] CODEC(ZSTD(1)),
+    resolution LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    access LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    usage LowCardinality(String) DEFAULT '' CODEC(LZ4),
     source_tags Array(LowCardinality(String)) CODEC(LZ4),
     target_tags Array(LowCardinality(String)) CODEC(LZ4),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),

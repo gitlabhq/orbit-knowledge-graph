@@ -102,13 +102,31 @@ properties:
     nullable: true
     description: "Raw source text, resolved from Gitaly at query time."
 
-  reason:
+  skip_reason:
     type: string
-    source: reason
+    source: skip_reason
     nullable: false
     mutable: true
     description: "Why the file was skipped or failed to index (e.g. oversize, timeout_parse, invalid_utf8). Empty for files indexed successfully."
     selectivity: low
+
+  is_test:
+    type: boolean
+    source: is_test
+    nullable: false
+    description: "True when the path rules or the test framework of the language mark the file as a test."
+
+  is_generated:
+    type: boolean
+    source: is_generated
+    nullable: false
+    description: "True when the file is generated, such as a lock file or a minified bundle."
+
+  is_vendored:
+    type: boolean
+    source: is_vendored
+    nullable: false
+    description: "True when the file is vendored third-party code."
 
 storage:
   settings:
@@ -124,7 +142,10 @@ storage:
     - {name: extension, type: "LowCardinality(String)", codec: ["LZ4"]}
     - {name: language, type: "LowCardinality(String)", codec: ["LZ4"]}
     - {name: size_bytes, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
-    - {name: reason, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: skip_reason, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: is_test, type: "Bool", default: "false"}
+    - {name: is_generated, type: "Bool", default: "false"}
+    - {name: is_vendored, type: "Bool", default: "false"}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}

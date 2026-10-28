@@ -581,7 +581,7 @@ fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::K
     }
     let git = backend.git();
     let batches = backend.client().query_arrow_json(
-        "SELECT DISTINCT definition_type AS kind FROM gl_definition
+        "SELECT DISTINCT kind FROM gl_definition
          WHERE project_id = ?1 AND commit_sha = ?2 ORDER BY 1",
         &[git.project_id.into(), git.commit_sha.clone().into()],
     )?;
