@@ -1,3 +1,20 @@
+## [0.162.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.161.0...v0.162.0) (2026-10-28)
+
+### Features
+
+* **cli:** add orbit workspace reset to delete the local graph ([582e597](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/582e5976e1207f73da1580fa487ca81f4ac20fb4)) by Jean-Gabriel Doyon
+* **observability:** measure query latency with finer histogram buckets ([1d8c5fe](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1d8c5fe7baa3a4ab2e01f4dba2e61cb2281ff013)) by Michael Usachenko
+* **orbit-cli:** show context graph neighbors the summary lacks ([d42bf6c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d42bf6cd339d9469831a2111192472496314825b)) by Aaron Algutifan
+
+### Fixes
+
+* **deps:** update pulldown-cmark to 0.13.5 for RUSTSEC-2026-0414 ([b2f3169](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b2f316954129bb2fa0ceb1d8c36ff14f0352e65d)) by Michael Usachenko
+
+### Other
+
+* **e2e:** pin the 19.4 and 19.5 lanes to the Orbit reapply MRs ([6e08d93](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6e08d939777a54fcbeae60f9943df66c53ddf1cb)) by Jean-Gabriel Doyon
+* testing doc authors and ADR 022 for queries in Rails ([a847b7e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a847b7ec56c477d7beac0945d8ea977aa3e048a0)) by Michael Angelo Rivera
+
 ## [0.161.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.160.0...v0.161.0) (2026-10-28)
 
 ### Features
