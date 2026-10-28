@@ -68,3 +68,26 @@ cases:
       row_count: 1
       row_values:
         - { ref: main, n: 2 }
+
+  - name: single_value_in_pins_project
+    description: A one-value IN list pins the project the same as equality
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.project_id IN [1002] RETURN j.name AS name, count(j) AS n ORDER BY name
+    expect:
+      skip_requirements: [filter:project_id, aggregation_sort]
+      row_count: 2
+      row_values:
+        - { name: lint, n: 2 }
+        - { name: rspec, n: 1 }
+
+  - name: single_value_in_pins_pipeline_source
+    description: One-value IN lists pin the project and source the same as equality
+    query:
+      gql: |
+        MATCH (pl:Pipeline) WHERE pl.project_id IN [1000] AND pl.source IN ['push'] RETURN pl.ref AS ref, count(pl) AS n
+    expect:
+      skip_requirements: [filter:project_id, filter:source]
+      row_count: 1
+      row_values:
+        - { ref: main, n: 2 }

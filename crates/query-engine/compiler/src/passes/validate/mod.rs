@@ -365,11 +365,16 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 candidate.id == node
                     && candidate.filters.get(property).is_some_and(|filters| {
                         filters.iter().any(|filter| {
-                            matches!(filter.op, None | Some(FilterOp::Eq))
-                                && filter
-                                    .value
-                                    .as_ref()
-                                    .is_some_and(|value| !value.is_array() && !value.is_null())
+                            let value = match (filter.op, &filter.value) {
+                                (None | Some(FilterOp::Eq), Some(value)) => Some(value),
+                                (Some(FilterOp::In), Some(serde_json::Value::Array(values)))
+                                    if values.len() == 1 =>
+                                {
+                                    values.first()
+                                }
+                                _ => None,
+                            };
+                            value.is_some_and(|value| !value.is_array() && !value.is_null())
                         })
                     })
             })
