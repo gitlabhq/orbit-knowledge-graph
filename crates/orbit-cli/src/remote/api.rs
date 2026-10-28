@@ -64,4 +64,9 @@ mod tests {
             assert_eq!(extensions.is_missing_schema(), missing, "{code}");
         }
     }
+
+    #[test]
+    fn a_response_without_schema_errors_keeps_graphql() {
+        assert!(Api::remember_from(&[]) == Api::Graphql);
+    }
 }
