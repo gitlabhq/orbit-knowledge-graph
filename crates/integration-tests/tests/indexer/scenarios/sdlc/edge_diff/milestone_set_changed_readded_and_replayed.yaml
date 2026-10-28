@@ -1,0 +1,59 @@
+description: A merge request milestone set from null, changed, set back and replayed keeps exactly one live IN_MILESTONE edge to the current milestone
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+      merge_requests:
+        - { id: 10, iid: 1, title: Work, source_branch: a, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, milestone_id: null, author_id: 1, traversal_path: "1/100/1000/" }
+    expect:
+      edges:
+        - { kind: IN_MILESTONE, from: MergeRequest, to: Milestone, count: 0 }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.MergeRequest, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      merge_requests:
+        - { id: 10, iid: 1, title: Work, source_branch: a, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, milestone_id: 900, author_id: 1, traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      edges:
+        - { kind: IN_MILESTONE, from: MergeRequest, to: Milestone, count: 1, rows: [{ source_id: 10, target_id: 900 }] }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.MergeRequest, watermark: "2024-01-20 18:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 18:00:00.000000" }
+      merge_requests:
+        - { id: 10, iid: 1, title: Work, source_branch: a, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, milestone_id: 901, author_id: 1, traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-20 19:00:00" }
+    expect:
+      edges:
+        - { kind: IN_MILESTONE, from: MergeRequest, to: Milestone, count: 1, rows: [{ source_id: 10, target_id: 901 }] }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.MergeRequest, watermark: "2024-01-20 19:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 19:00:00.000000" }
+      merge_requests:
+        - { id: 10, iid: 1, title: Work, source_branch: a, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, milestone_id: 900, author_id: 1, traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-20 20:00:00" }
+    expect:
+      edges:
+        - { kind: IN_MILESTONE, from: MergeRequest, to: Milestone, count: 1, rows: [{ source_id: 10, target_id: 900 }] }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.MergeRequest, watermark: "2024-01-20 19:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 19:00:00.000000" }
+    expect:
+      edges:
+        - { kind: IN_MILESTONE, from: MergeRequest, to: Milestone, count: 1, rows: [{ source_id: 10, target_id: 900 }] }
+        - { kind: IN_PROJECT, from: MergeRequest, to: Project, count: 1, rows: [{ source_id: 10, target_id: 1000 }] }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.MergeRequest, watermark: "2024-01-20 20:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 20:00:00.000000" }
+      merge_requests:
+        - { id: 10, iid: 1, title: Renamed, source_branch: a, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, milestone_id: 900, author_id: 1, traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-20 21:00:00" }
+    expect:
+      edges:
+        - { kind: IN_MILESTONE, from: MergeRequest, to: Milestone, count: 1, rows: [{ source_id: 10, target_id: 900 }] }
+        - { kind: AUTHORED, from: User, to: MergeRequest, count: 1, rows: [{ source_id: 1, target_id: 10 }] }

@@ -1,0 +1,25 @@
+description: A note deleted with a key-only tombstone loses its polymorphic HAS_NOTE edge and its AUTHORED edge
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      siphon_notes:
+        - { id: 1, note: MR note, noteable_type: MergeRequest, noteable_id: 100, author_id: 1, system: false, internal: false, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+        - { id: 2, note: Issue note, noteable_type: Issue, noteable_id: 200, author_id: 2, system: false, internal: false, traversal_path: "1/100/", created_at: "2024-01-16", updated_at: "2024-01-16" }
+    expect:
+      edges:
+        - { kind: AUTHORED, from: User, to: Note, count: 2 }
+        - { kind: HAS_NOTE, count: 2 }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Note, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      siphon_notes:
+        - { id: 2, traversal_path: "1/100/", _siphon_deleted: true, _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      edges:
+        - { kind: AUTHORED, from: User, to: Note, count: 1, rows: [{ source_id: 1, target_id: 1 }] }
+        - kind: HAS_NOTE
+          count: 1
+          rows:
+            - { source_kind: MergeRequest, source_id: 100, target_id: 1 }

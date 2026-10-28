@@ -1,4 +1,4 @@
-description: A merge request deleted with a key-only tombstone keeps no live FK edge after the sweep
+description: A merge request deleted with a key-only tombstone loses every FK edge; the other merge request keeps its edges
 scope: { namespace: 100 }
 
 steps:
@@ -29,9 +29,6 @@ steps:
           count: 1
           rows:
             - { id: 20 }
-
-  - run: stale_edge_reconciliation
-    expect:
       edges:
         - { kind: IN_PROJECT, from: MergeRequest, to: Project, count: 1, rows: [{ source_id: 20, target_id: 1000 }] }
         - { kind: SOURCE_PROJECT, from: MergeRequest, to: Project, count: 1, rows: [{ source_id: 20, target_id: 1000 }] }

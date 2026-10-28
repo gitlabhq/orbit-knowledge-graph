@@ -1,0 +1,31 @@
+description: A manual job played by another user keeps only the new user's TRIGGERED edge; its sibling keeps the old user's edge
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+      siphon_p_ci_builds:
+        - { id: 7001, partition_id: 1, stage_id: 6001, commit_id: 5001, project_id: 1000, user_id: 1, name: deploy, status: manual, ref: main, allow_failure: false, traversal_path: "1/100/1000/" }
+        - { id: 7002, partition_id: 1, stage_id: 6001, commit_id: 5001, project_id: 1000, user_id: 1, name: lint, status: success, ref: main, allow_failure: false, traversal_path: "1/100/1000/" }
+    expect:
+      edges:
+        - { kind: TRIGGERED, from: User, to: Job, count: 2 }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Job, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      siphon_p_ci_builds:
+        - { id: 7001, partition_id: 1, stage_id: 6001, commit_id: 5001, project_id: 1000, user_id: 2, name: deploy, status: pending, ref: main, allow_failure: false, traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      edges:
+        - kind: TRIGGERED
+          from: User
+          to: Job
+          count: 2
+          rows:
+            - { source_id: 2, target_id: 7001 }
+            - { source_id: 1, target_id: 7002 }
+        - { kind: HAS_JOB, from: Stage, to: Job, count: 2 }
