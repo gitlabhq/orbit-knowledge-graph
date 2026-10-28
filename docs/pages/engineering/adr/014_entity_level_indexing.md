@@ -16,10 +16,9 @@ Accepted (revised 2026-05-22)
 ## Context
 
 Software development lifecycle (SDLC) indexing had two handlers.
-The global handler processed all global entities for each message.
-The namespace handler processed all namespaced entities of one namespace for each message.
+For each message, the global handler processed all global entities, and the namespace handler processed all entities of one namespace.
 Both ran entity pipelines concurrently up to a fixed limit.
-The work stayed bound to one NATS message and one engine worker slot.
+But all the work for a message stayed bound to one message from NATS, the message bus, and one engine worker slot.
 
 This design had three problems:
 
@@ -39,7 +38,7 @@ Each handler owns the plan for one entity.
 It subscribes to the existing global or namespace NATS topic for the scope of its entity.
 The dispatcher publishes one message, and NATS delivers it to every entity handler for that scope.
 This gives parallelism across entities without per-entity subjects or a new message type.
-The handlers read the existing request messages, which already carry the watermark and the scope.
+The handlers read the existing request messages, which already carry the scope and the watermark, the point that the last run reached.
 
 Parallelism inside an entity comes from partitions.
 The ontology can declare a partition count for an entity pipeline.
@@ -79,10 +78,9 @@ For merge requests and for global users, that column is the ID.
 An entity whose first column after the traversal path has low cardinality is a bad candidate for partitions.
 An example is the type column of notes, which has about 10 values.
 
-We use range partitions and not hash partitions.
-Benchmarks ran on the source table for continuous integration (CI) builds, which has 100 million rows.
-Its primary key is the traversal path, the ID, and the partition ID.
-They ran on a ClickHouse Cloud development instance on 2026-05-08, with four partitions inside one top-level group.
+We use range partitions instead of hash partitions, because of a benchmark on a ClickHouse Cloud development instance on 2026-05-08.
+It used the source table for continuous integration (CI) builds, which has 100 million rows, and four partitions inside one top-level group.
+The primary key of that table is the traversal path, the ID, and the partition ID.
 
 | Filter | Rows read | Bytes read | Duration |
 |---|---:|---:|---:|
@@ -92,8 +90,7 @@ They ran on a ClickHouse Cloud development instance on 2026-05-08, with four par
 
 A range filter on a primary key column read 3.9 times less data than a hash filter.
 ClickHouse evaluates the range condition before it reads the other columns, so it skips the decompression of rows that do not match.
-The query plan showed that the range filter uses the traversal path and the ID in the primary key condition.
-The hash filter uses only the traversal path.
+In the query plan, the range filter used the path and the ID from the primary key, but the hash filter used only the path.
 
 ### Checkpoint keys
 
@@ -114,8 +111,7 @@ For more information, see [ADR 010](010_graph_status_endpoint.md).
 Per-entity handlers broke the single status entry.
 When entity A completes and writes "indexed" while entity B still runs, the namespace status is wrong.
 
-Each entity handler now writes its own status entry, keyed by the traversal path and the entity type.
-Each handler writes only its own entry.
+Each entity handler now writes only its own status entry, keyed by the traversal path and the entity type.
 NATS message deduplication serializes runs for the same entity and scope, so the handlers need no coordination.
 
 The status service gets the expected set of namespaced entity types from the ontology and reads one entry for each type.

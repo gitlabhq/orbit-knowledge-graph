@@ -33,12 +33,10 @@ Larger queries, such as row scans with redaction, took 7 to 8 seconds.
 In a staging load test at 1,000 requests per second, Puma saturation reached 70%.
 At 150 requests per second, three failures appeared: gRPC deadline errors, bad gateway errors from NGINX, and ClickHouse out-of-memory errors.
 
-Puma workers are finite.
-Each one is a thread that cannot serve other requests while it waits on a gRPC stream.
+Each Puma worker is one of a fixed number of threads, and it cannot serve other requests while it waits on a gRPC stream.
 More Orbit query traffic, especially from AI agents on the MCP endpoint, means more threads that wait on ClickHouse and redaction.
 
-The MCP endpoint handles JSON-RPC calls and has the same problem.
-A query tool call opens the same bidirectional stream and blocks Puma the same way.
+The MCP endpoint has the same problem, because a query tool call opens the same bidirectional stream and blocks Puma the same way.
 MCP uses OAuth with an Orbit MCP scope instead of standard GitLab authentication, but the gRPC layer is the same.
 AI agents call the query tool repeatedly, so MCP generates more sustained streaming load than the REST endpoint.
 
@@ -47,11 +45,10 @@ AI agents call the query tool repeatedly, so MCP generates more sustained stream
 **Workhorse runs the Orbit query stream, and Rails keeps authentication, feature flags, and JWT construction.**
 
 Workhorse calls back to Rails only for short redaction checks.
-The handoff uses the standard Workhorse send-data pattern.
-Rails authenticates the request and returns a response header with an operation prefix and encoded parameters.
+The handoff uses the standard Workhorse send-data pattern, which Workhorse already uses for Gitaly gRPC streams, file downloads, and the dependency proxy.
+Rails authenticates the request and returns a response header that names the operation and carries its parameters.
 Workhorse reads the header, drops the Rails response body, and runs the operation itself.
-Workhorse already uses this pattern for Gitaly gRPC streams, file downloads, and the dependency proxy.
-We add a prefix for Orbit queries.
+We add a new operation for Orbit queries.
 
 ```mermaid
 sequenceDiagram
@@ -94,16 +91,14 @@ The handler does these steps:
 1. Opens the stream with the JWT as gRPC metadata and sends the query.
 1. Handles each message from the stream until the result arrives.
 
-On a redaction request, the handler forwards the original user credentials to the internal Rails redaction endpoint.
-It returns the authorization map to the Orbit server.
-On a result, the handler writes the JSON response.
-For an MCP call, the handler wraps the result in a JSON-RPC response that holds an MCP tool result.
+On a redaction request, the handler forwards the original user credentials to the internal Rails redaction endpoint, then returns the authorization map to Orbit.
+On a result, the handler writes the JSON response, wrapped as an MCP tool result for an MCP call.
 On an error, the handler maps the Orbit error class to an HTTP status.
-Compile and validation errors become client errors.
-Execution and internal errors become bad gateway errors, and timeouts become gateway timeouts.
+Compile and validation errors become client errors, execution and internal errors become bad gateway errors, and timeouts become gateway timeouts.
 
 Rails builds the JWT when it builds the send-data header.
-The authorization context computes the user's traversal IDs, compacts them to a capped list, and caches them for a few minutes.
+It computes the traversal IDs, which identify the namespaces the user can access.
+It compacts them to a short list and caches them for a few minutes.
 The timeout comes from the instance configuration, with an environment variable fallback and a default.
 
 ### Internal redaction endpoint
@@ -154,22 +149,18 @@ The path has three network legs:
 In production, Orbit runs in the same cluster as Workhorse, and the Istio service mesh handles mutual TLS.
 So only local development uses the plaintext path.
 
-The Orbit JWT holds the user identity and traversal IDs.
-Rails puts it in the send-data response header to Workhorse.
-That header never leaves the machine, because it travels over the Unix socket or loopback connection between Puma and Workhorse.
+Rails puts the Orbit JWT, which holds the user identity and traversal IDs, in the send-data response header to Workhorse.
+That header never leaves the machine, because it travels over the local connection between Puma and Workhorse.
 Workhorse then sends the JWT to Orbit as a bearer token in gRPC metadata over the internal network.
 
 ### Scope
 
-The query API and the MCP query tool move to Workhorse.
-Both use bidirectional streaming, and the MCP tool carries the AI agent traffic.
-The schema, tools, and status APIs stay in Rails.
-They are fast unary calls that do not hold Puma workers for long.
+The query API and the MCP query tool move to Workhorse, because both use bidirectional streaming and the MCP tool carries the AI agent traffic.
+The schema, tools, and status APIs stay in Rails, because they are fast unary calls that do not hold Puma workers for long.
 
-The Orbit server does not change.
-The gRPC protocol is the same for a Rails or a Workhorse client, including the JWT format, metadata, stream messages, and the redaction handshake.
-The gRPC contract does not change, and we compile it for Go.
-The Orbit query pipeline runs the same way.
+Orbit and its query pipeline do not change.
+The gRPC contract is the same for a Rails or a Workhorse client, and we only compile it for Go as well.
+That includes the JWT format, metadata, stream messages, and the redaction handshake.
 
 The existing instance-level Orbit infrastructure feature flag gates the Workhorse path.
 That flag gates all Orbit internal endpoints, so the rollout needs no other mechanism.
@@ -201,38 +192,32 @@ The redaction preloading work cut SQL queries from 348 to 5 for 100 projects.
 Redaction is still the main bottleneck and takes most of the end-to-end latency in large queries.
 The move to Workhorse does not make redaction faster.
 It frees the Puma thread while the slow parts run, so other Rails requests do not starve.
-We need both changes.
-Faster redaction cuts total latency, and the move to Workhorse cuts thread use.
+We need both changes, because faster redaction cuts total latency and the move to Workhorse cuts thread use.
 
 ### Workhorse intercepts the route
 
 In the GitLab Observability Backend proxy pattern, Workhorse intercepts the route before Rails.
 It makes an internal authorization call and then proxies to the upstream service.
-This pattern works, but it needs a separate internal authorization endpoint.
-It also duplicates the feature flag and permission checks that already exist in the Rails API.
-Send-data is simpler, because the request still goes through Rails first.
-Authentication, feature flags, and JWT construction stay in the existing code path.
+This pattern works, but it needs a separate internal authorization endpoint and duplicates the feature flag and permission checks in the Rails API.
+Send-data is simpler, because the request still goes through Rails first, so authentication, feature flags, and JWT construction stay where they are.
 
 ### Replicate authorization in Orbit
 
-The Orbit server would replicate the full Rails permission model, which removes the redaction callback.
+Orbit would copy the full Rails permission model, so the redaction callback would go away.
 That model covers group hierarchies, custom roles, SAML, and organization membership.
-We would rebuild the declarative policy framework and keep permission data in sync.
-Two authorization implementations give authorization bugs two places to hide.
-Orbit does not own authorization.
+We would rebuild the Rails policy framework and keep permission data in sync.
+Orbit does not own authorization, and two implementations give authorization bugs two places to hide.
 
 ### Async job queue with polling
 
 Rails would put the query in a Sidekiq job, return a job ID, and let the client poll for results.
-This removes the Puma block.
-It adds polling latency, job queue contention, and a more complex client contract.
+This removes the Puma block, but it adds polling latency, job queue contention, and a more complex client contract.
 The Workhorse design keeps the request and response model that clients already use.
 
 ### Expose Orbit directly
 
 Clients could call the Orbit query endpoint directly, without Workhorse or Rails.
-Orbit would then need its own authentication and authorization, which is out of scope here.
-We may consider it later.
+Orbit would then need its own authentication and authorization, which is out of scope here, and we may consider it later.
 The Workhorse design is the intermediate step that removes the Puma bottleneck and keeps authorization in Rails.
 
 ## References

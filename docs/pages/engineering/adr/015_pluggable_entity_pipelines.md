@@ -15,25 +15,18 @@ Accepted
 
 ## Context
 
-The software development lifecycle (SDLC) indexer runs every entity through one generic entity handler and one shared pipeline.
-The pipeline owns extraction, transformation, writes, and checkpoints.
-Nodes, edges, and derived entities declare ontology pipelines.
-Each ontology pipeline has an extract section and a transform section.
-The indexer lowers each ontology pipeline into a plan with an extract SQL template and a transform spec.
+The software development lifecycle (SDLC) indexer runs every entity through one shared pipeline that extracts rows, transforms them, writes them, and saves checkpoints.
+Each node, edge, and derived entity declares an ontology pipeline with an extract section and a transform section.
+The indexer turns each ontology pipeline into a plan with an extract SQL template and a transform spec.
 
-Before this change, the transform stage was SQL-only.
-That fits an entity whose graph shape is a row-wise projection of one extracted batch.
-It does not fit an entity whose transform must query the data lake again in the middle of the transform.
+Before this change, every transform was a SQL projection of one extracted batch.
+That does not work for an entity whose transform must read the data lake again.
 
-The driver is the system note handler from [ADR 013](013_system_note_edges.md).
-It parses GitLab Flavored Markdown reference tokens out of free-text note bodies.
-It then resolves them to entity IDs with batched lookups against the route table and the entity tables.
+The first such entity is the system note handler from [ADR 013](013_system_note_edges.md).
+It parses GitLab Flavored Markdown references out of free-text note bodies, then resolves them to entity IDs with batched lookups in the data lake.
 A SQL projection over one in-memory block cannot express that second hop.
 
-A per-entity pipeline for system notes would be the wrong answer.
-**The pipeline is shared extraction and writing machinery that every SDLC entity needs.**
-
-None of its optimizations are entity-specific:
+A separate pipeline for system notes would copy work that every SDLC entity needs, because none of the pipeline optimizations are entity-specific:
 
 | Optimization | Effect |
 |---|---|
@@ -46,13 +39,13 @@ None of its optimizations are entity-specific:
 | Replacing merge tree tables | Makes reprocessing idempotent |
 | Read and write statistics | Feeds the pipeline observers |
 
-An Arrow string-offset overflow makes the adaptive retry drop straight to the floor.
-The only entity-specific part of this machinery was the SQL transformer.
+When a block holds more text than the in-memory column format can address, the adaptive retry drops straight to the floor.
+The only entity-specific part of this machinery was the SQL transform.
 
 [ADR 014](014_entity_level_indexing.md) named an entity pipeline extension point with system notes as the custom example.
-Taken literally, one custom pipeline per hard entity reintroduces the duplication above.
-This decision refines the granularity of that extension point.
-The dispatch, per-entity NATS subjects, and partitioning from ADR 014 do not change.
+If we read that literally, each hard entity gets its own pipeline and copies the machinery above.
+This decision makes the extension point smaller.
+The dispatch, per-entity handlers, and partitions from ADR 014 do not change.
 
 ## Decision
 
@@ -78,9 +71,9 @@ A transform has a name and declares its destination tables in output order.
 It turns one extracted block into rows for one or more of those tables.
 Each output batch selects its destination by position in the list.
 
-A transform takes no per-call context.
-Its registry factory captures its dependencies, such as the data lake handle and its configuration, when it builds the transform.
-The namespace scope for the lookups of a transform travels in the traversal path column of the block.
+A transform takes no context on each call.
+It gets its dependencies, such as data lake access and its configuration, when the indexer builds it.
+The namespace scope for its lookups comes from the traversal path column of the block.
 
 The contract enforces two rules:
 
@@ -95,7 +88,7 @@ A transform that needs wider batches can buffer internally.
 ### Two implementations of one contract
 
 The SQL transform keeps the existing behavior.
-It owns a DataFusion session internally, registers the block as the source table, and runs the SQL that the ontology generates.
+It owns a session of DataFusion, an in-process SQL engine, registers the block as the source table, and runs the SQL from the ontology.
 
 The system notes transform is hand-written Rust.
 It parses note bodies and collects distinct references.
@@ -124,15 +117,14 @@ The spec is either the built-in SQL projection, which is the default, or the nam
 The plan builder sets the SQL spec for node and standalone edge pipelines that declare the SQL transform type.
 It sets the Rust spec for a derived entity pipeline.
 
-At the start of each run, the pipeline asks its transform registry to build the transform for the plan.
-A SQL spec calls the injected SQL transform factory, and a Rust spec looks up a registered factory by name.
-The SQL transform is the default path and has no registry entry.
-Each Rust transform registers itself from its own module, so a new transform adds one registration line.
-Handler registration skips a Rust plan whose transform has no registration, so the derived entity stays dormant until its transform lands.
+At the start of each run, the pipeline builds the transform for the plan.
+The SQL transform is the default and needs no registration, and a Rust transform is found by its registered name.
+Each Rust transform registers itself in its own module.
+The indexer skips a Rust plan whose transform is not registered, so the derived entity stays dormant until its transform lands.
 
-The indexer builds one pipeline at handler registration and shares it with every handler.
-The pipeline bundles stateless collaborators, so sharing one instance duplicates no logic.
-The collaborators are the data lake, the checkpoint store, the metrics, and the retry configuration.
+The indexer builds one pipeline at startup and shares it with every handler.
+The pipeline holds only stateless parts, so one instance is safe to share.
+These parts are the data lake, the checkpoint store, the metrics, and the retry configuration.
 
 The pipeline owns per-page execution: extract, transform, write, and checkpoint.
 The entity handler owns the plan and the dispatch decisions: watermark derivation, partition ranges, and request decoding.
@@ -146,20 +138,19 @@ It holds no ClickHouse SQL and no knowledge of runtime markers.
 An extract query is either generated or authored:
 
 - A generated query comes from the declaration and its filter, and the indexer builds the SQL.
-- An authored query is the raw content of a co-located MiniJinja template, with its markers unresolved.
+- An authored query is a SQL template stored next to the declaration, with its markers unresolved.
 
 Derived entity pipelines are always authored.
 Their rows are neither node properties nor edge endpoints, so the indexer has nothing to generate a projection from.
 Only a few complex nodes and the system note entity use authored templates, and every other node and edge is generated.
 
-The plan builder is the only code that reads the transform declaration.
-It walks nodes, edge configurations, and derived entities, and decomposes each pipeline once.
-It hands each stage only its inputs, so data flows top-down:
+The plan builder is the only part of the indexer that reads the transform declaration.
+It reads each node, edge, and derived entity pipeline once, and gives each stage only its inputs:
 
 - A single point-lookup convention turns declared extract lookups into internal common table expressions (CTEs).
 - Each lookup CTE joins on the ID of the source node against the declared batch ID column.
 - A lookup CTE is scoped by path when the pipeline and the source node are both namespaced.
-- The final projection exposes only the stable output field aliases from the extract declaration.
+- The final projection exposes only the output field names from the extract declaration.
 - The extract stage produces one validated extract spec with its version, watermark, and deletion expressions.
 - The transform stage produces the transform spec: node columns with foreign key edge rows, a standalone edge row, or a named Rust transform.
 
@@ -169,7 +160,7 @@ Edge endpoints map ontology properties to fields in the extracted batch.
 The SQL transform uses those bindings to build denormalized edge tags.
 
 A plan gets its extract template only through validation, so every template that reaches the runtime is valid.
-An ontology unit test checks that every authored template projects the version and deletion aliases.
+An ontology unit test checks that every authored template returns the version and deletion columns.
 The same test checks that the template uses the watermark and deletion markers instead of literal column names.
 The indexer integration scenarios check projection completeness from end to end.
 
@@ -181,7 +172,7 @@ Existing entities do not change behavior, because they run the SQL transform ove
 
 ## Consequences
 
-A contract boundary replaced the concrete SQL transformer, which needed a mechanical refactor where the transformer was built.
+The transform contract replaced the SQL transformer, which needed a mechanical refactor where the indexer built it.
 
 Hand-written transforms can multiply.
 The default stays an ontology plan with the SQL transform.

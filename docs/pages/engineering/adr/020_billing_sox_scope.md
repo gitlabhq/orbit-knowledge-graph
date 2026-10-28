@@ -16,14 +16,19 @@ Accepted
 
 ## Context
 
-Orbit emits a billable usage event for each eligible graph query that succeeds.
-The event conforms to the shared GitLab billable usage schema and goes out through Snowplow.
-Emission happens only when tracking is on and the request carries valid attribution.
-Schema responses do not emit billing events.
-A missing or unknown realm value prevents the event.
-On GitLab.com, missing namespace attribution also prevents the event.
-The Data Insights Platform delivers events to CustomersDot asynchronously.
-A successful query does not guarantee delivery.
+Orbit emits its own billable usage events, so the work falls under Sarbanes-Oxley (SOX) IT general controls.
+We had to decide which part of the repository those controls cover.
+The compliance team told us that two scopes are possible:
+
+- The whole repository, as AI Gateway does, so that every change is a SOX-controlled change
+- A limited scope at the folder or component level
+
+For each eligible graph query that succeeds, Orbit sends a billable usage event in the shared GitLab billable usage schema through Snowplow.
+It sends the event only when tracking is on and the request carries valid attribution, and schema responses never send one.
+A missing or unknown realm, the claim that names the deployment type, prevents the event.
+On GitLab.com, missing namespace attribution also prevents it.
+The Data Insights Platform delivers events to CustomersDot, the GitLab billing system, later.
+A successful query therefore does not guarantee delivery.
 
 Before Orbit runs a query, it asks CustomersDot whether the caller has quota left.
 The quota gate supports two authentication modes, an admin token and a license checksum.
@@ -35,26 +40,18 @@ The gate skips the check in two cases:
 Any other quota-check failure denies the request.
 
 We can build Orbit with billing enforcement turned on.
-An enforced build validates its configuration at startup.
+An enforced build checks its configuration at startup.
 It refuses to start unless billing and quota checks are on, the endpoints match an approved environment pair, and the authentication modes are compatible.
 A build without enforcement can turn off billing and quota checks through configuration.
 
-Orbit emits its own billable usage events, so the work falls under Sarbanes-Oxley (SOX) IT general controls.
-The compliance team told us that two scopes are possible:
-
-- The whole repository, as AI Gateway does, so that every change is a SOX-controlled change
-- A limited scope at the folder or component level
-
-The billing code started as a module inside the server.
-We then moved it into an isolated billing component.
-Event construction, delivery integration, and quota logic now live in that component.
+The billing code started as a module inside the Orbit server.
+We then moved event construction, delivery integration, and quota logic into an isolated billing component.
 One claims-conversion adapter in the server turns the authenticated request claims into billing and quota inputs.
-Configuration, delivery credentials, and pipeline observer callbacks also cross into the billing component.
-They do not pass through the adapter.
+Configuration, delivery credentials, and pipeline observer callbacks also reach the billing component, but they do not pass through the adapter.
 
 A limited scope at the component level is therefore possible, but only if we also control the hook points around it.
-The adapter centralizes claim mapping.
-It does not isolate every dependency that can change billing correctness.
+A hook point is code outside the component that can change billing correctness.
+The adapter puts claim mapping in one place, but it does not isolate every such dependency.
 
 ## Decision
 
@@ -113,8 +110,7 @@ The adapter has a header comment that names it the one claims-conversion seam be
 The comment links to this ADR and names the extended hook points.
 It does not claim that configuration, credentials, or observer callbacks pass through claim conversion.
 
-The agent instruction files link to this ADR.
-Agents and contributors who change billing emission or quota-check code see the policy first.
+The agent instruction files link to this ADR, so agents and contributors who change billing emission or quota-check code see the policy first.
 
 A continuous integration (CI) job checks the package dependency declarations in the workspace.
 It fails if any package other than the server declares a direct dependency on the billing component.
@@ -134,8 +130,7 @@ The code owners rules and CI checks do not show that this access process is in p
 
 Compliance can audit one declared SOX surface without a review of every file in the repository.
 Work outside the billing surface has no SOX merge requirements.
-The ADR, the adapter header, and the code owners rules all point at the same set of files.
-Contributors and agents can find the boundary from any of them.
+The ADR, the adapter header, and the code owners rules point at the same files, so contributors and agents can find the boundary from each.
 
 ## Consequences
 

@@ -15,9 +15,9 @@ Proposed
 
 ## Context
 
-The indexer process runs three kinds of handlers in one engine.
-The handlers do software development lifecycle (SDLC) indexing, code indexing, and namespace deletion.
-They share one NATS consumer loop, one worker pool, and one set of resource limits.
+The indexer runs software development lifecycle (SDLC) indexing, code indexing, and namespace deletion in one process.
+All three share one NATS consumer loop, one worker pool, and one set of resource limits.
+Code indexing needs far more resources than the rest, so the shared process wastes resources and spreads failures.
 
 Code indexing and SDLC indexing use resources in different ways:
 
@@ -31,8 +31,7 @@ Code indexing and SDLC indexing use resources in different ways:
 | External dependencies | ClickHouse data lake and graph | GitLab Rails API and ClickHouse graph |
 | Failure blast radius | A slow namespace blocks its concurrency group | A large repository runs the pod out of memory, and the SDLC handlers stop with it |
 
-The Helm chart sizes the indexer pod for the worst case, which is code indexing.
-SDLC indexing alone needs a fraction of those resources.
+The Helm chart sizes the indexer pod for code indexing, the worst case, but SDLC indexing alone needs a fraction of those resources.
 
 This shared process causes four problems:
 
@@ -55,14 +54,13 @@ This shared process causes four problems:
 The code indexer is a new run mode of the same server binary.
 The existing indexer mode keeps only SDLC indexing and namespace deletion.
 
-The code indexer connects to NATS, to the ClickHouse graph database, and to the GitLab Rails API for archive downloads.
-It does not connect to the data lake.
+The code indexer connects to NATS, the ClickHouse graph database, and the GitLab Rails API for archive downloads, but not to the data lake.
 It runs the same schema migration check as the indexer, and it registers only the code handlers.
 It has its own engine configuration, with concurrency groups sized for code work.
 
 The indexer stops registering the code handlers.
-Operators can deploy the indexer before the code indexer exists.
-For this transition, a configuration flag can keep code indexing in the indexer until the migration is complete.
+A configuration flag keeps code indexing in the indexer until the migration is complete.
+So operators can deploy the new indexer before the code indexer exists.
 We remove the flag after the migration.
 
 The Helm chart gets a separate code indexer deployment with these properties:
@@ -74,8 +72,7 @@ The Helm chart gets a separate code indexer deployment with these properties:
 - The same secret mounts as the current indexer
 
 The indexer deployment then drops the scratch volume and lowers its resource limits.
-It also loses the Rails configuration and the Rails signing key.
-SDLC indexing does not call Rails.
+It also loses the Rails configuration and the Rails signing key, because SDLC indexing does not call Rails.
 The health-check service also monitors the new deployment, together with the indexer and the dispatcher.
 
 The rest of the pipeline stays the same:
@@ -83,19 +80,16 @@ The rest of the pipeline stays the same:
 - The dispatcher already publishes code tasks independently of the consumer.
 - Code tasks and SDLC requests already use separate NATS subjects, so routing does not change.
 - Namespace deletion stays in the indexer.
-  It removes rows from all ontology tables, including code tables.
-  It is a light ClickHouse delete and does not need code resources.
+  It removes rows from all graph tables, including code tables, but it is a light ClickHouse delete that does not need code resources.
 - Both services check the schema version on startup in the same way.
   During a migration, the dispatcher triggers code backfill, and the code indexer consumes those messages.
 - The code indexing module is already self-contained, so it needs no structural change.
 
 ## Benefits of this approach
 
-Code and SDLC indexing scale independently.
-Operators can run many code indexer replicas and few SDLC indexer replicas, based on the workload.
+Code and SDLC indexing scale independently, so operators can run many code indexer replicas and few SDLC indexer replicas.
 When code indexing runs out of memory, SDLC work continues.
-Each workload gets resource limits that fit it.
-SDLC pods drop to a fraction of the old memory limit, and code pods keep the high limits.
+Each workload gets limits that fit it, so SDLC pods drop to a fraction of the old memory limit and code pods keep theirs.
 Parser changes deploy and test on the code indexer without an effect on SDLC indexing.
 Monitoring and alerts can separate code indexing health from SDLC indexing health at the pod level.
 

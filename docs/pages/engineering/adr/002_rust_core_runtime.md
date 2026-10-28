@@ -15,169 +15,150 @@ Accepted
 
 ## Context
 
-The Orbit code indexer was written in Rust from the start.
-The indexer is a static analysis engine for many languages, built on tree-sitter and SWC.
+When Orbit changed from a local command-line interface (CLI) tool into a server-side service, we had to pick its main language.
+The code indexer was already in Rust, so we could keep Rust everywhere or rewrite the parts that do not parse code in Go.
+
+The indexer is a static analysis engine for many languages, built on the tree-sitter and SWC parsers.
 The tree-sitter organization maintains the Rust bindings for tree-sitter.
-Rust compiles to WebAssembly for client-side use in the Language Server and the Web IDE.
+Rust compiles to WebAssembly, so the same code runs in the Language Server and the Web IDE.
 Rust also parses large repositories in memory with no garbage collection (GC) pauses.
 The One Parser initiative later made Rust the GitLab standard for static code analysis in Orbit, embeddings, and language server features.
 
-Orbit then changed from a local command-line interface (CLI) tool into a server-side service.
-We had to keep the core runtime in Rust or rewrite the components that do not parse code in Go.
-At first, we embedded the Rust code in a Go-based indexer through a foreign function interface (FFI).
-That choice satisfied a packaging constraint of the Linux package.
-GitLab then committed to its segmentation strategy, and the constraint went away.
-We compared FFI with a standalone service and chose a dedicated Rust process.
-That choice made the language commitment permanent.
+At first, a packaging constraint in the Linux package made us embed the Rust code in a Go indexer through a foreign function interface (FFI).
+That constraint went away when GitLab committed to its segmentation strategy.
+We then compared FFI with a standalone Rust service and chose the service, which made Rust a permanent choice.
 
-The service builds a property graph from GitLab instance data and serves queries over gRPC.
+Orbit builds a property graph from GitLab instance data and serves queries over gRPC.
 It runs as one binary in four modes: web server, indexer, scheduler, and health check.
-It consumes change data capture (CDC) events from NATS and compiles a JSON query language into parameterized ClickHouse SQL.
+It reads change data capture (CDC) events from NATS and compiles a JSON query language into ClickHouse SQL.
 It uses bidirectional gRPC streams for the authorization exchange with Rails.
-One multi-tenant deployment serves all of GitLab.com.
-A three-hop traversal must finish in less than 300 ms at p95.
+One multi-tenant deployment serves all of GitLab.com, and a three-hop traversal must finish in less than 300 ms at p95.
 
-The choice also follows the data engineering trend across the industry.
-The columnar data stack that Orbit uses is native to Rust, and includes Arrow, DataFusion, and Parquet.
-DataFusion builds on the Arrow Rust implementation, and Polars, Delta Lake, and Databend also use it.
-Throughput needs grow with larger instances and more indexed entities.
+The columnar data libraries that Orbit uses, Arrow, DataFusion, and Parquet, are native to Rust.
+Polars, Delta Lake, and Databend also build on DataFusion and Arrow in Rust.
+Orbit needs more throughput as instances grow and as we index more entities.
 
 ## Decision
 
-**We use Rust as the core runtime language for the Orbit service.**
+**We write all of Orbit in Rust.**
 
-The indexer, the query compiler, the data pipeline, and the web server are one Rust workspace.
-They use the same language as the data processing libraries under them, so no serialization boundary separates them.
-Data can move from ClickHouse through Arrow inter-process communication (IPC) batches to gRPC responses with no copy.
-The service uses Rust libraries for the async runtime, HTTP, gRPC, columnar data, NATS, and tree-sitter.
+The indexer, the query compiler, the data pipeline, and the web server are one Rust codebase.
+They use the same language as the data libraries under them, so data does not need conversion between languages.
+Data can move from ClickHouse through Arrow batches to gRPC responses with no copy.
+Orbit uses Rust libraries for the async runtime, HTTP, gRPC, columnar data, NATS, and tree-sitter.
 
 ## Benefits of this approach
 
 ### Memory safety without garbage collection
 
-The service accepts untrusted user queries, CDC events, and repository archives in a multi-tenant environment.
-The Rust ownership model prevents use-after-free, double-free, buffer overflow, and data race bugs at compile time.
-We forbid unsafe code across the workspace.
+Orbit accepts untrusted user queries, CDC events, and repository archives from many tenants.
+The Rust ownership model prevents memory bugs and data races at compile time, and we forbid unsafe code everywhere.
 A language with GC is also memory-safe, but it adds pauses of unknown length.
-A pause during the bidirectional redaction exchange extends the time that a Puma thread waits on the Rails side.
+A pause during the redaction exchange makes a Puma thread in Rails wait longer.
 
 ### One binary for all workloads
 
 All four modes share configuration and startup logic.
-The Helm chart deploys the same container image for each workload, with a different mode argument and resource limits.
-Rust compiles to a statically linked binary with no runtime dependencies.
-The container image has only the binary, TLS certificates, and the ontology files.
-The image has no interpreter, no virtual machine, and no shared library chain.
-This makes GitLab Self-Managed and GitLab Dedicated deployments simpler, because we do not control the host operating system.
+The Helm chart deploys the same container image for each workload, with a different mode and different resource limits.
+Rust compiles to a static binary with no runtime dependencies.
+The container image has only the binary, TLS certificates, and the ontology files, with no interpreter or shared libraries.
+We do not control the host operating system on GitLab Self-Managed and GitLab Dedicated, so a self-contained image makes those deployments simpler.
 
 ### Async concurrency
 
-The indexer runs worker pools that consume NATS messages, fetch archives, parse code, and write to ClickHouse at the same time.
-CPU-bound tree-sitter parsing runs in a separate pool, so it does not block the async executor.
-The web server maps each gRPC stream to a lightweight task, not to an operating system thread.
+The indexer runs worker pools that read NATS messages, fetch archives, parse code, and write to ClickHouse at the same time.
+CPU-heavy parsing runs in a separate pool, so it does not block the async work.
+The web server runs each gRPC stream as a lightweight task instead of an operating system thread.
 The health check mode watches Kubernetes pod status asynchronously.
-The compiler checks thread-safety bounds, so a data race between async tasks fails at compile time.
+The compiler checks thread safety, so a data race between async tasks fails at compile time.
 
 ### Native FFI for tree-sitter
 
-Tree-sitter is a C library, and Rust calls C directly through a thin layer of safe Rust types.
-The call has no marshaling cost and needs no bridge such as JNI or cgo.
-The parser reads repository archives in memory, with no intermediate files, and extracts definitions, imports, references, and call graphs.
-SWC is a Rust-native JavaScript and TypeScript parser, and it runs next to tree-sitter.
-Both parsers share one allocator and compose with no cross-language cost.
+Tree-sitter is a C library, and Rust calls C directly with no conversion cost and no bridge such as JNI or cgo.
+The parser reads repository archives in memory and extracts definitions, imports, references, and calls.
+SWC is a Rust parser for JavaScript and TypeScript, and it runs next to tree-sitter in the same process.
 
 ### Shared gRPC contract
 
-One protocol file defines the service contract.
-The build generates the Rust server interfaces from it, and the same file generates the Ruby gem for the Rails client.
-The Rust compiler catches schema mismatches.
+One protocol file defines the contract between Rails and Orbit.
+The build generates the Rust server and the Ruby gem for the Rails client from it, so the compiler catches schema mismatches.
 
 ### Columnar data processing
 
-The ClickHouse client streams results as Arrow IPC batches, so large results need no row-by-row deserialization.
+The ClickHouse client streams results as Arrow batches, so Orbit does not decode large results row by row.
 The query engine uses DataFusion to plan and validate SQL.
-Both libraries are native to Rust, so no binding layer adds cost.
-A language with a separate runtime form for columnar data would add serialization cost as entity counts grow.
+Both libraries are native to Rust, so there is no binding layer.
+In another language, each conversion to and from columnar data would cost more as the graph grows.
 
 ### Compile-time correctness
 
 The type system catches whole classes of bugs before the code runs:
 
-- Each protobuf `oneof` maps to a Rust enum, and the compiler requires a match arm for each variant.
+- Each message that can take one of several shapes maps to a Rust enum, and the compiler requires a case for each shape.
 - A new message type in the contract forces an update to every handler.
-- The ontology loads and validates at startup and exposes typed accessors, so an invalid reference fails continuous integration (CI) and not a production query.
+- The ontology, the schema of the graph, is checked at startup, so an invalid reference fails continuous integration (CI) before it reaches production.
 - CI treats lint warnings as errors and checks licenses, known vulnerabilities, and unsafe code.
 
 ## Consequences
 
-Rust is harder to learn than Go or Python.
-At the February 2026 offsite, we invested in build infrastructure to reduce this cost.
-We added a prebuilt base image with pinned tool versions, a shared compiler cache, and Docker layer caching.
-With caching, a pipeline took about five minutes for 400 dependencies, against about 20 minutes without it.
+Rust is harder to learn than Go or Python, and its builds are slow.
+At the February 2026 offsite, we added a prebuilt base image, a shared compiler cache, and Docker layer caching.
+With caching, a pipeline took about five minutes instead of about 20.
 
-New contributors need Rust experience, so the reviewer pool at GitLab is smaller than for Go or Ruby.
-Other Rust projects at GitLab can reuse our observability library and CI patterns.
-GLAZ is one such Rust service.
+New contributors need Rust experience, so GitLab has fewer reviewers for Rust than for Go or Ruby.
+Other Rust projects at GitLab, such as the GLAZ authorization service, can reuse our observability library and CI patterns.
 
-Rust builds are slower than Go builds because of generic code expansion and LLVM code generation.
-A shared repository holds the builder images for all Rust services at GitLab.
-The Orbit image carries the prebuilt tools and the compiler cache configuration.
-Go would not need this maintenance.
-Multi-architecture builds need target triples and linked C libraries, such as tree-sitter grammars and OpenSSL.
-The multi-architecture Docker pipeline handles this, but it takes work to maintain.
+Rust builds are slower than Go builds.
+A shared repository holds the builder images for all Rust services at GitLab, and Go would not need this maintenance.
+Builds for several CPU architectures must also link C libraries, such as tree-sitter grammars and OpenSSL.
+Our Docker pipeline handles this, but it takes work to maintain.
 
 The Rust libraries for gRPC, HTTP, and the async runtime are ready for production.
 The official NATS client for Rust is actively maintained, and the ClickHouse client library meets our needs.
 
-GitLab site reliability engineering (SRE) has deep experience with Go services and little experience with Rust.
-The observability team found this gap at the February 2026 offsite and committed to a standard telemetry output for Rust services.
-We build a Rust implementation of LabKit to close the gap.
-It gives structured logging, correlation ID propagation, and OpenTelemetry metrics.
-It follows the patterns of the Go and Ruby libraries.
-We planned it in phases, from the logging foundation to server layers, client propagation, OpenTelemetry, and masking.
-The foundation phase was complete when we made this decision.
+GitLab site reliability engineering (SRE) has deep experience with Go services and little with Rust.
+The observability team found this gap at the February 2026 offsite and committed to standard telemetry for Rust services.
+To close the gap, we build a Rust version of LabKit, the GitLab observability library, on the patterns of the Go and Ruby versions.
+It gives structured logging, correlation IDs, and OpenTelemetry metrics.
+We planned it in phases, and the logging foundation was complete when we made this decision.
 
-The Production Readiness review evaluates the binary size and the memory profile.
-It also evaluates crash behavior on panic or abort, and core dump analysis.
+The Production Readiness review checks the binary size, the memory profile, crash behavior, and core dump analysis.
 
 ## Why not the alternatives
 
 ### FFI into Go
 
-Before the dedicated process, Orbit ran through FFI inside the Go-based indexer.
+Before the dedicated process, Orbit ran through FFI inside the Go indexer.
 We stopped for these reasons:
 
 - A query needed several steps: Go called Rust to build the query, ran it, then called Rust again to process the results.
 - Each API change needed edits in the Rust code, the FFI bindings, and the Go service.
 - A Rust panic or memory leak crashed the full Go process.
 - The FFI bindings needed unsafe code, and that removed the safety that made us choose Rust.
-- The async runtime does not embed cleanly in the Go scheduler, so pools and state went through raw pointers and C types.
-- The CPU and memory use of the Rust library were not separate from the Go process.
+- The Rust async runtime does not fit cleanly inside Go, so shared state went through raw pointers and C types.
+- We could not see the CPU and memory use of the Rust code apart from the Go process.
 
-A dedicated container gives its own resource limits, health checks, and metrics.
+A dedicated container has its own resource limits, health checks, and metrics.
 A proof of concept that moved indexing from FFI to HTTP took one day, and it was much easier to work with.
 Other GitLab projects had similar problems with FFI.
 
-We never planned to rewrite the service in Go.
-The question was how the Rust code should connect to GitLab infrastructure.
+We never planned to rewrite Orbit in Go, and the open question was how the Rust code connects to GitLab infrastructure.
 When the packaging constraint went away, we moved the Rust code into its own service.
 
 ### Go
 
 Go is the usual language at GitLab for infrastructure services, such as Gitaly, Praefect, Siphon, and Workhorse.
-Go was the main alternative and a reasonable choice.
-We know Go from Siphon, and its operational patterns are well established.
+It was the main alternative and a reasonable choice, and we know its operational patterns from Siphon.
 The workload made us choose Rust.
 
-GC pauses during bidirectional gRPC streams would extend the time that a Puma thread waits in Rails.
-The Go bindings for tree-sitter need cgo.
-cgo makes cross-compilation harder, makes builds slower, and adds memory bugs that the Go GC cannot control.
+GC pauses during the gRPC stream would make a Puma thread in Rails wait longer.
+The Go bindings for tree-sitter need cgo, the Go bridge to C.
+cgo makes cross-compilation harder and builds slower, and it adds memory bugs that the Go GC cannot catch.
 The One Parser initiative evaluated the Go tree-sitter options and found two blockers.
-The Go WebAssembly target does not support cgo, so client-side use in the Language Server and Web IDE is not possible.
-The most used Go binding had low activity and only some of the grammars.
+Go cannot use cgo when it compiles to WebAssembly, so the parser could not run in the Language Server and Web IDE.
+The most used Go binding also had low activity and only some of the grammars.
 
-Go has no sum types.
-In Go, the protobuf `oneof` pattern needs interface type assertions with no exhaustiveness check at compile time.
+Go has no sum types, so a message that can take several shapes gets no completeness check at compile time.
 Goroutines and channels are simpler, but Go finds data races only at runtime with the race detector.
 
 During the FFI evaluation, people raised concerns about Rust skills for interviews, style guides, monitoring, and on-call coverage.
@@ -193,11 +174,10 @@ A Ruby C extension can wrap tree-sitter, but that code is harder to make memory-
 Ruby can reach SWC only through a separate process or a Rust FFI layer.
 
 The indexer runs parallel worker pools for NATS, archive fetches, and ClickHouse writes.
-The Ruby global interpreter lock limits CPU-bound parallelism to forked processes.
-Forked processes use more memory and make shared state harder.
+Ruby can run CPU-heavy work in parallel only in forked processes, which use more memory and make shared state harder.
 Interpreter overhead and GC pauses make the p95 query target harder to meet.
 
-Ruby has no mature equivalent for Arrow IPC streaming or DataFusion.
+Ruby has no mature equivalent for Arrow streaming or DataFusion.
 We would have to wrap the Rust libraries through FFI from Ruby, with the same problems we had in Go.
 
 We keep Ruby for the Rails integration layer, and Rust for the compute-heavy service behind it.

@@ -16,14 +16,13 @@ We recorded this decision after the fact, because it predates the numbered ADR s
 
 ## Context
 
-Orbit started as a local-only desktop tool on Kuzu, a file-embedded graph database.
-In October 2025, its maintainers archived the project.
-The deployed service then needed a new storage decision.
+Orbit started as a local desktop tool that stored its graph in Kuzu, an embedded graph database.
+In October 2025, the Kuzu maintainers archived the project, so the deployed Orbit needed a new database.
 
 We tested database options against the code indexing and software development lifecycle (SDLC) indexing workloads.
 The tests used generated SDLC datasets and existing code index Parquet files.
-We evaluated new databases: Neo4j, FalkorDB, Memgraph, Neptune, and SpannerGraph.
-We also evaluated the approved databases that GitLab already deploys: PostgreSQL and ClickHouse.
+We evaluated Neo4j, FalkorDB, Memgraph, Neptune, and SpannerGraph, which GitLab does not run today.
+We also evaluated PostgreSQL and ClickHouse, which GitLab already deploys and has approved.
 
 ## Decision
 
@@ -32,28 +31,27 @@ We also evaluated the approved databases that GitLab already deploys: PostgreSQL
 We do not adopt a dedicated graph database.
 PostgreSQL is the fallback option.
 
-The data model is the most important part of the product.
-Property graphs with arbitrary nodes and edges give Orbit its graph capabilities, whatever the database.
+The data model matters more than the database.
+A property graph of typed nodes and edges gives Orbit its graph features on any database.
 GitLab has much more operational experience with ClickHouse and PostgreSQL than with graph databases.
-The existing stack means one fewer database to deploy and maintain, which reduces site reliability and database reliability engineering costs.
-Engineering effort goes into ClickHouse instead of an extract, transform, and load (ETL) pipeline from ClickHouse to a graph database.
-The Orbit team can then help with Siphon and NATS.
-The query layer also gets Orbit to market faster.
+With no new database to deploy and maintain, site reliability and database reliability engineers have less work.
+We also do not build an extract, transform, and load (ETL) pipeline from ClickHouse to a graph database.
+The Orbit team can spend that time on Siphon and NATS, the pipeline that brings GitLab data into ClickHouse.
+A query layer on ClickHouse also gets Orbit to market faster.
 
-The decision is a two-way door.
-If ClickHouse does not suit our needs, Siphon, NATS, and ClickHouse remain the base for a data pipeline to a graph database.
+We can reverse this decision.
+If ClickHouse does not suit our needs, Siphon, NATS, and ClickHouse can feed a graph database instead.
 
 ### Validation
 
 We drew on the Brahmand project and on the SQL:2023 standard for property graphs (ISO/IEC 9075-16:2023).
-We changed the demo instance from the original graph database to ClickHouse.
-The demo proved a working product on a property graph model in ClickHouse and PostgreSQL.
+We moved the demo instance from the original graph database to ClickHouse.
+It worked as a product on a property graph in ClickHouse and PostgreSQL.
 A separate OpenCypher-to-PostgreSQL project passes 70% of the OpenCypher Technology Compatibility Kit (TCK), and the team can reuse much of it.
 
-Kuzu is a columnar system, similar to modern read-optimized analytical databases such as ClickHouse.
-We ran a benchmark of a property graph on ClickHouse and PostgreSQL, and the results removed the performance concerns.
-Three-hop traversals on a dataset of more than 20 million rows and 11 GB ran at a p95 below 300 ms.
-The benchmark used compressed sparse row (CSR) adjacency list index ideas from the Kuzu research paper.
+Kuzu is a columnar database, like read-optimized analytical databases such as ClickHouse.
+So we benchmarked a property graph on ClickHouse and PostgreSQL, with adjacency index ideas from the Kuzu research paper.
+Three-hop traversals on more than 20 million rows ran at a p95 below 300 ms, which removed our performance concerns.
 
 ## Consequences
 
@@ -71,10 +69,10 @@ Neo4j needs an enterprise edition license.
 FalkorDB uses the Server Side Public License (SSPL) and an enterprise edition license.
 Memgraph uses the Business Source License (BSL) and an enterprise edition license.
 
-Because of these licenses, any new database must pass legal review and procurement review.
+Because of these licenses, any new database must pass legal and procurement review.
 We met with the legal and procurement teams.
-Each of these databases would need an enterprise edition license from the vendor, in addition to the engineering challenges.
-The negotiation and procurement cycle takes at least 30 days.
+Each database would need an enterprise edition license from the vendor, on top of the engineering work.
+The negotiation and procurement cycle takes at least a month.
 
 ### Fork Kuzu
 

@@ -15,28 +15,27 @@ Accepted
 
 ## Context
 
-A breaking schema change writes to a new set of tables with a version prefix.
-The old version keeps serving queries.
-The new set takes over when it is populated.
+When the graph schema changes in a breaking way, Orbit writes to a new set of tables whose names carry a version prefix.
+The old version keeps serving queries until the new set is populated and takes over.
 The schema management design describes that layout, and this decision does not change it.
 
 The problem is cost.
 The original flow rebuilt every table on every schema version change.
 It created the full new set empty, then indexed every namespace and repository into it again.
-A one-column change to one software development lifecycle (SDLC) entity pulled billions of Siphon rows and every code archive again before promotion.
+A one-column change to one software development lifecycle (SDLC) entity read billions of rows from Siphon again, with every code archive from Gitaly, before promotion.
+Siphon copies GitLab database rows for the indexer to read, and Gitaly stores the Git repositories.
 Most tables were identical, byte for byte, to the old version.
 
-The indexer could compare ontology versions at runtime and guess which tables changed.
-That guess is not safe.
+The indexer could compare ontology versions at runtime to guess which tables changed, but the guess is not safe.
 A missed change to an edge key leaves a stale row in a cloned table, and nothing can find the row later.
-The decision must be declared and reviewed.
+So a person must declare the scope of each change, and a reviewer must check it.
 
 ## Decision
 
-**On a forward migration, we clone each table that the version does not invalidate and index again only the invalidated entities.**
+**On a forward migration, we clone each table that the new version does not invalidate and reindex only the invalidated entities.**
 
-A migration ledger declares the invalidated set for each version.
-When the scope is not clear, it defaults to a full rebuild.
+A migration ledger, a reviewed file in the repository, declares which entities each version invalidates.
+When the scope is not clear, the migration rebuilds all tables.
 
 ### Ledger declares scope
 
@@ -49,42 +48,39 @@ An entry has one of these scopes:
 - SDLC: rebuild the SDLC tables, with an optional list of entities to narrow the scope.
 - Code: rebuild the code graph tables and their edge table.
 
-A person can widen an entry.
-A person cannot narrow it below the drift that the schema fingerprint snapshot detects.
+A person can widen an entry but cannot narrow it below the changes that the stored schema fingerprint detects.
 A continuous integration (CI) check and a unit test enforce that floor.
 A migration across several versions uses the union of their scopes.
 A gap in the ledger or a backward range widens the scope to full.
 
 ### Runtime widening for shared tables
 
-A declared scope is a request.
+A declared scope is only a starting point.
 The indexer widens it to full when a clone would corrupt data:
 
 - The scope touches the shared edge table.
   A clone that rebuilds only some of its writers keeps rows with old keys that the corrected writer no longer emits.
-- A rebuilt table has writers outside the scope.
-  The clone would drop their rows.
+- A rebuilt table has writers outside the scope, so the rebuild would drop their rows.
 
-The code scope is the exception.
-It clones the shared edge table intact.
-A sweep for stale code rows marks old code edge rows as deleted after each namespace finishes its new index run.
+The code scope is the exception, and it clones the shared edge table intact.
+After each namespace finishes its new index run, a sweep marks the old code edge rows as deleted.
 A code version change touches only code.
 
 The indexer then marks each table as clone or rebuild.
-A table is rebuilt only when the version invalidates every writer of that table.
+A table is rebuilt only when the version invalidates every pipeline that writes to it.
 The indexer maps the invalidated entities to the pipelines that must run again.
 For example, a change to the note edge reruns the note pipeline.
 
 ### Checkpoint seeding drives re-dispatch
 
-The checkpoints in the new set decide what runs again.
+A pipeline records a checkpoint when it completes, and the checkpoints in the new set decide what runs again.
 The namespace sweep dispatches each pipeline that has no completed checkpoint.
 Seeding differs by scope:
 
 | Scope | Checkpoint seeding |
 | ----- | ------------------ |
 | SDLC | Copy completed checkpoints for unchanged pipelines. Drop the invalidated checkpoints and the dispatch cursors. |
-| Code | Clone the checkpoints intact, with the dispatch cursors. Drop only the stale sweep gate for each namespace. |
+| Code | Clone the checkpoints intact, with the dispatch cursors. Drop only the marker that the stale-row sweep is done for each namespace. |
 | Full | Start with an empty checkpoint table, so everything backfills. |
 
 Control tables, such as the table that records the schema version, have no prefix.
@@ -92,27 +88,23 @@ A migration never clones or drops them.
 
 ### Promotion gates on the plan
 
-A scheduled check promotes the migrating version under one condition.
-Each enabled namespace must have a completed checkpoint for each required namespace pipeline.
-Each required global pipeline must also have a completed checkpoint.
+A scheduled check promotes the migrating version when each enabled namespace has a completed checkpoint for each required namespace pipeline.
+Each required global pipeline must also have one.
 The required set is the plan that the scope produced, so a selective migration waits only for the work it dispatched.
 
-The check computes the enabled set each time.
-A checkpoint from a namespace that was disabled after the migration started does not count.
-The check reports code coverage, but code coverage does not block promotion.
-One slow or failing repository must not keep a migration open.
+The check reads the enabled set each time, so a checkpoint from a namespace that was disabled after the migration started does not count.
+The check reports code coverage but does not wait for it, because one slow or failing repository must not keep a migration open.
 
-The gate uses checkpoints, not row counts.
+The gate counts checkpoints and does not count rows.
 Full correctness validation stays in the staging end-to-end tests.
 The schema management design describes this trade-off.
 
 ### Blue-green deployment
 
-The prefix layout is already a blue-green split.
-The active version keeps serving queries and streaming updates from its tables.
-The migrating version fills its own set at the same time.
+The prefix layout is already a blue-green split, with two copies side by side.
+The active version keeps serving queries and streaming updates from its tables while the migrating version fills its own set.
 Promotion moves reads to the new set in one step.
-The two versions also have separate NATS streams and locks.
+The two versions also have separate NATS message streams and locks.
 The readiness probe keeps the new pods out of rotation until their version is active.
 
 ```mermaid
@@ -127,12 +119,11 @@ flowchart LR
     P -->|No| I
 ```
 
-Clone-based migration makes the green side cheap to stand up.
-A full rebuild must index from the start before it can promote.
-For hours, the blue side alone carries fresh data under heavy Siphon and Gitaly load.
-Cloning brings the green tables up almost complete at once and indexes only what changed.
-The blue side is never disturbed, and the window shrinks to the size of the change.
-Promotion happens when that change is indexed, as the gate in [Promotion gates on the plan](#promotion-gates-on-the-plan) describes.
+Cloning makes the green side cheap to stand up.
+A full rebuild indexes everything from the start, so for hours only the blue side has fresh data, under heavy Siphon and Gitaly load.
+Cloning brings the green tables up almost complete at once, so the window shrinks to the size of the change.
+The blue side is never disturbed.
+Promotion happens when that change is indexed, as [Promotion gates on the plan](#promotion-gates-on-the-plan) describes.
 
 ## Benefits of this approach
 

@@ -15,18 +15,18 @@ Proposed
 
 ## Context
 
-The query compiler chooses join order from coarse high or low selectivity labels in the ontology.
-The compiler also uses a fixed strategy per query type.
+The query compiler picks a join order from a fixed strategy for each query type and from coarse selectivity labels in the ontology.
+Each label marks a filter as high or low selectivity.
 Flat chains start from the edge table, and foreign key (FK) star queries start from the center node.
 
 The labels hide large differences.
-A high-selectivity string filter on a column with 50,000 distinct values gets the same treatment as one on a column with three.
+A string filter on a column with tens of thousands of distinct values gets the same label as one on a column with three.
 
-Profiling showed that this matters.
-When the compiler replaced filter-only common table expressions (CTEs) with joins, rows read on code-graph queries dropped by 70%.
-That improvement was accidental, because the compiler happened to emit a better shape for that query.
+Profiling showed the cost of this.
+When the compiler replaced filter-only common table expressions (CTEs) with joins, rows read on code graph queries dropped by 70%.
+That gain was luck, because the new shape happened to suit that query.
 For a different filter combination, the old shape might have been better.
-Without cardinality data, the compiler cannot make this choice systematically.
+Without cardinality data, which counts rows and distinct values, the compiler cannot make this choice on purpose.
 
 The compiler already supports several join strategies:
 
@@ -43,6 +43,8 @@ With row counts and value distributions per column and namespace, the compiler c
 
 **The compiler orders joins by cost, with column statistics that ClickHouse maintains on insert.**
 
+The compiler estimates the rows that each valid join order reads and picks the cheapest one.
+
 ### Query types affected
 
 Join ordering applies to every query that joins two or more tables, so only bare single-node searches are out of scope.
@@ -56,7 +58,8 @@ Join ordering applies to every query that joins two or more tables, so only bare
 | Neighbors | One center node and one edge scan | Center first |
 | Path finding | Two anchor nodes and recursive edge CTEs | Anchor CTEs, then edge expansion |
 
-For a single-hop traversal, the planner starts from the edge table or from the more selective node.
+The planner is the plan pass of the compiler.
+For a single-hop traversal, it starts from the edge table or from the more selective node.
 For multiple hops, the direction of each hop matters.
 For an FK star, the planner joins the smallest target first to narrow the result early.
 For neighbors, the planner scans the center or the edges, based on center filters beyond the pinned IDs.
@@ -65,7 +68,7 @@ Its anchor selection is still a join ordering choice: which endpoint expands fir
 
 ### Statistics
 
-We keep three types of statistics, each in its own aggregating merge tree table:
+We keep three types of statistics, each in its own ClickHouse table that merges aggregate states:
 
 | Statistic | Covers | Key |
 |---|---|---|
@@ -77,26 +80,27 @@ The ontology property types decide the category of each column at load time, so 
 The statistics skip UUID columns, because their selectivity is always one row.
 They also skip virtual columns and columns that cannot be filtered.
 
-One materialized view per node table fires on insert and writes aggregate states to the stats tables.
-The view counts distinct entities per value or bucket with a HyperLogLog-based state.
-That state ignores duplicate values, so the row versions of replacing merge tree tables do not inflate counts.
+One materialized view per node table fires on insert and writes aggregate states to the statistics tables.
+The view counts distinct entities per value or bucket with a HyperLogLog sketch, which gives an approximate distinct count.
+The sketch ignores duplicate values, so the old row versions that node tables keep after an update do not inflate counts.
 
 Deleted rows still contribute to the statistics.
 We accept this error, because exact counts need a periodic batch job with a deduplicating scan.
 For join ordering, the error is negligible.
 
-Statistics are partitioned by traversal path, so each namespace has its own rows.
+Statistics are partitioned by traversal path, the namespace path stored on each row, so each namespace has its own statistics.
 Entities without a traversal path, such as users and runners, use an empty partition key for global statistics.
 The total row count of an entity comes from the histogram of its ID column.
 
-A ClickHouse dictionary over the stats tables refreshes every few minutes and gives lookups in less than a millisecond.
+A ClickHouse dictionary, an in-memory lookup table, sits over the statistics tables.
+It refreshes every few minutes and answers lookups in less than a millisecond.
 
 ### Cardinality estimation
 
 The planner estimates the rows that remain after filters:
 
 ```plaintext
-estimated_rows = total_rows * product(selectivity of each filter)
+estimated rows = total rows * product(selectivity of each filter)
 ```
 
 Each filter type gets its selectivity from one statistic:
@@ -120,7 +124,7 @@ Most filter columns in the Orbit ontology are independent.
 The planner estimates join output with the FK join formula:
 
 ```plaintext
-join_output = left_rows * right_rows / max(distinct_left_keys, distinct_right_keys)
+join output = left rows * right rows / max(distinct left keys, distinct right keys)
 ```
 
 For an edge-to-node join, the key is the node ID on one side and the source or target ID on the edge.
@@ -149,8 +153,8 @@ The planner picks ordering 1.
 
 ### Join order selection
 
-The planner lists the valid join orderings that the declared ontology relationships allow.
-The planner estimates the intermediate row count at each step and picks the ordering with the lowest estimated total.
+The planner lists the join orderings that the declared ontology relationships allow.
+It estimates the intermediate row count at each step and picks the ordering with the lowest estimated total.
 
 The query language caps the number of nodes and relationships, so the search space is small.
 Brute-force evaluation takes less than a microsecond, and no dynamic programming is necessary.
@@ -158,9 +162,9 @@ The compiler must be able to start a flat chain from either a node or an edge.
 
 ### Pipeline placement
 
-The server query pipeline runs security, compilation, the ClickHouse query, extraction, authorization, redaction, hydration, and output.
+The Orbit query pipeline runs these stages in order: security, compilation, the ClickHouse query, extraction, authorization, redaction, hydration, and output.
 The stats fetch runs after security and before compilation.
-At that point, the server has these inputs:
+At that point, Orbit has these inputs:
 
 - The traversal paths that the user can access
 - The parsed query, with its node entities and filters
@@ -170,7 +174,7 @@ The compiler needs the statistics during its plan pass, before it emits SQL.
 The fetch is one dictionary lookup, or a small batch, for the node tables of the query in the traversal paths of the user.
 An in-process cache keeps results for a few minutes, keyed by table, column, and traversal path.
 Most requests get their statistics from the cache with no ClickHouse round trip.
-The server passes the statistics to the compiler as a map from table and column to the statistics of that column.
+Orbit passes the statistics to the compiler as a map from table and column to the statistics of that column.
 
 A statistics section in the schema configuration declares the table names and dictionary settings.
 The same section sets the histogram bucket count, the top token count, the partition key, and the excluded columns.
@@ -180,12 +184,12 @@ The same section sets the histogram bucket count, the top token count, the parti
 Queries with several filtered nodes get the cheapest estimated join order instead of a fixed strategy.
 The planner can skip narrowing CTEs when statistics show that a filter does not narrow much.
 Measured numbers replace the high and low selectivity labels.
-Code-graph queries over files, definitions, or imported symbols benefit most.
+Code graph queries over files, definitions, or imported symbols benefit most.
 Their tables are large, and their filter selectivity varies widely.
 
 ## Consequences
 
-- Schema migrations must create and drop the stats tables, views, and dictionary with the graph tables.
+- Schema migrations must create and drop the statistics tables, views, and dictionary with the graph tables.
 - Each node table gets one materialized view, and each view fires on every insert, which adds write amplification.
 - Statistics for deleted entities stay slightly inflated until the HyperLogLog sketches are rebuilt.
 

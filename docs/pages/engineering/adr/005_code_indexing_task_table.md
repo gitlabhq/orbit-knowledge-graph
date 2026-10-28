@@ -15,31 +15,29 @@ Accepted
 
 ## Context
 
-The code indexer re-indexes a repository after a push to the default branch of an Orbit-enabled project.
-Before this decision, the indexer read raw push event payloads from the Siphon change data capture (CDC) stream.
-On GitLab.com, the push event table receives roughly 40 inserts per second.
-Fewer than 1% of those pushes are for Orbit-enabled projects.
+The code indexer indexes a repository again after a push to the default branch of a project that has Orbit turned on.
+Before this decision, it read every push event from Siphon, the change data capture (CDC) pipeline that copies PostgreSQL changes to ClickHouse through NATS.
+On GitLab.com, that is roughly 40 pushes per second, and fewer than 1% of them are for Orbit projects.
 For each event, the indexer made a Rails API call and a ClickHouse query, and then dropped almost every event.
 
-The indexer needs a filtered stream of the push events that matter to Orbit.
-Only Rails can filter the stream, because Rails owns the enabled namespace records and the branch configuration.
+The indexer needs only the push events that matter to Orbit.
+Only Rails can pick them out, because Rails knows which namespaces have Orbit turned on and which branch is the default.
 
 ## Decision
 
-**Rails writes a task row to a dedicated PostgreSQL table for each push to the default branch of an Orbit-enabled project.**
+**Rails writes a task row to a new PostgreSQL table for each push to the default branch of an Orbit project.**
 
-Siphon replicates the table to ClickHouse through NATS, and the indexer consumes the NATS subject for that table.
+Siphon copies the table through NATS, and the indexer reads the NATS stream for that table.
 
-The table uses the GitLab time-range partitioning automation, with daily partitions and a short retention.
-Each row holds the project ID, the branch name, the commit SHA, and the traversal path.
-The rows are transient work items, and the indexer does not need a row after it consumes it.
+The table uses the GitLab time-range partitioning, with daily partitions that are dropped after a short time.
+Each row holds the project ID, the branch name, the commit SHA, and the traversal path, which is the group hierarchy of the project.
+The rows are short-lived work items, and the indexer does not need a row after it reads it.
 
-On a push to the default branch, Rails checks the Orbit feature flag and the enabled namespace record of the root namespace.
-If both checks pass, Rails enqueues a low-urgency Sidekiq worker that writes the task row.
-The worker is idempotent and has a concurrency cap, and it defers when the database reports health problems.
+On a push to the default branch, Rails checks the Orbit feature flag and whether the top-level namespace has Orbit turned on.
+If both checks pass, Rails queues a low-urgency Sidekiq job that writes the task row.
+The job is safe to run twice and has a concurrency limit, and it waits when the database is unhealthy.
 
-The task row already holds the traversal path, the branch, and the commit SHA.
-The indexer goes straight to the checkpoint check, the lock, and indexing.
+Because the task row already holds the traversal path, the branch, and the commit SHA, the indexer can go straight to indexing.
 The indexer no longer does these steps:
 
 - Call the Rails API to check the default branch
@@ -48,42 +46,39 @@ The indexer no longer does these steps:
 
 ## Benefits of this approach
 
-The indexer processes only the events that matter to Orbit, instead of filtering out 99% of the stream.
-Each event saves two network round trips: the Rails API call and the ClickHouse query.
-The PostgreSQL partitioning automation removes old rows, so we do not manage a time to live (TTL).
-The flow matches the rest of the Siphon CDC pipeline: Rails writes to PostgreSQL, Siphon replicates through NATS, and Orbit consumes from NATS.
+The indexer reads only the events that matter to Orbit, instead of dropping 99% of the stream.
+Each event saves a Rails API call and a ClickHouse query.
+The PostgreSQL partitioning removes old rows, so we do not manage an expiry time.
+The flow matches the rest of the Siphon pipeline, where Rails writes to PostgreSQL, Siphon copies through NATS, and Orbit reads from NATS.
 Zoekt and other teams that need filtered push events can use the same pattern.
 
 ## Consequences
 
-The cost is a new table and model in the Rails monolith.
-A change to the task schema needs a Rails migration.
-Indexing depends on the Rails worker, so a failed or late worker delays indexing.
-The worker is idempotent and Sidekiq retries it, which reduces this risk.
+The cost is a new table and model in the Rails monolith, and a change to the task schema needs a Rails migration.
+Indexing depends on the Rails job, so a failed or late job delays indexing.
+Sidekiq retries the job, and a second run is harmless, which reduces this risk.
 Rails and the indexer must agree on the table schema.
-Siphon replication fails on a column mismatch, so schema drift does not go unnoticed.
+Siphon fails when the columns do not match, so we notice schema drift.
 
 ## Why not the alternatives
 
 ### Replicate the push event table and filter with a materialized view
 
-The push event table receives roughly 40 inserts per second.
-Replication would ingest hundreds of millions of rows to drop 99% of them.
+Siphon cannot filter rows, so every push event would land in ClickHouse before any filter runs.
+That is hundreds of millions of rows, and we would drop 99% of them.
 Orbit has no other use for this table.
-Siphon logical replication cannot filter rows, so the full volume would land in ClickHouse before any filter runs.
 
 ### Write directly from Rails to ClickHouse
 
-Rails could insert rows into a ClickHouse table with asynchronous inserts.
-This adds one more direct connection between the monolith and ClickHouse to maintain.
-The Siphon CDC pipeline already replicates PostgreSQL to ClickHouse, so a second path has no benefit.
+Rails could insert rows into a ClickHouse table directly.
+That adds one more connection between the monolith and ClickHouse to maintain.
+Siphon already copies PostgreSQL to ClickHouse, so a second path has no benefit.
 
 ### Send events from Rails to Orbit through gRPC
 
-Rails could call the Orbit web server on each push, and Orbit would put the event into NATS.
-This approach needs no table.
-The cost is per-event overhead in Rails for signing, connection management, and flow control when Orbit is slow.
-Batching reduces the overhead, but it adds complexity to Rails for a small gain over the table.
+Rails could call Orbit on each push, and Orbit would put the event into NATS.
+This needs no table, but Rails pays for each event in token signing, connections, and backoff when Orbit is slow.
+Batching reduces that cost, but it adds complexity to Rails for a small gain over the table.
 
 ### Use the Data Ingestion Pipeline with OpenTelemetry-like events
 
@@ -93,10 +88,8 @@ If DIP becomes generally available and supports custom event schemas, it could r
 
 ### Publish to NATS directly from Rails
 
-Rails could publish events to NATS and skip PostgreSQL and Siphon.
-Orbit and Zoekt could then consume from NATS directly.
-Rails has no event-driven architecture today.
-A design for flow triggers and events exists, but we do not expect it to land soon.
+Rails could publish events to NATS and skip PostgreSQL and Siphon, and Orbit and Zoekt could read them from NATS.
+But Rails has no event system today, and we do not expect the design for flow triggers and events to land soon.
 
 ## References
 

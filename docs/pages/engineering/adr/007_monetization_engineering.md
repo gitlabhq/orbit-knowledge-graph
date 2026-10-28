@@ -16,6 +16,7 @@ Draft
 
 ## Context
 
+Orbit needed a way to bill queries by channel that users cannot fake.
 Orbit has four consumption channels, and each deployment type bills them differently.
 GitLab Duo Agent Platform (DAP) agents call Orbit through the Duo Workflow Service (DWS).
 The frontend dashboard calls Orbit for a user in the browser.
@@ -30,16 +31,15 @@ External callers use the Model Context Protocol (MCP) endpoint, the GitLab comma
 | External | Agent to Rails OAuth to Orbit | OAuth and user JWT | Metered per query with credits | Metered per query with credits | Included, GB-based fee |
 
 On GitLab.com and GitLab-hosted Dedicated, DAP usage is zero-rated and MCP and CLI usage is charged.
-A user must not be able to make a query look like DAP traffic to get it free.
+So a user must not be able to make a query look like DAP traffic to get it free.
 GitLab Self-Managed and customer-hosted GitLab Dedicated have no per-query billing today, so the channel is for analytics only.
-The pricing model for those two deployment types can change.
-For that reason, instrumentation covers every deployment, so the billing pipeline can extend to them later.
+Their pricing model can change, so instrumentation covers every deployment and the billing pipeline can extend to them later.
 
 ## Decision
 
 **The service that executes the work emits the billing event, and Rails only acts as a proxy.**
 
-The Orbit web server emits one billable event for each query.
+Orbit emits one billable event for each query.
 The indexer will emit volume events where GB-based pricing applies.
 The AI Gateway and DWS keep their own DAP completion event, and they do not annotate Orbit calls.
 
@@ -93,21 +93,20 @@ sequenceDiagram
 Rails sends the source type to Orbit only as a claim in the signed JWT, and never as a field in the gRPC request body.
 
 Rails signs the JWT with the shared secret, so Orbit can trust the claim.
-An unsigned body field would carry no trust, and any caller could set it.
-The claim is required, and Orbit rejects a token without it.
-Orbit reads an unknown value as REST.
+Any caller could set an unsigned body field, so it would carry no trust.
+The claim is required, so Orbit rejects a token without it and reads an unknown value as REST.
 The source types are frontend, DWS, MCP, core, REST, and code intelligence.
 
 | Source type | Caller | How Rails detects it |
 |---|---|---|
 | MCP | MCP clients and the GitLab CLI | The request reaches the MCP endpoint, which is its own endpoint class, so the channel is MCP by definition |
 | Core | Internal services, such as the indexer | The request reaches the internal API, which accepts only an indexer token |
-| Frontend | The browser | The CSRF token matches the session |
+| Frontend | The browser | The cross-site request forgery (CSRF) token matches the session |
 | DWS | DAP agents | In Phase 1, the OAuth token has the workflow scope. In Phase 3, the request carries a valid Workhorse-signed token. |
 | REST | External REST callers with a personal access token or OAuth | None of the other checks match |
 
 The MCP and internal endpoints set the source type from the endpoint itself.
-On the REST endpoints, Rails checks the cross-site request forgery (CSRF) token first, and then the OAuth scope.
+On the REST endpoints, Rails checks the CSRF token first, and then the OAuth scope.
 In Phase 3, the Workhorse-signed token check comes first.
 
 Only the Rails workflow services create tokens with the workflow scope, and users cannot create personal access tokens with it.
@@ -129,11 +128,10 @@ Rails must resolve the billing namespace before it calls Orbit.
 
 Each user has an Orbit governing namespace preference, and Rails sends it as the root namespace claim.
 
-The candidates are the namespaces where the user is a member and the namespace has a Premium or Ultimate plan.
+The candidates are the Premium or Ultimate namespaces where the user is a member.
 If exactly one candidate exists, Rails sets the preference without asking.
-If the preference is empty and more than one candidate exists, MCP and REST queries return a structured error that points to the setting.
-The setting is in the user preferences, next to the Duo default namespace selector.
-It shows only when the user has more than one eligible namespace.
+If the preference is empty and more than one candidate exists, MCP and REST queries return an error that points to the setting.
+The setting is in the user preferences, next to the Duo default namespace selector, and shows only when the user has more than one candidate.
 Rails resolves the preference on the server for each request, and Orbit reads only the signed claim.
 
 A GitLab.com request with no root namespace claim skips the quota check, and Orbit drops its billing event.
@@ -159,9 +157,7 @@ The event carries these fields:
 | Unit and quantity | Constant | One request for each query |
 | Metadata | Pipeline context and server build | Query type, Orbit version, compile time, execute time, and row count |
 
-Delivery is asynchronous.
-Orbit queues events in memory and sends them from a background task.
-At shutdown, the web server drains the queue.
+Delivery is asynchronous: Orbit queues events in memory, sends them from a background task, and drains the queue at shutdown.
 The billing drain and the analytics drain run at the same time, so a slow collector on one side does not delay the other.
 
 The planned indexer events report, for each indexing batch, the namespace, the rows written, the bytes written, and the entity type.
@@ -191,15 +187,14 @@ Orbit caches the instance token in memory and refreshes it on the send path:
 - While the cached token is valid, a fetch has a short timeout, so a hung Rails cannot stall the billing send loop.
 - With no valid token, the fetch waits for the client timeouts, because the collector rejects an expired token anyway.
 - If the token has expired and Rails cannot supply a new one, Orbit sends the expired token.
-  The hosted collector rejects it with a 401, so GitLab sees the error, and the error does not stay hidden on the customer instance.
+  The hosted collector rejects it, so GitLab sees the error instead of it staying hidden on the customer instance.
 
 ### Quota check
 
 Before it runs a query on a metered channel, Orbit asks CustomersDot whether the namespace has credits, and it fails closed.
 
-The check runs in the gRPC handler before the query pipeline.
-Only the MCP and REST source types are checked, because they are the charged channels.
-The other channels skip the check, because they are zero-rated or included.
+The check runs before the query pipeline, and only for MCP and REST, because they are the charged channels.
+The other channels are zero-rated or included, so they skip the check.
 
 On GitLab.com, Orbit authenticates to CustomersDot with admin credentials.
 GitLab Self-Managed and Dedicated cannot hold those credentials.
@@ -210,8 +205,7 @@ Orbit never logs or re-serializes the checksum.
 Orbit caches each decision for each namespace, so most requests skip the round trip.
 The time to live (TTL) comes from the cache headers of CustomersDot, with a default when the header is absent.
 A small jitter stops entries from expiring across the fleet at the same time.
-Orbit caches both allow and deny decisions.
-Orbit does not cache a failed check, so the next request tries CustomersDot again.
+Orbit caches both allow and deny decisions, but not a failed check, so the next request tries CustomersDot again.
 Orbit does not follow redirects, and each request sends the Orbit version and the correlation ID.
 
 Only a 200 response from CustomersDot allows the query.
@@ -219,7 +213,7 @@ A 402 denies the query, and so does every other result: 401, 403, 422, any other
 This matches the AI Gateway, which denies on any quota-check error.
 So an outage or a rejected credential cannot turn into usage without a charge.
 A denied check returns the gRPC resource exhausted status with the credits-exhausted reason, and Workhorse maps that reason to a 402.
-A failed check returns the same status and reason, with the message "Unable to verify GitLab credits" instead of "GitLab credits exhausted".
+A failed check returns the same status and reason, but its message says that Orbit could not verify credits.
 Metrics record failed checks as a separate fail-closed decision.
 Orbit logs any block reason that CustomersDot sends, for cached denials too.
 
@@ -235,9 +229,8 @@ The enforcement flag is set at compile time, so the deployed configuration canno
 ### Tier enforcement
 
 Every Orbit endpoint requires the Orbit licensed feature, which is part of GitLab Premium.
-This includes the query, schema, tools, MCP, and health endpoints, the GraphQL update mutation, and the admin namespace pages.
-The MCP endpoint already had the check.
-The health endpoint can be exempt, because health checks are admin-only.
+This covers the query, schema, tools, MCP, and health endpoints, the GraphQL update mutation, and the admin namespace pages.
+The MCP endpoint already had the check, and the health endpoint can be exempt because health checks are admin-only.
 On GitLab.com, Rails checks the license of each top-level namespace.
 On GitLab Self-Managed, Rails checks the instance license, and no per-query billing applies.
 The Orbit feature flag stays as a kill switch next to the tier gate.
@@ -250,13 +243,11 @@ Workhorse stamps a short-lived signed token on DWS calls to Orbit, and Rails cla
 
 Workhorse signs the token with the existing Workhorse-to-Rails secret.
 Rails checks the signature, the expiry, and the claim that marks the request as DWS traffic.
-Rails still runs a request without a valid token.
-It tags that request as frontend or REST.
+Rails still runs a request without a valid token, but tags it as frontend or REST.
 A valid token proves that the request came through the DWS path.
 A token with the workflow scope proves only that a workflow token was issued.
 
-The secret lives only in Workhorse and Rails, so users cannot forge the token.
-DWS manages no secret.
+The secret lives only in Workhorse and Rails, so users cannot forge the token, and DWS manages no secret.
 The secret already exists in every deployment that runs Workhorse, so Phase 3 adds no new secret for each tenant.
 
 ### CustomersDot pricing
@@ -292,8 +283,7 @@ Orbit billing code joins one or more of these control sets.
 | Computer operations, CO.1 to CO.2 | Restricted access to billing continuous integration (CI) jobs, and job monitoring with documented issue resolution |
 
 We limit the scope to code owner rules on the billing paths, so the full Orbit repository stays out of SOX scope.
-Billing event emission lives in its own module, with one conversion point from token claims to billing inputs.
-This keeps the audit surface small.
+Billing event emission lives in its own module, with one conversion point from token claims to billing inputs, so the audit surface stays small.
 Code owner rules require approval from the billing owners for the module and the conversion point, which satisfies PC.2 and LA.4.
 [ADR 020](020_billing_sox_scope.md) records the detailed scope.
 
@@ -312,8 +302,7 @@ Code owner rules require approval from the billing owners for the module and the
 
 ### Emit billing events from Rails
 
-Rails is a proxy.
-The Orbit web server has the execution data that Rails does not see: latency, result count before redaction, and cache hits.
+Rails is only a proxy, and Orbit has execution data that Rails does not see: latency, result count before redaction, and cache hits.
 Emission from Orbit also matches the billing service connection pattern for other Rust and Go services.
 
 ### Suppress events for zero-rated channels

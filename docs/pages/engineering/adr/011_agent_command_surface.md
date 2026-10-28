@@ -19,8 +19,7 @@ Amended by [ADR 022](022_queries_in_rails.md): Rails now runs the query stream, 
 
 Orbit exposed agent tools through its gRPC service, through Rails REST endpoints, and through Model Context Protocol (MCP) tools in Rails.
 Each tool had a hand-written description and a JSON Schema.
-That worked for GitLab Duo and Agentic Chat.
-It failed when external coding agents, such as Claude Code, OpenCode, and Codex, used the same surface.
+That worked for GitLab Duo and Agentic Chat, but it failed when external coding agents such as Claude Code, OpenCode, and Codex used it.
 
 Claude Code truncates long tool descriptions.
 The query tool description embedded the full query grammar, so the grammar was cut off mid-token and agents wrote invalid queries.
@@ -31,8 +30,8 @@ No endpoint returned the response JSON Schema or its version, which coding agent
 Every new tool needed changes in Orbit, Rails, and the agent prompts, with three review queues.
 We added one tool every few months, and we wanted to ship changes several times a week.
 
-The query tool could not move into the Orbit executor.
-It ran through Workhorse for streaming and for redaction scoped to the caller token, and it needed context that only Rails had.
+The query tool could not move into the Orbit executor, because it needed context that only Rails had.
+It ran through Workhorse to stream results and to redact them, which means to remove the results that the caller cannot see.
 
 We already used the lazy-mcp pattern internally.
 It puts a catalog of typed commands behind two tools, one for discovery and one for invocation.
@@ -76,7 +75,7 @@ Direct API consumers can call the matching gRPC method or a REST endpoint.
 Like the schema command, both accept a raw format, which returns the JSON Schema as stored.
 They also accept a large language model (LLM) format, which returns a condensed Token-Oriented Object Notation (TOON) form to save tokens.
 
-GQL has no query language command.
+The GQL query mode, which uses an OpenCypher-like syntax, has no query language command.
 Instead, the GQL query command description holds brief OpenCypher-like syntax rules under a small size cap.
 Other descriptions keep a smaller cap, except the list tool, which also holds the command summaries.
 Both query modes keep large schemas out of descriptions.
@@ -104,8 +103,8 @@ sequenceDiagram
 ```
 
 A Rails interceptor runs before the Orbit dispatch, reports whether it handled the command, and builds the Workhorse hand-off for the graph query.
-The Orbit executor also refuses an intercepted command with a failed-precondition error.
-If a misconfigured Rails forwards the graph query, Orbit does not run it without the Rails context.
+The Orbit executor also refuses an intercepted command with an error.
+So if a misconfigured Rails forwards the graph query, Orbit does not run it without the Rails context.
 
 ### Discovery and invocation
 
@@ -142,20 +141,22 @@ A merge request check requires a version bump when the skill files change.
 The check does not make a version unique, because concurrent changes can pick the same version and an explicit bypass exists.
 
 The list method returns the name, version, description, and compatibility of each skill.
-The get method returns the versioned file tree, sorted by normalized relative path with a SHA-256 hash of each UTF-8 file, or only the metadata.
+The get method returns the versioned file tree, sorted by path with a hash of each file, or only the metadata.
 Both requests carry the query language of the caller.
 GQL callers get the GQL variant, whose version has a GQL suffix so caches differ by mode.
 A missing language selects JSON, and an unknown language is rejected.
 An unknown name returns a not-found error with the sorted known names.
 Both responses include the server version as provenance, outside skill identity.
 
-Rails uses the skill version as the item ETag, and a digest of the sorted name and version pairs as the collection ETag.
+Rails uses the skill version as the HTTP cache tag (ETag) of one skill.
+The tag of the list is a digest of all skill names and versions.
 Clients check every file hash before they publish a tree, and they key their caches by skill version.
 This envelope is separate from the query response format, so a change to it needs no response format version bump.
 
 ### Switchover
 
-A Rails feature flag selects the MCP tool list: the legacy query and schema tools when off, the two command tools when on.
+A Rails feature flag selects the MCP tool list.
+When it is off, agents see the legacy query and schema tools, and when it is on, they see the two command tools.
 **An agent session sees one surface or the other, never both.**
 
 With both, agents would see the graph query as a tool and as a command, and tool selection would become unpredictable.

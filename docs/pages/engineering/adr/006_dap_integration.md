@@ -18,17 +18,13 @@ Amended by [ADR 022](022_queries_in_rails.md): Rails now runs the query stream, 
 
 ## Context
 
-Orbit gives agents tools that query structured graph data.
-Without them, a large language model (LLM) assembles answers from dozens of REST calls.
-One tool runs a query in the condensed graph query language.
-One tool returns the ontology with progressive disclosure.
-Two tools list and invoke named commands ([ADR 011](011_agent_command_surface.md)).
-With these tools, agents make fewer calls and give better answers, because one call returns relational data.
+GitLab Duo Agent Platform (DAP) agents needed Orbit tools, but they had no way to reach them.
+DAP runs agents in the Duo Workflow Service (DWS), a separate service with no direct connection to Orbit.
 
-Agents reach these tools through the Rails REST API and the Orbit Model Context Protocol (MCP) server.
-The GitLab Duo Agent Platform (DAP) runs agents in the Duo Workflow Service (DWS).
-DWS is a separate service with no direct connection to the Orbit server.
-This decision is about how Orbit tools reach DAP agents.
+Without Orbit, a large language model (LLM) assembles answers from dozens of REST calls.
+Orbit gives agents a query tool for the graph query language, a schema tool, and two tools for named commands ([ADR 011](011_agent_command_surface.md)).
+One call returns relational data, so agents make fewer calls and give better answers.
+Other agents already reach these tools through the Rails REST API and the Orbit Model Context Protocol (MCP) server.
 [ADR 007](007_monetization_engineering.md) covers billing and usage tracking.
 
 Orbit has four consumption channels, each with its own authentication and billing:
@@ -42,18 +38,17 @@ Orbit has four consumption channels, each with its own authentication and billin
 
 Rails creates the DWS OAuth token when the workflow starts.
 The DWS executor sends all GitLab API traffic through Workhorse, and DWS makes no direct HTTP calls to Rails.
-The Orbit REST API accepts the workflow scope through the same shared check that other DWS-called APIs use.
+The Orbit REST API accepts the workflow scope through the same shared check as the other APIs that DWS calls.
 So the integration needs no new authentication mechanism on the data plane.
-The scope covers more than Orbit, so every Orbit route also requires the Orbit read permission.
-The scope only admits the token type.
+The scope only admits the token type, and it covers more than Orbit.
+So every Orbit route also requires the Orbit read permission.
 
 ## Decision
 
 **Orbit is a first-class MCP server in the Duo Agent Platform.**
 
 Rails defines the Orbit server in its MCP configuration the same way it defines the built-in GitLab MCP server.
-Workhorse hosts the MCP session.
-DWS consumes the tools like any other MCP tools, and DWS has no Orbit-specific tool classes.
+Workhorse hosts the MCP session, and DWS uses the tools like any other MCP tools, with no tool classes of its own for Orbit.
 
 ```mermaid
 sequenceDiagram
@@ -99,10 +94,9 @@ DWS calls Orbit through Rails, not directly, for four reasons:
 1. DWS needs no gRPC client to Orbit and no separate authentication channel.
    The only gRPC clients to Orbit live in Rails and Workhorse.
 
-Workhorse is a deliberate part of this path.
-It hosts the MCP client and resolves the internal endpoint path for the built-in servers.
-It forwards session identifiers and mints the channel identity header.
-It also speeds up query execution because it streams results from Orbit directly ([ADR 008](008_workhorse_query_acceleration.md)).
+We keep Workhorse in this path on purpose.
+It hosts the MCP client, finds the internal endpoint for the built-in servers, forwards session identifiers, and signs the channel identity header.
+It also streams results from Orbit directly, which makes queries faster ([ADR 008](008_workhorse_query_acceleration.md)).
 
 ### First-class MCP server
 
@@ -122,8 +116,8 @@ So Orbit tool descriptions carry no warning banner for an untrusted source.
 The name prefix is the only change to the tools.
 
 The trusted tool set holds the query tool, the schema tool, and the two named-command tools.
-A feature flag switches the visible tools between the legacy query pair and the named-command pair.
-So we can retire the legacy tools without a change to the transport.
+A feature flag switches the visible tools between the older pair of query tools and the named-command pair.
+So we can retire the older tools without a change to the transport.
 
 The integration depends on these properties:
 
@@ -146,8 +140,7 @@ The check has three layers:
 When a workflow starts, Rails puts it in one of those surfaces and checks the matching rule.
 If the rule passes, Rails adds the Orbit server to the MCP configuration.
 If the rule fails, the entry is absent, and the agent does not learn that Orbit exists for that run.
-Duo Code Review never gets Orbit.
-It is flat-rate and has deliberately not adopted Orbit.
+Duo Code Review never gets Orbit, because it is flat-rate and we chose not to add Orbit to it.
 
 ### Surfaces
 
@@ -160,11 +153,9 @@ Each surface gets Orbit in its own way:
 
 Duo Developer takes a different route and does not use the MCP tools.
 When Orbit is on for the user, Duo Developer runs an Orbit variant of its flow.
-That variant is a single agent with shell access in its execution environment.
-Its system prompt includes a shared Orbit skill.
-The skill teaches the agent to reach Orbit through the pre-authenticated GitLab CLI.
-The agent discovers the schema and the query language first.
-It then runs queries against the same REST API that the other channels use.
+That variant is a single agent with shell access, and its system prompt includes a shared Orbit skill.
+The skill teaches the agent to reach Orbit through the GitLab CLI, which is already signed in.
+The agent reads the schema and the query language first, then runs queries against the same REST API as the other channels.
 The CLI also serves a local graph for code structure questions about the current branch, which the remote graph does not cover.
 Flows that already give the agent a shell get Orbit this way at no extra cost.
 The MCP path exists for the surfaces that have no shell.
@@ -178,33 +169,29 @@ Other authenticated callers default to REST.
 The source travels to Orbit as a required claim on the JWT, and the claim matches the telemetry values.
 So both sides of the gRPC boundary can report usage, query mix, and latency for each channel.
 
-Detection by scope is enough for metrics, but a user can tamper with it.
-A user could extract a workflow token and replay it.
+Detection by scope is enough for metrics, but a user can defeat it by extracting a workflow token and replaying it.
 Zero-rating needs stronger attribution.
 So Workhorse stamps Orbit calls from DWS with a short-lived signed channel header, and Rails verifies it.
 [ADR 007](007_monetization_engineering.md) covers that mechanism.
 
-### Orbit service changes
+### Changes to Orbit
 
-The Orbit server needs no new endpoints for this integration.
-[ADR 003](003_api_design.md) made Rails the REST proxy, and that decision holds.
-The Orbit server serves gRPC only.
-Capabilities for agents, such as schema and query language discovery and named-query execution, are gRPC methods.
-The JWT carries the source claim.
-Traversal IDs and redaction work the same for every channel.
+Orbit needs no new endpoints for this integration.
+[ADR 003](003_api_design.md) made Rails the REST proxy, and Orbit still serves only gRPC.
+Agent capabilities, such as schema discovery and named queries, are gRPC methods.
+The JWT carries the source claim, and namespace access checks and redaction work the same for every channel.
 
 ### Prompt engineering
 
-Orbit tools need prompt guidance, not only registration.
+Registering the Orbit tools is not enough, because agents also need prompt guidance.
 Each tool description embeds the full query language grammar, encoded as Token-Oriented Object Notation (TOON).
-So the descriptions are large, a few thousand tokens each.
-In a crowded tool list with no guidance, they can confuse the agent about when to prefer them.
-They also fill the context window.
+So each description is a few thousand tokens long and fills the context window.
+In a crowded tool list with no guidance, the agent cannot tell when to prefer them.
 The prompt must cover when to prefer Orbit, when to avoid it, and how to use it well.
 
 Orbit data is not real time.
 The pipeline from PostgreSQL through Siphon change data capture, NATS, ClickHouse, and the indexer adds a short delay.
-The Orbit server tracks freshness with a watermark lag metric, and each namespace has a last-indexed timestamp.
+Orbit measures how far indexing lags behind, and each namespace records when it was last indexed.
 
 Agents default to Orbit for anything that is not brand new.
 They expect an empty result for entities that the user just created, and then fall back to the generic REST tool.
@@ -229,8 +216,7 @@ A prompt that names the wrong depth limit, or that encourages expansion of the w
 We treat such a prompt as a defect.
 
 Orbit prompt content lives inline in the DWS flow configurations and in a shared skill partial, next to the agent definitions.
-So prompts stay under flow version pinning, and prompt changes get review in one place.
-This also avoids a runtime fetch on every workflow.
+So prompts stay pinned with the flow version, prompt changes get review in one place, and no workflow fetches prompts at runtime.
 The Orbit repository documents the intended guidance, and the flow definitions are the runtime source of truth.
 
 ## Benefits of this approach
@@ -248,8 +234,7 @@ The Orbit repository documents the intended guidance, and the flow definitions a
   Multi-hop traversals and aggregations can be much slower and can reach the query timeout.
 - The MCP JSON-RPC framing adds overhead compared with a direct REST call.
   Workhorse query acceleration recovers most of it on the expensive path.
-- The MCP server and the prompts control tool behavior such as caching, retries, and error shape.
-  No custom DWS code controls it.
+- The MCP server and the prompts control tool behavior such as caching, retries, and error shape, and no custom DWS code does.
 
 ## Why not the alternatives
 

@@ -15,19 +15,18 @@ Accepted
 
 ## Context
 
-Orbit is a Rust service that queries ClickHouse.
-Rails owns all authorization decisions.
-Orbit runs a query, then asks Rails to check permissions on the results before it returns them.
+Orbit is a Rust service that queries ClickHouse, but Rails owns all authorization decisions.
+So Orbit runs a query, then asks Rails to check permissions on the results before it returns them.
 
-Orbit must call back to Rails during query execution.
-A standard request-response protocol cannot express this exchange.
-It would need a second connection from Orbit to Rails, which makes a circular dependency.
+This means Orbit must call back to Rails while the query runs.
+A plain request and response protocol cannot do this without a second connection from Orbit to Rails, which makes a circular dependency.
 
 ## Decision
 
-**We use gRPC with bidirectional streaming for the query RPC, which needs redaction.**
+**We use gRPC between Rails and Orbit, with a bidirectional stream for queries so that the redaction exchange runs inside one call.**
 
-The tool list, graph schema, and cluster health RPCs need no redaction, so they are unary.
+Redaction is the step that removes the rows the user cannot see.
+The tool list, graph schema, and cluster health calls need no redaction, so they are unary, with one request and one response.
 
 | RPC | Pattern | Purpose |
 |---|---|---|
@@ -37,7 +36,8 @@ The tool list, graph schema, and cluster health RPCs need no redaction, so they 
 | Cluster health | Unary | Return cluster health for the Orbit dashboard |
 
 The first design had five RPCs.
-We merged tool execution into the query RPC, which takes a response format, and we merged the ontology RPC into the graph schema RPC.
+We merged tool execution into the query RPC, which now takes a response format.
+We also merged the ontology RPC into the graph schema RPC.
 [ADR 003](003_api_design.md) gives the reasons.
 During the product rename, the server also answers the old service paths.
 
@@ -80,44 +80,41 @@ sequenceDiagram
 
 ### Row-level authorization
 
-Indexing adds permission metadata columns to each entity.
-After Orbit runs a ClickHouse query, it reads these columns from the result.
-It groups the resource IDs by resource type and ability, so Rails gets one check for each group instead of one for each row.
-Orbit then marks each row authorized or unauthorized and removes the unauthorized rows.
+Indexing stores permission metadata with each entity, and Orbit reads it from each query result.
+Orbit groups the resource IDs by resource type and ability, so Rails gets one check for each group instead of one for each row.
+Orbit then removes the rows that Rails did not authorize.
 
 ```plaintext
-rows:      { id: 1, type: Project }, { id: 5, type: Project }
-check:     { resource_type: projects, ability: read, ids: [1, 5] }
-decision:  { 1: true, 5: false }
-returned:  { id: 1, type: Project }
+rows:      Project 1, Project 5
+check:     can the user read projects 1 and 5?
+decision:  1 yes, 5 no
+returned:  Project 1
 ```
 
 ### Gitaly pattern
 
-The Rails integration copies the patterns of Gitaly.
-A Ruby gem, generated from the Orbit protocol definition, is published to RubyGems.
-Rails uses it for client stubs, as it uses the Gitaly protocol gem.
+The Rails integration copies the patterns that Rails already uses for Gitaly, the gRPC service for Git repositories.
+We generate a Ruby gem from the Orbit protocol definition and publish it to RubyGems, and Rails uses it for client stubs.
 
-Rails keeps a pool of gRPC channels to Orbit, configured with the Orbit service address.
+Rails keeps a pool of gRPC channels to Orbit.
 Connection settings, such as keepalive, maximum message size, and timeouts, follow the Gitaly configuration model.
 
-The error handling middleware mirrors Gitaly.
-An unavailable status causes a retry with backoff, permission denied maps to HTTP 403, and deadline exceeded maps to HTTP 504.
+Error handling also mirrors Gitaly.
+Rails retries an unavailable server with backoff, returns HTTP 403 for permission denied, and returns HTTP 504 for a deadline exceeded.
 gRPC interceptors handle request logging, tracing with LabKit, and metrics, as they do for Gitaly.
 
 ### Response compression
 
 The server compresses responses with Gzip or Zstandard, and accepts either on requests.
-It answers with the first of those encodings in the list that the client accepts, and with no compression if the client lists neither.
-The Ruby and Python C-core clients advertise Gzip and decode it transparently, so they get Gzip.
-Only clients that advertise Zstandard, such as tonic-based Rust clients or Go clients, get Zstandard.
+It prefers Gzip, then Zstandard, and sends no compression if the client accepts neither.
+The Ruby and Python clients accept Gzip, so they get Gzip.
+Only clients that accept Zstandard and not Gzip, such as some Rust or Go clients, get Zstandard.
 
 ### Authentication
 
 Service-to-service authentication has two layers, as the security design document describes.
-A JSON Web Token (JWT) carries the user context: the user ID, organization ID, and traversal IDs.
-A shared secret signs the token with HS256, and the token expires after a few minutes.
-Each RPC call carries the token in gRPC metadata.
+A JSON Web Token (JWT) carries the user context, such as the user ID, organization ID, and the groups the user can reach.
+A shared secret signs the token, the token expires after a few minutes, and each call carries it in gRPC metadata.
 Mutual TLS (mTLS) verifies the identity of each service at the transport layer.
 
 A Kubernetes service mesh such as Istio or Linkerd can manage the TLS certificates and rotate them with no application configuration.
@@ -129,21 +126,20 @@ GitLab Self-Managed can configure them manually, with the same certificate setup
 **Orbit never makes an authorization decision.**
 
 It runs queries, collects the resource IDs from the results, and sends them to Rails for permission checks.
-Rails is the single source of truth for permissions.
-Orbit only removes rows based on the authorized flags that it receives.
+Rails is the single source of truth for permissions, and Orbit only removes the rows that Rails marks unauthorized.
 
 ## Benefits of this approach
 
-The protocol definition is the contract.
-Rails generates a Ruby client from it, Orbit implements the server in Rust, and a schema mismatch fails at compile time.
-gRPC includes HTTP/2 multiplexing, and the bidirectional exchange has no clean equivalent in REST or GraphQL.
-Protobuf is smaller and faster to parse than JSON for batches of resource IDs and authorization results.
+The protocol definition is the contract between Rails and Orbit.
+Rails generates a Ruby client from it and Orbit implements the server in Rust, so a schema mismatch fails at build time.
+REST and GraphQL have no clean way to do a two-way exchange inside one request.
+Protocol Buffers, the gRPC message format, are smaller and faster to parse than JSON for batches of resource IDs.
 
 GitLab already runs gRPC services in production, such as Gitaly, Praefect, and Duo Workflow.
 The operational patterns for channels, errors, monitoring, and deployment already exist.
 
-The whole exchange runs in one RPC on one connection with one timeout, with no polling and no callback service.
-This halves the connection overhead and removes the cost to open a callback connection under load.
+The whole exchange runs in one call on one connection with one timeout, with no polling and no callback service.
+Rails and Orbit use half the connections, and do not open a callback connection under load.
 
 ## Consequences
 
@@ -152,8 +148,8 @@ This halves the connection overhead and removes the cost to open a callback conn
   Compatible changes, such as a new field or RPC, need no lockstep deploy.
   Breaking changes, such as a removed field or a changed type, follow the standard deprecation process.
 - Standard HTTP tools cannot inspect a bidirectional stream.
-  Teams need gRPC-aware tools, such as `grpcurl`, Bloom RPC, or logging interceptors.
-- If Rails is down or slow, Orbit cannot finish a query that needs tier 3 redaction checks.
+  Teams need gRPC tools, such as grpcurl, Bloom RPC, or logging interceptors.
+- If Rails is down or slow, Orbit cannot finish a query that needs redaction checks.
   We accept this, because to skip redaction would be a security violation.
 - Requests carry no key for deduplication or replay detection, so a failed request is retried from the start.
   Queries are read-only, so a retry is safe, but it runs the same ClickHouse work again.
@@ -162,8 +158,7 @@ This halves the connection overhead and removes the cost to open a callback conn
 
 A bidirectional stream adds denial-of-service risks:
 
-- A query with millions of rows would make a very large redaction request.
-  The row limit of the query engine prevents this.
+- A query with millions of rows would make a very large redaction request, but the row limit of the query engine prevents this.
 - A slow client holds the stream open on the server.
   Neither Rails nor Orbit sets a stream deadline yet, so only TCP keepalive bounds the wait.
   We must add a deadline for each RPC before the production rollout.
@@ -174,28 +169,23 @@ A bidirectional stream adds denial-of-service risks:
 
 ### PostgreSQL load from redaction checks
 
-Each Rails permission check evaluates the Rails policy rules against PostgreSQL.
-A result with a full row limit across several resource types could cause one check for each row.
-Each check can load the resource and evaluate several policy conditions.
+Each Rails permission check evaluates the Rails policy rules against PostgreSQL, and it can load the resource and evaluate several conditions.
+A full result across several resource types could cause one check for each row.
 
-Grouped IDs and a cap on the IDs in each check reduce this load.
-Rails gets a few batched checks instead of one for each row.
+Grouped IDs and a cap on the IDs in each check reduce this load to a few batched checks.
 The row limit of the query engine also bounds the number of checks for each request.
-The Rails handler must preload resources and their policy dependencies instead of checking each ID alone.
-The redaction of search results in Rails gives the template.
+The Rails handler must preload resources and their policy dependencies instead of checking each ID alone, as Rails does for search results.
 
-The Auth Architecture team is building GLAZ, a Zanzibar-like authorization service in Rust.
-GLAZ will control access based on relationships, roles, and attributes.
-PostgreSQL or YugabyteDB stores its data.
-When GLAZ is available, Rails can send tier 3 redaction checks to it over gRPC instead of PostgreSQL.
-The stream protocol does not change, and only the Rails handler changes.
+The Auth Architecture team is building GLAZ, a Rust authorization service modeled on Google Zanzibar.
+GLAZ will control access based on relationships, roles, and attributes, and it stores its data in PostgreSQL or YugabyteDB.
+When GLAZ is available, Rails can send redaction checks to it over gRPC instead of to PostgreSQL.
+Only the Rails handler changes, and the stream protocol stays the same.
 Until then, the batch caps and row limits bound the load.
 
 ### Puma threads
 
-Each query blocks a Puma thread for the full stream, from the request through the redaction lookups to the result.
-The Rails gRPC client is synchronous.
-A REST callback would use a second thread to handle the authorization callback, but the stream needs one thread.
+The Rails gRPC client is synchronous, so each query blocks a Puma thread for the full stream, from the request to the result.
+A REST callback would use a second thread for the authorization callback, but the stream needs only one.
 Other synchronous services in Rails, such as Gitaly, Elasticsearch, and Zoekt, block the same way.
 The mitigations are the same: request deadlines, small result sets, and monitoring of thread pool use.
 
@@ -220,9 +210,8 @@ Orbit could stream results to Rails, but Rails could not send redaction decision
 
 ### Shared database
 
-Orbit would read from PostgreSQL.
-That couples Orbit to the Rails schema and bypasses the change data capture pipeline.
-It also breaks the boundary between transactional and analytical storage.
+Orbit would read permissions from PostgreSQL directly.
+That couples Orbit to the Rails schema, bypasses the change data capture pipeline, and breaks the boundary between transactional and analytical storage.
 
 ### Precomputed authorization cache
 

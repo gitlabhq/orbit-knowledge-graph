@@ -15,6 +15,7 @@ Proposed
 
 ## Context
 
+Orbit had no public API that all of its clients could share, and its gRPC service had grown overlapping operations.
 The Orbit API serves three consumers:
 
 - The Orbit dashboard, a Vue app that renders graphs, tables, and schema views
@@ -22,8 +23,8 @@ The Orbit API serves three consumers:
 - The GitLab command-line interface (CLI), which runs queries and prints them for people or for agents
 
 The gRPC service had five operations at the time of this decision.
-Two listed tools and dispatched a generic tool call.
-The others ran a raw query, returned the full ontology as protobuf, and reported cluster health.
+Two listed tools and ran a generic tool call, and the others ran a raw query, returned the full ontology, and reported cluster health.
+The ontology is the schema of the graph.
 
 The design had these problems:
 
@@ -42,6 +43,8 @@ check security -> compile -> run in ClickHouse -> extract IDs -> authorize
 ## Decision
 
 **GraphQL serves Orbit settings, and REST serves Orbit data.**
+
+We also cut the gRPC service to four operations, each with one response format parameter.
 
 ```mermaid
 flowchart LR
@@ -75,7 +78,7 @@ Any consumer can reuse these endpoints, including the frontend, the CLI, agents,
 
 We remove the generic tool call and the separate ontology operation.
 The query operation and the new schema operation take a response format instead.
-The service goes from five operations to four:
+This takes the service from five operations to four:
 
 | Before | After |
 | ------ | ----- |
@@ -90,31 +93,29 @@ The service goes from five operations to four:
 
 The agent surface adds a catalog of commands that agents load on demand.
 One operation lists the commands and their parameter schemas, and one runs a command.
-Agents reach query language discovery and response format discovery through these two operations.
+Agents learn the query language and the response formats through these two operations.
 [ADR 011](011_agent_command_surface.md) describes this surface.
 
 Two direct operations return the query language schema and the response format schema, each with its version.
-These operations serve REST and API consumers that need stable structured endpoints without the command wrapper.
+They serve REST clients that need stable endpoints without the command catalog.
 
-Two more operations list the embedded Orbit skills and return one skill.
-They back typed REST endpoints in Rails.
-They stay out of the agent command catalog, because skills are CLI artifacts and not MCP capabilities.
+Two more operations list the Orbit skills and return one skill, and they back REST endpoints in Rails.
+They stay out of the agent command catalog, because skills belong to the CLI and MCP does not use them.
 
 ### One response format parameter
 
-The response format answers one question: who consumes the response?
-The two values are `raw` for structured data and `llm` for an LLM.
+The response format says who reads the response.
+Raw gives structured data for programs, and LLM gives compact text for a large language model (LLM).
 
 | Operation | Raw format | LLM format |
 | --------- | ---------- | ---------- |
-| Run query | Tabular JSON rows and query metadata | Graph Object Output Notation (GOON) with deduplicated nodes and edges that saves 25% to 50% of tokens |
+| Run query | Tabular JSON rows and query metadata | Graph Object Output Notation (GOON), which lists each node and edge once and uses 25% to 50% fewer tokens |
 | Get schema | Structured domains, nodes, edges, properties, and styles | Token-Oriented Object Notation (TOON) text |
 | Get cluster health | Structured status, version, and components | TOON key-value notation |
 | List tools | Tool names, descriptions, and parameter JSON schemas | Same as raw |
 
-We leave the detailed response format specification to a follow-up ADR.
-That specification covers the response envelope and the GOON encoding.
-It also covers a shared JSON Schema contract between the Rust service and the Vue frontend.
+A follow-up ADR specifies the response formats in detail.
+It covers the response envelope, the GOON encoding, and a shared JSON Schema contract between Orbit and the Vue frontend.
 
 ### REST contract
 
@@ -123,86 +124,65 @@ A feature flag gates every endpoint, and the endpoint returns not found when the
 Each data endpoint accepts the response format parameter, and raw is the default.
 
 The query endpoint accepts a query, a query language, and a format.
-The only query language at the time was a structured JSON DSL, and an OpenCypher-like language was a future option.
-The response holds the result, the query type, the generated SQL strings, and the row count.
-An illustrative exchange with placeholder values:
-
-```plaintext
-Request:
-  format: raw
-  query:  <traversal over merge requests where state is merged, limit 10>
-
-Response:
-  result:      [{id: <id>, type: MergeRequest, title: <title>, state: merged}, ...]
-  query_type:  json
-  sql:         [<generated SQL>]
-  row_count:   <count>
-```
-
+The only query language at the time was a structured JSON domain-specific language (DSL), and an OpenCypher-like language was a future option.
+The response holds the result, the query type, the generated SQL, and the row count.
+For example, a raw query for ten merged merge requests returns a list of merge request rows with their ID, type, title, and state.
 In the LLM format, the result is GOON text and the metadata stays the same.
+
 The query uses a bidirectional stream, and the Rails gRPC client handles the redaction exchange inside it.
-The signed token carries the traversal IDs of the user, and Orbit redacts results for that user.
+Redaction removes the rows that the user cannot see.
+The signed token says which groups the user can reach, and Orbit redacts results for that user.
 A query error returns bad request, and a connection error returns service unavailable.
 
 The schema endpoint accepts an optional list of node names to expand.
-Without the list, the response has domains, node summaries, and edges.
-Each edge lists its source and target types.
+Without the list, the response has domains, node summaries, and edges with their source and target types.
 An expanded node also has its properties, its style, and its edges in each direction.
-The schema operation is unary and reads the in-memory ontology with no ClickHouse query and no redaction.
+The schema operation is unary, with one request and one response, and it reads the ontology from memory with no ClickHouse query and no redaction.
 
-The status endpoint returns the cluster status, the version, and the status of each component.
-The status operation is unary.
+The status endpoint returns the cluster status, the version, and the status of each component, and its operation is also unary.
 
 ### Tool metadata
 
-**The Rust service owns all tool metadata.**
+**Orbit owns all tool metadata.**
 
-The service defines the tool names, the descriptions, and the parameter JSON schemas.
+Orbit defines the tool names, the descriptions, and the parameter JSON schemas.
 The query tool description includes the full schema in TOON as context for an LLM.
-Rails never copies this metadata.
-Rails passes the tool list through unchanged to the MCP tool list and to the REST tool endpoint.
-The only addition in Rails is a field that maps each tool name to its REST endpoint.
+Rails never copies this metadata and passes the tool list unchanged to MCP and to the REST tool endpoint.
+Rails only adds a field that maps each tool name to its REST endpoint.
 
 ### MCP tool calls
 
-The MCP tool call handler in Rails maps each tool name to one gRPC client method.
-The tool names are fixed in Rails, because only two tools exist and each has its own parameter shape.
-The handler rejects an unknown tool name before dispatch, as the AppSec review asked.
-No dynamic method dispatch is involved.
+The MCP handler in Rails maps each tool name to one gRPC client method.
+The tool names are fixed in Rails, because only two tools exist and each has its own parameters.
+As the AppSec review asked, the handler rejects an unknown tool name and never picks a method from user input.
 Both tools request the LLM format.
 
 ### CLI
 
 The CLI has commands to run a query, read the schema with optional expansion, show status, and list tools.
-The human format requests raw data and renders tables in the terminal.
-The LLM format prints text for piping to an agent.
-Human is the default.
+The default human format requests raw data and renders tables in the terminal.
+The LLM format prints text to pipe to an agent.
 
 ### Protocol changes
 
-The run query operation is a bidirectional stream of messages.
-Each message holds a request, a redaction exchange, a result, or an error.
-The request carries the query string, the format, and the query language.
-The result carries JSON or formatted text, and metadata with the query type, the SQL strings, and the row count.
+The run query operation is a bidirectional stream, and each message holds a request, a redaction exchange, a result, or an error.
+The request carries the query, the format, and the query language.
+The result carries JSON or formatted text, with the query type, the SQL, and the row count.
 An error carries a message and a code.
 The redaction exchange is unchanged from [ADR 001](001_grpc_communication.md).
 
 The schema response holds either the structured schema or formatted text.
-The proposal also had a pagination message in the query metadata.
-The shipped protocol has no pagination message, and pagination metadata lives in the formatted result body.
+The proposal also put pagination in the query metadata, but the shipped protocol puts it in the formatted result.
 
-In the Rails gRPC client, a new schema method replaces the ontology method.
-The query method gets the format and query language parameters.
+In the Rails gRPC client, a new schema method replaces the ontology method, and the query method gets the format and query language.
 
 **We keep no backward compatibility.**
 
-The Rust service drops the removed operations.
-All consumers move to the new operations in one coordinated deploy.
+Orbit drops the removed operations, and all consumers move to the new operations in one coordinated deploy.
 
 ### Access control
 
-All Orbit code in Rails lives in the EE code and behind a feature flag.
-Orbit is already listed as a GitLab Premium feature.
+All Orbit code in Rails is in the EE code and behind a feature flag, and Orbit is already listed as a GitLab Premium feature.
 A separate epic tracks billing, tier gating, instrumentation, and monetization.
 
 ## References

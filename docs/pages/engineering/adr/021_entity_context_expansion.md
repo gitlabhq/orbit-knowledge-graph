@@ -17,25 +17,25 @@ Amended by [ADR 022](022_queries_in_rails.md): Rails now runs the query stream, 
 
 ## Context
 
-An agent often holds a token for an entity, as a typed ID or a URL.
+An agent often holds a reference to an entity, such as a typed ID or a URL, and this ADR calls that reference a token.
 The agent needs the entity with its reviewers, linked issues, labels, and milestone.
 Today that takes one Rails lookup and one graph query for each related item.
-An issue tracks a Rails context endpoint that resolves tokens and returns PostgreSQL summaries.
+A planned Rails context endpoint resolves a token and returns a summary from PostgreSQL.
 A closed prototype of that endpoint motivated this decision, and the design now lives here.
 
-The endpoint must optionally attach graph data, and Orbit bills for each graph query.
+The endpoint can also attach graph data, but Orbit bills for each graph query.
 Orbit emits one billing event for each finished query stream, and Rails and Workhorse emit none.
 The event has no field that groups several queries.
-The event has a correlation ID, but Fulfillment uses it for logging and tracing only ([ADR 007](007_monetization_engineering.md)).
+It has a correlation ID, but the Fulfillment team uses it only for logging and tracing ([ADR 007](007_monetization_engineering.md)).
 A context request that ran several graph queries would bill as several queries, and the caller could not predict the count.
 
 Two accepted decisions shape where a graph query runs:
 
-- [ADR 008](008_workhorse_query_acceleration.md) gives Workhorse the gRPC stream, so a graph query never holds a Puma worker for its full duration.
+- [ADR 008](008_workhorse_query_acceleration.md) gives Workhorse the gRPC stream, so a graph query never holds a worker of Puma, the Rails web server, for its full duration.
 - [ADR 011](011_agent_command_surface.md) says that query execution outside Workhorse loses streaming, because Rails buffers large results.
 
-Rails can now run the stream itself, behind a feature flag.
-The flag is a derisk flag that is off by default, and the deployment tasks for I/O threads are still open.
+Rails can now run the stream itself, behind a feature flag that limits rollout risk and is off by default.
+The deployment tasks for I/O threads are still open.
 The Rails runner redacts in the same process and marks the request as I/O-bound.
 With I/O threads configured, the request does not hold a regular Puma thread, but that setting defaults to zero.
 
@@ -46,11 +46,10 @@ The buffering concern of ADR 011 is acceptable here, because the expansion is on
 
 ## Decision
 
-We fix the interface and the billing rule.
-We do not design the expansion queries.
-The Orbit team iterates on those queries and owns their content.
-
 **A context request takes one token and runs at most one billable graph query.**
+
+This ADR fixes the interface and the billing rule.
+It does not design the expansion queries, because the Orbit team owns their content and changes them over time.
 
 ### Request
 
@@ -61,7 +60,7 @@ An expand flag defaults to false.
 A wrong array length, an element that is not a string, or an expand flag that is not a boolean is a validation error.
 The response format is raw by default, or the large language model (LLM) format.
 The GQL format is a validation error.
-The endpoint declares the Orbit read permission, and fine-grained tokens list the route.
+The endpoint requires the Orbit read permission, and fine-grained access tokens can include the route.
 
 A token is a typed ID, a global ID, an instance URL, or a short reference for a merge request, issue, or epic.
 The endpoint supports merge requests and work items, including group-level work items.
@@ -93,7 +92,7 @@ These requests use rate-limit budget but are not billed:
 
 ### Response
 
-The response is version `1.1.0`.
+The response is version 1.1.0.
 It holds an array of entities, with one entry for the one token.
 Each entry carries the token as sent, the type, the string ID, a found flag, and an expansion field.
 A found entry adds the resolved token and the PostgreSQL summary, and an entry that was not found adds an error.
@@ -128,7 +127,7 @@ The echo is the exact payload that Rails sends to Orbit, and the named query end
 The caller can see the billed query, and can run it when expansion is unavailable.
 The echo replaces a fallback field from an earlier draft, and it is additive, so the response version stays the same.
 
-Version `1.1.0` is deliberate.
+Version 1.1.0 is deliberate.
 The closed prototype described version 1.0.0 with reference fields, which this contract renames to token fields.
 The prototype never merged, and the new version lets clients built against it detect the change.
 
@@ -173,7 +172,8 @@ The ID is null too for an internal ID token.
 For a typed ID or global ID, the ID only echoes what the caller sent.
 Linked items and reviewers include readable records only.
 Rails expands only a found, readable record, so the expansion payload holds only the ID of a found record.
-That rule saves work and avoids cross-tenant timing on the center, but redaction is the leak control.
+The center is that record, the entity that the token names.
+The rule saves work and removes a timing signal about the center across tenants, but redaction is the leak control.
 
 Orbit answers only inside the user's graph scope.
 The scope is the traversal paths where the user has at least the Reporter role and Orbit is on.
@@ -193,7 +193,7 @@ A candidate is a shared billable request ID that Rails puts in the signed claims
 Orbit would set the ID on the billing event of each sub-query, and billing could collapse them.
 This needs sign-off from the billing owners, who are the Orbit team for emission and Fulfillment for billing mediation.
 We have not built it, and the one-token limit stays until we do.
-We also defer an explicit Model Context Protocol (MCP) tool and an agent command.
+We also defer a dedicated Model Context Protocol (MCP) tool and an agent command.
 
 ## Consequences
 
@@ -203,11 +203,11 @@ We also defer an explicit Model Context Protocol (MCP) tool and an agent command
 - The context route and the named query route check the rate limit before the enabled-namespace check.
   Forbidden responses therefore use budget too, and we accept this for the first version.
 - Expansion waits for the Rails query rollout, and until then returns an expansion unavailable error.
-  Version `1.1.0` covers the whole body, so this decision needs no new Orbit version pin for raw or TOON output.
+  Version 1.1.0 covers the whole body, so this decision needs no new Orbit version pin for raw or TOON output.
 - A confidential issue tracks authorization-safe pagination, with page flags and cursors computed after redaction.
   That work does not block expansion, because expansion runs only named queries that the caller can already run.
   The fix must keep the truncation flag, because the truncation rule above relies on it.
-- The command-line interface (CLI) remote routing for context must use the POST request with tokens and the new response.
+- The Orbit command-line interface (CLI) must call the context endpoint with a POST request with tokens and read the new response.
   The closed CLI draft used a GET request with references.
   Whether a type and ID pair with a colon is a valid token form is still open.
 - Follow-up work covers the Rails resolver, group-level work items, and the per-type named queries in Orbit.
@@ -232,7 +232,7 @@ The correlation ID cannot do this today.
 This option is not possible today.
 A query stream carries one query, and a neighbors query takes one node selector, so one entity type.
 A traversal joins a few selectors, but does not return independent neighborhoods.
-A true single query needs batch or query language work in the billing-scoped server paths.
+A true single query needs batch or query language work in the Orbit server paths that are in the billing scope.
 With one token, we do not need it.
 
 ### Workhorse fan-out

@@ -15,7 +15,8 @@ Proposed
 
 ## Context
 
-Orbit reads repository content through internal Rails endpoints, one for each Gitaly remote procedure call (RPC).
+Orbit reads repository content from Gitaly, the GitLab Git storage service.
+It does this through internal Rails endpoints, one for each Gitaly remote procedure call (RPC).
 The archive endpoint wraps the archive RPC, and other endpoints wrap the changed-path, blob, and merge request diff RPCs.
 Rails authenticates and authorizes the request, resolves the repository storage, and hands the call to Workhorse.
 Workhorse performs the RPC and streams the bytes to Orbit.
@@ -26,19 +27,17 @@ Each read is also a full Rails request.
 One request per project archive is acceptable, but blob reads at query time would cost one Puma request per blob.
 
 Orbit cannot call Gitaly directly, because Orbit runs in its own Kubernetes cluster.
-Gitaly and Praefect are reachable only inside the GitLab network, so every read must pass through Workhorse.
+Gitaly and Praefect, its router, are reachable only inside the GitLab network, so every read must pass through Workhorse.
 
 Native gRPC needs HTTP/2, and the inbound Workhorse listener does not support it.
 The listener receives HTTP/1.1 behind an edge that terminates Transport Layer Security (TLS), in every supported topology.
-GitLab has used WebSockets for this constraint before.
-Duo Workflow bridges a bidirectional gRPC stream over a WebSocket.
-The language server executors moved from gRPC to WebSockets because some customers block HTTP/2.
+GitLab has worked around this limit with WebSockets before.
+Duo Workflow bridges a bidirectional gRPC stream over a WebSocket, and the language server executors moved to WebSockets because some customers block HTTP/2.
 
-A proof of concept (POC) compared a framed HTTP route, a dedicated gRPC port, and a reverse tunnel.
-The POC settled on a transparent proxy.
-Generated Gitaly stubs speak gRPC through a WebSocket, and Workhorse forwards RPCs without their schema, as Praefect does.
+A proof of concept (POC) compared a framed HTTP route, a dedicated gRPC port, and a reverse tunnel, and settled on a transparent proxy.
+Generated Gitaly client stubs speak gRPC through a WebSocket, and Workhorse forwards RPCs without decoding them, as Praefect does.
 An unmodified Rust gRPC client completed a code indexing job through a local Workhorse, Praefect, and Gitaly.
-The job included a 21 MB archive, back pressure, and concurrent streams.
+The job covered a large archive, back pressure, and concurrent streams.
 
 ## Decision
 
@@ -101,7 +100,7 @@ Workhorse pools its Gitaly client, so connections per project do not multiply co
 A profile is a rule set compiled into Workhorse.
 A policy is a profile that Rails selects and narrows for one session.
 The first version has one read-only repository profile.
-The profile allows accessor RPCs on the repository that Rails authorized and rejects all other calls.
+The profile allows read RPCs on the repository that Rails authorized and rejects all other calls.
 The profile also rejects a write RPC that Rails allowlists by mistake.
 Workhorse resolves the target repository with the same protobuf annotation as Gitaly and Praefect.
 
@@ -124,17 +123,17 @@ For Orbit, the worst case is about an hour more than the session age.
 The cap on this window is fixed in Workhorse, whatever values Rails requests.
 A short hard-kill grace then lets in-flight work close cleanly, so the observed ceiling can be a few seconds over the cap.
 
-A rollout feature flag per project or root namespace governs new pre-authorizations, and the flag is off by default.
+A rollout feature flag for each project or root namespace controls new pre-authorizations and is off by default.
 When the flag is off, Rails refuses new pre-authorizations and existing sessions drain.
-Orbit also requires Orbit indexing to be on for the project, the same gate that the indexing task producer applies.
+Pre-authorization also requires Orbit indexing to be on for the project, the same gate that the indexer applies before it schedules work.
 The proxy therefore cannot read a project that the indexer would not index.
 
 ### Capacity
 
-The fetch concurrency bound is the fleet bound only when the storage budgets are off or larger than the fetch concurrency times the pod count.
-The repository count does not change this bound, and more worker slots do not raise it.
-Backfill and incremental indexing share the concurrency.
-A NATS key-value lease also caps archive downloads per Gitaly storage across all pods.
+Each indexer pod limits how many archives it fetches at once, and backfill and incremental indexing share that limit.
+A NATS key-value lease also caps archive downloads for each Gitaly storage across all pods.
+The fleet cap is the fetch limit times the pod count, unless those storage budgets are lower.
+The repository count does not change this cap, and more worker slots do not raise it.
 At the time of this decision, the GitLab.com indexer pool had about 40 archive fetch slots.
 In each connection, Rails returns a stream cap that can narrow the Workhorse default.
 Workhorse also caps total connections, in-flight pre-authorizations, idle time, and message size.
@@ -152,7 +151,7 @@ Backfills produce short bursts of about 160 to 200 requests per second.
 Bursts of 50 requests per second or more carry about two thirds of the weekly volume in about two hours.
 The weekly mean of about five requests per second is therefore well above the steady-state percentiles.
 
-Archive durations over 24 hours, about 81,000 calls, were bimodal, with a long tail for large repositories:
+Over 24 hours, about 81,000 archive calls had bimodal durations, with a long tail for large repositories:
 
 | p50 | Average | p90 | p95 | p99 |
 |---:|---:|---:|---:|---:|
@@ -168,10 +167,10 @@ A proxy connection lives slightly longer than its RPC and can carry several RPCs
 
 A new consumer adds a Rails authorization check for its own credential, an RPC allowlist, and its own feature flag.
 The shared route needs no Workhorse, Ingress, or Cells routing change.
-Zoekt and the GitLab agent server for Kubernetes (KAS) are possible future consumers, and this decision does not implement them.
+Zoekt, the code search service, and the GitLab agent server for Kubernetes (KAS) are possible future consumers, and this decision does not implement them.
 
-A new RPC for an existing consumer is a Rails allowlist change when Workhorse already vendors its Gitaly descriptor.
-Otherwise, Workhorse must update its Gitaly module before the proxy can allow the method.
+A new RPC for an existing consumer is a Rails allowlist change when Workhorse already includes the Gitaly definition of that RPC.
+Otherwise, Workhorse must update its Gitaly dependency before the proxy can allow the method.
 
 ### Orbit as the first consumer
 

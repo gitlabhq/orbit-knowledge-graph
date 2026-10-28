@@ -16,21 +16,20 @@ Proposed
 ## Context
 
 Rails writes a system note when an issue closes, a merge request (MR) merges, a commit joins an MR, or one entity references another.
-Orbit drops these notes before they reach the edge table, because the note extract keeps only user notes.
-The graph-completeness epic and a team sync both named this gap.
-The graph had no mentions between MRs, or between MRs and work items.
-It had no links from MRs to commits, and no reopen transition.
+Orbit drops these notes before they become edges, because it reads only user notes.
+The graph had no mentions between MRs or between MRs and work items, no links from MRs to commits, and no reopen transition.
 Merged and closed edges came from foreign keys, but they were sparse on older data.
+The graph-completeness epic and a team sync both named this gap.
 
 The work has three difficulties:
 
-- Siphon did not replicate the system note metadata table, which holds the structured action of each note.
-- The target of a cross-reference is a GitLab Flavored Markdown reference in the free-text body, not a foreign key.
+- Siphon copies GitLab tables into the ClickHouse data lake, but it did not copy the system note metadata table.
+  That table holds the structured action of each note.
+- The target of a cross-reference is a GitLab Flavored Markdown reference in the free-text body, with no foreign key.
 - The source is large, with about 6.7 million system notes in one large top-level group and a global notes table of about 4 TB.
 
 A previous MR covered only the merged, closed, and reopened actions, with one filtered ClickHouse view per action.
-It passed continuous integration (CI).
-The author closed it to write this ADR first, which was a process decision and not a correctness one.
+It passed continuous integration (CI), but the author closed it for process reasons, to write this ADR first.
 It taught us three things:
 
 - The old edge extract shape had no filter clause, so it needed one view per action.
@@ -55,9 +54,8 @@ A proof of concept (POC) harness backs the decision, with results under [Benefit
 
 ### Scope and edge kinds
 
-The transform parses a subset of the Rails cross-reference actions and selected Enterprise Edition cross-reference actions.
-It also parses the commit action, which lists commit SHAs.
-The merge action has an inline SHA or an MR reference.
+The transform parses a subset of the Rails and Enterprise Edition cross-reference actions.
+It also parses the commit action, which lists commit SHAs, and the merge action, which has an inline SHA or an MR reference.
 
 | Edge | From and to | Source actions |
 |---|---|---|
@@ -85,7 +83,7 @@ We leave these out of scope:
 
 ### Transform design
 
-Under [ADR 014](014_entity_level_indexing.md), each entity kind has its own handler, NATS subject, and checkpoint.
+Under [ADR 014](014_entity_level_indexing.md), each entity kind has its own handler, message subject, and checkpoint.
 [ADR 015](015_pluggable_entity_pipelines.md) then made the transform stage the extension point.
 The system note entity is a derived ontology entity whose pipeline names the Rust transform.
 The shared pipeline owns extraction, paging, checkpoints, and writes.
@@ -106,7 +104,7 @@ for each page of system notes in the namespace:
 ```
 
 The deduplication key is the metadata ID, the edge kind, the source, and the target.
-The replacing merge engine makes a second pass idempotent.
+The ClickHouse table engine keeps one row for each key, so a second pass writes nothing new.
 The project and group ontology nodes already use the same route lookup, in the other direction.
 
 An unqualified reference, such as a bare MR number or a short SHA, takes its scope from the project of the noteable.
@@ -134,7 +132,7 @@ We vendor the Rails list of system note actions, pinned to an upstream commit.
 The list grew across releases, and Rails has changed system note phrasing more than once.
 A drift check, modeled on the one in [ADR 012](012_goon_format.md), compares the copy to upstream.
 It lists the missing values and runs in the pre-commit hook and the lint stage.
-At runtime, the transform logs and drops an unknown action and never panics.
+At runtime, the transform logs and drops an unknown action, and it does not crash.
 
 A new metric counts unknown actions by action, and the size of the list bounds its cardinality.
 The transform reuses the SDLC pipeline metrics and adds one general metric for edges written per edge kind.
@@ -148,7 +146,7 @@ The implementation MR does not turn the flag on until the two staging benchmarks
 
 The note path also wrote work item containment from four containment actions.
 The parent link table writes the same edges and is the source of truth for current hierarchy.
-Both writers shared one row identity in the replacing merge engine.
+Both writers shared one row identity in the table engine, which keeps the newest version of a row.
 The note row carried a wall-clock version and was never marked deleted.
 When a child left its parent, the note row outranked the deletion and brought the containment back.
 We removed the containment actions from the note path, which stops new writes.
@@ -179,7 +177,7 @@ We bumped the schema version, so a migration reindexes into new tables.
 ## Benefits of this approach
 
 The design closes the edge gap between MRs, work items, and commits.
-A new Rails cross-reference action becomes a parser change, not an ontology, fixture, and ETL change.
+A new Rails cross-reference action needs only a parser change, with no ontology, fixture, or ETL change.
 A slow system note pass does not redeliver messages for other entities in the namespace.
 
 The POC measured parse speed on one CPU core with a release build:
@@ -195,9 +193,8 @@ The transform dropped the seeded unknown actions with a warning.
 Both rates are about three times the pass criterion of 500,000 notes per second.
 For 6.7 million notes, parsing takes about four seconds on one core.
 
-On a small local GDK instance, three resolver queries took 8 ms for a batch of 1,000.
-They took 15 ms for a batch of 5,000.
-The budget per batch is 50 ms.
+On a small local GDK instance, three resolver queries took 8 ms for a batch of 1,000 and 15 ms for a batch of 5,000.
+The budget for each batch is 50 ms.
 Parse and resolve together ran at about 125,000 notes per second on one core.
 Few references resolved, because the seed data references IDs that do not exist, and those produced no rows.
 
@@ -205,8 +202,7 @@ These runs validate the query plan but not production scale.
 Two benchmarks need staging ClickHouse and the Siphon replication:
 
 - A full pass over the large top-level group in 10 minutes or less.
-  Compute alone extrapolates to about 54 seconds.
-  ClickHouse scan time, not parsing and resolving, dominates the time budget.
+  Compute alone extrapolates to about 54 seconds, so ClickHouse scan time takes most of the budget.
 - An edge density gain of at least three times for MR-to-work-item edges and 10 times for MR-to-MR edges.
   We propose these numbers for the upstream acceptance criterion.
 
@@ -220,7 +216,7 @@ The transform departs from the ontology-first convention, as only the code index
 We confine the departure to edge logic and record the reason in the code and the agent instructions.
 Fallback mode is dead code after the replication lands.
 If the replication slips, the transform ships in fallback mode, and the switch is one configuration change.
-The parser anchors on the reference, not the verb phrase, so a phrasing change does not break extraction.
+The parser anchors on the reference instead of the verb phrase, so a phrasing change does not break extraction.
 
 ### Same top-level namespace only
 
@@ -257,7 +253,7 @@ Rails could later act as a schema authority for unknown actions only.
 
 The closed MR was this option, and its author found it insufficient.
 It leaves the cross-reference gap open, and most lifecycle edges duplicate existing foreign keys.
-We keep a degraded mode, but it is not the target shape.
+We keep it only as the fallback mode.
 
 ### Extraction in Siphon
 
