@@ -399,25 +399,25 @@ setup-schema-validate:
 
 agent-plugins:
   stage: lint
-  image: oven/bun:1.4.4-alpine
+  image: oven/bun:1.4.4
   tags:
     - saas-linux-medium-amd64
   extends:
     - .mr-and-main-rules
   needs: []
+  variables:
+    CLAUDE_BIN: bun x @anthropic-ai/claude-code@2.1.308
+    DISABLE_GROWTHBOOK: "1"
   before_script:
-    - apk add --no-cache git
+    - apt-get update -qq && apt-get install -y -qq git > /dev/null
     - bun install --frozen-lockfile --ignore-scripts
   script:
-    - bun run --filter '@orbit/agent-plugin-core' --filter '@orbit/claude-code-plugin' --filter '@orbit/opencode-plugin' typecheck
-    - bun run --filter '@orbit/agent-plugin-core' --filter '@orbit/opencode-plugin' test
-    - bun run --filter '@orbit/claude-code-plugin' --filter '@orbit/opencode-plugin' build
-    - |
-      if [ -n "$(git status --porcelain -- config/setup)" ]; then
-        git status --short -- config/setup
-        echo "The agent plugins in config/setup are out of date. Run 'mise run build:agent-plugins' and commit."
-        exit 1
-      fi
+    - cd packages/agent-plugins
+    - bun run typecheck
+    - bun run test
+    - bun run test:claude
+    - bun run build
+    - git diff --exit-code -- ../../config/setup/opencode_plugin.js
 
 generate-config-schema:
   stage: lint

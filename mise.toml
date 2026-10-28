@@ -157,18 +157,10 @@ description = "Run code-graph and code-graph-incremental YAML suites with OpenCy
 run = "cargo build -p orbit-cli && cargo nextest run --test cli --test outside_repository --no-fail-fast"
 description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 
-[tasks."build:agent-plugins"]
-run = "bun run --filter '@orbit/claude-code-plugin' --filter '@orbit/opencode-plugin' build"
-description = "Build the Claude Code and OpenCode plugins in packages/ into config/setup, where orbit setup installs them from"
-
 [tasks."test:agent-plugins"]
-depends = ["build:agent-plugins"]
-run = [
-  "bun run --filter '@orbit/agent-plugin-core' --filter '@orbit/claude-code-plugin' --filter '@orbit/opencode-plugin' typecheck",
-  "bun run --filter '@orbit/agent-plugin-core' --filter '@orbit/opencode-plugin' test",
-  "bun run --filter '@orbit/claude-code-plugin' test:claude",
-]
-description = "Typecheck and test the agent plugins; the Claude Code tests need Claude Code 2.1.287+"
+dir = "packages/agent-plugins"
+run = ["bun run typecheck", "bun run test", "bun run test:claude", "bun run build"]
+description = "Typecheck, test, and build the Claude Code and OpenCode plugins; needs Claude Code 2.1.287+"
 
 [tasks."test:integration"]
 run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers --test indexer_containers --no-fail-fast --retries 0"
