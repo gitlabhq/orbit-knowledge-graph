@@ -20,7 +20,7 @@ export const TABS: Tab[] = [
   { route: "team", label: "Team" },
 ];
 
-export const USER_DOCS = { label: "User Docs", href: "https://docs.gitlab.com/orbit/" };
+export const USER_DOCS = { label: "User docs", href: "https://docs.gitlab.com/orbit/" };
 
 export const PAGES_DIR = "docs/pages";
 
