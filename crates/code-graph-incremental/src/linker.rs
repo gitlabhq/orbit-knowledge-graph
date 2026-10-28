@@ -14,7 +14,8 @@ use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, SsaEngine, Value};
 use crate::tags::ReservedTags;
 use crate::tree::{
-    Compact, Edge, EdgeKind, Role, find_member_in, is_name_text, members_by_level, members_named,
+    Compact, Edge, EdgeKind, Resolution, Role, find_member_in, is_name_text, members_by_level,
+    members_named,
 };
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
@@ -105,6 +106,7 @@ struct Fold<'t> {
     supertypes: FxHashMap<u32, Vec<u32>>,
     wildcards: WildcardImports,
     tags: ReservedTags,
+    resolution: Resolution,
     config: &'t LinkConfig,
     syms: &'t crate::intern::Interner,
     run: &'t Sentinel,
@@ -588,6 +590,9 @@ impl<'t> Fold<'t> {
     }
 
     fn declare(&mut self, c: Cursor<'t>, name: u32) {
+        if c.has_tag(self.tags.unbound) {
+            return;
+        }
         for sym in std::iter::once(name).chain(c.children_of(C::Alias).map(|a| a.sym())) {
             if sym == name && c.has(C::ImplBlock) && !self.lookup(name).is_empty() {
                 continue;
@@ -1263,6 +1268,7 @@ impl<'t> Fold<'t> {
             let mut targets = self.ssa.resolve_value(&value);
             match deferred {
                 Deferred::Callee(fallback) => {
+                    let outer = self.resolution;
                     if targets.is_empty() {
                         targets.extend(
                             fallback
@@ -1270,8 +1276,10 @@ impl<'t> Fold<'t> {
                                 .flat_map(|w| w.iter())
                                 .map(|&w| Value::ImportRef(w)),
                         );
+                        self.resolution = Resolution::WildcardImport;
                     }
                     self.emit_targets(&targets, from);
+                    self.resolution = outer;
                 }
                 Deferred::Receiver(object, method, seen) => {
                     targets.retain(|value| !seen.contains(value));
@@ -1314,10 +1322,14 @@ impl<'t> Fold<'t> {
         match r {
             Value::LocalDef(node) => {
                 if self.tree.cursor(*node).has_tag(self.tags.callable) {
-                    self.edges.push(Edge::local(from, *node, EdgeKind::Calls));
+                    let edge = Edge::local(from, *node, EdgeKind::Calls).resolved(self.resolution);
+                    self.edges.push(edge);
                 }
             }
-            Value::ImportRef(node) => self.edges.push(Edge::local(from, *node, EdgeKind::Imports)),
+            Value::ImportRef(node) => self.edges.push(
+                Edge::local(from, *node, EdgeKind::Imports)
+                    .resolved(self.resolution.max(Resolution::Import)),
+            ),
             Value::Call(call) => self
                 .edges
                 .push(Edge::local(from, *call, EdgeKind::TypeFlow)),
@@ -1362,10 +1374,17 @@ impl<'t> Fold<'t> {
                     self.push_calls(from, members);
                 }
                 Value::Call(n) if let Some(ty) = self.binding_type(n) => {
+                    let typed = match self.tree.cursor(n).has(C::SsaTyped) {
+                        true => Resolution::DeclaredType,
+                        false => Resolution::InferredType,
+                    };
+                    let outer = self.resolution;
+                    self.resolution = outer.max(typed);
                     self.resolve_obj(ty, method, from, role);
                     if obj.is(C::Object) {
                         self.emit(&r, from);
                     }
+                    self.resolution = outer;
                 }
                 _ if obj.is(C::Object) => self.emit(&r, from),
                 _ => {}
@@ -1411,6 +1430,10 @@ impl<'t> Fold<'t> {
                 Wildcards::Callable => callable_import(n),
             });
             targets = wild.map(|&n| Value::ImportRef(n)).collect();
+            let outer = std::mem::replace(&mut self.resolution, Resolution::WildcardImport);
+            self.emit_targets(&targets, from);
+            self.resolution = outer;
+            return;
         }
         self.emit_targets(&targets, from);
     }
@@ -1649,7 +1672,8 @@ impl<'t> Fold<'t> {
 
     fn push_calls(&mut self, from: u32, targets: Vec<u32>) {
         for m in targets {
-            self.edges.push(Edge::local(from, m, EdgeKind::Calls));
+            let edge = Edge::local(from, m, EdgeKind::Calls).resolved(self.resolution);
+            self.edges.push(edge);
         }
     }
 
@@ -1686,6 +1710,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
 
     let mut f = Fold {
         tree,
+        resolution: Resolution::Local,
         max_edges: env.limits.max_file_edges,
         ssa,
         cur: entry,
@@ -1744,9 +1769,10 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         for c in tree.cursor(dn).children().filter(|c| c.is(C::Decorator)) {
             for target in f.lookup_chain(c) {
                 match target {
-                    Value::LocalDef(target) => {
-                        f.edges.push(Edge::local(dn, target, EdgeKind::Calls))
-                    }
+                    Value::LocalDef(target) => f.edges.push(Edge {
+                        site: Some(c.index()),
+                        ..Edge::local(dn, target, EdgeKind::Calls)
+                    }),
                     Value::ImportRef(target) => f.edges.push(Edge {
                         site: Some(c.index()),
                         ..Edge::local(dn, target, EdgeKind::Imports)
@@ -1758,6 +1784,13 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     }
 
     for edge in &mut f.edges {
+        if edge.resolution == Resolution::None {
+            edge.resolution = match edge.kind {
+                EdgeKind::Calls | EdgeKind::Extends => Resolution::Local,
+                EdgeKind::Imports => Resolution::Import,
+                _ => Resolution::None,
+            };
+        }
         if edge.kind == EdgeKind::TypeFlow && f.shadowed_calls.contains(&edge.to_node) {
             edge.call_resolution = crate::tree::CallResolution::NonCallable;
         }

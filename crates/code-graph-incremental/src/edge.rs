@@ -19,6 +19,8 @@ pub enum EdgeKind {
     Imports = 3,
     Extends = 4,
     TypeFlow = 5,
+    DependsOn = 6,
+    Overrides = 7,
 }
 
 impl EdgeKind {
@@ -50,6 +52,34 @@ pub enum CallResolution {
     Reference,
 }
 
+#[repr(u8)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    strum::IntoStaticStr,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum Resolution {
+    Local,
+    Import,
+    DeclaredType,
+    InferredType,
+    WildcardImport,
+    #[default]
+    #[strum(serialize = "")]
+    None,
+}
+
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
@@ -61,6 +91,7 @@ pub struct Edge {
     pub kind: EdgeKind,
     pub site: Option<u32>,
     pub call_resolution: CallResolution,
+    pub resolution: Resolution,
 }
 
 impl Edge {
@@ -73,6 +104,7 @@ impl Edge {
             kind,
             site: None,
             call_resolution: CallResolution::Unknown,
+            resolution: Resolution::None,
         }
     }
     pub fn from_fi(&self) -> usize {
@@ -89,5 +121,8 @@ impl Edge {
     }
     pub fn local(from: u32, to: u32, kind: EdgeKind) -> Self {
         Self::new(0, from, 0, to, kind)
+    }
+    pub fn resolved(self, resolution: Resolution) -> Self {
+        Self { resolution, ..self }
     }
 }

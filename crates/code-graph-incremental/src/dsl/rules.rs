@@ -19,8 +19,6 @@
 //!           fields: { O: object, M: member }
 //! ```
 
-use std::collections::HashMap;
-
 use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::pattern::{Out, Rewrite, TagEntry, Tf};
@@ -354,7 +352,7 @@ struct Rule {
     #[serde(default)]
     append: Option<Vec<String>>,
     #[serde(default)]
-    tag: Option<HashMap<String, String>>,
+    tag: Option<indexmap::IndexMap<String, String>>,
     #[serde(default, rename = "where")]
     where_clause: Option<String>,
     #[serde(default)]
@@ -451,7 +449,7 @@ fn compile_stage(stage: &Stage, lang: &Lang) -> Result<Vec<Rewrite>, LoadError> 
 }
 
 fn compile_tags(
-    tag_map: &HashMap<String, String>,
+    tag_map: &indexmap::IndexMap<String, String>,
     ctx: &mut crate::pattern::Ctx,
 ) -> Result<Vec<TagEntry>, LoadError> {
     tag_map
