@@ -1163,13 +1163,13 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
     assert!(manifest.status.success());
     let manifest = String::from_utf8(manifest.stdout).unwrap();
     assert!(manifest.contains("name: orbit-cli"));
-    assert!(manifest.contains("references/local/sql.md"));
+    assert!(manifest.contains("references/local/cli.md"));
     assert!(
         manifest.contains("`orbit skills get orbit [path]`"),
         "served manifest must tell binary users the version-matched access path"
     );
 
-    for path in ["SKILL.md", "references/local/sql.md"] {
+    for path in ["SKILL.md", "references/local/cli.md"] {
         let out = hermetic_skills_cmd(cache.path())
             .args(["skills", "get", "orbit", path])
             .output()
@@ -1185,15 +1185,15 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
     }
 
     let canonical = hermetic_skills_cmd(cache.path())
-        .args(["skills", "get", "orbit", "references/local/sql.md"])
+        .args(["skills", "get", "orbit", "references/local/cli.md"])
         .output()
         .unwrap();
     let named_alias = hermetic_skills_cmd(cache.path())
-        .args(["skills", "orbit", "references/local/sql.md"])
+        .args(["skills", "orbit", "references/local/cli.md"])
         .output()
         .unwrap();
     let path_alias = hermetic_skills_cmd(cache.path())
-        .args(["skills", "references/local/sql.md"])
+        .args(["skills", "references/local/cli.md"])
         .output()
         .unwrap();
     assert!(canonical.status.success());
@@ -1248,13 +1248,13 @@ fn skills_reject_unknown_names_and_paths() {
     assert!(!error.contains("embedded local skill"));
 
     let path_as_name = hermetic_skills_cmd(cache.path())
-        .args(["skills", "get", "references/local/sql.md"])
+        .args(["skills", "get", "references/local/cli.md"])
         .output()
         .unwrap();
     assert!(!path_as_name.status.success());
     assert!(path_as_name.stdout.is_empty());
     let error = String::from_utf8(path_as_name.stderr).unwrap();
-    assert!(error.contains("invalid skill name \"references/local/sql.md\""));
+    assert!(error.contains("invalid skill name \"references/local/cli.md\""));
     assert!(!error.contains("path shorthand"));
 
     for path in [

@@ -1,9 +1,9 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.2+gql
+version: 0.35.3+gql
 license: MIT
-compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
+compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
   audience: developers
   keywords: orbit, knowledge-graph, gkg, graph, query, glab
@@ -34,7 +34,7 @@ If you find a legacy JSON query (an object with `query_type`, `nodes`, or `relat
 
 ## Discovery
 
-`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/sql.md` to print a file.
+`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/cli.md` to print a file.
 
 Run `CALL db.schema()` once per session, because the schema does not change mid-session. It lists every relationship as `(Source)-[:TYPE]->(Target)` and the properties of the common nodes, such as `User`, `Project`, `Group`, `MergeRequest`, and `WorkItem`. Run `CALL db.schema('Node')` only for a node it does not list properties for. Query syntax and paste-ready queries are in [`references/gql.md`](references/gql.md).
 
@@ -54,7 +54,7 @@ glab orbit query "CALL db.schema('Project')"
 glab orbit query "MATCH (p:Project {full_path: 'gitlab-org/gitlab'}) RETURN p.id, p.full_path LIMIT 1"
 ```
 
-With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted string literals then need double quotes around the query. Inline query text needs Orbit CLI 0.130.0 or later. If `glab orbit query` rejects the text argument, run `glab orbit --update`.
+With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted string literals then need double quotes around the query. Inline query text needs GitLab Orbit CLI 0.130.0 or later. If `glab orbit query` rejects the text argument, run `glab orbit --update`.
 
 `--file` reads a JSON request envelope whose `query` field holds the query text, not a bare query file. `--file -` reads that envelope from stdin. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
 
@@ -82,7 +82,7 @@ Orbit answers come from graph queries, not an authoritative source. Show the que
 
 ## Managed CLI
 
-`glab orbit` downloads, verifies, and runs the Orbit binary from the `orbit-cli` package (macOS, Linux, and Windows). `grep` and `context` read the local graph and index the working tree on their own. `workspace` groups the other local-graph commands (`index`, `sql`, `schema`, `list`, `mcp serve`). `query`, `status`, and `schema` use Orbit Remote.
+`glab orbit` downloads, verifies, and runs the GitLab Orbit CLI binary from the `orbit-cli` package (macOS, Linux, and Windows). `grep` and `context` read the local graph and index the working tree on their own. `workspace` groups the other local-graph commands (`index`, `list`, `mcp serve`). `query`, `status`, and `schema` call the GitLab Orbit API.
 
 glab handles `--install`, `--update`, and `--yes` itself and forwards everything else to the binary. `--install` and `--update` are mutually exclusive. `--yes` skips the confirmation prompts, so pass it in scripts and agent runs. Put these flags before the subcommand (`glab orbit --yes status`); the binary rejects `--yes` after other subcommands, except for `setup` and `uninstall`, which take their own. glab's own `update` command also takes `--yes`. `glab help orbit` shows the wrapper help. `glab orbit help` and `glab orbit <command> --help` show the binary's.
 
