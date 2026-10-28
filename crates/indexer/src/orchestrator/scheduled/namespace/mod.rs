@@ -178,7 +178,6 @@ impl NamespaceDispatcher {
 
         let elapsed = upper.signed_duration_since(last_sweep.watermark);
         let interval = seconds(self.config.sweep_interval_secs);
-        // Two ticks, so clock jitter at the boundary still skips at least one tick.
         let quiet = TimeDelta::from_std(self.config.schedule.interval_hint().saturating_mul(2))
             .unwrap_or(TimeDelta::MAX);
         if elapsed >= interval {
