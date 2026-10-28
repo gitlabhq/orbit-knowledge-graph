@@ -159,7 +159,7 @@ UnsignedInteger = @{ ("0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) ~ !IdentifierPar
 PathCount = @{ ("2" | "1" | "0") ~ !IdentifierPart }
 HopCount = @{ ("4" | "3" | "2" | "1" | "0") ~ !IdentifierPart }
 LimitCount = @{ ("1001" | "1000" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT{0,2} | "0") ~ !IdentifierPart }
-SkipCount = @{ ("10001" | "10000" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT{0,3} | "0" | "-1") ~ !IdentifierPart }
+SkipCount = @{ ("10001" | "10000" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT{0,3} | "0") ~ !IdentifierPart }
 
 // Raw C0 controls and DEL are invalid. Explicit escapes remain valid and count after decoding.
 StringLiteral = @{ "\"" ~ DoubleQuotedCharacter* ~ "\"" | "'" ~ SingleQuotedCharacter* ~ "'" }
@@ -170,10 +170,11 @@ ControlCharacter = _{ '\u{0000}'..'\u{001f}' | "\u{007f}" }
 // Escape letters b, f, n, r, and t are case-insensitive. Unicode has exactly four or eight hex digits.
 EscapedChar = _{ "\\" ~ ("\\" | "'" | "\"" | ^"b" | ^"f" | ^"n" | ^"r" | ^"t" | "u" ~ ASCII_HEX_DIGIT{4} | "U" ~ ASCII_HEX_DIGIT{8}) }
 
-// Empty IN and its 101st value are sentinels for the shared 1-100-value diagnostic.
-// General value lists preserve empty arrays. Both upper limits are equal today.
-InListLiteral = { "[" ~ SP? ~ (Value ~ (SP? ~ "," ~ SP? ~ Value){0,100})? ~ SP? ~ "]" }
-ListLiteral = { "[" ~ SP? ~ (Value ~ (SP? ~ "," ~ SP? ~ Value){0,100})? ~ SP? ~ "]" }
+// The 501st value is a sentinel for the node_ids diagnostic, because an id IN list becomes node_ids.
+// Validation caps other IN lists at 100. ListOverflow takes the rest, so any longer list gets one clear error.
+InListLiteral = { "[" ~ SP? ~ (Value ~ (SP? ~ "," ~ SP? ~ Value){0,500} ~ ListOverflow?)? ~ SP? ~ "]" }
+ListLiteral = { "[" ~ SP? ~ (Value ~ (SP? ~ "," ~ SP? ~ Value){0,500} ~ ListOverflow?)? ~ SP? ~ "]" }
+ListOverflow = { (SP? ~ "," ~ SP? ~ Value)+ }
 
 Variable = { SymbolicName }
 
@@ -184,8 +185,8 @@ SymbolicName = _{ EscapedSymbolicName | !ReservedWord ~ UnescapedSymbolicName }
 // The 65th character is a sentinel for validate_identifier's 64-byte diagnostic.
 UnescapedSymbolicName = @{ IdentifierStart ~ IdentifierPart{0,64} }
 
-// Backticks do not permit punctuation or doubled-backtick escapes.
-EscapedSymbolicName = @{ "`" ~ IdentifierStart ~ IdentifierPart{0,64} ~ "`" }
+// Backticks permit reserved words. validate_identifier rejects any other character, so the error names the problem.
+EscapedSymbolicName = @{ "`" ~ (!"`" ~ ANY)+ ~ "`" }
 
 IdentifierStart = _{ ASCII_ALPHA | "_" }
 IdentifierPart = _{ ASCII_ALPHANUMERIC | "_" }

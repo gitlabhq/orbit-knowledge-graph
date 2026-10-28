@@ -288,7 +288,7 @@ the later pages move by one row, so a row can repeat or be missing.
 - `ORDER BY` takes one sort key.
 - `LIMIT` accepts 1 to 1000 rows. The default is 30.
 - `SKIP` accepts 0 to 10,000 rows.
-- Each node returns at most 50 properties and filters on at most 100 IDs.
+- Each node returns at most 50 properties and filters on at most 500 IDs.
 - The query text is at most 32 KiB.
 
 ## Debug a query
