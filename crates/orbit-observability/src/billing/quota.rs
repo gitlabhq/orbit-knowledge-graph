@@ -12,6 +12,7 @@ pub mod values {
     pub const ALLOW: &str = "allow";
     pub const DENY: &str = "deny";
     pub const FAIL_CLOSED: &str = "fail_closed";
+    pub const FAIL_OPEN: &str = "fail_open";
     pub const SKIPPED: &str = "skipped";
     pub const HIT: &str = "hit";
     pub const MISS: &str = "miss";
@@ -19,9 +20,11 @@ pub mod values {
 
 const DOMAIN: &str = "billing.quota";
 
-// `decision=fail_closed` means CDot was unreachable, rejected the credentials, or
-// returned a status other than 200 or 402; the request was denied. Distinct from
-// `decision=deny` (CDot returned 402).
+// `decision=fail_open` means CDot was unreachable, answered 5xx after one retry, or
+// its circuit breaker was open; the request was allowed. `decision=fail_closed`
+// means CDot rejected the credentials or returned another status than 200, 402, or
+// 5xx; the request was denied. Both are distinct from `decision=deny` (CDot
+// returned 402).
 //
 // `cache=miss` on `decision=fail_closed` does not imply a 1:1 CDot call ratio: moka
 // coalesces concurrent misses, and failed checks are never cached, so under a
@@ -29,7 +32,7 @@ const DOMAIN: &str = "billing.quota";
 // fewer. Use `cdot_duration_seconds_count{outcome="fail_closed"}` for the call rate.
 pub const QUOTA_DECISIONS: MetricSpec = MetricSpec::counter(
     "gkg.billing.quota.decisions",
-    "Quota gate decisions, labelled by outcome (allow/deny/fail_closed/skipped), cache result \
+    "Quota gate decisions, labelled by outcome (allow/deny/fail_open/fail_closed/skipped), cache result \
      (hit/miss), and source_type (mcp/rest). \
      cache=miss on fail_closed does not imply a 1:1 CDot call ratio — see \
      gkg.billing.quota.cdot.duration for actual upstream call counts.",

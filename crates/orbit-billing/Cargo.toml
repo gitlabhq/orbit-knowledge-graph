@@ -11,6 +11,7 @@ path = "src/lib.rs"
 testkit = []
 
 [dependencies]
+circuit-breaker = { workspace = true }
 gitlab-client = { path = "../gitlab-client" }
 labkit = { workspace = true }
 labkit-events = { workspace = true }
@@ -27,6 +28,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 tonic = { workspace = true }
 tonic-types = { workspace = true }
 orbit-log-fields = { workspace = true }

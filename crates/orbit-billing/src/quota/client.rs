@@ -1,8 +1,11 @@
+use std::sync::Arc;
 use std::time::Duration;
 
+use circuit_breaker::{CircuitBreaker, CircuitBreakerError, CircuitConfig};
 use orbit_log_fields::warn;
-use reqwest::StatusCode;
+use orbit_observability::resilience::MetricsObserver;
 use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderName, HeaderValue};
+use reqwest::{RequestBuilder, Response, StatusCode};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 
@@ -12,6 +15,12 @@ use crate::constants::{APP_ID, CDOT_QUOTA_PATH, normalize_realm};
 const X_ADMIN_EMAIL: HeaderName = HeaderName::from_static("x-admin-email");
 const X_ADMIN_TOKEN: HeaderName = HeaderName::from_static("x-admin-token");
 const X_LICENSE_TOKEN: HeaderName = HeaderName::from_static("x-license-token");
+const RETRY_BACKOFF: Duration = Duration::from_millis(250);
+const CIRCUIT_CONFIG: CircuitConfig = CircuitConfig {
+    failure_threshold: 2,
+    window: Duration::from_secs(30),
+    cooldown: Duration::from_secs(15),
+};
 
 pub(crate) enum QuotaAuth {
     AdminToken { user: String, token: String },
@@ -40,8 +49,24 @@ pub(crate) enum QuotaOutcome {
 #[strum(serialize_all = "snake_case")]
 pub(crate) enum FailureReason {
     Unreachable,
+    ServerError,
+    CircuitOpen,
     Unauthorized,
     UnexpectedResponse,
+}
+
+impl FailureReason {
+    pub(crate) fn is_outage(self) -> bool {
+        matches!(
+            self,
+            Self::Unreachable | Self::ServerError | Self::CircuitOpen
+        )
+    }
+}
+
+enum Outage {
+    Unreachable(reqwest::Error),
+    ServerError(Box<Response>),
 }
 
 pub(crate) struct QuotaClient {
@@ -49,6 +74,7 @@ pub(crate) struct QuotaClient {
     base_url: String,
     default_ttl: Duration,
     license_auth: bool,
+    circuit_breaker: CircuitBreaker,
 }
 
 impl QuotaClient {
@@ -84,7 +110,18 @@ impl QuotaClient {
             base_url,
             default_ttl,
             license_auth,
+            circuit_breaker: CircuitBreaker::new(
+                "customers_dot",
+                CIRCUIT_CONFIG,
+                Arc::new(MetricsObserver::new()),
+            ),
         })
+    }
+
+    #[cfg(test)]
+    fn with_circuit_breaker(mut self, circuit_breaker: CircuitBreaker) -> Self {
+        self.circuit_breaker = circuit_breaker;
+        self
     }
 
     pub(crate) async fn check(&self, request: &CdotRequest) -> QuotaOutcome {
@@ -116,9 +153,20 @@ impl QuotaClient {
             builder = builder.header(X_LICENSE_TOKEN, token);
         }
 
-        let response = match builder.send().await {
-            Ok(r) => r,
-            Err(e) => {
+        let response = match self
+            .circuit_breaker
+            .call(|| send_with_one_retry(builder, request))
+            .await
+        {
+            Ok(response) => response,
+            Err(CircuitBreakerError::Inner(Outage::ServerError(response))) => *response,
+            Err(CircuitBreakerError::Open { .. }) => {
+                return QuotaOutcome::Failed {
+                    reason: FailureReason::CircuitOpen,
+                    block_reason: None,
+                };
+            }
+            Err(CircuitBreakerError::Inner(Outage::Unreachable(e))) => {
                 warn!(
                     safe(ERROR_TYPE) = "quota_request",
                     expanded(ERROR_MESSAGE) = %e,
@@ -127,7 +175,7 @@ impl QuotaClient {
                     safe(UNIQUE_INSTANCE_ID) = request.key.unique_instance_id.as_str(),
                     safe(FEATURE_QUALIFIED_NAME) = request.key.feature_qualified_name.as_str(),
                     safe(CORRELATION_ID) = request.correlation_id.as_str(),
-                    "quota check request failed; failing closed"
+                    "quota check request failed"
                 );
                 return QuotaOutcome::Failed {
                     reason: FailureReason::Unreachable,
@@ -162,17 +210,56 @@ impl QuotaClient {
             safe(UNIQUE_INSTANCE_ID) = request.key.unique_instance_id.as_str(),
             safe(FEATURE_QUALIFIED_NAME) = request.key.feature_qualified_name.as_str(),
             safe(CORRELATION_ID) = request.correlation_id.as_str(),
-            "unexpected quota check response; failing closed"
+            "unexpected quota check response"
         );
-        let reason = if status == StatusCode::UNAUTHORIZED {
-            FailureReason::Unauthorized
-        } else {
-            FailureReason::UnexpectedResponse
+        let reason = match status {
+            StatusCode::UNAUTHORIZED => FailureReason::Unauthorized,
+            status if status.is_server_error() => FailureReason::ServerError,
+            _ => FailureReason::UnexpectedResponse,
         };
         QuotaOutcome::Failed {
             reason,
             block_reason,
         }
+    }
+}
+
+async fn send_with_one_retry(
+    builder: RequestBuilder,
+    request: &CdotRequest,
+) -> Result<Response, Outage> {
+    let retry = builder.try_clone();
+    let first = classify_outage(builder.send().await);
+    let (Some(retry), Err(outage)) = (retry, &first) else {
+        return first;
+    };
+
+    let (status, error) = match outage {
+        Outage::ServerError(response) => (Some(response.status().as_u16()), None),
+        Outage::Unreachable(e) => (None, Some(e.to_string())),
+    };
+    warn!(
+        safe(ERROR_TYPE) = "quota_request",
+        safe(HTTP_STATUS_CODE) = status,
+        expanded(ERROR_MESSAGE) = error,
+        safe(REALM) = normalize_realm(&request.key.realm),
+        safe(INSTANCE_ID) = request.key.instance_id.as_str(),
+        safe(UNIQUE_INSTANCE_ID) = request.key.unique_instance_id.as_str(),
+        safe(FEATURE_QUALIFIED_NAME) = request.key.feature_qualified_name.as_str(),
+        safe(CORRELATION_ID) = request.correlation_id.as_str(),
+        "quota check failed transiently; retrying once"
+    );
+    tokio::time::sleep(RETRY_BACKOFF).await;
+    classify_outage(retry.send().await)
+}
+
+fn classify_outage(result: reqwest::Result<Response>) -> Result<Response, Outage> {
+    match result {
+        Ok(response) if response.status().is_server_error() => {
+            Err(Outage::ServerError(Box::new(response)))
+        }
+        Ok(response) => Ok(response),
+        Err(e) => Err(Outage::Unreachable(e)),
     }
 }
 
@@ -276,6 +363,29 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (format!("http://{addr}"), seen)
+    }
+
+    async fn sequenced_server(statuses: Vec<AxumStatus>) -> (String, Arc<Mutex<usize>>) {
+        install_crypto();
+        let calls = Arc::new(Mutex::new(0));
+        let counter = calls.clone();
+        let app = Router::new().route(
+            crate::constants::CDOT_QUOTA_PATH,
+            get(move || {
+                let counter = counter.clone();
+                let statuses = statuses.clone();
+                async move {
+                    let mut calls = counter.lock().unwrap();
+                    let status = statuses[(*calls).min(statuses.len() - 1)];
+                    *calls += 1;
+                    status
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (format!("http://{addr}"), calls)
     }
 
     fn license_request() -> CdotRequest {
@@ -405,6 +515,68 @@ mod tests {
             client.check(&sample_request()).await,
             failed(FailureReason::UnexpectedResponse)
         );
+    }
+
+    #[tokio::test]
+    async fn server_error_is_retried_once_then_allows() {
+        let (url, calls) = sequenced_server(vec![AxumStatus::BAD_GATEWAY, AxumStatus::OK]).await;
+        let outcome = license_client(url).check(&license_request()).await;
+        assert!(matches!(
+            outcome,
+            QuotaOutcome::Decided {
+                decision: QuotaDecision::Allow,
+                ..
+            }
+        ));
+        assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn repeated_server_error_fails_after_one_retry() {
+        let (url, calls) = sequenced_server(vec![AxumStatus::BAD_GATEWAY]).await;
+        assert_eq!(
+            license_client(url).check(&license_request()).await,
+            failed(FailureReason::ServerError)
+        );
+        assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn open_circuit_skips_cdot() {
+        let (url, calls) = sequenced_server(vec![AxumStatus::BAD_GATEWAY]).await;
+        let breaker = CircuitBreaker::new(
+            "customers_dot-test",
+            CircuitConfig {
+                failure_threshold: 1,
+                window: Duration::from_secs(60),
+                cooldown: Duration::from_secs(60),
+            },
+            Arc::new(circuit_breaker::NoopObserver),
+        );
+        let client = license_client(url).with_circuit_breaker(breaker);
+
+        assert_eq!(
+            client.check(&license_request()).await,
+            failed(FailureReason::ServerError)
+        );
+        assert_eq!(
+            client.check(&license_request()).await,
+            failed(FailureReason::CircuitOpen)
+        );
+        assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn client_errors_are_not_retried() {
+        for status in [
+            AxumStatus::PAYMENT_REQUIRED,
+            AxumStatus::UNAUTHORIZED,
+            AxumStatus::FORBIDDEN,
+        ] {
+            let (url, calls) = sequenced_server(vec![status, AxumStatus::OK]).await;
+            license_client(url).check(&license_request()).await;
+            assert_eq!(*calls.lock().unwrap(), 1, "{status} was retried");
+        }
     }
 
     #[tokio::test]

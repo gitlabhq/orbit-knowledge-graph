@@ -158,6 +158,21 @@ impl QuotaService {
                 );
                 Ok(())
             }
+            QuotaGateDecision::Failed(reason, _) if reason.is_outage() => {
+                warn!(
+                    safe(GL_USER_ID) = inputs.user_id,
+                    safe(REALM) = realm,
+                    safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                    expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                    safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                    safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                    safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                    safe(REASON) = <&str>::from(reason),
+                    safe(CORRELATION_ID) = correlation_id.as_str(),
+                    "quota gate decision: fail_open"
+                );
+                Ok(())
+            }
             QuotaGateDecision::Failed(reason, block_reason) => {
                 warn!(
                     safe(GL_USER_ID) = inputs.user_id,
@@ -210,11 +225,14 @@ fn record_skipped(source_type: &str) {
 }
 
 fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &str) {
-    use orbit_observability::billing::quota::values::{ALLOW, DENY, FAIL_CLOSED, HIT, MISS};
+    use orbit_observability::billing::quota::values::{
+        ALLOW, DENY, FAIL_CLOSED, FAIL_OPEN, HIT, MISS,
+    };
 
     let decision_label = match gate {
         QuotaGateDecision::Allow => ALLOW,
         QuotaGateDecision::Deny(_) => DENY,
+        QuotaGateDecision::Failed(reason, _) if reason.is_outage() => FAIL_OPEN,
         QuotaGateDecision::Failed(..) => FAIL_CLOSED,
     };
     let cache_label = match cache {
@@ -494,8 +512,6 @@ mod tests {
             AxumStatus::UNAUTHORIZED,
             AxumStatus::FORBIDDEN,
             AxumStatus::UNPROCESSABLE_ENTITY,
-            AxumStatus::INTERNAL_SERVER_ERROR,
-            AxumStatus::SERVICE_UNAVAILABLE,
         ] {
             let (url, counter) = counting_server(status).await;
             let svc = service_for(url);
@@ -522,11 +538,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_closed_when_cdot_unreachable() {
+    async fn fails_open_uncached_on_server_errors() {
+        for status in [
+            AxumStatus::INTERNAL_SERVER_ERROR,
+            AxumStatus::BAD_GATEWAY,
+            AxumStatus::SERVICE_UNAVAILABLE,
+        ] {
+            let (url, counter) = counting_server(status).await;
+            let svc = service_for(url);
+
+            for _ in 0..2 {
+                assert!(
+                    svc.check(&inputs_with_source("mcp")).await.is_ok(),
+                    "{status}"
+                );
+            }
+            assert_eq!(counter.load(Ordering::SeqCst), 4, "{status}");
+        }
+    }
+
+    #[tokio::test]
+    async fn fails_open_when_cdot_unreachable() {
         install_crypto();
         let svc = service_for("http://127.0.0.1:1".into());
-        let err = svc.check(&inputs_with_source("mcp")).await.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+        assert!(svc.check(&inputs_with_source("mcp")).await.is_ok());
     }
 
     #[tokio::test]

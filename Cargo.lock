@@ -6027,6 +6027,7 @@ name = "orbit-billing"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "circuit-breaker",
  "gitlab-client",
  "labkit",
  "labkit-events",
