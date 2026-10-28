@@ -152,7 +152,7 @@ These forms are supported:
 
 Values are literals.
 A string is in single or double quotes.
-Write a control character as an escape: `\n`, `\t`, `\r`, `\b`, `\f`, or `\uXXXX`. Also escape `\\`, `\'`, and `\"`.
+Write a control character as an escape: `\n`, `\t`, `\r`, `\b`, `\f`, `\uXXXX`, or `\UXXXXXXXX`. Also escape `\\`, `\'`, and `\"`.
 A string that contains a raw control character, such as a newline or a tab, fails.
 
 For a timestamp property, such as `mr.created_at`, use a string in the format `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SS`,
