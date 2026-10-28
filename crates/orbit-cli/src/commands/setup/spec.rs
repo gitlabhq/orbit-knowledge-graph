@@ -407,7 +407,6 @@ mod tests {
         assert!(!json.contains("{{"), "{json}");
     }
 
-    /// Commands an agent has no reason to run, so plugins give them no label.
     const UNLABELED: &[&str] = &[
         "hook-guard",
         "send-event",
@@ -417,26 +416,14 @@ mod tests {
     ];
 
     #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct CallLabel {
-        #[allow(dead_code)]
-        done: String,
-        #[allow(dead_code)]
-        running: String,
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
     struct CallLabels {
-        commands: BTreeMap<String, CallLabel>,
-        tools: BTreeMap<String, CallLabel>,
+        commands: BTreeMap<String, Value>,
+        tools: BTreeMap<String, Value>,
     }
 
     fn call_labels() -> CallLabels {
-        let file = SetupAssets::get("call_labels.yaml")
-            .expect("config/setup/call_labels.yaml is embedded");
-        orbit_utils::yaml::from_slice(&file.data)
-            .unwrap_or_else(|e| panic!("config/setup/call_labels.yaml is invalid: {e}"))
+        let source = include_str!("../../../../../packages/agent-plugins/core/labels.ts");
+        serde_json::from_str(source.trim_start_matches("export default ")).unwrap()
     }
 
     struct CliCommand {
@@ -483,7 +470,7 @@ mod tests {
         for key in labels.keys() {
             assert!(
                 known.contains(&key.as_str()),
-                "call_labels.yaml: `{key}` is not an orbit command"
+                "labels.ts: `{key}` is not an orbit command"
             );
         }
         for command in &commands {
@@ -491,7 +478,7 @@ mod tests {
                 for alias in &command.aliases {
                     assert!(
                         labels.contains_key(alias),
-                        "call_labels.yaml: label `{alias}` like `{}`",
+                        "labels.ts: label `{alias}` like `{}`",
                         command.path
                     );
                 }
@@ -500,7 +487,7 @@ mod tests {
                 || command.ancestors.iter().any(|a| labels.contains_key(a));
             assert!(
                 labeled || command.has_subcommands || UNLABELED.contains(&command.path.as_str()),
-                "call_labels.yaml: label `{}`, or add it to UNLABELED",
+                "labels.ts: label `{}`, or add it to UNLABELED",
                 command.path
             );
         }
@@ -513,7 +500,7 @@ mod tests {
         for tool in call_labels().tools.keys() {
             assert!(
                 tools.contains(&tool.as_str()),
-                "call_labels.yaml: `{tool}` is not an Orbit tool"
+                "labels.ts: `{tool}` is not an Orbit tool"
             );
         }
     }
@@ -565,7 +552,6 @@ mod tests {
 
     #[test]
     fn opencode_plugins_are_shell_safe() {
-        // The reminder lands inside a double-quoted string, so a template var must not close it
         let template = read_embedded_text("opencode_plugin.js");
         assert_eq!(
             template.matches("{{").count(),

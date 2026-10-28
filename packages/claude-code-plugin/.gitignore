@@ -1,3 +1,0 @@
-# Claude Code writes these on a --plugin-dir load; types/ holds the committed copy
-/.claude-plugin/types/
-/dist/
