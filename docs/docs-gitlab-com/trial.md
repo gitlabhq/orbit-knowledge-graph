@@ -30,10 +30,8 @@ Start a free trial to try GitLab Orbit in a top-level group before you buy it.
 Prerequisites:
 
 - The Owner role for the top-level group.
-- A top-level group that does not already have GitLab Orbit.
-- A group that is eligible for a trial.
-  If the group is not eligible, the **GitLab Orbit** settings page shows **Contact sales** in place of the toggle.
-  To get access to GitLab Orbit, [contact sales](https://about.gitlab.com/sales/).
+- A top-level group that is eligible for a trial and does not already have GitLab Orbit.
+  If the group is not eligible, see [the option to turn on GitLab Orbit is not available](troubleshooting.md#the-option-to-turn-on-gitlab-orbit-is-not-available).
 
 To start a trial:
 
@@ -45,19 +43,14 @@ To start a trial:
 
 The page shows **GitLab Orbit is indexing `<my-group>`**, then **GitLab Orbit is ready for `<my-group>`**.
 
-If none of your groups has GitLab Orbit turned on, you can also start the trial from the [GitLab Orbit dashboard](dashboard.md).
-
 To connect your agent, continue with the [quickstart](quickstart.md#step-2-connect-your-agent).
 
-## When the trial ends
+## After the trial ends
 
-At the end of the trial, GitLab turns off GitLab Orbit for the group, and queries fail.
+At the end of the trial, GitLab turns off GitLab Orbit for the group, and queries fail with the
+[`GitLab credits exhausted`](troubleshooting.md#error-gitlab-credits-exhausted) error.
 To continue with GitLab Orbit, contact sales.
 For information about GitLab Orbit pricing and usage, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 
 GitLab keeps the indexed data for a limited time.
 For more information, see [data retention and deletion](how-it-works.md#data-retention-and-deletion).
-
-## Related topics
-
-- [Troubleshooting](troubleshooting.md)
