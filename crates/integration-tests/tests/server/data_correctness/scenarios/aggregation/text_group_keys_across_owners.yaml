@@ -1,6 +1,7 @@
 config:
   redaction:
     allow:
+      project: [1000, 1002, 1010]
       ci_build: [9601, 9602, 9603, 9611, 9612, 9613]
       ci_pipeline: [8200, 8201, 8202]
     deny:
@@ -27,7 +28,7 @@ cases:
       gql: |
         MATCH (j:Job) WHERE j.project_id IN [1000, 1002] RETURN j.name AS name, count(j) AS n
     expect:
-      compile_error: filter j.project_id to one value
+      compile_error: filter j.project_id to one value, or return j.project_id (or the owner Project) as a group key
 
   - name: pinned_project_counts_exact
     description: Jobs that share a name in one pinned project count as one row
@@ -91,3 +92,59 @@ cases:
       row_count: 1
       row_values:
         - { ref: main, n: 2 }
+
+  - name: returned_project_counts_exact
+    description: Returning the owner column gives one exact row per project and name, and a denied project drops out
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.project_id IN [1000, 1002, 1010] AND j.name IN ['rspec', 'build'] RETURN j.project_id AS project, j.name AS name, count(j) AS n ORDER BY project
+    expect:
+      skip_requirements: [filter:project_id, filter:name, aggregation_sort]
+      row_count: 2
+      row_values:
+        - { project: 1000, name: rspec, n: 2 }
+        - { project: 1002, name: rspec, n: 1 }
+
+  - name: returned_owner_project_counts_exact
+    description: Grouping by the owner Project reached through IN_PROJECT gives one exact row per project and name
+    query:
+      gql: |
+        MATCH (j:Job)-[:IN_PROJECT]->(p:Project) WHERE j.project_id IN [1000, 1002, 1010] AND j.name IN ['rspec', 'build'] RETURN p.full_path AS project, j.name AS name, count(j) AS n ORDER BY project
+    expect:
+      skip_requirements: [filter:project_id, filter:name, aggregation_sort, "relationship:IN_PROJECT"]
+      row_count: 2
+      row_values:
+        - { project: public-group/internal-project, name: rspec, n: 1 }
+        - { project: public-group/public-project, name: rspec, n: 2 }
+
+  - name: owner_project_pin_counts_exact
+    description: Pinning the owner Project through IN_PROJECT pins the project the same as equality
+    query:
+      gql: |
+        MATCH (j:Job)-[:IN_PROJECT]->(p:Project {id: 1002}) RETURN j.name AS name, count(j) AS n ORDER BY name
+    expect:
+      skip_requirements: [node_ids, aggregation_sort, "relationship:IN_PROJECT"]
+      row_count: 2
+      row_values:
+        - { name: lint, n: 2 }
+        - { name: rspec, n: 1 }
+
+  - name: returned_pipeline_project_needs_source
+    description: Returning the project of a pipeline still needs one source
+    query:
+      gql: |
+        MATCH (pl:Pipeline) WHERE pl.project_id IN [1000, 1002] RETURN pl.project_id AS project, pl.ref AS ref, count(pl) AS n
+    expect:
+      compile_error: filter pl.source to one value, or return pl.source as a group key
+
+  - name: returned_pipeline_project_and_source_counts_exact
+    description: Returning the project and source of pipelines gives one exact row per project, source, and ref
+    query:
+      gql: |
+        MATCH (pl:Pipeline) WHERE pl.project_id IN [1000, 1002] RETURN pl.project_id AS project, pl.source AS source, pl.ref AS ref, count(pl) AS n ORDER BY source
+    expect:
+      skip_requirements: [filter:project_id, aggregation_sort]
+      row_count: 2
+      row_values:
+        - { project: 1000, source: external, ref: main, n: 1 }
+        - { project: 1000, source: push, ref: main, n: 2 }

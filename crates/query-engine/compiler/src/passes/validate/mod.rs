@@ -379,6 +379,35 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     })
             })
         };
+        let grouped = |node: &str, property: &str| {
+            crate::input::property_groups(groups).any(|key| key == (node, property))
+        };
+        let identifies = |owner: &str, key: PropertyId, property: &str| {
+            input
+                .entity_of(owner)
+                .and_then(|entity| model.property(entity, property))
+                .is_some_and(|property| property.id == key || model.property_unique(property.id))
+        };
+        let owner_grouped = |(owner, key): (&str, PropertyId)| {
+            node_groups.contains(owner)
+                || crate::input::property_groups(groups)
+                    .any(|(other, property)| other == owner && identifies(owner, key, property))
+        };
+        let owner_pinned = |(owner, key): (&str, PropertyId)| {
+            input.nodes.iter().any(|candidate| {
+                candidate.id == owner
+                    && (candidate.node_ids.len() == 1
+                        || candidate.filters.keys().any(|property| {
+                            identifies(owner, key, property) && pinned(owner, property)
+                        }))
+            })
+        };
+        let column_pinned = |node: &str, column: &str| {
+            pinned(node, column) || owners(input, model, node, column).any(owner_pinned)
+        };
+        let column_grouped = |node: &str, column: &str| {
+            grouped(node, column) || owners(input, model, node, column).any(owner_grouped)
+        };
         for (node, property) in crate::input::property_groups(groups) {
             let Some(entity) = text_key(node, property) else {
                 continue;
@@ -392,20 +421,40 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     format!("access to each {entity} is checked separately; group")
                 }
                 Some(query_data_model::ReadGrain::Owner { columns, split }) => {
-                    let owner_pinned = columns.iter().any(|column| pinned(node, column));
-                    let keys: Vec<String> = columns
+                    let owner_known = columns.iter().any(|column| column_pinned(node, column))
+                        || columns.iter().all(|column| column_grouped(node, column));
+                    let split = split
                         .iter()
-                        .take(usize::from(!owner_pinned))
-                        .chain(split.iter().map(|split| &split.property))
-                        .filter(|key| !pinned(node, key))
+                        .map(|split| split.property.as_str())
+                        .filter(|key| !pinned(node, key) && !grouped(node, key));
+                    let filter_keys: Vec<String> = columns
+                        .iter()
+                        .map(String::as_str)
+                        .take(usize::from(!owner_known))
+                        .chain(split.clone())
                         .map(|key| format!("{node}.{key}"))
                         .collect();
-                    if keys.is_empty() {
+                    if filter_keys.is_empty() {
                         continue;
                     }
+                    let owner = match columns.as_slice() {
+                        [column] => owner_entity(model, entity, column)
+                            .map(|owner| format!(" (or the owner {owner})")),
+                        _ => None,
+                    };
+                    let mut return_keys: Vec<String> = columns
+                        .iter()
+                        .filter(|column| !owner_known && !column_grouped(node, column))
+                        .map(|column| format!("{node}.{column}"))
+                        .collect();
+                    if let (Some(last), Some(owner)) = (return_keys.last_mut(), owner) {
+                        last.push_str(&owner);
+                    }
+                    return_keys.extend(split.map(|key| format!("{node}.{key}")));
                     format!(
-                        "access is checked per owner, so filter {} to one value, or group",
-                        keys.join(" and ")
+                        "access is checked per owner, so filter {} to one value, or return {} as a group key, or group",
+                        filter_keys.join(" and "),
+                        return_keys.join(" and ")
                     )
                 }
             };
@@ -1766,6 +1815,62 @@ fn check_filter_entries(property: &str, predicates: &[InputFilter]) -> Result<()
         }
     }
     Ok(())
+}
+
+fn owner_entity<'a, M>(model: &'a M, entity: &str, column: &str) -> Option<&'a str>
+where
+    M: query_data_model::OrbitQueryModel + ?Sized,
+{
+    let graph = model.graph();
+    let column = model.property(entity, column)?.id;
+    graph.variants().find_map(|variant| {
+        let source = graph.entity(variant.source).name.as_str();
+        let target = graph.entity(variant.target).name.as_str();
+        let relationship = &graph.relationship(variant.relationship).name;
+        let key = model.foreign_key(std::slice::from_ref(relationship), source, target)?;
+        let (holder, owner) = match key.holder {
+            query_data_model::Endpoint::Source => (source, target),
+            query_data_model::Endpoint::Target => (target, source),
+        };
+        (holder == entity && key.property == column).then_some(owner)
+    })
+}
+
+fn owners<'a, M>(
+    input: &'a Input,
+    model: &'a M,
+    node: &'a str,
+    column: &str,
+) -> impl Iterator<Item = (&'a str, PropertyId)> + 'a
+where
+    M: query_data_model::OrbitQueryModel + ?Sized,
+{
+    let column = input
+        .entity_of(node)
+        .and_then(|entity| model.property(entity, column))
+        .map(|property| property.id);
+    input
+        .relationships
+        .iter()
+        .filter(|rel| {
+            rel.hops == crate::input::HopRange::default()
+                && rel.direction != crate::input::Direction::Both
+        })
+        .filter_map(move |rel| {
+            let (source, target) = rel
+                .direction
+                .stored_order(rel.from.as_str(), rel.to.as_str());
+            let key = model.foreign_key(
+                &rel.types,
+                input.entity_of(source)?,
+                input.entity_of(target)?,
+            )?;
+            let (holder, owner) = match key.holder {
+                query_data_model::Endpoint::Source => (source, target),
+                query_data_model::Endpoint::Target => (target, source),
+            };
+            (holder == node && Some(key.property) == column).then_some((owner, key.referenced_key))
+        })
 }
 
 #[cfg(test)]
