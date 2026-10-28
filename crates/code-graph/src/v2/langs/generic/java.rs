@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::metadata;
+use crate::v2::dsl::extractors::{DisplayRules, Token, metadata};
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, DefKind};
+use crate::v2::types::{BindingKind, DefKind, Modifier, Modifiers, Visibility};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Extract, default_name, field, text};
@@ -101,6 +101,8 @@ fn java_record_accessors(
         let return_type = field("type")
             .inner("type_arguments", "type_identifier")
             .apply(&param);
+        let written_type = param.field("type").map(|t| t.text().to_string());
+        let accessor = name.clone();
         let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
         defs.push(crate::v2::types::CanonicalDefinition {
             definition_type: "Method",
@@ -109,15 +111,49 @@ fn java_record_accessors(
             fqn,
             range: crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(&param)),
             is_top_level: false,
-            metadata: return_type.map(|rt| {
-                Box::new(crate::v2::types::DefinitionMetadata {
-                    return_type: Some(rt),
-                    ..Default::default()
-                })
-            }),
+            metadata: Some(Box::new(crate::v2::types::DefinitionMetadata {
+                return_type,
+                declared_return_type: written_type.clone(),
+                signature: written_type.map(|t| format!("{t} {accessor}()")),
+                generated_by: Some("record".to_string()),
+                ..Default::default()
+            })),
         });
     }
     false
+}
+
+fn java_annotations(node: &N<'_>) -> Vec<String> {
+    node.children()
+        .filter(|c| c.kind() == "modifiers")
+        .flat_map(|m| m.children().collect::<Vec<_>>())
+        .filter(|c| matches!(c.kind().as_ref(), "marker_annotation" | "annotation"))
+        .filter_map(|a| a.field("name").map(|n| n.text().to_string()))
+        .collect()
+}
+
+fn java_test(node: &N<'_>, _name: &str) -> bool {
+    java_annotations(node).iter().any(|a| {
+        matches!(
+            a.as_str(),
+            "Test" | "ParameterizedTest" | "RepeatedTest" | "TestFactory" | "TestTemplate"
+        )
+    })
+}
+
+fn java_record_modifiers(_node: &N<'_>) -> Modifiers {
+    Modifiers::empty().with(Modifier::Final)
+}
+
+fn java_visibility(node: &N<'_>, _name: &str) -> Option<Visibility> {
+    let in_interface = node
+        .parent()
+        .is_some_and(|p| matches!(p.kind().as_ref(), "interface_body" | "annotation_type_body"));
+    Some(if in_interface {
+        Visibility::Public
+    } else {
+        Visibility::Package
+    })
 }
 
 impl DslLanguage for JavaDsl {
@@ -146,11 +182,11 @@ impl DslLanguage for JavaDsl {
                 .def_kind(DefKind::Class)
                 .metadata(class_meta()),
             scope("enum_declaration", "Enum")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Enum)
                 .metadata(class_meta()),
             scope("record_declaration", "Record")
                 .def_kind(DefKind::Class)
-                .metadata(class_meta()),
+                .metadata(class_meta().modifiers_with(java_record_modifiers)),
             scope("interface_declaration", "Interface")
                 .def_kind(DefKind::Interface)
                 .metadata(class_meta()),
@@ -160,17 +196,20 @@ impl DslLanguage for JavaDsl {
                 .def_kind(DefKind::EnumEntry)
                 .no_scope(),
             scope("field_declaration", "Field")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Field)
                 .no_scope()
                 .name_from(field("declarator").field("name"))
                 .metadata(
                     metadata()
-                        .type_annotation(field("type").inner("type_arguments", "type_identifier")),
+                        .type_annotation(field("type").inner("type_arguments", "type_identifier"))
+                        .declared_type(field("type"))
+                        .signature_until(&["value"]),
                 ),
             scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("compact_constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
+                .test_if(java_test)
                 .metadata(
                     metadata()
                         .return_type(field("type").inner("type_arguments", "type_identifier")),
@@ -180,6 +219,32 @@ impl DslLanguage for JavaDsl {
                 .no_scope()
                 .name_from(field("parameters")),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["body"],
+            parameters: &["parameters"],
+            return_type: &["type"],
+            declared_type: &["type"],
+            doc_comments: &["block_comment", "line_comment"],
+            doc_prefixes: &["/**"],
+            doc_markers: &["/**", "*/", "*"],
+            modifier_hosts: &["modifiers"],
+            tokens: &[
+                ("public", Token::Visibility(Visibility::Public)),
+                ("protected", Token::Visibility(Visibility::Protected)),
+                ("private", Token::Visibility(Visibility::Private)),
+                ("static", Token::Modifier(Modifier::Static)),
+                ("abstract", Token::Modifier(Modifier::Abstract)),
+                ("final", Token::Modifier(Modifier::Final)),
+                ("sealed", Token::Modifier(Modifier::Sealed)),
+                ("native", Token::Modifier(Modifier::Extern)),
+                ("@Override", Token::Modifier(Modifier::Override)),
+            ],
+            visibility: Some(java_visibility),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {

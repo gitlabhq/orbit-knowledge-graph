@@ -1,4 +1,5 @@
 use crate::v2::config::Language;
+use crate::v2::dsl::extractors::DisplayRules;
 use crate::v2::dsl::types::*;
 use crate::v2::types::{DefKind, Fqn};
 use treesitter_visit::extract::{child_of_kind, text};
@@ -45,12 +46,12 @@ impl DslLanguage for HclDsl {
                 .when(has_child_text("data"))
                 .name_from(nth_label(0)),
             scope("block", "Variable")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Variable)
                 .when(has_child_text("variable"))
                 .no_scope()
                 .name_from(nth_label(0)),
             scope("block", "Output")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Variable)
                 .when(has_child_text("output"))
                 .no_scope()
                 .name_from(nth_label(0)),
@@ -60,27 +61,34 @@ impl DslLanguage for HclDsl {
                 .no_scope()
                 .name_from(nth_label(0)),
             scope("block", "Locals")
-                .def_kind(DefKind::Other)
+                .def_kind(DefKind::Module)
                 .when(has_child_text("locals"))
                 .name_from(child_of_kind("identifier")),
             scope("block", "Provider")
-                .def_kind(DefKind::Other)
+                .def_kind(DefKind::Variable)
                 .when(has_child_text("provider"))
                 .no_scope()
                 .name_from(nth_label(0)),
             // The label becomes an iterator variable (e.g. ingress.value).
             scope("block", "Dynamic")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Variable)
                 .when(has_child_text("dynamic"))
                 .name_from(nth_label(0)),
             scope("block", "Terraform")
-                .def_kind(DefKind::Other)
+                .def_kind(DefKind::Variable)
                 .when(has_child_text("terraform"))
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
             // locals attributes become property defs via on_scope, not a scope rule,
             // to avoid matching attributes in other block types.
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            signature_with: Some(|_| None),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {
@@ -176,7 +184,7 @@ fn hcl_on_scope(
                         let fqn = Fqn::from_scope(scope_stack, &name, sep);
                         defs.push(crate::v2::types::CanonicalDefinition {
                             definition_type: "Local",
-                            kind: DefKind::Property,
+                            kind: DefKind::Variable,
                             name,
                             fqn,
                             range: crate::v2::types::Range::empty(),

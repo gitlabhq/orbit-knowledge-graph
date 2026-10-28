@@ -1,11 +1,13 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::metadata;
+use crate::v2::dsl::extractors::{DisplayRules, metadata};
 use crate::v2::dsl::types::{
     self, BindingRule, BranchRule, ChainConfig, DslLanguage, FieldAccessEntry, ImportRule,
     LanguageHooks, LoopRule, ReferenceRule, ScopeRule, binding, branch, loop_rule, reference,
-    scope, scopes,
+    scope, scope_fn, scopes,
 };
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{
+    BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode, Modifier, Modifiers,
+};
 use petgraph::graph::NodeIndex;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
@@ -44,10 +46,15 @@ impl DslLanguage for RubyDsl {
                 .def_kind(DefKind::Class)
                 .metadata(metadata().super_types(ruby_super_types)),
             scope("module", "Module")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Module)
                 .metadata(metadata().super_types(ruby_super_types)),
             scope("method", "Method").def_kind(DefKind::Method),
-            scope("singleton_method", "SingletonMethod").def_kind(DefKind::Method),
+            scope("method", "Initializer")
+                .def_kind(DefKind::Constructor)
+                .when(has_child_text("initialize")),
+            scope("singleton_method", "SingletonMethod")
+                .def_kind(DefKind::Method)
+                .metadata(metadata().modifiers_with(|_| Modifiers::empty().with(Modifier::Static))),
             // class << self: transparent scope, methods inside are
             // scoped to the parent class (don't add to FQN).
             scope("singleton_class", "SingletonClass")
@@ -65,7 +72,7 @@ impl DslLanguage for RubyDsl {
             // defined" return a node; `no_scope` keeps the constant from
             // pushing a new FQN segment for nested defs.
             scope("assignment", "Constant")
-                .def_kind(DefKind::Other)
+                .def_kind(DefKind::Constant)
                 .when(field_kind("left", &["constant", "scope_resolution"]))
                 .name_from(field("left"))
                 .no_scope(),
@@ -83,7 +90,29 @@ impl DslLanguage for RubyDsl {
                 .when(ruby_lambda_assignment())
                 .name_from(field("left"))
                 .no_scope(),
+            scope_fn("call", ruby_example_label)
+                .def_kind(DefKind::Test)
+                .when(ruby_example_call())
+                .name_hook(ruby_example_name),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &[
+                "body",
+                "body_statement",
+                "end",
+                "do_block",
+                "block",
+                "comment",
+            ],
+            parameters: &["parameters"],
+            doc_comments: &["comment"],
+            doc_markers: &["#"],
+            doc_hosts: &["body_statement"],
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {
@@ -235,7 +264,78 @@ fn ruby_lambda_assignment() -> Pred {
         .or(proc_new)
 }
 
+const RUBY_EXAMPLE_GROUPS: &[&str] = &[
+    "describe",
+    "context",
+    "feature",
+    "shared_examples",
+    "shared_context",
+];
+const RUBY_EXAMPLES: &[&str] = &["it", "specify", "example", "scenario", "its"];
+
+fn ruby_call_method<'a>(node: &N<'a>) -> Option<std::borrow::Cow<'a, str>> {
+    if node.field("receiver").is_some_and(|r| r.text() != "RSpec") {
+        return None;
+    }
+    node.field("method").map(|m| m.text())
+}
+
+fn ruby_example_call() -> Pred {
+    Pred::Exists(Box::new(field("block")))
+        .and(Pred::Exists(Box::new(field("arguments"))))
+        .and(Pred::Exists(Box::new(
+            field("method").where_(AnyKind(&["identifier"])),
+        )))
+}
+
+fn ruby_example_label(node: &N<'_>) -> &'static str {
+    match ruby_call_method(node).as_deref() {
+        Some(m) if RUBY_EXAMPLES.contains(&m) => "Example",
+        _ => "ExampleGroup",
+    }
+}
+
+fn ruby_example_name(node: &N<'_>) -> Option<String> {
+    let method = ruby_call_method(node)?;
+    if !RUBY_EXAMPLE_GROUPS.contains(&method.as_ref()) && !RUBY_EXAMPLES.contains(&method.as_ref())
+    {
+        return None;
+    }
+    let first = node.field("arguments")?.children().find(|c| c.is_named())?;
+    let name = match first.kind().as_ref() {
+        "string" => first
+            .children()
+            .filter(|c| c.kind() == "string_content")
+            .map(|c| c.text().to_string())
+            .collect::<String>(),
+        _ => first.text().to_string(),
+    };
+    (!name.is_empty()).then(|| crate::v2::types::text::cap(name, crate::v2::types::text::NAME_CAP))
+}
+
 fn ruby_extract_attr_methods(
+    node: &N<'_>,
+    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+    scope_stack: &[std::sync::Arc<str>],
+    sep: &'static str,
+) -> bool {
+    let start = defs.len();
+    let handled = ruby_extract_generated_methods(node, defs, scope_stack, sep);
+    if defs.len() > start {
+        let generator = match node.kind().as_ref() {
+            "call" => node.field("method").map(|m| m.text().to_string()),
+            kind => Some(kind.to_string()),
+        };
+        for def in &mut defs[start..] {
+            def.metadata
+                .get_or_insert_with(Default::default)
+                .generated_by = generator.clone();
+        }
+    }
+    handled
+}
+
+fn ruby_extract_generated_methods(
     node: &N<'_>,
     defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
     scope_stack: &[std::sync::Arc<str>],
@@ -346,12 +446,12 @@ fn ruby_extract_attr_methods(
 
     match method.as_str() {
         "attr_accessor" | "attr_reader" | "attr_writer" => {
-            push_symbol_defs(&args, defs, "Attribute", DefKind::Property);
+            push_symbol_defs(&args, defs, "Attribute", DefKind::Field);
             true
         }
         "class_attribute" | "mattr_accessor" | "cattr_accessor" | "mattr_reader"
         | "mattr_writer" | "cattr_reader" | "cattr_writer" => {
-            push_symbol_defs(&args, defs, "Attribute", DefKind::Property);
+            push_symbol_defs(&args, defs, "Attribute", DefKind::Field);
             true
         }
         "delegate" => {

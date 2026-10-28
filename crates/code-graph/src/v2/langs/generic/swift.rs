@@ -1,11 +1,13 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::metadata;
+use crate::v2::dsl::extractors::{DisplayRules, Token, metadata};
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{
+    BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode, Modifier, Visibility,
+};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::Extract;
-use treesitter_visit::extract::{child_of_kind, constant, default_name, text};
+use treesitter_visit::extract::{child_of_kind, constant, default_name, field, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -95,6 +97,18 @@ fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bo
     true
 }
 
+fn swift_return_type(node: &N<'_>) -> Option<String> {
+    let mut after_arrow = false;
+    for child in node.children() {
+        if child.kind() == "->" {
+            after_arrow = true;
+        } else if after_arrow && child.is_named() {
+            return Some(child.text().to_string());
+        }
+    }
+    None
+}
+
 #[derive(Default)]
 pub struct SwiftDsl;
 
@@ -118,16 +132,16 @@ impl DslLanguage for SwiftDsl {
             // Extensions index the name but do not push a scope — methods inside would receive
             // the wrong FQN prefix without a reattach hook (tracked in #765).
             scope("class_declaration", "Extension")
-                .def_kind(DefKind::Other)
-                .when(has_child_text("extension"))
-                .name_from(child_of_kind("type_identifier"))
-                .no_scope(),
-            scope("class_declaration", "Enum")
                 .def_kind(DefKind::Class)
+                .when(has_child_text("extension"))
+                .name_from(child_of_kind("user_type").child_of_kind("type_identifier"))
+                .scope_only(),
+            scope("class_declaration", "Enum")
+                .def_kind(DefKind::Enum)
                 .when(has_child_text("enum"))
                 .name_from(child_of_kind("type_identifier")),
             scope("class_declaration", "Struct")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Struct)
                 .when(has_child_text("struct"))
                 .name_from(child_of_kind("type_identifier"))
                 .metadata(metadata().super_types(swift_super_types)),
@@ -136,13 +150,27 @@ impl DslLanguage for SwiftDsl {
                 .when(has_child_text("class"))
                 .name_from(child_of_kind("type_identifier"))
                 .metadata(metadata().super_types(swift_super_types)),
-            scope("protocol_declaration", "Interface")
+            scope("protocol_declaration", "Protocol")
                 .def_kind(DefKind::Interface)
                 .name_from(child_of_kind("type_identifier"))
                 .metadata(metadata().super_types(swift_super_types)),
             scope("function_declaration", "Function")
                 .def_kind(DefKind::Function)
                 .name_from(child_of_kind("simple_identifier")),
+            scope("function_declaration", "Method")
+                .def_kind(DefKind::Method)
+                .when(parent_is("class_body"))
+                .name_from(child_of_kind("simple_identifier"))
+                .test_if(|_, name| name.starts_with("test")),
+            scope("property_declaration", "Variable")
+                .def_kind(DefKind::Variable)
+                .no_scope()
+                .name_from(field("name").field("bound_identifier")),
+            scope("property_declaration", "Property")
+                .def_kind(DefKind::Property)
+                .no_scope()
+                .when(parent_is("class_body"))
+                .name_from(field("name").field("bound_identifier")),
             // Protocol method requirements have no body; no_scope keeps them as flat defs
             // nested under the protocol's FQN (e.g. Drawable.draw).
             scope("protocol_function_declaration", "Method")
@@ -157,6 +185,34 @@ impl DslLanguage for SwiftDsl {
                 .def_kind(DefKind::Constructor)
                 .name_from(constant("init")),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["body", "value"],
+            parameters: &[],
+            parameter_items: &["parameter"],
+            return_type: &[],
+            declared_type: &["type_annotation"],
+            doc_comments: &["comment", "multiline_comment"],
+            doc_prefixes: &["///", "/**"],
+            doc_markers: &["///", "/**", "*/", "*"],
+            modifier_hosts: &["modifiers"],
+            tokens: &[
+                ("public", Token::Visibility(Visibility::Public)),
+                ("open", Token::Visibility(Visibility::Public)),
+                ("internal", Token::Visibility(Visibility::Internal)),
+                ("fileprivate", Token::Visibility(Visibility::File)),
+                ("private", Token::Visibility(Visibility::Private)),
+                ("static", Token::Modifier(Modifier::Static)),
+                ("final", Token::Modifier(Modifier::Final)),
+                ("override", Token::Modifier(Modifier::Override)),
+                ("async", Token::Modifier(Modifier::Async)),
+            ],
+            visibility: Some(|_, _| Some(Visibility::Internal)),
+            return_type_with: Some(swift_return_type),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {
@@ -323,7 +379,7 @@ mod tests {
             .iter()
             .find(|d| d.name == "Point")
             .unwrap();
-        assert_eq!(point.kind, DefKind::Class);
+        assert_eq!(point.kind, DefKind::Struct);
     }
 
     #[test]

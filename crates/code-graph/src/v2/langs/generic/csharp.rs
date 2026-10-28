@@ -1,7 +1,9 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::metadata;
+use crate::v2::dsl::extractors::{DisplayRules, Token, leading_comments, metadata};
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{
+    BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode, Modifier, Visibility,
+};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Extract, field, text};
@@ -19,6 +21,78 @@ use crate::v2::linker::{HasRules, ResolveSettings};
 pub struct CSharpDsl;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
+
+fn csharp_doc(node: &N<'_>) -> Option<String> {
+    let mut host = node.clone();
+    if host.kind() == "variable_declaration" {
+        host = host.parent()?;
+    }
+    let raw = leading_comments(&host, &["comment"], &["///"]).join("\n");
+    let mut plain = String::with_capacity(raw.len());
+    let mut in_tag = false;
+    for c in raw.replace("///", " ").chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' if in_tag => {
+                in_tag = false;
+                plain.push(' ');
+            }
+            _ if !in_tag => plain.push(c),
+            _ => {}
+        }
+    }
+    crate::v2::types::text::doc_paragraph(plain.lines())
+}
+
+fn csharp_test(node: &N<'_>, _name: &str) -> bool {
+    node.children()
+        .filter(|c| c.kind() == "attribute_list")
+        .flat_map(|l| l.children().collect::<Vec<_>>())
+        .filter(|a| a.kind() == "attribute")
+        .filter_map(|a| a.field("name").map(|n| n.text().to_string()))
+        .any(|name| {
+            let name = name
+                .rsplit('.')
+                .next()
+                .unwrap_or(&name)
+                .trim_end_matches("Attribute");
+            matches!(
+                name,
+                "Fact" | "Theory" | "Test" | "TestMethod" | "TestCase" | "DataTestMethod"
+            )
+        })
+}
+
+fn csharp_visibility(node: &N<'_>, _name: &str) -> Option<Visibility> {
+    if matches!(
+        node.kind().as_ref(),
+        "namespace_declaration" | "lambda_expression"
+    ) {
+        return None;
+    }
+    let parent = node.parent()?;
+    let container = if parent.kind() == "declaration_list" {
+        parent.parent()
+    } else {
+        Some(parent)
+    };
+    Some(match container.as_ref().map(|c| c.kind()) {
+        Some(k) if k == "interface_declaration" => Visibility::Public,
+        Some(k)
+            if matches!(
+                k.as_ref(),
+                "class_declaration" | "struct_declaration" | "record_declaration"
+            ) =>
+        {
+            Visibility::Private
+        }
+        _ => Visibility::Internal,
+    })
+}
+
+fn csharp_const() -> Pred {
+    Pred::Exists(Box::new(Extract::one(Child, Text("const"))))
+}
 
 fn csharp_super_types(node: &N<'_>) -> Vec<String> {
     let mut result = Vec::new();
@@ -53,26 +127,56 @@ impl DslLanguage for CSharpDsl {
         }
     }
 
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["body", "accessors"],
+            parameters: &["parameters"],
+            return_type: &["returns"],
+            declared_type: &["type"],
+            doc_comments: &["comment"],
+            modifier_hosts: &["modifier"],
+            tokens: &[
+                ("public", Token::Visibility(Visibility::Public)),
+                ("protected", Token::Visibility(Visibility::Protected)),
+                ("private", Token::Visibility(Visibility::Private)),
+                ("internal", Token::Visibility(Visibility::Internal)),
+                ("static", Token::Modifier(Modifier::Static)),
+                ("abstract", Token::Modifier(Modifier::Abstract)),
+                ("sealed", Token::Modifier(Modifier::Sealed)),
+                ("virtual", Token::Modifier(Modifier::Virtual)),
+                ("override", Token::Modifier(Modifier::Override)),
+                ("async", Token::Modifier(Modifier::Async)),
+                ("readonly", Token::Modifier(Modifier::Readonly)),
+                ("extern", Token::Modifier(Modifier::Extern)),
+                ("unsafe", Token::Modifier(Modifier::Unsafe)),
+            ],
+            visibility: Some(csharp_visibility),
+            doc_with: Some(csharp_doc),
+            ..DisplayRules::default()
+        }
+    }
+
     fn scopes() -> Vec<ScopeRule> {
         let class_meta = || metadata().super_types(csharp_super_types);
 
         vec![
-            scope("namespace_declaration", "Namespace").def_kind(DefKind::Other),
+            scope("namespace_declaration", "Namespace").def_kind(DefKind::Module),
             scope("class_declaration", "Class")
                 .def_kind(DefKind::Class)
                 .metadata(class_meta()),
             scope("struct_declaration", "Struct")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Struct)
                 .metadata(class_meta()),
             scope("record_declaration", "Record")
                 .def_kind(DefKind::Class)
                 .metadata(class_meta()),
-            scope("enum_declaration", "Enum").def_kind(DefKind::Class),
+            scope("enum_declaration", "Enum").def_kind(DefKind::Enum),
             scope("interface_declaration", "Interface")
                 .def_kind(DefKind::Interface)
                 .metadata(class_meta()),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
+                .test_if(csharp_test)
                 .metadata(metadata().return_type(field("returns"))),
             scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("property_declaration", "Property")
@@ -80,12 +184,26 @@ impl DslLanguage for CSharpDsl {
                 .no_scope()
                 .metadata(metadata().type_annotation(field("type"))),
             scope("field_declaration", "Field")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Field)
                 .no_scope()
                 .name_from(field("declaration").field("name"))
-                .metadata(metadata().type_annotation(field("declaration").field("type"))),
+                .metadata(
+                    metadata()
+                        .type_annotation(field("declaration").field("type"))
+                        .declared_type(field("declaration").field("type")),
+                ),
+            scope("field_declaration", "Constant")
+                .def_kind(DefKind::Constant)
+                .no_scope()
+                .when(csharp_const())
+                .name_from(field("declaration").field("name"))
+                .metadata(
+                    metadata()
+                        .type_annotation(field("declaration").field("type"))
+                        .declared_type(field("declaration").field("type")),
+                ),
             scope("event_field_declaration", "Event")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Field)
                 .no_scope()
                 .name_from(field("declaration").field("name")),
             scope("enum_member_declaration", "EnumMember")

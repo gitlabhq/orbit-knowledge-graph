@@ -1,4 +1,5 @@
 use crate::v2::config::Language;
+use crate::v2::dsl::extractors::{DisplayRules, metadata};
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::extract::{Extract, field};
@@ -34,27 +35,36 @@ impl DslLanguage for CppDsl {
         vec![
             scope("function_definition", "Function")
                 .def_kind(DefKind::Function)
-                .name_hook(c_family::cpp_declarator_name),
+                .name_hook(c_family::cpp_declarator_name)
+                .metadata(metadata().parameters_with(c_family::c_parameters)),
+            scope("function_definition", "Method")
+                .def_kind(DefKind::Method)
+                .when(parent_is("field_declaration_list"))
+                .name_hook(c_family::cpp_declarator_name)
+                .metadata(metadata().parameters_with(c_family::c_parameters)),
             scope("class_specifier", "Class")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("field_declaration_list")),
             // C++ treats a struct as a class with public default.
             scope("struct_specifier", "Struct")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Struct)
                 .when(has_descendant("field_declaration_list")),
             scope("enum_specifier", "Enum")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Enum)
                 .when(has_descendant("enumerator_list")),
             scope("union_specifier", "Union")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Struct)
                 .when(has_descendant("field_declaration_list")),
             scope("namespace_definition", "Namespace").def_kind(DefKind::Module),
             scope("type_definition", "Typedef")
-                .def_kind(DefKind::Other)
+                .def_kind(DefKind::TypeAlias)
                 .name_hook(c_family::cpp_declarator_name)
                 .no_scope(),
             scope("enumerator", "EnumConstant")
                 .def_kind(DefKind::EnumEntry)
+                .no_scope(),
+            scopes(&["preproc_def", "preproc_function_def"], "Macro")
+                .def_kind(DefKind::Macro)
                 .no_scope(),
             scope("concept_definition", "Concept")
                 .def_kind(DefKind::Interface)
@@ -62,6 +72,20 @@ impl DslLanguage for CppDsl {
             // Template declarations wrap function/class definitions but
             // create no named scope; the inner scope handles naming.
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["body", "value"],
+            return_type: &["type"],
+            doc_comments: &["comment"],
+            doc_markers: c_family::C_DOC_MARKERS,
+            doc_hosts: &["template_declaration"],
+            modifier_hosts: &["storage_class_specifier"],
+            tokens: c_family::C_TOKENS,
+            visibility: Some(c_family::cpp_access),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {
@@ -225,7 +249,7 @@ mod tests {
         let result = parse("struct Vec3 { double x; double y; double z; };\n").unwrap();
         let v = result.definitions.iter().find(|d| d.name == "Vec3");
         assert!(v.is_some(), "should find struct Vec3");
-        assert_eq!(v.unwrap().kind, DefKind::Class);
+        assert_eq!(v.unwrap().kind, DefKind::Struct);
     }
 
     #[test]

@@ -402,12 +402,20 @@ fn canonical_definitions(analysis: &JsFileAnalysis) -> Vec<CanonicalDefinition> 
 }
 
 fn canonical_definition(definition: &JsDef, extends: Option<&String>) -> CanonicalDefinition {
+    let display = &definition.display;
     let mut metadata = DefinitionMetadata {
         type_annotation: definition
             .type_annotation
             .as_deref()
             .map(truncate_identifier),
         is_exported: definition.is_exported,
+        signature: display.signature.clone(),
+        parameters: display.parameters.clone(),
+        declared_return_type: display.return_type.clone(),
+        declared_type: display.declared_type.clone(),
+        doc_comment: display.doc_comment.clone(),
+        modifiers: display.modifiers,
+        visibility: display.visibility,
         ..DefinitionMetadata::default()
     };
     if let Some(extends) = extends {
@@ -416,8 +424,8 @@ fn canonical_definition(definition: &JsDef, extends: Option<&String>) -> Canonic
 
     let fqn_truncated = truncate_identifier(&definition.fqn);
     CanonicalDefinition {
-        definition_type: definition.kind.as_str(),
-        kind: canonical_def_kind(&definition.kind),
+        definition_type: display.language_kind.unwrap_or(definition.kind.as_str()),
+        kind: display.kind.unwrap_or(canonical_def_kind(&definition.kind)),
         name: truncate_identifier(&definition.name),
         fqn: Fqn::from_parts(&[fqn_truncated.as_str()], "::"),
         range: to_range(definition.range),
@@ -454,14 +462,16 @@ fn canonical_def_kind(kind: &JsDefKind) -> DefKind {
         JsDefKind::Namespace => DefKind::Module,
         JsDefKind::Function => DefKind::Function,
         JsDefKind::Method { .. } => DefKind::Method,
+        JsDefKind::Constructor { .. } => DefKind::Constructor,
+        JsDefKind::Test { .. } => DefKind::Test,
         JsDefKind::LifecycleHook { .. } => DefKind::Method,
         JsDefKind::Watcher { .. } => DefKind::Method,
         JsDefKind::Property { .. } => DefKind::Property,
         JsDefKind::ComputedProperty { .. } => DefKind::Property,
-        JsDefKind::Variable => DefKind::Property,
+        JsDefKind::Variable => DefKind::Variable,
         JsDefKind::EnumMember => DefKind::EnumEntry,
-        JsDefKind::TypeAlias => DefKind::Other,
-        JsDefKind::Enum => DefKind::Other,
+        JsDefKind::TypeAlias => DefKind::TypeAlias,
+        JsDefKind::Enum => DefKind::Enum,
     }
 }
 

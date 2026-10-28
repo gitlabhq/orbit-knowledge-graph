@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::metadata;
+use crate::v2::dsl::extractors::{DisplayRules, Token, metadata};
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{CanonicalImport, DefKind};
+use crate::v2::types::{CanonicalImport, DefKind, Modifier, Modifiers};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Extract, child_of_kind, field, field_chain, no_extract, text};
@@ -65,24 +65,66 @@ fn in_class_body() -> Pred {
     ))
 }
 
-fn classify_python_function(node: &N<'_>) -> &'static str {
-    let is_async = node.has(Child, Kind("async"));
-    let has_decorator = node.has(Parent, Kind("decorated_definition"));
-    let is_method = node.parent().and_then(|p| p.parent()).is_some_and(|gp| {
-        gp.kind() == "class_definition"
-            || gp.kind() == "block" && gp.has(Parent, Kind("class_definition"))
-    });
+fn in_decorated_class_body() -> Pred {
+    Pred::Exists(Box::new(
+        Extract::one(Parent, Kind("decorated_definition"))
+            .nav(Parent, Any)
+            .nav(Parent, Kind("class_definition")),
+    ))
+}
 
-    match (is_method, is_async, has_decorator) {
-        (true, true, true) => "DecoratedAsyncMethod",
-        (true, true, false) => "AsyncMethod",
-        (true, false, true) => "DecoratedMethod",
-        (true, false, false) => "Method",
-        (false, true, true) => "DecoratedAsyncFunction",
-        (false, true, false) => "AsyncFunction",
-        (false, false, true) => "DecoratedFunction",
-        (false, false, false) => "Function",
+fn python_docstring(node: &N<'_>) -> Option<String> {
+    let first = node.field("body")?.children().find(|c| c.is_named())?;
+    if first.kind() != "expression_statement" {
+        return None;
     }
+    let string = first.children().find(|c| c.is_named())?;
+    if string.kind() != "string" {
+        return None;
+    }
+    let content: String = string
+        .children()
+        .filter(|c| c.kind() == "string_content")
+        .map(|c| c.text().to_string())
+        .collect();
+    crate::v2::types::text::doc_paragraph(content.lines())
+}
+
+fn python_modifiers(node: &N<'_>) -> Modifiers {
+    let mut modifiers = Modifiers::empty();
+    for decorator in python_decorators(node) {
+        let name = decorator.rsplit('.').next().unwrap_or(&decorator);
+        match name {
+            "staticmethod" | "classmethod" => modifiers.insert(Modifier::Static),
+            "abstractmethod" => modifiers.insert(Modifier::Abstract),
+            "override" => modifiers.insert(Modifier::Override),
+            "final" => modifiers.insert(Modifier::Final),
+            _ => {}
+        }
+    }
+    if node.kind() == "function_definition" && yields(node) {
+        modifiers.insert(Modifier::Generator);
+    }
+    modifiers
+}
+
+fn yields(node: &N<'_>) -> bool {
+    let Some(body) = node.field("body") else {
+        return false;
+    };
+    let mut stack: Vec<N<'_>> = body.children().collect();
+    while let Some(child) = stack.pop() {
+        match child.kind().as_ref() {
+            "yield" => return true,
+            "function_definition" | "class_definition" | "lambda" => {}
+            _ => stack.extend(child.children()),
+        }
+    }
+    false
+}
+
+fn python_test(_node: &N<'_>, name: &str) -> bool {
+    name.starts_with("test")
 }
 
 impl DslLanguage for PythonDsl {
@@ -106,47 +148,80 @@ impl DslLanguage for PythonDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let class_meta = || metadata().super_types(python_super_types);
+        let class_meta = || {
+            metadata()
+                .super_types(python_super_types)
+                .doc_with(python_docstring)
+        };
         let func_meta = || {
             metadata()
                 .return_type(field("return_type"))
                 .decorators(python_decorators)
+                .doc_with(python_docstring)
+                .modifiers_with(python_modifiers)
         };
 
         let mut rules = vec![
             scope("class_definition", "Class")
                 .def_kind(DefKind::Class)
                 .metadata(class_meta()),
-            scope("class_definition", "DecoratedClass")
+            scope("class_definition", "Class")
                 .def_kind(DefKind::Class)
                 .when(parent_is("decorated_definition"))
-                .metadata(class_meta()),
-            scope_fn("function_definition", classify_python_function)
+                .metadata(class_meta().modifiers_with(python_modifiers)),
+            scope("function_definition", "Function")
                 .def_kind(DefKind::Function)
-                .metadata(func_meta()),
+                .metadata(func_meta())
+                .test_if(python_test),
             scope("assignment", "Lambda")
                 .def_kind(DefKind::Lambda)
                 .when(field_kind("right", &["lambda"]))
                 .name_from(field("left"))
                 .no_scope(),
             scope("assignment", "Field")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Field)
                 .no_scope()
                 .when(field_kind("type", &["type"]).and(in_class_body()))
                 .name_from(field("left"))
-                .metadata(metadata().type_annotation(field("type"))),
+                .metadata(
+                    metadata()
+                        .type_annotation(field("type"))
+                        .signature_until(&["right"]),
+                ),
         ];
 
-        rules.extend(within(
+        for class_body in [
             grandparent_is("class_definition"),
-            vec![
-                scope_fn("function_definition", |_| "Method")
-                    .def_kind(DefKind::Method)
-                    .metadata(func_meta()),
-            ],
-        ));
+            in_decorated_class_body(),
+        ] {
+            rules.extend(within(
+                class_body,
+                vec![
+                    scope("function_definition", "Method")
+                        .def_kind(DefKind::Method)
+                        .metadata(func_meta())
+                        .test_if(python_test),
+                    scope("function_definition", "Initializer")
+                        .def_kind(DefKind::Constructor)
+                        .when(has_child_text("__init__"))
+                        .metadata(func_meta()),
+                ],
+            ));
+        }
 
         rules
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["body"],
+            parameters: &["parameters"],
+            return_type: &["return_type"],
+            declared_type: &["type"],
+            doc_comments: &["comment"],
+            tokens: &[("async", Token::Modifier(Modifier::Async))],
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {
@@ -736,7 +811,7 @@ mod tests {
         let fields: Vec<_> = result
             .definitions
             .iter()
-            .filter(|d| d.kind == DefKind::Property)
+            .filter(|d| d.kind == DefKind::Field)
             .map(|d| d.fqn.to_string())
             .collect();
         assert!(fields.contains(&"test.User.id".to_string()), "{fields:?}");

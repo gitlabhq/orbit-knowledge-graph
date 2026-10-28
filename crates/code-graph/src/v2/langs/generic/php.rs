@@ -1,7 +1,9 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::metadata;
+use crate::v2::dsl::extractors::{DisplayRules, Token, leading_comments, metadata};
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{
+    BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode, Modifier, Visibility,
+};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Emit, Extract, child_of_kind, default_name, field, text};
@@ -21,6 +23,23 @@ const PHP_PRIMITIVE_TYPES: &[&str] = &[
     "int", "float", "string", "bool", "void", "array", "object", "mixed", "null", "false", "true",
     "callable", "iterable", "never", "self", "static", "parent",
 ];
+
+fn php_test(node: &N<'_>, name: &str) -> bool {
+    name.starts_with("test")
+        || leading_comments(node, &["comment"], &["/**"])
+            .iter()
+            .any(|c| c.contains("@test"))
+        || node
+            .children()
+            .filter(|c| c.kind() == "attribute_list")
+            .any(|c| c.text().contains("Test"))
+}
+
+fn php_visibility(node: &N<'_>, _name: &str) -> Option<Visibility> {
+    node.parent()
+        .is_some_and(|p| p.kind() == "declaration_list")
+        .then_some(Visibility::Public)
+}
 
 #[derive(Default)]
 pub struct PhpDsl;
@@ -85,13 +104,18 @@ impl DslLanguage for PhpDsl {
                 .def_kind(DefKind::Interface)
                 .metadata(class_meta()),
             scope("trait_declaration", "Trait")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Trait)
                 .metadata(class_meta()),
             scope("enum_declaration", "Enum")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Enum)
                 .metadata(class_meta()),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
+                .metadata(metadata().return_type(field("return_type").descendant("name")))
+                .test_if(php_test),
+            scope("method_declaration", "Constructor")
+                .def_kind(DefKind::Constructor)
+                .when(has_child_text("__construct"))
                 .metadata(metadata().return_type(field("return_type").descendant("name"))),
             scope("function_definition", "Function")
                 .def_kind(DefKind::Function)
@@ -113,13 +137,43 @@ impl DslLanguage for PhpDsl {
                 .name_from(field("name").child_of_kind("name"))
                 .metadata(metadata().type_annotation(field("type").descendant("name"))),
             scope("const_declaration", "Constant")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Constant)
                 .no_scope()
                 .name_from(child_of_kind("const_element").child_of_kind("name")),
             scope("enum_case", "EnumCase")
                 .def_kind(DefKind::EnumEntry)
                 .no_scope(),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["body", "default_value"],
+            parameters: &["parameters"],
+            return_type: &["return_type"],
+            declared_type: &["type"],
+            doc_comments: &["comment"],
+            doc_prefixes: &["/**"],
+            doc_markers: &["/**", "*/", "*"],
+            modifier_hosts: &[
+                "visibility_modifier",
+                "static_modifier",
+                "abstract_modifier",
+                "final_modifier",
+                "readonly_modifier",
+            ],
+            tokens: &[
+                ("public", Token::Visibility(Visibility::Public)),
+                ("protected", Token::Visibility(Visibility::Protected)),
+                ("private", Token::Visibility(Visibility::Private)),
+                ("static", Token::Modifier(Modifier::Static)),
+                ("abstract", Token::Modifier(Modifier::Abstract)),
+                ("final", Token::Modifier(Modifier::Final)),
+                ("readonly", Token::Modifier(Modifier::Readonly)),
+            ],
+            visibility: Some(php_visibility),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {

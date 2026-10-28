@@ -1,7 +1,9 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::metadata;
+use crate::v2::dsl::extractors::{DisplayRules, metadata};
 use crate::v2::dsl::types::*;
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{
+    BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode, Visibility,
+};
 use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, field, field_chain, text};
 use treesitter_visit::predicate::*;
@@ -39,6 +41,24 @@ const GO_PRIMITIVE_TYPES: &[&str] = &[
     "error",
 ];
 
+fn go_visibility(_node: &N<'_>, name: &str) -> Option<Visibility> {
+    let first = name.chars().next()?;
+    Some(if first.is_uppercase() {
+        Visibility::Public
+    } else {
+        Visibility::Package
+    })
+}
+
+fn go_test(_node: &N<'_>, name: &str) -> bool {
+    ["Test", "Benchmark", "Example", "Fuzz"]
+        .iter()
+        .any(|prefix| {
+            name.strip_prefix(prefix)
+                .is_some_and(|rest| rest.chars().next().is_none_or(|c| !c.is_lowercase()))
+        })
+}
+
 #[derive(Default)]
 pub struct GoDsl;
 
@@ -55,7 +75,8 @@ impl DslLanguage for GoDsl {
         vec![
             scope("function_declaration", "Function")
                 .def_kind(DefKind::Function)
-                .metadata(metadata().return_type(field("result"))),
+                .metadata(metadata().return_type(field("result")))
+                .test_if(go_test),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .metadata(
@@ -74,16 +95,19 @@ impl DslLanguage for GoDsl {
                 .metadata(metadata().return_type(field("result"))),
             // Unconditional fallback first — reverse iteration means conditional
             // rules (Struct, Interface) are checked before the fallback.
-            scope("type_spec", "Type").def_kind(DefKind::Other),
+            scope("type_spec", "DefinedType").def_kind(DefKind::Class),
+            scope("type_alias", "TypeAlias")
+                .def_kind(DefKind::TypeAlias)
+                .no_scope(),
             scope("type_spec", "Struct")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Struct)
                 .when(field_kind("type", &["struct_type"]))
                 .metadata(metadata().super_types(go_embedded_types)),
             scope("type_spec", "Interface")
                 .def_kind(DefKind::Interface)
                 .when(field_kind("type", &["interface_type"])),
             scope("var_spec", "Var")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Variable)
                 .no_scope()
                 .when(!ancestor_is(&[
                     "function_declaration",
@@ -91,7 +115,7 @@ impl DslLanguage for GoDsl {
                     "func_literal",
                 ])),
             scope("const_spec", "Const")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Constant)
                 .no_scope()
                 .when(!ancestor_is(&[
                     "function_declaration",
@@ -99,6 +123,20 @@ impl DslLanguage for GoDsl {
                     "func_literal",
                 ])),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["body", "field_declaration_list", "{", "value"],
+            parameters: &["parameters"],
+            return_type: &["result"],
+            declared_type: &["type"],
+            doc_comments: &["comment"],
+            doc_markers: &["//", "/*", "*/"],
+            doc_hosts: &["type_declaration", "const_declaration", "var_declaration"],
+            visibility: Some(go_visibility),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {

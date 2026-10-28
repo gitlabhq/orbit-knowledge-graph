@@ -66,11 +66,42 @@ impl Relationship {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Role {
+    Class,
+    Interface,
+    Module,
+    Function,
+    Method,
+    Constructor,
+    Lambda,
+    Property,
+    EnumEntry,
+    Alias,
+}
+
+const fn role(kind: DefKind) -> Role {
+    match kind {
+        DefKind::Class | DefKind::Struct | DefKind::Enum | DefKind::Trait => Role::Class,
+        DefKind::Interface => Role::Interface,
+        DefKind::Module => Role::Module,
+        DefKind::Function | DefKind::Test => Role::Function,
+        DefKind::Method => Role::Method,
+        DefKind::Constructor => Role::Constructor,
+        DefKind::Lambda => Role::Lambda,
+        DefKind::Property | DefKind::Field | DefKind::Constant | DefKind::Variable => {
+            Role::Property
+        }
+        DefKind::EnumEntry => Role::EnumEntry,
+        DefKind::TypeAlias | DefKind::Macro => Role::Alias,
+    }
+}
+
 macro_rules! define_containment_rules {
     ( $( $parent:ident => [ $( $child:ident ),+ $(,)? ] ; )+ ) => {
         pub fn containment_edge_kind(parent: DefKind, child: DefKind) -> Option<EdgeKind> {
-            match (parent, child) {
-                $( $( (DefKind::$parent, DefKind::$child) => Some(EdgeKind::Defines), )+ )+
+            match (role(parent), role(child)) {
+                $( $( (Role::$parent, Role::$child) => Some(EdgeKind::Defines), )+ )+
                 _ => None,
             }
         }
@@ -84,22 +115,17 @@ macro_rules! define_containment_rules {
                 target_def_kind: Some(child),
             })
         }
-
-        #[cfg(test)]
-        fn all_valid_containment_pairs() -> Vec<(DefKind, DefKind)> {
-            vec![$( $( (DefKind::$parent, DefKind::$child), )+ )+]
-        }
     };
 }
 
 define_containment_rules! {
-    Module => [Class, Interface, Module, Function, Method, Constructor, Lambda, Property, EnumEntry, Other];
-    Class => [Class, Interface, Method, Function, Constructor, Lambda, Property, EnumEntry, Other];
+    Module => [Class, Interface, Module, Function, Method, Constructor, Lambda, Property, EnumEntry, Alias];
+    Class => [Class, Interface, Module, Method, Function, Constructor, Lambda, Property, EnumEntry, Alias];
     Interface => [Interface, Class, Method, Function, Property, Lambda];
     Method => [Method, Function, Class, Lambda, Interface, Property];
     Function => [Function, Class, Method, Lambda];
     Lambda => [Lambda, Class, Function, Method, Interface, Property];
-    Other => [Method, Function, Class, Property, Lambda];
+    Alias => [Method, Function, Class, Property, Lambda];
 }
 
 #[cfg(test)]
@@ -176,17 +202,6 @@ mod tests {
             assert!(
                 containment_edge_kind(DefKind::Module, kind).is_some(),
                 "Module should contain {kind:?}",
-            );
-        }
-    }
-
-    #[test]
-    fn all_pairs_produce_defines() {
-        for (parent, child) in all_valid_containment_pairs() {
-            assert_eq!(
-                containment_edge_kind(parent, child),
-                Some(EdgeKind::Defines),
-                "{parent:?} -> {child:?} should be Defines",
             );
         }
     }

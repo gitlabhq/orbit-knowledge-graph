@@ -1,9 +1,10 @@
 use crate::v2::config::Language;
+use crate::v2::dsl::extractors::{DisplayRules, metadata};
 use crate::v2::dsl::types::{
     ChainConfig, DslLanguage, FieldAccessEntry, LanguageHooks, ReferenceRule, ScopeRule, reference,
     scope,
 };
-use crate::v2::types::{CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{CanonicalImport, DefKind, ImportBindingKind, ImportMode, Visibility};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Extract, child_of_kind, field, text};
@@ -23,6 +24,140 @@ type N<'a> = Node<'a, StrDoc<SupportLang>>;
 /// named children.
 fn target_text(t: &'static str) -> Pred {
     Pred::Exists(Box::new(Extract::one(Field("target"), Text(t))))
+}
+
+fn elixir_target<'a>(node: &N<'a>) -> Option<std::borrow::Cow<'a, str>> {
+    node.field("target").map(|t| t.text())
+}
+
+fn elixir_string(node: &N<'_>) -> Option<String> {
+    let content: String = node
+        .children()
+        .filter(|c| c.kind() == "quoted_content")
+        .map(|c| c.text().to_string())
+        .collect();
+    (!content.is_empty()).then_some(content)
+}
+
+fn elixir_attribute_string(node: &N<'_>, attribute: &str) -> Option<String> {
+    if node.kind() != "unary_operator" {
+        return None;
+    }
+    let operand = node.field("operand")?;
+    if elixir_target(&operand).as_deref() != Some(attribute) {
+        return None;
+    }
+    let string = operand
+        .children()
+        .find(|c| c.kind() == "arguments")?
+        .children()
+        .find(|c| c.kind() == "string")?;
+    elixir_string(&string)
+}
+
+fn elixir_doc(node: &N<'_>) -> Option<String> {
+    let text = match elixir_target(node).as_deref() {
+        Some("defmodule") => node
+            .children()
+            .find(|c| c.kind() == "do_block")?
+            .children()
+            .filter(|c| c.is_named())
+            .find_map(|c| elixir_attribute_string(&c, "moduledoc"))?,
+        _ => node
+            .prev_all()
+            .filter(|c| c.is_named())
+            .take_while(|c| c.kind() == "unary_operator")
+            .find_map(|c| elixir_attribute_string(&c, "doc"))?,
+    };
+    crate::v2::types::text::doc_paragraph(text.lines())
+}
+
+fn elixir_parameters(node: &N<'_>) -> Vec<String> {
+    let Some(head) = node
+        .children()
+        .find(|c| c.kind() == "arguments")
+        .and_then(|a| a.children().find(|c| c.is_named()))
+    else {
+        return Vec::new();
+    };
+    let head = head.field("left").unwrap_or(head);
+    head.children()
+        .find(|c| c.kind() == "arguments")
+        .map(|args| {
+            args.children()
+                .filter(|c| c.is_named())
+                .map(|c| c.text().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn elixir_visibility(node: &N<'_>, _name: &str) -> Option<Visibility> {
+    match elixir_target(node).as_deref() {
+        Some("def" | "defmacro") => Some(Visibility::Public),
+        Some("defp" | "defmacrop") => Some(Visibility::Private),
+        _ => None,
+    }
+}
+
+fn elixir_test_name(node: &N<'_>) -> Option<String> {
+    let string = node
+        .children()
+        .find(|c| c.kind() == "arguments")?
+        .children()
+        .find(|c| c.is_named())?;
+    if string.kind() != "string" {
+        return None;
+    }
+    elixir_string(&string).map(|n| crate::v2::types::text::cap(n, crate::v2::types::text::NAME_CAP))
+}
+
+fn elixir_defstruct_fields(
+    node: &N<'_>,
+    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+    scope_stack: &[std::sync::Arc<str>],
+    sep: &'static str,
+) -> bool {
+    if node.kind() != "call" || elixir_target(node).as_deref() != Some("defstruct") {
+        return false;
+    }
+    let Some(args) = node.children().find(|c| c.kind() == "arguments") else {
+        return false;
+    };
+    let mut items: Vec<N<'_>> = Vec::new();
+    for arg in args.children().filter(|c| c.is_named()) {
+        match arg.kind().as_ref() {
+            "list" | "keywords" => items.extend(arg.children().filter(|c| c.is_named())),
+            _ => items.push(arg),
+        }
+    }
+    for item in items {
+        let name = match item.kind().as_ref() {
+            "atom" => item.text().trim_start_matches(':').to_string(),
+            "pair" | "keywords" => item
+                .field("key")
+                .map(|k| k.text().trim().trim_end_matches(':').to_string())
+                .unwrap_or_default(),
+            _ => continue,
+        };
+        if name.is_empty() {
+            continue;
+        }
+        let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+        defs.push(crate::v2::types::CanonicalDefinition {
+            definition_type: "StructField",
+            kind: DefKind::Field,
+            name,
+            fqn,
+            range: crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(&item)),
+            is_top_level: false,
+            metadata: Some(Box::new(crate::v2::types::DefinitionMetadata {
+                generated_by: Some("defstruct".to_string()),
+                ..Default::default()
+            })),
+        });
+    }
+    false
 }
 
 /// Forms whose head parses as a nested `call` (`def greet(name)`);
@@ -142,6 +277,7 @@ impl DslLanguage for ElixirDsl {
     fn hooks() -> LanguageHooks {
         LanguageHooks {
             on_import: Some(elixir_extract_imports),
+            on_scope: Some(elixir_defstruct_fields),
             ..LanguageHooks::default()
         }
     }
@@ -151,7 +287,7 @@ impl DslLanguage for ElixirDsl {
             // The module name is a single `alias` token, so a dotted
             // `defmodule Foo.Bar` lands as one FQN-aligned segment.
             scope("call", "Module")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Module)
                 .when(target_text("defmodule"))
                 .name_from(child_of_kind("arguments").child_of_kind("alias")),
             // The head is the first named child of `arguments`: an
@@ -170,8 +306,37 @@ impl DslLanguage for ElixirDsl {
                         .try_field("left")
                         .try_field("target")
                         .where_(Kind("identifier")),
-                ),
+                )
+                .metadata(metadata().parameters_with(elixir_parameters)),
+            scope("call", "Macro")
+                .def_kind(DefKind::Macro)
+                .when(target_text("defmacro").or(target_text("defmacrop")))
+                .name_from(
+                    child_of_kind("arguments")
+                        .first_named()
+                        .try_field("left")
+                        .try_field("target")
+                        .where_(Kind("identifier")),
+                )
+                .metadata(metadata().parameters_with(elixir_parameters)),
+            scope("call", "Test")
+                .def_kind(DefKind::Test)
+                .when(target_text("test").and(has_child(&["do_block"])))
+                .name_hook(elixir_test_name),
+            scope("call", "Describe")
+                .def_kind(DefKind::Test)
+                .when(target_text("describe").and(has_child(&["do_block"])))
+                .name_hook(elixir_test_name),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["do_block", "keywords"],
+            visibility: Some(elixir_visibility),
+            doc_with: Some(elixir_doc),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {

@@ -1,4 +1,5 @@
 use crate::v2::config::Language;
+use crate::v2::dsl::extractors::DisplayRules;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::extract::field;
@@ -35,6 +36,15 @@ impl DslLanguage for BashDsl {
                 .def_kind(DefKind::Function)
                 .name_from(field("name")),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["body"],
+            doc_comments: &["comment"],
+            doc_markers: &["#"],
+            ..DisplayRules::default()
+        }
     }
 
     fn file_scope() -> bool {

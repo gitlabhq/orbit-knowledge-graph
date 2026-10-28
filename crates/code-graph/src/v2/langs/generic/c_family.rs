@@ -109,6 +109,86 @@ fn descend_abstract_declarator<'r>(node: &N<'r>) -> Option<N<'r>> {
     })
 }
 
+pub fn c_parameters(def: &N<'_>) -> Vec<String> {
+    let mut cur = def.field("declarator");
+    while let Some(node) = cur {
+        if node.kind().as_ref() == "function_declarator" {
+            return node
+                .field("parameters")
+                .map(|list| {
+                    list.children()
+                        .filter(|c| c.is_named() && c.kind().as_ref() != "comment")
+                        .map(|c| c.text().to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+        cur = node.field("declarator");
+    }
+    Vec::new()
+}
+
+pub fn c_linkage(def: &N<'_>) -> Option<crate::v2::types::Visibility> {
+    if def.kind().as_ref() != "function_definition" {
+        return None;
+    }
+    let is_static = def
+        .children()
+        .any(|c| c.kind().as_ref() == "storage_class_specifier" && c.text() == "static");
+    Some(if is_static {
+        crate::v2::types::Visibility::File
+    } else {
+        crate::v2::types::Visibility::Public
+    })
+}
+
+pub fn cpp_access(def: &N<'_>, _name: &str) -> Option<crate::v2::types::Visibility> {
+    use crate::v2::types::Visibility;
+    let Some(list) = def
+        .parent()
+        .filter(|p| p.kind().as_ref() == "field_declaration_list")
+    else {
+        return c_linkage(def);
+    };
+    for sibling in def.prev_all() {
+        if sibling.kind().as_ref() == "access_specifier" {
+            return match sibling.text().trim() {
+                "public" => Some(Visibility::Public),
+                "protected" => Some(Visibility::Protected),
+                "private" => Some(Visibility::Private),
+                _ => None,
+            };
+        }
+    }
+    let owner = list.parent()?;
+    Some(if owner.kind().as_ref() == "class_specifier" {
+        Visibility::Private
+    } else {
+        Visibility::Public
+    })
+}
+
+pub const C_DOC_MARKERS: &[&str] = &["///", "//!", "//", "/**", "/*!", "/*", "*/", "*"];
+
+pub const C_TOKENS: &[(&str, crate::v2::dsl::extractors::Token)] = &[
+    (
+        "static",
+        crate::v2::dsl::extractors::Token::Modifier(crate::v2::types::Modifier::Static),
+    ),
+    (
+        "extern",
+        crate::v2::dsl::extractors::Token::Modifier(crate::v2::types::Modifier::Extern),
+    ),
+    (
+        "inline",
+        crate::v2::dsl::extractors::Token::Modifier(crate::v2::types::Modifier::Inline),
+    ),
+    (
+        "virtual",
+        crate::v2::dsl::extractors::Token::Modifier(crate::v2::types::Modifier::Virtual),
+    ),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

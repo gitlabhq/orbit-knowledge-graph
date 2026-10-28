@@ -1,4 +1,5 @@
 use crate::v2::config::Language;
+use crate::v2::dsl::extractors::{DisplayRules, metadata};
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::extract::{Extract, field};
@@ -35,24 +36,42 @@ impl DslLanguage for CDsl {
         vec![
             scope("function_definition", "Function")
                 .def_kind(DefKind::Function)
-                .name_hook(c_family::c_declarator_name),
+                .name_hook(c_family::c_declarator_name)
+                .metadata(metadata().parameters_with(c_family::c_parameters)),
             scope("struct_specifier", "Struct")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Struct)
                 .when(has_descendant("field_declaration_list")),
             scope("enum_specifier", "Enum")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Enum)
                 .when(has_descendant("enumerator_list")),
             scope("union_specifier", "Union")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Struct)
                 .when(has_descendant("field_declaration_list")),
             scope("type_definition", "Typedef")
-                .def_kind(DefKind::Other)
+                .def_kind(DefKind::TypeAlias)
                 .name_hook(c_family::c_declarator_name)
                 .no_scope(),
             scope("enumerator", "EnumConstant")
                 .def_kind(DefKind::EnumEntry)
                 .no_scope(),
+            scopes(&["preproc_def", "preproc_function_def"], "Macro")
+                .def_kind(DefKind::Macro)
+                .no_scope(),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["body", "value"],
+            return_type: &["type"],
+            doc_comments: &["comment"],
+            doc_markers: c_family::C_DOC_MARKERS,
+            doc_hosts: &["template_declaration"],
+            modifier_hosts: &["storage_class_specifier"],
+            tokens: c_family::C_TOKENS,
+            visibility: Some(|node, _| c_family::c_linkage(node)),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {
@@ -204,7 +223,7 @@ mod tests {
         let result = parse("struct Point { int x; int y; };\n").unwrap();
         let point = result.definitions.iter().find(|d| d.name == "Point");
         assert!(point.is_some(), "should find struct Point");
-        assert_eq!(point.unwrap().kind, DefKind::Class);
+        assert_eq!(point.unwrap().kind, DefKind::Struct);
     }
 
     #[test]

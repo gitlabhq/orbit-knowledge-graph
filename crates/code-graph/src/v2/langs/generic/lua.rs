@@ -1,4 +1,5 @@
 use crate::v2::config::Language;
+use crate::v2::dsl::extractors::DisplayRules;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::extract::field;
@@ -39,6 +40,16 @@ impl DslLanguage for LuaDsl {
                 .when(field_kind("name", &["method_index_expression"]))
                 .name_from(field("name").field("method")),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["body", "end"],
+            parameters: &["parameters"],
+            doc_comments: &["comment"],
+            doc_markers: &["---", "--"],
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {

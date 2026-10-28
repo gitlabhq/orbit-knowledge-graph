@@ -1,11 +1,11 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::metadata;
+use crate::v2::dsl::extractors::{DisplayRules, Token, metadata};
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::DefKind;
+use crate::v2::types::{DefKind, Modifier, Visibility};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::Extract;
-use treesitter_visit::extract::{child_of_kind, default_name, field, text};
+use treesitter_visit::extract::{child_of_kind, constant, default_name, field, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -190,7 +190,7 @@ impl DslLanguage for ScalaDsl {
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("identifier")),
             scope("trait_definition", "Trait")
-                .def_kind(DefKind::Class)
+                .def_kind(DefKind::Trait)
                 .name_from(child_of_kind("identifier"))
                 .metadata(metadata().super_types(scala_super_types)),
             scope("function_definition", "Function")
@@ -199,23 +199,71 @@ impl DslLanguage for ScalaDsl {
             scope("function_declaration", "Function")
                 .def_kind(DefKind::Function)
                 .name_from(child_of_kind("identifier")),
+            scope("function_definition", "Method")
+                .def_kind(DefKind::Method)
+                .when(parent_is("template_body"))
+                .name_from(child_of_kind("identifier")),
+            scope("function_declaration", "Method")
+                .def_kind(DefKind::Method)
+                .when(parent_is("template_body"))
+                .name_from(child_of_kind("identifier")),
+            scope("class_parameters", "PrimaryConstructor")
+                .def_kind(DefKind::Constructor)
+                .when(parent_is("class_definition"))
+                .name_from(constant("this"))
+                .no_scope(),
             scope("val_definition", "Val")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Variable)
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
             scope("val_declaration", "Val")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Variable)
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
             scope("var_definition", "Var")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Variable)
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
             scope("var_declaration", "Var")
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Variable)
+                .no_scope()
+                .name_from(child_of_kind("identifier")),
+            scopes(&["val_definition", "val_declaration"], "Val")
+                .def_kind(DefKind::Field)
+                .when(parent_is("template_body"))
+                .no_scope()
+                .name_from(child_of_kind("identifier")),
+            scopes(&["var_definition", "var_declaration"], "Var")
+                .def_kind(DefKind::Field)
+                .when(parent_is("template_body"))
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["body", "value"],
+            parameters: &["parameters"],
+            parameter_items: &["class_parameter"],
+            return_type: &["return_type"],
+            declared_type: &["type"],
+            doc_comments: &["block_comment", "comment"],
+            doc_prefixes: &["/**"],
+            doc_markers: &["/**", "*/", "*"],
+            modifier_hosts: &["modifiers"],
+            tokens: &[
+                ("private", Token::Visibility(Visibility::Private)),
+                ("protected", Token::Visibility(Visibility::Protected)),
+                ("override", Token::Modifier(Modifier::Override)),
+                ("abstract", Token::Modifier(Modifier::Abstract)),
+                ("final", Token::Modifier(Modifier::Final)),
+                ("sealed", Token::Modifier(Modifier::Sealed)),
+                ("inline", Token::Modifier(Modifier::Inline)),
+            ],
+            visibility: Some(|_, _| Some(Visibility::Public)),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {

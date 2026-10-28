@@ -8,6 +8,7 @@ mod config;
 mod document_types;
 
 use crate::v2::config::Language;
+use crate::v2::dsl::extractors::DisplayRules;
 use crate::v2::dsl::types::*;
 use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
@@ -38,10 +39,17 @@ impl DslLanguage for YamlDsl {
     fn scopes() -> Vec<ScopeRule> {
         vec![
             scope("anchor", "Anchor")
-                .def_kind(DefKind::Other)
+                .def_kind(DefKind::Variable)
                 .no_scope()
                 .name_from(child_of_kind("anchor_name")),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            signature_with: Some(|_| None),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {

@@ -58,6 +58,7 @@ use crate::v2::types::{
 
 type RustFileError = (String, AnalyzerError);
 
+mod display;
 mod local_flow;
 mod manifest;
 #[path = "ast.rs"]

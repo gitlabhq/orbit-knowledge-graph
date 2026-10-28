@@ -220,6 +220,20 @@ pub struct JsDef {
     pub is_exported: bool,
     pub type_annotation: Option<String>,
     pub invocation_support: Option<JsInvocationSupport>,
+    pub display: Box<JsDisplay>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JsDisplay {
+    pub signature: Option<String>,
+    pub parameters: Vec<String>,
+    pub return_type: Option<String>,
+    pub declared_type: Option<String>,
+    pub doc_comment: Option<String>,
+    pub modifiers: crate::v2::types::Modifiers,
+    pub visibility: Option<crate::v2::types::Visibility>,
+    pub language_kind: Option<&'static str>,
+    pub kind: Option<crate::v2::types::DefKind>,
 }
 
 #[derive(Debug, Clone)]
@@ -236,6 +250,8 @@ pub enum JsDefKind {
     Class,
     Function,
     Method { class_fqn: String, is_static: bool },
+    Constructor { class_fqn: String },
+    Test { group: bool },
     Property { class_fqn: String },
     ComputedProperty { class_fqn: String },
     Watcher { class_fqn: String },
@@ -252,6 +268,7 @@ impl JsDefKind {
     pub fn class_fqn(&self) -> Option<&str> {
         match self {
             Self::Method { class_fqn, .. }
+            | Self::Constructor { class_fqn }
             | Self::Property { class_fqn }
             | Self::ComputedProperty { class_fqn }
             | Self::Watcher { class_fqn }
@@ -270,6 +287,9 @@ impl JsDefKind {
             Self::Method {
                 is_static: false, ..
             } => "Method",
+            Self::Constructor { .. } => "Constructor",
+            Self::Test { group: true } => "TestSuite",
+            Self::Test { group: false } => "TestCase",
             Self::Property { .. } => "Property",
             Self::ComputedProperty { .. } => "ComputedProperty",
             Self::Watcher { .. } => "Watcher",

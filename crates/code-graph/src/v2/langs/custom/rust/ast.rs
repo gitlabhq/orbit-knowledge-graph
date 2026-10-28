@@ -238,7 +238,7 @@ impl RustStructureExtractor {
             ast::Item::Const(constant) => {
                 self.collect_named_item(
                     "Constant",
-                    DefKind::Property,
+                    DefKind::Constant,
                     constant,
                     module_parts,
                     top_level,
@@ -247,7 +247,7 @@ impl RustStructureExtractor {
             ast::Item::Static(static_item) => {
                 self.collect_named_item(
                     "Static",
-                    DefKind::Property,
+                    DefKind::Variable,
                     static_item,
                     module_parts,
                     top_level,
@@ -256,7 +256,7 @@ impl RustStructureExtractor {
             ast::Item::TypeAlias(type_alias) => {
                 self.collect_named_item(
                     "TypeAlias",
-                    DefKind::Other,
+                    DefKind::TypeAlias,
                     type_alias,
                     module_parts,
                     top_level,
@@ -270,7 +270,7 @@ impl RustStructureExtractor {
             ast::Item::MacroRules(macro_rules) => {
                 self.collect_named_item(
                     "Macro",
-                    DefKind::Other,
+                    DefKind::Macro,
                     macro_rules,
                     module_parts,
                     top_level,
@@ -279,7 +279,7 @@ impl RustStructureExtractor {
             ast::Item::MacroDef(macro_def) => {
                 self.collect_named_item(
                     "Macro",
-                    DefKind::Other,
+                    DefKind::Macro,
                     macro_def,
                     module_parts,
                     top_level,
@@ -312,7 +312,7 @@ impl RustStructureExtractor {
                 name.clone(),
                 &module_parts,
                 top_level,
-                module.syntax().text_range(),
+                module.syntax(),
             );
 
             if module.semicolon_token().is_some() {
@@ -344,11 +344,11 @@ impl RustStructureExtractor {
         let struct_parts = child_parts(module_parts, &name);
         self.push_definition(
             "Struct",
-            DefKind::Class,
+            DefKind::Struct,
             name,
             &struct_parts,
             top_level,
-            strukt.syntax().text_range(),
+            strukt.syntax(),
         );
 
         if let Some(field_list) = strukt.field_list() {
@@ -364,11 +364,11 @@ impl RustStructureExtractor {
         let union_parts = child_parts(module_parts, &name);
         self.push_definition(
             "Union",
-            DefKind::Class,
+            DefKind::Struct,
             name,
             &union_parts,
             top_level,
-            union_item.syntax().text_range(),
+            union_item.syntax(),
         );
 
         if let StructKind::Record(fields) = union_item.kind() {
@@ -379,11 +379,11 @@ impl RustStructureExtractor {
                 let field_parts = child_parts(&union_parts, &field_name);
                 self.push_definition(
                     "Field",
-                    DefKind::Property,
+                    DefKind::Field,
                     field_name,
                     &field_parts,
                     false,
-                    field.syntax().text_range(),
+                    field.syntax(),
                 );
             }
         }
@@ -397,11 +397,11 @@ impl RustStructureExtractor {
         let enum_parts = child_parts(module_parts, &name);
         self.push_definition(
             "Enum",
-            DefKind::Class,
+            DefKind::Enum,
             name,
             &enum_parts,
             top_level,
-            enum_item.syntax().text_range(),
+            enum_item.syntax(),
         );
 
         if let Some(variant_list) = enum_item.variant_list() {
@@ -416,7 +416,7 @@ impl RustStructureExtractor {
                     variant_name,
                     &variant_parts,
                     false,
-                    variant.syntax().text_range(),
+                    variant.syntax(),
                 );
                 if let Some(field_list) = variant.field_list() {
                     self.collect_field_list(field_list, &variant_parts);
@@ -438,11 +438,11 @@ impl RustStructureExtractor {
                 let trait_parts = child_parts(module_parts, &name);
                 self.push_definition(
                     "Trait",
-                    DefKind::Interface,
+                    DefKind::Trait,
                     name,
                     &trait_parts,
                     top_level,
-                    trait_item.syntax().text_range(),
+                    trait_item.syntax(),
                 );
                 trait_parts
             }
@@ -583,7 +583,7 @@ impl RustStructureExtractor {
                         name,
                         &function_parts,
                         false,
-                        function.syntax().text_range(),
+                        function.syntax(),
                     );
                     self.collect_nested_items_in_function(
                         &function,
@@ -595,7 +595,7 @@ impl RustStructureExtractor {
                 ast::AssocItem::Const(constant) => {
                     self.collect_named_item(
                         "Constant",
-                        DefKind::Property,
+                        DefKind::Constant,
                         constant,
                         container_parts,
                         false,
@@ -604,7 +604,7 @@ impl RustStructureExtractor {
                 ast::AssocItem::TypeAlias(type_alias) => {
                     self.collect_named_item(
                         "TypeAlias",
-                        DefKind::Other,
+                        DefKind::TypeAlias,
                         type_alias,
                         container_parts,
                         false,
@@ -632,7 +632,7 @@ impl RustStructureExtractor {
                     name,
                     &function_parts,
                     top_level,
-                    function.syntax().text_range(),
+                    function.syntax(),
                 );
                 function_parts
             }
@@ -653,20 +653,12 @@ impl RustStructureExtractor {
                     let Some(field_name) = field.name().map(|name| name.text().to_string()) else {
                         continue;
                     };
-                    self.push_field_definition(
-                        field_name,
-                        container_parts,
-                        field.syntax().text_range(),
-                    );
+                    self.push_field_definition(field_name, container_parts, field.syntax());
                 }
             }
             ast::FieldList::TupleFieldList(fields) => {
                 for (index, field) in fields.fields().enumerate() {
-                    self.push_field_definition(
-                        index.to_string(),
-                        container_parts,
-                        field.syntax().text_range(),
-                    );
+                    self.push_field_definition(index.to_string(), container_parts, field.syntax());
                 }
             }
         }
@@ -676,16 +668,16 @@ impl RustStructureExtractor {
         &mut self,
         field_name: String,
         container_parts: &[String],
-        range: TextRange,
+        syntax: &SyntaxNode,
     ) {
         let field_parts = child_parts(container_parts, &field_name);
         self.push_definition(
             "Field",
-            DefKind::Property,
+            DefKind::Field,
             field_name,
             &field_parts,
             false,
-            range,
+            syntax,
         );
     }
 
@@ -735,7 +727,7 @@ impl RustStructureExtractor {
             name,
             &fqn_parts,
             top_level,
-            node.syntax().text_range(),
+            node.syntax(),
         );
     }
 
@@ -865,16 +857,21 @@ impl RustStructureExtractor {
         name: String,
         fqn_parts: &[String],
         top_level: bool,
-        range: TextRange,
+        syntax: &SyntaxNode,
     ) {
+        let (definition_type, kind) = if super::display::is_test(syntax) {
+            ("Test", DefKind::Test)
+        } else {
+            (definition_type, kind)
+        };
         self.definitions.push(CanonicalDefinition {
             definition_type,
             kind,
             name,
             fqn: canonical_fqn_parts(fqn_parts),
-            range: self.line_index.range(range),
+            range: self.line_index.range(syntax.text_range()),
             is_top_level: top_level,
-            metadata: None,
+            metadata: Some(Box::new(super::display::metadata(syntax))),
         });
     }
 

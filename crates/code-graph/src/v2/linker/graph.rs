@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::trace_event;
 use crate::v2::config::Language;
 use crate::v2::types::{
-    CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
-    Range, Relationship, containment_relationship,
+    CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, DefScope, EdgeKind,
+    NodeKind, Range, Relationship, containment_relationship,
 };
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
 
@@ -386,13 +386,15 @@ impl CodeGraph {
             });
             def_nodes.push(def_node);
 
-            self.indexes.by_fqn.insert(gdef.fqn, def_node);
-            self.indexes.by_name.insert(gdef.name, def_node);
+            if gdef.kind.is_referable() {
+                self.indexes.by_fqn.insert(gdef.fqn, def_node);
+                self.indexes.by_name.insert(gdef.name, def_node);
 
-            let fqn_str = self.strings.get(gdef.fqn).to_string();
-            if let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) {
-                let parent_id = self.strings.alloc(&fqn_str[..sep_pos]);
-                self.indexes.nested.insert(parent_id, gdef.name, def_node);
+                let fqn_str = self.strings.get(gdef.fqn).to_string();
+                if let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) {
+                    let parent_id = self.strings.alloc(&fqn_str[..sep_pos]);
+                    self.indexes.nested.insert(parent_id, gdef.name, def_node);
+                }
             }
             definition_ranges.push((gdef.range, def_node));
 
@@ -408,28 +410,40 @@ impl CodeGraph {
             DefinitionRangeIndex::from_ranges(definition_ranges),
         );
 
+        let mut scopes = Vec::with_capacity(graph_defs.len());
         for (i, gdef) in graph_defs.iter().enumerate() {
+            let mut scope = DefScope::outside_parent(gdef.kind);
             let fqn_str = self.strings.get(gdef.fqn);
-            let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) else {
-                continue;
-            };
-            let parent_fqn = &fqn_str[..sep_pos];
-            for (j, parent_def) in graph_defs.iter().enumerate() {
-                if j != i
-                    && self.strings.get(parent_def.fqn) == parent_fqn
-                    && let Some(rel) = containment_relationship(parent_def.kind, gdef.kind)
-                {
-                    self.graph.add_edge(
-                        def_nodes[j],
-                        def_nodes[i],
-                        GraphEdge { relationship: rel },
-                    );
-                    break;
+            if let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) {
+                let parent_fqn = &fqn_str[..sep_pos];
+                let mut found_parent = false;
+                for (j, parent_def) in graph_defs.iter().enumerate() {
+                    if j == i || self.strings.get(parent_def.fqn) != parent_fqn {
+                        continue;
+                    }
+                    if !found_parent {
+                        scope = DefScope::inside(parent_def.kind);
+                        found_parent = true;
+                    }
+                    if let Some(rel) = containment_relationship(parent_def.kind, gdef.kind) {
+                        self.graph.add_edge(
+                            def_nodes[j],
+                            def_nodes[i],
+                            GraphEdge { relationship: rel },
+                        );
+                        scope = DefScope::inside(parent_def.kind);
+                        break;
+                    }
                 }
             }
+            scopes.push(scope);
         }
 
-        self.defs.extend(graph_defs);
+        self.defs
+            .extend(graph_defs.into_iter().zip(scopes).map(|(mut gdef, scope)| {
+                gdef.scope = scope;
+                gdef
+            }));
 
         let mut import_nodes = Vec::with_capacity(imports.len());
         let import_base = self.imports.len() as u32;
@@ -893,9 +907,7 @@ impl CodeGraph {
                 _ => None,
             },
             GraphNode::Definition { id, .. } => match property {
-                "kind" => Some(Cow::Borrowed(
-                    self.defs[id.0 as usize].ontology_kind().as_str(),
-                )),
+                "kind" => Some(Cow::Borrowed(self.defs[id.0 as usize].kind.kind().as_str())),
                 _ => None,
             },
             GraphNode::Import { .. } => None,
@@ -1332,7 +1344,7 @@ pub struct DefinitionRow<'a> {
 }
 impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
-        let kind = self.def.ontology_kind();
+        let kind = self.def.kind.kind();
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
         b.col("language")?.push_str(self.language)?;
@@ -1343,7 +1355,7 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
         b.col("return_type")?.push_opt_str(None::<&str>)?;
         b.col("declared_type")?.push_opt_str(None::<&str>)?;
         b.col("doc_comment")?.push_str("")?;
-        b.col("category")?.push_str(kind.category())?;
+        b.col("category")?.push_str(kind.category().as_str())?;
         b.col("kind")?.push_str(kind.as_str())?;
         b.col("language_kind")?.push_str(self.def.definition_type)?;
         b.col("scope")?.push_str("")?;

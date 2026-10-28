@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::metadata;
+use crate::v2::dsl::extractors::{DisplayRules, Token, metadata};
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::DefKind;
+use crate::v2::types::{DefKind, Modifier, Visibility};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::Extract;
@@ -91,6 +91,51 @@ fn classify_kotlin_class(node: &N<'_>) -> &'static str {
     "Class"
 }
 
+const KOTLIN_TYPES: &[&str] = &[
+    "user_type",
+    "nullable_type",
+    "function_type",
+    "parenthesized_type",
+];
+
+fn kotlin_return_type(node: &N<'_>) -> Option<String> {
+    let mut after_parameters = false;
+    for child in node.children() {
+        let kind = child.kind();
+        if kind == "function_value_parameters" {
+            after_parameters = true;
+        } else if after_parameters && KOTLIN_TYPES.contains(&kind.as_ref()) {
+            return Some(child.text().to_string());
+        }
+    }
+    None
+}
+
+fn kotlin_declared_type(node: &N<'_>) -> Option<String> {
+    node.children()
+        .find(|c| c.kind() == "variable_declaration")?
+        .children()
+        .find(|c| KOTLIN_TYPES.contains(&c.kind().as_ref()))
+        .map(|c| c.text().to_string())
+}
+
+fn kotlin_test(node: &N<'_>, _name: &str) -> bool {
+    node.children()
+        .filter(|c| c.kind() == "modifiers")
+        .flat_map(|m| m.children().collect::<Vec<_>>())
+        .any(|a| {
+            a.kind() == "annotation" && matches!(a.text().as_ref(), "@Test" | "@ParameterizedTest")
+        })
+}
+
+fn kotlin_const() -> Pred {
+    Pred::Exists(Box::new(
+        Extract::one(Child, Kind("modifiers"))
+            .nav(Child, Kind("property_modifier"))
+            .nav(Child, Text("const")),
+    ))
+}
+
 impl DslLanguage for KotlinDsl {
     fn name() -> &'static str {
         "kotlin"
@@ -104,6 +149,7 @@ impl DslLanguage for KotlinDsl {
         vec![
             scope_fn("class_declaration", classify_kotlin_class)
                 .def_kind(DefKind::Class)
+                .kinds_by_label(&[("Interface", DefKind::Interface), ("Enum", DefKind::Enum)])
                 .name_from(child_of_kind("type_identifier"))
                 .metadata(metadata().super_types(kotlin_super_types)),
             scope("object_declaration", "Object")
@@ -114,17 +160,53 @@ impl DslLanguage for KotlinDsl {
                 .name_from_or(child_of_kind("type_identifier"), "Companion"),
             // Unconditional fallback first — reverse iteration means
             // conditional rule (ExtensionFunction) is checked before fallback.
-            scope("function_declaration", "Function").def_kind(DefKind::Function),
+            scope("function_declaration", "Function")
+                .def_kind(DefKind::Function)
+                .metadata(metadata().written_return_type(kotlin_return_type))
+                .test_if(kotlin_test),
             scope("function_declaration", "ExtensionFunction")
                 .def_kind(DefKind::Function)
                 .when(has_child(&["."]))
-                .metadata(metadata().receiver_type(child_of_kind("user_type"))),
+                .metadata(
+                    metadata()
+                        .receiver_type(child_of_kind("user_type"))
+                        .written_return_type(kotlin_return_type),
+                ),
+            scope("function_declaration", "Method")
+                .def_kind(DefKind::Method)
+                .when(parent_is("class_body").and(!has_child(&["."])))
+                .metadata(metadata().written_return_type(kotlin_return_type))
+                .test_if(kotlin_test),
+            scope("primary_constructor", "PrimaryConstructor")
+                .def_kind(DefKind::Constructor)
+                .name_from(constant("constructor"))
+                .no_scope(),
             scope("secondary_constructor", "Constructor")
                 .def_kind(DefKind::Constructor)
-                .name_from(no_extract()),
+                .name_from(constant("constructor")),
+            scope("property_declaration", "Variable")
+                .name_from(
+                    child_of_kind("variable_declaration").then(child_of_kind("simple_identifier")),
+                )
+                .def_kind(DefKind::Variable)
+                .no_scope()
+                .metadata(metadata().declared_type_with(kotlin_declared_type)),
             scope("property_declaration", "Property")
+                .name_from(
+                    child_of_kind("variable_declaration").then(child_of_kind("simple_identifier")),
+                )
                 .def_kind(DefKind::Property)
-                .no_scope(),
+                .no_scope()
+                .when(parent_is("class_body"))
+                .metadata(metadata().declared_type_with(kotlin_declared_type)),
+            scope("property_declaration", "Constant")
+                .name_from(
+                    child_of_kind("variable_declaration").then(child_of_kind("simple_identifier")),
+                )
+                .def_kind(DefKind::Constant)
+                .no_scope()
+                .when(kotlin_const())
+                .metadata(metadata().declared_type_with(kotlin_declared_type)),
             scope("property_declaration", "ExtensionProperty")
                 .def_kind(DefKind::Property)
                 .no_scope()
@@ -151,6 +233,33 @@ impl DslLanguage for KotlinDsl {
                 .no_scope()
                 .name_from(no_extract()),
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &["class_body", "function_body", "enum_class_body"],
+            parameters: &["function_value_parameters"],
+            parameter_items: &["class_parameter"],
+            doc_comments: &["multiline_comment", "line_comment"],
+            doc_prefixes: &["/**"],
+            doc_markers: &["/**", "*/", "*"],
+            modifier_hosts: &["modifiers"],
+            tokens: &[
+                ("public", Token::Visibility(Visibility::Public)),
+                ("protected", Token::Visibility(Visibility::Protected)),
+                ("private", Token::Visibility(Visibility::Private)),
+                ("internal", Token::Visibility(Visibility::Internal)),
+                ("abstract", Token::Modifier(Modifier::Abstract)),
+                ("final", Token::Modifier(Modifier::Final)),
+                ("override", Token::Modifier(Modifier::Override)),
+                ("sealed", Token::Modifier(Modifier::Sealed)),
+                ("suspend", Token::Modifier(Modifier::Async)),
+                ("inline", Token::Modifier(Modifier::Inline)),
+                ("external", Token::Modifier(Modifier::Extern)),
+            ],
+            visibility: Some(|_, _| Some(Visibility::Public)),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {

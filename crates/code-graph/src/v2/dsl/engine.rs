@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::extractors::MetadataRule;
 use super::types::{ImportRewriter, LanguageSpec, Rule};
 use super::utils::{
     canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
@@ -138,6 +139,7 @@ impl std::fmt::Display for ParseFullError {
 impl std::error::Error for ParseFullError {}
 
 struct ScopeMatch {
+    scope_only: bool,
     name: String,
     label: &'static str,
     def_kind: DefKind,
@@ -163,13 +165,30 @@ impl LanguageSpec {
         let name = rule
             .extract_name(node)
             .or_else(|| rule.default_name.map(|s| s.to_string()))?;
+        let label = rule.resolve_label(node);
+        let def_kind = rule.kind_for_label(label)?;
+        let (def_kind, label) = if rule.is_test(node, &name) {
+            (DefKind::Test, "Test")
+        } else {
+            (def_kind, label)
+        };
+        let mut metadata = rule.extract_metadata(node, &resolve).unwrap_or_default();
+        match &rule.metadata_rule {
+            Some(meta_rule) => {
+                meta_rule.display(&self.display, node, &name, def_kind, &mut metadata)
+            }
+            None => {
+                MetadataRule::new().display(&self.display, node, &name, def_kind, &mut metadata)
+            }
+        }
         Some(ScopeMatch {
+            scope_only: rule.scope_only,
             name,
-            label: rule.resolve_label(node),
-            def_kind: rule.resolve_def_kind(),
+            label,
+            def_kind,
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
-            metadata: rule.extract_metadata(node, &resolve),
+            metadata: Some(metadata),
         })
     }
 
@@ -842,6 +861,7 @@ impl LanguageSpec {
         let node_kind = node.kind();
         let nk = node_kind.as_ref();
         let mut pushed_scope = false;
+        let mut pushed_def = false;
 
         if let Some((pkg_kind, ref pkg_extract)) = self.package_node
             && nk == pkg_kind
@@ -859,142 +879,168 @@ impl LanguageSpec {
             }
             bare
         }) {
-            let is_top_level = state.scope_stack.len() <= state.top_level_depth;
-            let def_index = state.defs.len() as u32;
-
-            if m.creates_scope {
+            if m.scope_only {
                 state.scope_stack.push(Arc::from(m.name.as_str()));
                 pushed_scope = true;
-
-                // Create new SSA block for this scope (isolates bindings)
                 let new_block = state.ssa.add_block();
                 state.ssa.add_predecessor(new_block, state.current_block);
                 state.ssa.seal_block(new_block);
                 state.saved_blocks.push(state.current_block);
                 state.current_block = new_block;
-            }
-
-            let fqn = if m.creates_scope {
-                Fqn::from_parts(
-                    &state
-                        .scope_stack
-                        .iter()
-                        .map(|s| s.as_ref())
-                        .collect::<Vec<_>>(),
-                    sep,
-                )
-            } else {
-                Fqn::from_scope(&state.scope_stack, &m.name, sep)
-            };
-
-            let is_type_scope = m.def_kind.is_type_container();
-
-            let def_name = m.name.clone();
-            trace_event!(
-                state.tracer,
-                ScopePush {
-                    name: def_name.clone(),
-                    kind: format!("{:?}", m.def_kind),
-                    label: m.label.to_string(),
-                    fqn: fqn.as_str().to_string(),
-                    block_id: state.current_block.0,
-                }
-            );
-            state.defs.push(CanonicalDefinition {
-                definition_type: m.label,
-                kind: m.def_kind,
-                name: m.name,
-                fqn,
-                range: canonical_range(&m.range),
-                is_top_level,
-                metadata: m.metadata,
-            });
-            let last_def = &state.defs[def_index as usize];
-            trace_event!(
-                state.tracer,
-                DefDiscovered {
-                    name: last_def.name.clone(),
-                    fqn: last_def.fqn.as_str().to_string(),
-                    kind: format!("{:?}", last_def.kind),
-                    label: last_def.definition_type.to_string(),
-                    is_top_level: is_top_level,
-                }
-            );
-
-            // Write def name to SSA in the parent block so sibling scopes can see it.
-            let parent_block = if pushed_scope {
-                *state.saved_blocks.last().unwrap_or(&state.current_block)
-            } else {
-                state.current_block
-            };
-            let ssa_name = state.arena.alloc_str(&def_name);
-            state.ssa.write_variable(
-                ssa_name,
-                parent_block,
-                super::ssa::SsaValue::LocalDef(def_index),
-            );
-
-            if is_type_scope {
-                let scope_fqn = {
+                if m.def_kind.is_type_container() {
                     let parts: Vec<&str> = state.scope_stack.iter().map(|s| s.as_ref()).collect();
-                    state.arena.alloc_str(&parts.join(sep))
+                    let scope_fqn = state.arena.alloc_str(&parts.join(sep));
+                    for &self_name in self.ssa_config.self_names {
+                        let name = state.arena.alloc_str(self_name);
+                        state.ssa.write_variable(
+                            name,
+                            state.current_block,
+                            super::ssa::SsaValue::Type(scope_fqn),
+                        );
+                    }
+                }
+            } else {
+                let is_top_level = state.scope_stack.len() <= state.top_level_depth;
+                let def_index = state.defs.len() as u32;
+
+                if m.creates_scope {
+                    state.scope_stack.push(Arc::from(m.name.as_str()));
+                    pushed_scope = true;
+
+                    // Create new SSA block for this scope (isolates bindings)
+                    let new_block = state.ssa.add_block();
+                    state.ssa.add_predecessor(new_block, state.current_block);
+                    state.ssa.seal_block(new_block);
+                    state.saved_blocks.push(state.current_block);
+                    state.current_block = new_block;
+                }
+
+                let fqn = if m.creates_scope {
+                    Fqn::from_parts(
+                        &state
+                            .scope_stack
+                            .iter()
+                            .map(|s| s.as_ref())
+                            .collect::<Vec<_>>(),
+                        sep,
+                    )
+                } else {
+                    Fqn::from_scope(&state.scope_stack, &m.name, sep)
                 };
-                for &self_name in self.ssa_config.self_names {
-                    let name = state.arena.alloc_str(self_name);
+
+                let is_type_scope = m.def_kind.is_type_container();
+
+                let def_name = m.name.clone();
+                trace_event!(
+                    state.tracer,
+                    ScopePush {
+                        name: def_name.clone(),
+                        kind: format!("{:?}", m.def_kind),
+                        label: m.label.to_string(),
+                        fqn: fqn.as_str().to_string(),
+                        block_id: state.current_block.0,
+                    }
+                );
+                state.defs.push(CanonicalDefinition {
+                    definition_type: m.label,
+                    kind: m.def_kind,
+                    name: m.name,
+                    fqn,
+                    range: canonical_range(&m.range),
+                    is_top_level,
+                    metadata: m.metadata,
+                });
+                let last_def = &state.defs[def_index as usize];
+                trace_event!(
+                    state.tracer,
+                    DefDiscovered {
+                        name: last_def.name.clone(),
+                        fqn: last_def.fqn.as_str().to_string(),
+                        kind: format!("{:?}", last_def.kind),
+                        label: last_def.definition_type.to_string(),
+                        is_top_level: is_top_level,
+                    }
+                );
+
+                // Write def name to SSA in the parent block so sibling scopes can see it.
+                let parent_block = if pushed_scope {
+                    *state.saved_blocks.last().unwrap_or(&state.current_block)
+                } else {
+                    state.current_block
+                };
+                if m.def_kind.is_referable() {
+                    let ssa_name = state.arena.alloc_str(&def_name);
                     state.ssa.write_variable(
-                        name,
-                        state.current_block,
-                        super::ssa::SsaValue::Type(scope_fqn),
+                        ssa_name,
+                        parent_block,
+                        super::ssa::SsaValue::LocalDef(def_index),
                     );
                 }
-                if let Some(super_name) = self.ssa_config.super_name
-                    && let Some(meta) = &state.defs[def_index as usize].metadata
-                    && let Some(super_type) = meta.super_types.first()
-                {
-                    let resolved =
-                        resolve_type_name(super_type, &state.import_map, module_prefix, sep);
-                    let st = state.arena.alloc_str(&resolved);
-                    let name = state.arena.alloc_str(super_name);
-                    state.ssa.write_variable(
-                        name,
-                        state.current_block,
-                        super::ssa::SsaValue::Type(st),
-                    );
+
+                if is_type_scope {
+                    let scope_fqn = {
+                        let parts: Vec<&str> =
+                            state.scope_stack.iter().map(|s| s.as_ref()).collect();
+                        state.arena.alloc_str(&parts.join(sep))
+                    };
+                    for &self_name in self.ssa_config.self_names {
+                        let name = state.arena.alloc_str(self_name);
+                        state.ssa.write_variable(
+                            name,
+                            state.current_block,
+                            super::ssa::SsaValue::Type(scope_fqn),
+                        );
+                    }
+                    if let Some(super_name) = self.ssa_config.super_name
+                        && let Some(meta) = &state.defs[def_index as usize].metadata
+                        && let Some(super_type) = meta.super_types.first()
+                    {
+                        let resolved =
+                            resolve_type_name(super_type, &state.import_map, module_prefix, sep);
+                        let st = state.arena.alloc_str(&resolved);
+                        let name = state.arena.alloc_str(super_name);
+                        state.ssa.write_variable(
+                            name,
+                            state.current_block,
+                            super::ssa::SsaValue::Type(st),
+                        );
+                    }
                 }
-            }
 
-            if m.creates_scope {
-                state.enclosing_def_stack.push(def_index);
+                if m.creates_scope {
+                    state.enclosing_def_stack.push(def_index);
+                    pushed_def = true;
 
-                // Adopt sibling references: when decorators/annotations are
-                // CST siblings of the scope node, emit refs attributed to
-                // this def rather than the parent scope.
-                if !self.hooks.adopt_sibling_refs.is_empty()
-                    && let Some(parent) = node.parent()
-                {
-                    for sibling in parent.children() {
-                        let sk = sibling.kind();
-                        if sibling.range() != node.range()
-                            && self.hooks.adopt_sibling_refs.contains(&sk.as_ref())
-                            && let Some(name) =
-                                treesitter_visit::extract::default_name().apply(&sibling)
-                        {
-                            trace_event!(
-                                state.tracer,
-                                SiblingRefAdopted {
-                                    name: name.clone(),
-                                    def_index: def_index,
-                                }
-                            );
-                            let ssa_key = state.arena.alloc_str(&name);
-                            state.pending_refs.push(PendingRef {
-                                name,
-                                chain: None,
-                                ssa_key,
-                                block: state.current_block,
-                                enclosing_def: Some(def_index),
-                                is_return: false,
-                            });
+                    // Adopt sibling references: when decorators/annotations are
+                    // CST siblings of the scope node, emit refs attributed to
+                    // this def rather than the parent scope.
+                    if !self.hooks.adopt_sibling_refs.is_empty()
+                        && let Some(parent) = node.parent()
+                    {
+                        for sibling in parent.children() {
+                            let sk = sibling.kind();
+                            if sibling.range() != node.range()
+                                && self.hooks.adopt_sibling_refs.contains(&sk.as_ref())
+                                && let Some(name) =
+                                    treesitter_visit::extract::default_name().apply(&sibling)
+                            {
+                                trace_event!(
+                                    state.tracer,
+                                    SiblingRefAdopted {
+                                        name: name.clone(),
+                                        def_index: def_index,
+                                    }
+                                );
+                                let ssa_key = state.arena.alloc_str(&name);
+                                state.pending_refs.push(PendingRef {
+                                    name,
+                                    chain: None,
+                                    ssa_key,
+                                    block: state.current_block,
+                                    enclosing_def: Some(def_index),
+                                    is_return: false,
+                                });
+                            }
                         }
                     }
                 }
@@ -1025,7 +1071,9 @@ impl LanguageSpec {
                 self.walk_full_branch(node, rule_idx, state, sep, module_prefix);
                 if pushed_scope {
                     state.scope_stack.pop();
-                    state.enclosing_def_stack.pop();
+                    if pushed_def {
+                        state.enclosing_def_stack.pop();
+                    }
                     if let Some(saved) = state.saved_blocks.pop() {
                         state.current_block = saved;
                     }
@@ -1038,7 +1086,9 @@ impl LanguageSpec {
                 self.walk_full_loop(node, rule_idx, state, sep, module_prefix);
                 if pushed_scope {
                     state.scope_stack.pop();
-                    state.enclosing_def_stack.pop();
+                    if pushed_def {
+                        state.enclosing_def_stack.pop();
+                    }
                     if let Some(saved) = state.saved_blocks.pop() {
                         state.current_block = saved;
                     }
@@ -1319,7 +1369,9 @@ impl LanguageSpec {
                 );
             }
             state.scope_stack.pop();
-            state.enclosing_def_stack.pop();
+            if pushed_def {
+                state.enclosing_def_stack.pop();
+            }
             if let Some(saved) = state.saved_blocks.pop() {
                 state.current_block = saved;
             }
@@ -1633,9 +1685,11 @@ mod tests {
         let spec = LanguageSpec::new(
             "test",
             vec![
-                scope("class_definition", "Class"),
-                scope("function_definition", "Function"),
-                scope("function_definition", "Method").when(grandparent_is("class_definition")),
+                scope("class_definition", "Class").def_kind(DefKind::Class),
+                scope("function_definition", "Function").def_kind(DefKind::Function),
+                scope("function_definition", "Method")
+                    .def_kind(DefKind::Method)
+                    .when(grandparent_is("class_definition")),
             ],
             vec![],
             vec![],
@@ -1682,9 +1736,10 @@ mod tests {
         let spec = LanguageSpec::new(
             "test",
             vec![
-                scope("class_definition", "Class"),
-                scope("function_definition", "Function"),
+                scope("class_definition", "Class").def_kind(DefKind::Class),
+                scope("function_definition", "Function").def_kind(DefKind::Function),
                 scope("function_definition", "FlatMethod")
+                    .def_kind(DefKind::Method)
                     .when(grandparent_is("class_definition"))
                     .no_scope(),
             ],
@@ -1707,9 +1762,11 @@ mod tests {
         let spec = LanguageSpec::new(
             "test",
             vec![
-                scope("class_definition", "Class"),
-                scope("function_definition", "Function"),
-                scope("function_definition", "Method").when(grandparent_is("class_definition")),
+                scope("class_definition", "Class").def_kind(DefKind::Class),
+                scope("function_definition", "Function").def_kind(DefKind::Function),
+                scope("function_definition", "Method")
+                    .def_kind(DefKind::Method)
+                    .when(grandparent_is("class_definition")),
             ],
             vec![],
             vec![],

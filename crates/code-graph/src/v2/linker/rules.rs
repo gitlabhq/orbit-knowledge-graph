@@ -295,7 +295,7 @@ impl ResolutionRules {
             if !s.creates_scope {
                 continue;
             }
-            let is_type_scope = s.get_def_kind().is_type_container();
+            let is_type_scope = s.get_def_kind().is_some_and(|k| k.is_type_container());
             for &kind in s.kinds() {
                 if seen.insert(kind) {
                     result.push(IsolatedScopeRule {

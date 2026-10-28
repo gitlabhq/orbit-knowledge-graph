@@ -301,7 +301,7 @@ fn synthesize_export_definition(
 
     let (definition_type, kind) = local_target
         .map(|def| (def.definition_type, def.kind))
-        .unwrap_or((MODULE_EXPORT_TYPE, DefKind::Other));
+        .unwrap_or((MODULE_EXPORT_TYPE, DefKind::Variable));
 
     CanonicalDefinition {
         definition_type,
@@ -312,7 +312,9 @@ fn synthesize_export_definition(
         is_top_level: false,
         metadata: Some(Box::new(DefinitionMetadata {
             is_exported: true,
-            ..DefinitionMetadata::default()
+            ..local_target
+                .and_then(|def| def.metadata.as_deref().cloned())
+                .unwrap_or_default()
         })),
     }
 }

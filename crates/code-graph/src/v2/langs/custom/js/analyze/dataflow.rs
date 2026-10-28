@@ -168,6 +168,8 @@ impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
         if matches!(
             def.kind,
             JsDefKind::Method { .. }
+                | JsDefKind::Constructor { .. }
+                | JsDefKind::Test { .. }
                 | JsDefKind::ComputedProperty { .. }
                 | JsDefKind::Watcher { .. }
                 | JsDefKind::LifecycleHook { .. }
@@ -491,7 +493,19 @@ impl<'a> Visit<'a> for CallExtractor<'a, '_> {
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         self.record_invocation_from_expression(&it.callee, JsInvocationKind::Call);
-        walk::walk_call_expression(self, it);
+        let test_def = self.lookup_range_def(it.span).filter(|&idx| {
+            self.defs
+                .get(idx as usize)
+                .is_some_and(|d| matches!(d.kind, JsDefKind::Test { .. }))
+        });
+        match test_def {
+            Some(idx) => {
+                self.scope_def_hints.push(Some(idx));
+                walk::walk_call_expression(self, it);
+                self.scope_def_hints.pop();
+            }
+            None => walk::walk_call_expression(self, it),
+        }
     }
 
     fn visit_new_expression(&mut self, it: &NewExpression<'a>) {

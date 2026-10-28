@@ -1,6 +1,7 @@
 use crate::v2::config::Language;
+use crate::v2::dsl::extractors::DisplayRules;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::DefKind;
+use crate::v2::types::{DefKind, Visibility};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::Extract;
@@ -50,6 +51,17 @@ const ZIG_BUILTIN_TYPES: &[&str] = &[
     "f80",
     "f128",
 ];
+
+fn zig_visibility(node: &N<'_>, _name: &str) -> Option<Visibility> {
+    if node.kind() == "test_declaration" {
+        return None;
+    }
+    Some(if node.children().any(|c| c.kind() == "pub") {
+        Visibility::Public
+    } else {
+        Visibility::File
+    })
+}
 
 fn classify_zig_binding(node: &N<'_>) -> &'static str {
     if node.children().any(|c| c.kind().as_ref() == "var") {
@@ -109,9 +121,13 @@ fn zig_extract_imports(node: &N<'_>, imports: &mut Vec<crate::v2::types::Canonic
 }
 
 // Helper used to reduce repetition in the ZigDsl::scope() specification.
-fn zig_container(label: &'static str, decl_kinds: &'static [&'static str]) -> ScopeRule {
+fn zig_container(
+    label: &'static str,
+    kind: DefKind,
+    decl_kinds: &'static [&'static str],
+) -> ScopeRule {
     scope("variable_declaration", label)
-        .def_kind(DefKind::Class)
+        .def_kind(kind)
         .when(has_child(&["const", "var"]).and(has_child(decl_kinds)))
         .name_from(child_of_kind("identifier"))
 }
@@ -144,7 +160,7 @@ fn zig_anonymous_test(
 
     defs.push(CanonicalDefinition {
         definition_type: "Test",
-        kind: DefKind::Function,
+        kind: DefKind::Test,
         name,
         fqn,
         range: crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(node)),
@@ -167,27 +183,68 @@ impl DslLanguage for ZigDsl {
     fn scopes() -> Vec<ScopeRule> {
         vec![
             scope_fn("variable_declaration", classify_zig_binding)
-                .def_kind(DefKind::Property)
+                .def_kind(DefKind::Variable)
+                .kinds_by_label(&[("Const", DefKind::Constant)])
                 .no_scope()
                 .when(has_child(&["const", "var"]))
                 .name_from(child_of_kind("identifier")),
-            zig_container("Struct", &["struct_declaration"]),
-            zig_container("Enum", &["enum_declaration"]),
-            zig_container("Union", &["union_declaration"]),
-            zig_container("Opaque", &["opaque_declaration"]),
+            zig_container("Struct", DefKind::Struct, &["struct_declaration"]),
+            zig_container("Enum", DefKind::Enum, &["enum_declaration"]),
+            zig_container("Union", DefKind::Struct, &["union_declaration"]),
+            zig_container("Opaque", DefKind::Struct, &["opaque_declaration"]),
             scope("function_declaration", "Function")
                 .def_kind(DefKind::Function)
                 .name_from(field("name")),
+            scope("function_declaration", "Method")
+                .def_kind(DefKind::Method)
+                .when(ancestor_is(&[
+                    "struct_declaration",
+                    "enum_declaration",
+                    "union_declaration",
+                    "opaque_declaration",
+                ]))
+                .name_from(field("name")),
             scope("test_declaration", "Test")
-                .def_kind(DefKind::Function)
+                .def_kind(DefKind::Test)
                 .when(has_child(&["identifier"]))
                 .name_from(child_of_kind("identifier")),
             scope("test_declaration", "Test")
-                .def_kind(DefKind::Function)
+                .def_kind(DefKind::Test)
                 .when(has_child(&["string"]))
                 .name_from(child_of_kind("string").child_of_kind("string_content")),
             // Anonymous tests are also valid, and caught by the `zig_anonymous_test` hook
         ]
+    }
+
+    fn display() -> DisplayRules {
+        DisplayRules {
+            body: &[
+                "body",
+                "block",
+                "struct_declaration",
+                "enum_declaration",
+                "union_declaration",
+                "opaque_declaration",
+            ],
+            parameters: &["parameters"],
+            return_type: &["type"],
+            declared_type: &["type"],
+            doc_comments: &["comment"],
+            doc_prefixes: &["///"],
+            doc_markers: &["///"],
+            tokens: &[
+                (
+                    "extern",
+                    crate::v2::dsl::extractors::Token::Modifier(crate::v2::types::Modifier::Extern),
+                ),
+                (
+                    "inline",
+                    crate::v2::dsl::extractors::Token::Modifier(crate::v2::types::Modifier::Inline),
+                ),
+            ],
+            visibility: Some(zig_visibility),
+            ..DisplayRules::default()
+        }
     }
 
     fn refs() -> Vec<ReferenceRule> {
@@ -347,7 +404,7 @@ mod tests {
             .iter()
             .find(|d| d.name == "Point")
             .unwrap();
-        assert_eq!(point.kind, DefKind::Class);
+        assert_eq!(point.kind, DefKind::Struct);
         assert_eq!(point.definition_type, "Struct");
         let init = result
             .definitions
@@ -369,14 +426,14 @@ mod tests {
         .unwrap();
         assert!(
             result.definitions.iter().any(|d| d.name == "Color"
-                && d.kind == DefKind::Class
+                && d.kind == DefKind::Enum
                 && d.definition_type == "Enum")
         );
         assert!(result.definitions.iter().any(|d| d.name == "Value"
-            && d.kind == DefKind::Class
+            && d.kind == DefKind::Struct
             && d.definition_type == "Union"));
         assert!(result.definitions.iter().any(|d| d.name == "Handle"
-            && d.kind == DefKind::Class
+            && d.kind == DefKind::Struct
             && d.definition_type == "Opaque"));
     }
 
@@ -384,10 +441,10 @@ mod tests {
     fn plain_const_and_var() {
         let result = parse("const MAX: u32 = 100;\nvar counter: u32 = 0;\n").unwrap();
         assert!(result.definitions.iter().any(|d| d.name == "MAX"
-            && d.kind == DefKind::Property
+            && d.kind == DefKind::Constant
             && d.definition_type == "Const"));
         assert!(result.definitions.iter().any(|d| d.name == "counter"
-            && d.kind == DefKind::Property
+            && d.kind == DefKind::Variable
             && d.definition_type == "Var"));
     }
 
@@ -398,7 +455,7 @@ mod tests {
         )
         .unwrap();
         assert!(result.definitions.iter().any(|d| d.name == "addition works"
-            && d.kind == DefKind::Function
+            && d.kind == DefKind::Test
             && d.definition_type == "Test"));
     }
 
@@ -465,7 +522,7 @@ mod tests {
                 .map(|d| (&d.name, d.definition_type))
                 .collect::<Vec<_>>()
         );
-        assert_eq!(tests[0].kind, DefKind::Function);
+        assert_eq!(tests[0].kind, DefKind::Test);
         assert_eq!(tests[0].name, "test@L1");
         assert!(
             !result.definitions.iter().any(|d| d.name.is_empty()),

@@ -283,18 +283,26 @@ fn extract_class_members(
             continue;
         };
 
-        let make_method = |name: String, range, is_static| JsDef {
-            fqn: format!("{class_name}::{name}"),
-            name,
-            kind: JsDefKind::Method {
-                class_fqn: class_name.clone(),
-                is_static,
-            },
-            range,
-            is_exported: false,
-            type_annotation: None,
-            invocation_support: Some(JsInvocationSupport::function()),
-        };
+        let make_method =
+            |name: String, range, method: &oxc::ast::ast::MethodDefinition<'_>| JsDef {
+                fqn: format!("{class_name}::{name}"),
+                name,
+                kind: if method.kind.is_constructor() {
+                    JsDefKind::Constructor {
+                        class_fqn: class_name.clone(),
+                    }
+                } else {
+                    JsDefKind::Method {
+                        class_fqn: class_name.clone(),
+                        is_static: method.r#static,
+                    }
+                },
+                range,
+                is_exported: false,
+                type_annotation: None,
+                invocation_support: Some(JsInvocationSupport::function()),
+                display: Box::new(super::display::method(ctx.source, method)),
+            };
 
         // One raw AST walk covers every method. OXC's class table applies the same
         // constructor and TypeScript-syntax gates but drops abstract methods, whose
@@ -302,7 +310,6 @@ fn extract_class_members(
         // abstract` is illegal (TS1243) and private abstract members cannot exist.
         for element in &class_ast.body.body {
             if let oxc::ast::ast::ClassElement::MethodDefinition(method) = element
-                && !method.kind.is_constructor()
                 && let Some(method_name) = if method.r#type
                     == oxc::ast::ast::MethodDefinitionType::TSAbstractMethodDefinition
                 {
@@ -316,7 +323,7 @@ fn extract_class_members(
                 member_defs.push(make_method(
                     method_name.to_string(),
                     ctx.lt.span_to_range(method.span),
-                    method.r#static,
+                    method,
                 ));
             }
         }
@@ -343,7 +350,7 @@ fn collect_receiver_type_fields(
     class_ast: &oxc::ast::ast::Class<'_>,
     class_name: &str,
 ) -> Vec<JsDef> {
-    let make_property = |name: String, range, type_annotation| JsDef {
+    let make_property = |name: String, range, type_annotation, display| JsDef {
         fqn: format!("{class_name}::{name}"),
         name,
         kind: JsDefKind::Property {
@@ -353,6 +360,7 @@ fn collect_receiver_type_fields(
         is_exported: false,
         type_annotation,
         invocation_support: None,
+        display: Box::new(display),
     };
 
     let mut fields = Vec::new();
@@ -366,6 +374,7 @@ fn collect_receiver_type_fields(
                         property_name.to_string(),
                         ctx.lt.span_to_range(property.span),
                         extract_type_name(property.type_annotation.as_deref()),
+                        super::display::property(ctx.source, property),
                     ));
                 }
             }
@@ -381,6 +390,13 @@ fn collect_receiver_type_fields(
                             binding.name.to_string(),
                             ctx.lt.span_to_range(param.span),
                             extract_type_name(param.type_annotation.as_deref()),
+                            super::display::parameter_property(
+                                ctx.source,
+                                param.span,
+                                param.accessibility,
+                                param.readonly,
+                                param.type_annotation.as_deref(),
+                            ),
                         ));
                     }
                 }
@@ -414,9 +430,21 @@ fn collect_symbol_data(ctx: &Ctx, parsed: &oxc::parser::ParserReturn) -> SymbolE
         }
 
         if let Some(kind) = classify_symbol_kind(flags, ctx.nodes, decl_node_id) {
+            let is_exported = exported_bindings.contains_key(name.as_str());
+            let visibility = Some(if is_exported {
+                crate::v2::types::Visibility::Public
+            } else {
+                crate::v2::types::Visibility::File
+            });
             defs.push(JsDef {
                 fqn: ctx.build_fqn(symbol_id),
-                is_exported: exported_bindings.contains_key(name.as_str()),
+                is_exported,
+                display: Box::new(super::display::for_declaration(
+                    ctx.source,
+                    ctx.nodes,
+                    decl_node_id,
+                    visibility,
+                )),
                 type_annotation: extract_type_annotation(ctx.nodes, decl_node_id, ctx.source),
                 invocation_support: invocation_support
                     .or_else(|| invocation_support_for_js_def_kind(&kind)),
@@ -880,6 +908,7 @@ impl JsAnalyzer {
         } = collect_symbol_data(&ctx, &parsed);
         let (method_defs, classes) = extract_class_members(&ctx, &semantic);
         defs.extend(method_defs);
+        defs.extend(super::test_blocks::collect_test_defs(&ctx));
         let mut class_hierarchy = classes
             .iter()
             .map(|class| (class.fqn.clone(), class.extends.clone()))

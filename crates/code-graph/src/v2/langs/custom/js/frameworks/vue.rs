@@ -263,6 +263,7 @@ pub(in crate::v2::langs::custom::js) fn extract_vue_options_api(
             range: span_to_range(obj.span),
             is_exported: true,
             type_annotation: None,
+            display: Box::default(),
             invocation_support: Some(JsInvocationSupport::class()),
         });
 
@@ -343,6 +344,7 @@ fn emit_executable_map(
             range: span_to_range(member.span),
             is_exported: false,
             type_annotation: None,
+            display: Box::default(),
             invocation_support,
         });
     }
@@ -365,6 +367,7 @@ fn emit_executable_fn(
         range: span_to_range(property.span),
         is_exported: false,
         type_annotation: None,
+        display: Box::default(),
         invocation_support: Some(JsInvocationSupport::function()),
     });
 }
@@ -385,6 +388,7 @@ fn emit_lifecycle_hook(
         range: span_to_range(property.span),
         is_exported: false,
         type_annotation: None,
+        display: Box::default(),
         invocation_support: Some(JsInvocationSupport::function()),
     });
 }

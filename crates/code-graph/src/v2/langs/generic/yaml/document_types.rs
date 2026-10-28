@@ -121,7 +121,7 @@ fn push_definition(
 ) {
     defs.push(CanonicalDefinition {
         definition_type: &rule.definition_type,
-        kind: DefKind::Other,
+        kind: DefKind::Variable,
         name: parts[parts.len() - 1].to_string(),
         fqn: Fqn::from_parts(parts, sep),
         range: node_range(node),

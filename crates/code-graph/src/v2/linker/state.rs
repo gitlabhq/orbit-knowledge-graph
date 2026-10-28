@@ -27,7 +27,9 @@
 
 use std::hash::{Hash, Hasher};
 
-use crate::v2::types::{DefKind, ImportBindingKind, ImportMode, Range};
+use crate::v2::types::{
+    DefKind, DefScope, ImportBindingKind, ImportMode, Modifiers, Range, Visibility,
+};
 use bumpalo::Bump;
 use petgraph::graph::NodeIndex;
 use rust_lapper::{Interval, Lapper};
@@ -286,6 +288,7 @@ pub struct GraphDef {
     pub fqn_sep: &'static str,
     pub range: Range,
     pub is_top_level: bool,
+    pub scope: DefScope,
     pub metadata: Option<Box<GraphDefMeta>>,
 }
 
@@ -298,6 +301,14 @@ pub struct GraphDefMeta {
     pub decorators: SmallVec<[StrId; 2]>,
     pub companion_of: Option<StrId>,
     pub is_exported: bool,
+    pub signature: Option<StrId>,
+    pub parameters: Box<[StrId]>,
+    pub declared_return_type: Option<StrId>,
+    pub declared_type: Option<StrId>,
+    pub doc_comment: Option<StrId>,
+    pub modifiers: Modifiers,
+    pub visibility: Option<Visibility>,
+    pub generated_by: Option<StrId>,
 }
 
 #[derive(Debug, Clone)]
@@ -314,12 +325,6 @@ pub struct GraphImport {
 }
 
 impl GraphDef {
-    pub fn ontology_kind(&self) -> crate::v2::types::Kind {
-        self.definition_type
-            .parse()
-            .unwrap_or_else(|_| self.kind.ontology_kind())
-    }
-
     pub fn from_canonical(
         def: &crate::v2::types::CanonicalDefinition,
         pool: &mut StringPool,
@@ -333,6 +338,14 @@ impl GraphDef {
                 decorators: m.decorators.iter().map(|s| pool.alloc(s)).collect(),
                 companion_of: m.companion_of.as_deref().map(|s| pool.alloc(s)),
                 is_exported: m.is_exported,
+                signature: m.signature.as_deref().map(|s| pool.alloc(s)),
+                parameters: m.parameters.iter().map(|s| pool.alloc(s)).collect(),
+                declared_return_type: m.declared_return_type.as_deref().map(|s| pool.alloc(s)),
+                declared_type: m.declared_type.as_deref().map(|s| pool.alloc(s)),
+                doc_comment: m.doc_comment.as_deref().map(|s| pool.alloc(s)),
+                modifiers: m.modifiers,
+                visibility: m.visibility,
+                generated_by: m.generated_by.as_deref().map(|s| pool.alloc(s)),
             })
         });
         Self {
@@ -343,6 +356,7 @@ impl GraphDef {
             fqn_sep: def.fqn.separator(),
             range: def.range,
             is_top_level: def.is_top_level,
+            scope: DefScope::TopLevel,
             metadata,
         }
     }
@@ -720,6 +734,7 @@ mod tests {
                 decorators: vec![],
                 companion_of: None,
                 is_exported: true,
+                ..Default::default()
             })),
         };
         let gdef = GraphDef::from_canonical(&cdef, &mut pool);

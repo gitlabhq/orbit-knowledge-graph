@@ -6,7 +6,7 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::types::{DefKind, DefinitionMetadata};
 
-use super::extractors::MetadataRule;
+use super::extractors::{DisplayRules, MetadataRule, TestFn};
 
 /// A per-family import rewriter. Given an import (mutated in place) plus the
 /// importing module's scope, the FQN separator, and the importing file's path,
@@ -44,13 +44,16 @@ enum Label {
 pub struct ScopeRule {
     pub(crate) kinds: Vec<&'static str>,
     label: Label,
-    def_kind: DefKind,
+    def_kind: Option<DefKind>,
     condition: Option<Pred>,
     name: Extract,
     name_hook: Option<NameHookFn>,
     pub(crate) default_name: Option<&'static str>,
     pub creates_scope: bool,
+    pub(crate) scope_only: bool,
+    kinds_by_label: &'static [(&'static str, DefKind)],
     pub(crate) metadata_rule: Option<MetadataRule>,
+    pub(crate) test_if: Option<TestFn>,
 }
 
 impl Rule for ScopeRule {
@@ -73,7 +76,7 @@ impl Rule for ScopeRule {
 }
 
 impl ScopeRule {
-    pub fn get_def_kind(&self) -> DefKind {
+    pub fn get_def_kind(&self) -> Option<DefKind> {
         self.def_kind
     }
 
@@ -108,8 +111,14 @@ impl ScopeRule {
         self
     }
 
+    pub fn scope_only(mut self) -> Self {
+        self.creates_scope = true;
+        self.scope_only = true;
+        self
+    }
+
     pub fn def_kind(mut self, kind: DefKind) -> Self {
-        self.def_kind = kind;
+        self.def_kind = Some(kind);
         self
     }
 
@@ -118,8 +127,26 @@ impl ScopeRule {
         self
     }
 
-    pub(crate) fn resolve_def_kind(&self) -> DefKind {
-        self.def_kind
+    pub fn kinds_by_label(mut self, kinds: &'static [(&'static str, DefKind)]) -> Self {
+        self.kinds_by_label = kinds;
+        self
+    }
+
+    pub(crate) fn kind_for_label(&self, label: &str) -> Option<DefKind> {
+        self.kinds_by_label
+            .iter()
+            .find(|(l, _)| *l == label)
+            .map(|(_, k)| *k)
+            .or(self.def_kind)
+    }
+
+    pub fn test_if(mut self, f: TestFn) -> Self {
+        self.test_if = Some(f);
+        self
+    }
+
+    pub(crate) fn is_test(&self, node: &N<'_>, name: &str) -> bool {
+        self.test_if.is_some_and(|f| f(node, name))
     }
 
     pub(crate) fn extract_metadata(
@@ -142,13 +169,16 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
     ScopeRule {
         kinds: vec![kind],
         label: Label::Static(label),
-        def_kind: DefKind::Other,
+        def_kind: None,
         condition: None,
         name: default_name(),
         name_hook: None,
         default_name: None,
         creates_scope: true,
+        scope_only: false,
+        kinds_by_label: &[],
         metadata_rule: None,
+        test_if: None,
     }
 }
 
@@ -156,13 +186,16 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
     ScopeRule {
         kinds: kinds.to_vec(),
         label: Label::Static(label),
-        def_kind: DefKind::Other,
+        def_kind: None,
         condition: None,
         name: default_name(),
         name_hook: None,
         default_name: None,
         creates_scope: true,
+        scope_only: false,
+        kinds_by_label: &[],
         metadata_rule: None,
+        test_if: None,
     }
 }
 
@@ -174,13 +207,16 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
     ScopeRule {
         kinds: vec![kind],
         label: Label::Fn(label_fn),
-        def_kind: DefKind::Other,
+        def_kind: None,
         condition: None,
         name: default_name(),
         name_hook: None,
         default_name: None,
         creates_scope: true,
+        scope_only: false,
+        kinds_by_label: &[],
         metadata_rule: None,
+        test_if: None,
     }
 }
 
@@ -461,6 +497,10 @@ pub trait DslLanguage: Send + Sync + Default {
         SsaConfig::default()
     }
 
+    fn display() -> DisplayRules {
+        DisplayRules::default()
+    }
+
     fn spec() -> LanguageSpec {
         let mut spec =
             LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
@@ -468,7 +508,8 @@ pub trait DslLanguage: Send + Sync + Default {
                 .with_bindings(Self::bindings())
                 .with_branches(Self::branches())
                 .with_loops(Self::loops())
-                .with_ssa_config(Self::ssa_config());
+                .with_ssa_config(Self::ssa_config())
+                .with_display(Self::display());
         if let Some(cc) = Self::chain_config() {
             spec = spec.chain(cc);
         }
@@ -846,6 +887,7 @@ pub struct LanguageSpec {
     pub(crate) file_scope: bool,
     pub(crate) hooks: LanguageHooks,
     pub ssa_config: SsaConfig,
+    pub display: DisplayRules,
 
     // Dispatch tables: node_kind → indices into the corresponding rule Vec.
     // Built once at construction, O(1) lookup per node during walk.
@@ -880,6 +922,7 @@ impl LanguageSpec {
             file_scope: false,
             hooks: LanguageHooks::default(),
             ssa_config: SsaConfig::default(),
+            display: DisplayRules::default(),
             scope_dispatch,
             ref_dispatch,
             import_dispatch,
@@ -926,6 +969,11 @@ impl LanguageSpec {
 
     pub fn with_ssa_config(mut self, config: SsaConfig) -> Self {
         self.ssa_config = config;
+        self
+    }
+
+    pub fn with_display(mut self, display: DisplayRules) -> Self {
+        self.display = display;
         self
     }
 }
