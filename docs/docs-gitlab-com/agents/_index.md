@@ -28,7 +28,7 @@ For a short walkthrough, see the [quickstart](../quickstart.md).
 
 Prerequisites:
 
-- `glab` 1.126 or later. To check your version, run `glab version`.
+- `glab` 1.120 or later. To check your version, run `glab version`.
 - An agent that setup supports. For the list, see [setup options](#setup-options).
 
 To set up your agent:
