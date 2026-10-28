@@ -3,8 +3,11 @@ use std::sync::LazyLock;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
 use orbit_observability::billing::quota as spec;
-use orbit_observability::billing::quota::labels::{CACHE, DECISION, SOURCE_TYPE};
-use orbit_observability::billing::quota::values::{ALLOW, DENY, FAIL_CLOSED, HIT, MISS, SKIPPED};
+use orbit_observability::billing::quota::labels::{CACHE, DECISION, SKIP_REASON, SOURCE_TYPE};
+use orbit_observability::billing::quota::values::{
+    ALLOW, DENY, FAIL_CLOSED, HIT, MISS, NO_LICENSE_CHECKSUM, NO_ROOT_NAMESPACE_ID, SKIPPED,
+    TEAM_MEMBER,
+};
 
 pub(super) static QUOTA_METRICS: LazyLock<QuotaMetrics> = LazyLock::new(QuotaMetrics::new);
 
@@ -58,14 +61,23 @@ pub fn register() {
         }
     }
     // fail_closed and skipped are only ever observed on cache=miss (never cached).
-    for decision in [FAIL_CLOSED, SKIPPED] {
-        for source_type in metered_types {
+    for source_type in metered_types {
+        QUOTA_METRICS.decisions.add(
+            0,
+            &[
+                KeyValue::new(DECISION, FAIL_CLOSED),
+                KeyValue::new(CACHE, MISS),
+                KeyValue::new(SOURCE_TYPE, source_type),
+            ],
+        );
+        for skip_reason in [TEAM_MEMBER, NO_LICENSE_CHECKSUM, NO_ROOT_NAMESPACE_ID] {
             QUOTA_METRICS.decisions.add(
                 0,
                 &[
-                    KeyValue::new(DECISION, decision),
+                    KeyValue::new(DECISION, SKIPPED),
                     KeyValue::new(CACHE, MISS),
                     KeyValue::new(SOURCE_TYPE, source_type),
+                    KeyValue::new(SKIP_REASON, skip_reason),
                 ],
             );
         }

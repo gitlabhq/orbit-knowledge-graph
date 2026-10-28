@@ -6,6 +6,7 @@ pub mod labels {
     pub const CACHE: &str = "cache";
     pub const OUTCOME: &str = "outcome";
     pub const SOURCE_TYPE: &str = "source_type";
+    pub const SKIP_REASON: &str = "skip_reason";
 }
 
 pub mod values {
@@ -15,6 +16,9 @@ pub mod values {
     pub const SKIPPED: &str = "skipped";
     pub const HIT: &str = "hit";
     pub const MISS: &str = "miss";
+    pub const TEAM_MEMBER: &str = "team_member";
+    pub const NO_LICENSE_CHECKSUM: &str = "no_license_checksum";
+    pub const NO_ROOT_NAMESPACE_ID: &str = "no_root_namespace_id";
 }
 
 const DOMAIN: &str = "billing.quota";
@@ -30,11 +34,17 @@ const DOMAIN: &str = "billing.quota";
 pub const QUOTA_DECISIONS: MetricSpec = MetricSpec::counter(
     "gkg.billing.quota.decisions",
     "Quota gate decisions, labelled by outcome (allow/deny/fail_closed/skipped), cache result \
-     (hit/miss), and source_type (mcp/rest). \
+     (hit/miss), and source_type (mcp/rest). decision=skipped also carries skip_reason \
+     (team_member/no_license_checksum/no_root_namespace_id). \
      cache=miss on fail_closed does not imply a 1:1 CDot call ratio — see \
      gkg.billing.quota.cdot.duration for actual upstream call counts.",
     None,
-    &[labels::DECISION, labels::CACHE, labels::SOURCE_TYPE],
+    &[
+        labels::DECISION,
+        labels::CACHE,
+        labels::SOURCE_TYPE,
+        labels::SKIP_REASON,
+    ],
     DOMAIN,
 );
 

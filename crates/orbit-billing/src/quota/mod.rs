@@ -17,6 +17,9 @@ use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
 use client::{QuotaAuth, QuotaClient};
 pub use inputs::QuotaCheckInputs;
 use key::CdotRequest;
+use orbit_observability::billing::quota::values::{
+    NO_LICENSE_CHECKSUM, NO_ROOT_NAMESPACE_ID, TEAM_MEMBER,
+};
 
 const ERROR_DOMAIN: &str = "BILLING";
 const REASON_GITLAB_CREDITS_EXHAUSTED: &str = "GITLAB_CREDITS_EXHAUSTED";
@@ -101,7 +104,7 @@ impl QuotaService {
                 safe(CORRELATION_ID) = correlation_id.as_str(),
                 "quota gate decision: skipped (GitLab team member on SaaS)"
             );
-            record_skipped(&inputs.source_type);
+            record_skipped(TEAM_MEMBER, &inputs.source_type);
             return Ok(());
         }
 
@@ -115,7 +118,7 @@ impl QuotaService {
                 safe(CORRELATION_ID) = correlation_id.as_str(),
                 "quota gate decision: skipped (no license_checksum claim)"
             );
-            record_skipped(&inputs.source_type);
+            record_skipped(NO_LICENSE_CHECKSUM, &inputs.source_type);
             return Ok(());
         }
 
@@ -132,7 +135,7 @@ impl QuotaService {
                 safe(CORRELATION_ID) = correlation_id.as_str(),
                 "quota gate decision: skipped (no root_namespace_id claim on SaaS)"
             );
-            record_skipped(&inputs.source_type);
+            record_skipped(NO_ROOT_NAMESPACE_ID, &inputs.source_type);
             return Ok(());
         }
 
@@ -218,9 +221,9 @@ fn credits_exhausted_status(message: &str) -> Status {
     Status::with_error_details(Code::ResourceExhausted, message, details)
 }
 
-fn record_skipped(source_type: &str) {
+fn record_skipped(skip_reason: &'static str, source_type: &str) {
     use orbit_observability::billing::quota::values::{MISS, SKIPPED};
-    record(SKIPPED, MISS, source_type);
+    record(SKIPPED, MISS, source_type, Some(skip_reason));
 }
 
 fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &str) {
@@ -235,22 +238,26 @@ fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &
         CacheOutcome::Hit => HIT,
         CacheOutcome::Miss => MISS,
     };
-    record(decision_label, cache_label, source_type);
+    record(decision_label, cache_label, source_type, None);
 }
 
-fn record(decision_label: &'static str, cache_label: &'static str, source_type: &str) {
+fn record(
+    decision_label: &'static str,
+    cache_label: &'static str,
+    source_type: &str,
+    skip_reason: Option<&'static str>,
+) {
     use orbit_observability::billing::quota::labels::{
-        CACHE as CACHE_LABEL, DECISION, SOURCE_TYPE,
+        CACHE as CACHE_LABEL, DECISION, SKIP_REASON, SOURCE_TYPE,
     };
 
-    metrics::QUOTA_METRICS.decisions.add(
-        1,
-        &[
-            opentelemetry::KeyValue::new(DECISION, decision_label),
-            opentelemetry::KeyValue::new(CACHE_LABEL, cache_label),
-            opentelemetry::KeyValue::new(SOURCE_TYPE, metered_source_type_label(source_type)),
-        ],
-    );
+    let mut labels = vec![
+        opentelemetry::KeyValue::new(DECISION, decision_label),
+        opentelemetry::KeyValue::new(CACHE_LABEL, cache_label),
+        opentelemetry::KeyValue::new(SOURCE_TYPE, metered_source_type_label(source_type)),
+    ];
+    labels.extend(skip_reason.map(|reason| opentelemetry::KeyValue::new(SKIP_REASON, reason)));
+    metrics::QUOTA_METRICS.decisions.add(1, &labels);
     #[cfg(test)]
     DECISION_RECORD_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
