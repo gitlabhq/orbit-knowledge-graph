@@ -15,6 +15,7 @@ use serde_json::Value;
 
 #[derive(Embed)]
 #[folder = "$CONFIG_DIR/setup"]
+#[exclude = "*.test.js"]
 struct SetupAssets;
 
 #[derive(Debug, Deserialize)]
@@ -418,6 +419,114 @@ mod tests {
         assert!(!json.contains("orbit query"), "{json}");
         assert!(json.contains("instead of glab and glab api"), "{json}");
         assert!(!json.contains("{{"), "{json}");
+    }
+
+    /// Plugin label tables keyed by orbit command path, such as `grep` or `workspace sql`.
+    const LABEL_TABLES: &[(&str, &str)] = &[("opencode_plugin.js", "const LABELS = {")];
+
+    /// Commands an agent has no reason to run, so plugins give them no label.
+    const UNLABELED: &[&str] = &[
+        "hook-guard",
+        "send-event",
+        "refresh",
+        "mcp serve",
+        "workspace mcp serve",
+    ];
+
+    struct CliCommand {
+        path: String,
+        aliases: Vec<String>,
+        ancestors: Vec<String>,
+        has_subcommands: bool,
+    }
+
+    fn cli_commands(command: &clap::Command, ancestors: &[String], out: &mut Vec<CliCommand>) {
+        let prefix = ancestors
+            .last()
+            .map(|p| format!("{p} "))
+            .unwrap_or_default();
+        for sub in command.get_subcommands() {
+            let path = format!("{prefix}{}", sub.get_name());
+            let mut lineage = ancestors.to_vec();
+            lineage.push(path.clone());
+            cli_commands(sub, &lineage, out);
+            out.push(CliCommand {
+                aliases: sub
+                    .get_all_aliases()
+                    .map(|a| format!("{prefix}{a}"))
+                    .collect(),
+                ancestors: ancestors.to_vec(),
+                has_subcommands: sub.has_subcommands(),
+                path,
+            });
+        }
+    }
+
+    fn label_keys(file: &str, start: &str) -> Vec<String> {
+        let source = read_embedded_text(file);
+        let (_, table) = source
+            .split_once(start)
+            .unwrap_or_else(|| panic!("{file} has no `{start}`"));
+        let (table, _) = table
+            .split_once("};")
+            .unwrap_or_else(|| panic!("{file}: `{start}` is not closed"));
+        table
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let quote = line.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+                line[1..].split_once(quote).map(|(key, _)| key.to_owned())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn plugin_labels_name_real_commands_and_cover_every_command() {
+        use clap::CommandFactory;
+        let mut commands = Vec::new();
+        cli_commands(&crate::Cli::command(), &[], &mut commands);
+        let known: Vec<&str> = commands
+            .iter()
+            .flat_map(|c| std::iter::once(&c.path).chain(&c.aliases))
+            .map(String::as_str)
+            .collect();
+
+        for (file, start) in LABEL_TABLES {
+            let keys = label_keys(file, start);
+            assert!(!keys.is_empty(), "{file}: no labels found");
+            for key in &keys {
+                assert!(
+                    known.contains(&key.as_str()),
+                    "{file}: `{key}` is not an orbit command"
+                );
+            }
+            for command in &commands {
+                let labeled = keys.contains(&command.path)
+                    || command.ancestors.iter().any(|a| keys.contains(a));
+                if keys.contains(&command.path) {
+                    for alias in &command.aliases {
+                        assert!(
+                            keys.contains(alias),
+                            "{file}: label `{alias}` like `{}`",
+                            command.path
+                        );
+                    }
+                }
+                assert!(
+                    labeled
+                        || command.has_subcommands
+                        || UNLABELED.contains(&command.path.as_str()),
+                    "{file}: label `{}`, or add it to UNLABELED",
+                    command.path
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn plugin_tests_are_not_embedded() {
+        assert!(SetupAssets::get("opencode_plugin.js").is_some());
+        assert!(SetupAssets::get("opencode_plugin.test.js").is_none());
     }
 
     #[test]

@@ -145,6 +145,10 @@ description = "Run local integration tests — compiler + querying pipeline (no 
 run = "for t in scripts/dev/tests/*_test.sh scripts/fuzz/*_test.sh; do bash \"$t\" || exit 1; done"
 description = "Run the shell tests for the local development scripts (no cluster needed)"
 
+[tasks."test:setup-plugins"]
+run = "bun test ./config/setup/opencode_plugin.test.js"
+description = "Run the tests for the agent plugins that orbit setup installs"
+
 [tasks."test:plan-shape"]
 run = "cargo test -p integration-tests --test local compiler::plan_shape -- --nocapture"
 description = "Check logical input and selected physical plans against YAML fixtures"
