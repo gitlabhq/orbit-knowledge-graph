@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -264,8 +264,32 @@ fn skill_client(name: &str) -> Result<Option<OrbitClient>> {
 }
 
 async fn list_skills() -> Result<()> {
+    let person_is_watching = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
+    if person_is_watching {
+        crate::tui::intro("Orbit skills")?;
+        warn_inside_setup_frame();
+    }
+    let skills = fetch_skill_listing().await?;
+    if !person_is_watching {
+        for skill in skills {
+            println!("{} — {}", skill.name, one_line(&skill.description));
+        }
+        return Ok(());
+    }
+
+    let rows = skills
+        .iter()
+        .map(|skill| (skill.name.as_str(), first_sentence(&skill.description)));
+    crate::tui::card("Skills", crate::tui::align_columns(rows))?;
+    crate::tui::outro(format!(
+        "`{} skills get <name>` prints a skill.",
+        crate::commands::setup::spec::launcher()
+    ))
+}
+
+async fn fetch_skill_listing() -> Result<Vec<ListedSkill>> {
     let Some(client) = skill_client(DEFAULT_SKILL)? else {
-        return print_local_list();
+        return local_listing();
     };
     match client.list_skills().await {
         Ok(response) if response.status == 200 => {
@@ -274,33 +298,30 @@ async fn list_skills() -> Result<()> {
             if envelope.skills.is_empty() {
                 bail!("Orbit skills listing response is empty");
             }
-            for skill in envelope.skills {
-                println!("{} — {}", skill.name, one_line(&skill.description));
-            }
-            Ok(())
+            Ok(envelope.skills)
         }
         Ok(response) if response.status == 404 => {
             warn(
                 "this GitLab instance does not serve Orbit skills; using the embedded local skill",
             );
-            print_local_list()
+            local_listing()
         }
         Ok(response) if degradation(response.status).is_some() => {
             warn(format!(
                 "{}; using the embedded local skill",
                 degradation_warning(&response)
             ));
-            print_local_list()
+            local_listing()
         }
         Ok(response) => Err(map_http_error(response.status, body_text(&response)).into()),
         Err(error) => {
             warn(format!("{error}; using the embedded local skill"));
-            print_local_list()
+            local_listing()
         }
     }
 }
 
-fn print_local_list() -> Result<()> {
+fn local_listing() -> Result<Vec<ListedSkill>> {
     let manifest = local_tree()
         .remove(MANIFEST)
         .ok_or_else(|| anyhow!("embedded {MANIFEST} missing"))?;
@@ -310,12 +331,23 @@ fn print_local_list() -> Result<()> {
         .map(|(yaml, _)| yaml)
         .ok_or_else(|| anyhow!("embedded {MANIFEST} has invalid frontmatter"))?;
     let frontmatter: LocalFrontmatter = orbit_utils::yaml::from_str(yaml)?;
-    println!("{DEFAULT_SKILL} — {}", one_line(&frontmatter.description));
-    Ok(())
+    Ok(vec![ListedSkill {
+        name: DEFAULT_SKILL.to_string(),
+        description: frontmatter.description,
+    }])
 }
 
 fn one_line(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Descriptions are written for agents to match on; people need only the summary.
+fn first_sentence(description: &str) -> String {
+    let description = one_line(description);
+    match description.find(". ") {
+        Some(end) => description[..=end].to_string(),
+        None => description,
+    }
 }
 
 async fn resolved_view(name: &str) -> Result<BTreeMap<String, String>> {

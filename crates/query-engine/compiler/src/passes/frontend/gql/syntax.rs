@@ -327,11 +327,11 @@ impl QueryParser {
     #[alias(predicate)]
     fn FunctionPredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
         let call = input.children().next().ok_or_else(|| mismatch(&input))?;
-        Err(unsupported_function(&call))
+        Err(unsupported_function(&call, true))
     }
 
     fn FunctionCall(input: Node) -> Result<()> {
-        Err(unsupported_function(&input))
+        Err(unsupported_function(&input, false))
     }
 
     #[alias(predicate)]
@@ -742,18 +742,27 @@ fn error_at(span: Span<'_>, message: &str) -> Error<Rule> {
     )
 }
 
-fn unsupported_function(call: &Node) -> Error<Rule> {
+fn unsupported_function(call: &Node, in_where: bool) -> Error<Rule> {
     let name = call.children().next().map_or("", |node| node.as_str());
     let hint = match name.to_ascii_lowercase().as_str() {
         "type" => {
             "type() takes one relationship variable and works in WHERE type(r) = 'CLOSES', WHERE type(r) IN ['CLOSES', 'MENTIONS'], RETURN type(r), and ORDER BY type(r)"
         }
-        "count" | "sum" | "avg" | "min" | "max" => {
-            "aggregates take one variable or property, as in count(mr) or sum(mr.added_lines), and belong in RETURN with an alias: count(mr) AS n"
+        "count" | "sum" | "avg" | "min" | "max" if in_where => &format!(
+            "{name}() belongs in RETURN with an alias, as in RETURN count(mr) AS n; WHERE cannot filter on an aggregate"
+        ),
+        "count" | "sum" | "avg" | "min" | "max" => &format!(
+            "{name}() takes one variable or property, as in count(mr) or sum(mr.added_lines), and belongs in RETURN with an alias: count(mr) AS n"
+        ),
+        "date_trunc" => {
+            "date_trunc() works only in RETURN, such as RETURN date_trunc('month', m.created_at)"
         }
-        "date_trunc" | "properties" | "token_match" | "all_tokens" | "any_tokens" => {
-            "this function does not accept these arguments here"
+        "properties" => {
+            "properties() works only in RETURN, with one node variable, such as RETURN properties(m)"
         }
+        "token_match" | "all_tokens" | "any_tokens" => &format!(
+            "{name}() works only in WHERE, with a property and a string, such as WHERE {name}(m.title, 'login')"
+        ),
         _ => {
             "RETURN supports count, sum, avg, min, max, date_trunc, properties, and type; WHERE supports token_match, all_tokens, any_tokens, and type"
         }
