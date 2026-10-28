@@ -35,6 +35,7 @@ const table: unknown = Bun.YAML.parse(await Bun.file(labels).text())
 await Bun.write(join(dist, 'hooks/core/labels.ts'), HEADER + 'export default ' + JSON.stringify(table, null, 2) + '\n')
 await cp(join(root, 'hooks/hooks.json'), join(dist, 'hooks/hooks.json'))
 await cp(join(root, '.claude-plugin/plugin.json'), join(dist, '.claude-plugin/plugin.json'))
+await cp(join(root, 'README.md'), join(dist, 'README.md'))
 
 await rm(shipped, { recursive: true, force: true })
 await cp(dist, shipped, { recursive: true, filter: (path) => !path.startsWith(join(dist, 'tests')) })
