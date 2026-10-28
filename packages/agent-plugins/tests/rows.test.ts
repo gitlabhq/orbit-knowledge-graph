@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { QUERY_LABEL, describeOrbitCall } from '../core/calls.ts'
-import { isPendingCall, joinPaths, mergeRuns } from '../hooks/rows.ts'
+import { isPendingCall, joinPaths, leadsIntoOrbit, mergeRuns, usesOrbit } from '../hooks/rows.ts'
 
 function calls(...commands: string[]) {
   return commands.map((command, i) => {
@@ -76,4 +76,31 @@ test('paths join on the node type whether it reads singular or plural', () => {
   expect(joinPaths(['Project → Merge requests', 'Merge requests → Users'])).toBe('Project → Merge requests → Users')
   expect(joinPaths(['Pipeline → Jobs', 'Job → Runners'])).toBe('Pipeline → Jobs → Runners')
   expect(joinPaths(['Merge request → Users', 'Project → Merge requests'])).toBe('Project → Merge requests → Users')
+})
+
+test('Orbit work covers the skill, Orbit rows, and shell calls that run Orbit among other commands', () => {
+  expect(usesOrbit('Skill', { skill: 'orbit' })).toBe(true)
+  expect(usesOrbit('Bash', { command: MR_PROJECT })).toBe(true)
+  expect(usesOrbit('Bash', { command: 'glab orbit --yes status 2>&1 | head -40; echo ---; git remote -v' })).toBe(true)
+  expect(usesOrbit('Skill', { skill: 'commit' })).toBe(false)
+  expect(usesOrbit('Bash', { command: 'git log --oneline -5' })).toBe(false)
+  expect(usesOrbit('Bash', { command: 'rg "glab orbit" docs/' })).toBe(false)
+})
+
+test('a progress line is the text right before an Orbit call, and the answer after it is not', () => {
+  const orbit = { tool: 'Bash', input: { command: MR_PROJECT } }
+  const messages = [
+    { role: 'user', text: 'analyse MRs', toolUses: [] },
+    { role: 'assistant', text: '', toolUses: [] },
+    { role: 'assistant', text: 'The schema is loaded. Next I will count MRs.', toolUses: [] },
+    { role: 'assistant', text: '', toolUses: [orbit] },
+    { role: 'user', text: '', toolUses: [] },
+    { role: 'assistant', text: 'There are 75 open MRs.', toolUses: [] },
+    { role: 'assistant', text: 'Next I will read the README.', toolUses: [] },
+    { role: 'assistant', text: '', toolUses: [{ tool: 'Read', input: { file_path: 'README.md' } }] },
+  ]
+  expect(leadsIntoOrbit(messages, 'The schema is loaded. Next I will count MRs.')).toBe(true)
+  expect(leadsIntoOrbit(messages, 'There are 75 open MRs.')).toBe(false)
+  expect(leadsIntoOrbit(messages, 'Next I will read the README.')).toBe(false)
+  expect(leadsIntoOrbit(messages, 'not in the transcript')).toBe(false)
 })

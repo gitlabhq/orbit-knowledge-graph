@@ -5,7 +5,7 @@ import { cypherSegments, hopsOf, queryOf } from '../core/cypher.ts'
 import { apiCallsFor, compact, graphStatus, grouped, parseResponse } from '../core/stats.ts'
 import { codeLines, layout, type Token } from './highlight.ts'
 import type { MarkProps } from './orbit-mark.ts'
-import { isPendingCall, mergeRuns } from './rows.ts'
+import { isPendingCall, leadsIntoOrbit, mergeRuns, usesOrbit } from './rows.ts'
 import { BLUE, MARK, TOKEN_STYLE } from './theme.ts'
 
 type Ui = Pick<Elements['terminal'], 'Box' | 'Text'>
@@ -20,6 +20,7 @@ const stats = { calls: 0, nodes: 0, edges: 0, apiCalls: 0 }
 let graphTotal: number | null = null
 let graphTotalAsked = false
 let knownEntities: ReadonlySet<string> = new Set()
+const narration = new Set<string>()
 
 function outputText(result: unknown): string {
   if (typeof result === 'string') return result
@@ -76,6 +77,7 @@ function codeBlock(ui: Ui, code: string): RenderElement {
 
 export const register: Register = (on) => {
   on('tool.call', async ($, e, next) => {
+    if (usesOrbit(e.tool, e)) $.ui.invalidate('ui.render')
     const call = describeOrbitCall(e.tool, e)
     if (!call) return next(e)
     const raw = (e as { command?: unknown }).command
@@ -180,6 +182,13 @@ export const register: Register = (on) => {
   }).catch((_$, e, next) => next(e))
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    const said = e.props.text.trim()
+    if (said && !narration.has(said)) {
+      try {
+        if (leadsIntoOrbit(await $.session.messages(), said)) narration.add(said)
+      } catch {}
+    }
+    if (narration.has(said)) return $.ui.resolve(e).Box({ children: [] })
     const segments = cypherSegments(e.props.text)
     if (!segments.some((part) => part.kind === 'code')) return next(e)
     const ui = $.ui.resolve(e)

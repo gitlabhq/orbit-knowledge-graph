@@ -84,6 +84,10 @@ export function orbitInvocations(command: string): string[][] {
   return plain ? calls.filter((words) => words !== null) : []
 }
 
+export function runsOrbit(command: string): boolean {
+  return simpleCommands(command).some((words) => orbitWords(words[0] === '|' ? words.slice(1) : words) !== null)
+}
+
 export function subcommandOf(words: readonly string[], known: (key: string) => boolean): Subcommand | null {
   const [sub, ...rest] = words
   if (sub === undefined) return null

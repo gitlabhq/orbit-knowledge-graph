@@ -1,9 +1,11 @@
-import { QUERY_LABEL, type OrbitCall } from '../core/calls.ts'
-import { isOrbitPrefix } from '../core/command.ts'
+import { QUERY_LABEL, describeOrbitCall, type OrbitCall } from '../core/calls.ts'
+import { isOrbitPrefix, runsOrbit } from '../core/command.ts'
 
 export type GroupCall<P extends { isRunning: boolean }> = { props: P; i: number; call: OrbitCall }
 
 export type Row<P extends { isRunning: boolean }> = GroupCall<P> & { isRunning: boolean }
+
+export type TranscriptMessage = { role: string; text: string; toolUses: readonly { tool: string; input: unknown }[] }
 
 function typeKey(name: string): string {
   const lower = name.toLowerCase()
@@ -96,4 +98,18 @@ export function isPendingCall(props: { tool: string; input: unknown; output?: un
   if (props.tool !== 'Bash' || props.output !== undefined) return false
   const input = props.input as { command?: unknown } | undefined
   return isOrbitPrefix(typeof input?.command === 'string' ? input.command : '')
+}
+
+export function usesOrbit(tool: string, input: unknown): boolean {
+  if (describeOrbitCall(tool, input)) return true
+  const { command, skill } = (input ?? {}) as { command?: unknown; skill?: unknown }
+  if (tool === 'Skill') return skill === 'orbit'
+  return tool === 'Bash' && typeof command === 'string' && runsOrbit(command)
+}
+
+export function leadsIntoOrbit(messages: readonly TranscriptMessage[], text: string): boolean {
+  const at = messages.findLastIndex((m) => m.role === 'assistant' && m.text.trim() === text)
+  if (at < 0) return false
+  const next = messages.slice(at).find((m, k) => m.toolUses.length > 0 || m.role !== 'assistant' || (k > 0 && m.text.trim() !== ''))
+  return next?.role === 'assistant' && next.toolUses.some((use) => usesOrbit(use.tool, use.input))
 }
