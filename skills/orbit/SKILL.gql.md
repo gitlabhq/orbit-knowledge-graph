@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.5+gql
+version: 0.35.6+gql
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
@@ -54,7 +54,7 @@ glab orbit query "CALL db.schema('Project')"
 glab orbit query "MATCH (p:Project {full_path: 'gitlab-org/gitlab'}) RETURN p.id, p.full_path LIMIT 1"
 ```
 
-With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted string literals then need double quotes around the query. Inline query text needs GitLab Orbit CLI 0.130.0 or later. If `glab orbit query` rejects the text argument, run `glab orbit --update`.
+With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted string literals then need double quotes around the query.
 
 `--file` reads a JSON request envelope whose `query` field holds the query text, not a bare query file. `--file -` reads that envelope from stdin. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
 
