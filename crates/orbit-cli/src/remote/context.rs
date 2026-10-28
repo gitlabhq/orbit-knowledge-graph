@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError};
 
@@ -108,6 +110,11 @@ fn strip_html_comments(text: &str) -> String {
     out
 }
 
+static EMPTY_GRAPH: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?m)^graph:\nquery_type: \S+\npagination:\n(?:  .*\n)*")
+        .expect("valid pattern")
+});
+
 pub(crate) fn tidy(text: &str, drop_failed_jobs: bool) -> String {
     let text = strip_html_comments(text);
     let mut out = String::with_capacity(text.len());
@@ -128,7 +135,7 @@ pub(crate) fn tidy(text: &str, drop_failed_jobs: bool) -> String {
         out.push_str(line);
         out.push('\n');
     }
-    out
+    EMPTY_GRAPH.replace_all(&out, "").into_owned()
 }
 
 pub(crate) fn shorten(text: &str, project: &str) -> String {
@@ -208,12 +215,14 @@ mod tests {
     }
 
     #[test]
-    fn tidy_keeps_the_graph_and_drops_timestamps_and_repeated_failed_jobs() {
+    fn tidy_drops_empty_graphs_timestamps_and_repeated_failed_jobs() {
         let text = "orbit_context version=1.1.0 entities=1\n- mr:1 found=true\n  failed_jobs[1]:\n    lint url\n\
-                    graph:\nnodes:\n  x\n- issue:2 found=true\n";
+                    graph:\nquery_type: neighbors\nnodes:\n  x\npagination:\n  truncated: false\n- issue:2 found=true\n\
+                    graph:\nquery_type: neighbors\npagination:\n  has_more: false\n  truncated: false\n";
         assert_eq!(
             tidy(text, true),
-            "- mr:1 found=true\ngraph:\nnodes:\n  x\n- issue:2 found=true\n"
+            "- mr:1 found=true\ngraph:\nquery_type: neighbors\nnodes:\n  x\npagination:\n  truncated: false\n\
+             - issue:2 found=true\n"
         );
     }
 }
