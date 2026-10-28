@@ -62,6 +62,9 @@ test('the query is read from the command, quotes undone', () => {
   expect(queryOf('glab orbit query "MATCH (n) WHERE n.x = \\"a\\" RETURN n"')).toBe('MATCH (n) WHERE n.x = "a" RETURN n')
   expect(queryOf("glab orbit query 'MATCH (n) RETURN n' | head -3")).toBe('MATCH (n) RETURN n')
   expect(queryOf('glab orbit grep foo')).toBe('')
+  expect(queryOf('orbit query --response-format raw "MATCH (n) RETURN n"')).toBe('MATCH (n) RETURN n')
+  expect(queryOf('orbit query --file q.json')).toBe('')
+  expect(queryOf('echo "glab orbit query \\"MATCH (n) RETURN n\\""')).toBe('')
 })
 
 test('the graph total sums every entity in every domain of graph-status', () => {

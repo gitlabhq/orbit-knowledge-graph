@@ -1,3 +1,4 @@
+import { orbitInvocations } from './command.ts'
 import { BLUE, FADE_STOPS } from './orbit.ts'
 
 export type TokenKind =
@@ -106,11 +107,17 @@ function trimEnd(line: Token[]): Token[] {
   return line
 }
 
-/** The query a `glab orbit query` command runs, unquoted, or '' when there is none. */
+/** The query an orbit `query` command runs, unquoted, or '' when there is none. */
 export function queryOf(command: string): string {
-  const m = command.match(/\bglab\s+orbit\s+query\s+(?:--[\w-]+(?:[ =][^\s'"]+)?\s+)*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')/)
-  if (!m) return ''
-  return m[1] !== undefined ? m[1].replace(/\\(["\\$`])/g, '$1') : (m[2] ?? '')
+  for (const { words } of orbitInvocations(command)) {
+    if (words[0] !== 'query' || words.includes('--file')) continue
+    for (let i = 1; i < words.length; i++) {
+      const word = words[i] ?? ''
+      if (word === '--response-format') i++
+      else if (!word.startsWith('-')) return word
+    }
+  }
+  return ''
 }
 
 /**

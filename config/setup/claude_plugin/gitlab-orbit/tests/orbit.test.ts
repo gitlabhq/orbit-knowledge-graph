@@ -12,11 +12,49 @@ test('every subcommand has a short finished and running label', () => {
   }
 })
 
-test('an unknown subcommand reads as a query, never as running Orbit', () => {
-  expect(describeOrbitCall('Bash', { command: 'glab orbit frobnicate' })).toMatchObject({
-    label: 'Explored Orbit',
-    active: 'Exploring Orbit',
+test('unknown, removed, and internal subcommands are not Orbit rows', () => {
+  for (const command of [
+    'glab orbit',
+    'glab orbit --help',
+    'glab orbit frobnicate',
+    'glab orbit dsl',
+    'glab orbit tools',
+    'glab orbit repo-map overview',
+    'glab orbit hook-guard',
+    'glab orbit mcp serve',
+    'glab orbit workspace',
+    'glab orbit constructor',
+  ]) {
+    expect(describeOrbitCall('Bash', { command })).toBe(null)
+  }
+})
+
+test('the standalone orbit binary gets the same labels', () => {
+  expect(describeOrbitCall('Bash', { command: "orbit grep 'auth|login'" })).toMatchObject({
+    label: 'Searched code',
+    detail: 'auth|login',
   })
+  expect(describeOrbitCall('Bash', { command: 'cd repo && orbit context src/main.rs:1-40' })?.label).toBe('Read code')
+})
+
+test('the remote schema and the local graph commands are told apart', () => {
+  const label = (command: string) => describeOrbitCall('Bash', { command })?.label
+  expect(label('glab orbit schema MergeRequest')).toBe('Read Orbit schema')
+  expect(label('glab orbit ontology')).toBe('Read Orbit schema')
+  expect(label('glab orbit workspace schema')).toBe('Read local schema')
+  expect(label("glab orbit workspace sql 'SELECT 1'")).toBe('Queried local graph')
+  expect(label('glab orbit workspace index .')).toBe('Indexed repo')
+  expect(describeOrbitCall('Bash', { command: 'glab orbit schema MergeRequest' })?.detail).toBe('MergeRequest')
+})
+
+test('flags before the subcommand and orbit inside an argument are handled', () => {
+  expect(describeOrbitCall('Bash', { command: 'glab orbit --yes grep foo' })?.label).toBe('Searched code')
+  expect(describeOrbitCall('Bash', { command: 'git commit -m "fix: glab orbit query output"' })).toBe(null)
+  expect(describeOrbitCall('Bash', { command: "echo 'glab orbit grep x'" })).toBe(null)
+})
+
+test('a grep pattern given with -e is the detail', () => {
+  expect(describeOrbitCall('Bash', { command: 'glab orbit grep -e foo src/' })?.detail).toBe('foo')
 })
 
 test('calls that are not Orbit calls are left alone', () => {

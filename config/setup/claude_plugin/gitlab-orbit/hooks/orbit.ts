@@ -1,3 +1,5 @@
+import { orbitInvocations, subcommandOf } from './command.ts'
+
 export const BLUE = '#949dcb'
 export const FADE_STOPS = ['#b5dedc', BLUE, '#6851ac'] as const
 
@@ -29,25 +31,37 @@ const QUERY: Labels = [QUERY_LABEL, 'Exploring Orbit']
 const SCHEMA: Labels = ['Read Orbit schema', 'Reading Orbit schema']
 const SYNTAX: Labels = ['Read query syntax', 'Reading query syntax']
 const TOOLS: Labels = ['Listed Orbit tools', 'Listing Orbit tools']
+const INDEX: Labels = ['Indexed repo', 'Indexing repo']
+const SQL: Labels = ['Queried local graph', 'Querying local graph']
+const REPOS: Labels = ['Listed repos', 'Listing repos']
+const GUIDE: Labels = ['Read Orbit guide', 'Reading Orbit guide']
+const SETTINGS: Labels = ['Read Orbit settings', 'Reading Orbit settings']
 
+// Each key is an orbit command or alias, with its subcommand after a space; a Rust test checks
+// the keys against the CLI. Commands not listed here are not Orbit rows.
 export const SUBCOMMANDS: Readonly<Record<string, Labels>> = {
-  query: QUERY,
-  ontology: SCHEMA,
-  dsl: SYNTAX,
-  tools: TOOLS,
-  status: ['Checked Orbit', 'Checking Orbit'],
+  'query': QUERY,
+  'schema': SCHEMA,
+  'ontology': SCHEMA,
+  'status': ['Checked Orbit', 'Checking Orbit'],
   'graph-status': ['Checked indexing', 'Checking indexing'],
-  grep: ['Searched code', 'Searching code'],
-  context: ['Read code', 'Reading code'],
-  sql: ['Queried local graph', 'Querying local graph'],
-  schema: ['Read local schema', 'Reading local schema'],
-  list: ['Listed repos', 'Listing repos'],
-  'repo-map': ['Mapped repo', 'Mapping repo'],
-  index: ['Indexed repo', 'Indexing repo'],
-  skills: ['Read Orbit guide', 'Reading Orbit guide'],
-  setup: ['Set up Orbit', 'Setting up Orbit'],
-  config: ['Read Orbit settings', 'Reading Orbit settings'],
-  version: ['Checked version', 'Checking version'],
+  'grep': ['Searched code', 'Searching code'],
+  'context': ['Read code', 'Reading code'],
+  'workspace index': INDEX,
+  'workspace sql': SQL,
+  'workspace schema': ['Read local schema', 'Reading local schema'],
+  'workspace list': REPOS,
+  'index': INDEX,
+  'sql': SQL,
+  'list': REPOS,
+  'skills': GUIDE,
+  'skill': GUIDE,
+  'setup': ['Set up Orbit', 'Setting up Orbit'],
+  'uninstall': ['Removed Orbit setup', 'Removing Orbit setup'],
+  'config get': SETTINGS,
+  'config list': SETTINGS,
+  'config set': ['Changed Orbit settings', 'Changing Orbit settings'],
+  'version': ['Checked version', 'Checking version'],
 }
 
 const MCP_COMMANDS: Readonly<Record<string, Labels>> = {
@@ -136,24 +150,34 @@ function splitTopLevel(text: string): string[] {
   return parts.map((p) => p.trim()).filter(Boolean)
 }
 
-function firstArg(rest: string): string {
-  const m = rest.match(/^\s*(?:-[\w-]+(?:[ =]\S+)?\s+)*(?:'([^']*)'|"([^"]*)"|(\S+))/)
-  return m ? (m[1] ?? m[2] ?? m[3] ?? '') : ''
-}
+// Flags whose value is the next word, so it is not read as the argument
+const VALUE_FLAGS = new Set(['--db', '--file', '--response-format', '--full-path', '--namespace-id', '--project-id'])
 
-function detailFor(sub: string, rest: string): string {
-  if (sub === 'query') {
-    const schema = rest.match(/CALL\s+db\.schema\(\s*'?(\w*)/i)
-    if (schema) return schema[1] ?? ''
-    const entities = entitiesOf(rest)
-    if (entities) return entities
-    return rest.match(/(?:--file|-f)[ =](\S+)/)?.[1] ?? ''
-  }
-  if (['grep', 'context', 'sql', 'repo-map', 'graph-status', 'skills'].includes(sub)) {
-    const arg = firstArg(sub === 'skills' ? rest.replace(/^\s*get\b/, '') : rest)
-    return arg && !arg.startsWith('-') ? clip(arg, 48) : ''
+function firstArg(args: readonly string[]): string {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? ''
+    if (arg === '-e' || arg === '--regexp') return args[i + 1] ?? ''
+    if (VALUE_FLAGS.has(arg)) i++
+    else if (!arg.startsWith('-')) return arg
   }
   return ''
+}
+
+const SHOWS_ARGUMENT = new Set(['grep', 'context', 'workspace sql', 'sql', 'schema', 'ontology', 'graph-status', 'skills', 'skill'])
+
+function detailFor(key: string, args: readonly string[]): string {
+  if (key === 'query') {
+    const text = args.join(' ')
+    const schema = text.match(/CALL\s+db\.schema\(\s*'?(\w*)/i)
+    if (schema) return schema[1] ?? ''
+    const entities = entitiesOf(text)
+    if (entities) return entities
+    const file = args.indexOf('--file')
+    return file >= 0 ? (args[file + 1] ?? '') : ''
+  }
+  if (!SHOWS_ARGUMENT.has(key)) return ''
+  const arg = firstArg(key.startsWith('skill') && args[0] === 'get' ? args.slice(1) : args)
+  return arg ? clip(arg, 48) : ''
 }
 
 function stringField(input: unknown, key: string): string | undefined {
@@ -166,13 +190,14 @@ function stringField(input: unknown, key: string): string | undefined {
 export function describeOrbitCall(tool: string, input: unknown): OrbitCall | null {
   const command = stringField(input, 'command')
   if (tool === 'Bash' && command !== undefined) {
-    const m = command.match(/\bglab\s+orbit\s+([\w-]+)?([\s\S]*)/)
-    if (!m) return null
-    const sub = m[1] ?? ''
-    const rest = m[2] ?? ''
-    const isSchemaQuery = sub === 'query' && /CALL\s+db\.schema\(/i.test(rest)
-    const [label, active] = isSchemaQuery ? SCHEMA : (SUBCOMMANDS[sub] ?? QUERY)
-    return { label, active, detail: detailFor(sub, rest) }
+    for (const { words } of orbitInvocations(command)) {
+      const sub = subcommandOf(words, (key) => Object.hasOwn(SUBCOMMANDS, key))
+      if (!sub) continue
+      const isSchemaQuery = sub.key === 'query' && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg))
+      const [label, active] = isSchemaQuery ? SCHEMA : (SUBCOMMANDS[sub.key] ?? QUERY)
+      return { label, active, detail: detailFor(sub.key, sub.args) }
+    }
+    return null
   }
   const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
   const server = mcp?.[1] ?? ''
