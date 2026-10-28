@@ -1,0 +1,20 @@
+description: Only closing links (link_type 0) produce CLOSES edges; mentioned (1) and related (2) links do not
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  work_items:
+    - { id: 1, iid: 1, title: Closed by MR, author_id: 1, state_id: 1, work_item_type_id: 0, confidential: false, namespace_id: 100, traversal_path: "1/100/" }
+    - { id: 2, iid: 2, title: Mentioned by MR, author_id: 1, state_id: 1, work_item_type_id: 0, confidential: false, namespace_id: 100, traversal_path: "1/100/" }
+    - { id: 3, iid: 3, title: Related to MR, author_id: 1, state_id: 1, work_item_type_id: 0, confidential: false, namespace_id: 100, traversal_path: "1/100/" }
+  merge_requests:
+    - { id: 10, iid: 101, title: Fix login, description: "Closes #1, see #2 and #3", source_branch: fix-login, target_branch: main, state_id: 3, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/" }
+  siphon_merge_requests_closing_issues:
+    - { id: 1, merge_request_id: 10, issue_id: 1, link_type: 0, project_id: 1000, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+    - { id: 2, merge_request_id: 10, issue_id: 2, link_type: 1, project_id: 1000, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+    - { id: 3, merge_request_id: 10, issue_id: 3, link_type: 2, project_id: 1000, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+
+expect:
+  edges:
+    - { kind: CLOSES, from: MergeRequest, to: WorkItem, traversal_path: "1/100/", count: 1, rows: [{ source_id: 10, target_id: 1 }] }
