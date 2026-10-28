@@ -16,6 +16,8 @@ redaction:
   resource_type: ci_build
   id_column: id
   ability: read_build
+  authorized_by:
+    columns: [project_id]
 
 properties:
   id:

@@ -253,6 +253,11 @@ pub trait OrbitQueryModel {
         self.query_authorization().redaction_id_column(entity)
     }
 
+    fn authorized_by(&self, entity: &str) -> Option<&crate::AuthorizedBy> {
+        self.query_authorization()
+            .authorized_by(self.graph().entity_id(entity)?)
+    }
+
     fn table_has_path_columns(&self, table: &str) -> bool {
         self.query_backend()
             .table_path_columns(table)

@@ -302,7 +302,7 @@
     },
     "redactionConfig": {
       "type": "object",
-      "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. The query engine includes id/type columns in results, and orbit-server validates these against the user's permissions before returning data.",
+      "description": "How orbit-server checks each result row of this entity against Rails' RedactionService.",
       "properties": {
         "resource_type": {
           "type": "string",
@@ -326,7 +326,23 @@
             "maintainer",
             "owner"
           ],
-          "description": "Minimum GitLab role a user must hold on a traversal path for this entity's rows to be visible. Applied by the compiler security pass: traversal paths where the user holds a lower role are dropped from the startsWith() predicate for this entity's table, closing the aggregation-query bypass where target nodes (e.g. Vulnerability) were never redacted. Defaults to 'reporter' for entities that do not opt in."
+          "description": "Minimum GitLab role on a traversal path for this entity's rows to be visible. The compiler security pass drops paths where the user holds a lower role. Defaults to 'reporter'."
+        },
+        "authorized_by": {
+          "type": "object",
+          "description": "Rails decides the read from an owner: entities equal on these columns share a verdict.",
+          "properties": {
+            "columns": {"type": "array", "items": {"type": "string"}},
+            "split_by": {
+              "type": "object",
+              "description": "Enum values whose entities get a separate verdict.",
+              "properties": {"property": {"type": "string"}, "values": {"type": "array", "items": {"type": "string"}}},
+              "required": ["property", "values"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["columns"],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -651,7 +667,7 @@
         },
         "partition": {
           "type": "object",
-          "description": "Partitioning for tables whose storage columns include the strategy's source column; others stay unpartitioned. Both the DDL and the query-compiler pushdown derive the partition expression from the strategy.",
+          "description": "Partitioning for tables whose storage columns include the strategy's source column. The DDL and the compiler pushdown both derive the partition expression from it.",
           "properties": {
             "strategy": {
               "type": "object",
@@ -862,7 +878,7 @@
               },
               "to_table": {
                 "type": "string",
-                "description": "Target table for the TO clause. The table must be an ontology-tracked table (auxiliary, node, or edge) so it is created and dropped alongside other graph tables during schema migration. Receives the schema-version prefix during migration unless versioned is false, in which case it must be an unversioned auxiliary table."
+                "description": "Target table for the TO clause: an ontology-tracked table (auxiliary, node, or edge) created and dropped with the graph tables. Gets the schema-version prefix unless versioned is false, in which case it must be an unversioned auxiliary table."
               },
               "select_query": {
                 "type": "string",
@@ -1041,7 +1057,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Regex patterns for versioned objects (matched against the base name after stripping the v<N>_ prefix) that the dead-version GC sweep must never drop. Empty by default: everything outside the keep-set is dropped.",
+          "description": "Regex patterns (matched against the base name without the v<N>_ prefix) for versioned objects the dead-version GC sweep must never drop. Defaults to empty.",
           "default": []
         }
       },
@@ -1310,7 +1326,7 @@
         },
         "fk_column": {
           "type": "string",
-          "description": "Foreign key column on one of the two node tables that encodes this relationship (e.g. 'project_id', 'author_id'). The loader resolves which node has the column. When present, the compiler can join node tables directly instead of scanning the edge table."
+          "description": "Foreign key column on one of the two node tables that encodes this relationship (e.g. 'project_id'). Lets the compiler join node tables instead of scanning the edge table."
         },
         "scope": {
           "$ref": "#/definitions/edgeVariantScope",
