@@ -172,13 +172,26 @@ pub(super) struct PluginSpec {
 }
 
 impl PluginSpec {
-    pub(super) fn id(&self) -> String {
-        format!("{}@{}", self.name, self.marketplace)
+    pub(super) fn marketplace_for(&self, target: &super::Target) -> String {
+        match target {
+            super::Target::Global => self.marketplace.clone(),
+            super::Target::Project(root) => {
+                format!(
+                    "{}-{}",
+                    self.marketplace,
+                    &sha256_hex(&root.display().to_string())[..8]
+                )
+            }
+        }
     }
 
-    pub(super) fn files(&self) -> Vec<(String, Vec<u8>)> {
+    pub(super) fn id(&self, marketplace: &str) -> String {
+        format!("{}@{marketplace}", self.name)
+    }
+
+    pub(super) fn files(&self, marketplace: &str) -> Vec<(String, Vec<u8>)> {
         let marketplace = serde_json::json!({
-            "name": self.marketplace,
+            "name": marketplace,
             "owner": { "name": "GitLab" },
             "plugins": [{ "name": self.name, "source": format!("./{}", self.name) }],
         });
@@ -521,7 +534,11 @@ mod tests {
     fn the_claude_plugin_embeds_its_marketplace_and_plugin() {
         let claude = agent_named("claude").unwrap();
         let plugin = claude.plugin.as_ref().unwrap();
-        let mut files: Vec<String> = plugin.files().into_iter().map(|(path, _)| path).collect();
+        let mut files: Vec<String> = plugin
+            .files(&plugin.marketplace)
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect();
         files.sort();
         let shipped = [
             "core/calls.ts",
@@ -543,7 +560,7 @@ mod tests {
         assert_eq!(files, expected);
         let marketplace: Value = serde_json::from_slice(
             &plugin
-                .files()
+                .files(&plugin.marketplace)
                 .into_iter()
                 .find(|(path, _)| path == ".claude-plugin/marketplace.json")
                 .unwrap()

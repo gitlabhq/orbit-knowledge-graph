@@ -1544,15 +1544,30 @@ mod tests {
         assert!(!marketplace.join("gitlab-orbit/tests").exists());
         assert!(!marketplace.join("gitlab-orbit/tsconfig.json").exists());
         let settings = read_json(&dir.path().join(".claude/settings.local.json"));
+        let name = read_json(&marketplace.join(".claude-plugin/marketplace.json"))["name"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(name.starts_with("gitlab-orbit-"), "{name}");
         assert_eq!(
-            settings["enabledPlugins"]["gitlab-orbit@gitlab-orbit"],
+            settings["enabledPlugins"][format!("gitlab-orbit@{name}")],
             true
         );
         assert_eq!(
-            settings["extraKnownMarketplaces"]["gitlab-orbit"]["source"],
+            settings["extraKnownMarketplaces"][&name]["source"],
             json!({"source": "directory", "path": marketplace.display().to_string()})
         );
         assert!(!dir.path().join(".codex/orbit").exists());
+    }
+
+    #[test]
+    fn each_project_gets_its_own_claude_plugin_marketplace() {
+        let claude = spec::agent_named("claude").unwrap();
+        let plugin = claude.plugin.as_ref().unwrap();
+        let a = plugin.marketplace_for(&Target::Project("/repo/a".into()));
+        let b = plugin.marketplace_for(&Target::Project("/repo/b".into()));
+        assert_ne!(a, b);
+        assert_eq!(plugin.marketplace_for(&Target::Global), "gitlab-orbit");
     }
 
     #[test]

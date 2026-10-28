@@ -79,7 +79,8 @@ fn install_plugin(
     let previous = read_manifest(&dir)?;
     let mut manifest = BTreeMap::new();
     let mut written = 0;
-    for (relative, contents) in plugin.files() {
+    let name = plugin.marketplace_for(target);
+    for (relative, contents) in plugin.files(&name) {
         let path = dir.join(&relative);
         let current = std::fs::read(&path).ok();
         if current.as_deref() != Some(contents.as_slice()) {
@@ -105,10 +106,10 @@ fn install_plugin(
 
     let (settings, settings_label) = target.resolve(&plugin.settings)?;
     let mut root = json::read_object(&settings)?;
-    let id = plugin.id();
-    let registered = json::set_key(&mut root, &marketplace_path(plugin), marketplace(&dir))
+    let id = plugin.id(&name);
+    let registered = json::set_key(&mut root, &marketplace_path(&name), marketplace(&dir))
         .with_context(|| format!("failed to update {}", settings.display()))?;
-    let enabled = json::set_key(&mut root, &enabled_path(plugin), json!(true))
+    let enabled = json::set_key(&mut root, &enabled_path(&id), json!(true))
         .with_context(|| format!("failed to update {}", settings.display()))?;
     let orbit_wrote_it = file_mentions(&settings, &id)
         || agent
@@ -154,9 +155,11 @@ fn remove_plugin(plugin: &PluginSpec, target: &Target, report: &mut Report) -> R
     let (settings, settings_label) = target.resolve(&plugin.settings)?;
     if settings.exists() {
         let mut root = json::read_object(&settings)?;
+        let name = plugin.marketplace_for(target);
         let unregistered =
-            json::remove_key_if(&mut root, &marketplace_path(plugin), &marketplace(&dir));
-        let disabled = json::remove_key_if(&mut root, &enabled_path(plugin), &json!(true));
+            json::remove_key_if(&mut root, &marketplace_path(&name), &marketplace(&dir));
+        let disabled =
+            json::remove_key_if(&mut root, &enabled_path(&plugin.id(&name)), &json!(true));
         if unregistered || disabled {
             json::write_or_delete_when_empty(&settings, &root, target, &settings_label, report)?;
         }
@@ -168,15 +171,12 @@ fn marketplace(dir: &Path) -> Value {
     json!({ "source": { "source": "directory", "path": dir.display().to_string() } })
 }
 
-fn marketplace_path(plugin: &PluginSpec) -> [String; 2] {
-    [
-        "extraKnownMarketplaces".to_string(),
-        plugin.marketplace.clone(),
-    ]
+fn marketplace_path(name: &str) -> [String; 2] {
+    ["extraKnownMarketplaces".to_string(), name.to_string()]
 }
 
-fn enabled_path(plugin: &PluginSpec) -> [String; 2] {
-    ["enabledPlugins".to_string(), plugin.id()]
+fn enabled_path(id: &str) -> [String; 2] {
+    ["enabledPlugins".to_string(), id.to_string()]
 }
 
 fn read_manifest(dir: &Path) -> Result<BTreeMap<String, String>> {
