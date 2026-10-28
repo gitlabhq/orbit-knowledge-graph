@@ -91,6 +91,16 @@ function subcommandOf(words, known) {
   return known(sub) ? { key: sub, args: rest } : null;
 }
 
+function e(o, t) {
+  let m = new Map;
+  for (let r = 0;r < o.length; r++) {
+    let p = o[r], i = t(p, r, o);
+    if (!m.has(i))
+      m.set(i, p);
+  }
+  return Array.from(m.values());
+}
+
 var NO_ENTITIES = new Set;
 var UNIQUE_KEYS = new Set(["id", "full_path", "username"]);
 function entityOfKey(key, known) {
@@ -171,21 +181,15 @@ function entitiesOf(text, known = NO_ENTITIES) {
           hops.push(m[2] ? "left" : m[3] ? "right" : "none");
       }
       const typed = nodes.map((type, i) => ({ type, one: pins[i]?.one ?? false }));
-      for (const path of readFromPin(typed, pins) ?? readForward(typed, hops)) {
-        if (!paths.some((p) => p.text === path.text))
-          paths.push(path);
-      }
+      paths.push(...readFromPin(typed, pins) ?? readForward(typed, hops));
     }
   }
-  const walks = paths.filter((p) => p.nodes.length > 1);
-  const kept = paths.filter((p) => p.nodes.length > 1 || !walks.some((w) => w.nodes.some((n) => n.type === p.nodes[0]?.type)));
+  const unique = e(paths, (p) => p.text);
+  const walks = unique.filter((p) => p.nodes.length > 1);
+  const kept = unique.filter((p) => p.nodes.length > 1 || !walks.some((w) => w.nodes.some((n) => n.type === p.nodes[0]?.type)));
   if (kept.length)
     return kept.map((p) => p.text).join(", ");
-  const names = [];
-  for (const m of text.matchAll(/\\?"entity\\?"\s*:\s*\\?"(\w+)/g)) {
-    if (m[1] && !names.includes(m[1]))
-      names.push(m[1]);
-  }
+  const names = e([...text.matchAll(/\\?"entity\\?"\s*:\s*\\?"(\w+)/g)].map((m) => m[1] ?? ""), (name) => name).filter(Boolean);
   return names.map((type) => displayOf({ type, one: false })).join(" \u2192 ");
 }
 function readFromPin(nodes, pins) {

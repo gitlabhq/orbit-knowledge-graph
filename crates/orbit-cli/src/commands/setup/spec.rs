@@ -577,6 +577,7 @@ mod tests {
             "core/command.ts",
             "core/cypher.ts",
             "core/labels.ts",
+            "core/lib.js",
             "core/stats.ts",
             "hooks/highlight.ts",
             "hooks/hooks.json",

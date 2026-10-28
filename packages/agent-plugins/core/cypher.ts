@@ -1,4 +1,5 @@
 import { orbitInvocations } from './command.ts'
+import { sumBy, uniqBy } from './lib.js'
 
 export function queryOf(command: string): string {
   for (const words of orbitInvocations(command)) {
@@ -31,15 +32,12 @@ export function cypherSegments(markdown: string): Segment[] {
 }
 
 export function hopsOf(query: string): number {
-  let hops = 0
-  for (const clause of query.split(/\bMATCH\b/i).slice(1)) {
-    const pattern = clause.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0] ?? ''
-    for (const m of pattern.matchAll(/<?-(?:\[([^\]]*)\])?->?/g)) {
-      const range = (m[1] ?? '').match(/\*\s*(\d+)?/)
-      hops += range ? Number(range[1] ?? 1) : 1
-    }
-  }
-  return hops
+  const patterns = query.split(/\bMATCH\b/i).slice(1).map((clause) => clause.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0] ?? '')
+  const hops = patterns.flatMap((pattern) => [...pattern.matchAll(/<?-(?:\[([^\]]*)\])?->?/g)])
+  return sumBy(hops, (hop) => {
+    const range = (hop[1] ?? '').match(/\*\s*(\d+)?/)
+    return range ? Number(range[1] ?? 1) : 1
+  })
 }
 
 type Hop = 'left' | 'right' | 'none'
@@ -125,18 +123,14 @@ export function entitiesOf(text: string, known: ReadonlySet<string> = NO_ENTITIE
         } else hops.push(m[2] ? 'left' : m[3] ? 'right' : 'none')
       }
       const typed = nodes.map((type, i) => ({ type, one: pins[i]?.one ?? false }))
-      for (const path of readFromPin(typed, pins) ?? readForward(typed, hops)) {
-        if (!paths.some((p) => p.text === path.text)) paths.push(path)
-      }
+      paths.push(...(readFromPin(typed, pins) ?? readForward(typed, hops)))
     }
   }
-  const walks = paths.filter((p) => p.nodes.length > 1)
-  const kept = paths.filter((p) => p.nodes.length > 1 || !walks.some((w) => w.nodes.some((n) => n.type === p.nodes[0]?.type)))
+  const unique = uniqBy(paths, (p) => p.text)
+  const walks = unique.filter((p) => p.nodes.length > 1)
+  const kept = unique.filter((p) => p.nodes.length > 1 || !walks.some((w) => w.nodes.some((n) => n.type === p.nodes[0]?.type)))
   if (kept.length) return kept.map((p) => p.text).join(', ')
-  const names: string[] = []
-  for (const m of text.matchAll(/\\?"entity\\?"\s*:\s*\\?"(\w+)/g)) {
-    if (m[1] && !names.includes(m[1])) names.push(m[1])
-  }
+  const names = uniqBy([...text.matchAll(/\\?"entity\\?"\s*:\s*\\?"(\w+)/g)].map((m) => m[1] ?? ''), (name) => name).filter(Boolean)
   return names.map((type) => displayOf({ type, one: false })).join(' → ')
 }
 

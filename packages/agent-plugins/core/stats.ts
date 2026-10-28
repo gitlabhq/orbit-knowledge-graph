@@ -1,3 +1,5 @@
+import { countBy, sumBy } from './lib.js'
+
 export type ResponseCounts = {
   nodes: number
   edges: number
@@ -12,11 +14,9 @@ export function parseResponse(text: string): ResponseCounts {
   const raw = text.trim().startsWith('{') ? tryJson(text) : null
   if (raw) {
     const r = (raw['result'] ?? raw) as { nodes?: unknown; edges?: unknown }
-    for (const n of Array.isArray(r.nodes) ? (r.nodes as { type?: unknown }[]) : []) {
-      const type = String(n.type)
-      out.byEntity[type] = (out.byEntity[type] ?? 0) + 1
-      out.nodes += 1
-    }
+    const nodes = Array.isArray(r.nodes) ? (r.nodes as { type?: unknown }[]) : []
+    out.byEntity = countBy(nodes, (node) => String(node.type))
+    out.nodes = nodes.length
     out.edges = Array.isArray(r.edges) ? r.edges.length : 0
     if (Array.isArray(r.nodes)) out.kind = 'traversal'
     return out
@@ -30,24 +30,16 @@ export function parseResponse(text: string): ResponseCounts {
     if (!header || header.index === undefined || counts.length === 0) return out
     const at = (header[1] ?? '').split(',').map((name) => counts.includes(name))
     const rows = text.slice(header.index + header[0].length).split(/^\S/m)[0] ?? ''
-    for (const line of rows.split('\n').filter((l) => l.trim())) {
-      line
-        .trim()
-        .split(',')
-        .forEach((cell, i) => {
-          if (at[i] && /^\d+$/.test(cell)) out.aggregated += Number(cell)
-        })
-    }
+    const cells = rows.split('\n').flatMap((line) => line.trim().split(',').filter((cell, i) => at[i] && /^\d+$/.test(cell)))
+    out.aggregated = sumBy(cells, Number)
     return out
   }
   if (/^query_type:\s*traversal/m.test(text)) out.kind = 'traversal'
   const nodeBlock = text.split(/^nodes:\s*$/m)[1]?.split(/^\S/m)[0] ?? ''
-  for (const m of nodeBlock.matchAll(/^\s+(\w+)\[(\d+)\]\{/gm)) {
-    const [, type = '', count = '0'] = m
-    out.byEntity[type] = (out.byEntity[type] ?? 0) + Number(count)
-    out.nodes += Number(count)
-    out.kind = 'traversal'
-  }
+  const sets = [...nodeBlock.matchAll(/^\s+(\w+)\[(\d+)\]\{/gm)].map(([, type = '', count = '0']) => ({ type, count: Number(count) }))
+  for (const { type, count } of sets) out.byEntity[type] = (out.byEntity[type] ?? 0) + count
+  out.nodes = sumBy(sets, (set) => set.count)
+  if (sets.length) out.kind = 'traversal'
   out.edges = Number(text.match(/^edges\[(\d+)\]/m)?.[1] ?? 0)
   return out
 }
@@ -75,7 +67,7 @@ export function graphStatus(json: string): { total: number; entities: string[] }
     if (!Array.isArray(domains)) return null
     const entities = domains.flatMap((domain) => domain.entities ?? [])
     return {
-      total: entities.reduce((sum, entity) => sum + (Number(entity.count) || 0), 0),
+      total: sumBy(entities, (entity) => Number(entity.count) || 0),
       entities: entities.map((entity) => String(entity.name ?? '')).filter(Boolean),
     }
   } catch {
