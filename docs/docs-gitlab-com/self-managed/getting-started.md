@@ -41,14 +41,15 @@ Each step depends on the step before it:
 
 You can verify steps 1 to 3 before you install GitLab Orbit.
 
-## Reference architectures
+## Sizing
 
-For the pod, node, NATS, Siphon, and ClickHouse sizes, see [GitLab Orbit reference architectures](reference-architectures.md).
+For the pod, node, NATS, Siphon, and ClickHouse sizes, see [GitLab Orbit sizing](sizing.md).
 For the chart defaults, see [`values.yaml`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/blob/main/chart/values.yaml).
 
 ## High availability
 
 For ClickHouse high availability, see [High availability](clickhouse.md#high-availability).
+For a NATS cluster, see [Configure a NATS cluster](sizing.md#configure-a-nats-cluster).
 
 ## Image volumes
 
@@ -80,7 +81,7 @@ config:
 
 Replace the following values:
 
-- `<volume_size>`: the size of the JetStream volume, from [NATS](reference-architectures.md#nats).
+- `<volume_size>`: the size of the JetStream volume, from [NATS](sizing.md#nats).
 
 Keep the `<<` and `>>` marks around `64MB`, so the chart writes the value without quotes.
 

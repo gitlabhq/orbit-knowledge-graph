@@ -2,8 +2,8 @@
 stage: Analytics
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Resource sizes for GitLab Orbit components at each GitLab reference architecture size.
-title: GitLab Orbit reference architectures
+description: Sizing recommendations for GitLab Orbit components at each GitLab reference architecture size.
+title: GitLab Orbit sizing
 ---
 
 {{< details >}}
@@ -14,14 +14,27 @@ title: GitLab Orbit reference architectures
 {{< /details >}}
 
 Size GitLab Orbit next to your [GitLab reference architecture](https://docs.gitlab.com/administration/reference_architectures/).
-Find the row for your reference architecture size, then add the GitLab Orbit components to your environment.
-For fewer than 2,000 users, use the 2,000 row.
+Find the size of your reference architecture, then add the GitLab Orbit components for that size to your environment.
 
 GitLab Orbit load depends more on the groups that you index, your Gitaly nodes, and your PostgreSQL change rate than on user count.
 After you choose a size, read [Adjust for your workload](#adjust-for-your-workload).
 
 The values are starting points, and they can be more than your workload needs.
 Monitor the signals in [Monitor and scale](#monitor-and-scale), then decrease the values.
+
+## Choose a size
+
+Use the size that matches your GitLab reference architecture.
+For fewer than 2,000 users, use the 2,000 users size.
+
+| Size | GitLab reference architecture | Cloud Native Hybrid size |
+|------|-------------------------------|--------------------------|
+| 2,000 users | [Up to 40 RPS or 2,000 users](https://docs.gitlab.com/administration/reference_architectures/2k_users/) | None |
+| 3,000 users | [Up to 60 RPS or 3,000 users](https://docs.gitlab.com/administration/reference_architectures/3k_users/) | None |
+| 5,000 users | [Up to 100 RPS or 5,000 users](https://docs.gitlab.com/administration/reference_architectures/5k_users/) | Small |
+| 10,000 users | [Up to 200 RPS or 10,000 users](https://docs.gitlab.com/administration/reference_architectures/10k_users/) | Medium |
+| 25,000 users | [Up to 500 RPS or 25,000 users](https://docs.gitlab.com/administration/reference_architectures/25k_users/) | Large |
+| 50,000 users | [Up to 1000 RPS or 50,000 users](https://docs.gitlab.com/administration/reference_architectures/50k_users/) | Extra large |
 
 ## Components
 
@@ -36,48 +49,73 @@ Monitor the signals in [Monitor and scale](#monitor-and-scale), then decrease th
 | Siphon | Kubernetes | Reads PostgreSQL changes and writes them to NATS and ClickHouse. |
 | ClickHouse | ClickHouse Cloud or VMs | Stores the data lake and the graph. |
 
-## Kubernetes pools
+## Kubernetes
+
+### Node pools
+
+Put the GitLab Orbit pods on their own node pool, and NATS and Siphon on a second node pool.
+The maximum node counts leave room for the extra pods that a chart upgrade starts.
+
+| Size | GitLab Orbit node pool | Node disk | NATS and Siphon node pool |
+|------|------------------------|-----------|---------------------------|
+| 2,000 users | 1 to 3 nodes, 8 vCPU, 32 GB memory | 200 GB | 1 to 2 nodes, 4 vCPU, 16 GB memory |
+| 3,000 users | 1 to 6 nodes, 8 vCPU, 32 GB memory | 200 GB | 1 to 2 nodes, 4 vCPU, 16 GB memory |
+| 5,000 users | 2 to 5 nodes, 16 vCPU, 64 GB memory | 300 GB | 1 to 2 nodes, 4 vCPU, 16 GB memory |
+| 10,000 users | 2 to 6 nodes, 16 vCPU, 64 GB memory | 400 GB | 1 to 2 nodes, 4 vCPU, 16 GB memory |
+| 25,000 users | 3 to 10 nodes, 16 vCPU, 64 GB memory | 500 GB | 3 to 4 nodes, 4 vCPU, 16 GB memory |
+| 50,000 users | 3 to 10 nodes, 32 vCPU, 128 GB memory | 600 GB | 3 to 4 nodes, 8 vCPU, 32 GB memory |
+
+| Node size | GCP example | AWS example | Azure example |
+|-----------|-------------|-------------|---------------|
+| 4 vCPU, 16 GB memory | `n2-standard-4` | `m6i.xlarge` | `Standard_D4s_v5` |
+| 8 vCPU, 32 GB memory | `n2-standard-8` | `m6i.2xlarge` | `Standard_D8s_v5` |
+| 16 vCPU, 64 GB memory | `n2-standard-16` | `m6i.4xlarge` | `Standard_D16s_v5` |
+| 32 vCPU, 128 GB memory | `n2-standard-32` | `m6i.8xlarge` | `Standard_D32s_v5` |
+
+Machine type examples are for illustration.
+Other machine types that meet the requirements are supported, including Arm types.
+Do not use burstable instance types, because their CPU performance is not consistent.
+
+### Pods
 
 The following tables give the pod count, and the request and the limit for one pod.
+The indexers use most of their memory limit during backfill, so their memory request equals the limit.
+GitLab Orbit sets CPU limits on the code indexer, because the code indexer sets its indexing lanes from them.
 
 Webserver:
 
 | Size | Pods | Request | Limit |
 |------|------|---------|-------|
-| 2,000 | 1 | 0.25 vCPU, 1 GiB | 2 vCPU, 4 GiB |
-| 3,000 | 2 | 0.25 vCPU, 1 GiB | 2 vCPU, 4 GiB |
-| 5,000 | 2 | 0.5 vCPU, 2 GiB | 2 vCPU, 6 GiB |
-| 10,000 | 2 | 0.5 vCPU, 2 GiB | 2 vCPU, 6 GiB |
-| 25,000 | 3 | 1 vCPU, 4 GiB | 4 vCPU, 8 GiB |
-| 50,000 | 3 | 1 vCPU, 4 GiB | 4 vCPU, 8 GiB |
+| 2,000 users | 1 | 250m vCPU, 1 GiB | 2 vCPU, 4 GiB |
+| 3,000 users | 2 | 250m vCPU, 1 GiB | 2 vCPU, 4 GiB |
+| 5,000 users | 2 | 500m vCPU, 2 GiB | 2 vCPU, 6 GiB |
+| 10,000 users | 2 | 500m vCPU, 2 GiB | 2 vCPU, 6 GiB |
+| 25,000 users | 3 | 1 vCPU, 4 GiB | 4 vCPU, 8 GiB |
+| 50,000 users | 3 | 1 vCPU, 4 GiB | 4 vCPU, 8 GiB |
 
 SDLC indexer:
 
 | Size | Pods | Request | Limit | Workers per pod |
 |------|------|---------|-------|-----------------|
-| 2,000 | 1 | 0.25 vCPU, 16 GiB | 2 vCPU, 16 GiB | 4 |
-| 3,000 | 1 | 0.25 vCPU, 16 GiB | 2 vCPU, 16 GiB | 4 |
-| 5,000 | 2 | 0.5 vCPU, 24 GiB | 4 vCPU, 24 GiB | 8 |
-| 10,000 | 2 | 0.5 vCPU, 24 GiB | 4 vCPU, 24 GiB | 8 |
-| 25,000 | 3 | 1 vCPU, 32 GiB | 8 vCPU, 32 GiB | 12 |
-| 50,000 | 3 | 1 vCPU, 32 GiB | 8 vCPU, 32 GiB | 16 |
+| 2,000 users | 1 | 250m vCPU, 16 GiB | 2 vCPU, 16 GiB | 4 |
+| 3,000 users | 1 | 250m vCPU, 16 GiB | 2 vCPU, 16 GiB | 4 |
+| 5,000 users | 2 | 500m vCPU, 24 GiB | 4 vCPU, 24 GiB | 8 |
+| 10,000 users | 2 | 500m vCPU, 24 GiB | 4 vCPU, 24 GiB | 8 |
+| 25,000 users | 3 | 1 vCPU, 32 GiB | 8 vCPU, 32 GiB | 12 |
+| 50,000 users | 3 | 1 vCPU, 32 GiB | 8 vCPU, 32 GiB | 16 |
 
 Code indexer:
 
-| Size | Pods | Request | Limit | Workers per pod | Indexing lanes per pod | Ephemeral disk (request, limit) | `/tmp` size | Archive slots per Gitaly storage |
-|------|------|---------|-------|-----------------|------------------------|---------------------------------|-------------|----------------------------------|
-| 2,000 | 1 | 2 vCPU, 10 GiB | 4 vCPU, 10 GiB | 2 | 2 | 20 GiB, 30 GiB | 26 GiB | 1 |
-| 3,000 | 1 to 3 | 3 vCPU, 16 GiB | 6 vCPU, 16 GiB | 3 | 3 | 20 GiB, 30 GiB | 26 GiB | 1 |
-| 5,000 | 1 to 3 | 4 vCPU, 20 GiB | 8 vCPU, 20 GiB | 4 | 4 | 30 GiB, 60 GiB | 54 GiB | 2 |
-| 10,000 | 1 to 3 | 6 vCPU, 26 GiB | 12 vCPU, 26 GiB | 6 | 5 | 30 GiB, 60 GiB | 54 GiB | 4 |
-| 25,000 | 2 to 3 | 6 vCPU, 34 GiB | 12 vCPU, 34 GiB | 6 | 6 | 50 GiB, 65 GiB | 59 GiB | 8 |
-| 50,000 | 2 to 3 | 8 vCPU, 40 GiB | 16 vCPU, 40 GiB | 8 | 8 | 65 GiB, 65 GiB | 59 GiB | 16 |
+| Size | Pods | Request | Limit | Indexing lanes per pod | Ephemeral disk (request, limit) | `/tmp` size | Archive slots per Gitaly storage |
+|------|------|---------|-------|------------------------|---------------------------------|-------------|----------------------------------|
+| 2,000 users | 1 | 2 vCPU, 10 GiB | 4 vCPU, 10 GiB | 2 | 20 GiB, 30 GiB | 26 GiB | 1 |
+| 3,000 users | 1 to 3 | 3 vCPU, 16 GiB | 6 vCPU, 16 GiB | 3 | 20 GiB, 30 GiB | 26 GiB | 1 |
+| 5,000 users | 1 to 3 | 4 vCPU, 20 GiB | 8 vCPU, 20 GiB | 4 | 30 GiB, 60 GiB | 54 GiB | 2 |
+| 10,000 users | 1 to 3 | 6 vCPU, 26 GiB | 12 vCPU, 26 GiB | 5 | 30 GiB, 60 GiB | 54 GiB | 4 |
+| 25,000 users | 2 to 3 | 6 vCPU, 34 GiB | 12 vCPU, 34 GiB | 6 | 50 GiB, 65 GiB | 59 GiB | 8 |
+| 50,000 users | 2 to 3 | 8 vCPU, 40 GiB | 16 vCPU, 40 GiB | 8 | 65 GiB, 65 GiB | 59 GiB | 16 |
 
-The indexers use most of their memory limit during backfill, so their memory request equals the limit.
-
-The code indexer sets its indexing lanes from the pod limits.
-Each lane needs about 2 vCPU and 5 GiB of memory.
-To index faster, add pods, not bigger pods.
+Each indexing lane needs about 2 vCPU and 5 GiB of memory.
 Keep the CPU limit below the usable vCPU of one node.
 
 ### Configure the pools
@@ -123,10 +161,6 @@ indexer:
           cpu: "12"
           memory: 26Gi
           ephemeral-storage: 60Gi
-      engine:
-        max_concurrent_workers: 6
-        concurrency_groups:
-          code: 6
 engine:
   handlers:
     code-indexing-task:
@@ -135,7 +169,7 @@ engine:
         archive_tenant_budget: 4
 ```
 
-- Set `max_concurrent_workers` and the matching `concurrency_groups` entry to the same value.
+- For the SDLC indexer, set `max_concurrent_workers` and `concurrency_groups.sdlc` to the same value.
 - Keep `tmpSizeLimit` below the ephemeral storage limit, because logs and the container layer use the same disk.
 - Without autoscaling, set the code indexer `replicas` to the maximum of the pod range.
 - Before you turn on indexing for groups, apply the rules in [Limit the archive load on Gitaly](#limit-the-archive-load-on-gitaly) to `archive_storage_budget` and `archive_tenant_budget`.
@@ -165,58 +199,37 @@ To autoscale the code indexer on the count of pending code indexing tasks:
 
    Replace the following values:
 
-   - `<code_min_pods>`: the minimum of the code indexer pod range in [Kubernetes pools](#kubernetes-pools).
+   - `<code_min_pods>`: the minimum of the code indexer pod range in [Pods](#pods).
    - `<code_max_pods>`: the maximum of the code indexer pod range. The chart default is 4.
 
 1. Upgrade the chart.
 
-### Node pools
-
-Put the GitLab Orbit pods on their own node pool, and NATS and Siphon on a second node pool.
-The maximum node counts leave room for the extra pods that a chart upgrade starts.
-
-| Size | GitLab Orbit node pool | Node disk | NATS and Siphon node pool |
-|------|------------------------|-----------|---------------------------|
-| 2,000 | 1 to 3 nodes, 8 vCPU, 32 GiB | 200 GiB | 1 to 2 nodes, 4 vCPU, 16 GiB |
-| 3,000 | 1 to 6 nodes, 8 vCPU, 32 GiB | 200 GiB | 1 to 2 nodes, 4 vCPU, 16 GiB |
-| 5,000 | 2 to 5 nodes, 16 vCPU, 64 GiB | 300 GiB | 1 to 2 nodes, 4 vCPU, 16 GiB |
-| 10,000 | 2 to 6 nodes, 16 vCPU, 64 GiB | 400 GiB | 1 to 2 nodes, 4 vCPU, 16 GiB |
-| 25,000 | 3 to 10 nodes, 16 vCPU, 64 GiB | 500 GiB | 3 to 4 nodes, 4 vCPU, 16 GiB |
-| 50,000 | 3 to 10 nodes, 32 vCPU, 128 GiB | 600 GiB | 3 to 4 nodes, 8 vCPU, 32 GiB |
-
-These machine types match the node sizes:
-
-| Node size | GCP | AWS | Azure |
-|-----------|-----|-----|-------|
-| 4 vCPU, 16 GiB | `n2-standard-4` | `m6i.xlarge` | `Standard_D4s_v5` |
-| 8 vCPU, 32 GiB | `n2-standard-8` | `m6i.2xlarge` | `Standard_D8s_v5` |
-| 16 vCPU, 64 GiB | `n2-standard-16` | `m6i.4xlarge` | `Standard_D16s_v5` |
-| 32 vCPU, 128 GiB | `n2-standard-32` | `m6i.8xlarge` | `Standard_D32s_v5` |
-
 ## ClickHouse
 
-GitLab Orbit can share the ClickHouse instance of GitLab, or use a separate one.
-The sizes are for the instance that holds the GitLab Orbit data lake and graph.
+The sizes are for the ClickHouse instance that holds the GitLab Orbit data lake and graph.
+If GitLab Orbit shares the ClickHouse instance of GitLab, use these sizes for the shared instance.
+They are larger than the sizes for GitLab ClickHouse features, because the data lake holds a copy of the GitLab database.
 
 | Size | Deployment | ClickHouse nodes | ClickHouse Keeper nodes |
 |------|------------|------------------|-------------------------|
-| 2,000 | ClickHouse Cloud or 1 node | 1, 8 vCPU, 32 GiB | None |
-| 3,000 | ClickHouse Cloud or 1 node | 1, 8 vCPU, 32 GiB | None |
-| 5,000 | ClickHouse Cloud or 1 node | 1, 16 vCPU, 64 GiB | None |
-| 10,000 | ClickHouse Cloud or 1 node, with optional high availability | 1, 16 vCPU, 64 GiB | 3, 2 vCPU, 8 GiB, for high availability |
-| 25,000 | ClickHouse Cloud or high availability | 3, 16 vCPU, 64 GiB | 3, 2 vCPU, 8 GiB |
-| 50,000 | ClickHouse Cloud or high availability | 3, 16 vCPU, 64 GiB | 3, 2 vCPU, 8 GiB |
+| 2,000 users | ClickHouse Cloud or 1 node | 1, 8 vCPU, 32 GB memory | None |
+| 3,000 users | ClickHouse Cloud or 1 node | 1, 8 vCPU, 32 GB memory | None |
+| 5,000 users | ClickHouse Cloud or 1 node | 1, 16 vCPU, 64 GB memory | None |
+| 10,000 users | ClickHouse Cloud or 1 node, with optional high availability | 1, 16 vCPU, 64 GB memory | 3, 2 vCPU, 8 GB memory, for high availability |
+| 25,000 users | ClickHouse Cloud, 1 node, or high availability | 1, 32 vCPU, 128 GB memory, or 3, 16 vCPU, 64 GB memory | 3, 2 vCPU, 8 GB memory, for high availability |
+| 50,000 users | ClickHouse Cloud or high availability | 3, 16 vCPU, 64 GB memory | 3, 2 vCPU, 8 GB memory |
+
+| Node size | GCP example | AWS example | Azure example |
+|-----------|-------------|-------------|---------------|
+| 2 vCPU, 8 GB memory | `c4a-standard-2` | `m8g.large` | `Standard_D2ps_v6` |
+| 8 vCPU, 32 GB memory | `c4a-standard-8` | `m8g.2xlarge` | `Standard_D8ps_v6` |
+| 16 vCPU, 64 GB memory | `c4a-standard-16` | `m8g.4xlarge` | `Standard_D16ps_v6` |
+| 32 vCPU, 128 GB memory | `c4a-standard-32` | `m8g.8xlarge` | `Standard_D32ps_v6` |
+
+The examples are Arm machine types. x86 machine types of the same size are also supported.
 
 For the high availability setup and its load balancer, see [High availability](clickhouse.md#high-availability).
 On ClickHouse Cloud, choose a service with at least the memory of one node in the table.
-
-These machine types match the node sizes:
-
-| Node size | GCP | AWS | Azure |
-|-----------|-----|-----|-------|
-| 2 vCPU, 8 GiB | `c4a-standard-2` | `m8g.large` | `Standard_D2ps_v6` |
-| 8 vCPU, 32 GiB | `c4a-standard-8` | `m8g.2xlarge` | `Standard_D8ps_v6` |
-| 16 vCPU, 64 GiB | `c4a-standard-16` | `m8g.4xlarge` | `Standard_D16ps_v6` |
 
 If you run ClickHouse on VMs:
 
@@ -238,12 +251,12 @@ If you run ClickHouse on VMs:
 
 | Size | Replicas | Request per pod | Limit per pod | Minimum volume per replica |
 |------|----------|-----------------|---------------|----------------------------|
-| 2,000 | 1 | 0.25 vCPU, 512 MiB | 1 vCPU, 1 GiB | 20 GiB |
-| 3,000 | 1 | 0.25 vCPU, 512 MiB | 1 vCPU, 1 GiB | 30 GiB |
-| 5,000 | 1 | 0.5 vCPU, 1 GiB | 2 vCPU, 2 GiB | 100 GiB |
-| 10,000 | 1 | 0.5 vCPU, 1 GiB | 2 vCPU, 2 GiB | 200 GiB |
-| 25,000 | 3 | 1 vCPU, 2 GiB | 2 vCPU, 4 GiB | 400 GiB |
-| 50,000 | 3 | 1 vCPU, 2 GiB | 4 vCPU, 8 GiB | 500 GiB |
+| 2,000 users | 1 | 250m vCPU, 512 MiB | 1 vCPU, 1 GiB | 20 GiB |
+| 3,000 users | 1 | 250m vCPU, 512 MiB | 1 vCPU, 1 GiB | 30 GiB |
+| 5,000 users | 1 | 500m vCPU, 1 GiB | 2 vCPU, 2 GiB | 100 GiB |
+| 10,000 users | 1 | 500m vCPU, 1 GiB | 2 vCPU, 2 GiB | 200 GiB |
+| 25,000 users | 3 | 1 vCPU, 2 GiB | 2 vCPU, 4 GiB | 400 GiB |
+| 50,000 users | 3 | 1 vCPU, 2 GiB | 4 vCPU, 8 GiB | 500 GiB |
 
 For fewer than 25,000 users, run NATS as one node.
 One node has no redundancy.
@@ -286,8 +299,9 @@ To run NATS as a 3-node JetStream cluster:
 
 1. Set `nats_config.replicas: 3` in `siphon-values.yaml`, as in [Install Siphon](data-replication.md#install-siphon), then upgrade the Siphon release.
 
-GitLab Orbit creates its own streams, which hold the indexing tasks, with one replica.
-The cluster does not replicate these streams.
+The cluster protects the Siphon stream only.
+GitLab Orbit creates its own streams and key-value buckets, including the schema archive catalog, with one replica.
+If you lose the node that holds them, GitLab Orbit can stop with [Error: `ontology archive vNN is missing`](troubleshooting.md#error-ontology-archive-vnn-is-missing).
 
 ## Siphon
 
@@ -295,14 +309,14 @@ Each Siphon deployment runs one pod.
 
 | Size | Memory request | Memory limit |
 |------|----------------|--------------|
-| 2,000 | 256 MiB | 2 GiB |
-| 3,000 | 256 MiB | 2 GiB |
-| 5,000 | 512 MiB | 4 GiB |
-| 10,000 | 1 GiB | 6 GiB |
-| 25,000 | 1 GiB | 8 GiB |
-| 50,000 | 2 GiB | 10 GiB |
+| 2,000 users | 256 MiB | 2 GiB |
+| 3,000 users | 256 MiB | 2 GiB |
+| 5,000 users | 512 MiB | 4 GiB |
+| 10,000 users | 1 GiB | 6 GiB |
+| 25,000 users | 1 GiB | 8 GiB |
+| 50,000 users | 2 GiB | 10 GiB |
 
-For CPU, give each pod a request of 0.25 vCPU and a limit of 2 vCPU.
+For CPU, give each pod a request of 250m vCPU and a limit of 2 vCPU.
 
 ### PostgreSQL disk for the replication slot
 
@@ -363,60 +377,40 @@ The formula assumes that the repositories are spread evenly across the storages.
 If one storage holds most of them, that storage sets the pace.
 Large repositories take longer.
 
-If the estimate is longer than you accept, increase the maximum code indexer pods.
-First, apply the rules in [Limit the archive load on Gitaly](#limit-the-archive-load-on-gitaly).
+The smaller term in `parallel_archives` sets the pace:
+
+- If archive slots x Gitaly storages is smaller, the archive slots set the pace.
+  Add slots only as the rules in [Limit the archive load on Gitaly](#limit-the-archive-load-on-gitaly) allow.
+  More code indexer pods do not help.
+- If code indexer pods x indexing lanes per pod is smaller, add code indexer pods.
 
 ### Limit the archive load on Gitaly
 
-The code backfill fetches an archive of every repository through the GitLab internal API.
-Gitaly builds each archive, so the load goes to the Gitaly node that holds the repositories.
-If one Gitaly node holds most of your repositories, the backfill can use all of its CPU and make Git operations slow for your users.
+Gitaly builds an archive of every repository for the code backfill.
+The load goes to the Gitaly node that holds the repositories.
 
-`archive_storage_budget` is the maximum number of archive downloads in flight for each Gitaly storage, across all code indexer pods.
+Before you turn on indexing for groups:
+
+1. Turn on the [GitLab rate limits](https://docs.gitlab.com/security/rate_limits/).
+1. Balance your repositories across your Gitaly nodes as evenly as you can.
+1. Find the vCPU count of the Gitaly node that holds the most repositories.
+   For Gitaly Cluster (Praefect), use the smallest node in the cluster.
+1. Calculate the archive slots: 1 for each 4 vCPU of that node, up to 16.
+   If the node has more than one storage, divide by the number of storages on the node.
+1. Set `archive_storage_budget` and `archive_tenant_budget` to the smaller of this value and the archive slots in [Pods](#pods), then upgrade the chart.
+
+`archive_storage_budget` limits the archive downloads in flight for each Gitaly storage, across all code indexer pods.
 `archive_tenant_budget` is the same limit for projects whose Gitaly storage GitLab Orbit cannot find.
 
-To limit the archive load before you turn on indexing for groups:
+During the backfill:
 
-1. Find the vCPU count of the Gitaly node that holds the most repositories.
-   If you use Gitaly Cluster (Praefect), use the vCPU count of the smallest node in the cluster.
-1. Calculate the budget for that node: 1 archive slot for each 4 vCPU, up to 16.
-1. If the node has more than one storage, divide the budget by the number of storages on the node.
-1. Set `archive_storage_budget` and `archive_tenant_budget` to the smaller of this value and the archive slots in [Kubernetes pools](#kubernetes-pools), then upgrade the chart.
-
-To watch the load during the backfill:
-
-1. Turn on indexing for a few groups at a time, not all at once.
+1. Turn on indexing for a few groups at a time.
 1. Monitor the CPU of the Gitaly node with the most repositories.
-   [Pause code indexing](#pause-code-indexing) if its CPU is more than 70%, or if its 1-minute load average is more than its vCPU count.
-1. Monitor the p95 of `grpc_server_handling_seconds` on Gitaly:
-   - `GetArchive` shows the load that the backfill adds.
-   - `PackObjectsHookWithSidechannel`, `PostUploadPackWithSidechannel`, and `FindCommit` show the effect on your users.
-
-   Gitaly exports these latency histograms only when you set `grpc_latency_buckets` in its Prometheus configuration.
-
-### Pause code indexing
-
-The commands use the release name `orbit` and the namespace `gitlab-orbit` from [Set up GitLab Orbit](orbit-setup.md).
-
-Without autoscaling:
-
-1. Set `indexer.pools.code.replicas: 0` in `orbit-values.yaml`, then upgrade the chart.
-   If you only scale the deployment with `kubectl`, the next chart upgrade starts the pods again.
-1. To resume, set `replicas` back to the value in [Kubernetes pools](#kubernetes-pools), then upgrade the chart.
-
-With autoscaling:
-
-1. To pause, run:
-
-   ```shell
-   kubectl -n gitlab-orbit annotate scaledobject orbit-indexer-code autoscaling.keda.sh/paused-replicas="0" --overwrite
-   ```
-
-1. To resume, run:
-
-   ```shell
-   kubectl -n gitlab-orbit annotate scaledobject orbit-indexer-code autoscaling.keda.sh/paused-replicas-
-   ```
+   If its CPU is more than 70%, or its 1-minute load average is more than its vCPU count, pause code indexing until the load drops.
+   To pause it, set `indexer.pools.code.replicas: 0` and upgrade the chart, or with autoscaling, set the `autoscaling.keda.sh/paused-replicas: "0"` annotation on the code indexer `ScaledObject`.
+1. Monitor the p95 of `grpc_server_handling_seconds` on Gitaly for `GetArchive`, which is the backfill load.
+   `PackObjectsHookWithSidechannel`, `PostUploadPackWithSidechannel`, and `FindCommit` show the effect on your users.
+   Gitaly exports these histograms only when you set `grpc_latency_buckets` in its Prometheus configuration.
 
 ## Monitor and scale
 
@@ -427,8 +421,8 @@ For the metrics and dashboards, see [Monitor GitLab Orbit](observability.md).
 |--------|--------|
 | OOM kills on any GitLab Orbit pod | Increase the memory request and limit of that pod. |
 | CPU throttling on the code or SDLC indexer | Increase the CPU limit, or add pods. |
-| Pending code indexing tasks grow and do not decrease | Add code indexer pods, if Gitaly has capacity. |
-| SDLC watermark lag grows | Increase the SDLC indexer CPU limit or workers. |
+| `code_pending` in the health check grows and does not decrease | Use the smaller term in [Estimate the backfill time](#estimate-the-backfill-time) to choose between archive slots and pods. |
+| `gkg_indexer_sdlc_watermark_lag_seconds` grows | Increase the SDLC indexer CPU limit or workers. |
 | Gitaly node CPU is more than 70% during backfill | Decrease the archive slots, or pause code indexing. |
 | NATS volume is more than 80% full | Increase the volume, or decrease the Siphon `max_age_seconds`. |
 | ClickHouse disk is more than 50% full | Increase the disk, so merges have space. |
@@ -438,6 +432,7 @@ For the metrics and dashboards, see [Monitor GitLab Orbit](observability.md).
 ## Related topics
 
 - [GitLab reference architectures](https://docs.gitlab.com/administration/reference_architectures/)
+- [GitLab rate limits](https://docs.gitlab.com/security/rate_limits/)
 - [Set up GitLab Orbit](orbit-setup.md)
 - [ClickHouse for GitLab Orbit](clickhouse.md)
 - [Monitor GitLab Orbit](observability.md)
