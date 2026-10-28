@@ -2,10 +2,11 @@ config:
   redaction:
     allow:
       project: [1000]
-      merge_request: [2000, 2001, 2004, 2005]
+      merge_request: [2000, 2004, 2005]
       ci_build: [9501, 9502, 9503]
     deny:
       project: [1001]
+      merge_request: [2001]
       ci_build: [9511, 9512]
   extra_seed:
     gl_job:
@@ -14,6 +15,10 @@ config:
       - { id: 9503, name: lint, status: failed, project_id: 1000, traversal_path: "1/100/1000/" }
       - { id: 9511, name: rspec, status: failed, project_id: 1002, traversal_path: "1/100/1002/" }
       - { id: 9512, name: rspec, status: failed, project_id: 1002, traversal_path: "1/100/1002/" }
+    gl_merge_request_diff:
+      - { id: 5010, merge_request_id: 2004, state: collected, head_commit_sha: eeeeeeee4444, traversal_path: "1/100/1000/" }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 2004, source_kind: MergeRequest, relationship_kind: HAS_DIFF, target_id: 5010, target_kind: MergeRequestDiff, source_tags: [state:merged], target_tags: [] }
 
 cases:
   - name: owner_authorized_text_key_merges
@@ -63,7 +68,7 @@ cases:
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.project_id = 1000 RETURN mr.target_branch AS branch, count(mr) AS n
     expect:
-      compile_error: free-text values cannot be grouped
+      compile_error: "access to each MergeRequest is checked separately; filter mr.target_branch to a value and count instead (WHERE mr.target_branch = '…' RETURN count(mr)), or add mr.id to the group keys to list one row per merge request"
 
   - name: per_entity_unique_key_groups
     description: A unique free-text key still groups a node read per entity
@@ -75,3 +80,15 @@ cases:
       row_count: 1
       row_values:
         - { path: public-group/public-project, n: 1 }
+
+  - name: per_entity_text_key_with_id_lists_entities
+    description: A free-text key of a node read per entity groups when the node id is also a key, and a denied row drops out
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff) WHERE mr.project_id = 1000 RETURN mr.id AS id, mr.iid AS iid, mr.title AS title, count(d) AS snapshots ORDER BY snapshots DESC
+    expect:
+      skip_requirements: [filter:project_id, aggregation_sort, "relationship:HAS_DIFF"]
+      row_count: 2
+      row_values:
+        - { id: 2000, iid: 1, title: Add feature A, snapshots: 2 }
+        - { id: 2004, iid: 5, title: Ship feature E, snapshots: 1 }

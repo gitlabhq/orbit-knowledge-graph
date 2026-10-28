@@ -148,3 +148,19 @@ cases:
       row_values:
         - { project: 1000, source: external, ref: main, n: 1 }
         - { project: 1000, source: push, ref: main, n: 2 }
+
+  - name: returned_entity_id_lists_entities
+    description: A free-text key of an owner-authorized node groups per entity when the node id is also a key
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.project_id IN [1000, 1002, 1010] RETURN j.id AS id, j.name AS name, count(j) AS n ORDER BY id
+    expect:
+      skip_requirements: [filter:project_id, aggregation_sort]
+      row_count: 6
+      row_values:
+        - { id: 9601, name: rspec, n: 1 }
+        - { id: 9602, name: rspec, n: 1 }
+        - { id: 9603, name: lint, n: 1 }
+        - { id: 9611, name: rspec, n: 1 }
+        - { id: 9612, name: lint, n: 1 }
+        - { id: 9613, name: lint, n: 1 }

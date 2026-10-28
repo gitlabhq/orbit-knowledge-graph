@@ -123,26 +123,35 @@ impl Input {
             let Some(authorized_by) = model.authorized_by(entity) else {
                 continue;
             };
-            let unique = self.groups_by_unique_text(model, node);
-            rows.insert(node, if unique { &ENTITY_ROWS } else { authorized_by });
+            let one_entity = self.groups_by_identity(model, node);
+            rows.insert(
+                node,
+                if one_entity {
+                    &ENTITY_ROWS
+                } else {
+                    authorized_by
+                },
+            );
         }
         rows
     }
 
-    pub(crate) fn groups_by_unique_text<M>(&self, model: &M, node: &str) -> bool
+    pub(crate) fn groups_by_identity<M>(&self, model: &M, node: &str) -> bool
     where
         M: query_data_model::OrbitQueryModel + ?Sized,
     {
+        let groups = &self.aggregation.group_by;
         let Some(entity) = self.entity_of(node) else {
             return false;
         };
-        property_groups(&self.aggregation.group_by).any(|(other, property)| {
-            other == node
-                && model.property_is_free_text(entity, property)
-                && model
-                    .property(entity, property)
-                    .is_some_and(|property| model.property_unique(property.id))
-        })
+        node_group_ids(groups).any(|other| other == node)
+            || property_groups(groups).any(|(other, property)| {
+                other == node
+                    && (property == DEFAULT_PRIMARY_KEY
+                        || model
+                            .property(entity, property)
+                            .is_some_and(|property| model.property_unique(property.id)))
+            })
     }
 
     /// Whether this query has the "search shape": a single-node table scan

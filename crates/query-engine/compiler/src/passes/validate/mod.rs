@@ -411,13 +411,22 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             let Some(entity) = text_key(node, property) else {
                 continue;
             };
-            if node_groups.contains(node) || input.groups_by_unique_text(model, node) {
+            if input.groups_by_identity(model, node) {
                 continue;
             }
             let reason = match model.authorized_by(entity) {
                 None => continue,
                 Some(query_data_model::AuthorizedBy::Entity) => {
-                    format!("access to each {entity} is checked separately; group")
+                    let noun = entity.chars().fold(String::new(), |mut noun, letter| {
+                        if letter.is_uppercase() && !noun.is_empty() {
+                            noun.push(' ');
+                        }
+                        noun.extend(letter.to_lowercase());
+                        noun
+                    });
+                    format!(
+                        "access to each {entity} is checked separately; filter {node}.{property} to a value and count instead (WHERE {node}.{property} = '…' RETURN count({node})), or add {node}.id to the group keys to list one row per {noun}"
+                    )
                 }
                 Some(query_data_model::AuthorizedBy::Owner { columns, split }) => {
                     let owner_known = columns.iter().any(|column| column_pinned(node, column))
@@ -451,14 +460,14 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     }
                     return_keys.extend(split.map(|key| format!("{node}.{key}")));
                     format!(
-                        "access is checked per owner, so filter {} to one value, or return {} as a group key, or group",
+                        "access is checked per owner, so filter {} to one value, or return {} as a group key, or group by a property with fixed values, by an id, or by \"{node}\"",
                         filter_keys.join(" and "),
                         return_keys.join(" and ")
                     )
                 }
             };
             return Err(QueryError::Validation(format!(
-                "aggregation group key {entity}.{property}: free-text values cannot be grouped because {reason} by a property with fixed values, by an id, or by \"{node}\""
+                "aggregation group key {entity}.{property}: free-text values cannot be grouped because {reason}"
             )));
         }
         Ok(())
