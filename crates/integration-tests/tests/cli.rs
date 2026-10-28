@@ -765,6 +765,68 @@ fn a_busy_graph_is_reported_in_one_line() {
     );
 }
 
+#[test]
+fn reset_removes_the_graph_and_keeps_settings() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+    std::fs::write(data_dir.path().join("graph.duckdb"), b"earlier release").unwrap();
+    let (_, stderr, ok) = run_cmd(
+        &["config", "set", "telemetry.enabled", "false"],
+        data_dir.path(),
+    );
+    assert!(ok, "{stderr}");
+
+    let (_, stderr, ok) = run_cmd(&["workspace", "reset", "--yes"], data_dir.path());
+
+    assert!(ok, "{stderr}");
+    for removed in ["local", "var", "graph.duckdb"] {
+        assert!(!data_dir.path().join(removed).exists(), "{removed} remains");
+    }
+    assert!(data_dir.path().join("settings.json").is_file());
+    assert!(orbit_index(&repo.path, data_dir.path()));
+    assert_eq!(indexed_repo_paths(data_dir.path()).len(), 1);
+}
+
+#[test]
+fn reset_dry_run_lists_the_graph_and_removes_nothing() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+
+    let (_, stderr, ok) = run_cmd(&["workspace", "reset", "--dry-run"], data_dir.path());
+
+    assert!(ok, "{stderr}");
+    assert!(stderr.contains("local"), "{stderr}");
+    assert_eq!(indexed_repo_paths(data_dir.path()).len(), 1);
+}
+
+#[test]
+fn reset_waits_for_open_readers_and_gives_up_without_removing() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+    let manifest = orbit_sql("SELECT database_path FROM _orbit_manifest", data_dir.path());
+    let reader = std::fs::File::open(format!(
+        "{}.lock",
+        manifest[0]["database_path"].as_str().unwrap()
+    ))
+    .unwrap();
+    reader.lock_shared().unwrap();
+
+    let out = orbit_cmd()
+        .args(["workspace", "reset", "--yes"])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .env("ORBIT_WAIT_TIMEOUT_MS", "200")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(75), "{stderr}");
+    assert!(stderr.contains("gave up waiting"), "{stderr}");
+    assert_eq!(indexed_repo_paths(data_dir.path()).len(), 1);
+}
+
 fn indexed_repo_paths(data_dir: &std::path::Path) -> Vec<String> {
     let (stdout, stderr, ok) = run_cmd(&["workspace", "list", "-F", "json"], data_dir);
     assert!(ok, "orbit workspace list failed: {stderr}");
