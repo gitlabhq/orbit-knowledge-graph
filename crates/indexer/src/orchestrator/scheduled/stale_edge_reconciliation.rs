@@ -178,6 +178,7 @@ impl StaleEdgeReconciliation {
         self.graph
             .query(&build_tombstone_statement(group, pending_namespaces))
             .param("cursor", cursor)
+            .with_setting("enable_materialized_cte", "1")
             .execute()
             .await
             .map_err(TaskError::new)
@@ -322,7 +323,7 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
     format!(
         "INSERT INTO {edge_table} \
            (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version, _deleted) \
-         WITH emitter AS ( \
+         WITH emitter AS MATERIALIZED ( \
            SELECT id, traversal_path, _version FROM ( \
              SELECT id, traversal_path, _version, _deleted \
              FROM {emitting_node_table} \
@@ -344,7 +345,7 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
            ) WHERE _deleted = false \
          ) \
          SELECT edge.traversal_path, edge.relationship_kind, edge.source_id, edge.source_kind, \
-                edge.target_id, edge.target_kind, emitter._version, true \
+                edge.target_id, edge.target_kind, emitter._version - toIntervalMicrosecond(1), true \
          FROM edge \
          JOIN emitter ON emitter.id = edge.{emitting_node_id_column} AND emitter.traversal_path = edge.traversal_path \
          WHERE edge._version < emitter._version"
@@ -591,8 +592,25 @@ mod tests {
 
             assert!(sql.contains("edge._version < emitter._version"), "{sql}");
             assert!(sql.contains("target_kind, _version, _deleted)"), "{sql}");
-            assert!(sql.contains("emitter._version, true"), "{sql}");
+            assert!(
+                sql.contains("emitter._version - toIntervalMicrosecond(1), true"),
+                "{sql}"
+            );
             assert!(!sql.contains("now64"), "{sql}");
+        }
+    }
+
+    #[test]
+    fn emitter_window_is_read_once_per_statement() {
+        for stale_when in [StaleWhen::EmitterChanged, StaleWhen::EmitterDeleted] {
+            let sql = build_tombstone_statement(&fixture(stale_when), &[]);
+
+            assert!(sql.contains("WITH emitter AS MATERIALIZED ("), "{sql}");
+            assert_eq!(sql.matches("FROM v57_gl_pipeline").count(), 1, "{sql}");
+            assert!(
+                sql.contains("SELECT id, traversal_path, _version FROM ("),
+                "{sql}"
+            );
         }
     }
 
