@@ -1,4 +1,20 @@
-import { BLUE, FADE_STOPS } from './orbit.js'
+import { BLUE, FADE_STOPS } from './orbit.ts'
+
+export type TokenKind =
+  | 'keyword'
+  | 'label'
+  | 'relationship'
+  | 'string'
+  | 'number'
+  | 'function'
+  | 'property'
+  | 'variable'
+  | 'punctuation'
+  | 'space'
+
+export type Token = { text: string; kind: TokenKind }
+
+type TokenStyle = { color?: string; bold?: boolean; italic?: boolean; dimColor?: boolean }
 
 const KEYWORDS = new Set([
   'MATCH', 'WHERE', 'RETURN', 'ORDER', 'BY', 'SKIP', 'OFFSET', 'LIMIT', 'CALL', 'AS', 'AND', 'NOT',
@@ -8,7 +24,7 @@ const KEYWORDS = new Set([
 // The keywords a new line starts at; ORDER starts one too, as ORDER BY
 const CLAUSES = new Set(['MATCH', 'OPTIONAL', 'WHERE', 'RETURN', 'ORDER', 'SKIP', 'OFFSET', 'LIMIT', 'CALL', 'UNION'])
 
-export const TOKEN_STYLE = {
+export const TOKEN_STYLE: Readonly<Record<TokenKind, TokenStyle>> = {
   keyword: { color: BLUE, bold: true },
   label: { color: FADE_STOPS[0] },
   relationship: { color: FADE_STOPS[0], italic: true },
@@ -23,14 +39,14 @@ export const TOKEN_STYLE = {
 
 const TOKEN = /\s+|'(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?|-?\d+(?:\.\d+)?|[A-Za-z_][\w]*|\*\d*(?:\.\.\d+)?|<-|->|<>|!=|<=|>=|[^\s\w]/g
 
-export function tokenize(query) {
+export function tokenize(query: string): Token[] {
   const raw = query.match(TOKEN) ?? []
-  const out = []
+  const out: Token[] = []
   for (let i = 0; i < raw.length; i++) {
-    const text = raw[i]
-    const prev = out.length ? out[out.length - 1].text : ''
+    const text = raw[i] ?? ''
+    const prev = out[out.length - 1]?.text ?? ''
     const next = raw[i + 1] ?? ''
-    let kind = 'variable'
+    let kind: TokenKind = 'variable'
     if (/^\s+$/.test(text)) kind = 'space'
     else if (/^['"]/.test(text)) kind = 'string'
     else if (/^-?\d/.test(text)) kind = 'number'
@@ -48,10 +64,10 @@ export function tokenize(query) {
   return out
 }
 
-function lastOpener(tokens) {
-  let depth = { '(': 0, '[': 0 }
+function lastOpener(tokens: readonly Token[]): '(' | '[' | '' {
+  const depth = { '(': 0, '[': 0 }
   for (let i = tokens.length - 1; i >= 0; i--) {
-    const t = tokens[i].text
+    const t = tokens[i]?.text
     if (t === ')') depth['(']++
     else if (t === ']') depth['[']++
     else if (t === '(' || t === '[') {
@@ -62,30 +78,34 @@ function lastOpener(tokens) {
   return ''
 }
 
-export function layout(query) {
+/** The query as lines of tokens, a new line at each clause keyword outside brackets. */
+export function layout(query: string): Token[][] {
   const tokens = tokenize(query.replace(/\s+/g, ' ').trim())
-  const lines = [[]]
+  const lines: Token[][] = [[]]
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
+    if (!t) continue
     const word = t.text.toUpperCase()
     // MATCH right after OPTIONAL stays on OPTIONAL's line
     const afterOptional = word === 'MATCH' && tokens[i - 2]?.text.toUpperCase() === 'OPTIONAL'
     const startsClause = t.kind === 'keyword' && CLAUSES.has(word) && !afterOptional && lastOpener(tokens.slice(0, i)) === ''
-    if (startsClause && lines[lines.length - 1].some((x) => x.kind !== 'space')) lines.push([])
-    const line = lines[lines.length - 1]
+    const current = lines[lines.length - 1] ?? []
+    if (startsClause && current.some((x) => x.kind !== 'space')) lines.push([])
+    const line = lines[lines.length - 1] ?? []
     if (t.kind === 'space' && line.every((x) => x.kind === 'space')) continue
     line.push(t)
   }
-  return lines.map((line) => trimEnd(line))
+  return lines.map(trimEnd)
 }
 
-function trimEnd(line) {
-  while (line.length && line[line.length - 1].kind === 'space') line.pop()
+function trimEnd(line: Token[]): Token[] {
+  while (line[line.length - 1]?.kind === 'space') line.pop()
   return line
 }
 
-export function queryOf(command) {
-  const m = String(command).match(/\bglab\s+orbit\s+query\s+(?:--[\w-]+(?:[ =][^\s'"]+)?\s+)*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')/)
+/** The query a `glab orbit query` command runs, unquoted, or '' when there is none. */
+export function queryOf(command: string): string {
+  const m = command.match(/\bglab\s+orbit\s+query\s+(?:--[\w-]+(?:[ =][^\s'"]+)?\s+)*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')/)
   if (!m) return ''
-  return m[1] !== undefined ? m[1].replace(/\\(["\\$`])/g, '$1') : m[2]
+  return m[1] !== undefined ? m[1].replace(/\\(["\\$`])/g, '$1') : (m[2] ?? '')
 }

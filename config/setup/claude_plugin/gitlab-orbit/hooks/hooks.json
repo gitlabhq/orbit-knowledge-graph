@@ -1,6 +1,6 @@
 {
   "description": "gitlab-orbit hooks module",
   "modules": [
-    "./register.js"
+    "./register.ts"
   ]
 }
