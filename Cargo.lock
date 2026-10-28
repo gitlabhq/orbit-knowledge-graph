@@ -6073,6 +6073,7 @@ dependencies = [
  "ignore",
  "jsonschema",
  "labkit-events",
+ "libduckdb-sys",
  "mimalloc",
  "ontology",
  "orbit-analytics",
