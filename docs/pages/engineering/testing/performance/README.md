@@ -3,7 +3,7 @@ title: Performance
 description: How Orbit measures query speed, indexing speed, and scale.
 order: 6
 authors:
-  - michaelangeloio
+  - vishal.s.patel
 ---
 
 ## What performance tests prove

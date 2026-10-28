@@ -219,7 +219,7 @@ Adjust the values for your environment:
 
 For TLS, private certificate authorities, NATS TLS, and plaintext connections, see [Networking for GitLab Orbit](networking.md).
 For every value and its default, see the [GitLab Orbit Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts).
-For pod sizes, see [Reference architectures](getting-started.md#reference-architectures).
+For pod sizes, see [GitLab Orbit sizing](sizing.md).
 
 ## Turn on indexing for a group
 

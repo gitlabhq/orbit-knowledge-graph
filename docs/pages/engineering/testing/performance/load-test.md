@@ -3,7 +3,7 @@ title: Load test
 description: How the Caproni load test measures query speed on a synthetic graph.
 order: 1
 authors:
-  - michaelangeloio
+  - vishal.s.patel
 ---
 
 ## What the load test measures

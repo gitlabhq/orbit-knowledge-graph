@@ -105,8 +105,6 @@ Commands that use only the local graph need no GitLab account and no network.
 | `grep` | Local graph and GitLab Orbit API | Search every line of code, tests, configuration, and documentation, with the enclosing definitions, and the merge requests, issues, and comments of your GitLab group. |
 | `context` | Local graph and GitLab Orbit API | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
 | `workspace index` | Local graph | Index a repository, or a directory of repositories. |
-| `workspace sql` | Local graph | Run read-only SQL. |
-| `workspace schema` | Local graph | List the tables and columns. |
 | `workspace list` | Local graph | List the indexed repositories. |
 | `workspace mcp serve` | Local graph | Serve the local graph to agents over the Model Context Protocol (MCP). |
 | `setup`, `uninstall` | None | Add or remove the agent configuration. |
@@ -198,7 +196,7 @@ For merge requests, pipelines, work items, and vulnerabilities, [query GitLab Or
 | Data | Code only | GitLab data and code |
 | Code version | The checkout on your machine, including commits that you have not pushed | The default branch of each project |
 | Refresh | `grep` and `context` index new commits and edited files, or you run `glab orbit workspace index` | Automatic |
-| Query with | `grep`, `context`, and `workspace sql` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
+| Query with | `grep` and `context` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
 
 Your agent can use the local graph and GitLab Orbit in the same conversation.
 
@@ -217,7 +215,7 @@ The parser and [supported languages](schema.md#supported-languages) are the same
 - When you pass the path of a directory, the CLI indexes each repository in the directory.
 - Each indexed commit keeps its own graph. When you index the same commit again, the CLI reindexes only the files that changed since the last run.
 - After you switch branches or commit, `grep` and `context` index the new commit for you.
-  `workspace sql` reads only commits that are already indexed.
+- To list the indexed repositories, run `glab orbit workspace list`.
 
 ### Search and read code
 
@@ -269,21 +267,6 @@ glab orbit context read_file
 `context` also takes fully qualified names, file paths, `path:start-end` ranges, and directories, several at a time.
 It also reads GitLab, in the project of the `origin` remote: `mr:42`, `issue:7`, `branch:<name>`, `pipeline:123`, `job:456`, or a GitLab URL.
 With no target, it reads the merge request and failed CI/CD jobs of the current branch.
-
-### Run SQL on the local graph
-
-To run read-only SQL directly on the graph tables:
-
-```shell
-glab orbit workspace sql -F json "SELECT count(*) AS n FROM gl_definition"
-```
-
-- By default, the query reads every indexed commit of every repository.
-  To query only the indexed commit of a checkout, use `--repo <path>`, for example `--repo .`.
-- To join across repositories, join the node tables to `_orbit_manifest` on `project_id`.
-- `-F` accepts `table` (default), `json`, `ndjson`, and `csv`. `-f <file>` or `-` reads the SQL from a file or stdin.
-
-To list the tables and columns, run `glab orbit workspace schema`. To list the indexed repositories, run `glab orbit workspace list`.
 
 ## Settings, storage, and telemetry
 
