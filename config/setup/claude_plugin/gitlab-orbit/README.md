@@ -4,7 +4,7 @@ A Claude Code [mod](https://code.claude.com/docs/en/plugins/mods/overview) that 
 
 - **Finished calls**: `◎ Explored Orbit  User → MergeRequest → Project`. The mark and the label are Orbit blue, `#949dcb`, and the entity path is grey. A failed call shows a red mark and `· failed`.
 - **Running calls**: the mark and the label fade through `#b5dedc`, `#949dcb`, and `#6851ac` and back every 2 seconds. The entity path stays grey. The spinner stays Claude Code's own.
-- **Repeats**: back-to-back identical calls in a group show as one row with a `×N` count.
+- **One row per run**: back-to-back Orbit calls share one row that shows the current call. When the run finishes, a run with queries reads `Explored Orbit` with every entity path it walked; any other run shows its last call.
 - **ctrl+o**: an expanded Orbit query shows one clause per line with openCypher highlighting, above Claude Code's own row.
 - **Status line**: after the first Orbit call, the session's calls, nodes, and edges show right-aligned under the prompt hint, ending with `◎ GitLab Orbit`.
 

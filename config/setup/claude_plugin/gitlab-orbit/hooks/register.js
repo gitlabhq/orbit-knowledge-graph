@@ -2,6 +2,7 @@ import { BLUE, MARK, describeOrbitCall } from './orbit.js'
 import { compact, parseResponse } from './stats.js'
 import { TOKEN_STYLE, layout, queryOf } from './cypher.js'
 
+const QUERY_LABEL = 'Explored Orbit'
 const stats = { calls: 0, nodes: 0, edges: 0 }
 
 function outputText(answer) {
@@ -17,7 +18,7 @@ function outputText(answer) {
 // A large output reaches the hook as a stub, with the full text saved to a file.
 async function record($, call, answer) {
   stats.calls += 1
-  if (call.label !== 'Explored Orbit' || !answer || answer.isError) return
+  if (call.label !== QUERY_LABEL || !answer || answer.isError) return
   const saved = answer.result && answer.result.persistedOutputPath
   const text = saved ? String(await $.fs.read(saved)) : outputText(answer)
   const parsed = parseResponse(text)
@@ -41,26 +42,33 @@ function finishedRow(Box, Text, call, props) {
   return Box({ flexDirection: 'row', children })
 }
 
-// Back-to-back calls with the same label and detail, as one row each: the latest call's state,
-// running while any of them runs, and how many there were
-function mergeRepeats(calls) {
-  const merged = []
-  for (const x of calls) {
-    const last = merged[merged.length - 1]
-    if (last && last.call.label === x.call.label && last.call.detail === x.call.detail) {
-      last.count += 1
-      last.isRunning = last.isRunning || x.props.isRunning
-      last.props = x.props
-    } else {
-      merged.push({ ...x, count: 1, isRunning: x.props.isRunning })
-    }
-  }
-  return merged
+// A shell call the model is still writing: no command yet, or only the start of `glab orbit`.
+// It joins an Orbit group's row once its command is known, so it must not break the group first.
+function isPendingCall(props) {
+  if (props.tool !== 'Bash' || props.output !== undefined) return false
+  const command = props.input && typeof props.input.command === 'string' ? props.input.command.trimStart() : ''
+  return command === '' || 'glab orbit '.startsWith(command)
 }
 
-function withCount(detail, count) {
-  if (count < 2) return detail
-  return (detail ? detail + '  ' : '') + '×' + count
+// Back-to-back Orbit calls as one row. While one runs, the row shows it. Once all are done, a
+// run with graph queries reads `Explored Orbit` with every path it walked; any other run shows
+// its last call.
+function mergeRuns(calls) {
+  const runs = []
+  for (const x of calls) {
+    const last = runs[runs.length - 1]
+    if (last && x.i === last.calls[last.calls.length - 1].i + 1) last.calls.push(x)
+    else runs.push({ calls: [x] })
+  }
+  return runs.map(({ calls: run }) => {
+    const latest = run[run.length - 1]
+    const running = [...run].reverse().find((x) => x.props.isRunning)
+    if (running) return { ...running, isRunning: true }
+    const queries = run.filter((x) => x.call.label === QUERY_LABEL)
+    if (queries.length === 0) return { ...latest, isRunning: false }
+    const paths = [...new Set(queries.map((x) => x.call.detail).filter(Boolean))]
+    return { ...latest, isRunning: false, call: { ...latest.call, label: QUERY_LABEL, detail: paths.join(', ') } }
+  })
 }
 
 function highlighted(Box, Text, query) {
@@ -123,12 +131,14 @@ export function register(on) {
       .filter((x) => x.call)
     if (orbitCalls.length === 0) return next(e)
     const { Box, Text, Client } = $.ui.resolve(e)
-    const rows = mergeRepeats(orbitCalls).map(({ props, i, call, count, isRunning }) =>
+    const rows = mergeRuns(orbitCalls).map(({ props, call, isRunning }, n) =>
       isRunning && Client
-        ? Client({ key: 'orbit-row-' + (props.tool_use_id || i), module: './orbit-mark.js', props: { kind: 'row', label: call.active, detail: withCount(call.detail, count) } })
-        : finishedRow(Box, Text, { ...call, detail: withCount(call.detail, count) }, props),
+        ? Client({ key: 'orbit-run-' + n, module: './orbit-mark.js', props: { kind: 'row', label: call.active, detail: call.detail } })
+        : finishedRow(Box, Text, call, props),
     )
-    const onlyOrbit = orbitCalls.length === e.props.calls.length && e.props.isCallsOnly !== false
+    // A group of nothing but Orbit calls is drawn as its rows alone, in place of the task summary
+    // Claude Code shows between calls, so the row doesn't jump while the model works
+    const onlyOrbit = e.props.calls.every((props) => describeOrbitCall(props.tool, props.input) || isPendingCall(props))
     if (onlyOrbit) return Box({ flexDirection: 'column', children: rows })
     const theirs = await next(e)
     return Box({ flexDirection: 'column', children: [theirs, Box({ flexDirection: 'column', paddingLeft: 2, children: rows })] })
