@@ -90,8 +90,9 @@ function orbitWords(words) {
 function orbitInvocations(command) {
   const commands = simpleCommands(command);
   const calls = commands.map(orbitWords);
-  const helper = (words) => words[0] === "cd" || words[0] === "|" && PIPE_TARGETS.has(words[1] ?? "") || words.join(" ") === "true";
-  const plain = commands.every((words, i) => !words.some((w) => SHELL_ONLY.has(w)) && (calls[i] || helper(words)));
+  const pipeTarget = (words) => words[0] === "|" && PIPE_TARGETS.has(words[1] ?? "") && words.slice(2).every((word) => word.startsWith("-") || /^\d+$/.test(word));
+  const helper = (words) => words[0] === "cd" || pipeTarget(words) || words.join(" ") === "true";
+  const plain = !command.includes("$'") && commands.every((words, i) => !words.some((w) => SHELL_ONLY.has(w)) && (calls[i] || helper(words)));
   return plain ? calls.filter((words) => words !== null) : [];
 }
 function subcommandOf(words, known) {
@@ -266,6 +267,7 @@ var labels_default = {
     "workspace sql": { done: "Queried local graph", running: "Querying local graph" },
     "workspace schema": { done: "Read local schema", running: "Reading local schema" },
     "workspace list": { done: "Listed repos", running: "Listing repos" },
+    "workspace mcp": { done: "Served local graph", running: "Serving local graph" },
     "workspace reset": { done: "Reset local graph", running: "Resetting local graph" },
     index: { done: "Indexed repo", running: "Indexing repo" },
     sql: { done: "Queried local graph", running: "Querying local graph" },
@@ -294,7 +296,21 @@ var TOOL_LABELS = labels_default.tools;
 var QUERY = labels_default.commands.query;
 var SCHEMA = labels_default.commands.schema;
 var QUERY_LABEL = QUERY.done;
-var VALUE_FLAGS = new Set(["--db", "--file", "--response-format", "--full-path", "--namespace-id", "--project-id"]);
+var VALUE_FLAGS = new Set([
+  "--db",
+  "--file",
+  "--response-format",
+  "--full-path",
+  "--namespace-id",
+  "--project-id",
+  "--repo",
+  "--budget",
+  "--timeout"
+]);
+var VALUE_FLAGS_BY_KEY = {
+  grep: new Set(["-A", "-B", "-C", "-m", "-g", "--glob", "--include", "--exclude", "--exclude-dir", "-t", "--type", "-T", "--type-not", "-M", "--max-columns"]),
+  "workspace sql": new Set(["-f", "-F", "--format"])
+};
 var SHOWS_ARGUMENT = new Set(["grep", "context", "workspace sql", "sql", "schema", "ontology", "graph-status", "skills", "skill"]);
 function labelFor(table, key) {
   return Object.hasOwn(table, key) ? table[key] : undefined;
@@ -306,12 +322,12 @@ function clip(text, max) {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? flat.slice(0, max - 1) + "\u2026" : flat;
 }
-function firstArg(args) {
+function firstArg(args, valueFlags) {
   for (let i = 0;i < args.length; i++) {
     const arg = args[i] ?? "";
     if (arg === "-e" || arg === "--regexp")
       return args[i + 1] ?? "";
-    if (VALUE_FLAGS.has(arg))
+    if (VALUE_FLAGS.has(arg) || valueFlags.has(arg))
       i++;
     else if (!arg.startsWith("-"))
       return arg;
@@ -329,7 +345,8 @@ function detailFor(key, args, known) {
   }
   if (!SHOWS_ARGUMENT.has(key))
     return "";
-  return clip(firstArg(key.startsWith("skill") && args[0] === "get" ? args.slice(1) : args), 48);
+  const valueFlags = VALUE_FLAGS_BY_KEY[key] ?? new Set;
+  return clip(firstArg(key.startsWith("skill") && args[0] === "get" ? args.slice(1) : args, valueFlags), 48);
 }
 function stringField(input, key) {
   const value = typeof input === "object" && input !== null ? input[key] : undefined;

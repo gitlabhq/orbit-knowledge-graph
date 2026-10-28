@@ -45,10 +45,15 @@ test('a repeated call graph query stays on one row', () => {
   expect(rows[0]?.call.detail).toBe('Definitions')
 })
 
-test('guide and schema calls stay on the row of the queries they follow', () => {
-  const rows = mergeRuns(calls('glab orbit skills get orbit', q("CALL db.schema('MergeRequest')"), MR_PROJECT))
+test('a schema read keeps its own line between queries', () => {
+  const rows = mergeRuns(calls(MR_PROJECT, q("CALL db.schema('MergeRequest')"), USER_MR))
+  expect(rows.map((row) => row.call.label)).toEqual([QUERY_LABEL, 'Read Orbit schema', QUERY_LABEL])
+})
+
+test('similar commands in a row share one line with their details', () => {
+  const rows = mergeRuns(calls('glab orbit grep foo', 'glab orbit grep bar'))
   expect(rows.length).toBe(1)
-  expect(rows[0]?.call).toMatchObject({ label: QUERY_LABEL, detail: 'Merge requests → Projects' })
+  expect(rows[0]?.call.detail).toBe('foo, bar')
 })
 
 test('a running query shows the path walked so far', () => {

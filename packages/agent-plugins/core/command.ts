@@ -78,9 +78,11 @@ function orbitWords(words: readonly string[]): string[] | null {
 export function orbitInvocations(command: string): string[][] {
   const commands = simpleCommands(command)
   const calls = commands.map(orbitWords)
-  const helper = (words: string[]) =>
-    words[0] === 'cd' || (words[0] === '|' && PIPE_TARGETS.has(words[1] ?? '')) || words.join(' ') === 'true'
-  const plain = commands.every((words, i) => !words.some((w) => SHELL_ONLY.has(w)) && (calls[i] || helper(words)))
+  const pipeTarget = (words: string[]) =>
+    words[0] === '|' && PIPE_TARGETS.has(words[1] ?? '') && words.slice(2).every((word) => word.startsWith('-') || /^\d+$/.test(word))
+  const helper = (words: string[]) => words[0] === 'cd' || pipeTarget(words) || words.join(' ') === 'true'
+  const plain =
+    !command.includes("$'") && commands.every((words, i) => !words.some((w) => SHELL_ONLY.has(w)) && (calls[i] || helper(words)))
   return plain ? calls.filter((words) => words !== null) : []
 }
 

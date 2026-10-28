@@ -16,7 +16,14 @@ const SCHEMA = labels.commands.schema
 
 export const QUERY_LABEL = QUERY.done
 
-const VALUE_FLAGS = new Set(['--db', '--file', '--response-format', '--full-path', '--namespace-id', '--project-id'])
+const VALUE_FLAGS = new Set([
+  '--db', '--file', '--response-format', '--full-path', '--namespace-id', '--project-id', '--repo', '--budget', '--timeout',
+])
+// Short flags take a value only on some commands: `-F` is fixed strings in grep and a format in workspace sql.
+const VALUE_FLAGS_BY_KEY: Readonly<Record<string, ReadonlySet<string>>> = {
+  grep: new Set(['-A', '-B', '-C', '-m', '-g', '--glob', '--include', '--exclude', '--exclude-dir', '-t', '--type', '-T', '--type-not', '-M', '--max-columns']),
+  'workspace sql': new Set(['-f', '-F', '--format']),
+}
 const SHOWS_ARGUMENT = new Set(['grep', 'context', 'workspace sql', 'sql', 'schema', 'ontology', 'graph-status', 'skills', 'skill'])
 
 function labelFor(table: Readonly<Record<string, Label>>, key: string): Label | undefined {
@@ -32,11 +39,11 @@ function clip(text: string, max: number): string {
   return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
 }
 
-function firstArg(args: readonly string[]): string {
+function firstArg(args: readonly string[], valueFlags: ReadonlySet<string>): string {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] ?? ''
     if (arg === '-e' || arg === '--regexp') return args[i + 1] ?? ''
-    if (VALUE_FLAGS.has(arg)) i++
+    if (VALUE_FLAGS.has(arg) || valueFlags.has(arg)) i++
     else if (!arg.startsWith('-')) return arg
   }
   return ''
@@ -51,7 +58,8 @@ function detailFor(key: string, args: readonly string[], known: ReadonlySet<stri
     return entitiesOf(text, known) || (file >= 0 ? (args[file + 1] ?? '') : '')
   }
   if (!SHOWS_ARGUMENT.has(key)) return ''
-  return clip(firstArg(key.startsWith('skill') && args[0] === 'get' ? args.slice(1) : args), 48)
+  const valueFlags = VALUE_FLAGS_BY_KEY[key] ?? new Set<string>()
+  return clip(firstArg(key.startsWith('skill') && args[0] === 'get' ? args.slice(1) : args, valueFlags), 48)
 }
 
 function stringField(input: unknown, key: string): string | undefined {

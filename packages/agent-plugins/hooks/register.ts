@@ -16,6 +16,7 @@ function clientOf(ui: Resolved): Elements['terminal']['Client'] | undefined {
 }
 type RowState = { isErrored?: boolean; isInterrupted?: boolean }
 
+const MAX_PROJECT_TOTALS = 8
 const stats = { calls: 0, nodes: 0, edges: 0, apiCalls: 0 }
 const projectTotals = new Map<string, number | null>()
 let entitiesAsked = false
@@ -95,22 +96,25 @@ export const register: Register = (on) => {
           stats.nodes += parsed.nodes + parsed.aggregated
           stats.apiCalls += apiCallsFor(parsed)
           stats.edges += parsed.edges + parsed.aggregated * hopsOf(queryOf(command))
-          const lookUps: { key: string; flags: readonly string[] }[] = projectsOf(queryOf(command)).filter((scope) => !projectTotals.has(scope.key))
+          const lookUps: { key: string; flags: readonly string[] }[] = projectsOf(queryOf(command))
+            .filter((scope) => !projectTotals.has(scope.key))
+            .slice(0, MAX_PROJECT_TOTALS)
           if (!entitiesAsked && lookUps.length === 0) lookUps.push({ key: '', flags: [] })
           entitiesAsked = true
           for (const { key } of lookUps) if (key) projectTotals.set(key, null)
-          void Promise.all(
-            lookUps.map(async ({ key, flags }) => {
+          void (async () => {
+            for (const { key, flags } of lookUps) {
               for (const launcher of [['glab', 'orbit'], ['orbit']]) {
                 const run = await $.process.run([...launcher, 'graph-status', ...flags, '--response-format', 'raw'], { timeoutMs: 30000 }).catch(() => null)
                 const graph = run?.exitCode === 0 ? graphStatus(run.stdout) : null
                 if (!graph) continue
                 if (key) projectTotals.set(key, graph.total)
                 knownEntities = new Set([...knownEntities, ...graph.entities])
-                return $.ui.invalidate('ui.render')
+                $.ui.invalidate('ui.render')
+                break
               }
-            }),
-          )
+            }
+          })()
         }
       } catch {}
       $.ui.invalidate('ui.render')

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -189,6 +189,10 @@ fn remove_plugin(plugin: &PluginSpec, target: &Target, report: &mut Report) -> R
         let mut kept = 0;
         for (relative, expected) in read_manifest(&dir)? {
             let path = dir.join(&relative);
+            if std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+                kept += 1;
+                continue;
+            }
             match std::fs::read(&path) {
                 Ok(current) if hash(&current) == expected => {
                     remove_file_and_empty_parents(&path, target)?;
@@ -238,12 +242,26 @@ fn enabled_path(id: &str) -> [String; 2] {
 
 fn read_manifest(dir: &Path) -> Result<BTreeMap<String, String>> {
     let path = dir.join(MANIFEST);
-    match std::fs::read_to_string(&path) {
+    let entries: BTreeMap<String, String> = match std::fs::read_to_string(&path) {
         Ok(raw) => serde_json::from_str(&raw)
-            .with_context(|| format!("{} is not valid; remove it and re-run", path.display())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
-        Err(e) => Err(e).with_context(|| format!("failed to read {}", path.display())),
+            .with_context(|| format!("{} is not valid; remove it and re-run", path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
+    };
+    if let Some(bad) = entries.keys().find(|key| !is_plain_relative(key)) {
+        bail!(
+            "{} lists {bad:?}, which is not a path inside the plugin folder; remove it and re-run",
+            path.display()
+        );
     }
+    Ok(entries)
+}
+
+fn is_plain_relative(key: &str) -> bool {
+    !key.is_empty()
+        && Path::new(key)
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
 }
 
 fn hash(contents: &[u8]) -> String {
@@ -291,11 +309,11 @@ fn run(command: &[String], target: &Target) -> Result<String, String> {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
     let (program, args) = command.split_first().ok_or("no command")?;
+    let scratch = tempfile::tempdir().map_err(|error| error.to_string())?;
     let cwd = match target {
         Target::Project(root) => root.clone(),
-        Target::Global => std::env::temp_dir().join("orbit-setup"),
+        Target::Global => scratch.path().to_path_buf(),
     };
-    std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
     let mut process = Command::new(program);
     process.current_dir(cwd);
     let mut child = process

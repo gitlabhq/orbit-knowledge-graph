@@ -64,33 +64,25 @@ function queryDetails<P extends { isRunning: boolean }>(calls: readonly GroupCal
   return calls.filter((x) => x.call.label === QUERY_LABEL).map((x) => x.call.detail)
 }
 
-function startsNewPath<P extends { isRunning: boolean }>(row: readonly GroupCall<P>[], x: GroupCall<P>): boolean {
-  if (x.call.label !== QUERY_LABEL || !x.call.detail) return false
-  const details = queryDetails(row)
-  if (details.length === 0) return false
-  const chains = (list: string[]) => joinPaths(list).split(', ').filter(Boolean).length
-  return chains([...details, x.call.detail]) > chains(details)
+function detailsOf<P extends { isRunning: boolean }>(group: readonly GroupCall<P>[]): string {
+  if (group[0]?.call.label === QUERY_LABEL) return joinPaths(queryDetails(group))
+  return [...new Set(group.map((x) => x.call.detail).filter(Boolean))].join(', ')
 }
 
 export function mergeRuns<P extends { isRunning: boolean }>(calls: readonly GroupCall<P>[]): Row<P>[] {
-  const runs: GroupCall<P>[][] = []
+  const groups: GroupCall<P>[][] = []
   for (const x of calls) {
-    const last = runs[runs.length - 1]
-    const follows = last !== undefined && x.i === (last[last.length - 1]?.i ?? -2) + 1
-    if (last && follows && !startsNewPath(last, x)) last.push(x)
-    else runs.push([x])
+    const last = groups[groups.length - 1]
+    if (last && last[0]?.call.label === x.call.label) last.push(x)
+    else groups.push([x])
   }
-  return runs.flatMap((run): Row<P>[] => {
-    const latest = run[run.length - 1]
+  return groups.flatMap((group): Row<P>[] => {
+    const latest = group[group.length - 1]
     if (!latest) return []
-    const running = [...run].reverse().find((x) => x.props.isRunning)
-    const walked = joinPaths(queryDetails(run))
-    if (running) {
-      const detail = running.call.label === QUERY_LABEL ? walked : running.call.detail
-      return [{ ...running, isRunning: true, call: { ...running.call, detail } }]
-    }
-    if (!walked) return [{ ...latest, isRunning: false }]
-    return [{ ...latest, isRunning: false, call: { ...latest.call, label: QUERY_LABEL, detail: walked } }]
+    const running = [...group].reverse().find((x) => x.props.isRunning)
+    const detail = detailsOf(group)
+    if (running) return [{ ...running, isRunning: true, call: { ...running.call, detail } }]
+    return [{ ...latest, isRunning: false, call: { ...latest.call, detail } }]
   })
 }
 
@@ -107,7 +99,13 @@ export function usesOrbit(tool: string, input: unknown): boolean {
   return tool === 'Bash' && typeof command === 'string' && runsOrbit(command)
 }
 
+export function isProgressText(text: string): boolean {
+  const flat = text.trim()
+  return flat.length > 0 && flat.length <= 160 && !flat.includes('\n') && !/[?\d]/.test(flat) && /\b(next|now|let me|i'll|i will)\b/i.test(flat)
+}
+
 export function leadsIntoOrbit(messages: readonly TranscriptMessage[], text: string): boolean {
+  if (!isProgressText(text)) return false
   const at = messages.findLastIndex((m) => m.role === 'assistant' && m.text.trim() === text)
   if (at < 0) return false
   const next = messages.slice(at).find((m, k) => m.toolUses.length > 0 || m.role !== 'assistant' || (k > 0 && m.text.trim() !== ''))
