@@ -1351,6 +1351,9 @@ fn validate_owner_grains(ontology: &crate::Ontology) -> Result<(), OntologyError
             let labels = field(&split.property)
                 .and_then(|field| field.enum_values.as_ref())
                 .ok_or_else(|| invalid(format!("'{}' is not an enum property", split.property)))?;
+            if split.values.is_empty() {
+                return Err(invalid("split_by values is empty".into()));
+            }
             if let Some(value) = split
                 .values
                 .iter()
@@ -1854,6 +1857,11 @@ mod tests {
                 "ci/pipeline.yaml",
                 serde_json::json!({"columns": ["project_id"], "split_by": {"property": "source", "values": ["nowhere"]}}),
                 "nowhere",
+            ),
+            (
+                "ci/pipeline.yaml",
+                serde_json::json!({"columns": ["project_id"], "split_by": {"property": "source", "values": []}}),
+                "split_by values is empty",
             ),
             (
                 "source_code/definition.yaml",
