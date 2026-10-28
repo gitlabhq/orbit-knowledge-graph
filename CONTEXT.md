@@ -23,7 +23,7 @@ The `orbit` binary. `glab orbit` installs it and forwards all verbs to it. `quer
 _Avoid_: Orbit CLI, Orbit Local, "local mode", "remote mode"
 
 **Local graph**:
-The DuckDB graph the **GitLab Orbit CLI** builds from a repository on the machine. Part of **GitLab Orbit**: it covers local code that the graph on the GitLab instance does not have. `grep` and `context` index the working tree on their own.
+The DuckDB graph the **GitLab Orbit CLI** builds from a repository on the machine. Part of **GitLab Orbit**: it covers local code that **GitLab Orbit** on the GitLab instance does not have. `grep` and `context` index the working tree on their own.
 _Avoid_: Orbit Local
 
 **Skill Placeholder**:
