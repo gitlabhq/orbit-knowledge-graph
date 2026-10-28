@@ -96,18 +96,19 @@ pub struct Input {
     pub relationship_return: RelationshipReturn,
 }
 
-pub(crate) static ENTITY_ROWS: query_data_model::ReadGrain = query_data_model::ReadGrain::Entity;
+pub(crate) static ENTITY_ROWS: query_data_model::AuthorizedBy =
+    query_data_model::AuthorizedBy::Entity;
 
 impl Input {
     pub(crate) fn aggregation_row_nodes<'a, M>(
         &'a self,
         model: &'a M,
-    ) -> HashMap<&'a str, &'a query_data_model::ReadGrain>
+    ) -> HashMap<&'a str, &'a query_data_model::AuthorizedBy>
     where
         M: query_data_model::OrbitQueryModel + ?Sized,
     {
         let groups = &self.aggregation.group_by;
-        let mut rows: HashMap<&str, &query_data_model::ReadGrain> = node_group_ids(groups)
+        let mut rows: HashMap<&str, &query_data_model::AuthorizedBy> = node_group_ids(groups)
             .map(|node| (node, &ENTITY_ROWS))
             .collect();
         for (node, property) in property_groups(groups) {
@@ -119,11 +120,11 @@ impl Input {
             {
                 continue;
             }
-            let Some(grain) = model.read_grain(entity) else {
+            let Some(authorized_by) = model.authorized_by(entity) else {
                 continue;
             };
             let unique = self.groups_by_unique_text(model, node);
-            rows.insert(node, if unique { &ENTITY_ROWS } else { grain });
+            rows.insert(node, if unique { &ENTITY_ROWS } else { authorized_by });
         }
         rows
     }

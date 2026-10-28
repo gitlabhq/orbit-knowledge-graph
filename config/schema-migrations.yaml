@@ -18,7 +18,7 @@
 migrations:
 - version: 117
   scope: none
-  note: redaction owner_grain; no table change
+  note: redaction authorized_by; no table change
 - version: 116
   scope: none
   note: high_fan_out query hint; no table change

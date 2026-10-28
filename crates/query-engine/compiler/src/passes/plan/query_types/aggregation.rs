@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use query_data_model::{OrbitQueryModel, ReadGrain};
+use query_data_model::{AuthorizedBy, OrbitQueryModel};
 
 use crate::error::Result;
 use crate::input::{
@@ -124,8 +124,8 @@ fn aggregation_plan<M: OrbitQueryModel + ?Sized>(
             }
         }
     }
-    for (node, grain) in input.aggregation_row_nodes(model) {
-        let ReadGrain::Owner { columns, split } = grain else {
+    for (node, authorized_by) in input.aggregation_row_nodes(model) {
+        let AuthorizedBy::Owner { columns, split } = authorized_by else {
             continue;
         };
         for column in columns {

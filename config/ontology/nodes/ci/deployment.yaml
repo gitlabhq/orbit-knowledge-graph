@@ -16,7 +16,7 @@ redaction:
   resource_type: deployment
   id_column: id
   ability: read_deployment
-  owner_grain:
+  authorized_by:
     columns: [project_id]
 
 properties:

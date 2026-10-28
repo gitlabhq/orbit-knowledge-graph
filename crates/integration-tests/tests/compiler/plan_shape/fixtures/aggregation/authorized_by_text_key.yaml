@@ -1,4 +1,4 @@
-name: A free-text key on a project-grain node groups by the owner, not the entity
+name: A free-text key on a node authorized by its project groups by the owner, not the entity
 
 query:
   json: |

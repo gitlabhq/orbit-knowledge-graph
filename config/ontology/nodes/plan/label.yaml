@@ -15,7 +15,7 @@ redaction:
   resource_type: label
   id_column: id
   ability: read_label
-  owner_grain:
+  authorized_by:
     columns: [project_id, group_id]
 
 properties:

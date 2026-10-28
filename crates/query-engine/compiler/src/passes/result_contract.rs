@@ -6,7 +6,7 @@ use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, ENTITY_ROWS, Input, QueryType};
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
-use query_data_model::{EntityAuthConfig, ReadGrain};
+use query_data_model::{AuthorizedBy, EntityAuthConfig};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,7 +126,7 @@ fn apply_with(
     ctx: &mut ResultContext,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
-    let selectable_nodes: HashMap<&str, &ReadGrain> = match input.query_type {
+    let selectable_nodes: HashMap<&str, &AuthorizedBy> = match input.query_type {
         QueryType::Aggregation => input.aggregation_row_nodes(model),
         QueryType::Traversal | QueryType::Neighbors => input
             .nodes
@@ -208,7 +208,7 @@ fn set_output(q: &mut Query, output: SelectExpr) {
 fn enforce_return_columns(
     q: &mut Query,
     input: &Input,
-    selectable_nodes: &HashMap<&str, &ReadGrain>,
+    selectable_nodes: &HashMap<&str, &AuthorizedBy>,
     bindings: &HashMap<String, NodeBinding>,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
@@ -217,7 +217,7 @@ fn enforce_return_columns(
         let Some(entity) = &node.entity else {
             continue;
         };
-        let Some(grain) = selectable_nodes.get(node.id.as_str()) else {
+        let Some(authorized_by) = selectable_nodes.get(node.id.as_str()) else {
             continue;
         };
         let entity_id = model
@@ -256,8 +256,8 @@ fn enforce_return_columns(
             identity.clone()
         };
 
-        match grain {
-            ReadGrain::Owner { .. } if !needs_separate_pk => {
+        match authorized_by {
+            AuthorizedBy::Owner { .. } if !needs_separate_pk => {
                 let representative = Expr::Aggregate {
                     function: AggFunction::Min,
                     argument: Some(Box::new(authorization_id)),
@@ -266,11 +266,11 @@ fn enforce_return_columns(
                 };
                 set_output(q, SelectExpr::new(representative, id_col.clone()));
             }
-            ReadGrain::Owner { .. } => {
+            AuthorizedBy::Owner { .. } => {
                 set_output(q, SelectExpr::new(authorization_id.clone(), id_col.clone()));
                 ensure_in_group_by(q, input.query_type, authorization_id);
             }
-            ReadGrain::Entity => {
+            AuthorizedBy::Entity => {
                 if needs_separate_pk {
                     let name = primary_key_column(&node.id);
                     set_output(q, SelectExpr::new(identity.clone(), name));

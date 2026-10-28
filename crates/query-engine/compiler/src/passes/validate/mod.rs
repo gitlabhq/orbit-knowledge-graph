@@ -415,12 +415,12 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             if node_groups.contains(node) || input.groups_by_unique_text(model, node) {
                 continue;
             }
-            let reason = match model.read_grain(entity) {
+            let reason = match model.authorized_by(entity) {
                 None => continue,
-                Some(query_data_model::ReadGrain::Entity) => {
+                Some(query_data_model::AuthorizedBy::Entity) => {
                     format!("access to each {entity} is checked separately; group")
                 }
-                Some(query_data_model::ReadGrain::Owner { columns, split }) => {
+                Some(query_data_model::AuthorizedBy::Owner { columns, split }) => {
                     let owner_known = columns.iter().any(|column| column_pinned(node, column))
                         || columns.iter().all(|column| column_grouped(node, column));
                     let split = split
@@ -488,7 +488,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 continue;
             };
             if row_nodes.contains_key(alias)
-                || model.read_grain(entity).is_none()
+                || model.authorized_by(entity).is_none()
                 || model.entity_authorized_by_namespace(entity)
                 || !model.property_is_free_text(entity, property)
             {

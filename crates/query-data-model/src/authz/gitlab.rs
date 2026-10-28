@@ -14,7 +14,7 @@ pub trait GitLabPolicy: Send + Sync {
     fn is_like_allowed(&self, property: PropertyId) -> bool;
     fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig>;
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str>;
-    fn read_grain(&self, entity: EntityId) -> Option<&ReadGrain>;
+    fn authorized_by(&self, entity: EntityId) -> Option<&AuthorizedBy>;
     fn required_access_level(&self, entity: EntityId) -> Option<u32>;
 }
 
@@ -28,15 +28,15 @@ pub struct EntityAuthConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReadGrain {
+pub enum AuthorizedBy {
     Entity,
     Owner {
         columns: Vec<String>,
-        split: Option<ontology::GrainSplit>,
+        split: Option<ontology::AuthorizedBySplit>,
     },
 }
 
-impl ReadGrain {
+impl AuthorizedBy {
     fn of(redaction: &ontology::RedactionConfig) -> Self {
         if redaction.id_column != DEFAULT_PRIMARY_KEY {
             return Self::Owner {
@@ -44,10 +44,10 @@ impl ReadGrain {
                 split: None,
             };
         }
-        match &redaction.owner_grain {
-            Some(grain) => Self::Owner {
-                columns: grain.columns.clone(),
-                split: grain.split_by.clone(),
+        match &redaction.authorized_by {
+            Some(authorized_by) => Self::Owner {
+                columns: authorized_by.columns.clone(),
+                split: authorized_by.split_by.clone(),
             },
             None => Self::Entity,
         }
@@ -61,7 +61,7 @@ pub struct EntityAuthorization {
     pub id_column: String,
     pub owner_entity: Option<EntityId>,
     pub required_access_level: u32,
-    pub grain: ReadGrain,
+    pub authorized_by: AuthorizedBy,
 }
 
 #[derive(Debug)]
@@ -138,8 +138,8 @@ impl GitLabPolicy for GitLabAuthzCatalog {
         self.entity(entity).map(|policy| policy.id_column.as_str())
     }
 
-    fn read_grain(&self, entity: EntityId) -> Option<&ReadGrain> {
-        self.entity(entity).map(|policy| &policy.grain)
+    fn authorized_by(&self, entity: EntityId) -> Option<&AuthorizedBy> {
+        self.entity(entity).map(|policy| &policy.authorized_by)
     }
 
     fn required_access_level(&self, entity: EntityId) -> Option<u32> {
@@ -187,7 +187,7 @@ impl GitLabAuthzCatalog {
                         .then(|| owners.get(redaction.resource_type.as_str()).copied())
                         .flatten(),
                     required_access_level: redaction.required_role.as_access_level(),
-                    grain: ReadGrain::of(redaction),
+                    authorized_by: AuthorizedBy::of(redaction),
                 });
                 entity_auth.insert(
                     node.name.clone(),

@@ -328,7 +328,7 @@
           ],
           "description": "Minimum GitLab role on a traversal path for this entity's rows to be visible. The compiler security pass drops paths where the user holds a lower role. Defaults to 'reporter'."
         },
-        "owner_grain": {
+        "authorized_by": {
           "type": "object",
           "description": "Rails decides the read from an owner: entities equal on these columns share a verdict.",
           "properties": {

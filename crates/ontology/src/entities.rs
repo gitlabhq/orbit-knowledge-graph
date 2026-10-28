@@ -306,20 +306,20 @@ pub struct RedactionConfig {
     #[serde(default = "RedactionConfig::default_required_role")]
     pub required_role: RequiredRole,
     #[serde(default)]
-    pub owner_grain: Option<OwnerGrain>,
+    pub authorized_by: Option<AuthorizedByConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct OwnerGrain {
+pub struct AuthorizedByConfig {
     pub columns: Vec<String>,
     #[serde(default)]
-    pub split_by: Option<GrainSplit>,
+    pub split_by: Option<AuthorizedBySplit>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct GrainSplit {
+pub struct AuthorizedBySplit {
     pub property: String,
     pub values: Vec<String>,
 }

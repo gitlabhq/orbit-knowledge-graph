@@ -36,7 +36,7 @@ cases:
     expect:
       compile_error: filter d.project_id to one value
 
-  - name: project_grain_text_key_merges
+  - name: authorized_by_project_text_key_merges
     description: Jobs that share a name in one project count as one row
     query:
       gql: |
@@ -48,7 +48,7 @@ cases:
         - { name: rspec, n: 2 }
         - { name: lint, n: 1 }
 
-  - name: project_grain_text_key_drops_denied_owner
+  - name: authorized_by_project_text_key_drops_denied_owner
     description: Jobs in a project the caller cannot read leave no name count
     query:
       gql: |
@@ -57,7 +57,7 @@ cases:
       skip_requirements: [filter:project_id, filter:name]
       row_count: 0
 
-  - name: entity_grain_text_key_rejected
+  - name: per_entity_text_key_rejected
     description: A free-text key of a node read per entity cannot merge its rows
     query:
       gql: |
@@ -65,7 +65,7 @@ cases:
     expect:
       compile_error: free-text values cannot be grouped
 
-  - name: entity_grain_unique_key_groups
+  - name: per_entity_unique_key_groups
     description: A unique free-text key still groups a node read per entity
     query:
       gql: |

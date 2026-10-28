@@ -7,7 +7,7 @@ pub mod layout;
 pub mod models;
 pub use layout::{Layout, Mapping, Relational, RelationalBackend};
 
-pub use authz::gitlab::{EntityAuthConfig, GitLabAuthzCatalog, GitLabPolicy, ReadGrain};
+pub use authz::gitlab::{AuthorizedBy, EntityAuthConfig, GitLabAuthzCatalog, GitLabPolicy};
 pub use authz::trusted::TrustedLocalCatalog;
 pub use error::DataModelError;
 pub use generic::{
