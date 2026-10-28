@@ -1,8 +1,12 @@
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
+use circuit_breaker::{CircuitBreaker, CircuitBreakerError, CircuitConfig};
 use orbit_log_fields::warn;
-use reqwest::StatusCode;
+use orbit_observability::resilience::MetricsObserver;
+use parking_lot::Mutex;
 use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderName, HeaderValue};
+use reqwest::{RequestBuilder, Response, StatusCode};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 
@@ -12,6 +16,13 @@ use crate::constants::{APP_ID, CDOT_QUOTA_PATH, normalize_realm};
 const X_ADMIN_EMAIL: HeaderName = HeaderName::from_static("x-admin-email");
 const X_ADMIN_TOKEN: HeaderName = HeaderName::from_static("x-admin-token");
 const X_LICENSE_TOKEN: HeaderName = HeaderName::from_static("x-license-token");
+const RETRY_BACKOFF: Duration = Duration::from_millis(250);
+const CIRCUIT_CONFIG: CircuitConfig = CircuitConfig {
+    failure_threshold: 2,
+    window: Duration::from_secs(30),
+    cooldown: Duration::from_secs(15),
+};
+const FAIL_OPEN_WINDOW: Duration = Duration::from_secs(600);
 
 pub(crate) enum QuotaAuth {
     AdminToken { user: String, token: String },
@@ -40,8 +51,35 @@ pub(crate) enum QuotaOutcome {
 #[strum(serialize_all = "snake_case")]
 pub(crate) enum FailureReason {
     Unreachable,
+    ServerError,
+    CircuitOpen,
+    ProlongedOutage,
+    RequestError,
     Unauthorized,
     UnexpectedResponse,
+}
+
+impl FailureReason {
+    pub(crate) fn is_brief_outage(self) -> bool {
+        matches!(
+            self,
+            Self::Unreachable | Self::ServerError | Self::CircuitOpen
+        )
+    }
+}
+
+enum SendFailure {
+    ServerError(Box<Response>),
+    Error(reqwest::Error),
+}
+
+impl SendFailure {
+    fn is_outage(&self) -> bool {
+        match self {
+            Self::ServerError(_) => true,
+            Self::Error(e) => is_unreachable(e),
+        }
+    }
 }
 
 pub(crate) struct QuotaClient {
@@ -49,6 +87,8 @@ pub(crate) struct QuotaClient {
     base_url: String,
     default_ttl: Duration,
     license_auth: bool,
+    circuit_breaker: CircuitBreaker,
+    last_answer: Mutex<Instant>,
 }
 
 impl QuotaClient {
@@ -84,10 +124,49 @@ impl QuotaClient {
             base_url,
             default_ttl,
             license_auth,
+            circuit_breaker: CircuitBreaker::new(
+                "customers_dot",
+                CIRCUIT_CONFIG,
+                Arc::new(MetricsObserver::new()),
+            ),
+            last_answer: Mutex::new(Instant::now()),
         })
     }
 
+    #[cfg(test)]
+    fn with_circuit_breaker(mut self, circuit_breaker: CircuitBreaker) -> Self {
+        self.circuit_breaker = circuit_breaker;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_last_answer(self, at: Instant) -> Self {
+        *self.last_answer.lock() = at;
+        self
+    }
+
     pub(crate) async fn check(&self, request: &CdotRequest) -> QuotaOutcome {
+        let outcome = self.ask_customers_dot(request).await;
+        let mut last_answer = self.last_answer.lock();
+        match outcome {
+            QuotaOutcome::Decided { .. } => {
+                *last_answer = Instant::now();
+                outcome
+            }
+            QuotaOutcome::Failed {
+                reason,
+                block_reason,
+            } if reason.is_brief_outage() && last_answer.elapsed() > FAIL_OPEN_WINDOW => {
+                QuotaOutcome::Failed {
+                    reason: FailureReason::ProlongedOutage,
+                    block_reason,
+                }
+            }
+            outcome => outcome,
+        }
+    }
+
+    async fn ask_customers_dot(&self, request: &CdotRequest) -> QuotaOutcome {
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), CDOT_QUOTA_PATH);
         let params = request.as_query_params();
 
@@ -116,9 +195,28 @@ impl QuotaClient {
             builder = builder.header(X_LICENSE_TOKEN, token);
         }
 
-        let response = match builder.send().await {
-            Ok(r) => r,
-            Err(e) => {
+        let response = match self
+            .circuit_breaker
+            .call_with_filter(
+                || send_with_one_retry(builder, request),
+                SendFailure::is_outage,
+            )
+            .await
+        {
+            Ok(response) => response,
+            Err(CircuitBreakerError::Inner(SendFailure::ServerError(response))) => *response,
+            Err(CircuitBreakerError::Open { .. }) => {
+                return QuotaOutcome::Failed {
+                    reason: FailureReason::CircuitOpen,
+                    block_reason: None,
+                };
+            }
+            Err(CircuitBreakerError::Inner(SendFailure::Error(e))) => {
+                let reason = if is_unreachable(&e) {
+                    FailureReason::Unreachable
+                } else {
+                    FailureReason::RequestError
+                };
                 warn!(
                     safe(ERROR_TYPE) = "quota_request",
                     expanded(ERROR_MESSAGE) = %e,
@@ -127,10 +225,11 @@ impl QuotaClient {
                     safe(UNIQUE_INSTANCE_ID) = request.key.unique_instance_id.as_str(),
                     safe(FEATURE_QUALIFIED_NAME) = request.key.feature_qualified_name.as_str(),
                     safe(CORRELATION_ID) = request.correlation_id.as_str(),
-                    "quota check request failed; failing closed"
+                    safe(REASON) = <&str>::from(reason),
+                    "quota check request failed"
                 );
                 return QuotaOutcome::Failed {
-                    reason: FailureReason::Unreachable,
+                    reason,
                     block_reason: None,
                 };
             }
@@ -162,18 +261,71 @@ impl QuotaClient {
             safe(UNIQUE_INSTANCE_ID) = request.key.unique_instance_id.as_str(),
             safe(FEATURE_QUALIFIED_NAME) = request.key.feature_qualified_name.as_str(),
             safe(CORRELATION_ID) = request.correlation_id.as_str(),
-            "unexpected quota check response; failing closed"
+            "unexpected quota check response"
         );
-        let reason = if status == StatusCode::UNAUTHORIZED {
-            FailureReason::Unauthorized
-        } else {
-            FailureReason::UnexpectedResponse
+        let reason = match status {
+            StatusCode::UNAUTHORIZED => FailureReason::Unauthorized,
+            status if is_outage_status(status) => FailureReason::ServerError,
+            _ => FailureReason::UnexpectedResponse,
         };
         QuotaOutcome::Failed {
             reason,
             block_reason,
         }
     }
+}
+
+async fn send_with_one_retry(
+    builder: RequestBuilder,
+    request: &CdotRequest,
+) -> Result<Response, SendFailure> {
+    let retry = builder.try_clone();
+    let first = send(builder).await;
+    let (Some(retry), Err(failure)) = (retry, &first) else {
+        return first;
+    };
+    if !failure.is_outage() {
+        return first;
+    }
+
+    let (status, error) = match failure {
+        SendFailure::ServerError(response) => (Some(response.status().as_u16()), None),
+        SendFailure::Error(e) => (None, Some(e.to_string())),
+    };
+    warn!(
+        safe(ERROR_TYPE) = "quota_request",
+        safe(HTTP_STATUS_CODE) = status,
+        expanded(ERROR_MESSAGE) = error,
+        safe(REALM) = normalize_realm(&request.key.realm),
+        safe(INSTANCE_ID) = request.key.instance_id.as_str(),
+        safe(UNIQUE_INSTANCE_ID) = request.key.unique_instance_id.as_str(),
+        safe(FEATURE_QUALIFIED_NAME) = request.key.feature_qualified_name.as_str(),
+        safe(CORRELATION_ID) = request.correlation_id.as_str(),
+        "quota check failed transiently; retrying once"
+    );
+    tokio::time::sleep(RETRY_BACKOFF.mul_f64(0.5 + rand::random::<f64>())).await;
+    send(retry).await
+}
+
+async fn send(builder: RequestBuilder) -> Result<Response, SendFailure> {
+    match builder.send().await {
+        Ok(response) if is_outage_status(response.status()) => {
+            Err(SendFailure::ServerError(Box::new(response)))
+        }
+        Ok(response) => Ok(response),
+        Err(e) => Err(SendFailure::Error(e)),
+    }
+}
+
+fn is_outage_status(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT
+    )
+}
+
+fn is_unreachable(e: &reqwest::Error) -> bool {
+    e.is_connect() || e.is_timeout()
 }
 
 #[derive(Deserialize)]
@@ -276,6 +428,29 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (format!("http://{addr}"), seen)
+    }
+
+    async fn sequenced_server(statuses: Vec<AxumStatus>) -> (String, Arc<Mutex<usize>>) {
+        install_crypto();
+        let calls = Arc::new(Mutex::new(0));
+        let counter = calls.clone();
+        let app = Router::new().route(
+            crate::constants::CDOT_QUOTA_PATH,
+            get(move || {
+                let counter = counter.clone();
+                let statuses = statuses.clone();
+                async move {
+                    let mut calls = counter.lock().unwrap();
+                    let status = statuses[(*calls).min(statuses.len() - 1)];
+                    *calls += 1;
+                    status
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (format!("http://{addr}"), calls)
     }
 
     fn license_request() -> CdotRequest {
@@ -405,6 +580,136 @@ mod tests {
             client.check(&sample_request()).await,
             failed(FailureReason::UnexpectedResponse)
         );
+    }
+
+    #[tokio::test]
+    async fn server_error_is_retried_once_then_allows() {
+        let (url, calls) = sequenced_server(vec![AxumStatus::BAD_GATEWAY, AxumStatus::OK]).await;
+        let outcome = license_client(url).check(&license_request()).await;
+        assert!(matches!(
+            outcome,
+            QuotaOutcome::Decided {
+                decision: QuotaDecision::Allow,
+                ..
+            }
+        ));
+        assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn repeated_server_error_fails_after_one_retry() {
+        let (url, calls) = sequenced_server(vec![AxumStatus::BAD_GATEWAY]).await;
+        assert_eq!(
+            license_client(url).check(&license_request()).await,
+            failed(FailureReason::ServerError)
+        );
+        assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn non_outage_failures_never_open_the_circuit() {
+        let (url, calls) = sequenced_server(vec![AxumStatus::UNAUTHORIZED]).await;
+        let client = license_client(url).with_circuit_breaker(eager_breaker());
+
+        for _ in 0..3 {
+            assert_eq!(
+                client.check(&license_request()).await,
+                failed(FailureReason::Unauthorized)
+            );
+        }
+        assert_eq!(*calls.lock().unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn malformed_url_fails_closed_as_request_error() {
+        install_crypto();
+        let client = QuotaClient::new(
+            "not a url".into(),
+            admin_auth(),
+            Duration::from_millis(500),
+            Duration::from_secs(3600),
+        )
+        .unwrap()
+        .with_circuit_breaker(eager_breaker());
+
+        for _ in 0..2 {
+            assert_eq!(
+                client.check(&sample_request()).await,
+                failed(FailureReason::RequestError)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn outage_without_recent_answer_is_prolonged() {
+        let (url, _) = sequenced_server(vec![AxumStatus::BAD_GATEWAY]).await;
+        let long_ago = Instant::now()
+            .checked_sub(FAIL_OPEN_WINDOW + Duration::from_secs(1))
+            .unwrap();
+        let client = license_client(url).with_last_answer(long_ago);
+
+        assert_eq!(
+            client.check(&license_request()).await,
+            failed(FailureReason::ProlongedOutage)
+        );
+    }
+
+    #[tokio::test]
+    async fn answer_restarts_the_fail_open_window() {
+        let (url, _) = sequenced_server(vec![AxumStatus::OK, AxumStatus::BAD_GATEWAY]).await;
+        let long_ago = Instant::now()
+            .checked_sub(FAIL_OPEN_WINDOW + Duration::from_secs(1))
+            .unwrap();
+        let client = license_client(url).with_last_answer(long_ago);
+
+        client.check(&license_request()).await;
+        assert_eq!(
+            client.check(&license_request()).await,
+            failed(FailureReason::ServerError)
+        );
+    }
+
+    fn eager_breaker() -> CircuitBreaker {
+        CircuitBreaker::new(
+            "customers_dot-test",
+            CircuitConfig {
+                failure_threshold: 1,
+                window: Duration::from_secs(60),
+                cooldown: Duration::from_secs(60),
+            },
+            Arc::new(circuit_breaker::NoopObserver),
+        )
+    }
+
+    #[tokio::test]
+    async fn open_circuit_skips_cdot() {
+        let (url, calls) = sequenced_server(vec![AxumStatus::BAD_GATEWAY]).await;
+        let client = license_client(url).with_circuit_breaker(eager_breaker());
+
+        assert_eq!(
+            client.check(&license_request()).await,
+            failed(FailureReason::ServerError)
+        );
+        assert_eq!(
+            client.check(&license_request()).await,
+            failed(FailureReason::CircuitOpen)
+        );
+        assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn non_outage_statuses_are_not_retried() {
+        for status in [
+            AxumStatus::PAYMENT_REQUIRED,
+            AxumStatus::UNAUTHORIZED,
+            AxumStatus::FORBIDDEN,
+            AxumStatus::INTERNAL_SERVER_ERROR,
+            AxumStatus::NOT_IMPLEMENTED,
+        ] {
+            let (url, calls) = sequenced_server(vec![status, AxumStatus::OK]).await;
+            license_client(url).check(&license_request()).await;
+            assert_eq!(*calls.lock().unwrap(), 1, "{status} was retried");
+        }
     }
 
     #[tokio::test]
