@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use orbit_log_fields::info;
 
 use crate::campaign::CampaignState;
@@ -29,6 +29,13 @@ pub const CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.changes";
 pub const SWEEP_CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.sweep";
 
 pub(super) const TASK_NAME: &str = "dispatch.sdlc.namespace";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tick {
+    Sweep,
+    Incremental,
+    Quiet,
+}
 
 pub struct NamespaceDispatcher {
     detector: Arc<dyn NamespaceChangeDetector>,
@@ -109,7 +116,13 @@ impl ScheduledTask for NamespaceDispatcher {
 impl NamespaceDispatcher {
     async fn dispatch_inner(&self) -> Result<(), TaskError> {
         let upper = Utc::now();
-        let sweeping = self.sweep_due(upper).await?;
+        let tick = self.next_tick(upper).await?;
+        if tick == Tick::Quiet {
+            info!("skipping incremental dispatch before the full sweep");
+            return Ok(());
+        }
+
+        let sweeping = tick == Tick::Sweep;
         let namespaces = self.namespaces_to_dispatch(sweeping, upper).await?;
 
         let changed_count = namespaces.len();
@@ -153,20 +166,27 @@ impl NamespaceDispatcher {
         }
     }
 
-    async fn sweep_due(&self, upper: DateTime<Utc>) -> Result<bool, TaskError> {
+    async fn next_tick(&self, upper: DateTime<Utc>) -> Result<Tick, TaskError> {
         let Some(last_sweep) = self
             .checkpoint_store
             .load(SWEEP_CHECKPOINT_KEY)
             .await
             .map_err(TaskError::new)?
         else {
-            return Ok(true);
+            return Ok(Tick::Sweep);
         };
 
-        let interval = chrono::Duration::seconds(
-            i64::try_from(self.config.sweep_interval_secs).unwrap_or(i64::MAX),
-        );
-        Ok(upper.signed_duration_since(last_sweep.watermark) >= interval)
+        let elapsed = upper.signed_duration_since(last_sweep.watermark);
+        let interval = seconds(self.config.sweep_interval_secs);
+        let quiet = TimeDelta::from_std(self.config.schedule.interval_hint().saturating_mul(2))
+            .unwrap_or(TimeDelta::MAX);
+        if elapsed >= interval {
+            return Ok(Tick::Sweep);
+        }
+        if elapsed >= interval - quiet {
+            return Ok(Tick::Quiet);
+        }
+        Ok(Tick::Incremental)
     }
 
     async fn resume_watermark(&self) -> Result<Option<DateTime<Utc>>, TaskError> {
@@ -215,6 +235,13 @@ impl NamespaceDispatcher {
             .await
             .map_err(TaskError::new)
     }
+}
+
+fn seconds(secs: u64) -> TimeDelta {
+    i64::try_from(secs)
+        .ok()
+        .and_then(TimeDelta::try_seconds)
+        .unwrap_or(TimeDelta::MAX)
 }
 
 #[cfg(test)]
@@ -520,6 +547,36 @@ mod tests {
 
         assert!(reader.was_called(), "an overdue sweep runs the full path");
         assert!(!detector.was_called());
+    }
+
+    #[tokio::test]
+    async fn tick_inside_the_quiet_window_publishes_nothing() {
+        let config = orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .namespace;
+        let tick = TimeDelta::from_std(config.schedule.interval_hint()).unwrap();
+        let last_sweep = Utc::now() - seconds(config.sweep_interval_secs) + tick;
+        let nats = Arc::new(MockNatsServices::new());
+        let checkpoint_store = Arc::new(StubCheckpointStore::default());
+        checkpoint_store.seed(CHECKPOINT_KEY, recent());
+        checkpoint_store.seed(SWEEP_CHECKPOINT_KEY, last_sweep);
+        let dispatcher = dispatcher_with(
+            Arc::new(StubDetector {
+                result: Ok(one_namespace()),
+            }),
+            StubReader::new(Ok(one_namespace())),
+            nats.clone(),
+            checkpoint_store.clone(),
+        );
+
+        dispatcher.dispatch_inner().await.unwrap();
+
+        assert!(nats.get_published().is_empty());
+        assert!(
+            checkpoint_store.saved().is_empty(),
+            "the change watermark waits for the sweep"
+        );
     }
 
     #[tokio::test]
