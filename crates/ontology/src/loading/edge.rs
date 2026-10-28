@@ -1,11 +1,12 @@
+use indexmap::IndexMap;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use crate::OntologyError;
-use crate::entities::{EdgeEntity, EdgeVariantScope};
+use crate::entities::{EdgeEntity, EdgeVariantScope, Field};
 use crate::etl::{EtlScope, Pipeline, ReindexSource};
 
-use super::node::{IndexerYaml, PipelineYaml, convert_reindex_on};
+use super::node::{IndexerYaml, PipelineYaml, PropertyYaml, convert_reindex_on};
 use super::{EtlSettings, ReadOntologyFile};
 
 #[derive(Debug, Deserialize)]
@@ -14,6 +15,8 @@ pub(crate) struct EdgeYaml {
     pub description: Option<String>,
     #[serde(default)]
     pub table: Option<String>,
+    #[serde(default)]
+    properties: IndexMap<String, PropertyYaml>,
     #[serde(default)]
     variants: Vec<EdgeVariantYaml>,
     #[serde(default)]
@@ -77,6 +80,17 @@ impl EdgeYaml {
                     scope: variant.scope,
                 }
             })
+            .collect()
+    }
+
+    pub(crate) fn take_properties(
+        &mut self,
+        relationship_kind: &str,
+    ) -> Result<Vec<Field>, OntologyError> {
+        let owner = format!("edge '{relationship_kind}'");
+        std::mem::take(&mut self.properties)
+            .into_iter()
+            .map(|(name, property)| property.into_field(name, &owner))
             .collect()
     }
 

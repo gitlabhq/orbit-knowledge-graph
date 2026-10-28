@@ -83,6 +83,15 @@ pub(crate) fn filter_expression(
     let typed = |v: serde_json::Value| -> Expr { Expr::param(parameter_type(data_type), v) };
 
     let op = filter.op.unwrap_or(FilterOp::Eq);
+    if data_type.is_some_and(|data_type| data_type.is_list())
+        && matches!(op, FilterOp::Contains | FilterOp::In)
+    {
+        let values = match val() {
+            serde_json::Value::Array(values) => values,
+            value => vec![value],
+        };
+        return array_membership(col, values.into_iter().map(typed).collect());
+    }
     let expression = match op {
         FilterOp::IsNull if null_as_epoch.column => return Expr::eq(raw, epoch()),
         FilterOp::IsNotNull if null_as_epoch.column => return not_epoch(raw),
@@ -227,6 +236,9 @@ pub fn parameter_type(dt: Option<&ontology::DataType>) -> SqlType {
             precision: 6,
             timezone: Some(TimeZone::Utc),
         },
+        Some(list @ (ontology::DataType::StringList | ontology::DataType::IntList)) => {
+            parameter_type(list.element().as_ref())
+        }
         None => SqlType::String,
     }
 }
@@ -271,18 +283,19 @@ pub fn denorm_tag_expr(
 }
 
 pub(crate) fn tag_membership(alias: &str, column: &str, values: &[String]) -> Expr {
-    if let [value] = values {
-        Expr::func(
-            Function::ArrayContains,
-            vec![Expr::col(alias, column), Expr::string(value)],
-        )
+    array_membership(
+        Expr::col(alias, column),
+        values.iter().map(Expr::string).collect(),
+    )
+}
+
+fn array_membership(column: Expr, mut values: Vec<Expr>) -> Expr {
+    if values.len() == 1 {
+        Expr::func(Function::ArrayContains, vec![column, values.remove(0)])
     } else {
         Expr::func(
             Function::ArrayContainsAny,
-            vec![
-                Expr::col(alias, column),
-                Expr::func(Function::Array, values.iter().map(Expr::string).collect()),
-            ],
+            vec![column, Expr::func(Function::Array, values)],
         )
     }
 }

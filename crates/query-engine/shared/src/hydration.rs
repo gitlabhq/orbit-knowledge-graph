@@ -214,6 +214,10 @@ fn typed_string(cv: ColumnValue, data_type: Option<&DataType>) -> ColumnValue {
             .as_string()
             .and_then(|s| ColumnValue::parse_datetime(s))
             .unwrap_or(cv),
+        Some(data_type) if data_type.is_list() => cv
+            .as_string()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .map_or(cv, ColumnValue::from),
         _ => cv,
     }
 }

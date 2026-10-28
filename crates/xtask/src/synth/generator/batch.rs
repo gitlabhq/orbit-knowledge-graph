@@ -32,6 +32,8 @@ enum ColumnValues {
     Bool(Vec<Option<bool>>),
     String(Vec<Option<String>>),
     Date32(Vec<Option<i32>>),
+    StringList(usize),
+    IntList(usize),
 }
 
 impl BatchBuilder {
@@ -143,6 +145,8 @@ impl ColumnValues {
             DataType::Bool => ColumnValues::Bool(Vec::new()),
             DataType::String | DataType::Enum | DataType::Uuid => ColumnValues::String(Vec::new()),
             DataType::Date => ColumnValues::Date32(Vec::new()),
+            DataType::StringList => ColumnValues::StringList(0),
+            DataType::IntList => ColumnValues::IntList(0),
         }
     }
 
@@ -159,6 +163,7 @@ impl ColumnValues {
             (ColumnValues::String(vec), FakeValue::Null) => vec.push(None),
             (ColumnValues::Date32(vec), FakeValue::Date(v)) => vec.push(Some(*v)),
             (ColumnValues::Date32(vec), FakeValue::Null) => vec.push(None),
+            (ColumnValues::StringList(rows) | ColumnValues::IntList(rows), _) => *rows += 1,
             (col, val) => panic!(
                 "type mismatch: column {:?} got {:?}",
                 std::mem::discriminant(col),
@@ -195,8 +200,21 @@ impl ColumnValues {
                 let data = std::mem::take(vec);
                 Arc::new(Date32Array::from(data))
             }
+            ColumnValues::StringList(rows) => {
+                empty_lists(ListBuilder::new(StringBuilder::new()), std::mem::take(rows))
+            }
+            ColumnValues::IntList(rows) => {
+                empty_lists(ListBuilder::new(Int64Builder::new()), std::mem::take(rows))
+            }
         }
     }
+}
+
+fn empty_lists<B: ArrayBuilder>(mut builder: ListBuilder<B>, rows: usize) -> ArrayRef {
+    for _ in 0..rows {
+        builder.append(true);
+    }
+    Arc::new(builder.finish())
 }
 
 #[cfg(test)]

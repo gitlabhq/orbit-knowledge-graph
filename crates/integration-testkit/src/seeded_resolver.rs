@@ -74,6 +74,7 @@ fn column_value_string(value: &ColumnValue) -> String {
         ColumnValue::Float64(v) => v.to_string(),
         ColumnValue::String(v) => v.clone(),
         ColumnValue::Bool(v) => v.to_string(),
+        list @ ColumnValue::List(_) => list.to_json().to_string(),
         ColumnValue::Null => String::new(),
     }
 }

@@ -165,6 +165,8 @@ fn local_data_type_to_column_type(data_type: &ontology::DataType) -> ColumnType 
             timezone: None,
         },
         ontology::DataType::Date => ColumnType::Date32,
+        ontology::DataType::StringList => ColumnType::Array(Box::new(ColumnType::String)),
+        ontology::DataType::IntList => ColumnType::Array(Box::new(ColumnType::Int64)),
         _ => ColumnType::String,
     }
 }

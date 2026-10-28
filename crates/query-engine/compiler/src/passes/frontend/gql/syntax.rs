@@ -302,6 +302,22 @@ impl QueryParser {
     }
 
     #[alias(predicate)]
+    fn MembershipExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
+        let span = input.as_span();
+        let comparison = match_nodes!(input.into_children();
+            [value(value), operator(_), PropertyExpression(property)] => Comparison {
+                span,
+                property,
+                op: FilterOp::Contains,
+                value: Some(value),
+                from_temporal_literal: false,
+                rhs_property: None,
+            },
+        );
+        Ok(leaf(comparison))
+    }
+
+    #[alias(predicate)]
     fn TypePredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
         let span = input.as_span();
         let (variable, op, value) = match_nodes!(input.into_children();

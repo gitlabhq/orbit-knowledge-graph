@@ -42,9 +42,11 @@
         "timestamp",
         "date",
         "enum",
-        "uuid"
+        "uuid",
+        "string[]",
+        "int64[]"
       ],
-      "description": "Data type for a property field."
+      "description": "Data type for a property field. string[] and int64[] are lists."
     },
     "etlScope": {
       "type": "string",
@@ -218,7 +220,7 @@
             {
               "if": {
                 "not": {
-                  "properties": { "type": { "const": "enum" } },
+                  "properties": { "type": { "enum": ["enum", "string[]"] } },
                   "required": ["type"]
                 }
               },
@@ -1528,6 +1530,11 @@
           "type": "integer",
           "minimum": 1,
           "default": 1
+        },
+        "ngram": {
+          "type": "boolean",
+          "default": true,
+          "description": "For type text: false keeps only the token index and drops the ngram index."
         }
       },
       "required": [

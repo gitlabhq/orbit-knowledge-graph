@@ -20,6 +20,7 @@ pub enum ColumnValue {
     Float64(f64),
     String(String),
     Bool(bool),
+    List(Vec<ColumnValue>),
     Null,
 }
 
@@ -90,6 +91,18 @@ impl ColumnValue {
     pub fn coerce<T: FromColumnValue>(&self) -> Option<T> {
         T::from_column_value(self)
     }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            Self::Int64(v) => (*v).into(),
+            Self::Float64(v) => serde_json::Number::from_f64(*v)
+                .map_or(serde_json::Value::Null, serde_json::Value::Number),
+            Self::String(v) => v.as_str().into(),
+            Self::Bool(v) => (*v).into(),
+            Self::List(items) => items.iter().map(Self::to_json).collect(),
+            Self::Null => serde_json::Value::Null,
+        }
+    }
 }
 
 impl From<serde_json::Value> for ColumnValue {
@@ -107,6 +120,9 @@ impl From<serde_json::Value> for ColumnValue {
             }
             serde_json::Value::Bool(b) => Self::Bool(b),
             serde_json::Value::Null => Self::Null,
+            serde_json::Value::Array(items) => {
+                Self::List(items.into_iter().map(Self::from).collect())
+            }
             other => Self::String(other.to_string()),
         }
     }
@@ -237,6 +253,7 @@ impl ArrowUtils {
             ColumnValue::Float64(v) => Some(v.to_string()),
             ColumnValue::String(v) => Some(v),
             ColumnValue::Bool(v) => Some(v.to_string()),
+            list @ ColumnValue::List(_) => Some(list.to_json().to_string()),
             ColumnValue::Null => None,
         }
     }
@@ -286,6 +303,14 @@ impl ArrowUtils {
         if let Some(arr) = array.as_any().downcast_ref::<Date64Array>() {
             return date_to_string(arr.value_as_date(idx));
         }
+        if let Some(arr) = array.as_any().downcast_ref::<ListArray>() {
+            let values = arr.value(idx);
+            return ColumnValue::List(
+                (0..values.len())
+                    .map(|i| Self::extract_value(values.as_ref(), i))
+                    .collect(),
+            );
+        }
 
         ColumnValue::Null
     }
@@ -302,6 +327,7 @@ pub enum ColumnType {
     TimestampMicros,
     /// `Array(String)` — variable-length list of strings.
     StrList,
+    IntList,
     /// `Array(String)` carried on the wire as dictionary keys. Use it when the
     /// same handful of values repeat across rows; the column type is unchanged.
     DictStrList,
@@ -340,6 +366,7 @@ enum Col {
     Bool(BooleanBuilder, bool),
     Timestamp(TimestampMicrosecondBuilder, bool),
     StrList(arrow::array::ListBuilder<StringBuilder>, bool),
+    IntList(arrow::array::ListBuilder<Int64Builder>, bool),
     DictStrList(
         arrow::array::ListBuilder<
             arrow::array::StringDictionaryBuilder<arrow::datatypes::Int32Type>,
@@ -364,6 +391,7 @@ impl Col {
             Self::Bool(b, _) => b.len(),
             Self::Timestamp(b, _) => b.len(),
             Self::StrList(b, _) => b.len(),
+            Self::IntList(b, _) => b.len(),
             Self::DictStrList(b, ..) => b.len(),
         }
     }
@@ -386,6 +414,7 @@ impl Col {
             Self::Bool(..) => "Bool",
             Self::Timestamp(..) => "Timestamp",
             Self::StrList(..) => "StrList",
+            Self::IntList(..) => "IntList",
             Self::DictStrList(..) => "DictStrList",
         }
     }
@@ -406,6 +435,10 @@ impl Col {
                 Arc::new(b.finish().with_timezone("UTC")),
             ),
             Self::StrList(mut b, nullable) => {
+                let arr = b.finish();
+                (arr.data_type().clone(), nullable, Arc::new(arr))
+            }
+            Self::IntList(mut b, nullable) => {
                 let arr = b.finish();
                 (arr.data_type().clone(), nullable, Arc::new(arr))
             }
@@ -521,6 +554,21 @@ impl ColRef<'_> {
         }
     }
 
+    pub fn push_int_list(&mut self, values: &[i64]) -> BatchResult<()> {
+        match &mut *self.col {
+            Col::IntList(b, _) => {
+                b.values().append_slice(values);
+                b.append(true);
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_int_list on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
+        }
+    }
+
     pub fn push_opt_str<S: AsRef<str>>(&mut self, v: Option<S>) -> BatchResult<()> {
         match &mut *self.col {
             Col::Str(b, _) => {
@@ -616,6 +664,10 @@ impl BatchBuilder {
                 ),
                 ColumnType::StrList => Col::StrList(
                     arrow::array::ListBuilder::new(StringBuilder::with_capacity(cap, cap * 8)),
+                    spec.nullable,
+                ),
+                ColumnType::IntList => Col::IntList(
+                    arrow::array::ListBuilder::new(Int64Builder::with_capacity(cap)),
                     spec.nullable,
                 ),
                 ColumnType::DictStrList => Col::DictStrList(

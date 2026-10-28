@@ -339,7 +339,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     for (edge_name, edge_path) in &schema.edges {
         let content = reader.read(edge_path)?;
-        let edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
+        let mut edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
 
         let entities = edge_def.to_entities(
             edge_name.clone(),
@@ -390,6 +390,13 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             ontology
                 .edge_descriptions
                 .insert(edge_name.clone(), desc.clone());
+        }
+
+        let properties = edge_def.take_properties(edge_name)?;
+        if !properties.is_empty() {
+            ontology
+                .edge_properties
+                .insert(edge_name.clone(), properties);
         }
 
         let (pipelines, reindex_sources) =
@@ -520,12 +527,14 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 column: "source_tags".to_string(),
                 index_type: "text(tokenizer = 'array')".to_string(),
                 granularity: 64,
+                ngram: false,
             },
             crate::entities::StorageIndex {
                 name: "target_tags_idx".to_string(),
                 column: "target_tags".to_string(),
                 index_type: "text(tokenizer = 'array')".to_string(),
                 granularity: 64,
+                ngram: false,
             },
         ]
     } else {

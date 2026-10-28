@@ -136,6 +136,7 @@ pub struct Ontology {
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
     pub(crate) edge_descriptions: BTreeMap<String, String>,
+    pub(crate) edge_properties: BTreeMap<String, Vec<Field>>,
     pub(crate) edge_pipelines: BTreeMap<String, Vec<Pipeline>>,
     /// Reindex trigger tables per edge relationship kind, resolved from each
     /// edge's `indexer` block. Parallels `edge_pipelines`; the pipeline model
@@ -201,6 +202,7 @@ impl Ontology {
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
             edge_descriptions: BTreeMap::new(),
+            edge_properties: BTreeMap::new(),
             edge_pipelines: BTreeMap::new(),
             edge_reindex_sources: BTreeMap::new(),
             etl_settings: EtlSettings {
@@ -1388,7 +1390,7 @@ impl Ontology {
                 DataType::Int | DataType::Float | DataType::Date | DataType::DateTime => {
                     histogram.push(field.name.as_str());
                 }
-                DataType::Uuid => {} // skip: selectivity is always 1/row_count
+                DataType::Uuid | DataType::StringList | DataType::IntList => {}
             }
         }
 
@@ -1484,6 +1486,12 @@ impl Ontology {
     #[must_use]
     pub fn get_edge_description(&self, name: &str) -> Option<&str> {
         self.edge_descriptions.get(name).map(|s| s.as_str())
+    }
+
+    pub fn edge_properties(&self, relationship_kind: &str) -> &[Field] {
+        self.edge_properties
+            .get(relationship_kind)
+            .map_or(&[], Vec::as_slice)
     }
 
     /// Returns `Some` only for edges sourced from standalone pipelines.

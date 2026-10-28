@@ -32,6 +32,7 @@ pub struct HydrationNodePlan {
     pub path_filter: Option<HydrationPathFilter>,
     pub sort_key: Vec<String>,
     pub null_as_epoch: HashSet<String>,
+    pub list_columns: HashSet<String>,
 }
 
 pub enum HydrationPathFilter {
@@ -95,7 +96,17 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
                 Some(ColumnSelection::List(cols)) => cols.clone(),
                 _ => vec![],
             };
+            let list_columns = columns
+                .iter()
+                .filter(|column| {
+                    model
+                        .property(entity, column)
+                        .is_some_and(|property| property.data_type.is_list())
+                })
+                .cloned()
+                .collect();
             Ok(HydrationNodePlan {
+                list_columns,
                 alias: node.id.clone(),
                 table: table.to_string(),
                 entity: entity.to_string(),

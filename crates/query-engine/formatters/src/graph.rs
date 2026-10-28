@@ -12,7 +12,9 @@ use types::{QueryResult, QueryResultRow};
 
 use semver::Version;
 
-use super::{FormatName, ResultFormatter, column_value_to_json};
+use orbit_arrow::ColumnValue;
+
+use super::{FormatName, ResultFormatter};
 
 mod id_as_string {
     use serde::Serializer;
@@ -144,9 +146,6 @@ impl ResultFormatter for GraphFormatter {
     }
 
     fn format(&self, output: &PipelineOutput) -> Value {
-        // GraphResponse holds only strings, primitives, and Values that
-        // already came from `column_value_to_json` (which filters non-finite
-        // floats). Serialization is infallible.
         serde_json::to_value(self.build_response(output))
             .expect("GraphResponse serialization is infallible")
     }
@@ -273,7 +272,7 @@ impl GraphFormatter {
         row.entity_properties(alias, edge_prefixes)
             .into_iter()
             .filter(|(k, _)| !is_reserved_node_key(k))
-            .map(|(k, v)| (k, column_value_to_json(&v)))
+            .map(|(k, v)| (k, v.to_json()))
             .collect()
     }
 
@@ -387,7 +386,7 @@ impl GraphFormatter {
                         obj.insert(
                             col_name.clone(),
                             row.get(col_name)
-                                .map(column_value_to_json)
+                                .map(ColumnValue::to_json)
                                 .unwrap_or(Value::Null),
                         );
                     }
@@ -402,7 +401,7 @@ impl GraphFormatter {
 
             for col_name in &agg_col_names {
                 if let Some(value) = row.get(col_name) {
-                    obj.insert(col_name.clone(), column_value_to_json(value));
+                    obj.insert(col_name.clone(), value.to_json());
                 }
             }
             rows.push(obj);
@@ -475,7 +474,7 @@ impl GraphFormatter {
                     let mut properties = serde_json::Map::new();
                     for (k, value) in &node_ref.properties {
                         if !is_reserved_node_key(k) {
-                            properties.insert(k.clone(), column_value_to_json(value));
+                            properties.insert(k.clone(), value.to_json());
                         }
                     }
                     GraphNode {
@@ -597,7 +596,7 @@ impl GraphFormatter {
             let mut neighbor_props = serde_json::Map::new();
             for (key, value) in &neighbor.properties {
                 if !is_reserved_node_key(key) {
-                    neighbor_props.insert(key.clone(), column_value_to_json(value));
+                    neighbor_props.insert(key.clone(), value.to_json());
                 }
             }
             let neighbor_key = (neighbor.entity_type.clone(), neighbor.id);

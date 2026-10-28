@@ -71,6 +71,7 @@ impl FieldKind {
             DataType::String => pools.classify_string(&field.name),
             DataType::Int => pools.classify_int(&field.name),
             DataType::Bool => pools.classify_bool(&field.name),
+            DataType::StringList | DataType::IntList => FieldKind::GenericString,
         }
     }
 }
