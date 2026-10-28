@@ -207,7 +207,7 @@ Group by MR to avoid returning it once per matching snapshot.
 
 ```gql orbit-query
 MATCH (mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: 278964, old_path: 'app/services/base_service.rb'})
-RETURN mr.id, mr.iid, count(d) AS snapshots
+RETURN mr.id, mr.iid, mr.title, count(d) AS snapshots
 ORDER BY snapshots DESC
 LIMIT 100
 ```
