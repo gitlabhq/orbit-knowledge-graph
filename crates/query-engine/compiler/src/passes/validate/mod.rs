@@ -360,14 +360,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 .entity_of(node)
                 .filter(|entity| model.property_is_free_text(entity, property))
         };
-        let unique_key = |node: &str| {
-            crate::input::property_groups(groups).any(|(other, property)| {
-                other == node
-                    && text_key(node, property)
-                        .and_then(|entity| model.property(entity, property))
-                        .is_some_and(|property| model.property_unique(property.id))
-            })
-        };
         let pinned = |node: &str, property: &str| {
             input.nodes.iter().any(|candidate| {
                 candidate.id == node
@@ -386,7 +378,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             let Some(entity) = text_key(node, property) else {
                 continue;
             };
-            if node_groups.contains(node) || unique_key(node) {
+            if node_groups.contains(node) || input.groups_by_unique_text(model, node) {
                 continue;
             }
             let reason = match model.read_grain(entity) {

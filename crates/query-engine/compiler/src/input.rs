@@ -122,12 +122,26 @@ impl Input {
             let Some(grain) = model.read_grain(entity) else {
                 continue;
             };
-            let unique = model
-                .property(entity, property)
-                .is_some_and(|property| model.property_unique(property.id));
+            let unique = self.groups_by_unique_text(model, node);
             rows.insert(node, if unique { &ENTITY_ROWS } else { grain });
         }
         rows
+    }
+
+    pub(crate) fn groups_by_unique_text<M>(&self, model: &M, node: &str) -> bool
+    where
+        M: query_data_model::OrbitQueryModel + ?Sized,
+    {
+        let Some(entity) = self.entity_of(node) else {
+            return false;
+        };
+        property_groups(&self.aggregation.group_by).any(|(other, property)| {
+            other == node
+                && model.property_is_free_text(entity, property)
+                && model
+                    .property(entity, property)
+                    .is_some_and(|property| model.property_unique(property.id))
+        })
     }
 
     /// Whether this query has the "search shape": a single-node table scan
