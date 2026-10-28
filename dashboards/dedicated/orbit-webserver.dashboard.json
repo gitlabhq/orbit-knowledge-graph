@@ -5802,7 +5802,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "Latency of upstream CustomersDot GET requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
+          "description": "Latency of upstream CustomersDot quota checks, labelled by outcome (allow/deny/error). Recorded once per check that reaches CustomersDot, including its retry; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -5871,7 +5871,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "Latency of upstream CustomersDot GET requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
+          "description": "Latency of upstream CustomersDot quota checks, labelled by outcome (allow/deny/error). Recorded once per check that reaches CustomersDot, including its retry; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -5922,7 +5922,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "Quota gate decisions, labelled by outcome (allow/deny/fail_closed/skipped), cache result (hit/miss), and source_type (mcp/rest). cache=miss on fail_closed does not imply a 1:1 CDot call ratio — see gkg.billing.quota.cdot.duration for actual upstream call counts.",
+          "description": "Quota gate decisions, labelled by outcome (allow/deny/fail_open/fail_closed/skipped), cache result (hit/miss), and source_type (mcp/rest). cache=miss on fail_closed does not imply a 1:1 CDot call ratio — see gkg.billing.quota.cdot.duration for actual upstream call counts.",
           "fieldConfig": {
             "defaults": {
               "custom": {
