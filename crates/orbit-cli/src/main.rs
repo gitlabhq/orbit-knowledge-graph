@@ -460,6 +460,19 @@ enum WorkspaceCommands {
     Schema(SchemaArgs),
     List(ListArgs),
     Mcp(McpArgs),
+    Reset(ResetArgs),
+}
+
+/// Delete the local graph so the next index starts from nothing. Settings stay.
+#[derive(Args, Debug, PartialEq)]
+struct ResetArgs {
+    /// Skip the confirmation prompt.
+    #[arg(long, short = 'y')]
+    yes: bool,
+
+    /// Print what would be removed and exit without removing it.
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -1038,6 +1051,7 @@ async fn run_workspace(
         }) => sql::run(query, file, format, db, repo),
         WorkspaceCommands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
         WorkspaceCommands::List(ListArgs { format, db }) => list::run(format, db),
+        WorkspaceCommands::Reset(ResetArgs { yes, dry_run }) => commands::reset::run(yes, dry_run),
         WorkspaceCommands::Mcp(McpArgs {
             command: McpCommands::Serve,
         }) => {
@@ -1125,7 +1139,8 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Commands, IndexArgs, SchemaArgs, WorkspaceArgs, WorkspaceCommands, tolerate_grep_flags,
+        Cli, Commands, IndexArgs, ResetArgs, SchemaArgs, WorkspaceArgs, WorkspaceCommands,
+        tolerate_grep_flags,
     };
     use clap::{CommandFactory, Parser};
 
@@ -1245,6 +1260,13 @@ mod tests {
             workspace(&["orbit", "workspace", "mcp", "serve"]),
             WorkspaceCommands::Mcp(_)
         ));
+        assert_eq!(
+            workspace(&["orbit", "workspace", "reset", "-y"]),
+            WorkspaceCommands::Reset(ResetArgs {
+                yes: true,
+                dry_run: false,
+            })
+        );
         assert!(Cli::try_parse_from(["orbit", "workspace"]).is_err());
     }
 
