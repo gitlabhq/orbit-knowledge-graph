@@ -1,7 +1,9 @@
+use std::io::Cursor;
 use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use datafusion::arrow as datafusion_arrow;
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
 use indexer::handler::HandlerError;
@@ -38,6 +40,7 @@ impl DataFusionTransform {
 
     fn load_block(&self, block: &RecordBatch) -> Result<(), HandlerError> {
         let _ = self.session.deregister_table(SOURCE_DATA_TABLE);
+        let block = to_datafusion(block).map_err(|err| self.conversion_error(err))?;
         let mem_table =
             MemTable::try_new(block.schema(), vec![vec![block.clone()]]).map_err(|err| {
                 HandlerError::Processing(format!(
@@ -63,15 +66,57 @@ impl DataFusionTransform {
                 self.name, transform.destination_table
             ))
         })?;
-        let mut batches = dataframe.collect().await.map_err(|err| {
+        let batches = dataframe.collect().await.map_err(|err| {
             HandlerError::Processing(format!(
                 "failed to transform {} for {}: {err}",
                 self.name, transform.destination_table
             ))
         })?;
+        let mut batches = batches
+            .iter()
+            .map(from_datafusion)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| self.conversion_error(err))?;
         prepare_batches(&mut batches, &transform.dict_encode_columns);
         Ok(batches)
     }
+
+    fn conversion_error(&self, err: impl std::fmt::Display) -> HandlerError {
+        HandlerError::Processing(format!(
+            "failed to convert Arrow batches for {}: {err}",
+            self.name
+        ))
+    }
+}
+
+type ConversionError = Box<dyn std::error::Error + Send + Sync>;
+
+/// DataFusion pins an older Arrow major than the workspace. An IPC stream hands each batch across
+/// the two versions without unsafe code.
+fn to_datafusion(
+    batch: &RecordBatch,
+) -> Result<datafusion_arrow::record_batch::RecordBatch, ConversionError> {
+    let mut bytes = Vec::new();
+    let mut writer = arrow::ipc::writer::StreamWriter::try_new(&mut bytes, &batch.schema())?;
+    writer.write(batch)?;
+    writer.finish()?;
+    drop(writer);
+    let mut reader =
+        datafusion_arrow::ipc::reader::StreamReader::try_new(Cursor::new(bytes), None)?;
+    Ok(reader.next().ok_or("empty IPC stream")??)
+}
+
+fn from_datafusion(
+    batch: &datafusion_arrow::record_batch::RecordBatch,
+) -> Result<RecordBatch, ConversionError> {
+    let mut bytes = Vec::new();
+    let mut writer =
+        datafusion_arrow::ipc::writer::StreamWriter::try_new(&mut bytes, &batch.schema())?;
+    writer.write(batch)?;
+    writer.finish()?;
+    drop(writer);
+    let mut reader = arrow::ipc::reader::StreamReader::try_new(Cursor::new(bytes), None)?;
+    Ok(reader.next().ok_or("empty IPC stream")??)
 }
 
 #[async_trait]
