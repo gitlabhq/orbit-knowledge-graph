@@ -1,10 +1,10 @@
 import type { Elements, Register, RenderElement } from 'claude-code'
 
-import { TOKEN_STYLE, layout, queryOf } from './cypher.ts'
+import { TOKEN_STYLE, codeLines, cypherSegments, hopsOf, layout, queryOf, type Token } from './cypher.ts'
 import type { MarkProps } from './orbit-mark.ts'
 import { BLUE, MARK, QUERY_LABEL, describeOrbitCall, type OrbitCall } from './orbit.ts'
 import { isPendingCall, mergeRuns } from './rows.ts'
-import { compact, parseResponse } from './stats.ts'
+import { compact, graphNodes, grouped, parseResponse } from './stats.ts'
 
 type Ui = Pick<Elements['terminal'], 'Box' | 'Text'>
 type Resolved = Elements[keyof Elements]
@@ -16,6 +16,9 @@ function clientOf(ui: Resolved): Elements['terminal']['Client'] | undefined {
 type RowState = { isErrored?: boolean; isInterrupted?: boolean }
 
 const stats = { calls: 0, nodes: 0, edges: 0 }
+// Asked on the first Orbit call, so a session that never uses Orbit never runs graph-status
+let graphTotal: number | null = null
+let graphTotalAsked = false
 
 function outputText(result: unknown): string {
   if (typeof result === 'string') return result
@@ -29,9 +32,8 @@ function outputText(result: unknown): string {
     .join('\n')
 }
 
-// Count one finished Orbit call; only graph queries carry nodes and edges.
 // A large output reaches the hook as a stub, with the full text saved to a file.
-async function record(read: (path: string) => Promise<unknown>, call: OrbitCall, answer: unknown) {
+async function record(read: (path: string) => Promise<unknown>, call: OrbitCall, command: string, answer: unknown) {
   stats.calls += 1
   const { result, isError } = (answer ?? {}) as { result?: unknown; isError?: boolean }
   if (call.label !== QUERY_LABEL || !answer || isError) return
@@ -39,7 +41,8 @@ async function record(read: (path: string) => Promise<unknown>, call: OrbitCall,
   const text = typeof saved === 'string' ? String(await read(saved)) : outputText(result)
   const parsed = parseResponse(text)
   stats.nodes += parsed.nodes + parsed.aggregated
-  stats.edges += parsed.edges
+  // A count answers with totals and no edges, yet every counted row matched the whole pattern
+  stats.edges += parsed.edges + parsed.aggregated * hopsOf(queryOf(command))
 }
 
 function finishedRow({ Box, Text }: Ui, call: OrbitCall, state: RowState): RenderElement {
@@ -68,6 +71,14 @@ function highlighted({ Box, Text }: Ui, query: string): RenderElement {
   })
 }
 
+function tokenLine({ Text }: Ui, line: readonly Token[]): RenderElement {
+  return Text({ children: line.length ? line.map((t) => Text({ ...TOKEN_STYLE[t.kind], children: [t.text] })) : [' '] })
+}
+
+function codeBlock(ui: Ui, code: string): RenderElement {
+  return ui.Box({ flexDirection: 'column', children: codeLines(code).map((line) => tokenLine(ui, line)) })
+}
+
 export const register: Register = (on) => {
   on('tool.call', async ($, e, next) => {
     const call = describeOrbitCall(e.tool, e)
@@ -79,8 +90,17 @@ export const register: Register = (on) => {
     } finally {
       // A parsing slip must not fail the hook after the tool has run
       try {
-        await record((path) => $.fs.read(path), call, answer)
+        const { command } = e as { command?: unknown }
+        await record((path) => $.fs.read(path), call, typeof command === 'string' ? command : '', answer)
       } catch {}
+      if (!graphTotalAsked) {
+        graphTotalAsked = true
+        const argv = ['glab', 'orbit', 'graph-status', '--response-format', 'raw']
+        void $.process.run(argv, { timeoutMs: 30000 }).then((run) => {
+          graphTotal = run.exitCode === 0 ? graphNodes(run.stdout) : null
+          $.ui.invalidate('ui.render')
+        }, () => {})
+      }
       $.ui.invalidate('ui.render')
     }
   }).catch(($, e, next) => next(e)) // A failure here must never block the tool call
@@ -143,7 +163,9 @@ export const register: Register = (on) => {
     const dim = (text: string) => Text({ dimColor: true, children: [text] })
     const words: [string, string][] = [
       [compact(stats.calls), stats.calls === 1 ? ' query' : ' queries'],
-      [compact(stats.nodes), stats.nodes === 1 ? ' node' : ' nodes'],
+      graphTotal
+        ? [compact(stats.nodes) + ' / ' + grouped(graphTotal), ' nodes total']
+        : [compact(stats.nodes), stats.nodes === 1 ? ' node' : ' nodes'],
       [compact(stats.edges), stats.edges === 1 ? ' edge' : ' edges'],
     ]
     const children = words.flatMap(([value, unit], i) => [...(i > 0 ? [dim('  ·  ')] : []), blue(value), dim(unit)])
@@ -155,5 +177,22 @@ export const register: Register = (on) => {
       flexDirection: 'column',
       children: [theirs, Box({ flexDirection: 'row', children: [Box({ flexGrow: 1 }), line, Text({ children: [' '] })] })],
     })
+  })
+
+  // Claude Code highlights no Cypher in a reply's code blocks. Its own drawing keeps the prose
+  // before the first block, bullet and all; the blocks and what follows draw here.
+  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    const segments = cypherSegments(e.props.text)
+    if (!segments.some((part) => part.kind === 'code')) return next(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Markdown } = ui
+    const [first, ...rest] = segments
+    const leadsWithProse = first?.kind === 'prose'
+    const theirs = leadsWithProse ? await next({ ...e, props: { ...e.props, text: first.text } }) : null
+    const body = (leadsWithProse ? rest : segments).map((part, i) =>
+      part.kind === 'code' ? codeBlock(ui, part.text) : Markdown({ key: 'orbit-prose-' + i, text: part.text }),
+    )
+    const blocks = Box({ flexDirection: 'column', paddingLeft: 2, rowGap: 1, children: body })
+    return Box({ flexDirection: 'column', rowGap: 1, children: theirs ? [theirs, blocks] : [blocks] })
   })
 }

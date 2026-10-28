@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { layout, queryOf, tokenize } from '../hooks/cypher.ts'
-import { compact, parseResponse } from '../hooks/stats.ts'
+import { codeLines, cypherSegments, hopsOf, layout, queryOf, tokenize } from '../hooks/cypher.ts'
+import { compact, graphNodes, grouped, parseResponse } from '../hooks/stats.ts'
 
 test('the llm format counts nodes by entity and edges', () => {
   const text = [
@@ -62,4 +62,51 @@ test('the query is read from the command, quotes undone', () => {
   expect(queryOf('glab orbit query "MATCH (n) WHERE n.x = \\"a\\" RETURN n"')).toBe('MATCH (n) WHERE n.x = "a" RETURN n')
   expect(queryOf("glab orbit query 'MATCH (n) RETURN n' | head -3")).toBe('MATCH (n) RETURN n')
   expect(queryOf('glab orbit grep foo')).toBe('')
+  expect(queryOf('orbit query --response-format raw "MATCH (n) RETURN n"')).toBe('MATCH (n) RETURN n')
+  expect(queryOf('orbit query --file q.json')).toBe('')
+  expect(queryOf('echo "glab orbit query \\"MATCH (n) RETURN n\\""')).toBe('')
+})
+
+test('the graph total sums every entity in every domain of graph-status', () => {
+  const json = JSON.stringify({
+    indexing: { state: 'READY' },
+    itemCounts: { domains: [{ entities: [{ name: 'Job', count: '658940' }, { name: 'Stage', count: '147995' }] }, { entities: [{ name: 'Project', count: '1' }] }] },
+  })
+  expect(graphNodes(json)).toBe(806936)
+  expect(graphNodes('not json')).toBeNull()
+  expect(graphNodes('{}')).toBeNull()
+})
+
+test('a graph total is written in full with thousands separators', () => {
+  expect(grouped(1675400)).toBe('1,675,400')
+  expect(grouped(950)).toBe('950')
+})
+
+test('comments are their own tokens: //, /* */, and a line that starts with --', () => {
+  expect(tokenize('MATCH (n) // trailing').at(-1)).toEqual({ text: '// trailing', kind: 'comment' })
+  expect(tokenize('/* note */ RETURN n')[0]).toEqual({ text: '/* note */', kind: 'comment' })
+  const lines = codeLines('-- 1. Check the schema\nCALL db.schema(\'Vulnerability\')\n')
+  expect(lines[0]).toEqual([{ text: '-- 1. Check the schema', kind: 'comment' }])
+  expect(lines[1]?.map((t) => t.kind)).toEqual(['keyword', 'space', 'variable', 'punctuation', 'function', 'punctuation', 'string', 'punctuation'])
+  expect(lines).toHaveLength(2)
+})
+
+test('a reply splits around its cypher blocks and leaves other code alone', () => {
+  const reply = 'Here it is.\n\n```cypher\nMATCH (n:Project {id: 1})\nRETURN n\n```\n\n```bash\nls\n```\nDone.'
+  expect(cypherSegments(reply)).toEqual([
+    { kind: 'prose', text: 'Here it is.' },
+    { kind: 'code', text: 'MATCH (n:Project {id: 1})\nRETURN n\n' },
+    { kind: 'prose', text: '```bash\nls\n```\nDone.' },
+  ])
+  expect(cypherSegments('No code here.')).toEqual([{ kind: 'prose', text: 'No code here.' }])
+  expect(cypherSegments('```cypher\nMATCH (n)\n')).toEqual([{ kind: 'prose', text: '```cypher\nMATCH (n)' }])
+})
+
+test('hops count each relationship in the MATCH patterns, a variable-length one by its lower bound', () => {
+  expect(hopsOf('MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN count(mr) AS n')).toBe(1)
+  expect(hopsOf('MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN u, count(mr) AS n')).toBe(2)
+  expect(hopsOf('MATCH (c:Definition)-[:EXTENDS*2..3]->(d:Definition {id: 1}) RETURN count(c) AS n')).toBe(2)
+  expect(hopsOf('MATCH (mr:MergeRequest {id: 1})--(n) RETURN n')).toBe(1)
+  expect(hopsOf('MATCH (p:Project {id: 1}) RETURN count(p) AS n')).toBe(0)
+  expect(hopsOf("CALL db.schema('Project')")).toBe(0)
 })

@@ -1,3 +1,4 @@
+import { isOrbitPrefix } from './command.ts'
 import { QUERY_LABEL, type OrbitCall } from './orbit.ts'
 
 /** One Orbit call in a tool group: Claude Code's props for it, its index, and what it read. */
@@ -77,11 +78,10 @@ export function mergeRuns<P extends { isRunning: boolean }>(calls: readonly Grou
   })
 }
 
-// A shell call the model is still writing: no command yet, or only the start of `glab orbit`.
+// A shell call the model is still writing: no command yet, or only the start of an orbit launcher.
 // It joins an Orbit group's row once its command is known, so it must not break the group first.
 export function isPendingCall(props: { tool: string; input: unknown; output?: unknown }): boolean {
   if (props.tool !== 'Bash' || props.output !== undefined) return false
   const input = props.input as { command?: unknown } | undefined
-  const command = typeof input?.command === 'string' ? input.command.trimStart() : ''
-  return command === '' || 'glab orbit '.startsWith(command)
+  return isOrbitPrefix(typeof input?.command === 'string' ? input.command : '')
 }

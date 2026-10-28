@@ -161,7 +161,7 @@ description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 dir = "config/setup/claude_plugin/gitlab-orbit"
 run = [
   "claude plugin validate --strict .",
-  "bun x tsc -p .",
+  "bun x tsc -p . --noEmit",
   "claude plugin test .",
 ]
 description = "Validate, typecheck, and test the gitlab-orbit Claude Code plugin (needs Claude Code 2.1.287+, which writes .claude-plugin/types on first --plugin-dir load)"

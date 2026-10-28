@@ -61,6 +61,7 @@ test('a running query shows the path walked so far', () => {
 test('a shell call still being written does not break an Orbit group', () => {
   expect(isPendingCall({ tool: 'Bash', input: {} })).toBe(true)
   expect(isPendingCall({ tool: 'Bash', input: { command: 'glab orb' } })).toBe(true)
+  expect(isPendingCall({ tool: 'Bash', input: { command: 'orb' } })).toBe(true)
   expect(isPendingCall({ tool: 'Bash', input: { command: 'ls' } })).toBe(false)
   expect(isPendingCall({ tool: 'Bash', input: {}, output: 'done' })).toBe(false)
 })

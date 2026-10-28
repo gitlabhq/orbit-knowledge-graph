@@ -7,7 +7,8 @@ A Claude Code [mod](https://code.claude.com/docs/en/plugins/mods/overview) that 
 - **Running calls**: the mark and the label fade through `#b5dedc`, `#949dcb`, and `#6851ac` and back every 2 seconds. The entity path stays grey. The spinner stays Claude Code's own.
 - **One row per run**: back-to-back Orbit calls share one row. Connected query paths join into one chain, so `MergeRequest → Project` and then `User → MergeRequest` read `User → MergeRequest → Project`. A query that doesn't connect starts its own row.
 - **ctrl+o**: an expanded Orbit query shows one clause per line with openCypher highlighting, above Claude Code's own row.
-- **Status line**: after the first Orbit call, the session's queries, nodes, and edges show right-aligned under the prompt hint, ending with `◎ GitLab Orbit`.
+- **Cypher in replies**: a ```` ```cypher ````, ```` ```opencypher ````, or ```` ```gql ```` block in Claude's reply draws with the same highlighting, in the author's own lines. Comments (`//`, `/* */`, and a line that starts with `-- `) are dim. Claude Code draws the prose before the first block.
+- **Status line**: after the first Orbit call, `3 queries  ·  536 / 1,675,400 nodes total  ◎ GitLab Orbit` shows right-aligned under the prompt hint. The first number is the nodes this session's queries returned or counted. The total is the project's whole graph, read once per session from `glab orbit graph-status` for the repository Claude Code runs in. Without an indexed project, the line shows the session's nodes alone. Edges aren't shown, because `graph-status` reports no edge counts.
 
 The plugin only changes what Claude Code draws. Its `tool.call` hook counts Orbit calls for the status line and passes every call through unchanged.
 
@@ -38,6 +39,6 @@ The first command loads the plugin for one session and reloads it when you save.
 - `hooks/orbit.ts`: the colors, the mark, and how a tool call maps to a label and an entity path.
 - `hooks/rows.ts`: how back-to-back calls in a tool group become rows, and how their paths join.
 - `hooks/orbit-mark.ts`: the animated row for a running call.
-- `hooks/cypher.ts`: the openCypher tokenizer and clause layout for the ctrl+o view.
+- `hooks/cypher.ts`: the openCypher tokenizer, the clause layout for the ctrl+o view, and code blocks in replies.
 - `hooks/stats.ts`: parses Orbit responses for the status line.
 - `tests/`: unit tests for the pure modules, and render tests that mount the plugin's `ToolUse` and `PromptHint` sites.
