@@ -130,7 +130,8 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
             return Ok(());
         };
         let (lt, rt) = (left.data_type, right.data_type);
-        if lt != rt {
+        let temporal = |data_type| matches!(data_type, DataType::Date | DataType::DateTime);
+        if lt != rt && !(temporal(lt) && temporal(rt)) {
             return Err(QueryError::Validation(format!(
                 "type mismatch in join predicate: {}.{} is {lt:?} but {}.{} is {rt:?}",
                 lhs.0, lhs.1, rhs.0, rhs.1
