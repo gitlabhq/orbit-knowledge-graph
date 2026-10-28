@@ -37,7 +37,7 @@ flowchart LR
 GitLab authenticates the caller and works out which namespaces they can read,
 and with which role. It signs that list into a short-lived token and opens a
 gRPC stream to Orbit. The same GitLab request answers the redaction checks and
-streams the result back.
+streams the result back to the caller.
 [Caller scope](../security/authorization.md#caller-scope) explains
 the token, and [ADR 022](../../adr/022_queries_in_rails.md)
 explains the stream.
