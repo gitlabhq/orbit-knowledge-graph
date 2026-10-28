@@ -1,5 +1,5 @@
 name: context_for_issue
-description: "Work item context the Orbit context summary lacks: author, related, parent, and child work items, and the MRs and work items it mentions or that mention it. Cut at limit in no set order; check pagination.truncated."
+description: "Work item neighbors the context summary lacks: author, related, parent, and child work items, and mentions. Cut at limit in no set order; check pagination.truncated."
 parameters:
   node_ids:
     schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }
