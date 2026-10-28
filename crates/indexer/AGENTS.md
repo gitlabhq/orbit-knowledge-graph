@@ -87,10 +87,14 @@ applies: an object survives if its base name (after stripping the `v<N>_` prefix
 `orchestrator::scheduled::StaleEdgeReconciliation` is a DispatchIndexing-mode `ScheduledTask` that tombstones
 stale FK-derived edges. A mutable-FK "latest" edge (e.g. `HAS_LATEST_DIFF`) orphans its old row when
 the FK changes. The reason: `target_id` is part of the `ReplacingMergeTree` identity. So the prior
-`(source, old_target)` row is never replaced. The task runs one idempotent `INSERT … SELECT` per
-`(relationship_kind, FK-owner)` variant against the changed-owner set (`_version >= cursor`). A dual
-`IN` on the edge PK prunes it to the changed set. The swept set is ontology-derived (edges marked
-`mutable: true`), as is each variant's metadata. It runs directly in the dispatcher (not dispatched to indexer workers):
+`(source, old_target)` row is never replaced. A deleted node also strands every FK edge it emitted.
+Siphon replicates a delete as the lake key plus defaults, so the tombstone has no FK. The edge
+transform then writes no edge tombstone. The task runs one idempotent `INSERT … SELECT` per
+`(FK-owner, edge table, endpoint)` group against the owners whose latest row is within the lookback
+(`_version >= cursor`). A dual `IN` on the edge PK prunes it to that set. Mappings marked
+`mutable: true` retire an older edge on any newer owner row, live or deleted. Every other FK mapping
+retires its edges only when the owner's latest row is deleted. The groups and their metadata are
+ontology-derived. It runs directly in the dispatcher (not dispatched to indexer workers):
 one cheap global sweep, off the insert hot path. See
 the [pre-rewrite SDLC indexing doc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md) ("Stale FK-edge reconciliation").
 
