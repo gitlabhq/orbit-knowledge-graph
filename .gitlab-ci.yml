@@ -417,7 +417,7 @@ agent-plugins:
     - bun run test
     - bun run test:claude
     - bun run build
-    - git diff --exit-code -- ../../config/setup/opencode_plugin.js
+    - git diff --exit-code -- ../../config/setup/opencode_plugin.js hooks/shiki.js
 
 generate-config-schema:
   stage: lint
