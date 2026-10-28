@@ -376,7 +376,7 @@ impl Tf {
             Tf::Pipeline(steps) => {
                 let mut s = t.text_at(id, lang).to_string();
                 for step in steps {
-                    if step.reads_source() {
+                    if matches!(step, Tf::Source(_) | Tf::SourceBefore(_)) {
                         s = step.source_text(t, id, edge_ctx).to_string();
                     } else if step.is_node_tf() {
                         s = lang

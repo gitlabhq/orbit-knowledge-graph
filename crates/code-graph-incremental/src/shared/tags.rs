@@ -18,6 +18,7 @@ pub struct ReservedTags {
     pub alias_scope: u32,
     pub visible_from: u32,
     pub implicit_self: u32,
+    pub unbound: u32,
 }
 
 impl ReservedTags {
@@ -37,6 +38,7 @@ impl ReservedTags {
             alias_scope: k("alias_scope"),
             visible_from: k("visible_from"),
             implicit_self: k("implicit_self"),
+            unbound: k("unbound"),
         }
     }
 }
