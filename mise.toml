@@ -42,7 +42,7 @@ clickhouse = "26.6.8.7-stable"
 "github:duckdb/duckdb" = { version = "2.0.0", matching = "duckdb-cli-" }
 uv = "0.9.28"
 bun = "1.4.4"
-lychee = "0.23"
+lychee = "0.24.2"
 vale = "3.21.0"
 rumdl = "0.2.69"
 lefthook = "2.1.3"
@@ -511,7 +511,7 @@ run = "vale --minAlertLevel error *.md docs"
 description = "Run Vale prose linting on markdown files"
 
 [tasks."lint:links"]
-run = "lychee --offline --include-fragments --exclude-path output --exclude-path .claude --exclude-path .opencode --exclude-path .ai/principles/distilled --exclude-path packages/site/content --exclude-path node_modules '**/*.md'"
+run = "lychee --offline --include-fragments --root-dir . '*.md' 'docs/**/*.md'"
 description = "Check for broken links in markdown files"
 
 [tasks."lint:prose"]
