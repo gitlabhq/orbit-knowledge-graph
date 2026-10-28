@@ -1,8 +1,5 @@
 fn main() {
-    #[cfg(target_os = "macos")]
-    {
-        println!("cargo:rustc-link-arg-bin=orbit=-Wl,-rpath,@loader_path/deps");
-    }
+    link_downloaded_duckdb();
 
     validate_prompts();
     validate_skills();
@@ -73,4 +70,59 @@ fn validate_skills() {
             .collect::<Vec<_>>()
             .join(",")
     );
+}
+
+/// libduckdb-sys 2.0 no longer adds an rpath for a downloaded libduckdb, so a debug `orbit` run
+/// outside Cargo finds the library only through this one. Release builds compile DuckDB in, so
+/// they must not carry a path to the build machine, and Windows linkers have no rpath.
+fn link_downloaded_duckdb() {
+    println!("cargo:rerun-if-env-changed=DUCKDB_DOWNLOAD_LIB");
+    let downloads = std::env::var("DUCKDB_DOWNLOAD_LIB")
+        .is_ok_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true"));
+    let unix = std::env::var("CARGO_CFG_TARGET_FAMILY")
+        .is_ok_and(|families| families.split(',').any(|family| family == "unix"));
+    let debug = std::env::var("PROFILE").is_ok_and(|profile| profile == "debug");
+    if !(downloads && unix && debug) {
+        return;
+    }
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("Cargo sets OUT_DIR"));
+    let Some(build_dir) = out_dir.ancestors().find(|dir| dir.ends_with("build")) else {
+        return;
+    };
+    let Some(target_root) = build_dir.parent().and_then(std::path::Path::parent) else {
+        return;
+    };
+    let Some(release) = libduckdb_release() else {
+        return;
+    };
+    let target = std::env::var("TARGET").expect("Cargo sets TARGET");
+    let lib_dir = target_root
+        .join("duckdb-download")
+        .join(target)
+        .join(release);
+    println!(
+        "cargo:rustc-link-arg-bin=orbit=-Wl,-rpath,{}",
+        lib_dir.display()
+    );
+}
+
+/// The DuckDB release libduckdb-sys downloads, decoded from its `1.MAJOR_MINOR_PATCH.x` version.
+fn libduckdb_release() -> Option<String> {
+    let lock = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock");
+    println!("cargo:rerun-if-changed={}", lock.display());
+    let lock = std::fs::read_to_string(lock).ok()?;
+    let package = lock
+        .split("[[package]]")
+        .find(|package| package.contains("\nname = \"libduckdb-sys\"\n"))?;
+    let version = package
+        .lines()
+        .find_map(|line| line.strip_prefix("version = \""))?
+        .trim_end_matches('"');
+    let encoded: u32 = version.split('.').nth(1)?.parse().ok()?;
+    Some(format!(
+        "v{}.{}.{}",
+        encoded / 10_000,
+        encoded / 100 % 100,
+        encoded % 100
+    ))
 }
