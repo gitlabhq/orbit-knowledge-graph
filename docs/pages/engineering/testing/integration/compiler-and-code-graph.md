@@ -4,8 +4,8 @@ description: How plan tests and code-graph suites test the query compiler and th
 order: 1
 authors:
   - michaelusa
-  - michaelangeloio
   - jgdoyon1
+  - michaelangeloio
 ---
 
 ## Plan tests

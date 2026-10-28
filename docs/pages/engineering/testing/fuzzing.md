@@ -3,7 +3,8 @@ title: Fuzzing
 description: How Orbit sends random input to its parsers and decoders.
 order: 7
 authors:
-  - michaelangeloio
+  - aalgutifan
+  - michaelusa
 ---
 
 Fuzz targets send random input to the query languages, the source

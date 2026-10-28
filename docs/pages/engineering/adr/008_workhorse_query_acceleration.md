@@ -7,7 +7,7 @@ toc_hide: true
 
 ## Status
 
-Accepted
+Superseded by [ADR 022](022_queries_in_rails.md).
 
 ## Date
 
