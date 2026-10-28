@@ -1,4 +1,3 @@
-use std::io::Cursor;
 use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
@@ -40,7 +39,7 @@ impl DataFusionTransform {
 
     fn load_block(&self, block: &RecordBatch) -> Result<(), HandlerError> {
         let _ = self.session.deregister_table(SOURCE_DATA_TABLE);
-        let block = to_datafusion(block).map_err(|err| self.conversion_error(err))?;
+        let block = copy_into_datafusion_arrow(block).map_err(|err| self.conversion_error(err))?;
         let mem_table =
             MemTable::try_new(block.schema(), vec![vec![block.clone()]]).map_err(|err| {
                 HandlerError::Processing(format!(
@@ -74,7 +73,7 @@ impl DataFusionTransform {
         })?;
         let mut batches = batches
             .iter()
-            .map(from_datafusion)
+            .map(copy_from_datafusion_arrow)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|err| self.conversion_error(err))?;
         prepare_batches(&mut batches, &transform.dict_encode_columns);
@@ -91,9 +90,10 @@ impl DataFusionTransform {
 
 type ConversionError = Box<dyn std::error::Error + Send + Sync>;
 
-/// DataFusion pins an older Arrow major than the workspace. An IPC stream hands each batch across
-/// the two versions without unsafe code.
-fn to_datafusion(
+/// DataFusion pins an older Arrow major than the workspace. Each batch crosses the two versions
+/// as one IPC stream, without unsafe code: the writer copies it into a buffer once, and the
+/// decoder reads the batch straight out of that buffer.
+fn copy_into_datafusion_arrow(
     batch: &RecordBatch,
 ) -> Result<datafusion_arrow::record_batch::RecordBatch, ConversionError> {
     let mut bytes = Vec::new();
@@ -101,12 +101,14 @@ fn to_datafusion(
     writer.write(batch)?;
     writer.finish()?;
     drop(writer);
-    let mut reader =
-        datafusion_arrow::ipc::reader::StreamReader::try_new(Cursor::new(bytes), None)?;
-    Ok(reader.next().ok_or("empty IPC stream")??)
+    let mut buffer = datafusion_arrow::buffer::Buffer::from_vec(bytes);
+    let mut decoder = datafusion_arrow::ipc::reader::StreamDecoder::new();
+    Ok(decoder
+        .decode(&mut buffer)?
+        .ok_or("IPC stream has no batch")?)
 }
 
-fn from_datafusion(
+fn copy_from_datafusion_arrow(
     batch: &datafusion_arrow::record_batch::RecordBatch,
 ) -> Result<RecordBatch, ConversionError> {
     let mut bytes = Vec::new();
@@ -115,8 +117,11 @@ fn from_datafusion(
     writer.write(batch)?;
     writer.finish()?;
     drop(writer);
-    let mut reader = arrow::ipc::reader::StreamReader::try_new(Cursor::new(bytes), None)?;
-    Ok(reader.next().ok_or("empty IPC stream")??)
+    let mut buffer = arrow::buffer::Buffer::from_vec(bytes);
+    let mut decoder = arrow::ipc::reader::StreamDecoder::new();
+    Ok(decoder
+        .decode(&mut buffer)?
+        .ok_or("IPC stream has no batch")?)
 }
 
 #[async_trait]
