@@ -91,6 +91,20 @@ impl QuotaService {
             .unwrap_or_default();
         let realm = inputs.realm.as_deref().and_then(normalize_realm);
 
+        if inputs.is_gitlab_team_member && realm == Some(REALM_SAAS) {
+            info!(
+                safe(GL_USER_ID) = inputs.user_id,
+                safe(REALM) = realm,
+                safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
+                "quota gate decision: skipped (GitLab team member on SaaS)"
+            );
+            record_skipped(&inputs.source_type);
+            return Ok(());
+        }
+
         if inner.auth_mode == QuotaAuthMode::LicenseChecksum && inputs.license_checksum.is_none() {
             warn!(
                 safe(GL_USER_ID) = inputs.user_id,
@@ -278,6 +292,7 @@ mod tests {
             unique_instance_id: Some("u".into()),
             instance_version: Some("19.5.0".into()),
             license_checksum: None,
+            is_gitlab_team_member: false,
         }
     }
 
@@ -484,6 +499,33 @@ mod tests {
             assert!(svc.check(&inputs).await.is_ok(), "{realm}");
         }
         assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn skips_for_gitlab_team_member_on_saas() {
+        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
+        let svc = service_for(url);
+        let inputs = QuotaCheckInputs {
+            is_gitlab_team_member: true,
+            ..inputs_with_source("mcp")
+        };
+
+        assert!(svc.check(&inputs).await.is_ok());
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn checks_gitlab_team_member_off_saas() {
+        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
+        let svc = license_service_for(url);
+        let inputs = QuotaCheckInputs {
+            is_gitlab_team_member: true,
+            ..license_inputs("mcp")
+        };
+
+        let err = svc.check(&inputs).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
