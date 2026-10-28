@@ -730,9 +730,16 @@ mod tests {
     #[test]
     fn target_keyed_edges_are_found_through_the_emitters_live_foreign_keys() {
         let groups = groups();
-        for (node, kind, foreign_keys) in [
-            ("Job", "TRIGGERED", "pipeline_id, stage_id, user_id"),
-            ("Stage", "HAS_STAGE", "pipeline_id"),
+        for (node, parent_keys) in [
+            (
+                "Job",
+                "('HAS_JOB', pipeline_id), ('HAS_JOB', stage_id), ('TRIGGERED', user_id)",
+            ),
+            (
+                "Pipeline",
+                "('TRIGGERED', merge_request_id), ('TRIGGERED', user_id)",
+            ),
+            ("Stage", "('HAS_STAGE', pipeline_id)"),
         ] {
             let group = find(
                 &groups,
@@ -741,13 +748,15 @@ mod tests {
                 "gl_ci_edge",
                 "target_id",
             );
-            assert!(group.relationship_kinds.contains(&kind.to_string()));
             let sql = build_tombstone_statement(group, &[]);
 
             assert!(
                 sql.contains(&format!(
-                    "prior AS MATERIALIZED ( SELECT traversal_path, id, \
-                     arrayJoin([{foreign_keys}]) AS foreign_key"
+                    "prior AS MATERIALIZED ( \
+                     SELECT traversal_path, id, link.1 AS relationship_kind, link.2 AS foreign_key \
+                     FROM v{}_gl_{} ARRAY JOIN [{parent_keys}] AS link",
+                    *SCHEMA_VERSION,
+                    node.to_lowercase(),
                 )),
                 "{sql}"
             );
@@ -759,7 +768,11 @@ mod tests {
                 "{sql}"
             );
             assert!(
-                sql.contains("AND source_id IN (SELECT foreign_key FROM prior)"),
+                sql.contains(
+                    "AND (traversal_path, relationship_kind, source_id, target_id) IN \
+                     (SELECT traversal_path, relationship_kind, assumeNotNull(foreign_key), id \
+                     FROM prior WHERE foreign_key IS NOT NULL)"
+                ),
                 "{sql}"
             );
             assert!(
@@ -783,7 +796,7 @@ mod tests {
     #[test]
     fn changed_keys_keep_the_target_read_because_merges_drop_old_key_values() {
         let groups = groups();
-        for (node, table) in [("Pipeline", "gl_ci_edge"), ("MergeRequest", "gl_edge")] {
+        for (node, table) in [("Note", "gl_edge"), ("MergeRequest", "gl_edge")] {
             let group = find(&groups, StaleWhen::EmitterChanged, node, table, "target_id");
             let sql = build_tombstone_statement(group, &[]);
             assert!(!sql.contains("prior AS"), "{sql}");
