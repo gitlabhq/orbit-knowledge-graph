@@ -36,6 +36,10 @@ pub(crate) fn outro_cancel(message: impl Display) -> Result<()> {
     Ok(cliclack::outro_cancel(message)?)
 }
 
+pub(crate) fn confirm(prompt: &str) -> Result<bool> {
+    Ok(cliclack::confirm(prompt).initial_value(false).interact()?)
+}
+
 pub(crate) fn card(title: impl Display, body: impl Display) -> Result<()> {
     Ok(cliclack::note(title, body)?)
 }
