@@ -42,6 +42,7 @@ impl From<&Claims> for QuotaCheckInputs {
             unique_instance_id: c.unique_instance_id.clone(),
             instance_version: c.instance_version.clone(),
             license_checksum: c.license_checksum.clone(),
+            is_gitlab_team_member: c.is_gitlab_team_member.unwrap_or(false),
         }
     }
 }
