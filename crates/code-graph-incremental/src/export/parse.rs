@@ -39,6 +39,8 @@ struct EntityYaml {
     #[serde(default)]
     exclude_parent: Option<String>,
     #[serde(default)]
+    exclude_child: Option<String>,
+    #[serde(default)]
     expand: Option<String>,
     id: IdYaml,
     columns: Vec<ColumnYaml>,
@@ -73,6 +75,16 @@ struct ColumnYaml {
     span: Vec<String>,
     #[serde(default)]
     on: Option<String>,
+    #[serde(default)]
+    cap: Option<usize>,
+    #[serde(default)]
+    over: Option<String>,
+    #[serde(default)]
+    split: Option<String>,
+    #[serde(default)]
+    max: Option<usize>,
+    #[serde(default)]
+    sort: bool,
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -133,11 +145,38 @@ pub(super) enum On {
     Expanded,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Over {
+    Cut,
+    Words,
+    Empty,
+    Drop,
+}
+
+pub(super) struct Bounds {
+    pub(super) cap: Option<usize>,
+    pub(super) over: Over,
+    pub(super) split: Option<String>,
+    pub(super) max: Option<usize>,
+    pub(super) sort: bool,
+}
+
 pub(super) struct EntityColumn {
     pub(super) name: String,
     pub(super) col_type: ColumnType,
+    pub(super) nullable: bool,
     pub(super) on: On,
     pub(super) source: Source,
+    pub(super) bounds: Bounds,
+    pub(super) allowed: Option<Vec<String>>,
+}
+
+impl EntityColumn {
+    pub(super) fn admits(&self, value: &str) -> bool {
+        self.allowed
+            .as_ref()
+            .is_none_or(|allowed| allowed.iter().any(|v| v == value))
+    }
 }
 
 pub(super) enum RowSource {
@@ -164,6 +203,7 @@ pub(super) struct EntityPlan {
     pub(super) header: Vec<Column>,
     pub(super) source_kinds: Vec<u16>,
     pub(super) exclude_parent: Option<u16>,
+    pub(super) exclude_child: Option<u16>,
     pub(super) expand: Option<u16>,
     pub(super) id_seed: String,
     pub(super) id_parts: Vec<IdPart>,
@@ -323,6 +363,7 @@ fn yaml_column_type(name: &str) -> Result<ColumnType, LoadError> {
         "Boolean" => Ok(ColumnType::Bool),
         "ListUtf8" => Ok(ColumnType::StrList),
         "ListInt64" => Ok(ColumnType::IntList),
+        "DictionaryListUtf8" => Ok(ColumnType::DictStrList),
         "TimestampMicros" => Ok(ColumnType::TimestampMicros),
         _ => Err(LoadError::new(format!(
             "unsupported export column type '{name}'"
@@ -351,6 +392,7 @@ fn check_schema(mapped: &[ColumnSpec], schema: &[ColumnSpec]) -> Result<(), Load
                     || matches!(
                         (column.col_type, spec.col_type),
                         (ColumnType::Str, ColumnType::DictStr)
+                            | (ColumnType::StrList, ColumnType::DictStrList)
                     ))
         }) {
             return Err(LoadError::new(format!(
@@ -408,9 +450,10 @@ fn compile_entity(
         .ok_or_else(|| LoadError::new(format!("ontology has no node '{name}'")))?
         .destination_table
         .clone();
-    let fields: Vec<(String, DataType, bool)> = ontology
+    let ontology_fields = ontology
         .local_entity_fields(name)
-        .ok_or_else(|| LoadError::new(format!("'{name}' is not a local entity")))?
+        .ok_or_else(|| LoadError::new(format!("'{name}' is not a local entity")))?;
+    let fields: Vec<(String, DataType, bool)> = ontology_fields
         .iter()
         .map(|f| (f.name.clone(), f.data_type, f.nullable))
         .collect();
@@ -438,11 +481,36 @@ fn compile_entity(
                     )));
                 }
             };
+            let over = match column.over.as_deref() {
+                None | Some("cut") => Over::Cut,
+                Some("words") => Over::Words,
+                Some("empty") => Over::Empty,
+                Some("drop") => Over::Drop,
+                Some(other) => {
+                    return Err(LoadError::new(format!(
+                        "export.yaml: {name}.{}: `over` is cut, words, empty or drop, not '{other}'",
+                        column.name
+                    )));
+                }
+            };
+            let field = ontology_fields.iter().find(|f| f.name == column.name);
             Ok(EntityColumn {
                 name: column.name.clone(),
                 col_type: yaml_column_type(&column.dtype)?,
+                nullable: column.nullable,
                 on,
                 source,
+                bounds: Bounds {
+                    cap: column.cap,
+                    over,
+                    split: column.split.clone(),
+                    max: column.max,
+                    sort: column.sort,
+                },
+                allowed: field
+                    .and_then(|f| f.enum_values.as_ref())
+                    .filter(|_| field.is_some_and(|f| matches!(f.enum_type, ontology::EnumType::String)))
+                    .map(|values| values.values().cloned().collect()),
             })
         })
         .collect::<Result<Vec<_>, LoadError>>()?;
@@ -478,6 +546,7 @@ fn compile_entity(
             .map(|k| lang.intern_kind(k))
             .collect(),
         exclude_parent: yaml.exclude_parent.as_deref().map(|k| lang.intern_kind(k)),
+        exclude_child: yaml.exclude_child.as_deref().map(|k| lang.intern_kind(k)),
         expand: yaml.expand.as_deref().map(|k| lang.intern_kind(k)),
         id_seed: yaml.id.seed.clone(),
         id_parts,

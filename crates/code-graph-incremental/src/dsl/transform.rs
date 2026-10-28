@@ -5,7 +5,7 @@ use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::tree::{EdgeKind, Node, Storage, Tree};
 
-use super::types::{Ctx, EdgeCtx, EdgeDir, Tf};
+use super::types::{Ctx, EdgeCtx, EdgeDir, Pairs, Tf};
 
 const MAX_REGEX_LOOP_PASSES: usize = 64;
 
@@ -130,6 +130,18 @@ impl Tf {
             "sibling_index" => Tf::SiblingIndex,
             "tree_node_id" => Tf::TreeNodeId,
             "kind" => Tf::KindName,
+            "source" | "source_before" => {
+                let bytes = arg(0)?
+                    .parse::<usize>()
+                    .map_err(|_| LoadError(format!("{name} needs a byte count")))?;
+                match name {
+                    "source" => Tf::Source(bytes),
+                    _ => Tf::SourceBefore(bytes),
+                }
+            }
+            "top_until" => Tf::TopUntil(re(0)?, Pairs::new(arg(1)?, args.get(2).copied())),
+            "top_after" => Tf::TopAfter(re(0)?, Pairs::new(arg(1)?, args.get(2).copied())),
+            "top_split" => Tf::TopSplit(s(0)?, Pairs::new(arg(1)?, args.get(2).copied())),
             _ => return Err(LoadError(format!("unknown transform: {name}"))),
         })
     }
@@ -230,6 +242,13 @@ impl Tf {
                 cur
             }
             Tf::RegexMatch(re) => Cow::Borrowed(if re.is_match(s) { "true" } else { "false" }),
+            Tf::TopUntil(re, pairs) => {
+                Cow::Borrowed(pairs.find(s, re).map_or(s, |(at, _)| &s[..at]))
+            }
+            Tf::TopAfter(re, pairs) => {
+                Cow::Borrowed(pairs.find(s, re).map_or("", |(_, end)| &s[end..]))
+            }
+            Tf::TopSplit(sep, pairs) => Cow::Owned(pairs.split(s, sep)),
             _ => Cow::Borrowed(s),
         }
     }
@@ -351,10 +370,15 @@ impl Tf {
                 .count();
                 lang.syms.intern(&index.to_string())
             }
+            Tf::Source(_) | Tf::SourceBefore(_) => {
+                lang.syms.intern(self.source_text(t, id, edge_ctx))
+            }
             Tf::Pipeline(steps) => {
                 let mut s = t.text_at(id, lang).to_string();
                 for step in steps {
-                    if step.is_node_tf() {
+                    if step.reads_source() {
+                        s = step.source_text(t, id, edge_ctx).to_string();
+                    } else if step.is_node_tf() {
                         s = lang
                             .syms
                             .resolve(step.apply_at(t, lang, id, edge_ctx))
@@ -377,6 +401,104 @@ impl Tf {
     }
 }
 
+impl Tf {
+    fn source_text<'t, S: Storage<Node = Node>>(
+        &self,
+        t: &'t Tree<S>,
+        id: u32,
+        edge_ctx: Option<&'t EdgeCtx>,
+    ) -> &'t str {
+        let text = edge_ctx.and_then(|ctx| ctx.source).unwrap_or(&t.source);
+        let node = t.storage.node(id);
+        let (start, end) = match self {
+            Tf::Source(bytes) => (
+                node.start as usize,
+                (node.end as usize).min(node.start as usize + bytes),
+            ),
+            Tf::SourceBefore(bytes) => (
+                (node.start as usize).saturating_sub(*bytes),
+                node.start as usize,
+            ),
+            _ => return "",
+        };
+        let end = text.floor_char_boundary(end.min(text.len()));
+        text.get(text.ceil_char_boundary(start.min(end))..end)
+            .unwrap_or("")
+    }
+}
+
+impl Pairs {
+    fn new(pairs: &str, quotes: Option<&str>) -> Self {
+        let pairs: Vec<char> = pairs.chars().collect();
+        Self {
+            open: pairs.iter().step_by(2).copied().collect(),
+            close: pairs.iter().skip(1).step_by(2).copied().collect(),
+            quotes: quotes
+                .map_or_else(|| "\"'`".to_string(), |q| q.replace("\\x22", "\""))
+                .chars()
+                .collect(),
+        }
+    }
+
+    fn top(&self, s: &str) -> Vec<bool> {
+        let mut top = vec![false; s.len() + 1];
+        let mut stack = Vec::new();
+        let mut quote: Option<char> = None;
+        let mut escaped = false;
+        for (at, ch) in s.char_indices() {
+            top[at] = stack.is_empty() && quote.is_none();
+            match quote {
+                Some(_) if escaped => escaped = false,
+                Some(_) if ch == '\\' => escaped = true,
+                Some(q) if ch == q => quote = None,
+                Some(_) => {}
+                None if self.quotes.contains(&ch) => quote = Some(ch),
+                None => {
+                    if let Some(i) = self.open.iter().position(|&o| o == ch) {
+                        stack.push(i);
+                    } else if let Some(i) = self.close.iter().position(|&c| c == ch)
+                        && stack.last() == Some(&i)
+                    {
+                        stack.pop();
+                    }
+                }
+            }
+        }
+        top[s.len()] = stack.is_empty() && quote.is_none();
+        top
+    }
+
+    fn find(&self, s: &str, re: &regex::Regex) -> Option<(usize, usize)> {
+        let top = self.top(s);
+        let mut at = 0;
+        while let Some(found) = re.find_at(s, at) {
+            if top[found.start()] {
+                return Some((found.start(), found.end()));
+            }
+            at = s.ceil_char_boundary(found.start() + 1);
+            if at > s.len() {
+                break;
+            }
+        }
+        None
+    }
+
+    fn split(&self, s: &str, sep: &str) -> String {
+        let top = self.top(s);
+        let mut parts = Vec::new();
+        let mut start = 0;
+        for (at, _) in s.match_indices(sep) {
+            if top[at] && at >= start {
+                parts.push(s[start..at].trim());
+                start = at + sep.len();
+            }
+        }
+        parts.push(s[start..].trim());
+        parts.retain(|part| !part.is_empty());
+        parts.join("\u{1f}")
+    }
+}
+
 fn keep_last<'a>(s: &'a str, sep: &str, segments: usize, bytes: usize) -> &'a str {
     if sep.is_empty() {
         return s;
@@ -394,4 +516,46 @@ fn keep_last<'a>(s: &'a str, sep: &str, segments: usize, bytes: usize) -> &'a st
             .unwrap_or(min);
     }
     &s[start..]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(name: &str, args: &[&str], input: &str) -> String {
+        Tf::from_func(name, args, None)
+            .unwrap()
+            .apply_to_str(input)
+            .into_owned()
+    }
+
+    #[test]
+    fn top_level_scans_skip_brackets_and_quotes() {
+        let sig = "fn f<'a>(a: Vec<Box<dyn Fn() -> u8>>, b: &'a str) -> Map<K, V> { a }";
+        let pairs = "()[]{}<>";
+        assert_eq!(
+            run("top_until", &["\\{", pairs, "\\x22"], sig),
+            "fn f<'a>(a: Vec<Box<dyn Fn() -> u8>>, b: &'a str) -> Map<K, V> "
+        );
+        let params = run("top_after", &["\\(", pairs, "\\x22"], sig);
+        let params = run("top_until", &["\\)", pairs, "\\x22"], &params);
+        assert_eq!(
+            run("top_split", &[",", pairs, "\\x22"], &params),
+            "a: Vec<Box<dyn Fn() -> u8>>\u{1f}b: &'a str"
+        );
+        assert_eq!(
+            run(
+                "top_until",
+                &[":", "()[]{}"],
+                "def f(a: int = {1: 2}, b=\":\") -> T:\n  x"
+            ),
+            "def f(a: int = {1: 2}, b=\":\") -> T"
+        );
+        assert_eq!(
+            run("top_after", &["=>", "()"], "(a) => (b) => c"),
+            " (b) => c"
+        );
+        assert_eq!(run("top_after", &["\\{", "()"], "f(a)"), "");
+        assert_eq!(run("top_split", &[",", "()"], " , "), "");
+    }
 }
