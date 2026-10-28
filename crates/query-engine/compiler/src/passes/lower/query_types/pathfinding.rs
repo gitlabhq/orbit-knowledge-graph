@@ -343,6 +343,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
             alias: alias.to_string(),
         },
         where_clause: Some(deleted_false(alias)),
+        order_by: vec![OrderExpr::asc(Expr::col(alias, DEFAULT_PRIMARY_KEY))],
         limit: Some(crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32),
         ..Default::default()
     };
