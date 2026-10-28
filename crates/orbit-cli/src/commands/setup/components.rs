@@ -1,8 +1,8 @@
+pub(super) mod agent_plugins;
 mod hooks;
 mod instructions;
 pub(super) mod json;
 mod mcp;
-pub(super) mod plugin;
 mod skill;
 
 use std::collections::BTreeSet;
@@ -47,7 +47,7 @@ pub(super) fn installer_for(component: Component) -> &'static dyn Installer {
         Component::Hooks => &hooks::Hooks,
         Component::Skill => &skill::WITHOUT_FILES,
         Component::Mcp => &mcp::McpServer,
-        Component::Plugin => &plugin::Plugin,
+        Component::AgentPlugins => &agent_plugins::AgentPlugins,
     }
 }
 

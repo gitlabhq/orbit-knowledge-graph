@@ -107,23 +107,18 @@
     },
     "plugin": {
       "$ref": "#/definitions/plugin",
-      "description": "An opt-in plugin folder written from config/setup/, registered in the assistant's settings as a local marketplace and enabled. Installed only with the plugin component (`--claude-ui`)."
+      "description": "The opt-in plugin from packages/agent-plugins, written as a local marketplace, registered in the assistant's settings, and enabled. Installed only with `--claude-ui`."
     }
   },
   "definitions": {
     "plugin": {
       "type": "object",
-      "required": ["source", "dir", "settings", "marketplace", "name", "min_version", "version_command"],
+      "required": ["dir", "settings", "marketplace", "name", "min_version", "version_command"],
       "additionalProperties": false,
       "properties": {
-        "source": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9_]*$",
-          "description": "Folder under config/setup/ holding .claude-plugin/marketplace.json and the plugin it lists."
-        },
         "dir": { "$ref": "#/definitions/scopedPath", "description": "Where the marketplace folder is written." },
         "settings": { "$ref": "#/definitions/scopedPath", "description": "Settings file that receives the extraKnownMarketplaces and enabledPlugins entries." },
-        "marketplace": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Marketplace name, as in its marketplace.json." },
+        "marketplace": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Marketplace name setup writes to marketplace.json." },
         "name": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Plugin name, as the marketplace lists it." },
         "min_version": {
           "type": "string",

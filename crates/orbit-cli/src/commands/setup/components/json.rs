@@ -90,7 +90,6 @@ pub(super) fn remove_value(root: &mut Value, path: &[String], value: &str) -> bo
     retain_and_prune(root, path, &|entry| entry.as_str() != Some(value))
 }
 
-/// Sets the key at `path` to `value`, creating parent objects. Returns whether it changed.
 pub(super) fn set_key(root: &mut Value, path: &[String], value: Value) -> Result<bool> {
     let (last, parents) = path.split_last().expect("spec paths are non-empty");
     let parent = ensure_object_at(root, path, parents)?;
@@ -101,8 +100,6 @@ pub(super) fn set_key(root: &mut Value, path: &[String], value: Value) -> Result
     Ok(true)
 }
 
-/// Removes the key at `path` only while it still holds `expected`, so a value the user changed
-/// stays. Parents left empty are removed too. Returns whether it changed.
 pub(super) fn remove_key_if(root: &mut Value, path: &[String], expected: &Value) -> bool {
     let Some((first, rest)) = path.split_first() else {
         return false;

@@ -249,7 +249,7 @@ pub(crate) enum Component {
     Hooks,
     Skill,
     Mcp,
-    Plugin,
+    AgentPlugins,
 }
 
 impl Component {
@@ -258,14 +258,14 @@ impl Component {
         Component::Hooks,
         Component::Skill,
         Component::Mcp,
-        Component::Plugin,
+        Component::AgentPlugins,
     ];
 
     pub(crate) fn from_flags(mcp: bool, plugin: bool, skip: &[Component]) -> BTreeSet<Component> {
         Component::ALL
             .into_iter()
             .filter(|component| *component != Component::Mcp || mcp)
-            .filter(|component| *component != Component::Plugin || plugin)
+            .filter(|component| *component != Component::AgentPlugins || plugin)
             .filter(|component| !skip.contains(component))
             .collect()
     }
@@ -276,7 +276,7 @@ impl Component {
             Component::Hooks => "hooks",
             Component::Skill => "skill",
             Component::Mcp => "mcp server",
-            Component::Plugin => "plugin",
+            Component::AgentPlugins => "agent plugins",
         }
     }
 }
@@ -1558,7 +1558,7 @@ mod tests {
     #[test]
     fn the_claude_plugin_is_skipped_on_an_old_or_missing_claude() {
         for version in [Some("2.1.286"), None] {
-            components::plugin::TEST_VERSION
+            components::agent_plugins::TEST_VERSION
                 .with(|fake| *fake.borrow_mut() = version.map(str::to_string));
             let dir = tempfile::tempdir().unwrap();
             install_with_plugin(&["claude"], dir.path());
@@ -1568,7 +1568,7 @@ mod tests {
                 "{version:?}"
             );
         }
-        components::plugin::TEST_VERSION
+        components::agent_plugins::TEST_VERSION
             .with(|fake| *fake.borrow_mut() = Some("2.1.308".to_string()));
     }
 

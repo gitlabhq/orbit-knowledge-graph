@@ -12,13 +12,11 @@ use super::{
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{Agent, PluginSpec};
 
-/// Hashes of the files setup wrote, so uninstall removes only the ones the user left alone.
-/// The plugin's JSON files can't carry the `//` checksum stamp that template files use.
 const MANIFEST: &str = ".orbit-setup.json";
 
-pub(super) struct Plugin;
+pub(super) struct AgentPlugins;
 
-impl Installer for Plugin {
+impl Installer for AgentPlugins {
     fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>> {
         let Some(plugin) = &agent.plugin else {
             return Ok(Vec::new());
@@ -112,7 +110,6 @@ fn install_plugin(
         .with_context(|| format!("failed to update {}", settings.display()))?;
     let enabled = json::set_key(&mut root, &enabled_path(plugin), json!(true))
         .with_context(|| format!("failed to update {}", settings.display()))?;
-    // Hooks share the user settings file and back it up before they write it.
     let orbit_wrote_it = file_mentions(&settings, &id)
         || agent
             .json_merges
@@ -198,7 +195,6 @@ fn hash(contents: &[u8]) -> String {
 
 #[cfg(test)]
 thread_local! {
-    /// Stands in for the version command in unit tests; `None` means the assistant is missing.
     pub(in crate::commands::setup) static TEST_VERSION: std::cell::RefCell<Option<String>> =
         std::cell::RefCell::new(Some("2.1.308".to_string()));
 }

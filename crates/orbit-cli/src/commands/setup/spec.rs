@@ -17,6 +17,14 @@ use serde_json::Value;
 #[folder = "$CONFIG_DIR/setup"]
 struct SetupAssets;
 
+#[derive(Embed)]
+#[folder = "$CARGO_MANIFEST_DIR/../../packages/agent-plugins"]
+#[include = ".claude-plugin/*"]
+#[include = "hooks/*"]
+#[include = "core/*"]
+#[exclude = "*.test.ts"]
+struct AgentPluginAssets;
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SetupTexts {
@@ -155,7 +163,6 @@ pub(super) struct AgentSpec {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PluginSpec {
-    pub(super) source: String,
     pub(super) dir: ScopedPath,
     pub(super) settings: ScopedPath,
     pub(super) marketplace: String,
@@ -169,17 +176,22 @@ impl PluginSpec {
         format!("{}@{}", self.name, self.marketplace)
     }
 
-    /// Every embedded file under `config/setup/<source>/`, the plugin build from `packages/`, as
-    /// (path relative to it, bytes).
     pub(super) fn files(&self) -> Vec<(String, Vec<u8>)> {
-        let prefix = format!("{}/", self.source);
-        SetupAssets::iter()
-            .filter_map(|path| {
-                let relative = path.strip_prefix(&prefix)?.to_string();
-                let file = SetupAssets::get(&path).expect("embedded file must be readable");
-                Some((relative, file.data.into_owned()))
-            })
-            .collect()
+        let marketplace = serde_json::json!({
+            "name": self.marketplace,
+            "owner": { "name": "GitLab" },
+            "plugins": [{ "name": self.name, "source": format!("./{}", self.name) }],
+        });
+        let plugin = AgentPluginAssets::iter().map(|path| {
+            let file = AgentPluginAssets::get(&path).expect("embedded file must be readable");
+            (format!("{}/{path}", self.name), file.data.into_owned())
+        });
+        std::iter::once((
+            ".claude-plugin/marketplace.json".to_string(),
+            serde_json::to_vec_pretty(&marketplace).unwrap(),
+        ))
+        .chain(plugin)
+        .collect()
     }
 }
 
@@ -509,28 +521,26 @@ mod tests {
     fn the_claude_plugin_embeds_its_marketplace_and_plugin() {
         let claude = agent_named("claude").unwrap();
         let plugin = claude.plugin.as_ref().unwrap();
-        let files: Vec<String> = plugin.files().into_iter().map(|(path, _)| path).collect();
-        for expected in [
-            ".claude-plugin/marketplace.json",
-            "gitlab-orbit/.claude-plugin/plugin.json",
-            "gitlab-orbit/hooks/hooks.json",
-            "gitlab-orbit/hooks/register.ts",
-            "gitlab-orbit/hooks/core/labels.ts",
-        ] {
-            assert!(
-                files.iter().any(|path| path == expected),
-                "{expected}: {files:?}"
-            );
-        }
-        for path in &files {
-            let development = path.contains("/tests/")
-                || path.ends_with(".test.ts")
-                || path.ends_with("tsconfig.json");
-            assert!(
-                !development,
-                "{path} must not ship to users; build it from packages/"
-            );
-        }
+        let mut files: Vec<String> = plugin.files().into_iter().map(|(path, _)| path).collect();
+        files.sort();
+        let shipped = [
+            "core/calls.ts",
+            "core/command.ts",
+            "core/cypher.ts",
+            "core/labels.ts",
+            "core/stats.ts",
+            "hooks/hooks.json",
+            "hooks/orbit-mark.ts",
+            "hooks/register.ts",
+            "hooks/rows.ts",
+            "hooks/theme.ts",
+        ];
+        let mut expected = vec![
+            ".claude-plugin/marketplace.json".to_string(),
+            "gitlab-orbit/.claude-plugin/plugin.json".to_string(),
+        ];
+        expected.extend(shipped.iter().map(|path| format!("gitlab-orbit/{path}")));
+        assert_eq!(files, expected);
         let marketplace: Value = serde_json::from_slice(
             &plugin
                 .files()
