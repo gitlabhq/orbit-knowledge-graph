@@ -9,6 +9,8 @@ toc_hide: true
 
 Accepted
 
+Amended by [ADR 022](022_queries_in_rails.md): Rails now runs the query stream, and Workhorse only proxies the request.
+
 ## Date
 
 2026-05-06
@@ -78,8 +80,9 @@ and `GetSkill` gRPC methods serve the deployed Orbit Remote skill to Rails, whos
 typed `/orbit/skills` endpoints are the only consumer. The methods deliberately
 sit outside `CommandRegistry`, so MCP agents can neither list nor invoke skills.
 
-The server embeds only `skills/orbit`; Orbit Local continues to own
-`skills/orbit-cli`. A skill is identified by its frontmatter `name` and
+The server embeds `skills/orbit` and `skills/orbit-start`, a guided first
+session. Orbit Local continues to own `skills/orbit-cli`. A skill is identified
+by its frontmatter `name` and
 top-level `version`. The merge request check requires a version bump for changes
 under the corresponding `skills/<name>/` tree. It is not a content-identity
 guarantee: concurrent changes can choose the same next version, and an explicit

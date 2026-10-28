@@ -74,7 +74,7 @@ Leave these settings off on a single node and on ClickHouse Cloud.
 
 ## Memory and disk
 
-Give ClickHouse at least 8 CPU, 32 GiB of memory, and as much storage as the GitLab PostgreSQL database.
+For CPU, memory, and disk sizes, see [ClickHouse](sizing.md#clickhouse) in GitLab Orbit sizing.
 
 To cap memory and spill large queries to disk, put the limits in the `default` profile in `/etc/clickhouse-server/users.d/`.
 ClickHouse ignores a profile in `config.d/` and reports no error.

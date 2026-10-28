@@ -1,9 +1,9 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.1
+version: 0.35.5
 license: MIT
-compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
+compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
   audience: developers
   keywords: orbit, knowledge-graph, gkg, graph, query, glab
@@ -14,7 +14,7 @@ metadata:
 
 # Orbit skill
 
-Query GitLab Orbit (previously GitLab Knowledge Graph) through the flat `glab orbit` command tree. It needs glab v1.117.0 or later. Hosted commands handle authentication, response framing, and exit codes. Local commands use the managed binary and the local DuckDB graph.
+Query GitLab Orbit (previously GitLab Knowledge Graph) through the flat `glab orbit` command tree. It needs glab v1.126.0 or later. Hosted commands handle authentication, response framing, and exit codes. Local commands use the managed binary and the local DuckDB graph.
 
 ## Prerequisites
 
@@ -28,13 +28,13 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 ## Discovery
 
-`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/sql.md` to print a file. For entity properties, prefer the recipes in [`references/recipes.md`](references/recipes.md) over schema introspection. They already encode the columns and filters known to work.
+`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/cli.md` to print a file. For entity properties, prefer the recipes in [`references/recipes.md`](references/recipes.md) over schema introspection. They already encode the columns and filters known to work.
 
-If you must introspect, call `glab orbit schema <Entity...>` with explicit entity names. The unscoped form returns about 17 KB of output. Call it at most once per session, because the schema does not change mid-session. In JSON mode, the DSL is documented in [`references/query_language.md`](references/query_language.md). In GQL mode, run `CALL db.schema()` instead. The schema command returns an object with a `nodes` array and does not accept `--jq`, so pipe into `jq`. Per-node `outgoing_edges` and `incoming_edges` are arrays of edge type names, not objects:
+If you must introspect, call `glab orbit schema <Entity...>` with explicit entity names. The unscoped form returns about 40 KB of output. Call it at most once per session, because the schema does not change mid-session. In JSON mode, the DSL is documented in [`references/query_language.md`](references/query_language.md). In GQL mode, run `CALL db.schema()` instead. The schema command returns an object with `nodes` and `edges` arrays and does not accept `--jq`, so pipe into `jq`. Only named nodes have `properties`. Edges list `endpoints` with a `source` and a `target`:
 
 ```shell
 glab orbit schema Project |
-  jq '.nodes[] | select(.name == "Project") | .properties'
+  jq '.nodes[] | select(.name == "Project") | .properties.nodes'
 ```
 
 The default-off Rails `orbit_gql_queries` flag selects one mode per user: JSON objects when off, GQL strings when on. Follow only the active mode's discovery; a mismatched query rejects without parser fallback. GQL mode hides and rejects `get_query_dsl`; use `CALL db.schema()` instead. The JSON recipes below apply only when the flag is off.
@@ -107,13 +107,13 @@ Orbit answers come from graph queries, not an authoritative source. Show the que
 
 ## Repository map helper
 
-For code-structure orientation on a project already indexed in Orbit Remote, use the bundled remote helper script. The script path is relative to this skill root, not the user's repository. See the repository-map row in [References](#references).
+For code-structure orientation on a project already indexed by GitLab Orbit, use the bundled remote helper script. The script path is relative to this skill root, not the user's repository. See the repository-map row in [References](#references).
 
 <!-- orbit:include local:quick-start -->
 
 ## Managed CLI
 
-`glab orbit` downloads, verifies, and runs the Orbit binary from the `orbit-cli` package (macOS, Linux, and Windows). `grep` and `context` read the local graph and index the working tree on their own. `workspace` groups the other local-graph commands (`index`, `sql`, `schema`, `list`, `mcp serve`). `query`, `status`, and `schema` use Orbit Remote.
+`glab orbit` downloads, verifies, and runs the GitLab Orbit CLI binary from the `orbit-cli` package (macOS, Linux, and Windows). `grep` and `context` read the local graph and index the working tree on their own. `workspace` groups the other local-graph commands (`index`, `list`, `mcp serve`). `query`, `status`, and `schema` call the GitLab Orbit API.
 
 glab handles `--install`, `--update`, and `--yes` itself and forwards everything else to the binary. `--install` and `--update` are mutually exclusive. `--yes` skips the confirmation prompts, so pass it in scripts and agent runs. Put these flags before the subcommand (`glab orbit --yes status`); the binary rejects `--yes` after other subcommands, except for `setup` and `uninstall`, which take their own. glab's own `update` command also takes `--yes`. `glab help orbit` shows the wrapper help. `glab orbit help` and `glab orbit <command> --help` show the binary's.
 

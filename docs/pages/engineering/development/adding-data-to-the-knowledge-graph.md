@@ -269,8 +269,8 @@ mise schema:bump              # bumps the `schema:` pin in config/versions.yaml,
 mise run schema:generate:ddl  # regenerates the DDL (do NOT hand-edit graph.sql)
 ```
 
-This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql`
-(local/DuckDB). Expect:
+This rewrites `config/graph.sql` (ClickHouse) and `config/graph_local.sql`
+(DuckDB, for the local graph). Expect:
 
 - `config/graph.sql`: a new `CREATE TABLE … gl_<node>` block + the version stamp.
 - **Edges have no per-edge table**. They're rows in the shared `gl_edge` table, so a new edge produces *no* new `CREATE TABLE`. That's correct.

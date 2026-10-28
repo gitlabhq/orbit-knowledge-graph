@@ -28,7 +28,7 @@ For a short walkthrough, see the [quickstart](../quickstart.md).
 
 Prerequisites:
 
-- `glab` 1.120 or later. To check your version, run `glab version`.
+- `glab` 1.126 or later. To check your version, run `glab version`.
 - An agent that setup supports. For the list, see [setup options](#setup-options).
 
 To set up your agent:
@@ -39,7 +39,7 @@ To set up your agent:
 1. In the list of agents, keep or clear the agents that setup selected, then press <kbd>Enter</kbd>.
 
 Setup installs the GitLab Orbit skill for your agents and indexes the repository for code search.
-To check that the repository is indexed, run `glab orbit list`.
+To check that the repository is indexed, run `glab orbit workspace list`.
 To load the skill, start a new session of your agent.
 To update the setup, run the command again.
 For a guided first session, see [step 3 of the quickstart](../quickstart.md#step-3-ask-your-first-question).
@@ -52,7 +52,7 @@ glab orbit --yes setup --yes
 
 The first `--yes` confirms the download. The second skips the list of agents.
 
-To query your GitLab data, also [sign in with `glab`](../cli.md#query-the-remote-graph).
+To query your GitLab data, also [sign in with `glab`](../cli.md#query-gitlab-orbit).
 
 If you installed the [standalone binary](../cli.md#install-the-standalone-binary), run `orbit` in place of `glab orbit`.
 

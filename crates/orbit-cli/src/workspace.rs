@@ -51,6 +51,22 @@ impl Workspace {
         self.root.join("var").join(project_id.to_string())
     }
 
+    /// Index state comes first so a reset waits for running indexes before it locks the
+    /// manifest. `graph.duckdb` is the single-file graph from releases before the manifest.
+    pub fn graph_paths(&self) -> Vec<PathBuf> {
+        [
+            "var",
+            "local",
+            "graph.duckdb",
+            "graph.duckdb.wal",
+            "graph.duckdb.lock",
+        ]
+        .into_iter()
+        .map(|name| self.root.join(name))
+        .filter(|path| path.exists())
+        .collect()
+    }
+
     /// Discover git repos in a directory, including nested repos when
     /// the path itself is a git repo. A folder inside a repository, with no
     /// repositories below it, resolves to that repository's root. Returns

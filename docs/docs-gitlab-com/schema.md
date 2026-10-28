@@ -59,14 +59,13 @@ To see the current schema, use one of these methods:
 - In GitLab, in the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**, then select the **Schema** tab.
   On GitLab.com, go to [`https://gitlab.com/dashboard/orbit/schema`](https://gitlab.com/dashboard/orbit/schema).
   For more information, see [GitLab Orbit dashboard](dashboard.md).
-- In a terminal, run `glab orbit ontology`. To show the properties and relationships of node types,
-  add their names, for example `glab orbit ontology MergeRequest Project`.
+- In a terminal, run `glab orbit schema`. To show the properties and relationships of node types,
+  add their names, for example `glab orbit schema MergeRequest Project`.
 - Over HTTP, call `GET /api/v4/orbit/schema`. For more information, see the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
 - In a query, for example in the **Query editor** tab of the [GitLab Orbit dashboard](dashboard.md) or with `glab orbit query`, run `CALL db.schema()`.
 
 ## Supported languages
 
-The remote graph and the local graph use the same parser.
 Each language gets files, directories, and definitions.
 Most languages also get imports and cross-file calls.
 

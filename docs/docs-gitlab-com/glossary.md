@@ -21,8 +21,14 @@ Code layer
 Definition
 : A named code element, such as a class, function, method, or module. Its fully qualified name (`fqn`) includes the enclosing names.
 
+GitLab Orbit
+: The product that builds a graph of GitLab data and code for each top-level group that has the feature turned on, and answers queries on the graph. The graph holds the code of your repositories and software development lifecycle (SDLC) data, such as merge requests, pipelines, work items, and security findings. Queries run on GitLab and return only the data your role lets you see.
+
+GitLab Orbit API
+: The REST, GraphQL, and MCP endpoints of GitLab Orbit on your GitLab instance. The GitLab Orbit CLI and agents call these endpoints.
+
 GitLab Orbit CLI
-: The `orbit` binary. `glab orbit` installs it and forwards every command to it.
+: The `orbit` binary. `glab orbit` installs it and forwards every command to it. The CLI queries the GitLab Orbit API, and also builds a local graph of the code on your machine. Some commands combine results from both.
 
 GitLab Orbit MCP endpoint
 : The Model Context Protocol (MCP) server of GitLab Orbit, at `/api/v4/orbit/mcp`, for agents that cannot run shell commands.
@@ -50,9 +56,6 @@ Property graph
 
 Relationship
 : A directed connection between two nodes, such as `AUTHORED` from a user to a merge request, or `CALLS` from one definition to another.
-
-Remote graph
-: The graph GitLab builds for each top-level group where GitLab Orbit is turned on. It holds the code of your repositories and software development lifecycle (SDLC) data, such as merge requests, pipelines, work items, and security findings. Queries run on GitLab and return only the data your role lets you see.
 
 Software development lifecycle (SDLC) data
 : The part of the graph that holds GitLab objects: groups, projects, users, merge requests, pipelines, work items, packages, and security findings.

@@ -8,6 +8,7 @@ use serde_json::{Number, Value};
 use super::ast::*;
 use super::{QueryParser, Rule};
 use crate::input::{BooleanExpression, Direction, FilterOp, OrderDirection, TruncateUnit};
+use crate::query_limits::{MAX_FILTER_STRING_LEN, MAX_IN_VALUES, MAX_NODE_IDS};
 
 pub(super) type Node<'i> = pest_consume::Node<'i, Rule, ()>;
 pub(super) type Result<T> = std::result::Result<T, Error<Rule>>;
@@ -102,7 +103,7 @@ impl QueryParser {
         let span = input.as_span();
         match_nodes!(input.into_children();
             [] => Ok(()),
-            [UnsignedInteger(count)] => if count.as_u64() == Some(1) {
+            [PathCount(count)] => if count.as_u64() == Some(1) {
                 Ok(())
             } else {
                 Err(error_at(span, "only one shortest path is supported; use ANY SHORTEST or SHORTEST 1"))
@@ -134,10 +135,10 @@ impl QueryParser {
             [Variable(variable), NodeLabel(label)] => NodePattern {
                 span, variable, label: Some(label), properties: Vec::new(),
             },
-            [Variable(variable), MapLiteral(map)] => NodePattern {
+            [Variable(variable), NodeMapLiteral(map)] => NodePattern {
                 span, variable, label: None, properties: map.entries,
             },
-            [Variable(variable), NodeLabel(label), MapLiteral(map)] => NodePattern {
+            [Variable(variable), NodeLabel(label), NodeMapLiteral(map)] => NodePattern {
                 span, variable, label: Some(label), properties: map.entries,
             },
         ))
@@ -183,7 +184,9 @@ impl QueryParser {
                 Rule::Variable => relationship.variable = Some(Self::Variable(child)?),
                 Rule::RelationshipTypes => relationship.types = Self::RelationshipTypes(child)?,
                 Rule::RangeLiteral => relationship.range = Some(Self::RangeLiteral(child)?),
-                Rule::MapLiteral => relationship.properties = Some(Self::MapLiteral(child)?),
+                Rule::RelationshipMapLiteral => {
+                    relationship.properties = Some(Self::RelationshipMapLiteral(child)?)
+                }
                 _ => return Err(mismatch(&child)),
             }
         }
@@ -220,6 +223,14 @@ impl QueryParser {
 
     fn RangeDots(_input: Node) -> Result<()> {
         Ok(())
+    }
+
+    fn HopCount(input: Node) -> Result<Value> {
+        number(&input)
+    }
+
+    fn PathCount(input: Node) -> Result<Value> {
+        number(&input)
     }
 
     fn Where(input: Node) -> Result<BooleanExpression<Predicate>> {
@@ -316,11 +327,11 @@ impl QueryParser {
     #[alias(predicate)]
     fn FunctionPredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
         let call = input.children().next().ok_or_else(|| mismatch(&input))?;
-        Err(unsupported_function(&call))
+        Err(unsupported_function(&call, true))
     }
 
     fn FunctionCall(input: Node) -> Result<()> {
-        Err(unsupported_function(&input))
+        Err(unsupported_function(&input, false))
     }
 
     #[alias(predicate)]
@@ -568,17 +579,14 @@ impl QueryParser {
     fn Skip(input: Node) -> Result<u32> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [UnsignedInteger(value)] => value
-                .as_u64()
-                .and_then(|n| u32::try_from(n).ok())
-                .ok_or_else(|| error_at(span, "SKIP must be a non-negative integer"))?,
+            [SkipCount(value)] => row_count(&value, span, "SKIP")?,
         ))
     }
 
     fn Limit(input: Node) -> Result<u32> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [UnsignedInteger(value)] => row_count(&value, span, "LIMIT")?,
+            [LimitCount(value)] => row_count(&value, span, "LIMIT")?,
         ))
     }
 
@@ -593,18 +601,12 @@ impl QueryParser {
         ))
     }
 
-    fn MapLiteral(input: Node) -> Result<MapLiteral> {
-        let span = input.as_span();
-        let mut keys = HashSet::new();
-        let mut entries = Vec::new();
-        for child in input.into_children() {
-            let entry = Self::MapEntry(child.clone())?;
-            if !keys.insert(entry.key.value.clone()) {
-                return Err(child.error("duplicate property in a map"));
-            }
-            entries.push(entry);
-        }
-        Ok(MapLiteral { span, entries })
+    fn NodeMapLiteral(input: Node) -> Result<MapLiteral> {
+        map(input)
+    }
+
+    fn RelationshipMapLiteral(input: Node) -> Result<MapLiteral> {
+        map(input)
     }
 
     fn MapEntry(input: Node) -> Result<MapEntry> {
@@ -635,16 +637,27 @@ impl QueryParser {
         number(&input)
     }
 
+    fn SkipCount(input: Node) -> Result<Value> {
+        number(&input)
+    }
+
+    fn LimitCount(input: Node) -> Result<Value> {
+        number(&input)
+    }
+
     #[alias(value)]
     fn StringLiteral(input: Node) -> Result<Value> {
         string(&input).map(Value::String)
     }
 
     #[alias(value)]
+    fn InListLiteral(input: Node) -> Result<Value> {
+        list(input)
+    }
+
+    #[alias(value)]
     fn ListLiteral(input: Node) -> Result<Value> {
-        Ok(match_nodes!(input.into_children();
-            [value(values)..] => Value::Array(values.collect()),
-        ))
+        list(input)
     }
 
     fn Variable(input: Node) -> Result<Name> {
@@ -654,6 +667,20 @@ impl QueryParser {
     fn SchemaName(input: Node) -> Result<Name> {
         name(&input)
     }
+}
+
+fn map(input: Node) -> Result<MapLiteral> {
+    let span = input.as_span();
+    let mut keys = HashSet::new();
+    let mut entries = Vec::new();
+    for child in input.into_children() {
+        let entry = QueryParser::MapEntry(child.clone())?;
+        if !keys.insert(entry.key.value.clone()) {
+            return Err(child.error("duplicate property in a map"));
+        }
+        entries.push(entry);
+    }
+    Ok(MapLiteral { span, entries })
 }
 
 fn directed(input: Node, direction: Direction) -> Result<Relationship> {
@@ -681,6 +708,24 @@ fn leaf(comparison: Comparison<'_>) -> BooleanExpression<Predicate<'_>> {
     BooleanExpression::Leaf(Predicate::Comparison(Box::new(comparison)))
 }
 
+fn list(input: Node) -> Result<Value> {
+    if input
+        .children()
+        .any(|child| child.as_rule() == Rule::ListOverflow)
+    {
+        let message = match input.as_rule() {
+            Rule::InListLiteral => format!(
+                "IN takes at most {MAX_NODE_IDS} values on id and {MAX_IN_VALUES} on other properties"
+            ),
+            _ => format!("a list takes at most {MAX_IN_VALUES} values"),
+        };
+        return Err(error_at(input.as_span(), &message));
+    }
+    Ok(match_nodes!(<QueryParser>; input.into_children();
+        [value(values)..] => Value::Array(values.collect()),
+    ))
+}
+
 fn row_count(value: &Value, span: Span<'_>, clause: &str) -> Result<u32> {
     value
         .as_u64()
@@ -697,18 +742,27 @@ fn error_at(span: Span<'_>, message: &str) -> Error<Rule> {
     )
 }
 
-fn unsupported_function(call: &Node) -> Error<Rule> {
+fn unsupported_function(call: &Node, in_where: bool) -> Error<Rule> {
     let name = call.children().next().map_or("", |node| node.as_str());
     let hint = match name.to_ascii_lowercase().as_str() {
         "type" => {
             "type() takes one relationship variable and works in WHERE type(r) = 'CLOSES', WHERE type(r) IN ['CLOSES', 'MENTIONS'], RETURN type(r), and ORDER BY type(r)"
         }
-        "count" | "sum" | "avg" | "min" | "max" => {
-            "aggregates take one variable or property, as in count(mr) or sum(mr.added_lines), and belong in RETURN with an alias: count(mr) AS n"
+        "count" | "sum" | "avg" | "min" | "max" if in_where => &format!(
+            "{name}() belongs in RETURN with an alias, as in RETURN count(mr) AS n; WHERE cannot filter on an aggregate"
+        ),
+        "count" | "sum" | "avg" | "min" | "max" => &format!(
+            "{name}() takes one variable or property, as in count(mr) or sum(mr.added_lines), and belongs in RETURN with an alias: count(mr) AS n"
+        ),
+        "date_trunc" => {
+            "date_trunc() works only in RETURN, such as RETURN date_trunc('month', m.created_at)"
         }
-        "date_trunc" | "properties" | "token_match" | "all_tokens" | "any_tokens" => {
-            "this function does not accept these arguments here"
+        "properties" => {
+            "properties() works only in RETURN, with one node variable, such as RETURN properties(m)"
         }
+        "token_match" | "all_tokens" | "any_tokens" => &format!(
+            "{name}() works only in WHERE, with a property and a string, such as WHERE {name}(m.title, 'login')"
+        ),
         _ => {
             "RETURN supports count, sum, avg, min, max, date_trunc, properties, and type; WHERE supports token_match, all_tokens, any_tokens, and type"
         }
@@ -750,7 +804,8 @@ fn name<'i>(node: &Node<'i>) -> Result<Name<'i>> {
     let value = raw
         .strip_prefix('`')
         .and_then(|s| s.strip_suffix('`'))
-        .map_or_else(|| raw.to_owned(), |s| s.replace("``", "`"));
+        .unwrap_or(raw)
+        .to_owned();
     crate::passes::validate::validate_identifier(&value)
         .map_err(|error| node.error(error.to_string()))?;
     Ok(Name {
@@ -799,6 +854,11 @@ fn string(node: &Node) -> Result<String> {
             }
             _ => return Err(mismatch(node)),
         }
+    }
+    if result.chars().count() > MAX_FILTER_STRING_LEN {
+        return Err(node.error(format!(
+            "string literal must not exceed {MAX_FILTER_STRING_LEN} characters"
+        )));
     }
     Ok(result)
 }

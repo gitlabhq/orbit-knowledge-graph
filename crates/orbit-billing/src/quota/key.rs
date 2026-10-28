@@ -91,6 +91,7 @@ mod tests {
             unique_instance_id: uiid.map(Into::into),
             instance_version: None,
             license_checksum: None,
+            is_gitlab_team_member: false,
         }
     }
 

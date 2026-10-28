@@ -3,10 +3,10 @@
 # CI can override GKG image via E2E_GKG_IMAGE / E2E_GKG_TAG env vars.
 
 siphon:
-  chart: "2.0.0"
+  chart: "2.1.0"
   image:
     repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-    tag: "0.0.150-beta"
+    tag: "0.0.153-beta"
 gitlab:
   # Devel (nightly) chart from gitlab-devel/gitlab. The chart version,
   # gitlab-org/gitlab ref, and CNG image digests below are all bumped
@@ -14,12 +14,12 @@ gitlab:
   # to the current master. Pinning the chart alone is not enough because
   # every CNG image defaults to :master (a moving tag); the `images.*.digest`
   # entries force specific digests so every pod pulls identical rails code.
-  chart: "10.5.0-2957821414"
+  chart: "10.5.1-2993129602"
   # Git ref of `gitlab-org/gitlab` used to fetch SSOT siphon table definitions
   # (`db/siphon/tables/*.yml`) when running `scripts/sync-cdc-tables.sh`.
   # Pinned to a master commit so siphon's view of the schema matches the
   # pinned CNG images.
-  ref: "6bd64988da3f1828bd9325d79b3b8d5bdc218190"
+  ref: "ec0e8b7afef079cd4e26d187ae6135252df21796"
   # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
   # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image
   # avoids version skew between webservice (Rails) and its workhorse sidecar:
@@ -28,45 +28,45 @@ gitlab:
   # an empty Authorization header and silently 502.
   images:
     webservice:
-      digest: "sha256:7fcc3db781425386bc6d68a86ff64dd6c36378b0404b46c6ea4915c77f18d08d"
+      digest: "sha256:ce5b8e1cebe7481d0d1e34cbbd7add45c370505b9fa3310e9157d0caf678cf1e"
     workhorse:
-      digest: "sha256:c6cfe5f26969747faa6f7316f3aa49af0035b5e804a6b11fbca555f3ff65b997"
+      digest: "sha256:263f4cb3c094ea0415bb3b391845e0e9bedfc165704e56f405ea40d012df0e71"
     sidekiq:
-      digest: "sha256:764e3e5634a0567b7c1ac880c639951a8fd12931b5798ffec21826ed6b119fec"
+      digest: "sha256:4ef6036778da09135f940ed50bbf3d4ecb07f552ca86bf28357aa6874af21e8f"
     toolbox:
-      digest: "sha256:1309483072230d05b15ac89dde7ee6218950e47ed958635c74814f41089204c7"
+      digest: "sha256:0820d6d00b1a5bed7dc0cfd52fda41db306351f1d5a0a93d37c49d83cec03828"
 gitlab_lanes:
   "19-4":
     chart: "10.4.3"
-    ref: "b0325a9acd7e36f0f88731686fd9cc8d8d4dc85d"
+    ref: "2d90d3471a3e6a21d6cacf252f21aecdd5c5bfcf"
     images:
       webservice:
-        digest: "sha256:e48fec75ffe438c337b349563ddea9d911b584921f74cf3ac25ebf145bda6202"
+        digest: "sha256:849b1a873a60d101b5605732a661a0d8ee413949784872c908149a15d85e4511"
       workhorse:
-        digest: "sha256:4a4556c1372563517e9b9a2505ac5fc6fa8b9a9723d19f9e0b64868b0992de5b"
+        digest: "sha256:250e71813d5002340771d0e5c9f4119ae54d7c7998caec4bbafd057e27164fab"
       sidekiq:
-        digest: "sha256:9c21ee1c8b9b2a20eaf979abfe75c18d1aa1f23d9a5d7322ee824dc3777bc0c0"
+        digest: "sha256:4d06a48cda65933e248badaa2ef1a7590968957f94ec056520c8f65f1f2d8277"
       toolbox:
-        digest: "sha256:2f0bc573ae18ad26eb842899e38c904b8d549d31eedff61f9f0b08e2c36c1030"
+        digest: "sha256:16d0a2d9b9d71dc0a02cb8cdbb2d320f260eaa0e9a4b923ca8ad3fd8a29872ff"
     repository: registry.gitlab.com/gitlab-org/build/cng-mirror
   "19-5":
     chart: "10.5.1"
-    ref: "e4383f16d7a065d0e8c6e4eb2bc969dc6c17c7bc"
+    ref: "bb72babf5fe6b72e6f1608ac32709cca896a81a8"
     images:
       webservice:
-        digest: "sha256:2ab6b77769f777ec2dc94004ea493d1d3c2e6fe116d54d2679f7ce3bbc70c9ac"
+        digest: "sha256:b5ff38be437efae409973f13de609c9c05099ed4f7216857767932943ed1138e"
       workhorse:
-        digest: "sha256:adf0f41e1bb4bf487d580ceaef429ee09dddf32a313f7d8e0a2f2c846edc5663"
+        digest: "sha256:9d5f2a44d3c0c7ebf3e537164b123576450b83d11a5e72d667b55b60aa5626ca"
       sidekiq:
-        digest: "sha256:3ee087c7251f1225c31cf0ed3fe0323013679c5da504b9c0a94f042b8fed9968"
+        digest: "sha256:24f97ac7a208bbc591aa2ab6f5ee119a685b182ed882e6269480da7a69557dab"
       toolbox:
-        digest: "sha256:950fc05a3d47ce7da463d82044b7f7ea5050c8383be6b04dedd0bdc34abc514e"
+        digest: "sha256:dd7a6853ce45c09d11af0aa061ab2fc0a39e3017f17af05397d8ae02d24d8b73"
     repository: registry.gitlab.com/gitlab-org/build/cng-mirror
 gkg:
   chart: "4.1.0"
   image:
     repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
-    tag: "0.146.0"
+    tag: "0.159.1"
 nats:
   chart: "2.15.0"
 postgresql:

@@ -272,6 +272,32 @@ pub fn export(
     )
 }
 
+/// The directories that hold `paths`, and the edges between them.
+pub fn export_directories(
+    paths: &[&str],
+    export_config: &ExportConfig,
+    ontology: &ontology::Ontology,
+    envelope: &Envelope,
+) -> Result<Vec<(String, RecordBatch)>, Error> {
+    let lang = Lang::new();
+    let plan = ExportPlan::from_config(export_config, ontology, &lang)?;
+    let trees: Vec<Tree> = paths
+        .iter()
+        .map(|path| crate::tree::Tree::unparsed(&lang, path, 0, "").into())
+        .collect();
+    export_trees(
+        &trees,
+        &[],
+        &lang,
+        &plan,
+        envelope,
+        true,
+        &|_| false,
+        Some(&FxHashSet::default()),
+        &Sentinel::disabled(),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn export_trees(
     trees: &[Tree],
@@ -287,6 +313,18 @@ pub fn export_trees(
     envelope.check(plan)?;
     run.check()?;
     let forest = Forest::new(trees, lang);
+    let needed: Option<FxHashSet<u32>> = only.map(|only| {
+        let endpoints = edges
+            .iter()
+            .filter(|e| only.contains(&e.from_tree) || only.contains(&e.to_tree))
+            .flat_map(|e| [e.from_tree, e.to_tree]);
+        only.iter()
+            .copied()
+            .chain(endpoints)
+            .chain([PROJECT])
+            .collect()
+    });
+    let wanted = |tree: u32| needed.as_ref().is_none_or(|needed| needed.contains(&tree));
     let mut ids = FxHashMap::default();
     let mut tables = Vec::new();
     for (index, entity) in plan.entities.iter().enumerate() {
@@ -299,6 +337,7 @@ pub fn export_trees(
             lang,
             envelope,
             &mut ids,
+            &wanted,
             &|index, tree| match entity.name.as_str() {
                 "Directory" => include_directories,
                 "File" => owns_file(&tree.label) && only.is_none_or(|only| only.contains(&index)),
@@ -324,12 +363,13 @@ fn write_entity(
     lang: &Lang,
     envelope: &Envelope,
     ids: &mut FxHashMap<(u32, u32), (i64, usize, bool)>,
+    wanted: &dyn Fn(u32) -> bool,
     emit: &dyn Fn(u32, &Tree) -> bool,
     run: &Sentinel,
 ) -> Result<(), Error> {
     let mut builder = BatchBuilder::new(&entity.specs, 0)?;
     let b = &mut builder;
-    for (ti, tree) in forest.all() {
+    for (ti, tree) in forest.all().filter(|(ti, _)| wanted(*ti)) {
         run.check()?;
         let root = tree.root();
         let nodes = std::iter::once(root)

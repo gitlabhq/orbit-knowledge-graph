@@ -13,6 +13,16 @@ title: Troubleshooting GitLab Orbit
 
 {{< /details >}}
 
+For TLS, network, or data loss problems in the GitLab Orbit service on GitLab Self-Managed,
+see [Troubleshooting GitLab Orbit on GitLab Self-Managed](self-managed/troubleshooting.md).
+
+If you cannot resolve your problem:
+
+- To get help, [contact GitLab Support](https://about.gitlab.com/support/).
+- To report a bug, check the [open issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?state=opened).
+  If an issue matches your problem, add your details to it.
+  If no issue matches, [create an issue](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/new?issuable_template=Bug_Report).
+
 When working with GitLab Orbit, you might encounter the following issues.
 
 ## CLI install and update
@@ -30,13 +40,15 @@ To resolve this issue, [update `glab`](https://docs.gitlab.com/cli/), then run `
 You might get an error that states:
 
 ```plaintext
-error: unrecognized subcommand 'repo-map'
+error: unrecognized subcommand 'workspace'
 ```
 
-This issue occurs when your `orbit` binary is from a release earlier than the one that added the command.
+This issue occurs when your `orbit` binary is from a release earlier than the one that added the command,
+or when the command was removed, such as `repo-map` and `tools`.
 
 To resolve this issue, run `glab orbit --update`.
 If you installed `orbit` without `glab`, run the [installer](cli.md#install-the-standalone-binary) again.
+For the current commands, see the [command catalog](cli.md#command-catalog).
 
 ### Error: `GLIBC_2.28' not found`
 
@@ -114,7 +126,7 @@ To resolve this issue, ask your agent the example questions in
 If the command fails with `could not fetch the "orbit-start" skill` instead, the CLI cannot reach your instance.
 Sign in with `glab auth login`, then run the command again.
 
-## Remote queries
+## Queries to GitLab Orbit
 
 {{< details >}}
 
@@ -169,10 +181,10 @@ This issue occurs when the indexer has not finished indexing the group or projec
 To resolve this issue, check the progress, and send the query again when indexing is complete:
 
 ```shell
-glab orbit graph-status --full-path <my-group>
+glab orbit status --full-path <my-group>
 ```
 
-`glab orbit status` shows only the health of the service, not indexing progress.
+Without `--full-path`, `glab orbit status` shows only the health of the service, not indexing progress.
 
 ## Tokens and service accounts
 
@@ -264,27 +276,16 @@ These issues affect the [local graph](cli.md#local-graph).
 You might get an error that states:
 
 ```plaintext
-Error: no local graph found. Run `glab orbit index` first.
+Error: no local graph found. Run `glab orbit workspace index` first.
 ```
 
-This issue occurs when the repository is not indexed, or when the path you gave with `--db` does not exist.
+This issue occurs when you run the command outside a Git repository and nothing is indexed,
+or when the path you gave with `--db` does not exist.
+Inside a repository, `workspace sql`, `workspace schema`, and `workspace mcp serve` index the repository on first use instead.
 Earlier versions report `Table 'Definition' does not exist`.
 
-To resolve this issue, run `glab orbit index <repository_path>`.
+To resolve this issue, run `glab orbit workspace index <repository_path>`.
 If you passed `--db`, check that the path exists.
-
-### Error: `current commit is not indexed`
-
-`glab orbit repo-map` exits with code 1 with an error that states:
-
-```plaintext
-Error: current commit 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b is not indexed in the local graph
-       run:  glab orbit index .
-```
-
-This issue occurs when the local graph does not contain the current commit, because `repo-map` does not index the checkout for you.
-
-To resolve this issue, run `glab orbit index .`, then run `repo-map` again.
 
 ### Error: `The local graph is busy`
 
@@ -301,6 +302,19 @@ Earlier versions report `IO Error: Could not set lock on file`.
 To resolve this issue, wait for the other process to finish.
 If it does not finish, stop it with the process ID (PID) from the error, for example `kill 4242`.
 
+### Exit code 75 while waiting for an index
+
+A command that reads the local graph, or `glab orbit workspace index`, exits with code `75`.
+
+This issue occurs when a running index did not finish in the wait time, which is 10 minutes by default,
+or when open readers held the locks for too long.
+
+To resolve this issue, run the command again after the index finishes.
+To wait longer, set `ORBIT_WAIT_TIMEOUT_MS`, or pass `--timeout <seconds>` to `workspace index`.
+
+If `workspace index --async` exits with code `75`, the background index keeps waiting for the readers.
+You don't need to run it again. The error message names the log file to follow.
+
 ### `grep` prints nothing
 
 `glab orbit grep` prints nothing and exits with code 1.
@@ -311,12 +325,17 @@ To resolve this issue, search for a shorter term, or remove options that narrow 
 
 ### Files marked `(edited since index)`
 
-`grep` marks a file `(edited since index)` and shows no definitions for it.
+`grep` marks a file `(edited since index)` and does not show its definitions.
+`context` prints a note that its definitions come from the last indexed commit.
 
-This issue occurs when the file differs from the last commit.
+This issue occurs when you edited the file after the last index, and `grep` or `context` could not index the edit in time.
+For example:
 
-To resolve this issue, commit the change.
-The next `grep` indexes the new commit.
+- Indexing the edit took longer than two seconds. Indexing continues in the background.
+- Indexing the edit failed, for example because another `orbit` process is writing the local graph.
+
+To resolve this issue, wait a few seconds, then run the command again.
+If the file is still marked, wait for other `orbit` processes to finish, then run the command again.
 
 ### Warning: `ignoring unsupported flag`
 
@@ -324,13 +343,13 @@ This issue occurs when you pass an option that `grep` does not support, such as 
 `grep` drops the option and reads its value as a path, so it then fails with an error like `no such path in the repository: 5`.
 
 To resolve this issue, remove the option.
-To narrow the search, give paths, or use `-g`, `-t`, or `--kind`.
+To narrow the search, give paths, use `-g` or `-t`, or start the query with a kind, such as `def:`.
 
 ### Repositories missing after an update
 
 Repositories that you indexed before an update are missing from the local graph.
 
-This issue occurs when the update changed the format of the local graph, and the next `index` rebuilt the graph file.
+This issue occurs when the update changed the format of the local graph, and the next `workspace index` rebuilt the graph file.
 
 To resolve this issue, index your repositories again.
 
@@ -340,3 +359,4 @@ To resolve this issue, index your repositories again.
 - [Security](security.md)
 - [GitLab Orbit architecture](how-it-works.md)
 - [GitLab Orbit MCP endpoint](agents/mcp.md)
+- [Monitor GitLab Orbit](self-managed/observability.md)
