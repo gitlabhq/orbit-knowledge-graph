@@ -1,5 +1,3 @@
-use std::sync::LazyLock;
-
 use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError};
 
@@ -67,10 +65,6 @@ async fn request(
         })
 }
 
-static GRAPH_KEY: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"^(query_type|nodes|edges|pagination)\b").expect("valid pattern")
-});
-
 /// Drops HTML comments outside code fences, as rendered Markdown does, so PR templates and
 /// bot markers in descriptions and notes cost nothing. A line left empty by a removed comment
 /// goes, and so does a blank line after another blank line.
@@ -117,22 +111,14 @@ fn strip_html_comments(text: &str) -> String {
 pub(crate) fn tidy(text: &str, drop_failed_jobs: bool) -> String {
     let text = strip_html_comments(text);
     let mut out = String::with_capacity(text.len());
-    let (mut in_graph, mut in_failed_jobs) = (false, false);
+    let mut in_failed_jobs = false;
     for line in text.lines() {
         let indent = line.len() - line.trim_start().len();
-        if in_graph && (indent > 0 || GRAPH_KEY.is_match(line)) {
-            continue;
-        }
-        in_graph = false;
         if in_failed_jobs && (indent > 2 || line.trim().is_empty()) {
             continue;
         }
         in_failed_jobs = false;
         if line.starts_with("orbit_context version=") {
-            continue;
-        }
-        if line == "graph:" {
-            in_graph = true;
             continue;
         }
         if drop_failed_jobs && indent == 2 && line[indent..].starts_with("failed_jobs[") {
@@ -222,12 +208,12 @@ mod tests {
     }
 
     #[test]
-    fn tidy_drops_the_graph_timestamps_and_repeated_failed_jobs() {
+    fn tidy_keeps_the_graph_and_drops_timestamps_and_repeated_failed_jobs() {
         let text = "orbit_context version=1.1.0 entities=1\n- mr:1 found=true\n  failed_jobs[1]:\n    lint url\n\
                     graph:\nnodes:\n  x\n- issue:2 found=true\n";
         assert_eq!(
             tidy(text, true),
-            "- mr:1 found=true\n- issue:2 found=true\n"
+            "- mr:1 found=true\ngraph:\nnodes:\n  x\n- issue:2 found=true\n"
         );
     }
 }
