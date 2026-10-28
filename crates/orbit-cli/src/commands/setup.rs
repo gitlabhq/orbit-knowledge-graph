@@ -1620,6 +1620,47 @@ mod tests {
         assert!(!old.exists());
     }
 
+    #[test]
+    fn a_manifest_path_outside_the_plugin_folder_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("victim.txt");
+        std::fs::write(&outside, "keep\n").unwrap();
+        let root = dir.path().join(".claude/orbit/claude_plugin");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".orbit-setup.json"),
+            json!({ "../../../victim.txt": sha2_hex(b"keep\n") }).to_string(),
+        )
+        .unwrap();
+        assert!(
+            install(
+                options_for(&["claude"]),
+                project(dir.path()),
+                &bare_machine()
+            )
+            .is_err()
+        );
+        assert!(outside.is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn uninstall_never_follows_a_symlinked_folder_in_the_plugin() {
+        let dir = tempfile::tempdir().unwrap();
+        install_default(&["claude"], dir.path());
+        let elsewhere = tempfile::tempdir().unwrap();
+        let victim = elsewhere.path().join("l.txt");
+        std::fs::write(&victim, "keep\n").unwrap();
+        let root = dir.path().join(".claude/orbit/claude_plugin");
+        std::os::unix::fs::symlink(elsewhere.path(), root.join("gitlab-orbit/linkdir")).unwrap();
+        let manifest = root.join(".orbit-setup.json");
+        let mut recorded = read_json(&manifest);
+        recorded["gitlab-orbit/linkdir/l.txt"] = json!(sha2_hex(b"keep\n"));
+        std::fs::write(&manifest, recorded.to_string()).unwrap();
+        uninstall_named(&["claude"], dir.path());
+        assert!(victim.is_file());
+    }
+
     fn sha2_hex(bytes: &[u8]) -> String {
         use sha2::{Digest, Sha256};
         Sha256::digest(bytes)

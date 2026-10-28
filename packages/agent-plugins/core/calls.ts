@@ -19,7 +19,6 @@ export const QUERY_LABEL = QUERY.done
 const VALUE_FLAGS = new Set([
   '--db', '--file', '--response-format', '--full-path', '--namespace-id', '--project-id', '--repo', '--budget', '--timeout',
 ])
-// Short flags take a value only on some commands: `-F` is fixed strings in grep and a format in workspace sql.
 const VALUE_FLAGS_BY_KEY: Readonly<Record<string, ReadonlySet<string>>> = {
   grep: new Set(['-A', '-B', '-C', '-m', '-g', '--glob', '--include', '--exclude', '--exclude-dir', '-t', '--type', '-T', '--type-not', '-M', '--max-columns']),
   'workspace sql': new Set(['-f', '-F', '--format']),

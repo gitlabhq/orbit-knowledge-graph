@@ -108,6 +108,13 @@ fn install_plugin(
     let name = plugin.marketplace_for(target);
     for (relative, contents) in plugin.files(&name) {
         let path = dir.join(&relative);
+        if !inside(&dir, &path) {
+            bail!(
+                "{} is a link out of {}; remove it and re-run",
+                path.display(),
+                dir.display()
+            );
+        }
         let current = std::fs::read(&path).ok();
         if current.as_deref() != Some(contents.as_slice()) {
             let ours = current
@@ -123,7 +130,7 @@ fn install_plugin(
     }
     for (relative, expected) in &previous {
         let path = dir.join(relative);
-        if manifest.contains_key(relative) || !path.exists() {
+        if manifest.contains_key(relative) || !path.exists() || !inside(&dir, &path) {
             continue;
         }
         if std::fs::read(&path).is_ok_and(|current| hash(&current) == *expected) {
@@ -189,7 +196,7 @@ fn remove_plugin(plugin: &PluginSpec, target: &Target, report: &mut Report) -> R
         let mut kept = 0;
         for (relative, expected) in read_manifest(&dir)? {
             let path = dir.join(&relative);
-            if std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            if !inside(&dir, &path) {
                 kept += 1;
                 continue;
             }
@@ -255,6 +262,19 @@ fn read_manifest(dir: &Path) -> Result<BTreeMap<String, String>> {
         );
     }
     Ok(entries)
+}
+
+fn inside(dir: &Path, path: &Path) -> bool {
+    if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return false;
+    }
+    let Ok(dir) = std::fs::canonicalize(dir) else {
+        return true;
+    };
+    let ancestor = path.ancestors().skip(1).find(|ancestor| ancestor.exists());
+    ancestor
+        .and_then(|ancestor| std::fs::canonicalize(ancestor).ok())
+        .is_some_and(|ancestor| ancestor.starts_with(&dir))
 }
 
 fn is_plain_relative(key: &str) -> bool {

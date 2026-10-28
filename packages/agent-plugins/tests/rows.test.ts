@@ -34,9 +34,9 @@ test('connected queries share one row with the joined path', () => {
   expect(rows[0]?.call).toMatchObject({ label: QUERY_LABEL, detail: 'Users → Merge requests → Projects' })
 })
 
-test('a disconnected query starts its own row', () => {
+test('back-to-back queries share one row, with disconnected paths listed side by side', () => {
   const rows = mergeRuns(calls(MR_PROJECT, PIPELINE_JOB, JOB_RUNNER))
-  expect(rows.map((row) => row.call.detail)).toEqual(['Merge requests → Projects', 'Pipelines → Jobs → Runners'])
+  expect(rows.map((row) => row.call.detail)).toEqual(['Merge requests → Projects, Pipelines → Jobs → Runners'])
 })
 
 test('a repeated call graph query stays on one row', () => {
