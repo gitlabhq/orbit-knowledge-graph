@@ -72,13 +72,17 @@ fn validate_skills() {
     );
 }
 
-/// libduckdb-sys 2.0 no longer adds an rpath for a downloaded libduckdb, so `orbit` run outside
-/// Cargo finds the library only through this one. Release builds compile DuckDB in and skip it.
+/// libduckdb-sys 2.0 no longer adds an rpath for a downloaded libduckdb, so a debug `orbit` run
+/// outside Cargo finds the library only through this one. Release builds compile DuckDB in, so
+/// they must not carry a path to the build machine, and Windows linkers have no rpath.
 fn link_downloaded_duckdb() {
     println!("cargo:rerun-if-env-changed=DUCKDB_DOWNLOAD_LIB");
     let downloads = std::env::var("DUCKDB_DOWNLOAD_LIB")
         .is_ok_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true"));
-    if !downloads {
+    let unix = std::env::var("CARGO_CFG_TARGET_FAMILY")
+        .is_ok_and(|families| families.split(',').any(|family| family == "unix"));
+    let debug = std::env::var("PROFILE").is_ok_and(|profile| profile == "debug");
+    if !(downloads && unix && debug) {
         return;
     }
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("Cargo sets OUT_DIR"));
