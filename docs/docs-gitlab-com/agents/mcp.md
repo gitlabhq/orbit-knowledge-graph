@@ -34,7 +34,8 @@ Prerequisites:
 
 - GitLab Orbit is [turned on](../quickstart.md#step-1-turn-on-gitlab-orbit) for a group where you have the Reporter, Security Manager, Developer, Maintainer, or Owner role.
 - Your client signs in with OAuth.
-  A client that connects over native HTTP must request the `mcp_orbit` scope.
+  The endpoint asks native HTTP clients for the `mcp_orbit` scope.
+  It also accepts OAuth tokens with the `mcp`, `api`, `read_api`, or `ai_workflows` scope.
   You can also [use a personal access token](#connect-with-a-personal-access-token).
 
 ### Connect a client to the endpoint
@@ -179,6 +180,9 @@ The endpoint has two tools. `list_commands` lists the GitLab Orbit commands with
 | `query_graph` | Runs a [GQL](../queries/query-language.md) query. |
 | `get_graph_schema` | Returns the node types and relationship types, and the properties of the node types you pass in `expand_nodes`. |
 | `get_response_format` | Returns the response JSON Schema of `query_graph` and its version. |
+
+Each `query_graph` call counts toward a rate limit of 60 requests per minute for each user.
+Over the limit, the endpoint returns `429 Too Many Requests` with a `Retry-After` header.
 
 To get the properties and relationships of a node type, pass its name in `expand_nodes`,
 for example `["MergeRequest"]`, or run `CALL db.schema('MergeRequest')` with `query_graph`.
