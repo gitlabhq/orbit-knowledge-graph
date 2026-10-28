@@ -142,7 +142,7 @@ A merge request check requires a version bump when the skill files change.
 The check does not make a version unique, because concurrent changes can pick the same version and an explicit bypass exists.
 
 The list method returns the name, version, description, and compatibility of each skill.
-The get method returns the versioned file tree, sorted by normalized relative path with a SHA-256 hash of each file, or only the metadata.
+The get method returns the versioned file tree, sorted by normalized relative path with a SHA-256 hash of each UTF-8 file, or only the metadata.
 Both requests carry the query language of the caller.
 GQL callers get the GQL variant, whose version has a GQL suffix so caches differ by mode.
 A missing language selects JSON, and an unknown language is rejected.

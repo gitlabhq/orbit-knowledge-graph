@@ -32,11 +32,12 @@ That choice made the language commitment permanent.
 
 The service builds a property graph from GitLab instance data and serves queries over gRPC.
 It runs as one binary in four modes: web server, indexer, scheduler, and health check.
-It consumes change data capture (CDC) events from NATS and compiles a structured query language into ClickHouse SQL.
+It consumes change data capture (CDC) events from NATS and compiles a JSON query language into parameterized ClickHouse SQL.
 It uses bidirectional gRPC streams for the authorization exchange with Rails.
 One multi-tenant deployment serves all of GitLab.com.
 A three-hop traversal must finish in less than 300 ms at p95.
 
+The choice also follows the data engineering trend across the industry.
 The columnar data stack that Orbit uses is native to Rust, and includes Arrow, DataFusion, and Parquet.
 DataFusion builds on the Arrow Rust implementation, and Polars, Delta Lake, and Databend also use it.
 Throughput needs grow with larger instances and more indexed entities.
@@ -164,7 +165,8 @@ When the packaging constraint went away, we moved the Rust code into its own ser
 ### Go
 
 Go is the usual language at GitLab for infrastructure services, such as Gitaly, Praefect, Siphon, and Workhorse.
-Go was the main alternative and a reasonable choice, because we know Go from Siphon.
+Go was the main alternative and a reasonable choice.
+We know Go from Siphon, and its operational patterns are well established.
 The workload made us choose Rust.
 
 GC pauses during bidirectional gRPC streams would extend the time that a Puma thread waits in Rails.

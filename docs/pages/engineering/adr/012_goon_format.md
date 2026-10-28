@@ -31,7 +31,7 @@ A session with 5 to 10 graph queries spent 50,000 to 80,000 tokens of context on
 
 The encoding also affects correctness.
 A Google study measured graph reasoning accuracy as a function of the encoding alone.
-Accuracy moved between 4.8% and 61.8% for each task.
+The encoding alone changed accuracy by 4.8 to 61.8 percentage points, depending on the task.
 Incident encoding groups edges by source.
 On most tasks, it did better than flat edge lists and adjacency matrices.
 Dense encodings with many edges distracted the model.
@@ -61,8 +61,9 @@ We therefore removed the hints block.
 
 ### Format
 
-A result has a header section, a nodes section, and a section for the query shape.
-That section holds edges for traversal, search, and neighbors, paths for path finding, or rows for aggregation.
+A result has a header section, then a nodes section.
+Traversal, search, neighbors, and aggregation results then have an edges section, and path finding results have a paths section.
+An aggregation result adds a rows section.
 A section with no entries still has its marker, so a parser does not need a special case.
 
 This example shows a small traversal:
@@ -76,6 +77,7 @@ edges:1
 @nodes
 User(1):
 1 username=alice name="Alice Smith" state=active
+
 MergeRequest(1):
 42 iid=101 state=merged title="Fix auth bug"
 @edges
@@ -111,6 +113,7 @@ The edges section groups edges by relationship type and uses arrow notation, as 
 Edges have a total order and no duplicates.
 An edge from a variable-length traversal carries its depth.
 A path is one line with a chain of typed nodes and relationships, so the agent does not rebuild it from separate edges.
+The nodes section still carries the full properties of each node in a path.
 An aggregation row is one line with the group columns first, then the metrics.
 
 ### Encoder
@@ -150,7 +153,7 @@ The CLI shows readable text for the LLM format, in place of dense JSON.
 - Snapshot tests catch unintended format drift.
   A deliberate format change is therefore a large snapshot diff.
 
-The benchmark used a Python prototype encoder, and we deferred a check that both encoders give byte-identical output.
+A Python prototype encoder exists next to the Rust encoder, and byte-identical output from both is deferred.
 
 ## Why not the alternatives
 

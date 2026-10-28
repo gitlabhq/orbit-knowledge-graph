@@ -43,10 +43,10 @@ The columns depend on the query type:
 - An aggregation prints one column for each group and metric output name, and prints node groups as node literals.
 - A neighbors query or a path-finding query prints one path column, and neighbor direction follows the stored edge.
 
-Values use the literal forms of OpenCypher-like shells: quoted strings, true, false, and null.
+Values use the literal forms of OpenCypher-like shells: quoted strings, `TRUE`, `FALSE`, and `NULL`.
 Long text uses the shared truncation limits and adds a length property with the original length.
-Cells pad to the widest cell in their column, up to a fixed width.
-Longer cells overflow, so one long value does not widen every row.
+Cells pad to the widest cell in their column.
+Padding stops at a fixed width, so one long value does not widen every row, and longer cells overflow.
 The footer reports the row count.
 A paginated page also reports that more rows are available and gives the next cursor.
 A duplicate path or neighbor prints once, as in the raw format.
@@ -65,7 +65,8 @@ Schema queries return Token-Oriented Object Notation (TOON) text for `gql`, as t
 - We must deploy the Orbit release with this change before GitLab turns on GQL responses.
   Older servers return raw JSON for the new format value.
   Workhorse must inspect the format of the returned content, not only the requested format.
-  Workhorse must treat a mismatch as an error or as an explicit fallback, or it can return an empty success response.
+  Workhorse must treat a mismatch as an error or as an explicit fallback.
+  Otherwise it returns an empty success response by mistake.
 - Query analytics must record the selected response format, and a version pin is not enough.
   A separate analytics schema change adds that field before we measure adoption.
 - Rows repeat full node bodies, so the output is larger than the TOON output of the agent format.

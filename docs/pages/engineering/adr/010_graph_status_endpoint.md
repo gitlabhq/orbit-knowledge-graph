@@ -26,7 +26,7 @@ Entity counts alone do not answer the questions that users ask:
 
 The indexer checkpoint tables hold this information, but no RPC exposed it.
 
-The original RPC had four limits:
+The original RPC worked this way:
 
 - It took a raw traversal path and did not know whether the scope was a group or a project.
 - It ran one count query per node table and grouped the results by domain.
@@ -41,7 +41,7 @@ When the Orbit response shape changes, Rails adjusts its mapping.
 
 **We evolve the graph stats RPC into one graph status RPC that returns entity counts and indexing progress together.**
 
-We delivered the change in four phases, one merge request each.
+We split the change into four phases, one merge request each.
 
 ### Original design
 

@@ -35,8 +35,7 @@ At 150 requests per second, three failures appeared: gRPC deadline errors, bad g
 
 Puma workers are finite.
 Each one is a thread that cannot serve other requests while it waits on a gRPC stream.
-Orbit query traffic grows, mainly from AI agents on the MCP endpoint.
-More traffic means more threads that wait on ClickHouse and redaction.
+More Orbit query traffic, especially from AI agents on the MCP endpoint, means more threads that wait on ClickHouse and redaction.
 
 The MCP endpoint handles JSON-RPC calls and has the same problem.
 A query tool call opens the same bidirectional stream and blocks Puma the same way.

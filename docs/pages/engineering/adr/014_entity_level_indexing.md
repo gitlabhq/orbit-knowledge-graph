@@ -122,7 +122,7 @@ The status service gets the expected set of namespaced entity types from the ont
 A missing entry counts as not indexed.
 The namespace state is the worst state of any entity.
 From best to worst, the order is indexed, indexing, error, backfilling, not indexed, and unknown.
-About 36 reads at under one millisecond each took about 18 ms in total.
+About 36 reads at under one millisecond each add up to about 18 ms.
 
 The existing global and namespace topic configurations still set engine-level policy for retries, concurrency groups, and the dead letter queue.
 The entity handlers subscribe to those topics.
@@ -143,7 +143,7 @@ Checkpoint keys stay compatible, so a deploy does not reprocess data.
   Before, each handler collected the errors of its entities.
 - Indexing status needs one entry for each entity and namespace, and the status service aggregates them.
   During rollout, the status service read the old and the new formats.
-  Old entries became stale after all handlers ran the new code, and a time to live removes them.
+  Old entries became stale after all handlers ran the new code, and a time to live can remove them.
 
 ## Why not the alternatives
 

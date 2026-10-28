@@ -45,7 +45,7 @@ The AI Gateway and DWS keep their own DAP completion event, and they do not anno
 
 We split the work into four phases:
 
-1. Instrumentation, in April: Rails sends the source type, and Orbit emits billable events and checks quota before each query.
+1. Instrumentation, in April: Rails sends the source type, and Orbit emits billable events and checks quota before each metered query.
 1. Tier enforcement, in April and in parallel: every Orbit endpoint requires GitLab Premium or GitLab Ultimate.
 1. Zero-rate enforcement, in May, after Phase 1: a signed service token proves that a request came from DWS.
 1. CustomersDot billing pipeline, from May to June: flat-rate multiplier pricing in CustomersDot, plus a credits dashboard.
@@ -100,7 +100,7 @@ The source types are frontend, DWS, MCP, core, REST, and code intelligence.
 
 | Source type | Caller | How Rails detects it |
 |---|---|---|
-| MCP | MCP clients and the GitLab CLI | The request reaches the MCP endpoint, which accepts only the Orbit MCP scope |
+| MCP | MCP clients and the GitLab CLI | The request reaches the MCP endpoint, which is its own endpoint class, so the channel is MCP by definition |
 | Core | Internal services, such as the indexer | The request reaches the internal API, which accepts only an indexer token |
 | Frontend | The browser | The CSRF token matches the session |
 | DWS | DAP agents | In Phase 1, the OAuth token has the workflow scope. In Phase 3, the request carries a valid Workhorse-signed token. |
@@ -110,7 +110,7 @@ The MCP and internal endpoints set the source type from the endpoint itself.
 On the REST endpoints, Rails checks the cross-site request forgery (CSRF) token first, and then the OAuth scope.
 In Phase 3, the Workhorse-signed token check comes first.
 
-Only DWS creates tokens with the workflow scope, and users cannot create personal access tokens with it.
+Only the Rails workflow services create tokens with the workflow scope, and users cannot create personal access tokens with it.
 A user can still copy a short-lived DWS token from the browser developer tools and call the API directly.
 That risk is acceptable for Phase 1 analytics, and Phase 3 closes it.
 
@@ -252,7 +252,8 @@ Workhorse signs the token with the existing Workhorse-to-Rails secret.
 Rails checks the signature, the expiry, and the claim that marks the request as DWS traffic.
 Rails still runs a request without a valid token.
 It tags that request as frontend or REST.
-A valid token proves that the request came through the DWS path, and a token with the workflow scope proves only that DWS issued it.
+A valid token proves that the request came through the DWS path.
+A token with the workflow scope proves only that a workflow token was issued.
 
 The secret lives only in Workhorse and Rails, so users cannot forge the token.
 DWS manages no secret.
@@ -344,7 +345,8 @@ This matches the AI Gateway, where the executing service owns quota enforcement.
 Rails and Orbit run side by side, so a shared signing secret is enough.
 Cloud Connector serves GitLab Self-Managed and Dedicated instances that reach GitLab cloud services over the internet.
 Orbit runs next to the GitLab instance, and it is not a central cloud service.
-If Orbit becomes an add-on that customers buy separately, we will register an Orbit query unit primitive in Cloud Connector for general availability (GA).
+If Orbit becomes an add-on that customers buy separately, the right path is to register an Orbit query unit primitive in Cloud Connector.
+That registration would come at general availability (GA).
 CustomersDot can then control Orbit access through subscription status, in addition to the current approach.
 
 ### Reuse the Duo default namespace

@@ -45,7 +45,7 @@ If ClickHouse does not suit our needs, Siphon, NATS, and ClickHouse remain the b
 
 ### Validation
 
-We based the design on the Brahmand project and on the SQL:2023 standard for property graphs (ISO/IEC 9075-16:2023).
+We drew on the Brahmand project and on the SQL:2023 standard for property graphs (ISO/IEC 9075-16:2023).
 We changed the demo instance from the original graph database to ClickHouse.
 The demo proved a working product on a property graph model in ClickHouse and PostgreSQL.
 A separate OpenCypher-to-PostgreSQL project passes 70% of the OpenCypher Technology Compatibility Kit (TCK), and the team can reuse much of it.
@@ -57,7 +57,7 @@ The benchmark used compressed sparse row (CSR) adjacency list index ideas from t
 
 ## Consequences
 
-- Graph nodes live in typed ClickHouse tables, one for each entity type.
+- Graph nodes live in typed ClickHouse tables.
 - Relationships live in edge tables that the ontology configures, with ordering and projections tuned for adjacency.
 - The query layer compiles an intermediate JSON query language into parameterized ClickHouse SQL, and does not run OpenCypher natively.
 - PostgreSQL remains the backup option, and it can reuse the OpenCypher-to-PostgreSQL work.

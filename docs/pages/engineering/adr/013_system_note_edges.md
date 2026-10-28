@@ -43,7 +43,7 @@ It taught us three things:
 Rails owns authorization and writes the note bodies.
 We do not control the templates, and we accept Rails phrasing changes as a maintenance cost.
 The Analytics team owns Siphon, so the new replication is cross-team work on the critical path.
-The schema migration framework was complete and validated on staging, so a new edge kind needs only a schema version bump.
+The schema migration framework was complete and validated on staging, so a new edge kind needs only a schema version bump and no table rebuild.
 
 ## Decision
 
@@ -55,7 +55,7 @@ A proof of concept (POC) harness backs the decision, with results under [Benefit
 
 ### Scope and edge kinds
 
-The transform parses the Rails cross-reference actions and selected Enterprise Edition cross-reference actions.
+The transform parses a subset of the Rails cross-reference actions and selected Enterprise Edition cross-reference actions.
 It also parses the commit action, which lists commit SHAs.
 The merge action has an inline SHA or an MR reference.
 
@@ -131,7 +131,7 @@ Configuration selects the mode.
 ### Action drift and rollout
 
 We vendor the Rails list of system note actions, pinned to an upstream commit.
-The list had 61 values at the time of writing.
+The list grew across releases, and Rails has changed system note phrasing more than once.
 A drift check, modeled on the one in [ADR 012](012_goon_format.md), compares the copy to upstream.
 It lists the missing values and runs in the pre-commit hook and the lint stage.
 At runtime, the transform logs and drops an unknown action and never panics.
@@ -162,7 +162,7 @@ The reopen branch of the note path matched nothing and never wrote an edge.
 Reopen edges now come from two generated edge pipelines over the replicated resource state events, one for MRs and one for work items.
 Each filters on the reopened state in its extract.
 Merged and closed edges stay note-derived.
-We defer a reconciliation of those edges with resource state events, because current-state and event-history semantics differ.
+We defer a reconciliation of those edges with resource state events, which must settle current-state against event-history semantics and handle deduplication and deleted rows.
 
 ### Amendment: mention edge direction (2026-06-25)
 
@@ -206,6 +206,7 @@ Two benchmarks need staging ClickHouse and the Siphon replication:
 
 - A full pass over the large top-level group in 10 minutes or less.
   Compute alone extrapolates to about 54 seconds.
+  ClickHouse scan time, not parsing and resolving, dominates the time budget.
 - An edge density gain of at least three times for MR-to-work-item edges and 10 times for MR-to-MR edges.
   We propose these numbers for the upstream acceptance criterion.
 
@@ -234,7 +235,7 @@ An integration test guards this limit.
 
 The resolver could read a projected route set from the graph database instead of the data lake.
 One option is a ClickHouse dictionary from project to traversal path, with constant-time lookups.
-Its refresh cadence, owner, and source query are open questions for the Siphon owners.
+Its refresh cadence, owner, and source query are open questions with the Analytics team.
 Another option loads the licensed route set into memory once per pass.
 A dictionary would also resolve references across top-level namespaces and could check visibility at read time.
 We revisit these if the full-pass benchmark fails or route lookups get twice as slow at staging scale.

@@ -38,7 +38,7 @@ None of its optimizations are entity-specific:
 | Optimization | Effect |
 |---|---|
 | Keyset pagination with a cursor predicate | Uses the ClickHouse sort-key index |
-| Watermark window and traversal path scope in the extract SQL | Reads only the changed rows of one namespace |
+| Watermark window and traversal path scope in the extract SQL | Limits the extract to rows changed since the watermark, inside the scope of the request |
 | Whole-page read with read-ahead of one page | Overlaps the next read with the current writes |
 | Adaptive retry | Shrinks the block size on a data lake failure, down to a floor |
 | Lazy bulk writers per destination table | Opens no insert for an empty table |
@@ -221,4 +221,4 @@ It can follow if Rust transforms find manual encoding error-prone.
 
 - [ADR 013: Materialize edges from system notes](013_system_note_edges.md)
 - [ADR 014: Entity-level SDLC indexing](014_entity_level_indexing.md)
-- [SDLC indexing](../architecture/indexing/sdlc-indexing.md)
+- [SDLC indexing design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)

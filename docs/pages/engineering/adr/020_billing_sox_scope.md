@@ -63,13 +63,7 @@ It does not isolate every dependency that can change billing correctness.
 The SOX-scoped section of the code owners file is the list of in-scope files.
 Each file in that section has a required-reviewer rule.
 
-A change is in scope when it can change any of these:
-
-- How a billing event is built, or what its payload contains
-- Whether a billing event fires for a given query outcome
-- How events reach CustomersDot, including the credentials for delivery
-- Whether the quota check runs, and how its result gates a request
-- Whether billing and quota enforcement start, and with which settings
+A component outside the billing component is in scope when a change to it can change billing correctness without a change to billing code.
 
 ### Primary scope
 
@@ -95,7 +89,7 @@ A change that adds a new kind of hook point must also add a row to this table.
 | Authorization gate | It decides whether a query can complete. A rejection before completion prevents emission. |
 | Billing observer construction | It builds the billing observer from the adapter inputs and attaches it to the pipeline. |
 | Pipeline billing wiring | It connects the billing tracker to the query pipeline. A removal or a new order silently stops emission. |
-| Tracker and quota startup | It validates configuration, builds the tracker and the quota service, and drains queued events at shutdown. A change can turn off emission or quota enforcement, prevent startup, or lose queued events. |
+| Tracker and quota startup | It validates configuration, builds the tracker and the quota service, wires them into the service, and drains queued events at shutdown. A change can turn off emission or quota enforcement, prevent startup, or lose queued events. |
 | Pipeline security gate | It decides whether the pipeline gets far enough to report success. |
 | Billing configuration and defaults | They set emission and quota enablement, endpoint selection, and authentication modes. They also hold other settings that affect delivery or quota enforcement. |
 | Delivery token cache | It caches and refreshes the Cloud Connector token for event delivery. A change can prevent delivery without a change to the billing component. |

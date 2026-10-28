@@ -110,7 +110,7 @@ gRPC interceptors handle request logging, tracing with LabKit, and metrics, as t
 The server compresses responses with Gzip or Zstandard, and accepts either on requests.
 It answers with the first of those encodings in the list that the client accepts, and with no compression if the client lists neither.
 The Ruby and Python C-core clients advertise Gzip and decode it transparently, so they get Gzip.
-Only clients that advertise Zstandard, such as the Rust and Go clients, get Zstandard.
+Only clients that advertise Zstandard, such as tonic-based Rust clients or Go clients, get Zstandard.
 
 ### Authentication
 
@@ -178,7 +178,8 @@ Each Rails permission check evaluates the Rails policy rules against PostgreSQL.
 A result with a full row limit across several resource types could cause one check for each row.
 Each check can load the resource and evaluate several policy conditions.
 
-Grouped IDs and a cap on the IDs in each check reduce this load to a few batched checks.
+Grouped IDs and a cap on the IDs in each check reduce this load.
+Rails gets a few batched checks instead of one for each row.
 The row limit of the query engine also bounds the number of checks for each request.
 The Rails handler must preload resources and their policy dependencies instead of checking each ID alone.
 The redaction of search results in Rails gives the template.

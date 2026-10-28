@@ -89,7 +89,7 @@ Rails may narrow the named policy for each session.
 After the consumer opens a new connection, the old one stops accepting streams and closes when its in-flight streams finish.
 
 Rails answers Workhorse directly, and the consumer holds no token with the authorization in it.
-Nothing can be replayed or revoked, and the Gitaly secret never leaves the GitLab deployment.
+No token exists to replay or revoke, and the Gitaly secret never leaves the GitLab deployment.
 
 Each connection covers one project, because Rails resolves the repository storage of that project.
 A tunnel for a group would have to resolve storage again for each stream and route across Gitaly nodes.
@@ -105,8 +105,8 @@ The profile allows accessor RPCs on the repository that Rails authorized and rej
 The profile also rejects a write RPC that Rails allowlists by mistake.
 Workhorse resolves the target repository with the same protobuf annotation as Gitaly and Praefect.
 
-Workhorse sets the Gitaly client name on every stream from the value that Rails returned.
-Workhorse ignores metadata from the consumer, so the Gitaly limits and dashboards per client keep working.
+Workhorse sets the Gitaly client name on every stream from the value that Rails returned, and ignores metadata from the consumer.
+The Gitaly limits and dashboards per client therefore keep working.
 The consumer identity from Rails also flows into Workhorse metrics and logs, so attribution stays.
 
 ### Session lifetime
@@ -120,7 +120,8 @@ This design lets in-flight streams run until their own deadline.
 
 A session admitted just before Rails revokes access can start streams until the session age ends.
 Those streams can run until their deadline, so the worst case is the session age plus the stream deadline.
-Workhorse caps this window at a fixed maximum, whatever values Rails requests.
+For Orbit, the worst case is about an hour more than the session age.
+The cap on this window is fixed in Workhorse, whatever values Rails requests.
 A short hard-kill grace then lets in-flight work close cleanly, so the observed ceiling can be a few seconds over the cap.
 
 A rollout feature flag per project or root namespace governs new pre-authorizations, and the flag is off by default.
@@ -130,7 +131,7 @@ The proxy therefore cannot read a project that the indexer would not index.
 
 ### Capacity
 
-The archive fetch concurrency per indexer pod, times the number of pods, bounds the active archive proxy connections.
+The fetch concurrency bound is the fleet bound only when the storage budgets are off or larger than the fetch concurrency times the pod count.
 The repository count does not change this bound, and more worker slots do not raise it.
 Backfill and incremental indexing share the concurrency.
 A NATS key-value lease also caps archive downloads per Gitaly storage across all pods.

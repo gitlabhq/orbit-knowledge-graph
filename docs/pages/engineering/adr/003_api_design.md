@@ -46,10 +46,10 @@ check security -> compile -> run in ClickHouse -> extract IDs -> authorize
 ```mermaid
 flowchart LR
     accTitle: Orbit API surfaces
-    accDescr: The dashboard uses GraphQL for settings. The dashboard, the CLI, and other clients use REST for data. Agents use MCP. Rails maps REST and MCP calls to the Orbit gRPC service.
+    accDescr: The dashboard uses GraphQL for settings. The dashboard, the CLI, agents, and other clients use REST for data. Agents use MCP. Rails maps REST and MCP calls to the Orbit gRPC service.
     D[Dashboard] -->|Settings| G[GraphQL in Rails]
     D -->|Data| R[REST in Rails]
-    C[CLI and other clients] --> R
+    C[CLI, agents, and other clients] --> R
     A[AI agents] --> M[MCP in Rails]
     R --> O[Orbit gRPC service]
     M --> O
@@ -130,11 +130,11 @@ An illustrative exchange with placeholder values:
 ```plaintext
 Request:
   format: raw
-  query:  MATCH (mr:MergeRequest {state: 'merged'}) RETURN mr LIMIT 10
+  query:  <traversal over merge requests where state is merged, limit 10>
 
 Response:
   result:      [{id: <id>, type: MergeRequest, title: <title>, state: merged}, ...]
-  query_type:  <query type>
+  query_type:  json
   sql:         [<generated SQL>]
   row_count:   <count>
 ```

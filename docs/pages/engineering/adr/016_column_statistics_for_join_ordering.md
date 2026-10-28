@@ -129,9 +129,7 @@ The histogram table gives the number of distinct key values.
 In this example query, the user is pinned and the merge requests have a branch filter:
 
 ```plaintext
-MATCH (u:User)-[:AUTHORED]->(m:MergeRequest)-[:IN_PROJECT]->(p:Project)
-WHERE u.id = 1 AND m.source_branch = 'main'
-RETURN m, p
+Query: a traversal from a user with pinned node ID 1, through AUTHORED to merge requests on the main source branch, through IN_PROJECT to projects.
 
 Statistics for one namespace:
   Merge requests: 82,000 rows, 4,200 distinct source branches

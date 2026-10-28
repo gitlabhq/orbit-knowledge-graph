@@ -120,9 +120,8 @@ flowchart LR
     accTitle: Clone-based migration
     accDescr: The active version keeps serving queries. The migrating version clones the tables that the scope does not invalidate, rebuilds the rest, and indexes again only the invalidated pipelines. Promotion moves reads to the migrating version when the planned pipelines finish.
     A[Active version serves queries] --> C[Clone unaffected tables]
-    A --> R[Rebuild invalidated tables empty]
-    C --> I[Index invalidated pipelines again]
-    R --> I
+    R[Rebuild invalidated tables empty] --> I[Index invalidated pipelines again]
+    C --> I
     I --> P{Planned pipelines complete?}
     P -->|Yes| S[Promote: reads move to the new version]
     P -->|No| I
@@ -162,5 +161,5 @@ These items are out of scope:
 - [Checkpoint-based validation trade-off](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md#known-trade-off-checkpoint-based-validation)
 - [SDLC indexing design](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)
 - [ADR 014: Entity-level SDLC indexing](014_entity_level_indexing.md)
-- [ADR 015: Transforms over a shared SDLC pipeline](015_pluggable_entity_pipelines.md)
+- [ADR 015: Pluggable transforms over a shared SDLC pipeline](015_pluggable_entity_pipelines.md)
 - [Non-blocking migrations and blue/green deployment](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/7)

@@ -34,7 +34,8 @@ Two accepted decisions shape where a graph query runs:
 - [ADR 008](008_workhorse_query_acceleration.md) gives Workhorse the gRPC stream, so a graph query never holds a Puma worker for its full duration.
 - [ADR 011](011_agent_command_surface.md) says that query execution outside Workhorse loses streaming, because Rails buffers large results.
 
-Rails can now run the stream itself, behind a feature flag that is off by default.
+Rails can now run the stream itself, behind a feature flag.
+The flag is a derisk flag that is off by default, and the deployment tasks for I/O threads are still open.
 The Rails runner redacts in the same process and marks the request as I/O-bound.
 With I/O threads configured, the request does not hold a regular Puma thread, but that setting defaults to zero.
 
@@ -209,6 +210,7 @@ We also defer an explicit Model Context Protocol (MCP) tool and an agent command
 - The command-line interface (CLI) remote routing for context must use the POST request with tokens and the new response.
   The closed CLI draft used a GET request with references.
   Whether a type and ID pair with a colon is a valid token form is still open.
+- Follow-up work covers the Rails resolver, group-level work items, and the per-type named queries in Orbit.
 - We do not decide these future items:
   - More types, such as notes, milestones, users, projects, and groups, through a generic neighbors query.
   - File and definition tokens that resolve from the graph and never from Gitaly, with their own expansion queries.

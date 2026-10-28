@@ -97,10 +97,10 @@ An edge names its source type and ID, its target type and ID, and its relationsh
 Each query type fills the same shape:
 
 - A lookup is a traversal with one node and no relationships, and it returns nodes with no edges.
-- A traversal returns each node once and one edge for each connected pair.
+- A traversal returns each node once and each edge instance between two nodes.
 - A variable-length traversal adds a depth to each edge.
 - Path finding adds a path ID and a step to each edge, and it deduplicates nodes across paths.
-- Neighbors returns the center node as one more node in the list, next to neighbors of mixed types.
+- Neighbors returns the center node as one more node in the list, next to neighbors of mixed types, and edge direction follows the ontology.
 - Aggregation keeps computed values in rows, never on graph nodes.
 
 An aggregation column descriptor names the function, the target node alias, and an optional property.

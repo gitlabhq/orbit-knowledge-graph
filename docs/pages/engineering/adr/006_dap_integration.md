@@ -44,8 +44,8 @@ Rails creates the DWS OAuth token when the workflow starts.
 The DWS executor sends all GitLab API traffic through Workhorse, and DWS makes no direct HTTP calls to Rails.
 The Orbit REST API accepts the workflow scope through the same shared check that other DWS-called APIs use.
 So the integration needs no new authentication mechanism on the data plane.
-The scope covers more than Orbit, so it only admits the token type.
-Every Orbit route also requires the Orbit read permission.
+The scope covers more than Orbit, so every Orbit route also requires the Orbit read permission.
+The scope only admits the token type.
 
 ## Decision
 
@@ -58,7 +58,7 @@ DWS consumes the tools like any other MCP tools, and DWS has no Orbit-specific t
 ```mermaid
 sequenceDiagram
     accTitle: An Orbit tool call from a DAP agent
-    accDescr: Rails creates an OAuth token and starts the workflow in DWS. DWS fetches the MCP configuration, and the agent selects an Orbit tool. Workhorse forwards the tool call to the Orbit MCP endpoint in Rails. Rails checks the token and permission, then calls Orbit over gRPC and answers redaction requests. The result returns the same way.
+    accDescr: Rails creates an OAuth token and starts the workflow in DWS. DWS fetches the MCP configuration through Workhorse, and the agent selects an Orbit tool. Workhorse forwards the tool call to the Orbit MCP endpoint in Rails. Rails checks the token and permission, then calls Orbit over gRPC and answers redaction requests. The result returns the same way.
     participant U as User
     participant R as Rails
     participant D as DWS
@@ -67,7 +67,8 @@ sequenceDiagram
     U->>R: Start Agentic Chat or an agent
     R->>R: Create an OAuth token
     R->>D: Start the workflow over gRPC
-    D->>R: Fetch the MCP configuration for the workflow
+    D->>W: Fetch the MCP configuration for the workflow
+    W->>R: Forward the configuration request
     D->>W: Run an Orbit MCP tool
     W->>R: Forward the tool call with the channel identity header
     R->>R: Check the token and the Orbit permission
