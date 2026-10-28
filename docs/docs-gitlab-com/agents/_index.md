@@ -72,6 +72,7 @@ glab orbit setup [<agent>...] [options]
 | `--yes`, `-y` | Skip the list of agents. |
 | `--skip <component>` | Leave out `instructions`, `hooks`, or `skill`. You can repeat it. |
 | `--skill full` | Install the full skill files in place of the wrapper skill. |
+| `--claude-ui` | Also install the GitLab Orbit plugin for Claude Code. For more information, see [show GitLab Orbit calls in Claude Code](#show-gitlab-orbit-calls-in-claude-code). |
 | `--no-index` | Do not index the repository. |
 | `--project` | Write to the current project in place of your user configuration. |
 | `--dir <path>` | Write to the project in `<path>`. Implies `--project`. |
@@ -87,6 +88,7 @@ By default, setup writes to your user configuration, so the changes affect only 
 | Instructions | All | A block between `<!-- orbit:setup:begin -->` and `<!-- orbit:setup:end -->` in the instruction file of the agent. The block tells the agent to search with `orbit grep` and to read code with `orbit context`. |
 | Hooks | Claude Code, OpenCode | A reminder to use `orbit grep`. For Claude Code, the reminder comes when the agent runs `grep`, `rg`, `ack`, or `ag` in an indexed repository, and never blocks the call. For OpenCode, the reminder comes once each session. |
 | Skill | Claude Code, Codex, GitLab Duo, OpenCode | The `orbit` skill, in `~/.agents/skills/orbit`. For GitLab Duo, setup writes the full skill files. For Claude Code, setup also links the skill in `~/.claude/skills/`, and allows the skill command in `settings.json` so that the skill loads without a prompt. |
+| Plugin | Claude Code, with `--claude-ui` | The `gitlab-orbit` plugin, in `~/.claude/orbit/claude_plugin`. Setup adds the folder as a plugin marketplace and turns on the plugin in `settings.json`. With `--project` or `--dir`, setup uses `.claude/settings.local.json`. |
 
 Other agents that support the [Agent Skills specification](https://agentskills.io/specification), such as Gemini CLI,
 can also load the skill from `~/.agents/skills/orbit`.
@@ -107,6 +109,32 @@ Setup follows these rules:
   To set it for every repository, run `glab config set orbit_cli_auto_run true --global`.
 - With `--project` or `--dir`, setup writes files such as `CLAUDE.md` and `AGENTS.md` in the project.
   Teams usually commit these files, so the change can reach your teammates.
+
+## Show GitLab Orbit calls in Claude Code
+
+The GitLab Orbit plugin for Claude Code marks each GitLab Orbit call in the transcript with the GitLab Orbit icon and a short label.
+For example, a query shows as `◎ Explored Orbit  MergeRequest → Project`.
+After the first call, the number of GitLab Orbit calls, nodes, and edges in the session shows below the prompt.
+The plugin changes only what Claude Code shows.
+
+Prerequisites:
+
+- Claude Code 2.1.287 or later. To check your version, run `claude --version`.
+  On an earlier version, setup skips the plugin.
+
+To install the plugin:
+
+1. Run:
+
+   ```shell
+   glab orbit setup claude --claude-ui
+   ```
+
+1. Start a new Claude Code session.
+1. To check that the plugin loaded, run `/plugin`.
+
+To turn off the plugin, in Claude Code, run `/plugin` and disable `gitlab-orbit` on the **Installed** tab.
+To remove the plugin, run `glab orbit uninstall`.
 
 ## Remove the setup
 
