@@ -1,0 +1,61 @@
+description: Job-minutes per day per runner type for merge request pipelines, and distinct pipelines next to jobs
+
+config:
+  security:
+    paths: ["1/"]
+  redaction:
+    allow:
+      ci_pipeline: [98001, 98002, 98003]
+      ci_build: [98101, 98102, 98103, 98104]
+      ci_runner: [98201, 98202]
+  extra_seed:
+    gl_pipeline:
+      - { id: 98001, project_id: 1000, status: success, source: merge_request_event, created_at: "2024-01-15 08:00:00", traversal_path: "1/100/1000/" }
+      - { id: 98002, project_id: 1000, status: success, source: merge_request_event, created_at: "2024-01-16 08:00:00", traversal_path: "1/100/1000/" }
+      - { id: 98003, project_id: 1000, status: success, source: push, created_at: "2024-01-15 09:00:00", traversal_path: "1/100/1000/" }
+    gl_runner:
+      - { id: 98201, runner_type: instance_type, name: shared }
+      - { id: 98202, runner_type: project_type, name: dedicated }
+    gl_job:
+      - { id: 98101, name: build, status: success, project_id: 1000, pipeline_id: 98001, runner_id: 98201, duration: 60, created_at: "2024-01-15 08:01:00", traversal_path: "1/100/1000/" }
+      - { id: 98102, name: test, status: success, project_id: 1000, pipeline_id: 98001, runner_id: 98202, duration: 120, created_at: "2024-01-17 08:02:00", traversal_path: "1/100/1000/" }
+      - { id: 98103, name: build, status: success, project_id: 1000, pipeline_id: 98002, runner_id: 98201, duration: 180, created_at: "2024-01-16 08:01:00", traversal_path: "1/100/1000/" }
+      - { id: 98104, name: build, status: success, project_id: 1000, pipeline_id: 98003, runner_id: 98201, duration: 600, created_at: "2024-01-15 09:01:00", traversal_path: "1/100/1000/" }
+    gl_ci_edge:
+      - { traversal_path: "1/100/1000/", source_id: 98001, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 98101, target_kind: Job }
+      - { traversal_path: "1/100/1000/", source_id: 98001, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 98102, target_kind: Job }
+      - { traversal_path: "1/100/1000/", source_id: 98002, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 98103, target_kind: Job }
+      - { traversal_path: "1/100/1000/", source_id: 98003, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 98104, target_kind: Job }
+      - { traversal_path: "1/100/1000/", source_id: 98101, source_kind: Job, relationship_kind: RUNS_ON, target_id: 98201, target_kind: Runner }
+      - { traversal_path: "1/100/1000/", source_id: 98102, source_kind: Job, relationship_kind: RUNS_ON, target_id: 98202, target_kind: Runner }
+      - { traversal_path: "1/100/1000/", source_id: 98103, source_kind: Job, relationship_kind: RUNS_ON, target_id: 98201, target_kind: Runner }
+      - { traversal_path: "1/100/1000/", source_id: 98104, source_kind: Job, relationship_kind: RUNS_ON, target_id: 98201, target_kind: Runner }
+
+cases:
+  - name: job_seconds_per_day_and_runner_type
+    description: Summed job seconds per day and runner type for merge request pipelines in one project; the push pipeline is excluded
+    query:
+      gql: |
+        MATCH (pl:Pipeline {project_id: 1000, source: 'merge_request_event'})-[:HAS_JOB]->(j:Job)-[:RUNS_ON]->(r:Runner)
+        WHERE j.created_at >= '2024-01-01T00:00:00Z' AND j.created_at < '2024-02-01T00:00:00Z'
+        RETURN date_trunc('day', j.created_at) AS day, r.runner_type AS runner_type, sum(j.duration) AS seconds
+        ORDER BY day
+        LIMIT 20
+    expect:
+      skip_requirements: ["node_ids", "filter:project_id", "filter:source", "filter:created_at", "aggregation_sort", "aggregation"]
+      row_count: 3
+      row_values:
+        - { day: "2024-01-15", runner_type: instance_type, seconds: 60 }
+        - { day: "2024-01-16", runner_type: instance_type, seconds: 180 }
+        - { day: "2024-01-17", runner_type: project_type, seconds: 120 }
+
+  - name: distinct_pipelines_next_to_jobs
+    description: count(DISTINCT pl) counts each pipeline once while count(j) counts every job
+    query:
+      gql: |
+        MATCH (pl:Pipeline {project_id: 1000, source: 'merge_request_event'})-[:HAS_JOB]->(j:Job)
+        RETURN count(DISTINCT pl) AS pipelines, count(j) AS jobs
+    expect:
+      skip_requirements: ["node_ids", "filter:project_id", "filter:source"]
+      row_count: 1
+      row_values: [{ pipelines: 2, jobs: 3 }]

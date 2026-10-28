@@ -1,0 +1,46 @@
+SELECT
+  id,
+  name,
+  status,
+  ref,
+  tag,
+  allow_failure,
+  coverage,
+  environment,
+  when,
+  retried,
+  failure_reason,
+  created_at,
+  started_at,
+  finished_at,
+  queued_at,
+  if(
+    started_at IS NULL OR finished_at IS NULL,
+    NULL,
+    intDiv(toUnixTimestamp64Micro(finished_at) - toUnixTimestamp64Micro(started_at), 1000000)
+  ) AS duration,
+  if(
+    queued_at IS NULL OR started_at IS NULL,
+    NULL,
+    intDiv(toUnixTimestamp64Micro(started_at) - toUnixTimestamp64Micro(queued_at), 1000000)
+  ) AS queued_duration,
+  type,
+  runner_id,
+  timeout,
+  timeout_source,
+  exit_code,
+  scheduling_type,
+  project_id,
+  user_id,
+  upstream_pipeline_id,
+  stage_id,
+  commit_id,
+  auto_canceled_by_id,
+  traversal_path,
+  partition_id,
+  {{version_column}} AS _version,
+  {{deleted_column}} AS _deleted
+FROM siphon_p_ci_builds
+WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
+ORDER BY traversal_path, id, partition_id
+LIMIT {{batch_size}}
