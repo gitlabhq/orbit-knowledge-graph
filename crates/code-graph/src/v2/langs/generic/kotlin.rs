@@ -274,7 +274,15 @@ impl DslLanguage for KotlinDsl {
                 )
                 .when(has_child(&["navigation_expression"]))
                 .receiver_via(child_of_kind("navigation_expression").first_named()),
-            reference("type_identifier").name_from(text()),
+            reference("type_identifier").name_from(text()).type_use(&[
+                ("type_arguments", crate::v2::types::TypeUsage::Generic),
+                ("as_expression", crate::v2::types::TypeUsage::Cast),
+                ("parameter", crate::v2::types::TypeUsage::Parameter),
+                ("class_parameter", crate::v2::types::TypeUsage::Parameter),
+                ("function_declaration", crate::v2::types::TypeUsage::Return),
+                ("property_declaration", crate::v2::types::TypeUsage::Field),
+                ("variable_declaration", crate::v2::types::TypeUsage::Field),
+            ]),
             // Operator desugaring: binary operators map to named methods.
             // The left operand is the receiver, the method name is derived from the operator.
             reference("additive_expression")

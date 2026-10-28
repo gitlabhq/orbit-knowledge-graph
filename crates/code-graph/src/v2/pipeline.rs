@@ -2,16 +2,15 @@ use crate::v2::config::{Language, LanguageFamily, detect_language_from_path};
 use crate::v2::error::FileReason;
 use crate::v2::sink::{GraphConverter, OnBatch};
 use arrow::record_batch::RecordBatch;
-use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::any::Any;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::v2::linker::{CodeGraph, GraphEdge};
+use crate::v2::linker::CodeGraph;
 use crate::v2::trace::Tracer;
 
 // This is a parse-cost guard for generated Go blobs, not the cumulative Arrow
@@ -148,7 +147,7 @@ pub struct SilentProgress;
 
 impl ProgressObserver for SilentProgress {}
 
-type EdgeTriple = (NodeIndex, NodeIndex, GraphEdge);
+use crate::v2::linker::graph::EdgeTriple;
 
 /// A chain reference that failed resolution in Phase 2, stored for
 /// re-resolution in Phase 3 after return types are merged.
@@ -157,38 +156,32 @@ struct FailedChain {
     chain: Vec<crate::v2::types::ExpressionStep>,
     reaching: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]>,
     enclosing_def: Option<u32>,
+    site: crate::v2::linker::RefSite,
     pending_import_edges: Vec<EdgeTriple>,
 }
 
-fn dedupe_edge_triples(edges: &mut Vec<EdgeTriple>) {
-    let mut seen = FxHashSet::default();
-    edges.retain(|(source, target, edge)| {
-        edge.relationship.target_node != crate::v2::types::NodeKind::Import
-            || seen.insert((source.index(), target.index(), edge.relationship.edge_kind))
-    });
+struct ResolvedEdges {
+    edges: Vec<EdgeTriple>,
+    runs: Vec<Box<[u32]>>,
 }
 
-fn graph_has_edge_kind(
-    graph: &CodeGraph,
-    source: NodeIndex,
-    target: NodeIndex,
-    edge: &GraphEdge,
-) -> bool {
-    graph
-        .graph
-        .edges_connecting(source, target)
-        .any(|existing| existing.weight().relationship.edge_kind == edge.relationship.edge_kind)
+impl ResolvedEdges {
+    fn merged(mut edges: Vec<EdgeTriple>) -> Self {
+        let mut runs = Vec::new();
+        crate::v2::linker::graph::merge_parallel_edges(&mut edges, &mut runs);
+        edges.shrink_to_fit();
+        Self { edges, runs }
+    }
 }
 
-fn add_edge_if_missing(
-    graph: &mut CodeGraph,
-    source: NodeIndex,
-    target: NodeIndex,
-    edge: GraphEdge,
-) {
-    if edge.relationship.target_node != crate::v2::types::NodeKind::Import
-        || !graph_has_edge_kind(graph, source, target, &edge)
-    {
+fn add_resolved_edges(graph: &mut CodeGraph, resolved: ResolvedEdges, merge_existing: bool) {
+    let offset = graph.line_runs.len() as u32;
+    graph.line_runs.extend(resolved.runs);
+    for (source, target, mut edge) in resolved.edges {
+        edge.lines = edge.lines.rebased(offset);
+        if merge_existing && graph.merge_into_existing_edge(source, target, &edge) {
+            continue;
+        }
         graph.graph.add_edge(source, target, edge);
     }
 }
@@ -454,6 +447,7 @@ impl<'a> BatchTx<'a> {
 
 impl BatchTx<'_> {
     pub fn send_graph(&self, mut graph: CodeGraph) {
+        graph.link_structure();
         graph.release_resolution_state();
         self.stats.record_graph(&graph);
         let batches = match self.converter.convert(graph) {
@@ -1231,6 +1225,7 @@ impl FamilyPipeline {
             ext: String,
             file_size: u64,
             parse_ms: f64,
+            generated: bool,
         }
 
         let parse_outcomes: Vec<Option<ParseOutcome>> = files
@@ -1346,8 +1341,10 @@ impl FamilyPipeline {
                     .unwrap_or("")
                     .to_string();
                 let file_size = source.len() as u64;
+                let generated = crate::v2::config::has_generated_marker(&source);
                 progress.files_advanced(ProgressPhase::Parse, 1);
                 Some(ParseOutcome::Ok(Box::new(ParsedFile {
+                    generated,
                     path_idx: idx,
                     language: f.language,
                     result,
@@ -1432,6 +1429,9 @@ impl FamilyPipeline {
                 &parsed_file.result.definitions,
                 &parsed_file.result.imports,
             );
+            if parsed_file.generated {
+                graph.mark_generated(file_node);
+            }
 
             files_with_refs[parsed_file.path_idx] = Some(FileWithRefs {
                 info: FileInfo {
@@ -1502,12 +1502,21 @@ impl FamilyPipeline {
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
 
         type Phase2Result = (
-            Vec<EdgeTriple>,
+            ResolvedEdges,
             Vec<(u32, String)>,
             Option<(FileInfo, Language)>,
             Vec<FailedChain>,
             bool,
         );
+        let empty_phase2 = || -> Phase2Result {
+            (
+                ResolvedEdges::merged(Vec::new()),
+                Vec::new(),
+                None,
+                Vec::new(),
+                false,
+            )
+        };
 
         let resolve_results: Vec<Phase2Result> = files_with_refs
             .into_par_iter()
@@ -1515,11 +1524,11 @@ impl FamilyPipeline {
             .map(|(file_idx, fwr_opt)| -> Phase2Result {
                 if ctx.is_cancelled() {
                     progress.files_advanced(ProgressPhase::Resolve, 1);
-                    return Default::default();
+                    return empty_phase2();
                 }
                 let Some(fwr) = fwr_opt else {
                     progress.files_advanced(ProgressPhase::Resolve, 1);
-                    return Default::default();
+                    return empty_phase2();
                 };
 
                 let lctx = &member_ctxs[&fwr.language];
@@ -1552,12 +1561,17 @@ impl FamilyPipeline {
                 for i in 0..fwr.refs.len() {
                     let before = edges.len();
                     let r = fwr.refs.decode(i, &mut chain_buf, &mut values_buf);
+                    let site = crate::v2::linker::RefSite {
+                        kind: r.kind,
+                        line: r.line,
+                    };
                     if resolver
                         .resolve(
                             r.name,
                             r.has_chain.then_some(chain_buf.as_slice()),
                             &values_buf,
                             r.enclosing_def,
+                            site,
                             &mut edges,
                         )
                         .is_err()
@@ -1572,6 +1586,7 @@ impl FamilyPipeline {
                             chain: chain_buf.clone(),
                             reaching: values_buf.as_slice().into(),
                             enclosing_def: r.enclosing_def,
+                            site,
                             pending_import_edges: import_edges,
                         });
                     } else {
@@ -1589,12 +1604,12 @@ impl FamilyPipeline {
                     language: format!("{}", fwr.language),
                 });
 
-                dedupe_edge_triples(&mut edges);
-                // `dedupe_edge_triples` retains in place and every file's result
-                // is held until the merge, so the slop is repository-wide.
-                edges.shrink_to_fit();
+                if !killed {
+                    edges.extend(resolver.import_resolution_edges());
+                }
+                let edges = ResolvedEdges::merged(edges);
                 failed_chains.shrink_to_fit();
-                total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
+                total_edges.fetch_add(edges.edges.len(), std::sync::atomic::Ordering::Relaxed);
                 progress.files_advanced(ProgressPhase::Resolve, 1);
                 (
                     edges,
@@ -1631,9 +1646,7 @@ impl FamilyPipeline {
                     "per-file watchdog killed analysis",
                 );
             }
-            for (src, tgt, edge) in edges {
-                add_edge_if_missing(&mut graph, src, tgt, edge);
-            }
+            add_resolved_edges(&mut graph, edges, false);
             if let Some((info, lang)) = info_opt {
                 if !inferred.is_empty() {
                     all_inferred.push((info.def_nodes.clone(), inferred));
@@ -1691,6 +1704,7 @@ impl FamilyPipeline {
                                 Some(&failed.chain),
                                 &failed.reaching,
                                 failed.enclosing_def,
+                                failed.site,
                                 &mut edges,
                             )
                             .is_err()
@@ -1706,18 +1720,14 @@ impl FamilyPipeline {
                             }
                         }
                     }
-                    dedupe_edge_triples(&mut edges);
-                    edges.shrink_to_fit();
-                    edges
+                    ResolvedEdges::merged(edges)
                 })
                 .collect();
 
             let mut phase3_edges = 0usize;
             for edges in phase3_results {
-                phase3_edges += edges.len();
-                for (src, tgt, edge) in edges {
-                    add_edge_if_missing(&mut graph, src, tgt, edge);
-                }
+                phase3_edges += edges.edges.len();
+                add_resolved_edges(&mut graph, edges, true);
             }
             if phase3_edges > 0 {
                 orbit_log_fields::info!(

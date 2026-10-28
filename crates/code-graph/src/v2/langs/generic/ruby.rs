@@ -132,17 +132,20 @@ impl DslLanguage for RubyDsl {
             // name, the LHS of an assignment, etc. The chain handler already
             // picks up constants used as receivers (`Foo.bar`), so
             // `!parent_is("call")` avoids a duplicate edge there.
-            reference("constant").name_from(text()).when(
-                (!parent_is("scope_resolution"))
-                    .and(!parent_is("call"))
-                    .and(!parent_is("superclass"))
-                    .and(!parent_is("left_assignment_list"))
-                    .and(!parent_is("singleton_class"))
-                    .and(!parent_is("class").and(!has_named_prev_sibling()))
-                    .and(!parent_is("module").and(!has_named_prev_sibling()))
-                    .and(!parent_is("assignment").and(!has_named_prev_sibling()))
-                    .and(!parent_is("operator_assignment").and(!has_named_prev_sibling())),
-            ),
+            reference("constant")
+                .name_from(text())
+                .kind(crate::v2::types::RefKind::Value)
+                .when(
+                    (!parent_is("scope_resolution"))
+                        .and(!parent_is("call"))
+                        .and(!parent_is("superclass"))
+                        .and(!parent_is("left_assignment_list"))
+                        .and(!parent_is("singleton_class"))
+                        .and(!parent_is("class").and(!has_named_prev_sibling()))
+                        .and(!parent_is("module").and(!has_named_prev_sibling()))
+                        .and(!parent_is("assignment").and(!has_named_prev_sibling()))
+                        .and(!parent_is("operator_assignment").and(!has_named_prev_sibling())),
+                ),
             // bare method call without parens/args — just an identifier in Ruby
             // e.g. `validate_name` inside a method body. Exclude positions
             // where identifiers are definitely not method calls.

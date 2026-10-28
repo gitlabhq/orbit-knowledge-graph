@@ -81,6 +81,8 @@ pub struct CollectedRef {
     pub chain: Option<Vec<ExpressionStep>>,
     pub reaching: Vec<crate::v2::types::ssa::ParseValue>,
     pub enclosing_def: Option<u32>,
+    pub kind: crate::v2::types::RefKind,
+    pub line: u32,
 }
 
 /// Result of a full parse (defs + imports + refs). The refs have SSA
@@ -200,7 +202,12 @@ impl LanguageSpec {
         module_prefix: Option<&str>,
         sep: &str,
         tracer: &Tracer,
-    ) -> Option<(String, crate::utils::Range, Option<Vec<ExpressionStep>>)> {
+    ) -> Option<(
+        String,
+        crate::utils::Range,
+        Option<Vec<ExpressionStep>>,
+        crate::v2::types::RefKind,
+    )> {
         let indices = self.ref_dispatch.get(node_kind)?;
         let rule = indices
             .iter()
@@ -228,7 +235,7 @@ impl LanguageSpec {
                 if chain.len() > 1 { Some(chain) } else { None }
             });
 
-        Some((name, node_to_range(node), expression))
+        Some((name, node_to_range(node), expression, rule.kind_at(node)))
     }
 
     /// Iteratively walk a receiver expression, building the chain
@@ -1039,6 +1046,8 @@ impl LanguageSpec {
                                     block: state.current_block,
                                     enclosing_def: Some(def_index),
                                     is_return: false,
+                                    kind: crate::v2::types::RefKind::Annotation,
+                                    line: sibling.start_pos().line() as u32 + 1,
                                 });
                             }
                         }
@@ -1287,12 +1296,12 @@ impl LanguageSpec {
                     RefEvaluated {
                         node_kind: nk.to_string(),
                         matched: ref_result.is_some(),
-                        name: ref_result.as_ref().map(|(n, _, _)| n.clone()),
-                        has_chain: ref_result.as_ref().is_some_and(|(_, _, e)| e.is_some()),
+                        name: ref_result.as_ref().map(|(n, _, _, _)| n.clone()),
+                        has_chain: ref_result.as_ref().is_some_and(|(_, _, e, _)| e.is_some()),
                     }
                 );
             }
-            if let Some((mut name, _range, expression)) = ref_result {
+            if let Some((mut name, range, expression, ref_kind)) = ref_result {
                 if let Some(rewrite) = self.hooks.ref_name_rewrite
                     && let Some(new_name) = rewrite(node, &name)
                 {
@@ -1343,6 +1352,8 @@ impl LanguageSpec {
                     block: state.current_block,
                     enclosing_def: state.enclosing_def_stack.last().copied(),
                     is_return: state.in_return,
+                    kind: ref_kind,
+                    line: range.start.line as u32 + 1,
                 });
             }
         }
@@ -1530,6 +1541,8 @@ struct PendingRef<'a> {
     block: super::ssa::BlockId,
     enclosing_def: Option<u32>,
     is_return: bool,
+    kind: crate::v2::types::RefKind,
+    line: u32,
 }
 
 struct WalkFullState<'a> {
@@ -1653,6 +1666,8 @@ impl<'a> WalkFullState<'a> {
                 chain: chain_slice.map(|s| s.to_vec()),
                 reaching: parse_values.to_vec(),
                 enclosing_def: pending.enclosing_def,
+                kind: pending.kind,
+                line: pending.line,
             });
         }
         collected

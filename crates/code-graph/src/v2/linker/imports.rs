@@ -76,7 +76,8 @@ impl<'a> ImportResolver<'a> {
         &mut self,
         strategies: &[ImportStrategy],
         name: &str,
-    ) -> Vec<NodeIndex> {
+    ) -> (Vec<NodeIndex>, crate::v2::types::Resolution) {
+        use crate::v2::types::Resolution;
         for strategy in strategies {
             let candidates = match strategy {
                 ImportStrategy::ScopeFqnWalk => self.scope_fqn_walk(name),
@@ -89,10 +90,20 @@ impl<'a> ImportResolver<'a> {
                 ImportStrategy::IncludeGraph => self.include_graph(name),
             };
             if !candidates.is_empty() {
-                return candidates;
+                let resolution = match strategy {
+                    ImportStrategy::ExplicitImport
+                    | ImportStrategy::IncludeGraph
+                    | ImportStrategy::GlobalName
+                    | ImportStrategy::FilePath => Resolution::Import,
+                    ImportStrategy::WildcardImport => Resolution::WildcardImport,
+                    ImportStrategy::ScopeFqnWalk
+                    | ImportStrategy::SamePackage
+                    | ImportStrategy::SameFile => Resolution::Local,
+                };
+                return (candidates, resolution);
             }
         }
-        vec![]
+        (vec![], Resolution::None)
     }
 
     pub fn resolve_import(&mut self, import_idx: NodeIndex) -> Vec<NodeIndex> {

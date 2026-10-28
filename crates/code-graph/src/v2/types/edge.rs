@@ -8,8 +8,61 @@ pub enum EdgeKind {
     Contains,
     Defines,
     ResolvesTo,
+    DependsOn,
     Calls,
+    Instantiates,
+    UsesValue,
+    UsesType,
     Extends,
+    Implements,
+    Overrides,
+    AnnotatedBy,
+}
+
+impl EdgeKind {
+    pub const fn is_supertype(&self) -> bool {
+        matches!(self, Self::Extends | Self::Implements)
+    }
+
+    pub const fn needs_definition_source(&self) -> bool {
+        matches!(self, Self::UsesType | Self::AnnotatedBy)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, AsRefStr)]
+#[strum(serialize_all = "snake_case")]
+pub enum Resolution {
+    #[default]
+    #[strum(serialize = "")]
+    None,
+    WildcardImport,
+    InferredType,
+    DeclaredType,
+    Import,
+    Local,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum RefKind {
+    #[default]
+    Call,
+    Value,
+    Write,
+    Type(TypeUsage),
+    Annotation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, AsRefStr)]
+#[strum(serialize_all = "snake_case")]
+pub enum TypeUsage {
+    #[default]
+    #[strum(serialize = "")]
+    Unknown,
+    Parameter,
+    Return,
+    Field,
+    Generic,
+    Cast,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, EnumString, AsRefStr, Display)]

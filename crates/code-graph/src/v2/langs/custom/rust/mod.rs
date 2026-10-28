@@ -761,15 +761,13 @@ fn add_unresolved_imported_call_edges(graph: &mut CodeGraph, parsed: &[ParsedRus
             graph.graph.add_edge(
                 source_node,
                 target_node,
-                GraphEdge {
-                    relationship: Relationship {
-                        edge_kind: EdgeKind::Calls,
-                        source_node: NodeKind::Definition,
-                        target_node: NodeKind::Import,
-                        source_def_kind: Some(graph.def(source_node).kind),
-                        target_def_kind: None,
-                    },
-                },
+                GraphEdge::new(Relationship {
+                    edge_kind: EdgeKind::Calls,
+                    source_node: NodeKind::Definition,
+                    target_node: NodeKind::Import,
+                    source_def_kind: Some(graph.def(source_node).kind),
+                    target_def_kind: None,
+                }),
             );
         }
     }

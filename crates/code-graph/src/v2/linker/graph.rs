@@ -6,7 +6,7 @@ use crate::trace_event;
 use crate::v2::config::Language;
 use crate::v2::types::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, DefScope, EdgeKind,
-    NodeKind, Range, Relationship, containment_relationship,
+    NodeKind, Range, Relationship, Resolution, TypeUsage, containment_relationship,
 };
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
 
@@ -14,8 +14,8 @@ fn common_prefix_len(a: &str, b: &str) -> usize {
     a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
 }
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::{Bfs, EdgeFiltered, VisitMap, Visitable};
-use rustc_hash::{FxHashMap, FxHasher};
+use petgraph::visit::{Bfs, EdgeFiltered, EdgeRef, VisitMap, Visitable};
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use smallvec::SmallVec;
 use std::collections::VecDeque;
 
@@ -77,20 +77,125 @@ impl GraphNode {
 #[derive(Debug, Clone)]
 pub struct GraphEdge {
     pub relationship: Relationship,
+    pub resolution: Resolution,
+    pub usage: TypeUsage,
+    pub write: bool,
+    pub lines: Lines,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Lines(u32);
+
+impl Lines {
+    const INLINE: u32 = 1 << 31;
+
+    pub const fn none() -> Self {
+        Self(0)
+    }
+
+    pub const fn one(line: u32) -> Self {
+        Self(Self::INLINE | (line & !Self::INLINE))
+    }
+
+    const fn run(index: u32) -> Self {
+        Self(index + 1)
+    }
+
+    pub const fn rebased(self, offset: u32) -> Self {
+        match self.0 {
+            0 => self,
+            v if v & Self::INLINE != 0 => self,
+            v => Self(v + offset),
+        }
+    }
+
+    pub fn get<'a>(&self, runs: &'a [Box<[u32]>], single: &'a mut [u32; 1]) -> &'a [u32] {
+        match self.0 {
+            0 => &[],
+            v if v & Self::INLINE != 0 => {
+                single[0] = v & !Self::INLINE;
+                &single[..]
+            }
+            v => runs.get((v - 1) as usize).map_or(&[], |r| &r[..]),
+        }
+    }
 }
 
 impl GraphEdge {
-    pub fn structural(edge_kind: EdgeKind, source: NodeKind, target: NodeKind) -> Self {
+    pub fn new(relationship: Relationship) -> Self {
         Self {
-            relationship: Relationship {
-                edge_kind,
-                source_node: source,
-                target_node: target,
-                source_def_kind: None,
-                target_def_kind: None,
-            },
+            relationship,
+            resolution: Resolution::None,
+            usage: TypeUsage::Unknown,
+            write: false,
+            lines: Lines::none(),
         }
     }
+
+    pub fn structural(edge_kind: EdgeKind, source: NodeKind, target: NodeKind) -> Self {
+        Self::new(Relationship {
+            edge_kind,
+            source_node: source,
+            target_node: target,
+            source_def_kind: None,
+            target_def_kind: None,
+        })
+    }
+
+    pub fn with_resolution(mut self, resolution: Resolution) -> Self {
+        self.resolution = resolution;
+        self
+    }
+}
+
+pub type EdgeTriple = (NodeIndex, NodeIndex, GraphEdge);
+
+pub fn merge_parallel_edges(edges: &mut Vec<EdgeTriple>, runs: &mut Vec<Box<[u32]>>) {
+    if edges.len() < 2 {
+        return;
+    }
+    edges.sort_by_key(|(s, t, e)| (s.index(), t.index(), e.relationship.edge_kind as u8));
+    let mut merged: Vec<EdgeTriple> = Vec::with_capacity(edges.len());
+    let mut lines: Vec<u32> = Vec::new();
+    let mut single = [0u32; 1];
+    let flush = |merged: &mut Vec<EdgeTriple>, lines: &mut Vec<u32>, runs: &mut Vec<Box<[u32]>>| {
+        if let Some(last) = merged.last_mut() {
+            lines.sort_unstable();
+            lines.dedup();
+            lines.truncate(crate::v2::types::text::LINES_MAX);
+            last.2.lines = match lines.as_slice() {
+                [] => Lines::none(),
+                [one] => Lines::one(*one),
+                many => {
+                    runs.push(many.into());
+                    Lines::run(runs.len() as u32 - 1)
+                }
+            };
+        }
+        lines.clear();
+    };
+    for (s, t, e) in edges.drain(..) {
+        let same = merged.last().is_some_and(|(ls, lt, le)| {
+            *ls == s && *lt == t && le.relationship.edge_kind == e.relationship.edge_kind
+        });
+        let edge_lines = e.lines.get(runs, &mut single).to_vec();
+        if same {
+            let last = merged.last_mut().map(|m| &mut m.2);
+            if let Some(last) = last {
+                last.resolution = last.resolution.max(e.resolution);
+                last.write |= e.write;
+                if last.usage == TypeUsage::Unknown {
+                    last.usage = e.usage;
+                }
+            }
+        } else {
+            flush(&mut merged, &mut lines, runs);
+            merged.push((s, t, e));
+        }
+        lines.extend(edge_lines);
+    }
+    flush(&mut merged, &mut lines, runs);
+    *edges = merged;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,6 +308,7 @@ pub struct CodeGraph {
     pub root_path: String,
     pub output: GraphOutput,
     pub rules: Option<std::sync::Arc<super::rules::ResolutionRules>>,
+    pub line_runs: Vec<Box<[u32]>>,
 }
 
 /// Distinct tag sets plus one index per node. The ontology declares a closed set
@@ -230,6 +336,7 @@ impl CodeGraph {
             root_path: String::new(),
             output: GraphOutput::Complete,
             rules: None,
+            line_runs: Vec::new(),
         }
     }
 
@@ -356,6 +463,7 @@ impl CodeGraph {
             language,
             size: file_size,
             reason,
+            flags: crate::v2::config::path_flags(&relative_path),
         })));
         if let Some(fi) = &mut self.indexes.file_index {
             fi.insert(relative_path.clone(), file_node);
@@ -426,11 +534,8 @@ impl CodeGraph {
                         found_parent = true;
                     }
                     if let Some(rel) = containment_relationship(parent_def.kind, gdef.kind) {
-                        self.graph.add_edge(
-                            def_nodes[j],
-                            def_nodes[i],
-                            GraphEdge { relationship: rel },
-                        );
+                        self.graph
+                            .add_edge(def_nodes[j], def_nodes[i], GraphEdge::new(rel));
                         scope = DefScope::inside(parent_def.kind);
                         break;
                     }
@@ -507,7 +612,7 @@ impl CodeGraph {
         let extends_only = EdgeFiltered(
             &self.graph,
             |e: petgraph::graph::EdgeReference<'_, GraphEdge>| {
-                e.weight().relationship.edge_kind == EdgeKind::Extends
+                e.weight().relationship.edge_kind.is_supertype()
             },
         );
 
@@ -523,7 +628,7 @@ impl CodeGraph {
             let has_extends = self
                 .graph
                 .edges_directed(idx, petgraph::Direction::Outgoing)
-                .any(|e| e.weight().relationship.edge_kind == EdgeKind::Extends);
+                .any(|e| e.weight().relationship.edge_kind.is_supertype());
             if !has_extends {
                 continue;
             }
@@ -796,15 +901,13 @@ impl CodeGraph {
         self.graph.add_edge(
             source_node,
             target_node,
-            GraphEdge {
-                relationship: Relationship {
-                    edge_kind: EdgeKind::Calls,
-                    source_node: source_node_kind,
-                    target_node: NodeKind::Definition,
-                    source_def_kind,
-                    target_def_kind,
-                },
-            },
+            GraphEdge::new(Relationship {
+                edge_kind: EdgeKind::Calls,
+                source_node: source_node_kind,
+                target_node: NodeKind::Definition,
+                source_def_kind,
+                target_def_kind,
+            }),
         );
     }
 
@@ -1087,15 +1190,249 @@ impl CodeGraph {
         }
 
         for (child, parent) in edges {
+            let parent_kind = self.def_kind(parent);
+            let edge_kind = if parent_kind.is_interface_like() {
+                EdgeKind::Implements
+            } else {
+                EdgeKind::Extends
+            };
+            let resolution = self.resolution_between(child, parent);
             self.graph.add_edge(
                 child,
                 parent,
-                GraphEdge::structural(
-                    EdgeKind::Extends,
-                    NodeKind::Definition,
-                    NodeKind::Definition,
-                ),
+                GraphEdge::new(Relationship {
+                    edge_kind,
+                    source_node: NodeKind::Definition,
+                    target_node: NodeKind::Definition,
+                    source_def_kind: Some(self.def_kind(child)),
+                    target_def_kind: Some(parent_kind),
+                })
+                .with_resolution(resolution),
             );
+        }
+    }
+
+    fn resolution_between(&self, source: NodeIndex, target: NodeIndex) -> Resolution {
+        if self.graph[source].path() == self.graph[target].path() {
+            Resolution::Local
+        } else {
+            Resolution::Import
+        }
+    }
+
+    pub fn has_members(&self, scope_fqn: &str) -> bool {
+        !scope_fqn.is_empty()
+            && self
+                .strings
+                .find(scope_fqn)
+                .is_some_and(|id| self.indexes.nested.contains_scope(id))
+    }
+
+    pub fn mark_generated(&mut self, file_node: NodeIndex) {
+        if let GraphNode::File(file) = &mut self.graph[file_node] {
+            file.flags.is_generated = true;
+        }
+    }
+
+    pub fn mark_external_import(&mut self, node: NodeIndex) {
+        if let Some(id) = self.graph[node].import_id() {
+            self.imports[id.0 as usize].is_external = true;
+        }
+    }
+
+    pub fn edge_lines(&self, edge: &GraphEdge) -> Vec<u32> {
+        let mut single = [0u32; 1];
+        edge.lines.get(&self.line_runs, &mut single).to_vec()
+    }
+
+    pub fn merge_into_existing_edge(
+        &mut self,
+        source: NodeIndex,
+        target: NodeIndex,
+        edge: &GraphEdge,
+    ) -> bool {
+        let Some(existing) = self
+            .graph
+            .edges_connecting(source, target)
+            .find(|e| e.weight().relationship.edge_kind == edge.relationship.edge_kind)
+            .map(|e| e.id())
+        else {
+            return false;
+        };
+        let mut lines = self.edge_lines(&self.graph[existing]);
+        lines.extend(self.edge_lines(edge));
+        lines.sort_unstable();
+        lines.dedup();
+        lines.truncate(crate::v2::types::text::LINES_MAX);
+        let merged = match lines.as_slice() {
+            [] => Lines::none(),
+            [one] => Lines::one(*one),
+            many => {
+                self.line_runs.push(many.into());
+                Lines::run(self.line_runs.len() as u32 - 1)
+            }
+        };
+        let weight = &mut self.graph[existing];
+        weight.lines = merged;
+        weight.resolution = weight.resolution.max(edge.resolution);
+        weight.write |= edge.write;
+        true
+    }
+
+    fn file_of(&self, node: NodeIndex) -> Option<NodeIndex> {
+        self.graph
+            .neighbors_directed(node, petgraph::Direction::Incoming)
+            .find(|&n| matches!(self.graph[n], GraphNode::File(_)))
+    }
+
+    fn owner_of(&self, node: NodeIndex) -> Option<NodeIndex> {
+        self.graph
+            .edges_directed(node, petgraph::Direction::Incoming)
+            .filter(|e| e.weight().relationship.edge_kind == EdgeKind::Defines)
+            .map(|e| e.source())
+            .find(|&n| matches!(self.graph[n], GraphNode::Definition { .. }))
+    }
+
+    pub fn link_structure(&mut self) {
+        let mut added: Vec<EdgeTriple> = Vec::new();
+        let sep = self.sep().to_string();
+        let import_nodes: Vec<NodeIndex> = self
+            .graph
+            .node_indices()
+            .filter(|&n| matches!(self.graph[n], GraphNode::Import { .. }))
+            .collect();
+        for node in import_nodes {
+            let resolved = self
+                .graph
+                .edges_directed(node, petgraph::Direction::Outgoing)
+                .any(|e| e.weight().relationship.edge_kind == EdgeKind::ResolvesTo);
+            if resolved {
+                continue;
+            }
+            let import = self.import(node);
+            let path = self.str(import.path);
+            let targets: Vec<NodeIndex> = match (import.wildcard, import.name.map(|n| self.str(n)))
+            {
+                (false, Some(name)) if !path.is_empty() => {
+                    self.lookup_fqn(&format!("{path}{sep}{name}")).to_vec()
+                }
+                (false, Some(name)) => self.lookup_fqn(name).to_vec(),
+                (false, None) => self.lookup_fqn(path).to_vec(),
+                (true, _) => Vec::new(),
+            };
+            let local_package = import.wildcard && self.has_members(path);
+            for &target in &targets {
+                added.push((
+                    node,
+                    target,
+                    GraphEdge::new(Relationship {
+                        edge_kind: EdgeKind::ResolvesTo,
+                        source_node: NodeKind::Import,
+                        target_node: NodeKind::Definition,
+                        source_def_kind: None,
+                        target_def_kind: Some(self.def_kind(target)),
+                    })
+                    .with_resolution(Resolution::Import),
+                ));
+            }
+            if targets.is_empty() && !local_package {
+                self.mark_external_import(node);
+            }
+        }
+        for (source, target, edge) in added.drain(..) {
+            self.graph.add_edge(source, target, edge);
+        }
+        let mut dependencies: FxHashSet<(NodeIndex, NodeIndex)> = FxHashSet::default();
+        for edge in self.graph.edge_references() {
+            if edge.weight().relationship.edge_kind != EdgeKind::ResolvesTo {
+                continue;
+            }
+            let Some(source_file) = self.file_of(edge.source()) else {
+                continue;
+            };
+            let target_file = match self.graph[edge.target()] {
+                GraphNode::File(_) => Some(edge.target()),
+                _ => self.file_of(edge.target()),
+            };
+            if let Some(target_file) = target_file
+                && target_file != source_file
+            {
+                dependencies.insert((source_file, target_file));
+            }
+        }
+        let mut dependencies: Vec<_> = dependencies.into_iter().collect();
+        dependencies.sort_unstable_by_key(|(a, b)| (a.index(), b.index()));
+        for (source, target) in dependencies {
+            added.push((
+                source,
+                target,
+                GraphEdge::structural(EdgeKind::DependsOn, NodeKind::File, NodeKind::File),
+            ));
+        }
+
+        for idx in self.graph.node_indices() {
+            let Some(def) = self.try_def(idx) else {
+                continue;
+            };
+            if let Some(receiver) = def.metadata.as_ref().and_then(|m| m.receiver_type) {
+                let has_owner = self.owner_of(idx).is_some();
+                let owners: SmallVec<[NodeIndex; 8]> = self
+                    .resolve_scope_nodes(self.str(receiver))
+                    .into_iter()
+                    .filter(|&n| self.def_kind(n).is_type_container())
+                    .collect();
+                if !has_owner
+                    && let [owner] = owners.as_slice()
+                    && let Some(rel) = containment_relationship(self.def_kind(*owner), def.kind)
+                {
+                    added.push((*owner, idx, GraphEdge::new(rel)));
+                }
+            }
+            if def.kind != crate::v2::types::DefKind::Method {
+                continue;
+            }
+            let Some(owner) = self
+                .owner_of(idx)
+                .filter(|&n| self.def_kind(n).is_type_container())
+            else {
+                continue;
+            };
+            let Some(chain) = self.indexes.ancestors.get(&owner) else {
+                continue;
+            };
+            let name = def.name;
+            for &ancestor in chain {
+                let found: Vec<NodeIndex> = self
+                    .indexes
+                    .nested
+                    .lookup(self.def(ancestor).fqn, name)
+                    .iter()
+                    .copied()
+                    .filter(|&n| n != idx && self.def_kind(n) == crate::v2::types::DefKind::Method)
+                    .collect();
+                if found.is_empty() {
+                    continue;
+                }
+                for target in found {
+                    let resolution = self.resolution_between(idx, target);
+                    added.push((
+                        idx,
+                        target,
+                        GraphEdge::new(Relationship {
+                            edge_kind: EdgeKind::Overrides,
+                            source_node: NodeKind::Definition,
+                            target_node: NodeKind::Definition,
+                            source_def_kind: Some(crate::v2::types::DefKind::Method),
+                            target_def_kind: Some(crate::v2::types::DefKind::Method),
+                        })
+                        .with_resolution(resolution),
+                    ));
+                }
+                break;
+            }
+        }
+        for (source, target, edge) in added {
+            self.graph.add_edge(source, target, edge);
         }
     }
 

@@ -228,9 +228,21 @@ impl DslLanguage for CSharpDsl {
             reference("object_creation_expression").name_from(field("type")),
             reference("type_identifier")
                 .name_from(text())
-                .when(!parent_is("object_creation_expression")),
-            reference("is_pattern_expression").name_from(field("pattern")),
-            reference("attribute").name_from(field("name")),
+                .when(!parent_is("object_creation_expression"))
+                .type_use(&[
+                    ("type_argument_list", crate::v2::types::TypeUsage::Generic),
+                    ("cast_expression", crate::v2::types::TypeUsage::Cast),
+                    ("parameter", crate::v2::types::TypeUsage::Parameter),
+                    ("method_declaration", crate::v2::types::TypeUsage::Return),
+                    ("property_declaration", crate::v2::types::TypeUsage::Field),
+                    ("variable_declaration", crate::v2::types::TypeUsage::Field),
+                ]),
+            reference("is_pattern_expression")
+                .name_from(field("pattern"))
+                .type_use(&[("is_pattern_expression", crate::v2::types::TypeUsage::Cast)]),
+            reference("attribute")
+                .name_from(field("name"))
+                .kind(crate::v2::types::RefKind::Annotation),
         ]
     }
 

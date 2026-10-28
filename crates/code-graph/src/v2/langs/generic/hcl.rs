@@ -94,7 +94,9 @@ impl DslLanguage for HclDsl {
     fn refs() -> Vec<ReferenceRule> {
         vec![
             reference("function_call").name_from(child_of_kind("identifier")),
-            reference("variable_expr").name_from(child_of_kind("identifier")),
+            reference("variable_expr")
+                .name_from(child_of_kind("identifier"))
+                .kind(crate::v2::types::RefKind::Value),
         ]
     }
 

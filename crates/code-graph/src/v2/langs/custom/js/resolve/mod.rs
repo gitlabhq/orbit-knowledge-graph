@@ -141,15 +141,14 @@ pub fn attach_resolution_edges(
             &mut seen,
             source_node,
             target_node,
-            GraphEdge {
-                relationship: Relationship {
-                    edge_kind: EdgeKind::ResolvesTo,
-                    source_node: NodeKind::Import,
-                    target_node: target_node_kind,
-                    source_def_kind: None,
-                    target_def_kind,
-                },
-            },
+            GraphEdge::new(Relationship {
+                edge_kind: EdgeKind::ResolvesTo,
+                source_node: NodeKind::Import,
+                target_node: target_node_kind,
+                source_def_kind: None,
+                target_def_kind,
+            })
+            .with_resolution(crate::v2::types::Resolution::Import),
         ) {
             locally_resolved_imports.insert(source_node);
         }
@@ -218,6 +217,7 @@ fn resolve_local_call_edges(
             call.chain.as_deref(),
             &call.reaching,
             call.enclosing_def,
+            crate::v2::linker::RefSite::default(),
             &mut resolved,
         );
 
@@ -332,15 +332,13 @@ fn append_direct_class_invocations(
         edges.push((
             source_node,
             target_node,
-            GraphEdge {
-                relationship: Relationship {
-                    edge_kind: EdgeKind::Calls,
-                    source_node: source_node_kind,
-                    target_node: NodeKind::Definition,
-                    source_def_kind,
-                    target_def_kind: Some(DefKind::Class),
-                },
-            },
+            GraphEdge::new(Relationship {
+                edge_kind: EdgeKind::Calls,
+                source_node: source_node_kind,
+                target_node: NodeKind::Definition,
+                source_def_kind,
+                target_def_kind: Some(DefKind::Class),
+            }),
         ));
     }
 }
@@ -528,15 +526,13 @@ fn add_call_relationship_edge(
         seen,
         source_node,
         target_node,
-        GraphEdge {
-            relationship: Relationship {
-                edge_kind: EdgeKind::Calls,
-                source_node: source_node_kind,
-                target_node: NodeKind::Definition,
-                source_def_kind,
-                target_def_kind: Some(graph.def(target_node).kind),
-            },
-        },
+        GraphEdge::new(Relationship {
+            edge_kind: EdgeKind::Calls,
+            source_node: source_node_kind,
+            target_node: NodeKind::Definition,
+            source_def_kind,
+            target_def_kind: Some(graph.def(target_node).kind),
+        }),
     );
 }
 
@@ -564,15 +560,13 @@ fn add_unresolved_imported_call_edges(
                 seen,
                 source.node,
                 target_node,
-                GraphEdge {
-                    relationship: Relationship {
-                        edge_kind: EdgeKind::Calls,
-                        source_node: source.node_kind,
-                        target_node: NodeKind::Import,
-                        source_def_kind: source.def_kind,
-                        target_def_kind: None,
-                    },
-                },
+                GraphEdge::new(Relationship {
+                    edge_kind: EdgeKind::Calls,
+                    source_node: source.node_kind,
+                    target_node: NodeKind::Import,
+                    source_def_kind: source.def_kind,
+                    target_def_kind: None,
+                }),
             );
         }
     }

@@ -145,6 +145,10 @@ impl NestedMap {
         candidates.as_slice()
     }
 
+    pub fn contains_scope(&self, scope: StrId) -> bool {
+        self.inner.contains_key(&scope)
+    }
+
     pub fn lookup_into(&self, scope: StrId, member: StrId, out: &mut Vec<NodeIndex>) -> bool {
         let Some(inner) = self.inner.get(&scope) else {
             return false;
@@ -322,6 +326,7 @@ pub struct GraphImport {
     pub range: Range,
     pub is_type_only: bool,
     pub wildcard: bool,
+    pub is_external: bool,
 }
 
 impl GraphDef {
@@ -374,6 +379,7 @@ impl GraphImport {
             range: imp.range,
             is_type_only: imp.is_type_only,
             wildcard: imp.wildcard,
+            is_external: false,
         }
     }
 }

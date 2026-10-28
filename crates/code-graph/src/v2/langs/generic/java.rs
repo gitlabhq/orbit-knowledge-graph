@@ -18,6 +18,14 @@ use crate::v2::linker::{HasRules, ResolveSettings};
 #[derive(Default)]
 pub struct JavaDsl;
 
+const JAVA_TYPE_USES: &[(&str, crate::v2::types::TypeUsage)] = &[
+    ("type_arguments", crate::v2::types::TypeUsage::Generic),
+    ("cast_expression", crate::v2::types::TypeUsage::Cast),
+    ("formal_parameter", crate::v2::types::TypeUsage::Parameter),
+    ("method_declaration", crate::v2::types::TypeUsage::Return),
+    ("field_declaration", crate::v2::types::TypeUsage::Field),
+];
+
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 fn java_super_types(node: &N<'_>) -> Vec<String> {
@@ -265,7 +273,8 @@ impl DslLanguage for JavaDsl {
             // Skip inside object_creation_expression (already tracked above).
             reference("type_identifier")
                 .name_from(text())
-                .when(!parent_is("object_creation_expression")),
+                .when(!parent_is("object_creation_expression"))
+                .type_use(JAVA_TYPE_USES),
             reference("method_reference")
                 .name_from(
                     Extract::terminal(treesitter_visit::extract::Emit::Text).nth(
@@ -281,7 +290,9 @@ impl DslLanguage for JavaDsl {
                         0,
                     ),
                 ),
-            references(&["marker_annotation", "annotation"]).name_from(field("name")),
+            references(&["marker_annotation", "annotation"])
+                .name_from(field("name"))
+                .kind(crate::v2::types::RefKind::Annotation),
         ]
     }
 

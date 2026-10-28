@@ -21,6 +21,18 @@ use crate::v2::linker::rules::{
 #[derive(Default)]
 pub struct PythonDsl;
 
+const PYTHON_TYPE_USES: &[(&str, crate::v2::types::TypeUsage)] = &[
+    ("subscript", crate::v2::types::TypeUsage::Generic),
+    ("generic_type", crate::v2::types::TypeUsage::Generic),
+    ("typed_parameter", crate::v2::types::TypeUsage::Parameter),
+    (
+        "typed_default_parameter",
+        crate::v2::types::TypeUsage::Parameter,
+    ),
+    ("function_definition", crate::v2::types::TypeUsage::Return),
+    ("assignment", crate::v2::types::TypeUsage::Field),
+];
+
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 fn python_super_types(node: &N<'_>) -> Vec<String> {
@@ -234,8 +246,11 @@ impl DslLanguage for PythonDsl {
             reference("attribute")
                 .name_from(field("attribute"))
                 .receiver_chain(&["object"])
-                .when(!parent_is("call")),
-            reference("type").name_from(text()),
+                .when(!parent_is("call"))
+                .kind(crate::v2::types::RefKind::Value),
+            reference("type")
+                .name_from(text())
+                .type_use(PYTHON_TYPE_USES),
         ]
     }
 

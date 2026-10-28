@@ -6,7 +6,7 @@ pub mod state;
 
 pub use graph::{CodeGraph, GraphEdge, GraphNode};
 pub use imports::ResolveSettings;
-pub use resolver::FileResolver;
+pub use resolver::{FileResolver, RefSite};
 pub use rules::{
     AmbientImportFallback, HasRules, ImportedSymbolFallbackPolicy, NoRules, ResolutionRules,
     ResolverHooks,

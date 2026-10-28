@@ -8,22 +8,61 @@
 //! one ref at a time into reusable scratch buffers.
 
 use crate::v2::dsl::engine::CollectedRef;
-use crate::v2::types::ExpressionStep;
 use crate::v2::types::ssa::ParseValue;
+use crate::v2::types::{ExpressionStep, RefKind, TypeUsage};
 use orbit_utils::strings::{StrId, StringPool};
 use smol_str::SmolStr;
 
 const NO_CHAIN: u32 = u32::MAX;
 const NO_ENCLOSING: u32 = u32::MAX;
+const KIND_SHIFT: u32 = 24;
+const LEN_MASK: u32 = (1 << KIND_SHIFT) - 1;
+
+fn encode_kind(kind: RefKind) -> u32 {
+    match kind {
+        RefKind::Call => 0,
+        RefKind::Value => 1,
+        RefKind::Write => 2,
+        RefKind::Annotation => 3,
+        RefKind::Type(usage) => {
+            8 + match usage {
+                TypeUsage::Unknown => 0,
+                TypeUsage::Parameter => 1,
+                TypeUsage::Return => 2,
+                TypeUsage::Field => 3,
+                TypeUsage::Generic => 4,
+                TypeUsage::Cast => 5,
+            }
+        }
+    }
+}
+
+fn decode_kind(code: u32) -> RefKind {
+    match code {
+        1 => RefKind::Value,
+        2 => RefKind::Write,
+        3 => RefKind::Annotation,
+        8..=13 => RefKind::Type(match code - 8 {
+            1 => TypeUsage::Parameter,
+            2 => TypeUsage::Return,
+            3 => TypeUsage::Field,
+            4 => TypeUsage::Generic,
+            5 => TypeUsage::Cast,
+            _ => TypeUsage::Unknown,
+        }),
+        _ => RefKind::Call,
+    }
+}
 
 #[derive(Debug)]
 struct PackedRef {
     name: StrId,
     enclosing_def: u32,
     chain_start: u32,
-    chain_len: u32,
+    kind_and_chain_len: u32,
     values_start: u32,
     values_len: u32,
+    line: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -71,6 +110,8 @@ pub struct DecodedRef<'a> {
     pub name: &'a str,
     pub has_chain: bool,
     pub enclosing_def: Option<u32>,
+    pub kind: RefKind,
+    pub line: u32,
 }
 
 impl RefPack {
@@ -101,7 +142,7 @@ impl RefPack {
                         let name = ident.map(|s| pack.strings.alloc(s.as_str()));
                         pack.steps.push(PackedStep { tag, name });
                     }
-                    (start, chain.len() as u32)
+                    (start, (chain.len() as u32).min(LEN_MASK))
                 }
             };
 
@@ -136,9 +177,10 @@ impl RefPack {
                 name,
                 enclosing_def: r.enclosing_def.unwrap_or(NO_ENCLOSING),
                 chain_start,
-                chain_len,
+                kind_and_chain_len: (encode_kind(r.kind) << KIND_SHIFT) | chain_len,
                 values_start,
                 values_len: r.reaching.len() as u32,
+                line: r.line,
             });
         }
 
@@ -169,7 +211,7 @@ impl RefPack {
         let has_chain = r.chain_start != NO_CHAIN;
         if has_chain {
             let start = r.chain_start as usize;
-            for step in &self.steps[start..start + r.chain_len as usize] {
+            for step in &self.steps[start..start + (r.kind_and_chain_len & LEN_MASK) as usize] {
                 chain_buf.push(match step.tag {
                     StepTag::Ident => ExpressionStep::Ident(self.sym(step.name)),
                     StepTag::Field => ExpressionStep::Field(self.sym(step.name)),
@@ -196,6 +238,8 @@ impl RefPack {
             name: self.strings.get(r.name),
             has_chain,
             enclosing_def: (r.enclosing_def != NO_ENCLOSING).then_some(r.enclosing_def),
+            kind: decode_kind(r.kind_and_chain_len >> KIND_SHIFT),
+            line: r.line,
         }
     }
 
@@ -236,6 +280,8 @@ mod tests {
                     chain: d.has_chain.then(|| chain_buf.clone()),
                     reaching: values_buf.clone(),
                     enclosing_def: d.enclosing_def,
+                    kind: d.kind,
+                    line: d.line,
                 }
             })
             .collect()
@@ -246,6 +292,8 @@ mod tests {
             && a.chain == b.chain
             && a.reaching == b.reaching
             && a.enclosing_def == b.enclosing_def
+            && a.kind == b.kind
+            && a.line == b.line
     }
 
     #[test]
@@ -257,6 +305,8 @@ mod tests {
                 chain: None,
                 reaching: vec![],
                 enclosing_def: None,
+                kind: RefKind::Call,
+                line: 3,
             },
             CollectedRef {
                 name: SmolStr::from(long),
@@ -275,12 +325,16 @@ mod tests {
                     ParseValue::Opaque,
                 ],
                 enclosing_def: Some(42),
+                kind: RefKind::Type(TypeUsage::Return),
+                line: 9,
             },
             CollectedRef {
                 name: SmolStr::from("empty_chain"),
                 chain: Some(vec![]),
                 reaching: vec![ParseValue::Opaque],
                 enclosing_def: Some(0),
+                kind: RefKind::Annotation,
+                line: 1,
             },
         ];
 
@@ -301,6 +355,8 @@ mod tests {
                 chain: Some(vec![ExpressionStep::Field(SmolStr::from("repeated_name"))]),
                 reaching: vec![],
                 enclosing_def: None,
+                kind: RefKind::Value,
+                line: 0,
             })
             .collect();
         let pack = RefPack::from_refs(&refs);
@@ -314,6 +370,8 @@ mod tests {
             chain: None,
             reaching: vec![ParseValue::LocalDef(1), ParseValue::Opaque],
             enclosing_def: None,
+            kind: RefKind::Call,
+            line: 0,
         }];
         let mut pack = RefPack::from_refs(&refs);
         pack.set_reaching_type(0, "pkg.Alias");

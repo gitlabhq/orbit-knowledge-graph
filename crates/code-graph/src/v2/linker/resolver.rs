@@ -7,10 +7,11 @@ use crate::v2::sentinel::{FileGuard, Killed};
 use crate::v2::trace::Tracer;
 use crate::v2::types::ssa::ParseValue;
 use crate::v2::types::{
-    DefKind, EdgeKind, ExpressionStep, ImportBindingKind, NodeKind, Relationship,
+    Category, DefKind, EdgeKind, ExpressionStep, ImportBindingKind, NodeKind, RefKind,
+    Relationship, Resolution, TypeUsage,
 };
 use petgraph::graph::NodeIndex;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use super::graph::{CodeGraph, GraphEdge};
@@ -27,6 +28,47 @@ pub struct RefData<'a> {
     pub enclosing_def: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RefSite {
+    pub kind: RefKind,
+    pub line: u32,
+}
+
+fn target_edge_kind(kind: RefKind, target: Option<DefKind>) -> Option<EdgeKind> {
+    let category = target.map(|k| k.category());
+    match kind {
+        RefKind::Call => Some(match target {
+            Some(k) if matches!(k.category(), Category::Type | Category::Module) => {
+                EdgeKind::Instantiates
+            }
+            Some(DefKind::EnumEntry) => EdgeKind::Instantiates,
+            _ => EdgeKind::Calls,
+        }),
+        RefKind::Value | RefKind::Write => Some(EdgeKind::UsesValue),
+        RefKind::Type(_) => match category {
+            None | Some(Category::Type) => Some(EdgeKind::UsesType),
+            _ => None,
+        },
+        RefKind::Annotation => Some(EdgeKind::AnnotatedBy),
+    }
+}
+
+fn site_edge(mut edge: GraphEdge, site: RefSite, resolution: Resolution) -> GraphEdge {
+    edge.resolution = match edge.relationship.edge_kind {
+        EdgeKind::UsesType | EdgeKind::AnnotatedBy => Resolution::None,
+        _ => resolution,
+    };
+    edge.usage = match site.kind {
+        RefKind::Type(usage) => usage,
+        _ => TypeUsage::Unknown,
+    };
+    edge.write = matches!(site.kind, RefKind::Write);
+    if site.line > 0 {
+        edge.lines = super::graph::Lines::one(site.line);
+    }
+    edge
+}
+
 /// Per-file resolver with caches. Create once per file, call `resolve()` per ref.
 pub struct FileResolver<'a> {
     ctx: ResolveCtx<'a>,
@@ -36,7 +78,6 @@ pub struct FileResolver<'a> {
     /// Edges from definitions to external imported symbols. Stored
     /// separately so they don't interfere with the failed_chains check.
     import_edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
-    import_edge_keys: FxHashSet<(NodeIndex, NodeIndex, EdgeKind)>,
 }
 
 impl<'a> FileResolver<'a> {
@@ -64,7 +105,6 @@ impl<'a> FileResolver<'a> {
             ctx,
             _guard: guard,
             import_edges: Vec::new(),
-            import_edge_keys: FxHashSet::default(),
         }
     }
 
@@ -97,12 +137,12 @@ impl<'a> FileResolver<'a> {
             include_index: None,
             include_reachable: None,
             reexport_index: None,
+            resolution: Resolution::None,
         };
         Self {
             ctx,
             _guard: None,
             import_edges: Vec::new(),
-            import_edge_keys: FxHashSet::default(),
         }
     }
 
@@ -120,7 +160,6 @@ impl<'a> FileResolver<'a> {
     }
 
     pub fn drain_import_edges(&mut self) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
-        self.import_edge_keys.clear();
         std::mem::take(&mut self.import_edges)
     }
 
@@ -146,6 +185,7 @@ impl<'a> FileResolver<'a> {
         chain: Option<&[ExpressionStep]>,
         reaching: &[ParseValue],
         enclosing_def: Option<u32>,
+        site: RefSite,
         edges: &mut Vec<(NodeIndex, NodeIndex, GraphEdge)>,
     ) -> Result<(), Killed> {
         self.ctx.check_killed()?;
@@ -156,11 +196,13 @@ impl<'a> FileResolver<'a> {
             reaching,
             enclosing_def,
         };
+        self.ctx.resolution = Resolution::None;
         let targets = self.ctx.resolve_single(&ref_data)?;
         if targets.is_empty() {
-            self.emit_imported_symbol_edges(&ref_data);
+            self.emit_imported_symbol_edges(&ref_data, site);
             return Ok(());
         }
+        let resolution = self.ctx.resolution;
 
         let graph = self.ctx.graph;
         let source_node = enclosing_def
@@ -191,24 +233,74 @@ impl<'a> FileResolver<'a> {
             let target_def_kind = graph.graph[target]
                 .def_id()
                 .map(|did| graph.defs[did.0 as usize].kind);
+            let Some(edge_kind) = target_edge_kind(site.kind, target_def_kind).filter(|k| {
+                source_node_kind == NodeKind::Definition || !k.needs_definition_source()
+            }) else {
+                continue;
+            };
             edges.push((
                 source_node,
                 target,
-                GraphEdge {
-                    relationship: Relationship {
-                        edge_kind: EdgeKind::Calls,
+                site_edge(
+                    GraphEdge::new(Relationship {
+                        edge_kind,
                         source_node: source_node_kind,
                         target_node: NodeKind::Definition,
                         source_def_kind,
                         target_def_kind,
-                    },
-                },
+                    }),
+                    site,
+                    resolution,
+                ),
             ));
         }
         Ok(())
     }
 
-    fn emit_imported_symbol_edges(&mut self, r: &RefData<'_>) {
+    pub fn import_resolution_edges(&mut self) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
+        let mut edges = Vec::new();
+        let import_nodes = self.ctx.import_nodes;
+        for &import_node in import_nodes {
+            let targets = self.ctx.resolve_import_cached(import_node);
+            let graph = self.ctx.graph;
+            if targets.is_empty() {
+                let path = graph.str(graph.import(import_node).path);
+                if let Some(file) = self.ctx.include_file(path) {
+                    edges.push((
+                        import_node,
+                        file,
+                        GraphEdge::structural(
+                            EdgeKind::ResolvesTo,
+                            NodeKind::Import,
+                            NodeKind::File,
+                        )
+                        .with_resolution(Resolution::Import),
+                    ));
+                }
+                continue;
+            }
+            for target in targets {
+                let target_def_kind = graph.graph[target]
+                    .def_id()
+                    .map(|did| graph.defs[did.0 as usize].kind);
+                edges.push((
+                    import_node,
+                    target,
+                    GraphEdge::new(Relationship {
+                        edge_kind: EdgeKind::ResolvesTo,
+                        source_node: NodeKind::Import,
+                        target_node: NodeKind::Definition,
+                        source_def_kind: None,
+                        target_def_kind,
+                    })
+                    .with_resolution(Resolution::Import),
+                ));
+            }
+        }
+        edges
+    }
+
+    fn emit_imported_symbol_edges(&mut self, r: &RefData<'_>, site: RefSite) {
         let graph = self.ctx.graph;
         let src = r
             .enclosing_def
@@ -220,8 +312,13 @@ impl<'a> FileResolver<'a> {
             .and_then(|&n| graph.graph[n].def_id())
             .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
             .unwrap_or((NodeKind::File, None));
+        let Some(edge_kind) = target_edge_kind(site.kind, None)
+            .filter(|k| source_node_kind == NodeKind::Definition || !k.needs_definition_source())
+        else {
+            return;
+        };
         let rel = Relationship {
-            edge_kind: EdgeKind::Calls,
+            edge_kind,
             source_node: source_node_kind,
             target_node: NodeKind::Import,
             source_def_kind,
@@ -248,7 +345,7 @@ impl<'a> FileResolver<'a> {
             let mut emitted = false;
             for import_node in candidates {
                 if !self.ctx.import_resolves_locally(import_node) {
-                    self.push_imported_symbol_edge(src, import_node, rel);
+                    self.push_imported_symbol_edge(src, import_node, rel, site);
                     emitted = true;
                 }
             }
@@ -269,7 +366,7 @@ impl<'a> FileResolver<'a> {
                         continue;
                     }
                     if !self.ctx.import_resolves_locally(import_node) {
-                        self.push_imported_symbol_edge(src, import_node, rel);
+                        self.push_imported_symbol_edge(src, import_node, rel, site);
                     }
                 }
             }
@@ -296,7 +393,7 @@ impl<'a> FileResolver<'a> {
                     return;
                 }
                 for import_node in candidates {
-                    self.push_imported_symbol_edge(src, import_node, rel);
+                    self.push_imported_symbol_edge(src, import_node, rel, site);
                 }
             }
         }
@@ -307,14 +404,18 @@ impl<'a> FileResolver<'a> {
         src: NodeIndex,
         import_node: NodeIndex,
         relationship: Relationship,
+        site: RefSite,
     ) {
-        if self
-            .import_edge_keys
-            .insert((src, import_node, relationship.edge_kind))
-        {
-            self.import_edges
-                .push((src, import_node, GraphEdge { relationship }));
-        }
+        let resolution = if self.ctx.graph.import(import_node).wildcard {
+            Resolution::WildcardImport
+        } else {
+            Resolution::Import
+        };
+        self.import_edges.push((
+            src,
+            import_node,
+            site_edge(GraphEdge::new(relationship), site, resolution),
+        ));
     }
 }
 
@@ -340,6 +441,7 @@ struct ResolveCtx<'a> {
     /// Precomputed symbol re-export index. Shared across resolvers, set before
     /// Phase 2 when the language provides a builder hook.
     reexport_index: Option<std::sync::Arc<super::graph::ReexportIndex>>,
+    resolution: Resolution,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -372,6 +474,7 @@ impl<'a> ResolveCtx<'a> {
             include_index: None,
             include_reachable: None,
             reexport_index: None,
+            resolution: Resolution::None,
         }
     }
 
@@ -441,6 +544,20 @@ impl<'a> ResolveCtx<'a> {
         }
         self.import_cache.insert(import_node, result.clone());
         result
+    }
+
+    fn include_file(&mut self, path: &str) -> Option<NodeIndex> {
+        let index = self.include_index.as_ref()?;
+        let normalized = path
+            .trim_matches('"')
+            .trim_matches('<')
+            .trim_matches('>')
+            .trim_start_matches("../")
+            .trim_start_matches("./");
+        match index.suffix_map.get(normalized).map(Vec::as_slice) {
+            Some([file]) => Some(*file),
+            _ => None,
+        }
     }
 
     fn import_resolves_locally(&mut self, import_node: NodeIndex) -> bool {
@@ -649,6 +766,7 @@ impl<'a> ResolveCtx<'a> {
         if !r.name.is_empty() && r.name.contains(self.rules.fqn_separator) {
             let matches = self.graph.lookup_fqn(r.name);
             if !matches.is_empty() {
+                self.resolution = Resolution::Local;
                 if self.settings.same_directory_scope {
                     // Directory-scoped languages (HCL): a qualified ref such as
                     // `local.x` / `aws_vpc.this` only addresses its own module
@@ -688,7 +806,10 @@ impl<'a> ResolveCtx<'a> {
                     }
                     {
                         let strategies = self.rules.import_strategies.clone();
-                        self.import_resolver().apply_strategies(&strategies, r.name)
+                        let (found, resolution) =
+                            self.import_resolver().apply_strategies(&strategies, r.name);
+                        self.resolution = resolution;
+                        found
                     }
                 }
                 ResolveStage::ImplicitMember => {
@@ -698,6 +819,7 @@ impl<'a> ResolveCtx<'a> {
                     if let Some(enclosing_idx) = r.enclosing_def
                         && let Some(&enclosing_node) = self.def_nodes.get(enclosing_idx as usize)
                     {
+                        self.resolution = Resolution::Local;
                         self.resolve_implicit_member(enclosing_node, r.name)
                     } else {
                         vec![]
@@ -740,6 +862,13 @@ impl<'a> ResolveCtx<'a> {
         self.check_killed()?;
         let mut result = Vec::new();
         for value in reaching {
+            let before_value = result.len();
+            let value_resolution = match value {
+                ParseValue::LocalDef(_) => Resolution::Local,
+                ParseValue::ImportRef(_) => Resolution::Import,
+                ParseValue::Type(_) => Resolution::InferredType,
+                ParseValue::Opaque => Resolution::None,
+            };
             match value {
                 ParseValue::LocalDef(i) => {
                     if let Some(&node) = self.def_nodes.get(*i as usize)
@@ -877,6 +1006,9 @@ impl<'a> ResolveCtx<'a> {
                     }
                 }
                 ParseValue::Opaque => {}
+            }
+            if result.len() > before_value {
+                self.resolution = self.resolution.max(value_resolution);
             }
         }
         Ok(result)
@@ -1029,6 +1161,10 @@ impl<'a> ResolveCtx<'a> {
             );
 
             if is_last {
+                self.resolution = match chain[0] {
+                    ExpressionStep::This | ExpressionStep::Super => Resolution::Local,
+                    _ => Resolution::InferredType,
+                };
                 found_nodes.extend(base_class_nodes.iter().copied());
                 let mut seen = rustc_hash::FxHashSet::default();
                 found_nodes.retain(|n| seen.insert(*n));

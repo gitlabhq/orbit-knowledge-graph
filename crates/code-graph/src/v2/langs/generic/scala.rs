@@ -271,8 +271,18 @@ impl DslLanguage for ScalaDsl {
             reference("call_expression")
                 .name_from(child_of_kind("identifier"))
                 .when(!has_child(&["."])),
-            reference("field_expression").name_from(child_of_kind("identifier")),
-            reference("type_identifier").name_from(text()),
+            reference("field_expression")
+                .name_from(child_of_kind("identifier"))
+                .kind(crate::v2::types::RefKind::Value),
+            reference("type_identifier").name_from(text()).type_use(&[
+                ("type_arguments", crate::v2::types::TypeUsage::Generic),
+                ("parameter", crate::v2::types::TypeUsage::Parameter),
+                ("class_parameter", crate::v2::types::TypeUsage::Parameter),
+                ("function_definition", crate::v2::types::TypeUsage::Return),
+                ("function_declaration", crate::v2::types::TypeUsage::Return),
+                ("val_definition", crate::v2::types::TypeUsage::Field),
+                ("var_definition", crate::v2::types::TypeUsage::Field),
+            ]),
         ]
     }
 

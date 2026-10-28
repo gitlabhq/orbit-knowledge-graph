@@ -5,7 +5,10 @@ mod range;
 pub mod ssa;
 pub mod text;
 
-pub use edge::{EdgeKind, NodeKind, Relationship, containment_edge_kind, containment_relationship};
+pub use edge::{
+    EdgeKind, NodeKind, RefKind, Relationship, Resolution, TypeUsage, containment_edge_kind,
+    containment_relationship,
+};
 pub use fqn::Fqn;
 pub use node::{
     BindingKind, CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, Category,

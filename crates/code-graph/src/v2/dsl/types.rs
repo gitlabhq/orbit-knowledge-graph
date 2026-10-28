@@ -225,6 +225,8 @@ pub struct ReferenceRule {
     condition: Option<Pred>,
     name: Extract,
     pub(crate) receiver_extract: Option<Extract>,
+    pub(crate) ref_kind: crate::v2::types::RefKind,
+    usage_by_ancestor: &'static [(&'static str, crate::v2::types::TypeUsage)],
 }
 
 pub struct FieldAccessEntry {
@@ -285,6 +287,41 @@ impl ReferenceRule {
         self.receiver_extract = Some(extract);
         self
     }
+
+    pub fn kind(mut self, kind: crate::v2::types::RefKind) -> Self {
+        self.ref_kind = kind;
+        self
+    }
+
+    pub fn type_use(
+        mut self,
+        usage: &'static [(&'static str, crate::v2::types::TypeUsage)],
+    ) -> Self {
+        self.ref_kind = crate::v2::types::RefKind::Type(crate::v2::types::TypeUsage::Unknown);
+        self.usage_by_ancestor = usage;
+        self
+    }
+
+    pub(crate) fn kind_at(&self, node: &N<'_>) -> crate::v2::types::RefKind {
+        use crate::v2::types::{RefKind, TypeUsage};
+        match self.ref_kind {
+            RefKind::Type(TypeUsage::Unknown) if !self.usage_by_ancestor.is_empty() => {
+                let usage = node
+                    .ancestors()
+                    .take(3)
+                    .find_map(|a| {
+                        let kind = a.kind();
+                        self.usage_by_ancestor
+                            .iter()
+                            .find(|(k, _)| *k == kind.as_ref())
+                            .map(|(_, u)| *u)
+                    })
+                    .unwrap_or(TypeUsage::Unknown);
+                RefKind::Type(usage)
+            }
+            kind => kind,
+        }
+    }
 }
 
 pub fn reference(kind: &'static str) -> ReferenceRule {
@@ -293,6 +330,8 @@ pub fn reference(kind: &'static str) -> ReferenceRule {
         condition: None,
         name: default_name(),
         receiver_extract: None,
+        ref_kind: crate::v2::types::RefKind::Call,
+        usage_by_ancestor: &[],
     }
 }
 
@@ -302,6 +341,8 @@ pub fn references(kinds: &[&'static str]) -> ReferenceRule {
         condition: None,
         name: default_name(),
         receiver_extract: None,
+        ref_kind: crate::v2::types::RefKind::Call,
+        usage_by_ancestor: &[],
     }
 }
 

@@ -354,6 +354,7 @@ pub struct CanonicalFile {
     /// Why the file did not index cleanly (skip/fault), or `None`. Strictly an
     /// enum so `gl_file.reason` can never hold an unbounded string.
     pub reason: crate::v2::error::FileReason,
+    pub flags: crate::v2::config::FileFlags,
 }
 
 impl CanonicalFile {

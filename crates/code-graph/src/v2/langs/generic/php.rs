@@ -195,14 +195,25 @@ impl DslLanguage for PhpDsl {
             // Foo::CONST / self::VERSION / EnumType::Case: scope is the first named child, name the last.
             reference("class_constant_access_expression")
                 .name_from(Extract::terminal(Emit::Text).nth(Child, Named, -1))
-                .receiver_via(Extract::one(Child, Named)),
+                .receiver_via(Extract::one(Child, Named))
+                .kind(crate::v2::types::RefKind::Value),
             reference("function_call_expression").name_from(field("function")),
             reference("object_creation_expression")
                 .name_from(Extract::one(Child, AnyKind(&["name", "qualified_name"]))),
             reference("attribute")
-                .name_from(Extract::one(Child, AnyKind(&["name", "qualified_name"]))),
+                .name_from(Extract::one(Child, AnyKind(&["name", "qualified_name"])))
+                .kind(crate::v2::types::RefKind::Annotation),
             // Bare type references: param/return/property types, instanceof, catch.
-            reference("named_type").name_from(text()),
+            reference("named_type").name_from(text()).type_use(&[
+                ("simple_parameter", crate::v2::types::TypeUsage::Parameter),
+                (
+                    "property_promotion_parameter",
+                    crate::v2::types::TypeUsage::Parameter,
+                ),
+                ("method_declaration", crate::v2::types::TypeUsage::Return),
+                ("function_definition", crate::v2::types::TypeUsage::Return),
+                ("property_declaration", crate::v2::types::TypeUsage::Field),
+            ]),
             // $x instanceof Foo: the right operand is the class being tested.
             reference("binary_expression")
                 .when(has_child_text("instanceof"))
