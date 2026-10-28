@@ -1,0 +1,13 @@
+{
+  "name": "gitlab-orbit",
+  "owner": {
+    "name": "GitLab"
+  },
+  "plugins": [
+    {
+      "name": "gitlab-orbit",
+      "source": "./gitlab-orbit",
+      "description": "Shows GitLab Orbit calls in Claude Code with the Orbit mark and short labels."
+    }
+  ]
+}
