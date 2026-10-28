@@ -31,7 +31,7 @@ GQL supports:
 - `MATCH` with one connected pattern, and more than one `MATCH` clause in a query
 - `WHERE` with `AND`, `NOT`, comparisons, `IN`, `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `IS NULL`, and `IS NOT NULL`
 - `RETURN` with properties, nodes, `properties(n)`, `n{.property}`, and `AS` aliases
-- The aggregate functions `count`, `sum`, `avg`, `min`, and `max`, and `date_trunc` for time periods
+- The aggregate functions `count`, `sum`, `avg`, `min`, and `max`, `count(DISTINCT x)`, and `date_trunc` for time periods
 - `ORDER BY` with one sort key, `SKIP` (or `OFFSET`), and `LIMIT`
 - Variable-length relationships up to three hops, and shortest paths with `ANY SHORTEST` or `SHORTEST 1`
 - `type(r)`, and the text search functions `token_match`, `all_tokens`, and `any_tokens`
@@ -43,8 +43,9 @@ GQL does not support these forms, and rejects them:
 - `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`, `YIELD`, and subqueries
 - Patterns that are not connected or that have a cycle
 - `OR`, `XOR`, and `x NOT IN [...]` (write `NOT x IN [...]` instead)
-- `DISTINCT`, `count(*)`, and arbitrary expressions
-- More than one `ORDER BY` key, and `LIMIT` before `SKIP`
+- `DISTINCT` outside `count()`, such as `RETURN DISTINCT` or `sum(DISTINCT x)`
+- `count(*)` and arbitrary expressions
+- More than one `ORDER BY` key
 - Query parameters
 - Other functions, such as `collect(x)` (the error names the function)
 
@@ -135,14 +136,26 @@ To exclude values, write `NOT x.state IN [...]`, not `x.state NOT IN [...]`.
 These forms are supported:
 
 - Comparisons: `=`, `<>` or `!=`, `<`, `<=`, `>`, `>=`. You can compare a property with a literal or with another property.
-- Lists: `x.state IN ['opened', 'merged']`, with up to 100 values.
+- Lists: `x.state IN ['opened', 'merged']`, with up to 100 values, or up to 500 values on `id`.
 - Strings: `STARTS WITH`, `ENDS WITH`, and `CONTAINS`. The pattern needs at least three characters.
   Matching ignores ASCII case, except on the `branch` property of code nodes, such as `File` and `Definition`.
 - Nulls: `IS NULL` and `IS NOT NULL`.
 
 Values are literals.
-For dates, use an ISO 8601 string, such as `'2026-01-31'` or `'2026-01-31T12:00:00Z'`.
+A string is in single or double quotes, and has at most 1024 characters.
+Write a newline, a tab, or another control character as an escape, such as `\n` or `\t`.
+A string that contains a raw newline or tab fails.
+
+For dates, use a string in the format `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SS`,
+with optional fractional seconds and a trailing `Z`, such as `'2026-01-31'` or `'2026-01-31T12:00:00Z'`.
+A date with a time zone offset, such as `+02:00`, fails.
 You can wrap the string in `date()` or `datetime()`, but the result is the same.
+
+An enum property, such as `mr.state`, accepts only its declared values with `=`, `<>`, and `IN`.
+Enum values have no order, so `<`, `<=`, `>`, and `>=` fail.
+An unknown value fails, and the error lists the valid values.
+On a relationship, `source_kind`, `target_kind`, and `relationship_kind` must name a kind that the pattern can match.
+For example, `-[r:IN_PROJECT]->` rejects `r.target_kind = 'Group'`.
 Group predicates with parentheses.
 Queries do not take parameters, so do not insert untrusted text into a query.
 
@@ -213,8 +226,10 @@ These properties have a text index:
 
 - `RETURN mr.iid, mr.title` returns properties.
 - `RETURN mr` returns the default properties of the node, for example `id`, `iid`, `title`, `state`,
-  `source_branch`, and `target_branch` for `MergeRequest`. `properties(mr)` returns all of them.
+  `source_branch`, and `target_branch` for `MergeRequest`. `properties(mr)` returns all properties of the node.
   `mr{.iid, .title}` returns the listed properties.
+- `RETURN mr` and `properties(mr)` do not include properties for administrators, such as `User.is_admin`.
+  To get one, name it, as in `RETURN u.is_admin`. Only administrators can.
 - The response always includes the identity of each node and the metadata of each relationship.
 - `type(r)` returns the type of a one-hop relationship variable in `WHERE`, `RETURN`, and `ORDER BY`,
   but not as an aggregation group key.
@@ -224,15 +239,17 @@ These properties have a text index:
 - The aggregate functions are `count`, `sum`, `avg`, `min`, and `max`.
   The other items in `RETURN` become group keys.
   To sort by an aggregate, give it an alias: `RETURN mr.state, count(mr) AS mrs ORDER BY mrs DESC`.
-  `sum` and `avg` need a numeric property. `min` and `max` need a number, boolean, enum, date, or timestamp property.
+  `sum` and `avg` need a numeric property. `min` and `max` need a number, boolean, date, or timestamp property.
+  `DISTINCT` works only in `count()`, as in `count(DISTINCT mr.author_id)`.
   In an aggregation, a text match or a `<`, `<=`, `>`, or `>=` comparison on a free-text property, such as `mr.title`,
   needs that node in a group key: return the node, as in `RETURN mr, count(p)`, or one of its free-text properties,
   as in `RETURN mr.title, count(p)`. Other properties, such as `mr.iid`, do not count.
   Otherwise, the query fails with `text matching and ordering require grouping by "mr"`.
-  `Project`, `Group`, and code nodes are exempt.
+  `Project`, `Group`, `AgentSession`, `Branch`, `Commit`, and the code nodes
+  `Definition`, `Directory`, `File`, and `ImportedSymbol` are exempt.
 - To group by a time period, use `date_trunc('<unit>', <property>)` as a group key on a date property.
   The units are `minute`, `hour`, `day`, `week`, `month`, `quarter`, and `year`.
-  `minute` and `hour` also need a filter on the same property. Weeks start on Sunday.
+  `minute` and `hour` also need a filter on the same property, or on the `id` of the node. Weeks start on Sunday.
 
 ```gql orbit-query
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
@@ -284,11 +301,17 @@ the later pages move by one row, so a row can repeat or be missing.
 ## Limits
 
 - Each relationship spans at most three hops. `-[:CONTAINS*1..3]->` is a bounded variable-length hop.
-- A query has at most five nodes and five relationships.
+- A query has at most five nodes. The pattern is a tree, so it has at most four relationships.
+- A relationship names at most 10 types.
+- A query has at most 16 conditions. Inline properties, such as `{project_id: 278964}`, count as conditions.
+- Each node filters on at most 10 properties, and each relationship on at most 5.
+- Conditions nest at most 32 levels deep.
+- An aggregation has at most 10 aggregate functions and 4 group keys.
 - `ORDER BY` takes one sort key.
 - `LIMIT` accepts 1 to 1000 rows. The default is 30.
 - `SKIP` accepts 0 to 10,000 rows.
 - Each node returns at most 50 properties and filters on at most 500 IDs.
+- Variables and aliases have at most 64 characters. Strings have at most 1024 characters.
 - The query text is at most 32 KiB.
 
 ## Debug a query
