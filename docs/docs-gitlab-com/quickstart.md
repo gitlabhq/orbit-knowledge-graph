@@ -13,6 +13,19 @@ title: GitLab Orbit quickstart
 
 {{< /details >}}
 
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.2.2.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+
+{{< /history >}}
+
+> [!flag]
+> The availability of this feature is controlled by a feature flag.
+> For more information, see the history.
+
 Turn on GitLab Orbit for your group, then set up your agent and ask your first question
 about your GitLab data.
 To try GitLab Orbit, start a [free trial on GitLab.com](trial.md), or [contact sales](https://about.gitlab.com/sales/).
@@ -119,7 +132,8 @@ and follow the skill that it prints.
 ```
 
 Replace `<my-group>` and `<my-group>/<my-project>` with the full paths of your group and project.
-To ask more questions in any agent, including GitLab Duo Chat, try the following prompts:
+To ask more questions in any agent, including GitLab Duo Chat, try the following prompts. 
+Replace `<my-group>` and `<my-group>/<my-project>` with the full paths of your group and project.:
 
 - Find the merge requests that a failing job blocks:
 
