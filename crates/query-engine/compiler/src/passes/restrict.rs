@@ -134,6 +134,12 @@ pub fn restrict(
             }
         }
 
+        if let Some(ColumnSelection::All) = &node.columns {
+            return Err(QueryError::PipelineInvariant(
+                "restrict requires expanded columns; normalization must run first".into(),
+            ));
+        }
+
         if let Some(ColumnSelection::List(columns)) = &node.columns
             && let Some(column) = columns
                 .iter()
@@ -320,6 +326,22 @@ mod tests {
         let input = input_with_columns(vec!["username", "is_admin"]);
         let error = apply(&input, &ontology(), &non_admin_ctx()).unwrap_err();
         assert!(error.to_string().contains("is_admin"), "{error}");
+    }
+
+    #[test]
+    fn unexpanded_wildcard_fails_closed() {
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![InputNode {
+                id: "_u".into(),
+                entity: Some("User".into()),
+                columns: Some(ColumnSelection::All),
+                ..Default::default()
+            }],
+            ..Input::default()
+        };
+        let error = apply(&input, &ontology(), &non_admin_ctx()).unwrap_err();
+        assert!(error.to_string().contains("normalization"), "{error}");
     }
 
     #[test]

@@ -6,6 +6,7 @@ cases:
         MATCH (u:User) RETURN count(*)
     expect:
       compile_error: "function count() is not supported: count() takes one variable or property, as in count(mr) or sum(mr.added_lines), and belongs in RETURN with an alias: count(mr) AS n"
+      compile_error_not_contains: ["WHERE cannot filter"]
 
   - name: aggregate_in_where
     description: An aggregate in WHERE says that WHERE cannot filter on an aggregate
