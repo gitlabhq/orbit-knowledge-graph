@@ -19,7 +19,9 @@ see [Troubleshooting GitLab Orbit on GitLab Self-Managed](self-managed/troublesh
 If you cannot resolve your problem:
 
 - To get help, [contact GitLab Support](https://about.gitlab.com/support/).
-- To report a bug, [create an issue](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/new?issuable_template=Bug_Report).
+- To report a bug, check the [open issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?state=opened).
+  If an issue matches your problem, add your details to it.
+  If no issue matches, [create an issue](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/new?issuable_template=Bug_Report).
 
 When working with GitLab Orbit, you might encounter the following issues.
 
