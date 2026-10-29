@@ -103,25 +103,25 @@ stages:
 
       # Parameters
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:__member)'
-        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T))))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))))'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T))))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__type "parameter") (__callee $T)))))'
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:type_identifier)'
         replace: '(kt_prop (__def (__defname @$N $N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier)'
         replace: '(__def (__defname @$N) (__property))'
       - match: '(class_parameter $N:simple_identifier $T:__member)'
-        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
+        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type "parameter") (__callee $T))))'
       - match: '(class_parameter $N:simple_identifier $T:type_identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
       - match: '(class_parameter $N:simple_identifier)'
         replace: '(__binding @$N)'
       - match: '(parameter $N:simple_identifier $T:__member)'
-        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
+        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type "parameter") (__callee $T))))'
       - match: '(parameter $N:simple_identifier $T:type_identifier)'
-        replace: '(__binding @$N $N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T))))'
+        replace: '(__binding @$N $N (__ssa_typed @$T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
       - match: '(parameter $N:simple_identifier)'
         replace: '(__binding @$N)'
       - match: '(catch_block $N:simple_identifier $T:type_identifier $$$B)'
-        replace: '(catch_block (__binding @$N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T)))) $$$B)'
+        replace: '(catch_block (__binding @$N (__ssa_typed @$T) (__rhs (__call (__type "parameter") (__callee @$T $T)))) $$$B)'
 
   - name: retag-expressions
     rules:
@@ -216,10 +216,14 @@ stages:
         replace: '(__def (__defname @$N) (__enum_variant) $$$R)'
 
       - match: '(function_declaration $M?:modifiers $N:simple_identifier $P:function_value_parameters $RT:__member $B?:function_body)'
-        replace: '(__def (__defname @$N) (__function) (__ssa_return_type $RT) $M $P $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type $RT) $M $P (__call (__type "return") (__callee $RT)) $B)'
       # Functions: extension functions become methods of the receiver type
+      - match: '(function_declaration $M?:modifiers $R:type_identifier $N:simple_identifier $P:function_value_parameters $RT:type_identifier $B?:function_body)'
+        replace: '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__function) (__ssa_return_type @$RT) $M (__binding "this" (__ssa_typed @$R)) $P (__call (__type "return") (__callee @$RT $RT)) $B))'
       - match: '(function_declaration $M?:modifiers $R:type_identifier $N:simple_identifier $P:function_value_parameters $RT?:type_identifier $B?:function_body)'
         replace: '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M (__binding "this" (__ssa_typed @$R)) $P $B))'
+      - match: '(function_declaration $M?:modifiers $N:simple_identifier $P:function_value_parameters $RT:type_identifier $B?:function_body)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$RT) $M $P (__call (__type "return") (__callee @$RT $RT)) $B)'
       - match: '(function_declaration $M?:modifiers $N:simple_identifier $P:function_value_parameters $RT?:type_identifier $B?:function_body)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
 
@@ -240,12 +244,15 @@ stages:
         replace: '(__def (__defname @$N) (__class) $M $P $B)'
       - match: '(secondary_constructor $$$C)'
         replace: '(__def (__defname "constructor") (__method) $$$C)'
+        tag: { language_kind: Constructor }
       - match: '(type_alias $N:type_identifier)'
         replace: '(__def (__defname @$N) (__type_alias))'
   - name: primary-constructors
     rules:
       - match: '(primary_constructor $$$P)'
         replace: '(kt_ctor (__def (__defname "constructor") (__method)) $$$P)'
+        tag: { language_kind: PrimaryConstructor }
+        tag_on: __def
 
   - name: data-components
     rules:
@@ -378,7 +385,7 @@ display:
       - match: '(__def (__enum))'
         tag: { kind: Enum }
       - match: '(__def (__enum_variant))'
-        tag: { kind: EnumMember }
+        tag: { kind: EnumMember, language_kind: EnumEntry }
       - match: '(__def (__type_alias))'
         tag: { kind: TypeAlias }
       - match: '(__def (__function))'

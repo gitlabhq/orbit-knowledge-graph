@@ -115,7 +115,21 @@ fixtures:
         });
       });
 
+  - path: src/uses.ts
+    content: |
+      class Holder {}
+      class Item {}
+
+      class Box {
+        item: Item = new Item();
+      }
+
+      function pick(h: Holder): Item {
+        return new Item();
+      }
+
 tests:
+  # corrected: convention: a module-level TypeScript definition is public when exported and file otherwise
   - name: "Shape is a Class"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'Shape' AND d.kind = 'Class'
@@ -133,10 +147,11 @@ tests:
           declared_type: null
           doc_comment: "Shapes with an area."
           modifiers: ["abstract"]
-          visibility: null
+          visibility: "public"
           generated_by: null
           language: "typescript"
 
+  # corrected: convention: a TypeScript class field has language_kind Property
   - name: "Shape::id is a Field"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'Shape::id' AND d.kind = 'Field'
@@ -145,7 +160,7 @@ tests:
       - { row_count: 1 }
       - row:
           kind: "Field"
-          language_kind: "Field"
+          language_kind: "Property"
           category: "Value"
           scope: "member"
           signature: "protected readonly id: number"
@@ -158,6 +173,7 @@ tests:
           generated_by: null
           language: "typescript"
 
+  # corrected: convention: a TypeScript class field has language_kind Property
   - name: "Shape::count is a Field"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'Shape::count' AND d.kind = 'Field'
@@ -166,7 +182,7 @@ tests:
       - { row_count: 1 }
       - row:
           kind: "Field"
-          language_kind: "Field"
+          language_kind: "Property"
           category: "Value"
           scope: "member"
           signature: "static count"
@@ -346,6 +362,7 @@ tests:
           generated_by: null
           language: "typescript"
 
+  # corrected: convention: a module-level TypeScript definition is public when exported and file otherwise
   - name: "Named is a Interface"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'Named' AND d.kind = 'Interface'
@@ -363,10 +380,11 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: []
-          visibility: null
+          visibility: "public"
           generated_by: null
           language: "typescript"
 
+  # corrected: convention: a module-level TypeScript definition is public when exported and file otherwise
   - name: "Color is a Enum"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'Color' AND d.kind = 'Enum'
@@ -384,7 +402,7 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: []
-          visibility: null
+          visibility: "public"
           generated_by: null
           language: "typescript"
 
@@ -430,6 +448,7 @@ tests:
           generated_by: null
           language: "typescript"
 
+  # corrected: convention: a module-level TypeScript definition is public when exported and file otherwise
   - name: "Id is a TypeAlias"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'Id' AND d.kind = 'TypeAlias'
@@ -447,10 +466,11 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: []
-          visibility: null
+          visibility: "public"
           generated_by: null
           language: "typescript"
 
+  # corrected: convention: a module-level TypeScript definition is public when exported and file otherwise
   - name: "Geometry is a Module"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'Geometry' AND d.kind = 'Module'
@@ -468,7 +488,7 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: []
-          visibility: null
+          visibility: "public"
           generated_by: null
           language: "typescript"
 
@@ -493,6 +513,7 @@ tests:
           generated_by: null
           language: "typescript"
 
+  # corrected: convention: a module-level TypeScript definition is public when exported and file otherwise
   - name: "double is a Function"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'double' AND d.kind = 'Function'
@@ -510,10 +531,11 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: []
-          visibility: null
+          visibility: "public"
           generated_by: null
           language: "typescript"
 
+  # corrected: convention: a module-level TypeScript definition is public when exported and file otherwise
   - name: "MAX is a Constant"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'MAX' AND d.kind = 'Constant'
@@ -531,10 +553,11 @@ tests:
           declared_type: "number"
           doc_comment: ""
           modifiers: []
-          visibility: null
+          visibility: "public"
           generated_by: null
           language: "typescript"
 
+  # corrected: convention: a module-level TypeScript definition is public when exported and file otherwise
   - name: "counter is a Variable"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'counter' AND d.kind = 'Variable'
@@ -552,10 +575,11 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: []
-          visibility: null
+          visibility: "public"
           generated_by: null
           language: "typescript"
 
+  # corrected: convention: a module-level TypeScript definition is public when exported and file otherwise
   - name: "helper is a Function"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'helper' AND d.kind = 'Function' AND d.file_path = 'src/util.ts'
@@ -573,10 +597,11 @@ tests:
           declared_type: null
           doc_comment: "Formats a number."
           modifiers: []
-          visibility: null
+          visibility: "public"
           generated_by: null
           language: "typescript"
 
+  # corrected: convention: a module-level TypeScript definition is public when exported and file otherwise
   - name: "loaded is a Constant"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'loaded' AND d.kind = 'Constant' AND d.file_path = 'src/side.ts'
@@ -594,11 +619,12 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: []
-          visibility: null
+          visibility: "public"
           generated_by: null
           language: "typescript"
 
-  - name: "A describe block is a Test with language_kind ExampleGroup"
+  # corrected: convention: a Jest describe block has language_kind Describe
+  - name: "A describe block is a Test with language_kind Describe"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'formatting' AND d.kind = 'Test' AND d.file_path = 'src/shapes.test.ts'
       RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
@@ -606,7 +632,7 @@ tests:
       - { row_count: 1 }
       - row:
           kind: "Test"
-          language_kind: "ExampleGroup"
+          language_kind: "Describe"
           category: "Callable"
           scope: "top_level"
           signature: "describe('formatting')"
@@ -619,7 +645,8 @@ tests:
           generated_by: null
           language: "typescript"
 
-  - name: "An it block is a Test with language_kind Example"
+  # corrected: convention: a Jest it block has language_kind Test
+  - name: "An it block is a Test with language_kind Test"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'formatting::formats numbers' AND d.kind = 'Test' AND d.file_path = 'src/shapes.test.ts'
       RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
@@ -627,7 +654,7 @@ tests:
       - { row_count: 1 }
       - row:
           kind: "Test"
-          language_kind: "Example"
+          language_kind: "Test"
           category: "Callable"
           scope: "local"
           signature: "it('formats numbers')"
@@ -754,6 +781,45 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { target: "Point2::x", kind: "Field" } }
+
+  - name: "edges: USES_TYPE from a parameter type has usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'pick' AND b.fqn = 'Holder' AND e.usage = 'parameter'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "pick", dst: "Holder" } }
+
+  - name: "edges: USES_TYPE from a return type has usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'pick' AND b.fqn = 'Item' AND e.usage = 'return'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "pick", dst: "Item" } }
+
+  - name: "edges: USES_TYPE from a field type has usage field"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'Box::item' AND b.fqn = 'Item' AND e.usage = 'field'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "Box::item", dst: "Item" } }
+
+  - name: "A module-level definition that is not exported has visibility file"
+    query: |
+      MATCH (d:Definition) WHERE d.file_path = 'src/uses.ts' AND d.scope = 'top_level'
+      RETURN d.fqn AS fqn, d.visibility AS visibility
+      ORDER BY fqn
+    assert:
+      - { row_count: 4 }
+      - { row: { fqn: "Box", visibility: "file" } }
+      - { row: { fqn: "Holder", visibility: "file" } }
+      - { row: { fqn: "Item", visibility: "file" } }
+      - { row: { fqn: "pick", visibility: "file" } }
 
   - name: "An imported superclass is EXTENDS with resolution import"
     query: |

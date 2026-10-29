@@ -498,7 +498,7 @@ display:
       - match: '(__def (__lambda))'
         tag: { kind: Function, language_kind: Lambda }
       - match: '(__def (__property))'
-        tag: { kind: Field }
+        tag: { kind: Field, language_kind: Attribute }
       - match: '(__def (__constant))'
         tag: { kind: Constant }
   - name: content

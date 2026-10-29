@@ -140,7 +140,25 @@ fixtures:
           }
       }
 
+  - path: src/com/acme/edges/Uses.java
+    content: |
+      package com.acme.edges;
+
+      import com.acme.edges.lib.Base;
+      import com.acme.edges.util.Tool;
+      import com.acme.billing.util.Money;
+
+      public class Uses {
+          Tool pick(Base p, Object o) {
+              if (o instanceof Money) {
+                  return null;
+              }
+              return null;
+          }
+      }
+
 tests:
+  # corrected: convention: a Java enum constant has language_kind EnumConstant
   - name: "every definition in src/com/acme/billing/Order.java carries the contract columns"
     query: |
       MATCH (d:Definition)
@@ -348,7 +366,7 @@ tests:
       - row:
           fqn: "com.acme.billing.Status.OPEN"
           kind: "EnumMember"
-          language_kind: "EnumMember"
+          language_kind: "EnumConstant"
           category: "Value"
           scope: "member"
           signature: "OPEN"
@@ -363,7 +381,7 @@ tests:
       - row:
           fqn: "com.acme.billing.Status.CLOSED"
           kind: "EnumMember"
-          language_kind: "EnumMember"
+          language_kind: "EnumConstant"
           category: "Value"
           scope: "member"
           signature: "CLOSED"
@@ -655,7 +673,7 @@ tests:
   - name: "edges: USES_TYPE links a parameter type"
     query: |
       MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-      WHERE a.fqn = 'com.acme.edges.App.use' AND b.fqn = 'com.acme.edges.lib.Base'
+      WHERE a.fqn = 'com.acme.edges.App.use' AND b.fqn = 'com.acme.edges.lib.Base' AND e.usage = 'parameter'
       RETURN a.fqn AS src, b.fqn AS dst
     assert:
       - { row_count: 1 }
@@ -663,10 +681,37 @@ tests:
   - name: "edges: USES_TYPE links a field type"
     query: |
       MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-      WHERE a.fqn = 'com.acme.edges.App.held' AND b.fqn = 'com.acme.edges.lib.Base'
+      WHERE a.fqn = 'com.acme.edges.App.held' AND b.fqn = 'com.acme.edges.lib.Base' AND e.usage = 'field'
       RETURN a.fqn AS src, b.fqn AS dst
     assert:
       - { row_count: 1 }
+
+  - name: "edges: USES_TYPE from a parameter type has usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.Uses.pick' AND b.fqn = 'com.acme.edges.lib.Base' AND e.usage = 'parameter'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "com.acme.edges.Uses.pick", dst: "com.acme.edges.lib.Base" } }
+
+  - name: "edges: USES_TYPE from a return type has usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.Uses.pick' AND b.fqn = 'com.acme.edges.util.Tool' AND e.usage = 'return'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "com.acme.edges.Uses.pick", dst: "com.acme.edges.util.Tool" } }
+
+  - name: "edges: USES_TYPE from an instanceof type has usage cast"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.Uses.pick' AND b.fqn = 'com.acme.billing.util.Money' AND e.usage = 'cast'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "com.acme.edges.Uses.pick", dst: "com.acme.billing.util.Money" } }
 
   - name: "edges: EXTENDS a superclass has resolution import"
     query: |

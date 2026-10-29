@@ -308,6 +308,14 @@ stages:
       # Parameters become typed bindings; the type is the bare type name
       - match: '(parameter pattern: (mut_pattern $N) type: $T)'
         replace: '(parameter (identifier @$N) $T)'
+      - match: '(parameter pattern: $N type: (reference_type type: (generic_type type: $T:(type_identifier "/^(?:[^S].*|S(?:[^e].*)?|Se(?:[^l].*)?|Sel(?:[^f].*)?|Self.+)$/"))))'
+        replace: '(__binding @$N $N (__ssa_typed @$T $T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
+      - match: '(parameter pattern: $N type: (reference_type type: $T:(type_identifier "/^(?:[^S].*|S(?:[^e].*)?|Se(?:[^l].*)?|Sel(?:[^f].*)?|Self.+)$/")))'
+        replace: '(__binding @$N $N (__ssa_typed @$T $T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
+      - match: '(parameter pattern: $N type: (generic_type type: $T:(type_identifier "/^(?:[^S].*|S(?:[^e].*)?|Se(?:[^l].*)?|Sel(?:[^f].*)?|Self.+)$/")))'
+        replace: '(__binding @$N $N (__ssa_typed @$T $T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
+      - match: '(parameter pattern: $N:identifier type: $T:(type_identifier "/^(?:[^S].*|S(?:[^e].*)?|Se(?:[^l].*)?|Sel(?:[^f].*)?|Self.+)$/"))'
+        replace: '(__binding @$N (__ssa_typed @$T $T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
       - match: '(parameter pattern: $N type: (reference_type type: (generic_type type: $T)))'
         replace: '(__binding @$N $N (__ssa_typed @$T $T))'
       - match: '(parameter pattern: $N type: (reference_type type: $T))'
@@ -322,6 +330,11 @@ stages:
         replace: '(closure_parameters $$$P->__binding)'
 
       # Trait method signatures (no body) — self variant first
+      - match: '(function_signature_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding) return_type: $R:(type_identifier "/^(?:[^S].*|S(?:[^e].*)?|Se(?:[^l].*)?|Sel(?:[^f].*)?|Self.+)$/"))'
+        replace: '(__def (__defname @$N) (__method) (__declaration) (__ssa_return_type @$R $R) $$$P (__call (__type "return") (__callee @$R $R)))'
+        tag: { flavor: self_method }
+      - match: '(function_signature_item name: $N parameters: (parameters $$$P:__binding) return_type: $R:(type_identifier "/^(?:[^S].*|S(?:[^e].*)?|Se(?:[^l].*)?|Sel(?:[^f].*)?|Self.+)$/"))'
+        replace: '(__def (__defname @$N) (__function) (__declaration) (__ssa_return_type @$R $R) $$$P (__call (__type "return") (__callee @$R $R)))'
       - match: '(function_signature_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R)'
         replace: '(__def (__defname @$N) (__method) (__declaration) (__ssa_return_type? @$R $R) $$$P)'
         tag: { flavor: self_method }
@@ -329,6 +342,11 @@ stages:
         replace: '(__def (__defname @$N) (__function) (__declaration) (__ssa_return_type? @$R $R) $$$P)'
 
       # Functions — self variant first, then generic
+      - match: '(function_item name: $N type_parameters:? (type_parameters $$$TP) **/(self_parameter) parameters: (parameters $$$P:__binding) return_type: $R:(type_identifier "/^(?:[^S].*|S(?:[^e].*)?|Se(?:[^l].*)?|Sel(?:[^f].*)?|Self.+)$/") body: $B $$$ANN:__visibility)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$R $R) $$$ANN $$$TP $$$P (__call (__type "return") (__callee @$R $R)) $B)'
+        tag: { flavor: self_method }
+      - match: '(function_item name: $N type_parameters:? (type_parameters $$$TP) parameters: (parameters $$$P:__binding) return_type: $R:(type_identifier "/^(?:[^S].*|S(?:[^e].*)?|Se(?:[^l].*)?|Sel(?:[^f].*)?|Self.+)$/") body: $B $$$ANN:__visibility)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$R $R) $$$ANN $$$TP $$$P (__call (__type "return") (__callee @$R $R)) $B)'
       - match: '(function_item name: $N type_parameters:? (type_parameters $$$TP) **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__visibility)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R $R) $$$ANN $$$TP $$$P $B)'
         tag: { flavor: self_method }

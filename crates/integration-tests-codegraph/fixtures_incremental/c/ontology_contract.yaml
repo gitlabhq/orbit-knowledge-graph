@@ -45,6 +45,8 @@ fixtures:
 
       int read_x(struct Point *p) { return p->x + counter; }
 
+      Point_t origin(void) { Point_t o = {0, 0}; return o; }
+
 tests:
   - name: "every definition has its kind, language kind, category, and scope"
     query: |
@@ -92,12 +94,14 @@ tests:
       - { row: { fqn: "main::main", signature: "int main(void)", parameters: [], return_type: "int", modifiers: [] } }
       - { row: { fqn: "util::helper", signature: "int helper(void)", return_type: "int" } }
 
-  - name: "C fills no visibility"
+  # corrected: convention: a top-level static C function or variable has visibility file; every other C definition has none
+  - name: "C fills visibility file only for a static definition"
     query: |
       MATCH (d:Definition) WHERE d.visibility IS NOT NULL
-      RETURN d.fqn
+      RETURN d.fqn AS fqn, d.visibility AS visibility
     assert:
-      - { empty: true }
+      - { row_count: 1 }
+      - { row: { fqn: "main::add", visibility: "file" } }
 
   - name: "C has no generated definitions"
     query: |
@@ -116,6 +120,24 @@ tests:
       - { row_count: 2 }
       - { row: { name: "*", import_kind: "wildcard", language_kind: "WildcardImport", import_path: "<stdio.h>", fqn: null } }
       - { row: { name: "*", import_kind: "wildcard", language_kind: "WildcardImport", import_path: '"util.h"', fqn: null, is_external: false } }
+
+  - name: "edges: USES_TYPE from a parameter type has usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'main::read_x' AND b.fqn = 'main::Point' AND e.usage = 'parameter'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "main::read_x", dst: "main::Point" } }
+
+  - name: "edges: USES_TYPE from a return type has usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'main::origin' AND b.fqn = 'main::Point_t' AND e.usage = 'return'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "main::origin", dst: "main::Point_t" } }
 
   - name: "every definition kind is in the closed list"
     query: |

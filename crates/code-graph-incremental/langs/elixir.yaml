@@ -268,7 +268,7 @@ display:
       - match: '(__def (__function))'
         tag:
           kind: '@$ROOT|tag("ex_word")|regex_replace("^(?:test|describe)$", "Test")|regex_replace("^defmacrop?$", "Macro")|regex_replace("^def\w*$", "Function")'
-          language_kind: '@$ROOT|tag("ex_word")|regex_replace("^describe$", "ExampleGroup")|regex_replace("^[a-z].*$", "")'
+          language_kind: '@$ROOT|tag("ex_word")|regex_replace("^describe$", "Describe")|regex_replace("^test$", "Test")|regex_replace("^[a-z].*$", "")'
           visibility: '@$ROOT|tag("ex_word")|regex_replace("^(?:defp|defmacrop|defguardp)$", "private")|regex_replace("^(?:def|defmacro|defguard|defdelegate)$", "public")|regex_replace("^(?:test|describe)$", "")'
   - name: content
     rules:

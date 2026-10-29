@@ -163,6 +163,8 @@ stages:
         replace: '(__binding @$N (__ssa_typed @$T))'
       - match: '(typed_default_parameter name: $N)'
         replace: '(__binding @$N)'
+      - match: '(typed_parameter $C:identifier type: (type $T:identifier))'
+        replace: '(__binding @$C (__ssa_typed @$T $T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
       - match: '(typed_parameter $C:identifier type: (type $T))'
         replace: '(__binding @$C (__ssa_typed @$T $T))'
       - match: '(typed_parameter $C:identifier)'
@@ -229,11 +231,16 @@ stages:
         replace: '(__ssa_loop $$$BODY)'
 
       # Methods — has self parameter (before generic function rule)
+      - match: '(function_definition name: $N **/(identifier "self") parameters:? (parameters $$$P:__binding) return_type: $R:(type $RT:identifier) body: $B $$$ANN:__decorator)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$R $R) $$$ANN $$$P (__call (__type "return") (__callee @$RT $RT)) $B)'
+        tag: { flavor: self_method }
       - match: '(function_definition name: $N **/(identifier "self") parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R $R) $$$ANN $$$P $B)'
         tag: { flavor: self_method }
 
       # Functions — no self parameter
+      - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type: $R:(type $RT:identifier) body: $B $$$ANN:__decorator)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$R $R) $$$ANN $$$P (__call (__type "return") (__callee @$RT $RT)) $B)'
       - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R $R) $$$ANN $$$P $B)'
 
@@ -430,12 +437,6 @@ display:
         tag:
           import_kind: module
           fqn: '@$ROOT|tag("source_path")'
-      # `import os`: the name repeats the module, so the whole module is imported.
-      - match: '(__import $S:__source $$$A $N:__name $$$B)'
-        where: '$N == $S'
-        tag_on: __name
-        tag:
-          import_type: Import
       - match: '(__name)'
         tag:
           resolved: '@$ROOT|has_incoming("Imports")'

@@ -119,11 +119,13 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a catch type is a type use, USES_TYPE with usage parameter
   - name: "Cross-file catch type reference: OrderService.run references RepositoryException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_TYPE]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Error\RepositoryException'
+        AND e.usage = 'parameter'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

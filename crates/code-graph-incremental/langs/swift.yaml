@@ -40,8 +40,10 @@ stages:
         replace: '(__supertype @$T)'
       - match: '(navigation_expression target: (self_expression) suffix: (navigation_suffix suffix: $N:simple_identifier))'
         replace: '(__ivar @$N)'
+      - match: '(attribute $T:type_identifier $$$A)'
+        replace: '(__decorator @$T)'
       - match: '(parameter name: $N:simple_identifier $T:type_identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
       - match: '(parameter name: $N:simple_identifier)'
         replace: '(__binding @$N)'
 
@@ -71,16 +73,16 @@ stages:
 
   - name: classify
     rules:
-      - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier) value: $V:__call)'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
-      - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier))'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T $T)))) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T)))))'
-      - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) value: $V:__call)'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $V)) (__binding (__ivar @$N) (__rhs $V)))'
-      - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) value: $V)'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs @$V $V)))'
-      - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) $$$R)'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration)) $$$R)'
+      - match: '(property_declaration $M?:modifiers (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier) value: $V:__call)'
+        replace: '(sw_prop (__def (__defname @$N) (__property) $M (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
+      - match: '(property_declaration $M?:modifiers (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier))'
+        replace: '(sw_prop (__def (__defname @$N) (__property) $M (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T $T)))))'
+      - match: '(property_declaration $M?:modifiers (pattern bound_identifier: $N:simple_identifier) value: $V:__call)'
+        replace: '(sw_prop (__def (__defname @$N) (__property) $M) (__binding @$N (__declaration) (__rhs $V)) (__binding (__ivar @$N) (__rhs $V)))'
+      - match: '(property_declaration $M?:modifiers (pattern bound_identifier: $N:simple_identifier) value: $V)'
+        replace: '(sw_prop (__def (__defname @$N) (__property) $M) (__binding @$N (__declaration) (__rhs @$V $V)))'
+      - match: '(property_declaration $M?:modifiers (pattern bound_identifier: $N:simple_identifier) $$$R)'
+        replace: '(sw_prop (__def (__defname @$N) (__property) $M) (__binding @$N (__declaration)) $$$R)'
       - match: '(assignment target: (directly_assignable_expression $T:__ivar) result: $R:__call)'
         replace: '(__binding $T (__rhs $R))'
       - match: '(assignment target: (directly_assignable_expression $T:__ivar) result: $R)'
@@ -105,27 +107,29 @@ stages:
         replace: '(__ssa_loop $$$X)'
       - match: '(enum_entry name: $N:simple_identifier $$$R)'
         replace: '(__def (__defname @$N) (__enum_variant) $$$R)'
+      - match: '(protocol_function_declaration name: $N:simple_identifier $$$P:__binding $RT:type_identifier)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $$$P (__call (__type "return") (__callee @$RT $RT)))'
       - match: '(protocol_function_declaration name: $N:simple_identifier $$$P:__binding $RT?:type_identifier)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $$$P)'
-      - match: '(init_declaration $$$P:__binding body: $B:function_body)'
-        replace: '(__def (__defname "init") (__method) $$$P $B)'
+      - match: '(init_declaration $M?:modifiers $$$P:__binding body: $B:function_body)'
+        replace: '(__def (__defname "init") (__method) $M $$$P $B)'
       - match: '(function_declaration $M?:modifiers name: $N:simple_identifier $$$P:__binding $RT:type_identifier body: $B:function_body)'
-        replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$RT) $M $$$P $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$RT) $M $$$P (__call (__type "return") (__callee @$RT $RT)) $B)'
       - match: '(function_declaration $M?:modifiers name: $N:simple_identifier $$$P:__binding body: $B:function_body)'
         replace: '(__def (__defname @$N) (__function) $M $$$P $B)'
-      - match: '(class_declaration (struct) name: $N:type_identifier $$$ANN body: (class_body $$$B))'
-        replace: '(__def (__defname @$N) (__struct) $$$ANN $$$B)'
-      - match: '(class_declaration (enum) name: $N:type_identifier $$$ANN body: (enum_class_body $$$B))'
-        replace: '(__def (__defname @$N) (__enum) $$$ANN $$$B)'
-      - match: '(class_declaration (extension) name: $N:type_identifier $$$ANN body: (class_body $$$B))'
-        replace: '(__def (__defname @$N) (__impl) $$$ANN $$$B)'
+      - match: '(class_declaration $M?:modifiers (struct) name: $N:type_identifier $$$ANN body: (class_body $$$B))'
+        replace: '(__def (__defname @$N) (__struct) $M $$$ANN $$$B)'
+      - match: '(class_declaration $M?:modifiers (enum) name: $N:type_identifier $$$ANN body: (enum_class_body $$$B))'
+        replace: '(__def (__defname @$N) (__enum) $M $$$ANN $$$B)'
+      - match: '(class_declaration $M?:modifiers (extension) name: $N:type_identifier $$$ANN body: (class_body $$$B))'
+        replace: '(__def (__defname @$N) (__impl) $M $$$ANN $$$B)'
         tag: { language_kind: Extension }
-      - match: '(class_declaration name: $N:type_identifier $S:__supertype $$$ANN body: (class_body $$$B))'
-        replace: '(__def (__defname @$N) (__class) $S $$$ANN (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $$$B)'
-      - match: '(class_declaration name: $N:type_identifier $$$ANN body: (class_body $$$B))'
-        replace: '(__def (__defname @$N) (__class) $$$ANN $$$B)'
-      - match: '(protocol_declaration name: $N:type_identifier $$$ANN body: (protocol_body $$$B))'
-        replace: '(__def (__defname @$N) (__interface) $$$ANN $$$B)'
+      - match: '(class_declaration $M?:modifiers name: $N:type_identifier $S:__supertype $$$ANN body: (class_body $$$B))'
+        replace: '(__def (__defname @$N) (__class) $M $S $$$ANN (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $$$B)'
+      - match: '(class_declaration $M?:modifiers name: $N:type_identifier $$$ANN body: (class_body $$$B))'
+        replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B)'
+      - match: '(protocol_declaration $M?:modifiers name: $N:type_identifier $$$ANN body: (protocol_body $$$B))'
+        replace: '(__def (__defname @$N) (__interface) $M $$$ANN $$$B)'
       - match: '(typealias_declaration name: $N:type_identifier)'
         replace: '(__def (__defname @$N) (__type_alias))'
 
@@ -159,7 +163,7 @@ stages:
       - match: '(__def (__interface))'
         tag: { value: "true", declares_type: "true" }
       - match: '(__def (__property))'
-        tag: { value: "true" }
+        tag: { value: "true", scoped: "true" }
       - match: '(__def (__type_alias))'
         tag: { value: "true", declares_type: "true" }
 
@@ -269,7 +273,7 @@ display:
       - match: '(__def (__type_alias))'
         tag: { kind: TypeAlias }
       - match: '(__def (__enum_variant))'
-        tag: { kind: EnumMember }
+        tag: { kind: EnumMember, language_kind: EnumCase }
       - match: '(__def (__method))'
         tag: { kind: Method }
       - match: '(__def (__defname "init") (__method))'
@@ -328,6 +332,6 @@ display:
           resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name)'
         tag:
-          import_type: '@$ROOT|tag("import_type")|default("Import")'
+          import_type: '@$ROOT|tag("import_type")|default("NamedImport")'
           import_kind: '@$ROOT|source("256")|regex_replace("(?s)\A\s*(?:@\w+\s+)*import\s+(?:typealias|struct|class|enum|protocol|let|var|func)\s.*", "symbol")|regex_replace("(?s)^(symbol)$|.*", "$1")|default("module")'
           fqn: '@$ROOT|ancestor_tag("source_path")'

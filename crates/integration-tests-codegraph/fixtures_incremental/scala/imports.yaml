@@ -28,6 +28,7 @@ fixtures:
       class Mixed {}
 
 tests:
+  # corrected: convention: a plain import has language_kind NamedImport
   - name: Simple import is extracted correctly
     query: |
       MATCH (i:Import)
@@ -35,7 +36,7 @@ tests:
       RETURN i.import_path AS path, i.name AS name, i.language_kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { path: "com.example.models", name: "User", type: "Import" } }
+      - { row: { path: "com.example.models", name: "User", type: "NamedImport" } }
 
   - name: Wildcard import is extracted correctly
     query: |

@@ -70,6 +70,7 @@ fixtures:
       };
 
 tests:
+  # corrected: convention: a Zig declaration without pub has visibility file
   - name: "std is a Constant"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'std' AND d.kind = 'Constant'
@@ -87,7 +88,7 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: []
-          visibility: "private"
+          visibility: "file"
           generated_by: null
           language: "zig"
 
@@ -175,6 +176,7 @@ tests:
           generated_by: null
           language: "zig"
 
+  # corrected: convention: a Zig declaration without pub has visibility file
   - name: "Point.norm is a Method"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'Point.norm' AND d.kind = 'Method'
@@ -192,10 +194,11 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: []
-          visibility: "private"
+          visibility: "file"
           generated_by: null
           language: "zig"
 
+  # corrected: convention: a Zig declaration without pub has visibility file
   - name: "Color is a Enum"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'Color' AND d.kind = 'Enum'
@@ -213,7 +216,7 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: []
-          visibility: "private"
+          visibility: "file"
           generated_by: null
           language: "zig"
 
@@ -301,6 +304,7 @@ tests:
           generated_by: null
           language: "zig"
 
+  # corrected: convention: a Zig declaration without pub has visibility file
   - name: "counter is a Variable"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'counter' AND d.kind = 'Variable'
@@ -318,7 +322,7 @@ tests:
           declared_type: "u32"
           doc_comment: ""
           modifiers: []
-          visibility: "private"
+          visibility: "file"
           generated_by: null
           language: "zig"
 
@@ -364,6 +368,7 @@ tests:
           generated_by: null
           language: "zig"
 
+  # corrected: convention: a Zig declaration without pub has visibility file
   - name: "exported is a Function"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'exported' AND d.kind = 'Function'
@@ -381,10 +386,11 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: ["extern"]
-          visibility: "private"
+          visibility: "file"
           generated_by: null
           language: "zig"
 
+  # corrected: convention: a Zig declaration without pub has visibility file
   - name: "fast is a Function"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'fast' AND d.kind = 'Function'
@@ -402,7 +408,7 @@ tests:
           declared_type: null
           doc_comment: ""
           modifiers: ["inline"]
-          visibility: "private"
+          visibility: "file"
           generated_by: null
           language: "zig"
 
@@ -517,6 +523,22 @@ tests:
       RETURN a.fqn AS source, b.fqn AS target
     assert:
       - { row: { source: "Point.init", target: "Point" } }
+
+  - name: "a parameter type is USES_TYPE with usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE e.usage = 'parameter' AND a.fqn = 'Point.norm'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Point.norm", target: "Point" } }
+
+  - name: "a return type is USES_TYPE with usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE e.usage = 'return' AND a.fqn = 'Segment.make'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Segment.make", target: "Segment" } }
 
   - name: "a field read through a typed parameter is USES_VALUE"
     query: |

@@ -40,7 +40,7 @@ stages:
       - match: '(return_expression $$$V)'
         replace: '(__ssa_return $$$V)'
       - match: '(parameter name: $N:identifier type: $T:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T))'
+        replace: '(zig_param (__binding @$N (__ssa_typed @$T)) (__call (__type "parameter") (__callee @$T $T)))'
       - match: '(parameter name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(zig_enum_member name: $N:identifier)'
@@ -97,6 +97,8 @@ stages:
         replace: '(__ssa_loop $$$X)'
       - match: '(for_statement $$$X)'
         replace: '(__ssa_loop $$$X)'
+      - match: '(function_declaration name: $N:identifier $P:parameters type: $RT:identifier body: $B:block)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$RT) $P (__call (__type "return") (__callee @$RT $RT)) $B)'
       - match: '(function_declaration name: $N:identifier $P:parameters type:? $RT:identifier body: $B:block)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_declaration name: $N:identifier $P:parameters $$$R)'
@@ -268,7 +270,7 @@ display:
       - match: '(__def)'
         tag:
           modifiers: '@$ROOT|tag("head")|regex_replace("\b(extern|inline)\b|\b(export)\b|.", "$1$2 ")|regex_replace("\bexport\b", "extern")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
-          visibility: '@$ROOT|tag("head")|regex_first("(?s)\A(?:(pub)\b.*|.*)\z", "$1")|map("pub:public")|default("private")'
+          visibility: '@$ROOT|tag("head")|regex_first("(?s)\A(?:(pub)\b.*|.*)\z", "$1")|map("pub:public")|default("file")'
       - match: '(__def)'
         tag:
           visibility: '@$ROOT|concat(":", "ancestor_tag:kind", "tag:visibility")|regex_first("(?s)\A(?:(?:Function|Method|Test):.*|(?:[A-Za-z]+:)?(.*))\z", "$1")'

@@ -89,10 +89,11 @@ tests:
       - { column_values: { field: kind, values: ["Method"] } }
 
   # corrected: contract: a member read without a call is USES_VALUE; contract: an enum constant is kind EnumMember
+  # corrected: convention: a Java enum constant has language_kind EnumConstant
   - name: a read of a constant that shares its name with a method targets the constant
     query: |
       MATCH (c:Definition)-[:USES_VALUE]->(t:Definition)
       WHERE c.name = 'read' AND t.name = 'FOO'
       RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
-      - { column_values: { field: language_kind, values: ["EnumMember"] } }
+      - { column_values: { field: language_kind, values: ["EnumConstant"] } }

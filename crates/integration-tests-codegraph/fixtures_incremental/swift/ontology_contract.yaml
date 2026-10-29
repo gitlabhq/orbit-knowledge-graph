@@ -90,9 +90,24 @@ fixtures:
           }
       }
 
+      final class Holder {
+          var shape: Shape = Shape(name: "h")
+      }
+
   - path: Sources/Utils/Util.swift
     content: |
       public func util() {}
+
+  - path: Sources/App/Wrap.swift
+    content: |
+      @propertyWrapper
+      struct Clamped {
+          var wrappedValue: Int
+      }
+
+      struct Box {
+          @Clamped var size: Int
+      }
 
 tests:
   - name: "Store is a Interface"
@@ -410,6 +425,7 @@ tests:
           generated_by: null
           language: "swift"
 
+  # corrected: convention: a Swift enum case has language_kind EnumCase
   - name: "Direction.north is a EnumMember"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'Direction.north' AND d.kind = 'EnumMember'
@@ -418,7 +434,7 @@ tests:
       - { row_count: 1 }
       - row:
           kind: "EnumMember"
-          language_kind: "EnumMember"
+          language_kind: "EnumCase"
           category: "Value"
           scope: "member"
           signature: "case north"
@@ -578,6 +594,7 @@ tests:
           generated_by: null
           language: "swift"
 
+  # corrected: convention: a plain import has language_kind NamedImport
   - name: "Import Foundation from Foundation is module"
     query: |
       MATCH (i:Import) WHERE i.import_path = 'Foundation' AND i.name = 'Foundation'
@@ -588,11 +605,12 @@ tests:
           name: "Foundation"
           alias: ""
           import_kind: "module"
-          language_kind: "Import"
+          language_kind: "NamedImport"
           import_path: "Foundation"
           fqn: "Foundation"
           is_external: true
 
+  # corrected: convention: a plain import has language_kind NamedImport
   - name: "Import Utils from Utils is module"
     query: |
       MATCH (i:Import) WHERE i.import_path = 'Utils' AND i.name = 'Utils'
@@ -603,10 +621,11 @@ tests:
           name: "Utils"
           alias: ""
           import_kind: "module"
-          language_kind: "Import"
+          language_kind: "NamedImport"
           import_path: "Utils"
           fqn: "Utils"
 
+  # corrected: convention: a plain import has language_kind NamedImport
   - name: "Import URL from Foundation.URL is symbol"
     query: |
       MATCH (i:Import) WHERE i.import_path = 'Foundation.URL' AND i.name = 'URL'
@@ -617,7 +636,7 @@ tests:
           name: "URL"
           alias: ""
           import_kind: "symbol"
-          language_kind: "Import"
+          language_kind: "NamedImport"
           import_path: "Foundation.URL"
           fqn: "Foundation.URL"
           is_external: true
@@ -674,6 +693,41 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { source: "measure", target: "Shape.id" } }
+
+  - name: "edges: USES_TYPE from a parameter type has usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'measure' AND b.fqn = 'Shape' AND e.usage = 'parameter'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "measure", dst: "Shape" } }
+
+  - name: "edges: USES_TYPE from a return type has usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'Shape.make' AND b.fqn = 'Shape' AND e.usage = 'return'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "Shape.make", dst: "Shape" } }
+
+  - name: "edges: USES_TYPE from a property type has usage field"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'Holder.shape' AND b.fqn = 'Shape' AND e.usage = 'field'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "Holder.shape", dst: "Shape" } }
+
+  - name: "edges: ANNOTATED_BY links a property to its property wrapper"
+    query: |
+      MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
+      WHERE a.fqn = 'Box.size' AND b.fqn = 'Clamped'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
 
   - name: "a superclass is EXTENDS"
     query: |

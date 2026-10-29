@@ -143,12 +143,22 @@ tests:
       - { row: { fqn: "main.main", signature: "func main()", parameters: [], return_type: null } }
       - { row: { fqn: "main.TestArea", signature: "func TestArea(t *testing.T)", parameters: ["t *testing.T"], return_type: null } }
 
-  - name: "Go fills no visibility"
+  # corrected: convention: an exported Go name has visibility public, an unexported name package, a local none
+  - name: "an exported name is public and an unexported name is package"
     query: |
-      MATCH (d:Definition) WHERE d.visibility IS NOT NULL
-      RETURN d.fqn
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.visibility AS visibility
+      ORDER BY fqn
+      LIMIT 100
     assert:
-      - { empty: true }
+      - { row: { fqn: "main.Point", visibility: "public" } }
+      - { row: { fqn: "main.Point.X", visibility: "public" } }
+      - { row: { fqn: "main.Point.Area", visibility: "public" } }
+      - { row: { fqn: "main.Shape.Area", visibility: "public" } }
+      - { row: { fqn: "main.counter", visibility: "package" } }
+      - { row: { fqn: "main.usePoint", visibility: "package" } }
+      - { row: { fqn: "main.main.local", visibility: null } }
+      - { row: { fqn: "main.TestArea", visibility: "public" } }
 
   - name: "Go has no generated definitions"
     query: |
@@ -157,6 +167,7 @@ tests:
     assert:
       - { empty: true }
 
+  # corrected: convention: a plain import has language_kind NamedImport, an aliased one AliasedImport, a dot import WildcardImport
   - name: "imports carry their kind, path, and full name"
     query: |
       MATCH (i:Import)
@@ -164,10 +175,10 @@ tests:
       ORDER BY import_path, name
       LIMIT 100
     assert:
-      - { row: { name: "fmt", import_kind: "module", language_kind: "Import", import_path: "fmt", fqn: "fmt" } }
-      - { row: { name: "strings", alias: "str", import_kind: "module", import_path: "strings", fqn: "strings" } }
-      - { row: { name: "math", import_kind: "wildcard", import_path: "math", fqn: null } }
-      - { row: { name: "embed", import_kind: "side_effect", import_path: "embed", fqn: "embed" } }
+      - { row: { name: "fmt", import_kind: "module", language_kind: "NamedImport", import_path: "fmt", fqn: "fmt" } }
+      - { row: { name: "strings", alias: "str", import_kind: "module", language_kind: "AliasedImport", import_path: "strings", fqn: "strings" } }
+      - { row: { name: "math", import_kind: "wildcard", language_kind: "WildcardImport", import_path: "math", fqn: null } }
+      - { row: { name: "embed", import_kind: "side_effect", language_kind: "NamedImport", import_path: "embed", fqn: "embed" } }
       - { row: { name: "util", import_kind: "module", import_path: "example.com/demo/util", fqn: "example.com/demo/util", is_external: false } }
       - { row: { name: "ext", import_kind: "module", import_path: "github.com/acme/ext", fqn: "github.com/acme/ext", is_external: true } }
 
@@ -239,6 +250,24 @@ tests:
       - { row: { source: "main.main", target: "ext" } }
       - { row: { source: "main.main", target: "fmt" } }
       - { row: { source: "main.main", target: "strings" } }
+
+  - name: "a parameter type is USES_TYPE with usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE e.usage = 'parameter' AND a.fqn = 'main.usePoint'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main.usePoint", target: "main.Point" } }
+
+  - name: "a return type is USES_TYPE with usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE e.usage = 'return' AND a.fqn = 'main.NewPoint'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main.NewPoint", target: "main.Point" } }
 
   - name: "a field read on the receiver is USES_VALUE"
     query: |

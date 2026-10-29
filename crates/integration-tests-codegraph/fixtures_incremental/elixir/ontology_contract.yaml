@@ -80,6 +80,7 @@ fixtures:
       end
 
 tests:
+  # corrected: convention: an ExUnit describe block has language_kind Describe
   - name: "every definition has its kind, language kind, category, and scope"
     query: |
       MATCH (d:Definition)
@@ -99,7 +100,7 @@ tests:
       - { row: { fqn: "Weather.Helpers", kind: "Module", language_kind: "Module", category: "Module", scope: "top_level" } }
       - { row: { fqn: "Weather.Helpers.load", kind: "Function", language_kind: "Function", category: "Callable", scope: "member" } }
       - { row: { fqn: "Weather.ForecastTest", kind: "Module", language_kind: "Module", category: "Module", scope: "top_level" } }
-      - { row: { fqn: "Weather.ForecastTest.fetch/2", kind: "Test", language_kind: "ExampleGroup", category: "Callable", scope: "member" } }
+      - { row: { fqn: "Weather.ForecastTest.fetch/2", kind: "Test", language_kind: "Describe", category: "Callable", scope: "member" } }
       - { row: { fqn: "Weather.ForecastTest.fetch/2.returns the city", kind: "Test", language_kind: "Test", category: "Callable", scope: "local" } }
 
   - name: "an ExUnit test is named by its description string and calls the function it tests"
