@@ -11,10 +11,14 @@ export function mergeRuns<P extends { isRunning: boolean }>(calls: readonly Grou
   const groups = new Map<string, GroupCall<P>[]>()
   for (const x of calls) groups.set(x.call.label, [...(groups.get(x.call.label) ?? []), x])
   return [...groups.values()].flatMap((group): Row<P>[] => {
-    const shown = group.find((x) => x.props.isRunning) ?? group[group.length - 1]
-    if (!shown) return []
-    const detail = shown.call.detail || ([...group].reverse().find((x) => x.call.detail)?.call.detail ?? '')
-    return [{ ...shown, isRunning: shown.props.isRunning, call: { ...shown.call, detail } }]
+    const done = group.filter((x) => !x.props.isRunning)
+    const running = group.find((x) => x.props.isRunning)
+    const last = done[done.length - 1]
+    const detail = [...done].reverse().find((x) => x.call.detail)?.call.detail ?? ''
+    return [
+      ...(last ? [{ ...last, isRunning: false, call: { ...last.call, detail } }] : []),
+      ...(running ? [{ ...running, isRunning: true }] : []),
+    ]
   })
 }
 

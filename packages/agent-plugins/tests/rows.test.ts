@@ -30,12 +30,15 @@ test('a call with no detail keeps the last detail on its line', () => {
   expect(mergeRuns(calls(q("CALL db.schema('Runner')"), q('CALL db.schema()'))).map((row) => row.call.detail)).toEqual(['Runner'])
 })
 
-test('a running call swaps in its own detail', () => {
+test('a running call gets its own line under the finished one, and merges up when done', () => {
   const [first, second] = calls(MR_PROJECT, USER_MR)
   if (!first || !second) throw new Error('two calls expected')
   const rows = mergeRuns([first, { ...second, props: { isRunning: true } }])
-  expect(rows).toHaveLength(1)
-  expect(rows[0]).toMatchObject({ isRunning: true, call: { active: 'Exploring Orbit', detail: 'Users → Merge requests' } })
+  expect(rows.map((row) => [row.isRunning, row.call.detail])).toEqual([
+    [false, 'Merge requests → Projects'],
+    [true, 'Users → Merge requests'],
+  ])
+  expect(mergeRuns([first, second]).map((row) => [row.isRunning, row.call.detail])).toEqual([[false, 'Users → Merge requests']])
 })
 
 test('a shell call still being written does not break an Orbit group', () => {
