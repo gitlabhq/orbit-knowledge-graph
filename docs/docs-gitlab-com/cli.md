@@ -314,7 +314,7 @@ The CLI reads these environment variables:
 | `2` | A command-line usage error, or HTTP `404`: the path does not exist, or the endpoint is not available. |
 | `3` | HTTP `401`. The token is missing or expired. |
 | `4` | HTTP `403`. No group with GitLab Orbit turned on is available to you. |
-| `5` | HTTP `429`. Rate limited. Wait up to one minute, then try again. |
+| `5` | HTTP `429`. Rate limited. Wait for `Retry-After`. |
 | `130` | You canceled a prompt or indexing. |
 
 ## Related topics
