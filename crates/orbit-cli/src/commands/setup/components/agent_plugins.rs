@@ -272,8 +272,10 @@ fn prune_stale_entries(plugin: &PluginSpec, current: &str, root: &mut Value) -> 
         ] {
             if let Some(map) = root.get_mut(section).and_then(Value::as_object_mut) {
                 map.remove(&key);
-                if map.is_empty() {
-                    root.as_object_mut().map(|root| root.remove(section));
+                if map.is_empty()
+                    && let Some(root) = root.as_object_mut()
+                {
+                    root.remove(section);
                 }
             }
         }
