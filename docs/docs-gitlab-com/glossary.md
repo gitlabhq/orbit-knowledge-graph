@@ -16,7 +16,7 @@ title: GitLab Orbit glossary
 This glossary provides definitions for terms related to GitLab Orbit.
 
 Code layer
-: The layer of the graph that holds source code structure: files, directories, definitions, imported symbols, and the calls, imports, and inheritance between them.
+: The layer of the graph that holds source code structure: files, directories, definitions, imports, and the calls, uses, imports, and inheritance between them.
 
 Definition
 : A named code element, such as a class, function, method, or module. Its fully qualified name (`fqn`) includes the enclosing names.

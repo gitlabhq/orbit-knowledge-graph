@@ -69,12 +69,9 @@ LIMIT 100
 Calls are resolved inside one project, so imports show the other projects that depend on the code:
 
 ```gql orbit-query
-MATCH (s:ImportedSymbol {import_path: 'gitlab.com/gitlab-org/labkit/v2/log'})
-  <-[:IMPORTS]-(f:File)
-  -[:ON_BRANCH]->(b:Branch)
-  <-[:CONTAINS]-(p:Project)
-WHERE p.full_path STARTS WITH 'gitlab-org/' AND p.id <> 9438583 AND b.is_default = true
-RETURN p.full_path, count(f) AS files
+MATCH (s:Import {import_path: 'gitlab.com/gitlab-org/labkit/v2/log'})
+WHERE s.project_id <> 9438583
+RETURN s.project_id, count(DISTINCT s.file_path) AS files
 ORDER BY files DESC
 LIMIT 100
 ```
@@ -242,15 +239,10 @@ LIMIT 1000
 The projects that import a library:
 
 ```gql orbit-query
-MATCH (s:ImportedSymbol)
-  <-[:IMPORTS]-(f:File)
-  -[:ON_BRANCH]->(b:Branch)
-  <-[:CONTAINS]-(p:Project)
+MATCH (s:Import)
 WHERE s.import_path STARTS WITH 'gitlab.com/gitlab-org/labkit'
-  AND p.full_path STARTS WITH 'gitlab-org/'
-  AND b.is_default = true
-RETURN p.full_path, count(s) AS import_sites
-ORDER BY import_sites DESC
+RETURN s.project_id, count(DISTINCT s.file_path) AS files
+ORDER BY files DESC
 LIMIT 200
 ```
 
