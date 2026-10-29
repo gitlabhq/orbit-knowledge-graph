@@ -337,6 +337,7 @@ pub enum JsImportKind {
 pub struct JsCallEdge {
     pub caller: JsCallSite,
     pub callee: JsCallTarget,
+    pub line: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -345,6 +346,7 @@ pub struct JsResolvedCallRelationship {
     pub source_definition_range: Option<Range>,
     pub target_path: String,
     pub target_definition_range: Range,
+    pub line: u32,
 }
 
 #[derive(Debug, Clone)]

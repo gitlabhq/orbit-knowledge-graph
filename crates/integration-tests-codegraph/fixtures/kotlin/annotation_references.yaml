@@ -21,7 +21,7 @@ fixtures:
 tests:
   - name: Annotation ref attributed to the annotated method
     query: |
-      MATCH (caller:Definition)-[e:USES_TYPE]->(callee:Definition)
+      MATCH (caller:Definition)-[e:ANNOTATED_BY]->(callee:Definition)
       WHERE caller.name = 'annotatedMethod'
       RETURN callee.name AS callee
     assert:
@@ -30,7 +30,7 @@ tests:
 
   - name: Each method references its own annotation
     query: |
-      MATCH (caller:Definition)-[e:USES_TYPE]->(callee:Definition)
+      MATCH (caller:Definition)-[e:ANNOTATED_BY]->(callee:Definition)
       WHERE caller.name = 'otherMethod'
       RETURN callee.name AS callee
     assert:

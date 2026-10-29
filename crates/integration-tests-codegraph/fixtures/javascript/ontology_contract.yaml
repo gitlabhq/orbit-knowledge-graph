@@ -21,6 +21,10 @@ fixtures:
       export const MAX = 10;
       export function make(a, b) { return a + b; }
 
+      class Rush extends Order {
+        describe() {}
+      }
+
   - path: src/helper.js
     content: |
       module.exports = { run(x) { return x; } };

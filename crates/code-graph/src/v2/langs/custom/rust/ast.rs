@@ -30,7 +30,7 @@ pub(super) fn build_parsed_rust_file(
 }
 
 impl ByteLineIndex {
-    fn new(source: &str) -> Self {
+    pub(super) fn new(source: &str) -> Self {
         let mut line_starts = vec![0];
         for (idx, byte) in source.as_bytes().iter().enumerate() {
             if *byte == b'\n' {
@@ -46,7 +46,7 @@ impl ByteLineIndex {
         Range::new(self.position(start), self.position(end), (start, end))
     }
 
-    fn position(&self, offset: usize) -> Position {
+    pub(super) fn position(&self, offset: usize) -> Position {
         let line = self
             .line_starts
             .partition_point(|line_start| *line_start <= offset)

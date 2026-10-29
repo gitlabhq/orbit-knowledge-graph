@@ -69,7 +69,7 @@ tests:
 
   - name: process calls double, area, and Circle
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'process'
       RETURN callee.name AS callee
       ORDER BY callee

@@ -75,7 +75,7 @@ tests:
 
   - name: "local tuple struct constructors resolve to the local struct"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'outer' AND callee.name = 'Local'
       RETURN callee.fqn AS fqn, callee.kind AS type
     assert:
@@ -84,7 +84,7 @@ tests:
 
   - name: "local enum variant constructors resolve to the local variant"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'outer' AND callee.name = 'Pick'
       RETURN callee.fqn AS fqn, callee.language_kind AS type
     assert:

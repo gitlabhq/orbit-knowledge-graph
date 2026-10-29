@@ -278,6 +278,7 @@ impl JsCrossFileResolver {
                 },
                 target_path: final_path,
                 target_definition_range: final_range,
+                line: call.line,
             });
         }
 

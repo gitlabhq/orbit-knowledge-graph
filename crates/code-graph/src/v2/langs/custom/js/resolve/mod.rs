@@ -526,19 +526,16 @@ fn add_call_relationship_edge(
         (source_node, NodeKind::File, None)
     };
 
-    add_edge(
-        graph,
-        seen,
-        source_node,
-        target_node,
-        GraphEdge::new(Relationship {
-            edge_kind: EdgeKind::Calls,
-            source_node: source_node_kind,
-            target_node: NodeKind::Definition,
-            source_def_kind,
-            target_def_kind: Some(graph.def(target_node).kind),
-        }),
-    );
+    let mut edge = GraphEdge::new(Relationship {
+        edge_kind: EdgeKind::Calls,
+        source_node: source_node_kind,
+        target_node: NodeKind::Definition,
+        source_def_kind,
+        target_def_kind: Some(graph.def(target_node).kind),
+    })
+    .with_resolution(crate::v2::types::Resolution::Import);
+    edge.lines = crate::v2::linker::graph::Lines::one(relationship.line);
+    add_edge(graph, seen, source_node, target_node, edge);
 }
 
 fn add_unresolved_imported_call_edges(
@@ -560,19 +557,16 @@ fn add_unresolved_imported_call_edges(
                 continue;
             };
 
-            add_edge(
-                graph,
-                seen,
-                source.node,
-                target_node,
-                GraphEdge::new(Relationship {
-                    edge_kind: EdgeKind::Calls,
-                    source_node: source.node_kind,
-                    target_node: NodeKind::Import,
-                    source_def_kind: source.def_kind,
-                    target_def_kind: None,
-                }),
-            );
+            let mut edge = GraphEdge::new(Relationship {
+                edge_kind: EdgeKind::Calls,
+                source_node: source.node_kind,
+                target_node: NodeKind::Import,
+                source_def_kind: source.def_kind,
+                target_def_kind: None,
+            })
+            .with_resolution(crate::v2::types::Resolution::Import);
+            edge.lines = crate::v2::linker::graph::Lines::one(call.line);
+            add_edge(graph, seen, source.node, target_node, edge);
         }
     }
 }

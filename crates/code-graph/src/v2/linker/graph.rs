@@ -903,7 +903,13 @@ impl CodeGraph {
             .find_enclosing_or_overlapping(start, end)
     }
 
-    pub fn add_call_edge(&mut self, source_node: NodeIndex, target_node: NodeIndex) {
+    pub fn add_call_edge(
+        &mut self,
+        source_node: NodeIndex,
+        target_node: NodeIndex,
+        line: u32,
+        resolution: Resolution,
+    ) {
         let (source_node_kind, source_def_kind) = self.graph[source_node]
             .def_id()
             .map(|id| (NodeKind::Definition, Some(self.defs[id.0 as usize].kind)))
@@ -911,18 +917,21 @@ impl CodeGraph {
         let target_def_kind = self.graph[target_node]
             .def_id()
             .map(|id| self.defs[id.0 as usize].kind);
-
-        self.graph.add_edge(
-            source_node,
-            target_node,
-            GraphEdge::new(Relationship {
-                edge_kind: EdgeKind::Calls,
-                source_node: source_node_kind,
-                target_node: NodeKind::Definition,
-                source_def_kind,
-                target_def_kind,
-            }),
-        );
+        let Some(edge_kind) =
+            super::resolver::target_edge_kind(crate::v2::types::RefKind::Call, target_def_kind)
+        else {
+            return;
+        };
+        let mut edge = GraphEdge::new(Relationship {
+            edge_kind,
+            source_node: source_node_kind,
+            target_node: NodeKind::Definition,
+            source_def_kind,
+            target_def_kind,
+        })
+        .with_resolution(resolution);
+        edge.lines = Lines::one(line);
+        self.graph.add_edge(source_node, target_node, edge);
     }
 
     pub fn try_def(&self, idx: NodeIndex) -> Option<&GraphDef> {
@@ -1316,13 +1325,15 @@ impl CodeGraph {
             .edges_directed(idx, petgraph::Direction::Outgoing)
             .filter(|e| e.weight().relationship.edge_kind == EdgeKind::ResolvesTo)
             .find_map(|e| match &self.graph[e.target()] {
-                GraphNode::File(f) => Some(
-                    Path::new(&f.path)
-                        .with_extension("")
-                        .to_string_lossy()
-                        .into_owned(),
-                ),
+                GraphNode::File(f) => Some(f.path.as_str()),
+                GraphNode::Definition { file_path, .. } => Some(file_path.as_ref()),
                 _ => None,
+            })
+            .map(|path| {
+                Path::new(path)
+                    .with_extension("")
+                    .to_string_lossy()
+                    .into_owned()
             })
     }
 

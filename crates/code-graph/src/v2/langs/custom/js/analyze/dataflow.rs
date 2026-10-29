@@ -346,10 +346,11 @@ impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
             .collect()
     }
 
-    fn record_imported_call(&mut self, imported_call: JsImportedCall) {
+    fn record_imported_call(&mut self, imported_call: JsImportedCall, span: oxc::span::Span) {
         self.imported_calls.push(JsCallEdge {
             caller: self.source_site(),
             callee: JsCallTarget::ImportedCall { imported_call },
+            line: self.ctx.lt.span_to_range(span).start.line as u32 + 1,
         });
     }
 
@@ -362,12 +363,15 @@ impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
             && let Some(binding) =
                 binding_from_identifier_reference(self.ctx, identifier, &self.import_bindings)
         {
-            self.record_imported_call(JsImportedCall {
-                fallback_binding: binding.clone(),
-                binding,
-                member_path: Vec::new(),
-                invocation_kind,
-            });
+            self.record_imported_call(
+                JsImportedCall {
+                    fallback_binding: binding.clone(),
+                    binding,
+                    member_path: Vec::new(),
+                    invocation_kind,
+                },
+                callee.span(),
+            );
             return;
         }
 
@@ -379,7 +383,7 @@ impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
                 invocation_kind,
             )
         {
-            self.record_imported_call(imported_call);
+            self.record_imported_call(imported_call, callee.span());
             return;
         }
 
@@ -537,7 +541,7 @@ impl<'a> Visit<'a> for CallExtractor<'a, '_> {
             },
         ) {
             Some(JsxInvocation::Imported(imported_call)) => {
-                self.record_imported_call(imported_call);
+                self.record_imported_call(imported_call, it.span);
             }
             Some(JsxInvocation::Local { name, chain }) => {
                 self.append_invocation(name, chain, JsInvocationKind::Jsx, it.span);

@@ -34,7 +34,7 @@ pub struct RefSite {
     pub line: u32,
 }
 
-fn target_edge_kind(kind: RefKind, target: Option<DefKind>) -> Option<EdgeKind> {
+pub(crate) fn target_edge_kind(kind: RefKind, target: Option<DefKind>) -> Option<EdgeKind> {
     let category = target.map(|k| k.category());
     match kind {
         RefKind::Call => Some(match target {

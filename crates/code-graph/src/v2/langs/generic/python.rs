@@ -85,6 +85,10 @@ fn in_decorated_class_body() -> Pred {
     ))
 }
 
+fn assignment_target() -> Pred {
+    parent_is("assignment").and(!has_named_prev_sibling())
+}
+
 fn python_docstring(node: &N<'_>) -> Option<String> {
     let first = node.field("body")?.children().find(|c| c.is_named())?;
     if first.kind() != "expression_statement" {
@@ -241,8 +245,13 @@ impl DslLanguage for PythonDsl {
             reference("attribute")
                 .name_from(field("attribute"))
                 .receiver_chain(&["object"])
-                .when(!parent_is("call"))
+                .when((!parent_is("call")).and(!assignment_target()))
                 .kind(crate::v2::types::RefKind::Value),
+            reference("attribute")
+                .name_from(field("attribute"))
+                .receiver_chain(&["object"])
+                .when(assignment_target())
+                .kind(crate::v2::types::RefKind::Write),
             reference("type")
                 .name_from(text())
                 .type_use(PYTHON_TYPE_USES),

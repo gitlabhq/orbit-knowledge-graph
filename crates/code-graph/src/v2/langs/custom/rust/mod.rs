@@ -160,6 +160,7 @@ struct ResolvedEdgeCandidate {
     source_start: u32,
     source_end: u32,
     target: DefinitionSite,
+    line: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -168,6 +169,7 @@ struct UnresolvedImportedCallCandidate {
     source_start: u32,
     source_end: u32,
     import_name: String,
+    line: u32,
 }
 
 struct ByteLineIndex {
@@ -324,7 +326,12 @@ impl LanguagePipeline for RustPipeline {
                     continue;
                 };
                 if source_node != target_node {
-                    graph.add_call_edge(source_node, target_node);
+                    let resolution = if edge.target.relative_path == edge.source_relative_path {
+                        crate::v2::types::Resolution::Local
+                    } else {
+                        crate::v2::types::Resolution::Import
+                    };
+                    graph.add_call_edge(source_node, target_node, edge.line, resolution);
                 }
             }
             let resolve_ms = t_resolve.elapsed().as_secs_f64() * 1000.0;
@@ -736,7 +743,6 @@ fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> CodeGraph {
 
 fn add_unresolved_imported_call_edges(graph: &mut CodeGraph, parsed: &[ParsedRustFile]) {
     let import_lookup = RustImportedSymbolLookup::from_graph(graph);
-    let mut seen_edges = HashSet::new();
 
     for file in parsed {
         for call in &file.unresolved_imported_calls {
@@ -754,21 +760,16 @@ fn add_unresolved_imported_call_edges(graph: &mut CodeGraph, parsed: &[ParsedRus
             ) else {
                 continue;
             };
-            if !seen_edges.insert((source_node, target_node)) {
-                continue;
-            }
-
-            graph.graph.add_edge(
-                source_node,
-                target_node,
-                GraphEdge::new(Relationship {
-                    edge_kind: EdgeKind::Calls,
-                    source_node: NodeKind::Definition,
-                    target_node: NodeKind::Import,
-                    source_def_kind: Some(graph.def(source_node).kind),
-                    target_def_kind: None,
-                }),
-            );
+            let mut edge = GraphEdge::new(Relationship {
+                edge_kind: EdgeKind::Calls,
+                source_node: NodeKind::Definition,
+                target_node: NodeKind::Import,
+                source_def_kind: Some(graph.def(source_node).kind),
+                target_def_kind: None,
+            })
+            .with_resolution(crate::v2::types::Resolution::Import);
+            edge.lines = crate::v2::linker::graph::Lines::one(call.line);
+            graph.graph.add_edge(source_node, target_node, edge);
         }
     }
 }
@@ -1193,6 +1194,7 @@ impl<'a> ResolvedEdgeCollector<'a> {
             source_start: u32::from(call_range.start()),
             source_end: u32::from(call_range.end()),
             target,
+            line: 0,
         };
         if self.seen_edges.insert(edge.clone()) {
             self.edges.push(edge);
@@ -1205,6 +1207,7 @@ impl<'a> ResolvedEdgeCollector<'a> {
             source_start: u32::from(call_range.start()),
             source_end: u32::from(call_range.end()),
             import_name,
+            line: 0,
         };
         if self.seen_unresolved_imported_calls.insert(edge.clone()) {
             self.unresolved_imported_calls.push(edge);
@@ -1274,10 +1277,18 @@ fn collect_resolved_edge_candidates<'a>(
     }
     .collect(source_file);
     let ResolvedEdgeCollector {
-        edges,
-        unresolved_imported_calls,
+        mut edges,
+        mut unresolved_imported_calls,
         ..
     } = edge_collector;
+    let lines = ByteLineIndex::new(&source_file.syntax().text().to_string());
+    let line_of = |start: u32| lines.position(start as usize).line as u32 + 1;
+    for edge in &mut edges {
+        edge.line = line_of(edge.source_start);
+    }
+    for call in &mut unresolved_imported_calls {
+        call.line = line_of(call.source_start);
+    }
     EdgeCollectionResult {
         edge_candidates: edges,
         unresolved_imported_calls,

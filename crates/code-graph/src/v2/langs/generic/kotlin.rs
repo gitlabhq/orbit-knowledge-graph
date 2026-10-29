@@ -274,6 +274,9 @@ impl DslLanguage for KotlinDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
+            reference("annotation")
+                .name_from(child_of_kind("user_type").then(child_of_kind("type_identifier")))
+                .kind(crate::v2::types::RefKind::Annotation),
             reference("call_expression")
                 .name_from(child_of_kind("simple_identifier"))
                 .when(!has_child(&["navigation_expression"])),
@@ -284,15 +287,23 @@ impl DslLanguage for KotlinDsl {
                 )
                 .when(has_child(&["navigation_expression"]))
                 .receiver_via(child_of_kind("navigation_expression").first_named()),
-            reference("type_identifier").name_from(text()).type_use(&[
-                ("type_arguments", crate::v2::types::TypeUsage::Generic),
-                ("as_expression", crate::v2::types::TypeUsage::Cast),
-                ("parameter", crate::v2::types::TypeUsage::Parameter),
-                ("class_parameter", crate::v2::types::TypeUsage::Parameter),
-                ("function_declaration", crate::v2::types::TypeUsage::Return),
-                ("property_declaration", crate::v2::types::TypeUsage::Field),
-                ("variable_declaration", crate::v2::types::TypeUsage::Field),
-            ]),
+            reference("type_identifier")
+                .name_from(text())
+                .when(
+                    !(parent_is("class_declaration")
+                        .or(parent_is("object_declaration"))
+                        .or(parent_is("type_alias"))
+                        .or(ancestor_is(&["annotation"]))),
+                )
+                .type_use(&[
+                    ("type_arguments", crate::v2::types::TypeUsage::Generic),
+                    ("as_expression", crate::v2::types::TypeUsage::Cast),
+                    ("parameter", crate::v2::types::TypeUsage::Parameter),
+                    ("class_parameter", crate::v2::types::TypeUsage::Parameter),
+                    ("function_declaration", crate::v2::types::TypeUsage::Return),
+                    ("property_declaration", crate::v2::types::TypeUsage::Field),
+                    ("variable_declaration", crate::v2::types::TypeUsage::Field),
+                ]),
             // Operator desugaring: binary operators map to named methods.
             // The left operand is the receiver, the method name is derived from the operator.
             reference("additive_expression")

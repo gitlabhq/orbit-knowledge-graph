@@ -37,6 +37,10 @@ fixtures:
           requests.get(created.status)
           return created
 
+
+      def close(order: Order):
+          order.status = "closed"
+
   - path: billing/base.py
     content: |
       def audited(fn):

@@ -243,13 +243,20 @@ impl DslLanguage for SwiftDsl {
                 )
                 .when(has_child(&["navigation_expression"]))
                 .receiver_via(child_of_kind("navigation_expression").first_named()),
-            reference("type_identifier").name_from(text()).type_use(&[
-                ("type_arguments", crate::v2::types::TypeUsage::Generic),
-                ("as_expression", crate::v2::types::TypeUsage::Cast),
-                ("parameter", crate::v2::types::TypeUsage::Parameter),
-                ("function_declaration", crate::v2::types::TypeUsage::Return),
-                ("type_annotation", crate::v2::types::TypeUsage::Field),
-            ]),
+            reference("type_identifier")
+                .name_from(text())
+                .when(
+                    !(parent_is("class_declaration")
+                        .or(parent_is("protocol_declaration"))
+                        .or(parent_is("typealias_declaration"))),
+                )
+                .type_use(&[
+                    ("type_arguments", crate::v2::types::TypeUsage::Generic),
+                    ("as_expression", crate::v2::types::TypeUsage::Cast),
+                    ("parameter", crate::v2::types::TypeUsage::Parameter),
+                    ("function_declaration", crate::v2::types::TypeUsage::Return),
+                    ("type_annotation", crate::v2::types::TypeUsage::Field),
+                ]),
         ]
     }
 

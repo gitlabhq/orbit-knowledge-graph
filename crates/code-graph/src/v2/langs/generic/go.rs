@@ -157,7 +157,10 @@ impl DslLanguage for GoDsl {
             // Skip inside composite_literal (already tracked via chain_config.constructor).
             reference("type_identifier")
                 .name_from(text())
-                .when(!parent_is("composite_literal"))
+                .when(
+                    (!parent_is("composite_literal"))
+                        .and(!(parent_is("type_spec").and(!has_named_prev_sibling()))),
+                )
                 .type_use(&[
                     ("type_arguments", crate::v2::types::TypeUsage::Generic),
                     (
