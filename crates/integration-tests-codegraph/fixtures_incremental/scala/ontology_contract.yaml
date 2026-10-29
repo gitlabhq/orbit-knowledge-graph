@@ -62,6 +62,71 @@ fixtures:
         def zero(): Money = new Money()
       }
 
+  - path: src/com/acme/edges/lib/Base.scala
+    content: |
+      package com.acme.edges.lib
+
+      class Base {
+        val size: Int = 1
+        def run(): Unit = {}
+      }
+
+      object Factory {
+        def make(): Base = new Base()
+      }
+
+      trait Runner {
+        def go(): Unit
+      }
+
+      class Marked extends scala.annotation.StaticAnnotation
+
+  - path: src/com/acme/edges/util/Tool.scala
+    content: |
+      package com.acme.edges.util
+
+      class Tool
+
+  - path: src/com/acme/edges/App.scala
+    content: |
+      package com.acme.edges
+
+      import com.acme.edges.lib.Base
+      import com.acme.edges.lib.Factory
+      import com.acme.edges.lib.Runner
+      import com.acme.edges.lib.Marked
+      import com.acme.edges.util._
+      import org.vendor.Ext
+
+      class App extends Base with Runner {
+        val held: Base = new Base()
+
+        @Marked
+        def go(): Unit = {
+          helper()
+          Factory.make()
+          val t = new Tool()
+          Ext.call()
+        }
+
+        override def run(): Unit = {}
+
+        def helper(): Unit = {}
+
+        def use(p: Base): Unit = {
+          p.run()
+        }
+
+        def read(p: Base): Int = {
+          p.size
+        }
+
+        def infer(): Unit = {
+          val c = new Base()
+          c.run()
+        }
+      }
+
 tests:
   - name: "every definition in src/acme/billing/Order.scala carries the contract columns"
     query: |
@@ -528,3 +593,186 @@ tests:
       MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro'] RETURN d.fqn
     assert:
       - { empty: true }
+
+  - name: "edges: CALLS to a definition in the same file has resolution local"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App.go' AND b.fqn = 'com.acme.edges.App.helper' AND e.resolution = 'local'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: CALLS to an imported definition has resolution import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App.go' AND b.fqn = 'com.acme.edges.lib.Factory.make' AND e.resolution = 'import'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: CALLS through a declared parameter type has resolution declared_type"
+    # Known gap: the engine writes inferred_type for a call through a declared parameter type.
+    skip: true
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App.use' AND b.fqn = 'com.acme.edges.lib.Base.run' AND e.resolution = 'declared_type'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: CALLS through an inferred local type has resolution inferred_type"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App.infer' AND b.fqn = 'com.acme.edges.lib.Base.run' AND e.resolution = 'inferred_type'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: CALLS to an external import ends at the Import row"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Import)
+      WHERE a.fqn = 'com.acme.edges.App.go' AND b.fqn = 'org.vendor.Ext' AND e.resolution = 'import'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: INSTANTIATES a type in the same file has resolution local"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.lib.Factory.make' AND b.fqn = 'com.acme.edges.lib.Base' AND e.resolution = 'local'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: INSTANTIATES a type found by a wildcard import has resolution wildcard_import"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App.go' AND b.fqn = 'com.acme.edges.util.Tool' AND e.resolution = 'wildcard_import'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: a static member call does not instantiate its type"
+    # Known gap: the type of a static or companion member call is linked at the call site, so the export writes INSTANTIATES.
+    skip: true
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App.go' AND b.fqn = 'com.acme.edges.lib.Factory'
+      RETURN b.fqn AS dst
+    assert:
+      - { empty: true }
+
+  - name: "edges: USES_VALUE reads a field through a declared parameter type"
+    # Known gap: a field read through a parameter of an imported type gives no edge.
+    skip: true
+    query: |
+      MATCH (a:Definition)-[e:USES_VALUE]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App.read' AND b.fqn = 'com.acme.edges.lib.Base.size' AND e.resolution = 'declared_type'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: USES_TYPE links a parameter type"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App.use' AND b.fqn = 'com.acme.edges.lib.Base'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: USES_TYPE links a field type"
+    # Known gap: a field type with an initializer gives no USES_TYPE edge; only the initializer call is linked.
+    skip: true
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App.held' AND b.fqn = 'com.acme.edges.lib.Base'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: EXTENDS a superclass has resolution import"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App' AND b.fqn = 'com.acme.edges.lib.Base' AND e.resolution = 'import'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: IMPLEMENTS a supertype that is an Trait"
+    query: |
+      MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App' AND b.fqn = 'com.acme.edges.lib.Runner' AND e.resolution = 'import'
+      RETURN a.fqn AS src, b.fqn AS dst, b.kind AS kind
+    assert:
+      - { row: { dst: "com.acme.edges.lib.Runner", kind: "Trait" } }
+
+  - name: "edges: EXTENDS is not written for an interface or a trait"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App' AND b.fqn = 'com.acme.edges.lib.Runner'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { empty: true }
+
+  - name: "edges: OVERRIDES links each method to the method it replaces"
+    query: |
+      MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+      WHERE a.fqn STARTS WITH 'com.acme.edges.App.' AND e.resolution = 'import'
+      RETURN a.fqn AS src, b.fqn AS dst
+      ORDER BY a.fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { src: "com.acme.edges.App.go", dst: "com.acme.edges.lib.Runner.go" } }
+      - { row: { src: "com.acme.edges.App.run", dst: "com.acme.edges.lib.Base.run" } }
+
+  - name: "edges: ANNOTATED_BY links a method to its annotation"
+    # Known gap: scala.yaml has no annotation rule, so an annotation gives no edge.
+    skip: true
+    query: |
+      MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App.go' AND b.fqn = 'com.acme.edges.lib.Marked'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: DEFINES links a type to its member"
+    query: |
+      MATCH (a:Definition)-[e:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.App' AND b.fqn = 'com.acme.edges.App.go'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: RESOLVES_TO links an import to its definition with resolution import"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(d:Definition)
+      WHERE i.file_path = 'src/com/acme/edges/App.scala' AND i.name = 'Base' AND e.resolution = 'import'
+      RETURN d.fqn AS dst
+    assert:
+      - { row: { dst: "com.acme.edges.lib.Base" } }
+
+  - name: "edges: RESOLVES_TO links a wildcard import to a definition with resolution wildcard_import"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(d:Definition)
+      WHERE i.file_path = 'src/com/acme/edges/App.scala' AND i.name = '*' AND d.fqn = 'com.acme.edges.util.Tool' AND e.resolution = 'wildcard_import'
+      RETURN d.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: RESOLVES_TO links a wildcard import to a file"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(f:File)
+      WHERE i.file_path = 'src/com/acme/edges/App.scala' AND i.name = '*' AND f.path = 'src/com/acme/edges/util/Tool.scala'
+      RETURN f.path AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: DEPENDS_ON links a file to each file it imports from"
+    query: |
+      MATCH (a:File)-[e:DEPENDS_ON]->(b:File)
+      WHERE a.path = 'src/com/acme/edges/App.scala'
+      RETURN b.path AS dst
+      ORDER BY b.path
+    assert:
+      - { row: { dst: "src/com/acme/edges/lib/Base.scala" } }
+      - { row: { dst: "src/com/acme/edges/util/Tool.scala" } }

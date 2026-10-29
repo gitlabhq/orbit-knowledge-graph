@@ -45,6 +45,33 @@ fixtures:
       def test_charge():
           Order.charge(1)
 
+  - path: shop/edges.py
+    content: |
+      from shop.money import Money
+
+
+      def audit(fn):
+          return fn
+
+
+      class Base:
+          def describe(self):
+              return 1
+
+
+      class Item(Base):
+          price: Money
+
+          def describe(self):
+              return self.price
+
+
+      @audit
+      def build():
+          item = Item()
+          item.describe()
+          return item.price
+
 tests:
   - name: "every definition has its kind, language kind, category, and scope"
     query: |
@@ -53,7 +80,7 @@ tests:
       ORDER BY fqn
       LIMIT 100
     assert:
-      - { row_count: 11 }
+      - { row_count: 18 }
       - { row: { fqn: "shop.orders.MAX", kind: "Constant", language_kind: "Constant", category: "Value", scope: "top_level", language: "python" } }
       - { row: { fqn: "shop.orders.count", kind: "Variable", language_kind: "Variable", category: "Value", scope: "top_level" } }
       - { row: { fqn: "shop.orders.Order", kind: "Class", language_kind: "Class", category: "Type", scope: "top_level" } }
@@ -184,6 +211,85 @@ tests:
       RETURN d.start_line AS line, d.id AS id
     assert:
       - { row: { line: 1, id: 5678537043871612082 } }
+
+  - name: "a member call through an inferred receiver type is CALLS"
+    query: |
+      MATCH (a:Definition)-[r:CALLS]->(b:Definition)
+      WHERE a.fqn = 'shop.edges.build' AND r.resolution = 'inferred_type'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "shop.edges.build", target: "shop.edges.Item.describe" } }
+
+  - name: "a call of a local class is INSTANTIATES"
+    query: |
+      MATCH (a:Definition)-[r:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'shop.edges.build' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "shop.edges.build", target: "shop.edges.Item" } }
+
+  - name: "an attribute read without a call is USES_VALUE"
+    query: |
+      MATCH (a:Definition)-[r:USES_VALUE]->(b:Definition)
+      WHERE a.fqn = 'shop.edges.build' AND r.resolution = 'inferred_type'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "shop.edges.build", target: "shop.edges.Item.price" } }
+
+  - name: "a base class is EXTENDS"
+    query: |
+      MATCH (a:Definition)-[r:EXTENDS]->(b:Definition)
+      WHERE a.fqn = 'shop.edges.Item' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "shop.edges.Item", target: "shop.edges.Base" } }
+
+  - name: "Python declares no interfaces, so nothing is IMPLEMENTS"
+    query: |
+      MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "a method with the name of a base class method is OVERRIDES"
+    query: |
+      MATCH (a:Definition)-[r:OVERRIDES]->(b:Definition)
+      WHERE a.fqn = 'shop.edges.Item.describe' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "shop.edges.Item.describe", target: "shop.edges.Base.describe" } }
+
+  - name: "a decorator is ANNOTATED_BY"
+    query: |
+      MATCH (a:Definition)-[r:ANNOTATED_BY]->(b:Definition)
+      WHERE a.fqn = 'shop.edges.build'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "shop.edges.build", target: "shop.edges.audit" } }
+
+  - name: "a class defines its members"
+    query: |
+      MATCH (a:Definition)-[r:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'shop.edges.Item' AND b.name = 'describe'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "shop.edges.Item", target: "shop.edges.Item.describe" } }
+
+  - name: "a wildcard import resolves to the imported file"
+    query: |
+      MATCH (a:Import)-[r:RESOLVES_TO]->(b:File)
+      WHERE a.file_path = 'shop/orders.py' AND a.import_kind = 'wildcard' AND r.resolution = 'import'
+      RETURN a.import_path AS source, b.path AS target
+    assert:
+      - { row: { source: "shop.money", target: "shop/money.py" } }
+
+  - name: "a file that imports a symbol depends on the file that defines it"
+    query: |
+      MATCH (a:File)-[r:DEPENDS_ON]->(b:File)
+      WHERE a.path = 'shop/edges.py'
+      RETURN a.path AS source, b.path AS target
+    assert:
+      - { row: { source: "shop/edges.py", target: "shop/money.py" } }
 
 steps:
   - name: add a line above the class

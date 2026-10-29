@@ -64,6 +64,26 @@ fixtures:
           return n > 0
       }
 
+      class Circle: Shape {
+          var center: Point = Point(x: 0)
+
+          override func save(_ item: String) -> Bool {
+              return true
+          }
+      }
+
+      func measure(_ s: Shape) -> Int {
+          return s.id
+      }
+
+      func readLimit() -> Int {
+          return limit
+      }
+
+      func callUtil() {
+          util()
+      }
+
       class ShapeTests: XCTestCase {
           func testHelper() {
               _ = helper(1)
@@ -624,3 +644,74 @@ tests:
       RETURN d.fqn LIMIT 100
     assert:
       - { empty: true }
+
+  - name: "a call to a function in the same module is CALLS with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'ShapeTests.testHelper' AND e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "ShapeTests.testHelper", target: "helper" } }
+
+  - name: "a call to a class is INSTANTIATES of the class"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'Shape.make' AND e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "Shape.make", target: "Shape" } }
+
+  - name: "a property read on a typed parameter is USES_VALUE"
+    query: |
+      MATCH (a:Definition)-[e:USES_VALUE]->(b:Definition)
+      WHERE a.fqn = 'measure' AND e.resolution = 'declared_type'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "measure", target: "Shape.id" } }
+
+  - name: "a superclass is EXTENDS"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+      WHERE e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "Circle", target: "Shape" } }
+
+  - name: "a protocol conformance is IMPLEMENTS"
+    query: |
+      MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+      WHERE e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "Shape", target: "Store" } }
+
+  - name: "an override and a protocol requirement are OVERRIDES"
+    query: |
+      MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+      WHERE e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 2 }
+      - { row: { source: "Circle.save", target: "Shape.save" } }
+      - { row: { source: "Shape.save", target: "Store.save" } }
+
+  - name: "the extended type defines the members of its extension"
+    query: |
+      MATCH (a:Definition)-[e:DEFINES]->(b:Definition)
+      WHERE b.fqn = 'Shape.area'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "Shape", target: "Shape.area" } }

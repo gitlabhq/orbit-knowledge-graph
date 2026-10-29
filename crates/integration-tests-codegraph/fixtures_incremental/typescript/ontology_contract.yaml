@@ -64,6 +64,47 @@ fixtures:
     content: |
       export const loaded = true;
 
+  - path: src/edges.ts
+    content: |
+      import { helper } from './util';
+      import { Shape, Named, Color, MAX } from './shapes';
+      import * as util from './util';
+
+      function sealed(target: any) { return target; }
+
+      class Point2 {
+        x = 0;
+        norm(): number { return this.x; }
+      }
+
+      @sealed
+      class Circle extends Shape implements Named {
+        name: string = 'c';
+        center: Point2 = new Point2();
+
+        area(): number {
+          return MAX + Color.Red;
+        }
+
+        run(): string {
+          const inferred = new Circle('i');
+          inferred.area();
+          util.helper(2);
+          return helper(local());
+        }
+
+        measure(p: Point2): number {
+          return p.norm();
+        }
+
+        size(p: Point2): number {
+          return p.x;
+        }
+      }
+
+      export function local(): number { return local2(); }
+      function local2(): number { return 1; }
+
   - path: src/shapes.test.ts
     content: |
       import { helper } from './util';
@@ -659,3 +700,130 @@ tests:
       RETURN d.fqn LIMIT 100
     assert:
       - { empty: true }
+
+  - name: "A call to a function in the same file is CALLS with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'local' AND e.resolution = 'local'
+      RETURN b.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "local2" } }
+
+  - name: "A call to an imported function is CALLS with resolution import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Circle::run' AND e.resolution = 'import'
+      RETURN b.fqn AS callee, b.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "helper", file: "src/util.ts" } }
+
+  - name: "A call on a parameter of a declared type is CALLS with resolution declared_type"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Circle::measure' AND e.resolution = 'declared_type'
+      RETURN b.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Point2::norm" } }
+
+  - name: "A call on a value made by new is CALLS with resolution inferred_type"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Circle::run' AND e.resolution = 'inferred_type'
+      RETURN b.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Circle::area" } }
+
+  - name: "new Circle() is INSTANTIATES with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'Circle::run' AND e.resolution = 'local'
+      RETURN b.fqn AS target, b.kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "Circle", kind: "Class" } }
+
+  - name: "A field read on a parameter of a declared type is USES_VALUE with resolution declared_type"
+    query: |
+      MATCH (a:Definition)-[e:USES_VALUE]->(b:Definition)
+      WHERE a.fqn = 'Circle::size' AND e.resolution = 'declared_type'
+      RETURN b.fqn AS target, b.kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "Point2::x", kind: "Field" } }
+
+  - name: "An imported superclass is EXTENDS with resolution import"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+      WHERE a.fqn = 'Circle' AND e.resolution = 'import'
+      RETURN b.fqn AS parent, b.kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { parent: "Shape", kind: "Class" } }
+
+  - name: "An imported interface in implements is IMPLEMENTS with resolution import"
+    query: |
+      MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+      WHERE a.fqn = 'Circle' AND e.resolution = 'import'
+      RETURN b.fqn AS parent, b.kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { parent: "Named", kind: "Interface" } }
+
+  - name: "A method that replaces a superclass method is OVERRIDES with resolution import"
+    query: |
+      MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+      WHERE a.fqn = 'Circle::area' AND e.resolution = 'import'
+      RETURN b.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "Shape::area" } }
+
+  - name: "A class decorator is ANNOTATED_BY"
+    query: |
+      MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
+      WHERE a.fqn = 'Circle'
+      RETURN b.fqn AS decorator, b.kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { decorator: "sealed", kind: "Function" } }
+
+  - name: "A namespace DEFINES its members"
+    query: |
+      MATCH (a:Definition)-[e:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'Geometry'
+      RETURN b.fqn AS member
+    assert:
+      - { row_count: 1 }
+      - { row: { member: "Geometry::dist" } }
+
+  - name: "A named import RESOLVES_TO the exported definition with resolution import"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(d:Definition)
+      WHERE i.file_path = 'src/edges.ts' AND i.name = 'Shape' AND e.resolution = 'import'
+      RETURN d.fqn AS target, d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "Shape", file: "src/shapes.ts" } }
+
+  - name: "A side-effect import RESOLVES_TO the file with resolution import"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(f:File)
+      WHERE i.name = './side' AND e.resolution = 'import'
+      RETURN f.path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "src/side.ts" } }
+
+  - name: "A file that imports from another file DEPENDS_ON it"
+    query: |
+      MATCH (a:File)-[e:DEPENDS_ON]->(b:File)
+      WHERE a.path = 'src/edges.ts'
+      RETURN b.path AS target
+      ORDER BY target
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: target, values: ["src/shapes.ts", "src/util.ts"] } }

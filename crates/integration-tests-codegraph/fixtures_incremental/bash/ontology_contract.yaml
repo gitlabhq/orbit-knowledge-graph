@@ -23,6 +23,8 @@ fixtures:
         greet
       }
 
+      deploy
+
   - path: lib/helpers.sh
     content: |
       helper_fn() {
@@ -78,5 +80,68 @@ tests:
     query: |
       MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
       RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "A call to a function in the same script is CALLS with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'main.deploy' AND e.resolution = 'local'
+      RETURN b.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["main.deploy.inner", "main.greet"] } }
+
+  - name: "A call to a function of a sourced script is CALLS with resolution wildcard_import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'main.greet' AND e.resolution = 'wildcard_import'
+      RETURN b.fqn AS callee, b.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "helpers.helper_fn", file: "lib/helpers.sh" } }
+
+  - name: "A top-level call in a script is a CALLS from the file with resolution local"
+    query: |
+      MATCH (f:File)-[e:CALLS]->(b:Definition)
+      WHERE f.path = 'main.sh' AND e.resolution = 'local'
+      RETURN b.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.deploy" } }
+
+  - name: "A sourced script import RESOLVES_TO its functions with resolution wildcard_import"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(d:Definition)
+      WHERE i.import_path = './lib/helpers.sh' AND e.resolution = 'wildcard_import'
+      RETURN d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "helpers.helper_fn" } }
+
+  - name: "A sourced script import RESOLVES_TO the file with resolution import"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(f:File)
+      WHERE i.import_path = './lib/helpers.sh' AND e.resolution = 'import'
+      RETURN f.path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "lib/helpers.sh" } }
+
+  - name: "A script that sources another script DEPENDS_ON it"
+    query: |
+      MATCH (a:File)-[e:DEPENDS_ON]->(b:File)
+      WHERE a.path = 'main.sh'
+      RETURN b.path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "lib/helpers.sh" } }
+
+  - name: "Bash has no types, classes, or annotations, so it has no type or annotation edges"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES|USES_TYPE|EXTENDS|IMPLEMENTS|OVERRIDES|ANNOTATED_BY]->(b:Definition)
+      RETURN a.fqn AS source, b.fqn AS target
+      LIMIT 100
     assert:
       - { empty: true }

@@ -71,6 +71,28 @@ fixtures:
         end
       end
 
+  - path: lib/edges.rb
+    content: |
+      module Auditable
+        def audit; end
+      end
+
+      class Shape
+        def area; end
+      end
+
+      class Square < Shape
+        include Auditable
+
+        def area
+          audit
+        end
+
+        def self.build
+          Square.new
+        end
+      end
+
 tests:
   - name: "every definition has its kind, language kind, category, and scope"
     query: |
@@ -79,7 +101,7 @@ tests:
       ORDER BY fqn, kind
       LIMIT 100
     assert:
-      - { row_count: 19 }
+      - { row_count: 26 }
       - { row: { fqn: "WeatherApp", kind: "Module", language_kind: "Module", category: "Module", scope: "top_level" } }
       - { row: { fqn: "WeatherApp::MAX_DAYS", kind: "Constant", language_kind: "Constant", category: "Value", scope: "member" } }
       - { row: { fqn: "WeatherApp::Forecast", kind: "Class", language_kind: "Class", category: "Type", scope: "member" } }
@@ -164,3 +186,104 @@ tests:
       RETURN d.fqn
     assert:
       - { empty: true }
+
+  - name: "an inherited module method call is CALLS"
+    query: |
+      MATCH (a:Definition)-[r:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Square::area' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Square::area", target: "Auditable::audit" } }
+
+  - name: "a call through an autoloaded constant is CALLS"
+    query: |
+      MATCH (a:Definition)-[r:CALLS]->(b:Definition)
+      WHERE a.fqn = 'WeatherApp::Forecast::fetch' AND r.resolution = 'import' AND b.kind = 'Method'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "WeatherApp::Forecast::fetch", target: "Helpers::load" } }
+
+  - name: "Const.new is INSTANTIATES"
+    query: |
+      MATCH (a:Definition)-[r:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'Square::build' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Square::build", target: "Square" } }
+
+  - name: "a superclass is EXTENDS"
+    query: |
+      MATCH (a:Definition)-[r:EXTENDS]->(b:Definition)
+      WHERE a.fqn = 'Square' AND b.fqn = 'Shape' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Square", target: "Shape" } }
+
+  - name: "an included module is EXTENDS"
+    query: |
+      MATCH (a:Definition)-[r:EXTENDS]->(b:Definition)
+      WHERE a.fqn = 'Square' AND b.fqn = 'Auditable' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Square", target: "Auditable" } }
+
+  - name: "Ruby declares no interfaces, so nothing is IMPLEMENTS"
+    query: |
+      MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "a method with the name of a superclass method is OVERRIDES"
+    query: |
+      MATCH (a:Definition)-[r:OVERRIDES]->(b:Definition)
+      WHERE a.fqn = 'Square::area' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Square::area", target: "Shape::area" } }
+
+  - name: "Ruby has no annotations, so nothing is ANNOTATED_BY"
+    query: |
+      MATCH (a:Definition)-[:ANNOTATED_BY]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Ruby declares no types, so nothing is USES_TYPE"
+    query: |
+      MATCH (a:Definition)-[:USES_TYPE]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "a class defines its methods"
+    query: |
+      MATCH (a:Definition)-[r:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'Square' AND a.kind = 'Class' AND b.name = 'area'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Square", target: "Square::area" } }
+
+  - name: "an autoloaded constant resolves to its definition"
+    query: |
+      MATCH (a:Import)-[r:RESOLVES_TO]->(b:Definition)
+      WHERE a.name = 'Helpers' AND a.language_kind = 'Autoload' AND r.resolution = 'import'
+      RETURN a.name AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Helpers", target: "Helpers" } }
+
+  - name: "require_relative resolves to the required file"
+    query: |
+      MATCH (a:Import)-[r:RESOLVES_TO]->(b:File)
+      WHERE a.language_kind = 'RequireRelative' AND r.resolution = 'import'
+      RETURN a.import_path AS source, b.path AS target
+    assert:
+      - { row: { source: "helpers", target: "lib/helpers.rb" } }
+
+  - name: "a file depends on the file it requires"
+    query: |
+      MATCH (a:File)-[r:DEPENDS_ON]->(b:File)
+      WHERE a.path = 'lib/weather_app.rb'
+      RETURN a.path AS source, b.path AS target
+    assert:
+      - { row: { source: "lib/weather_app.rb", target: "lib/helpers.rb" } }
