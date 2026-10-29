@@ -12,4 +12,4 @@ async function bundle(entry: string, out: string, minify: boolean): Promise<void
 }
 
 await bundle('vendor/lib.ts', 'core/lib.js', true)
-await bundle('opencode/index.ts', '../../config/setup/opencode_ui_plugin.js', false)
+await bundle('opencode/index.ts', '../../config/setup/agents/opencode_ui_plugin.js', false)

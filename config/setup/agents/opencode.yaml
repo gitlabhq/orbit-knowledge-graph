@@ -15,7 +15,7 @@ template_files:
   - path:
       project: .opencode/plugins/orbit-ui.js
       global: "~/.config/opencode/plugins/orbit-ui.js"
-    template: opencode_ui_plugin.js
+    template: agents/opencode_ui_plugin.js
     ui: true
 registrations:
   - file:
