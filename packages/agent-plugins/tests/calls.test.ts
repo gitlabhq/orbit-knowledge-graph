@@ -227,6 +227,10 @@ test('every shape that runs something besides the Orbit call names it or shows a
     ["glab orbit status | jq -n '$ENV'", '+ jq'],
     ['glab orbit status | jq "include \\"f\\"; ." ', '+ jq'],
     ['glab orbit status; if ((x<<2)); then prog; fi', '+ prog'],
+    ['glab orbit status; for i in 1 2; do prog; done', '+ prog'],
+    ['glab orbit status; case x in x) prog;; esac', '+ prog'],
+    ['glab orbit status; function f { prog; }; f', '+ prog'],
+    ['glab orbit status; echo $(( $(prog) + 1 ))', '+ $(...)'],
     ['glab orbit status; glab orbit workspace reset --all', '+ orbit workspace reset'],
     ['glab orbit status && orbit config set foo bar', '+ orbit config set'],
     ['glab orbit status; glab orbit reset', '+ orbit reset'],
@@ -244,6 +248,9 @@ test('quiet shell words and filters with only a pattern or count stay out of the
     'glab orbit status | grep -epat',
     'glab orbit status | grep -e pat',
     'glab orbit status; if ((x<<2)); then true; fi',
+    'glab orbit status; i=$((i+1))',
+    'glab orbit status; ((i++))',
+    'glab orbit status; for i in 1 2; do true; done',
     'glab orbit status; cd repo; true',
     "glab orbit query <<'EOF'\n$(not run)\nEOF",
   ]) {
@@ -273,4 +280,9 @@ test('bidirectional and zero-width characters are dropped from the names in the 
 
 test('format and variation-selector characters are dropped from the names in the list', () => {
   expect(rowOf('glab orbit status; pro\u00adg\ufe0f\u061c\u{e0041}')).toBe('Checked Orbit  + prog')
+})
+
+test('names that differ only after the clipped prefix are listed separately', () => {
+  const long = 'a'.repeat(45)
+  expect(rowOf(`glab orbit status; ${long}1; ${long}2`)).toBe(`Checked Orbit  + ${'a'.repeat(39)}…, ${'a'.repeat(39)}…`)
 })

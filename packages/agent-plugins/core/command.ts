@@ -1,6 +1,8 @@
+import { isQuietFilter } from './quiet-filters.ts'
+import { lex, type Token } from './shell-lexer.ts'
+
 export type Subcommand = { key: string; args: string[] }
 
-const HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/
 const MAX_NAME_LENGTH = 40
 const INVISIBLE = /[\p{Cc}\p{Cf}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]/gu
 
@@ -14,160 +16,47 @@ export function displayName(name: string): string {
   return /[,\s']/.test(text) ? `'${text.replaceAll("'", "\\'")}'` : text
 }
 
-const SUBSTITUTION = /\$\(|`/
+type SimpleCommand = { piped: boolean; words: string[]; readsInput: boolean; writes: string[]; substitutes: boolean }
 
-type Heredoc = { delimiter: string; stripTabs: boolean; quoted: boolean }
-
-function arithmeticEnd(command: string, open: number): number {
-  let depth = 2
-  for (let i = open + 2; i < command.length; i++) {
-    if (command[i] === '(') depth++
-    else if (command[i] === ')') {
-      if (depth === 2 && command[i + 1] === ')') return i + 2
-      if (--depth < 2) return -1
-    }
-  }
-  return -1
+function emptyCommand(piped: boolean): SimpleCommand {
+  return { piped, words: [], readsInput: false, writes: [], substitutes: false }
 }
 
-function heredocOperand(command: string, from: number): { delimiter: string; quoted: boolean; end: number } {
-  let i = from
-  let delimiter = ''
-  let quoted = false
-  while (i < command.length && !/[\s;&|<>()]/.test(command[i] ?? '')) {
-    const c = command[i] ?? ''
-    if (c === "'" || c === '"') {
-      const close = command.indexOf(c, i + 1)
-      quoted = true
-      delimiter += command.slice(i + 1, close < 0 ? command.length : close)
-      i = close < 0 ? command.length : close + 1
-    } else if (c === '\\') {
-      quoted = true
-      delimiter += command[i + 1] ?? ''
-      i += 2
-    } else {
-      delimiter += c
-      i++
-    }
-  }
-  return { delimiter, quoted, end: i }
+function isEmpty(command: SimpleCommand): boolean {
+  return !command.words.length && !command.writes.length && !command.substitutes
 }
 
-export function parseCommands(command: string): { commands: string[][]; unparsed: boolean } {
-  const commands: string[][] = []
-  let words: string[] = []
-  let word = ''
-  let inWord = false
-  let quote = ''
-  let ansiQuote = false
-  let dollarAt = -1
-  let piped = false
-  let unparsed = false
-  const heredocs: Heredoc[] = []
-  const endWord = () => {
-    if (inWord) words.push(word)
-    word = ''
-    inWord = false
-  }
-  const endCommand = () => {
-    endWord()
-    if (words.length) commands.push(piped ? ['|', ...words] : words)
-    words = []
-    piped = false
-  }
-  const skipHeredocBodies = (newline: number): number => {
-    let at = newline + 1
-    for (const { delimiter, stripTabs, quoted } of heredocs.splice(0)) {
-      let closed = false
-      while (at < command.length && !closed) {
-        const end = command.indexOf('\n', at)
-        const line = command.slice(at, end < 0 ? command.length : end)
-        at = end < 0 ? command.length : end + 1
-        closed = (stripTabs ? line.replace(/^\t+/, '') : line) === delimiter
-        if (!closed && !quoted && SUBSTITUTION.test(line)) words.push('$(')
-      }
-      if (!closed) unparsed = true
-    }
-    return at - 1
-  }
-  for (let i = 0; i < command.length; i++) {
-    const c = command[i] ?? ''
-    if (quote !== "'" && (c === '`' || (c === '$' && command[i + 1] === '('))) words.push(c === '`' ? '`' : '$(')
-    if (quote) {
-      if (c === quote) {
-        quote = ''
-        ansiQuote = false
-      } else if (c === '\\' && (quote === '"' || ansiQuote) && i + 1 < command.length) word += command[++i]
-      else word += c
-    } else if (c === "'" || c === '"') {
-      ansiQuote = c === "'" && inWord && dollarAt === i - 1
-      quote = c
-      inWord = true
-    } else if (c === '\\' && command[i + 1] === '\n') {
-      i++
-      endWord()
-    } else if (c === '\\' && i + 1 < command.length) {
-      word += command[++i]
-      inWord = true
-    } else if (
-      (c === '$' && command[i + 1] === '(' && command[i + 2] === '(' && arithmeticEnd(command, i + 1) >= 0) ||
-      (c === '(' && command[i + 1] === '(' && !inWord && (words.every((word) => PREFIX_WORDS.has(word)) || words[0] === 'for') && arithmeticEnd(command, i) >= 0)
-    ) {
-      const end = arithmeticEnd(command, c === '$' ? i + 1 : i)
-      if (SUBSTITUTION.test(command.slice(i, end))) words.push('$(')
-      if (c === '$') inWord = true
-      i = end - 1
-    } else if ('&>'.includes(c) && HARMLESS_REDIRECT.test(command.slice(i))) {
-      if (/^\d+$/.test(word) && /\d/.test(command[i - 1] ?? '')) {
-        word = ''
-        inWord = false
-      } else endWord()
-      i += (command.slice(i).match(HARMLESS_REDIRECT)?.[0].length ?? 1) - 1
-    } else if (c === '<' || c === '>' || (c === '&' && command[i + 1] === '>')) {
-      if (inWord && /^\d+$/.test(word) && /\d/.test(command[i - 1] ?? '')) {
-        word = ''
-        inWord = false
-      } else endWord()
-      if (c === '&') i++
-      const operator = command[i] ?? c
-      if (operator === '<' && command[i + 1] === '<' && command[i + 2] === '<') {
-        i += 2
-        words.push('<')
-      } else if (operator === '<' && command[i + 1] === '<') {
-        const stripTabs = command[i + 2] === '-'
-        const operand = heredocOperand(command, i + (stripTabs ? 3 : 2) + (command.slice(i + (stripTabs ? 3 : 2)).match(/^[ \t]*/)?.[0].length ?? 0))
-        if (!operand.delimiter) unparsed = true
-        else heredocs.push({ delimiter: operand.delimiter, stripTabs, quoted: operand.quoted })
-        i = operand.end - 1
-      } else {
-        if (operator === '>' && command[i + 1] === '>') i++
-        if (operator === '>' && (command[i + 1] === '|' || command[i + 1] === '&')) i++
-        words.push(operator)
-      }
-    } else if (c === '|' && command[i + 1] !== '|') {
-      endCommand()
-      piped = true
-      if (command[i + 1] === '&') i++
-    } else if (c === '\n' || ';&|()'.includes(c)) {
-      if (c === '\n' && heredocs.length) i = skipHeredocBodies(i)
-      endCommand()
-      if ('&|'.includes(c) && command[i + 1] === c) i++
-    } else if (c === '#' && !inWord) {
-      while (i + 1 < command.length && command[i + 1] !== '\n') i++
-    } else if (/\s/.test(c)) {
-      endWord()
-    } else {
-      if (c === '$') dollarAt = i
-      word += c
-      inWord = true
+function redirectTarget(tokens: readonly Token[], from: number): { target?: string; end: number } {
+  let at = from
+  while (tokens[at]?.kind === 'substitution') at++
+  const token = tokens[at]
+  return token?.kind === 'word' ? { target: token.text, end: at } : { end: from - 1 }
+}
+
+function groupCommands(tokens: readonly Token[]): SimpleCommand[] {
+  const commands: SimpleCommand[] = []
+  let current = emptyCommand(false)
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (token?.kind === 'word') current.words.push(token.text)
+    else if (token?.kind === 'substitution') current.substitutes = true
+    else if (token?.kind === 'redirect') {
+      const { target, end } = redirectTarget(tokens, i + 1)
+      if (token.operator === '<') current.readsInput = true
+      else if (target !== undefined) current.writes.push(target)
+      current.substitutes ||= tokens.slice(i + 1, end + 1).some((skipped) => skipped.kind === 'substitution')
+      i = end
+    } else if (token?.kind === 'separator') {
+      if (!isEmpty(current)) commands.push(current)
+      current = emptyCommand(token.pipe)
     }
   }
-  endCommand()
-  return { commands, unparsed: unparsed || quote !== '' }
+  if (!isEmpty(current)) commands.push(current)
+  return commands
 }
 
 export function simpleCommands(command: string): string[][] {
-  return parseCommands(command).commands
+  return groupCommands(lex(command).tokens).map(({ piped, words }) => (piped ? ['|', ...words] : words))
 }
 
 function orbitWords(words: readonly string[]): string[] | null {
@@ -181,40 +70,24 @@ function orbitWords(words: readonly string[]): string[] | null {
 }
 
 const PREFIX_WORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', 'time', '{'])
-const SUBSTITUTION_MARKERS = ['$(', '`']
+const HEADER_WORDS = new Set(['for', 'select', 'case'])
 
-type Runnable = { piped: boolean; words: string[]; readsInput: boolean; writes: string[]; substitutes: boolean }
-
-function withoutRedirects(words: readonly string[]): Pick<Runnable, 'words' | 'readsInput' | 'writes'> {
-  const kept: string[] = []
-  const writes: string[] = []
-  let readsInput = false
-  for (let i = 0; i < words.length; i++) {
+function withoutKeywords(words: readonly string[]): string[] {
+  let i = 0
+  for (; i < words.length; i++) {
     const word = words[i] ?? ''
-    if (word !== '<' && word !== '>') {
-      kept.push(word)
-      continue
-    }
-    const target = words[i + 1]
-    const hasTarget = target !== undefined && !['<', '>', ...SUBSTITUTION_MARKERS].includes(target)
-    if (word === '<') readsInput = true
-    else if (hasTarget) writes.push(target)
-    if (hasTarget) i++
+    if (HEADER_WORDS.has(word)) return []
+    if (word === 'function') i++
+    else if (!PREFIX_WORDS.has(word)) break
   }
-  return { words: kept, readsInput, writes }
+  return words.slice(i)
 }
 
-function runnable(command: string): { runs: Runnable[]; unparsed: boolean } {
-  const { commands, unparsed } = parseCommands(command)
-  const runs: Runnable[] = []
-  for (const raw of commands) {
-    const piped = raw[0] === '|'
-    const { words, readsInput, writes } = withoutRedirects(piped ? raw.slice(1) : raw)
-    let i = 0
-    while (PREFIX_WORDS.has(words[i] ?? '')) i++
-    const substitutes = raw.some((word) => SUBSTITUTION_MARKERS.includes(word))
-    if (i < words.length || writes.length || substitutes) runs.push({ piped, words: words.slice(i), readsInput, writes, substitutes })
-  }
+function runnable(command: string): { runs: SimpleCommand[]; unparsed: boolean } {
+  const { tokens, unparsed } = lex(command)
+  const runs = groupCommands(tokens)
+    .map((simple) => ({ ...simple, words: withoutKeywords(simple.words) }))
+    .filter((run) => !isEmpty(run))
   return { runs, unparsed }
 }
 
@@ -224,61 +97,29 @@ export function orbitInvocations(command: string): string[][] {
     .filter((words) => words !== null)
 }
 
+const SUBSTITUTION_IN_WORD = /\$\(|`/
 const SHELL_WORDS = new Set(['cd', 'pushd', 'popd', 'true', ':', 'fi', 'done', 'esac', '}'])
-const FILTER_MAX_OPERANDS: Readonly<Record<string, number>> = { head: 0, tail: 0, wc: 0, cut: 0, grep: 1, jq: 1 }
-const FILTER_FILE_OPTIONS: Readonly<Record<string, RegExp>> = {
-  grep: /^-[A-Za-z]*[rRdf]|^--(?:recursive|dereference-recursive|directories|file)/,
-  jq: /^-[A-Za-z]*[fL]|^--(?:from-file|slurpfile|rawfile|argfile)/,
-}
-const OPTION_TAKING_NUMBER = /^-[A-Za-z]*[nNcmABCfb]$|^--(?:lines|bytes|max-count|after-context|before-context|context)$/
 
-function grepPatternOption(arg: string): 'attached' | 'separate' | null {
-  if (arg === '--regexp') return 'separate'
-  if (arg.startsWith('--regexp=')) return 'attached'
-  const letters = arg.startsWith('--') ? null : arg.match(/^-[A-Za-z]*?e(.*)$/)
-  return letters ? (letters[1] ? 'attached' : 'separate') : null
-}
-
-const JQ_NOT_QUIET = /\b(?:import|include|env)\b|\$ENV|^-[A-Za-z]*n|^--null-input$/
-
-function isQuietFilter(program: string, args: readonly string[], readsInput: boolean): boolean {
-  const maxOperands = FILTER_MAX_OPERANDS[program]
-  if (maxOperands === undefined || readsInput) return false
-  if (program === 'jq' && args.some((arg) => JQ_NOT_QUIET.test(arg))) return false
-  const patternOptions = program === 'grep' ? args.map(grepPatternOption) : []
-  const allowed = patternOptions.includes('attached') ? 0 : maxOperands
-  let operands = 0
-  let optionsEnded = false
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i] ?? ''
-    if (!optionsEnded && arg === '--') optionsEnded = true
-    else if (!optionsEnded && arg.startsWith('-')) {
-      if (FILTER_FILE_OPTIONS[program]?.test(arg)) return false
-      if (patternOptions[i] === 'separate' && i + 1 < args.length) {
-        operands++
-        i++
-      }
-    } else if (optionsEnded || !(/^\d+$/.test(arg) && OPTION_TAKING_NUMBER.test(args[i - 1] ?? ''))) operands++
-  }
-  return operands <= allowed
+function isQuiet(program: string, args: readonly string[], run: SimpleCommand): boolean {
+  if (program.includes('/')) return false
+  return SHELL_WORDS.has(program) || (run.piped && isQuietFilter(program, args, run.readsInput))
 }
 
 export function otherCommands(command: string, orbitExtras: readonly string[] = []): string[] {
   const { runs, unparsed } = runnable(command)
-  const programs = new Set<string>(unparsed ? ['unparsed'] : [])
-  const writes = new Set<string>()
+  const listed = new Map<string, string>()
+  const writes = new Map<string, string>()
+  if (unparsed) listed.set('unparsed', 'unparsed')
   for (const run of runs) {
-    if (run.substitutes) programs.add('$(...)')
-    for (const target of run.writes) writes.add('> ' + displayName(target))
+    if (run.substitutes) listed.set('$(...)', '$(...)')
+    for (const target of run.writes) writes.set(target, '> ' + displayName(target))
     if (orbitWords(run.words)) continue
     const at = run.words.findIndex((word) => !/^\w+=/.test(word))
     const program = run.words[at]
-    if (program === undefined || SUBSTITUTION_MARKERS.includes(program)) continue
-    const bare = !program.includes('/')
-    if (bare && (SHELL_WORDS.has(program) || (run.piped && isQuietFilter(program, run.words.slice(at + 1), run.readsInput)))) continue
-    programs.add(displayName(program))
+    if (program === undefined || SUBSTITUTION_IN_WORD.test(program)) continue
+    if (!isQuiet(program, run.words.slice(at + 1), run)) listed.set(program, displayName(program))
   }
-  return [...programs, ...orbitExtras, ...writes]
+  return [...listed.values(), ...orbitExtras, ...writes.values()]
 }
 
 export function runsOrbit(command: string): boolean {
