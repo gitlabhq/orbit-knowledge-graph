@@ -52,6 +52,7 @@ pub struct EdgeRelation {
     pub min_hops: u32,
     pub max_hops: u32,
     pub filters: Vec<(String, BoundFilter)>,
+    pub properties: Vec<String>,
     pub fk: Option<Fk>,
 }
 

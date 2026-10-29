@@ -129,6 +129,8 @@ pub struct GraphEdge {
     pub path_id: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<usize>,
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub properties: Map<String, Value>,
 }
 
 type EdgeKey = (String, i64, String, i64, String, Option<i64>);
@@ -313,6 +315,14 @@ impl GraphFormatter {
                     depth,
                     path_id: None,
                     step: None,
+                    properties: meta
+                        .properties
+                        .iter()
+                        .filter_map(|property| {
+                            row.get(&meta.property_column(property))
+                                .map(|value| (property.clone(), column_value_to_json(value)))
+                        })
+                        .collect(),
                 });
             }
         }
@@ -483,6 +493,7 @@ impl GraphFormatter {
                     depth: None,
                     path_id: Some(path_id),
                     step: Some(hop_idx),
+                    properties: Map::new(),
                 });
             }
         }
@@ -598,6 +609,7 @@ impl GraphFormatter {
                 depth: None,
                 path_id: None,
                 step: None,
+                properties: Map::new(),
             });
         }
     }
@@ -1178,6 +1190,7 @@ mod tests {
             depth: None,
             path_id: None,
             step: None,
+            properties: Map::new(),
         };
         let json = serde_json::to_value(&edge).unwrap();
         assert_eq!(json["from_id"].as_str().unwrap(), "9007199254740993");

@@ -115,9 +115,33 @@ where
                 .map(|(_, column)| column)
                 .collect();
             select_edge_layouts(model, &mut edge_tables, &pinned);
+            let relationship_target = PredicateTarget::Relationship(input_index);
+            let mut filtered: Vec<&str> = relationship.filters.keys().map(String::as_str).collect();
+            filtered.sort_unstable();
+            let mut properties: Vec<String> = Vec::new();
+            for property in input
+                .relationship_return
+                .read_properties(input_index)
+                .chain(filtered)
+                .chain(
+                    input
+                        .conditions()
+                        .filter(|condition| {
+                            condition.target == relationship_target
+                                && !condition.is_relationship_type()
+                        })
+                        .map(|condition| condition.property.as_str()),
+                )
+                .filter(|property| !model.graph().relationships_declaring(property).is_empty())
+            {
+                if !properties.iter().any(|p| p == property) {
+                    properties.push(property.to_string());
+                }
+            }
             let fk = (relationship.hops.max == 1
                 && relationship.filters.is_empty()
-                && !input.references(&PredicateTarget::Relationship(input_index))
+                && properties.is_empty()
+                && !input.references(&relationship_target)
                 && relationship.direction != Direction::Both)
                 .then(|| {
                     let foreign_key = model.foreign_key(&relationship.types, source, target)?;
@@ -153,6 +177,7 @@ where
                 min_hops: relationship.hops.min,
                 max_hops: relationship.hops.max,
                 filters,
+                properties,
                 edge_tables,
                 fk,
             }

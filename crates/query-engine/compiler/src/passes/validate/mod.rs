@@ -790,6 +790,9 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             for (prop, filters) in &rel.filters {
                 self.check_relationship_filters(input, i, prop, filters)?;
             }
+            for prop in input.relationship_return.read_properties(i) {
+                self.check_relationship_filters(input, i, prop, &[])?;
+            }
         }
         for condition in input.conditions().filter(|c| !c.is_relationship_type()) {
             let filters = std::slice::from_ref(&condition.filter);
@@ -985,8 +988,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         let relationship = &input.relationships[index];
         let graph = self.model.get().graph();
         let every_entity = || graph.entities().map(|entity| entity.name.clone()).collect();
-        let untyped =
-            relationship.types.is_empty() || relationship.types.iter().any(|kind| kind == "*");
+        let untyped = relationship.is_untyped();
         match prop {
             RELATIONSHIP_KIND_COLUMN if untyped => graph.relationship_names(None, None),
             RELATIONSHIP_KIND_COLUMN => relationship.types.clone(),
@@ -1017,7 +1019,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 kinds.dedup();
                 kinds
             }
-            _ => Vec::new(),
+            _ => graph.relationship_enum_values(&relationship.types, prop),
         }
     }
 
@@ -1031,10 +1033,27 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         let model = self.model.get();
         if prop.starts_with('_') || prop == TRAVERSAL_PATH_COLUMN {
             return Err(QueryError::Validation(format!(
-                "relationship[{index}] filter on private edge column \"{prop}\""
+                "relationship[{index}] reads private edge column \"{prop}\""
             )));
         }
         let relationship = &input.relationships[index];
+        let declaring = model.graph().relationships_declaring(prop);
+        if filters.is_empty() && declaring.is_empty() {
+            return Err(QueryError::Validation(format!(
+                "relationship[{index}] reads \"{prop}\", which no relationship type declares as a property"
+            )));
+        }
+        if !declaring.is_empty()
+            && (relationship.is_untyped()
+                || relationship
+                    .types
+                    .iter()
+                    .any(|kind| !declaring.contains(&kind.as_str())))
+        {
+            return Err(QueryError::Validation(format!(
+                "relationship[{index}] reads property \"{prop}\", which only {declaring:?} declare; name one of those relationship types"
+            )));
+        }
         let from = input
             .node(&relationship.from)
             .and_then(|node| node.entity.as_deref());
@@ -1071,7 +1090,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             data_type.filter(|first| types.all(|data_type| data_type == Some(*first)))
         else {
             return Err(QueryError::Validation(format!(
-                "relationship[{index}] filter on unknown edge column \"{prop}\" or incompatible column types across tables {edge_tables:?}"
+                "relationship[{index}] reads unknown edge column \"{prop}\" or incompatible column types across tables {edge_tables:?}"
             )));
         };
         for filter in filters {

@@ -204,6 +204,13 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
                 relation.path_nodes_column(),
             ));
         }
+        if relation.max_hops == 1 && !self.pattern.aggregate() {
+            let prefix = relation.column_prefix();
+            self.outputs
+                .extend(relation.properties.iter().map(|property| {
+                    Projection::new(column(property), edge_property_column(&prefix, property))
+                }));
+        }
     }
 }
 
@@ -226,22 +233,16 @@ pub(super) fn current_edge_rows<M: OrbitQueryModel + ?Sized>(
             ReadScope::Edge,
         ));
     }
-    edge_union(
-        graph,
-        &relation.edge_tables,
-        alias,
-        alias,
-        |graph, table| {
-            Ok(graph.current_rows(
-                table,
-                alias,
-                owner.clone(),
-                sort_key(model, table)?,
-                predicates.clone(),
-                ReadScope::Edge,
-            ))
-        },
-    )
+    edge_union(graph, relation, alias, alias, |graph, table| {
+        Ok(graph.current_rows(
+            table,
+            alias,
+            owner.clone(),
+            sort_key(model, table)?,
+            predicates.clone(),
+            ReadScope::Edge,
+        ))
+    })
 }
 
 fn plain_edge_rows(
@@ -256,32 +257,32 @@ fn plain_edge_rows(
         return Ok(graph.owned(read, owner, alias));
     }
     let route_alias = union_arm_alias(alias);
-    edge_union(
-        graph,
-        &relation.edge_tables,
-        alias,
-        &route_alias,
-        |graph, table| {
-            let read = graph.read(table, &route_alias, final_);
-            Ok(graph.owned(read, owner.clone(), &route_alias))
-        },
-    )
+    edge_union(graph, relation, alias, &route_alias, |graph, table| {
+        let read = graph.read(table, &route_alias, final_);
+        Ok(graph.owned(read, owner.clone(), &route_alias))
+    })
 }
 
 fn edge_union(
     graph: &mut RelationGraph,
-    tables: &[String],
+    relation: &EdgeRelation,
     alias: &str,
     route_alias: &str,
     mut route: impl FnMut(&mut RelationGraph, &str) -> Result<RelationId>,
 ) -> Result<RelationId> {
     let mut routes = Vec::new();
-    for table in tables {
+    for table in &relation.edge_tables {
         let rows = route(graph, table)?;
         let outputs = EDGE_RESERVED_COLUMNS
             .iter()
             .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN, &DELETED_COLUMN])
             .map(|column| Projection::col(route_alias, column))
+            .chain(
+                relation
+                    .properties
+                    .iter()
+                    .map(|property| Projection::col(route_alias, property)),
+            )
             .collect();
         routes.push(graph.project(rows, outputs).into());
     }

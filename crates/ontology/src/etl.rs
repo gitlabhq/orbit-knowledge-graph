@@ -109,6 +109,16 @@ pub struct EdgeMapping {
     pub mutable: bool,
 }
 
+impl EdgeMapping {
+    pub fn array_column(&self) -> Option<&str> {
+        self.array_field.as_ref()?;
+        [&self.source, &self.target]
+            .into_iter()
+            .find(|node_ref| node_ref.field != crate::constants::DEFAULT_PRIMARY_KEY)
+            .map(|node_ref| node_ref.field.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeRef {
     pub field: String,

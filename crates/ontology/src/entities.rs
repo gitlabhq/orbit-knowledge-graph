@@ -23,6 +23,42 @@ pub struct StorageColumn {
     pub codec: Option<Vec<String>>,
 }
 
+impl StorageColumn {
+    pub fn for_field(field: &Field) -> Self {
+        let (base, default, codec): (&str, &str, &[&str]) = match field.data_type {
+            DataType::Enum => ("String", "''", &["LZ4"]),
+            DataType::String | DataType::Uuid => ("String", "''", &["ZSTD(1)"]),
+            DataType::Int => ("Int64", "0", &["T64", "ZSTD(1)"]),
+            DataType::Float => ("Float64", "0", &["ZSTD(1)"]),
+            DataType::Bool => ("Bool", "false", &[]),
+            DataType::Date => ("Date32", "'1970-01-01'", &["ZSTD(1)"]),
+            DataType::DateTime => (
+                "DateTime64(0, 'UTC')",
+                "toDateTime64(0, 0, 'UTC')",
+                &["Delta(8)", "ZSTD(1)"],
+            ),
+            DataType::IntList => ("Array(Int64)", "[]", &["ZSTD(1)"]),
+            DataType::StringList => ("Array(String)", "[]", &["ZSTD(1)"]),
+        };
+        let nullable = if field.nullable {
+            format!("Nullable({base})")
+        } else {
+            base.to_string()
+        };
+        let ch_type = if field.data_type == DataType::Enum {
+            format!("LowCardinality({nullable})")
+        } else {
+            nullable
+        };
+        Self {
+            name: field.name.clone(),
+            ch_type,
+            default: (!field.nullable).then(|| default.to_string()),
+            codec: (!codec.is_empty()).then(|| codec.iter().map(|c| (*c).to_string()).collect()),
+        }
+    }
+}
+
 /// Table-level storage configuration for a node entity. Fully explicit:
 /// columns are listed in DDL order, indexes and projections are complete.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -99,6 +135,7 @@ pub struct EdgeTableStorage {
     pub projections: Vec<StorageProjection>,
     pub denormalized_columns: Vec<StorageColumn>,
     pub denormalized_indexes: Vec<StorageIndex>,
+    pub property_columns: Vec<StorageColumn>,
     pub settings: BTreeMap<String, String>,
 }
 

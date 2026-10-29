@@ -104,6 +104,13 @@
           "type": "integer",
           "description": "For path finding queries, the position of this edge within its path (0-indexed). Absent for non-path queries.",
           "minimum": 0
+        },
+        "properties": {
+          "type": "object",
+          "description": "Relationship properties the query returns. Absent when the query returns none.",
+          "additionalProperties": {
+            "type": ["string", "integer", "number", "boolean", "null"]
+          }
         }
       },
       "additionalProperties": false

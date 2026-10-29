@@ -975,12 +975,7 @@ fn convert_node_storage(yaml: NodeStorageYaml, sort_key: &[String]) -> NodeStora
         columns: yaml
             .columns
             .into_iter()
-            .map(|col| crate::entities::StorageColumn {
-                name: col.name,
-                ch_type: col.ch_type,
-                default: col.default,
-                codec: col.codec,
-            })
+            .map(StorageColumnYaml::into_column)
             .collect(),
         indexes: yaml
             .indexes
@@ -993,6 +988,17 @@ fn convert_node_storage(yaml: NodeStorageYaml, sort_key: &[String]) -> NodeStora
             .map(|p| convert_storage_projection(p, sort_key))
             .collect(),
         settings: yaml.settings,
+    }
+}
+
+impl StorageColumnYaml {
+    pub(crate) fn into_column(self) -> crate::entities::StorageColumn {
+        crate::entities::StorageColumn {
+            name: self.name,
+            ch_type: self.ch_type,
+            default: self.default,
+            codec: self.codec,
+        }
     }
 }
 

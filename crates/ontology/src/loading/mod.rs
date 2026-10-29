@@ -7,8 +7,9 @@ use rust_embed::Embed;
 use serde::Deserialize;
 use std::path::Path;
 
-use crate::entities::{DomainInfo, EdgeColumn, EnumType};
+use crate::entities::{DataType, DomainInfo, EdgeColumn, EnumType, StorageColumn};
 use crate::{Ontology, OntologyError};
+use std::collections::{BTreeMap, BTreeSet};
 
 use derived::DerivedYaml;
 pub(crate) use edge::EdgeYaml;
@@ -172,12 +173,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 columns: s
                     .columns
                     .into_iter()
-                    .map(|col| crate::entities::StorageColumn {
-                        name: col.name,
-                        ch_type: col.ch_type,
-                        default: col.default,
-                        codec: col.codec,
-                    })
+                    .map(node::StorageColumnYaml::into_column)
                     .collect(),
                 indexes: s
                     .indexes
@@ -191,6 +187,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     .collect(),
                 denormalized_columns: vec![],
                 denormalized_indexes: vec![],
+                property_columns: vec![],
                 settings: s.settings,
             });
             let config = crate::EdgeTableConfig {
@@ -205,6 +202,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                         default: c.default,
                     })
                     .collect(),
+                property_columns: Vec::new(),
                 storage: storage.unwrap_or_default(),
             };
             (name, config)
@@ -340,7 +338,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     for (edge_name, edge_path) in &schema.edges {
         let content = reader.read(edge_path)?;
-        let edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
+        let mut edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
 
         let entities = edge_def.to_entities(
             edge_name.clone(),
@@ -391,6 +389,13 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             ontology
                 .edge_descriptions
                 .insert(edge_name.clone(), desc.clone());
+        }
+
+        let properties = edge_def.take_properties(edge_name)?;
+        if !properties.is_empty() {
+            ontology
+                .edge_properties
+                .insert(edge_name.clone(), properties);
         }
 
         let (pipelines, reindex_sources) =
@@ -944,6 +949,8 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         }
     }
 
+    assign_edge_property_columns(&mut ontology)?;
+    validate_edge_property_writers(&ontology)?;
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
@@ -1348,6 +1355,108 @@ fn validate_auxiliary_dictionaries(ontology: &crate::Ontology) -> Result<(), Ont
         }
     }
 
+    Ok(())
+}
+
+fn assign_edge_property_columns(ontology: &mut crate::Ontology) -> Result<(), OntologyError> {
+    use crate::constants::{
+        EDGE_OUTPUT_SUFFIXES, EDGE_RESERVED_COLUMNS, SOURCE_TAGS_COLUMN, TARGET_TAGS_COLUMN,
+    };
+    let mut owners: BTreeMap<(String, String), (String, StorageColumn, DataType)> = BTreeMap::new();
+    for (edge_name, fields) in &ontology.edge_properties {
+        let tables: BTreeSet<&str> = ontology.edges[edge_name]
+            .iter()
+            .map(|edge| edge.destination_table.as_str())
+            .collect();
+        for field in fields {
+            let column = StorageColumn::for_field(field);
+            let reserved = EDGE_RESERVED_COLUMNS
+                .iter()
+                .chain(EDGE_OUTPUT_SUFFIXES)
+                .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN])
+                .any(|name| *name == field.name);
+            if reserved || field.name.starts_with('_') {
+                return Err(OntologyError::Validation(format!(
+                    "edge '{edge_name}': property '{}' collides with a reserved edge column",
+                    field.name
+                )));
+            }
+            for table in &tables {
+                let base = &ontology.edge_table_configs[*table].columns;
+                if base.iter().any(|column| column.name == field.name) {
+                    return Err(OntologyError::Validation(format!(
+                        "edge '{edge_name}': property '{}' collides with a column of '{table}'",
+                        field.name
+                    )));
+                }
+                let key = ((*table).to_string(), field.name.clone());
+                match owners.get(&key) {
+                    Some((owner, existing, data_type))
+                        if *existing != column || *data_type != field.data_type =>
+                    {
+                        return Err(OntologyError::Validation(format!(
+                            "edge table '{table}': property '{}' is declared by '{owner}' and '{edge_name}' with different types",
+                            field.name
+                        )));
+                    }
+                    Some(_) => {}
+                    None => {
+                        owners.insert(key, (edge_name.clone(), column.clone(), field.data_type));
+                    }
+                }
+            }
+        }
+    }
+    for ((table, name), (_, column, data_type)) in owners {
+        let config = ontology
+            .edge_table_configs
+            .get_mut(&table)
+            .expect("edge routes name a declared table");
+        config.property_columns.push(EdgeColumn {
+            name,
+            data_type,
+            default: column.default.clone(),
+        });
+        config.storage.property_columns.push(column);
+    }
+    Ok(())
+}
+
+fn validate_edge_property_writers(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for (edge_name, fields) in &ontology.edge_properties {
+        if let Some(derived) = ontology
+            .derived_entities
+            .values()
+            .find(|derived| derived.emits.iter().any(|emitted| emitted == edge_name))
+        {
+            return Err(OntologyError::Validation(format!(
+                "edge '{edge_name}' declares properties, but derived entity '{}' emits it without them",
+                derived.name
+            )));
+        }
+        for node in ontology.nodes() {
+            for pipeline in &node.pipelines {
+                let crate::etl::Extract::ClickHouse(extract) = &pipeline.extract;
+                let generated = matches!(extract.query, crate::etl::ExtractQuery::Generated { .. });
+                for mapping in pipeline.transform.edges() {
+                    if mapping.label != *edge_name || mapping.array_field.is_some() || !generated {
+                        continue;
+                    }
+                    for field in fields {
+                        let Some(source) = field.column_name() else {
+                            continue;
+                        };
+                        if !node.fields.iter().any(|f| f.column_name() == Some(source)) {
+                            return Err(OntologyError::Validation(format!(
+                                "edge '{edge_name}' property '{}': node '{}' pipeline '{}' extracts no column '{source}'",
+                                field.name, node.name, pipeline.name
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 

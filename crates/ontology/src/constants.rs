@@ -28,6 +28,30 @@ pub const TARGET_ID_COLUMN: &str = "target_id";
 
 pub const TARGET_KIND_COLUMN: &str = "target_kind";
 
+pub const EDGE_KIND_SUFFIX: &str = "kind";
+
+pub const EDGE_SRC_SUFFIX: &str = "src";
+
+pub const EDGE_SRC_KIND_SUFFIX: &str = "src_kind";
+
+pub const EDGE_DST_SUFFIX: &str = "dst";
+
+pub const EDGE_DST_KIND_SUFFIX: &str = "dst_kind";
+
+pub const EDGE_PATH_NODES_SUFFIX: &str = "path_nodes";
+
+pub const EDGE_DEPTH_SUFFIX: &str = "depth";
+
+pub const EDGE_OUTPUT_SUFFIXES: &[&str] = &[
+    EDGE_KIND_SUFFIX,
+    EDGE_SRC_SUFFIX,
+    EDGE_SRC_KIND_SUFFIX,
+    EDGE_DST_SUFFIX,
+    EDGE_DST_KIND_SUFFIX,
+    EDGE_PATH_NODES_SUFFIX,
+    EDGE_DEPTH_SUFFIX,
+];
+
 pub const SOURCE_TAGS_COLUMN: &str = "source_tags";
 
 pub const TARGET_TAGS_COLUMN: &str = "target_tags";

@@ -96,13 +96,13 @@ cases:
     expect: { compile_error: path finding and neighbors have fixed result ordering }
 
   - name: order_relationship_property
-    description: ORDER BY a relationship property rejects and points to node properties or type(r), instead of
+    description: ORDER BY a relationship column that no edge declares as a property rejects, instead of
       reporting an undefined node
     query:
       gql: |
         MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN mr ORDER BY r.source_id LIMIT 10
     expect:
-      compile_error: "ORDER BY cannot sort by a relationship property; sort by a node property or by type(r)"
+      compile_error_contains: ['reads "source_id", which no relationship type declares as a property']
       compile_error_not_contains: [undefined node]
 
   - name: order_variable_length

@@ -140,12 +140,14 @@ pub(crate) fn union_arm_alias(alias: &str) -> String {
 /// Upper bound on rows fetched per entity type during dynamic hydration.
 pub const MAX_DYNAMIC_HYDRATION_RESULTS: usize = 1000;
 
-pub const EDGE_KIND_SUFFIX: &str = "kind";
-pub const EDGE_SRC_SUFFIX: &str = "src";
-pub const EDGE_SRC_KIND_SUFFIX: &str = "src_kind";
-pub const EDGE_DST_SUFFIX: &str = "dst";
-pub const EDGE_DST_KIND_SUFFIX: &str = "dst_kind";
-pub const EDGE_PATH_NODES_SUFFIX: &str = "path_nodes";
+pub use ontology::constants::{
+    EDGE_DST_KIND_SUFFIX, EDGE_DST_SUFFIX, EDGE_KIND_SUFFIX, EDGE_PATH_NODES_SUFFIX,
+    EDGE_SRC_KIND_SUFFIX, EDGE_SRC_SUFFIX,
+};
+
+pub fn edge_property_column(prefix: &str, property: &str) -> String {
+    format!("{prefix}{property}")
+}
 
 const _: () = {
     let suffixes = [

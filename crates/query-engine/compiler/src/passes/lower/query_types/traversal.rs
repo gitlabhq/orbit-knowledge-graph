@@ -1,6 +1,6 @@
 use super::Emitted;
 use crate::ast::*;
-use crate::constants::EDGE_KIND_SUFFIX;
+use crate::constants::{EDGE_KIND_SUFFIX, edge_property_column};
 use crate::error::{QueryError, Result};
 use crate::input::{Input, OrderDirection};
 use crate::passes::lower::{graph, predicates};
@@ -20,6 +20,12 @@ pub(crate) fn emit(
             .iter()
             .map(|order| execution.property(&order.node, &order.property)),
     );
+    let sorted_hop = input.relationship_return.sort.as_ref().and_then(|sort| {
+        plan.relations
+            .iter()
+            .find(|hop| hop.input_index == sort.relationship)
+            .map(|hop| (hop, sort))
+    });
     let mut output = graph::execute(execution, &read, tp_bounds);
     let nodes = output.take_bindings(plan, input)?;
     let mut query = output.into_query(vec![], vec![], vec![], input.limit);
@@ -33,15 +39,17 @@ pub(crate) fn emit(
             order.direction,
         )],
         (None, Some(sort)) => {
-            let edge_type = plan
-                .relations
-                .iter()
-                .find(|hop| hop.input_index == sort.relationship)
-                .and_then(|hop| edge_type(&query, hop))
+            let sorted = sorted_hop
+                .and_then(|(hop, sort)| match &sort.property {
+                    Some(property) => query
+                        .selected(&edge_property_column(&hop.column_prefix(), property))
+                        .cloned(),
+                    None => edge_type(&query, hop),
+                })
                 .ok_or_else(|| {
                     QueryError::Lowering("sorted relationship has no edge type column".into())
                 })?;
-            vec![ordered(edge_type, sort.direction)]
+            vec![ordered(sorted, sort.direction)]
         }
         (None, None) => Vec::new(),
     };

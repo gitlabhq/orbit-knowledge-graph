@@ -1,11 +1,12 @@
+use indexmap::IndexMap;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use crate::OntologyError;
-use crate::entities::{EdgeEntity, EdgeVariantScope};
+use crate::entities::{EdgeEntity, EdgeVariantScope, Field};
 use crate::etl::{EtlScope, Pipeline, ReindexSource};
 
-use super::node::{IndexerYaml, PipelineYaml, convert_reindex_on};
+use super::node::{IndexerYaml, PipelineYaml, PropertyYaml, convert_reindex_on};
 use super::{EtlSettings, ReadOntologyFile};
 
 #[derive(Debug, Deserialize)]
@@ -14,6 +15,8 @@ pub(crate) struct EdgeYaml {
     pub description: Option<String>,
     #[serde(default)]
     pub table: Option<String>,
+    #[serde(default)]
+    properties: IndexMap<String, PropertyYaml>,
     #[serde(default)]
     variants: Vec<EdgeVariantYaml>,
     #[serde(default)]
@@ -78,6 +81,34 @@ impl EdgeYaml {
                 }
             })
             .collect()
+    }
+
+    pub(crate) fn take_properties(
+        &mut self,
+        relationship_kind: &str,
+    ) -> Result<Vec<Field>, OntologyError> {
+        let owner = format!("edge '{relationship_kind}'");
+        let mut fields = Vec::new();
+        for (name, property) in std::mem::take(&mut self.properties) {
+            let field = property.into_field(name, &owner)?;
+            if field.admin_only
+                || field.is_virtual()
+                || field.hidden
+                || field.unique
+                || field.high_fan_out
+                || !field.filterable
+                || !field.like_allowed
+                || field.traversal_path_lookup.is_some()
+                || field.terminal_values.is_some()
+            {
+                return Err(OntologyError::Validation(format!(
+                    "property '{}' on {owner}: edge properties take type, source, nullable, values, and description only",
+                    field.name
+                )));
+            }
+            fields.push(field);
+        }
+        Ok(fields)
     }
 
     pub(crate) fn into_pipelines(

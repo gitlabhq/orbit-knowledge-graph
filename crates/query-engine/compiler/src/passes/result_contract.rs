@@ -31,6 +31,13 @@ pub struct EdgeMeta {
     pub dst_column: String,
     pub dst_type_column: String,
     pub relationship: usize,
+    pub properties: Vec<String>,
+}
+
+impl EdgeMeta {
+    pub fn property_column(&self, property: &str) -> String {
+        crate::constants::edge_property_column(&self.column_prefix, property)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -199,6 +206,11 @@ fn apply_with(
                 relationship: edge.relationship,
                 from_alias: String::new(),
                 to_alias: String::new(),
+                properties: input
+                    .relationship_return
+                    .properties(edge.relationship)
+                    .map(str::to_string)
+                    .collect(),
             });
         }
     }

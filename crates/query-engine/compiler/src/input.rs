@@ -51,6 +51,38 @@ impl RelationshipReturn {
                 .as_ref()
                 .is_some_and(|sort| sort.relationship == relationship)
     }
+
+    pub fn properties(&self, relationship: usize) -> impl Iterator<Item = &str> {
+        let mut seen = Vec::new();
+        self.columns
+            .iter()
+            .filter(move |column| column.relationship == relationship)
+            .filter_map(|column| match &column.kind {
+                RelationshipColumnKind::Property(property) => Some(property.as_str()),
+                _ => None,
+            })
+            .filter(move |property| {
+                let new = !seen.contains(property);
+                seen.push(*property);
+                new
+            })
+    }
+
+    pub fn read_properties(&self, relationship: usize) -> impl Iterator<Item = &str> {
+        let sorted = self
+            .sort
+            .iter()
+            .filter(move |sort| sort.relationship == relationship)
+            .filter_map(|sort| sort.property.as_deref());
+        let mut seen = Vec::new();
+        self.properties(relationship)
+            .chain(sorted)
+            .filter(move |property| {
+                let new = !seen.contains(property);
+                seen.push(*property);
+                new
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,16 +92,24 @@ pub struct RelationshipColumn {
     pub kind: RelationshipColumnKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RelationshipColumnKind {
     Type,
     Relationship,
+    Property(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelationshipOrder {
     pub relationship: usize,
+    pub property: Option<String>,
     pub direction: OrderDirection,
+}
+
+impl InputRelationship {
+    pub fn is_untyped(&self) -> bool {
+        self.types.is_empty() || self.types.iter().any(|kind| kind == "*")
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

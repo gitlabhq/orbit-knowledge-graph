@@ -78,22 +78,29 @@ fn relationship_cell(
     context: &ResultContext,
     column: &RelationshipColumn,
 ) -> String {
-    context
+    let edge = context
         .edges()
         .iter()
-        .find(|edge| edge.relationship == column.relationship)
-        .and_then(|edge| {
-            row.get_column_string(&edge.type_column).or_else(|| {
-                let [kind] = edge.rel_types.as_slice() else {
-                    return None;
-                };
-                Some(kind.clone())
-            })
+        .find(|edge| edge.relationship == column.relationship);
+    if let RelationshipColumnKind::Property(property) = &column.kind {
+        return edge
+            .and_then(|edge| row.get(&edge.property_column(property)))
+            .map_or_else(null, |value| {
+                literal(&column_value_to_json(value), property)
+            });
+    }
+    edge.and_then(|edge| {
+        row.get_column_string(&edge.type_column).or_else(|| {
+            let [kind] = edge.rel_types.as_slice() else {
+                return None;
+            };
+            Some(kind.clone())
         })
-        .map_or_else(null, |kind| match column.kind {
-            RelationshipColumnKind::Type => quote_escaped(&kind),
-            RelationshipColumnKind::Relationship => format!("[:{kind}]"),
-        })
+    })
+    .map_or_else(null, |kind| match column.kind {
+        RelationshipColumnKind::Relationship => format!("[:{kind}]"),
+        _ => quote_escaped(&kind),
+    })
 }
 
 fn path_table(output: &PipelineOutput) -> Table {

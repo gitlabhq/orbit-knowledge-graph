@@ -1,0 +1,19 @@
+table: gl_prop_edge
+properties:
+  state:
+    type: enum
+    source: state
+    nullable: false
+    description: "Review state of the reviewer on the merge request."
+    values:
+      0: unreviewed
+      1: reviewed
+      2: requested_changes
+      3: approved
+      4: unapproved
+      5: review_started
+  created_at:
+    type: datetime
+    source: created_at
+    nullable: false
+    description: "When the reviewer was requested."
