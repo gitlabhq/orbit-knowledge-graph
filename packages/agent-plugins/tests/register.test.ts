@@ -185,12 +185,16 @@ const IDENTITIES: Record<string, object> = {
   'projects/8': { id: 8, path_with_namespace: 'z/p' },
 }
 
-async function totalAfter($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], cyphers: string[], failLookups = false) {
+type Lookups = { fail?: boolean; hang?: boolean; runs?: string[] }
+
+async function totalAfter($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], cyphers: string[], lookups: Lookups = {}) {
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
   on('tool.call', () => ({ result: { stdout: 'nodes:\n  Project[1]{id}:\n    1\n' } }))
-  on('process.run', (_$, e) => {
+  on('process.run', async (_$, e) => {
     if (e.argv[1] === 'api') {
-      const body = failLookups ? undefined : IDENTITIES[e.argv[2] ?? '']
+      lookups.runs?.push(e.argv[2] ?? '')
+      if (lookups.hang) await new Promise<never>(() => {})
+      const body = lookups.fail ? undefined : IDENTITIES[e.argv[2] ?? '']
       const result = { exitCode: body ? 0 : 1, stdout: JSON.stringify(body ?? {}), stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
       return { value: result }
     }
@@ -213,7 +217,7 @@ test('different groups add up in the total', async ($, on) => {
   expect(await (await totalAfter($, on, [GROUP_BY_PATH, "MATCH (g:Group {full_path: 'b'}) RETURN g"]))('2 / 200')).toBe(true)
 })
 
-test('a project inside a counted group is not added, one outside it is', async ($, on) => {
+test('a project inside a counted group is not added', async ($, on) => {
   expect(await (await totalAfter($, on, [GROUP_BY_ID, 'MATCH (mr:MergeRequest {project_id: 7}) RETURN mr']))('2 / 100')).toBe(true)
 })
 
@@ -222,7 +226,20 @@ test('a project outside every counted group is added', async ($, on) => {
 })
 
 test('when the identity lookups fail every spelling keeps its own total', async ($, on) => {
-  expect(await (await totalAfter($, on, [GROUP_BY_PATH, GROUP_BY_ID], true))('2 / 200')).toBe(true)
+  expect(await (await totalAfter($, on, [GROUP_BY_PATH, GROUP_BY_ID], { fail: true }))('2 / 200')).toBe(true)
+})
+
+test('each scope is looked up once, never again on render', async ($, on) => {
+  const runs: string[] = []
+  const has = await totalAfter($, on, [GROUP_BY_PATH, GROUP_BY_ID, GROUP_BY_PATH], { runs })
+  expect(await has('3 / 100')).toBe(true)
+  expect(runs).toEqual(['groups/a', 'groups/9'])
+  expect(await has('3 / 100')).toBe(true)
+})
+
+test('a lookup that never answers leaves the status line rendering', async ($, on) => {
+  const has = await totalAfter($, on, [GROUP_BY_PATH], { hang: true })
+  expect(await has(' node')).toBe(true)
 })
 
 test('graph-status runs through a fixed launcher after a successful query', async ($, on) => {
