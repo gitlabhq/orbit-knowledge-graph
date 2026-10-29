@@ -29,6 +29,10 @@ function labelFor(table: Readonly<Record<string, Label>>, key: string): Label | 
   return Object.hasOwn(table, key) ? table[key] : undefined
 }
 
+export function detailText(call: OrbitCall): string {
+  return [call.detail, ...(call.also ?? [])].filter(Boolean).join(', ')
+}
+
 function callOf(label: Label, detail: string): OrbitCall {
   return { label: label.done, active: label.running, detail }
 }

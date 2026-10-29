@@ -336,6 +336,9 @@ var SHOWS_ARGUMENT = new Set(["grep", "context", "workspace sql", "sql", "schema
 function labelFor(table, key) {
   return Object.hasOwn(table, key) ? table[key] : undefined;
 }
+function detailText(call) {
+  return [call.detail, ...call.also ?? []].filter(Boolean).join(", ");
+}
 function callOf(label, detail) {
   return { label: label.done, active: label.running, detail };
 }
@@ -406,7 +409,8 @@ var OrbitUiPlugin = async ({ client }) => ({
       const call = describeOrbitCall(input.tool, output.args);
       if (!call)
         return;
-      const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "") + (call.also ? "  \xB7 also " + call.also.join(", ") : "");
+      const detail = detailText(call);
+      const message = MARK + " " + call.active + (detail ? "  " + detail : "");
       client.tui.showToast({ body: { message, variant: "info", duration: 2000 } }).catch(() => {});
     } catch {}
   }
