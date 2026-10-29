@@ -311,3 +311,8 @@ display:
       - match: '(__name)'
         tag:
           resolved: '@$ROOT|has_incoming("Imports")'
+  - name: language
+    rules:
+      - match: '(__def)'
+        tag:
+          language: '@$ROOT|ancestor_tag("language")'

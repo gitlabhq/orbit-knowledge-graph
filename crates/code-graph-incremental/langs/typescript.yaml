@@ -722,3 +722,8 @@ display:
       - match: '(__name "*" (__alias))'
         tag:
           fqn: '@$ROOT|ancestor_tag("resolved_source")'
+  - name: language
+    rules:
+      - match: '(__def)'
+        tag:
+          language: '@$ROOT|ancestor_tag("language")'

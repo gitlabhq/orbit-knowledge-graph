@@ -450,3 +450,8 @@ display:
           fqn: '@$ROOT|ancestor_tag("source_path")'
       - match: '(__name "*")'
         tag: { import_kind: wildcard, fqn: '' }
+  - name: language
+    rules:
+      - match: '(__def)'
+        tag:
+          language: '@$ROOT|ancestor_tag("language")'

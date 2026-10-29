@@ -332,3 +332,8 @@ display:
           import_type: '@$ROOT|tag("import_type")|default("Import")'
           import_kind: '@$ROOT|source("256")|regex_replace("(?s)\A\s*(?:@\w+\s+)*import\s+(?:typealias|struct|class|enum|protocol|let|var|func)\s.*", "symbol")|regex_replace("(?s)^(symbol)$|.*", "$1")|default("module")'
           fqn: '@$ROOT|ancestor_tag("source_path")'
+  - name: language
+    rules:
+      - match: '(__def)'
+        tag:
+          language: '@$ROOT|ancestor_tag("language")'

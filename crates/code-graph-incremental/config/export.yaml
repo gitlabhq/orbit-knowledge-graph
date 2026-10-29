@@ -61,34 +61,39 @@ entities:
       - { name: language, type: Utf8, from: tag("language") }
       - { name: size_bytes, type: Int64, position: end_byte }
       - { name: skip_reason, type: Utf8, from: tag("reason") }
-      - { name: is_test, type: Boolean, const: "false" }
-      - { name: is_generated, type: Boolean, const: "false" }
-      - { name: is_vendored, type: Boolean, const: "false" }
+      - { name: is_test, type: Boolean, from: tag("is_test")|default("false") }
+      - name: is_generated
+        type: Boolean
+        from: 'concat(":", "tag:generated", "id")|regex_match("^true:|\.min\.(js|css)$|\.pb\.go$|_pb2(_grpc)?\.py$|\.g\.dart$|\.designer\.cs$|\.generated\.\w+$|(^|[:/])(gen|generated)/")'
+      - name: is_vendored
+        type: Boolean
+        from: regex_match("(^|/)(vendor|vendors|node_modules|third_party|bower_components|Pods|Carthage)/")
 
   Definition:
     source: __def
-    id: { seed: def, columns: [file_path, fqn, span] }
+    exclude_tag: { kind: [Impl] }
+    id: { seed: def, columns: [file_path, fqn, kind, signature] }
     columns:
       - { name: file_path, type: Utf8, from: ancestor_tag("file_path") }
-      - { name: language, type: Utf8, const: "" }
-      - { name: fqn, type: Utf8, from: tag("fqn") }
-      - { name: name, type: Utf8, from: child_sym("__defname") }
-      - { name: signature, type: Utf8, const: "" }
-      - { name: parameters, type: ListUtf8, const: "" }
-      - { name: return_type, type: Utf8, nullable: true, const: "" }
-      - { name: declared_type, type: Utf8, nullable: true, const: "" }
-      - { name: doc_comment, type: Utf8, const: "" }
+      - { name: language, type: Utf8, from: tag("language") }
+      - { name: fqn, type: Utf8, from: tag("fqn"), cap: 1024 }
+      - { name: name, type: Utf8, from: child_sym("__defname"), cap: 512 }
+      - { name: signature, type: Utf8, from: tag("signature"), cap: 2048 }
+      - { name: parameters, type: ListUtf8, from: tag("parameters"), split: "\x1f", max: 64, cap: 512 }
+      - { name: return_type, type: Utf8, nullable: true, from: tag("return_type"), cap: 512 }
+      - { name: declared_type, type: Utf8, nullable: true, from: tag("declared_type"), cap: 1024 }
+      - { name: doc_comment, type: Utf8, from: tag("doc_comment"), cap: 1024, over: words }
       - name: category
         type: Utf8
-        from: tag("def_type")|map("Property:Field", "EnumVariant:EnumMember", "Variant:EnumMember", "Lambda:Function", "Static:Variable", "Union:Struct")|map("Class:Type", "Struct:Type", "Interface:Type", "Trait:Type", "Enum:Type", "TypeAlias:Type", "Function:Callable", "Method:Callable", "Constructor:Callable", "Test:Callable", "Field:Value", "Constant:Value", "Variable:Value", "EnumMember:Value")
-      - name: kind
+        from: tag("kind")|map("Class:Type", "Struct:Type", "Interface:Type", "Trait:Type", "Enum:Type", "TypeAlias:Type", "Function:Callable", "Method:Callable", "Constructor:Callable", "Test:Callable", "Field:Value", "Constant:Value", "Variable:Value", "EnumMember:Value", "Module:Module", "Macro:Macro")
+      - { name: kind, type: Utf8, from: tag("kind") }
+      - { name: language_kind, type: Utf8, from: 'or("tag:language_kind", "tag:kind")' }
+      - name: scope
         type: Utf8
-        from: tag("def_type")|map("Property:Field", "EnumVariant:EnumMember", "Variant:EnumMember", "Lambda:Function", "Static:Variable", "Union:Struct")
-      - { name: language_kind, type: Utf8, from: tag("def_type") }
-      - { name: scope, type: Utf8, const: "" }
-      - { name: modifiers, type: ListUtf8, const: "" }
-      - { name: visibility, type: Utf8, nullable: true, const: "" }
-      - { name: generated_by, type: Utf8, nullable: true, const: "" }
+        from: ancestor_tag("kind")|map("Function:local", "Method:local", "Constructor:local", "Test:local", "Class:member", "Struct:member", "Interface:member", "Trait:member", "Enum:member", "TypeAlias:member", "Module:member", "Impl:member", "Field:member", "Constant:member", "Variable:member", "EnumMember:member", "Macro:member")|default("top_level")
+      - { name: modifiers, type: ListUtf8, from: tag("modifiers"), split: " ", sort: true, max: 16 }
+      - { name: visibility, type: Utf8, nullable: true, from: tag("visibility") }
+      - { name: generated_by, type: Utf8, nullable: true, from: tag("generated_by"), cap: 256 }
       - { name: start_line, type: Int64, position: start_line, span: [tag:definition_span, __defname] }
       - { name: end_line, type: Int64, position: end_line, span: [tag:definition_span, __defname] }
       - { name: start_byte, type: Int64, position: start_byte, span: [tag:definition_span, __defname] }
@@ -103,16 +108,22 @@ entities:
     id: { seed: import, columns: [file_path, import_path, name, alias, span] }
     columns:
       - { name: file_path, type: Utf8, from: ancestor_tag("file_path") }
-      - { name: import_kind, type: Utf8, const: "" }
+      - name: import_kind
+        type: Utf8
+        on: expanded
+        from: or("tag:import_kind", "ancestor_tag:import_kind")|default("symbol")
       - name: language_kind
         type: Utf8
         on: expanded
         from: or("tag:import_type", "ancestor_tag:import_type")|default("NamedImport")
-      - { name: import_path, type: Utf8, from: tag("source_path") }
-      - { name: name, type: Utf8, on: expanded }
-      - { name: alias, type: Utf8, on: expanded, from: ancestor_sym("__alias") }
-      - { name: fqn, type: Utf8, nullable: true, const: "" }
-      - { name: is_external, type: Boolean, const: "false" }
+      - { name: import_path, type: Utf8, from: tag("source_path"), cap: 1024, over: drop }
+      - { name: name, type: Utf8, on: expanded, cap: 512, over: drop }
+      - { name: alias, type: Utf8, on: expanded, from: ancestor_sym("__alias"), cap: 256, over: empty }
+      - { name: fqn, type: Utf8, nullable: true, on: expanded, from: tag("fqn"), cap: 1024, over: empty }
+      - name: is_external
+        type: Boolean
+        on: expanded
+        from: has_outgoing("Imports", "parent")|map("true:false", "false:true")
       - { name: start_line, type: Int64, position: start_line }
       - { name: end_line, type: Int64, position: end_line }
       - { name: start_byte, type: Int64, position: start_byte }
@@ -122,7 +133,7 @@ entities:
 
 # The edge table. `containment` rows link each `to` entity to its nearest
 # enclosing `from` entity. `graph` rows come from the resolver, matched on
-# edge kind and the entities at each end; cross-file ones collapse to one
+# edge kind and the entities at each end; all rows collapse to one
 # row per source, target and kind.
 edges:
   columns:
@@ -132,8 +143,8 @@ edges:
     - { name: target_id, type: Int64, from: target.id }
     - { name: target_kind, type: Utf8, from: target.entity }
     - { name: traversal_path, type: Utf8, const: "" }
-    - { name: lines, type: ListInt64, const: "" }
-    - { name: resolution, type: Utf8, const: "" }
+    - { name: lines, type: ListInt64, from: lines }
+    - { name: resolution, type: Utf8, from: resolution }
     - { name: access, type: Utf8, const: "" }
     - { name: usage, type: Utf8, const: "" }
   containment:
@@ -142,8 +153,22 @@ edges:
     - { from: File, to: Definition, kind: DEFINES }
     - { from: File, to: Import, kind: DEFINES }
   graph:
+    - { edge: Calls, to: Definition, site: [__decorator], kind: ANNOTATED_BY }
+    - { edge: Imports, from: Definition, to: Import, site: [__decorator], kind: ANNOTATED_BY }
+    - { edge: Calls, to: Definition, site_child: __type, kind: USES_TYPE, set: { usage: field } }
+    - { edge: Calls, to: Definition, reference: true, kind: USES_VALUE, set: { access: read } }
+    - edge: Calls
+      to: Definition
+      site: [__call]
+      target_tag: { kind: [Class, Struct, Interface, Trait, Enum, TypeAlias, Module, EnumMember] }
+      kind: INSTANTIATES
     - { edge: Calls, to: Definition, kind: CALLS }
     - { edge: Defines, from: Definition, to: Definition, kind: DEFINES }
+    - { edge: Extends, from: Definition, to: Definition, target_tag: { kind: [Interface, Trait] }, kind: IMPLEMENTS }
     - { edge: Extends, from: Definition, to: Definition, kind: EXTENDS }
+    - { edge: Overrides, from: Definition, to: Definition, kind: OVERRIDES }
+    - { edge: DependsOn, from: File, to: File, kind: DEPENDS_ON }
     - { edge: Imports, from: Import, to: Definition, kind: RESOLVES_TO }
+    - { edge: Imports, from: Import, to: File, kind: RESOLVES_TO }
     - { edge: Imports, from: Definition, to: Import, kind: CALLS, fallback: true }
+    - { edge: Imports, from: File, to: Import, kind: CALLS, fallback: true }

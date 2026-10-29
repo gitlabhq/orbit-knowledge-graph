@@ -505,3 +505,8 @@ display:
       - match: '(__name)'
         tag:
           fqn: '@$ROOT|concat("\", "ancestor_tag:source_path", "tag:member")'
+  - name: language
+    rules:
+      - match: '(__def)'
+        tag:
+          language: '@$ROOT|ancestor_tag("language")'

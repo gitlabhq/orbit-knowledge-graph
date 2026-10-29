@@ -359,7 +359,8 @@ display:
   - name: kind
     rules:
       - match: '(__def (__function))'
-        tag: { kind: Function }
+        tag:
+          kind: '@$ROOT|ancestor_tag("kind")|map("Class:ClassMethod")|regex_replace("^(ClassMethod)$|(?s).*", "$1")|map("ClassMethod:Method")|default("Function")'
       - match: '(__def (__defname "^test") (__function))'
         tag: { kind: Test }
       - match: '(__def (__method))'
@@ -439,3 +440,8 @@ display:
       - match: '(__name)'
         tag:
           resolved: '@$ROOT|has_incoming("Imports")'
+  - name: language
+    rules:
+      - match: '(__def)'
+        tag:
+          language: '@$ROOT|ancestor_tag("language")'
