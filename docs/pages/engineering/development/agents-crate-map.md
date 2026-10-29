@@ -39,7 +39,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `gitaly-protos` | Gitaly protobuf types for gRPC repository operations |
 | `health-check` | Networked aggregate health for configured Kubernetes workloads and ClickHouse, plus NATS code work queue depth for autoscaling code indexer pods |
-| `orbit-cli` | Local `orbit workspace index`, `orbit workspace sql`, `orbit workspace schema`, and `orbit workspace mcp serve` (stateless stdio MCP server: `run_sql`, `get_graph_schema`, `index`; descriptions shared with the CLI via `descriptions.rs`) commands; writes the property graph to DuckDB and exposes it as raw SQL (no DSL); workspace management (`Workspace`, `GitInfo`, manifest in DuckDB). Release artifacts include glibc 2.28 Linux builds plus fully static musl Linux builds for Alpine, scratch, and distroless environments. |
+| `orbit-cli` | Local `orbit workspace index`, `orbit workspace sql`, and `orbit workspace schema` commands; writes the property graph to DuckDB and exposes it as raw SQL (no DSL); workspace management (`Workspace`, `GitInfo`, manifest in DuckDB). Release artifacts include glibc 2.28 Linux builds plus fully static musl Linux builds for Alpine, scratch, and distroless environments. |
 | `orbit-search` | Store-agnostic grep helpers: OR-alternative parsing and the kind filter (`grep`), and the shared corpus policy (source extensions, test/vendor exclusions) in `corpus` |
 | `duckdb-client` | DuckDB client with read-write retry backoff, read-only concurrent access, ontology-driven graph converter, shared SQL-literal/Arrow-column helpers |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |

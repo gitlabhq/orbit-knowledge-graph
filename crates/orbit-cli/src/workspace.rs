@@ -17,8 +17,6 @@ impl Workspace {
     }
 
     pub fn default_root() -> Result<PathBuf> {
-        // Resolution runs inside the cell so the legacy migration happens at most
-        // once per process, even when MCP tool calls race on the first use.
         static ROOT: OnceLock<std::result::Result<PathBuf, String>> = OnceLock::new();
         ROOT.get_or_init(|| {
             let override_dir = std::env::var("ORBIT_DATA_DIR")

@@ -285,16 +285,14 @@ pub(crate) enum Component {
     Instructions,
     Hooks,
     Skill,
-    Mcp,
     AgentPlugins,
 }
 
 impl Component {
-    pub(super) const ALL: [Component; 5] = [
+    pub(super) const ALL: [Component; 4] = [
         Component::Instructions,
         Component::Hooks,
         Component::Skill,
-        Component::Mcp,
         Component::AgentPlugins,
     ];
 
@@ -312,7 +310,6 @@ impl Component {
         }
         Ok(Component::ALL
             .into_iter()
-            .filter(|component| *component != Component::Mcp || install.contains(component))
             .filter(|component| !skip.contains(component))
             .collect())
     }
@@ -322,7 +319,6 @@ impl Component {
             Component::Instructions => "instructions",
             Component::Hooks => "hooks",
             Component::Skill => "skill",
-            Component::Mcp => "mcp server",
             Component::AgentPlugins => "agent plugins",
         }
     }
@@ -481,23 +477,12 @@ mod tests {
         }
     }
 
-    fn options_with_mcp(names: &[&str]) -> Options {
-        Options {
-            components: Component::from_flags(&[Component::Mcp], &[]).unwrap(),
-            ..options_for(names)
-        }
-    }
-
     fn install_default(names: &[&str], dir: &Path) {
         install(options_for(names), project(dir), &bare_machine()).unwrap();
     }
 
     fn bare_machine() -> Machine {
         Machine::new(PathBuf::from("/nonexistent-home"), BTreeMap::new())
-    }
-
-    fn install_with_mcp(names: &[&str], dir: &Path) {
-        install(options_with_mcp(names), project(dir), &bare_machine()).unwrap();
     }
 
     fn uninstall_named(names: &[&str], dir: &Path) -> SetupRun {
@@ -543,34 +528,14 @@ mod tests {
     #[test]
     fn dry_run_prints_the_plan_and_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let mut dry = options_with_mcp(&["claude", "codex", "opencode"]);
+        let mut dry = options_for(&["claude", "codex", "opencode"]);
         dry.dry_run = true;
         dry.index = true;
         let run = install(dry, project(dir.path()), &bare_machine()).unwrap();
         assert_eq!(run.outcome, Outcome::DryRun);
         assert_eq!(run.index, Some(false));
         assert_eq!(run.graph_first, None);
-        assert!(run.components.contains(&Component::Mcp));
         assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
-    }
-
-    #[test]
-    fn mcp_server_is_opt_in() {
-        let dir = tempfile::tempdir().unwrap();
-        install(
-            options_for(&["claude", "codex", "opencode"]),
-            project(dir.path()),
-            &bare_machine(),
-        )
-        .unwrap();
-
-        assert!(dir.path().join("CLAUDE.md").is_file());
-        assert!(!dir.path().join(".mcp.json").exists());
-        assert!(!dir.path().join(".codex").exists());
-        assert!(!dir.path().join("opencode.json").exists());
-
-        install_with_mcp(&["claude"], dir.path());
-        assert!(dir.path().join(".mcp.json").is_file());
     }
 
     #[test]
@@ -598,7 +563,7 @@ mod tests {
         std::fs::create_dir_all(home.path().join(".codex")).unwrap();
         let machine = Machine::new(home.path().to_path_buf(), BTreeMap::new());
         let dir = tempfile::tempdir().unwrap();
-        install_with_mcp(&["opencode"], dir.path());
+        install_default(&["opencode"], dir.path());
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
 
         uninstall(options_for(&[]), project(dir.path()), &machine).unwrap();
@@ -616,7 +581,7 @@ mod tests {
         std::fs::create_dir_all(opencode_config.parent().unwrap()).unwrap();
         std::fs::write(&opencode_config, r#"{"plugin": ["other.js"]}"#).unwrap();
 
-        install_with_mcp(&["codex", "opencode"], dir.path());
+        install_default(&["codex", "opencode"], dir.path());
 
         let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
         assert!(agents.contains("<!-- orbit:setup:begin -->"));
@@ -627,22 +592,6 @@ mod tests {
             assert!(path.is_file(), "{}", path.display());
         }
         assert_eq!(read_json(&opencode_config), json!({"plugin": ["other.js"]}));
-        assert_eq!(
-            read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],
-            json!({
-                "type": "local",
-                "command": ["orbit", "workspace", "mcp", "serve"],
-                "enabled": true,
-                "environment": {"AI_AGENT": "opencode"}
-            })
-        );
-        let codex = std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap();
-        assert!(codex.contains("[mcp_servers.orbit]"), "{codex}");
-        assert!(
-            codex.contains(r#"args = ["workspace", "mcp", "serve"]"#),
-            "{codex}"
-        );
-        assert!(codex.contains(r#"env = { AI_AGENT = "codex" }"#), "{codex}");
         assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
 
         let removed = uninstall_named(&["codex", "opencode"], dir.path());
@@ -669,7 +618,7 @@ mod tests {
         std::fs::write(dir.path().join("AGENTS.md"), "# rules\n").unwrap();
         std::os::unix::fs::symlink("AGENTS.md", dir.path().join("CLAUDE.md")).unwrap();
 
-        install_with_mcp(&["claude", "codex"], dir.path());
+        install_default(&["claude", "codex"], dir.path());
 
         let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
         assert_eq!(agents.matches("<!-- orbit:setup:begin -->").count(), 1);
@@ -678,53 +627,67 @@ mod tests {
     }
 
     #[test]
-    fn claude_mcp_entry_joins_existing_servers_and_leaves_them_on_uninstall() {
+    fn setup_removes_retired_mcp_entries_and_keeps_foreign_servers() {
         let dir = tempfile::tempdir().unwrap();
         let mcp_json = dir.path().join(".mcp.json");
         let theirs = json!({"mcpServers": {"theirs": {"command": "their-server"}}});
-        std::fs::write(&mcp_json, theirs.to_string()).unwrap();
+        let mut retired = theirs.clone();
+        retired["mcpServers"]["orbit"] = json!({
+            "type": "stdio",
+            "command": "orbit",
+            "args": ["workspace", "mcp", "serve"],
+            "env": {"AI_AGENT": "claude-code"}
+        });
+        std::fs::write(&mcp_json, retired.to_string()).unwrap();
+        let codex_config = dir.path().join(".codex/config.toml");
+        std::fs::create_dir_all(codex_config.parent().unwrap()).unwrap();
+        let codex_theirs = "# my codex settings\nmodel = \"o3\"\n\n[mcp_servers.theirs]\ncommand = \"their-server\"\n";
+        std::fs::write(
+            &codex_config,
+            format!("{codex_theirs}\n[mcp_servers.orbit]\ncommand = \"orbit\"\nargs = [\"workspace\", \"mcp\", \"serve\"]\n"),
+        )
+        .unwrap();
+        let opencode_json = dir.path().join("opencode.json");
+        std::fs::write(
+            &opencode_json,
+            json!({"mcp": {"orbit": {"type": "local", "command": ["orbit", "workspace", "mcp", "serve"]}}}).to_string(),
+        )
+        .unwrap();
 
-        install_with_mcp(&["claude"], dir.path());
-        install_with_mcp(&["claude"], dir.path());
-
-        let servers = read_json(&mcp_json)["mcpServers"].clone();
-        assert_eq!(servers["theirs"], json!({"command": "their-server"}));
-        assert_eq!(
-            servers["orbit"],
-            json!({
-                "type": "stdio",
-                "command": "orbit",
-                "args": ["workspace", "mcp", "serve"],
-                "env": {"AI_AGENT": "claude-code"}
-            })
-        );
-
-        uninstall_named(&["claude"], dir.path());
+        let mut without_hooks = options_for(&["claude", "codex", "opencode"]);
+        without_hooks.components = Component::from_flags(&[], &[Component::Hooks]).unwrap();
+        install(without_hooks, project(dir.path()), &bare_machine()).unwrap();
 
         assert_eq!(read_json(&mcp_json), theirs);
+        assert_eq!(
+            std::fs::read_to_string(&codex_config).unwrap(),
+            codex_theirs
+        );
+        assert!(!opencode_json.exists());
     }
 
     #[test]
-    fn codex_mcp_entry_preserves_comments_and_foreign_tables() {
+    fn setup_leaves_mcp_configs_it_cannot_parse_or_does_not_own() {
         let dir = tempfile::tempdir().unwrap();
-        let config = dir.path().join(".codex/config.toml");
-        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
-        let theirs = "# my codex settings\nmodel = \"o3\"\n\n[mcp_servers.theirs]\ncommand = \"their-server\"\n";
-        std::fs::write(&config, theirs).unwrap();
+        let codex_config = dir.path().join(".codex/config.toml");
+        std::fs::create_dir_all(codex_config.parent().unwrap()).unwrap();
+        std::fs::write(&codex_config, "model = [unclosed\n").unwrap();
+        let mcp_json = dir.path().join(".mcp.json");
+        let opencode_json = dir.path().join("opencode.json");
+        let foreign = json!({"mcpServers": {"orbit": {"type": "http", "url": "https://gitlab.com/api/v4/orbit/mcp"}}});
+        std::fs::write(&mcp_json, foreign.to_string()).unwrap();
+        let remote = json!({"mcp": {"orbit": {"type": "local", "command": ["npx", "mcp-remote", "https://gitlab.com/api/v4/orbit/mcp"]}}});
+        std::fs::write(&opencode_json, remote.to_string()).unwrap();
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["claude", "codex", "opencode"], dir.path());
+        uninstall_named(&["claude", "codex", "opencode"], dir.path());
 
-        let installed = std::fs::read_to_string(&config).unwrap();
-        assert!(
-            installed.starts_with("# my codex settings\nmodel = \"o3\""),
-            "{installed}"
+        assert_eq!(
+            std::fs::read_to_string(&codex_config).unwrap(),
+            "model = [unclosed\n"
         );
-        assert!(installed.contains("[mcp_servers.theirs]"), "{installed}");
-        assert!(installed.contains("[mcp_servers.orbit]"), "{installed}");
-
-        uninstall_named(&["codex"], dir.path());
-
-        assert_eq!(std::fs::read_to_string(&config).unwrap(), theirs);
+        assert_eq!(read_json(&mcp_json), foreign);
+        assert_eq!(read_json(&opencode_json), remote);
     }
 
     #[test]
@@ -765,51 +728,18 @@ mod tests {
                 r#"{"hooks": "a-string"}"#,
                 "expected an object",
             ),
-            (
-                "codex",
-                ".codex/config.toml",
-                "model = [unclosed\n",
-                "not valid TOML",
-            ),
         ] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join(file);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, contents).unwrap();
 
-            let err = install(
-                options_with_mcp(&[agent]),
-                project(dir.path()),
-                &bare_machine(),
-            )
-            .unwrap_err();
+            let err =
+                install(options_for(&[agent]), project(dir.path()), &bare_machine()).unwrap_err();
 
             assert!(format!("{err:#}").contains(complaint), "{file}: {err:#}");
             assert_eq!(std::fs::read_to_string(&path).unwrap(), contents, "{file}");
         }
-    }
-
-    #[test]
-    fn opencode_jsonc_config_is_refused_not_rewritten() {
-        let dir = tempfile::tempdir().unwrap();
-        let jsonc = dir.path().join("opencode.jsonc");
-        std::fs::write(&jsonc, "{\n  // mine\n  \"theme\": \"dark\"\n}\n").unwrap();
-
-        let err = install(
-            options_with_mcp(&["opencode"]),
-            project(dir.path()),
-            &bare_machine(),
-        )
-        .unwrap_err();
-
-        let message = format!("{err:#}");
-        assert!(message.contains("opencode.jsonc"), "{message}");
-        assert!(message.contains("\"mcp\""), "{message}");
-        assert_eq!(
-            std::fs::read_to_string(&jsonc).unwrap(),
-            "{\n  // mine\n  \"theme\": \"dark\"\n}\n"
-        );
-        assert!(!dir.path().join("opencode.json").exists());
     }
 
     fn write_legacy_skill(legacy: &Path) {
@@ -833,7 +763,7 @@ mod tests {
     #[test]
     fn skill_is_written_once_and_linked_into_claude() {
         let dir = tempfile::tempdir().unwrap();
-        install_with_mcp(&["claude", "codex"], dir.path());
+        install_default(&["claude", "codex"], dir.path());
 
         let canonical = dir.path().join(".agents/skills/orbit");
         let link = dir.path().join(".claude/skills/orbit");
@@ -856,7 +786,7 @@ mod tests {
     #[test]
     fn the_default_skill_is_the_wrapper_named_orbit() {
         let dir = tempfile::tempdir().unwrap();
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
 
         let installed = dir.path().join(".agents/skills/orbit");
         assert_eq!(skill_manifest_name(&installed), "orbit");
@@ -872,7 +802,7 @@ mod tests {
     #[test]
     fn a_full_skill_replaces_the_wrapper_and_keeps_the_name() {
         let dir = tempfile::tempdir().unwrap();
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
         let installed = dir.path().join(".agents/skills/orbit");
 
         let options = Options {
@@ -905,7 +835,7 @@ mod tests {
         .unwrap();
         std::fs::write(installed.join("extra.md"), "mine\n").unwrap();
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
 
         assert!(skills.join(".orbit-managed").is_file());
         assert!(!installed.join("extra.md").exists());
@@ -941,7 +871,7 @@ mod tests {
     }
 
     fn install_with_search_path(names: &[&str], dir: &Path, search_path: std::ffi::OsString) {
-        let mut options = options_with_mcp(names);
+        let mut options = options_for(names);
         options.skill.search_path = Some(search_path);
         install(options, project(dir), &bare_machine()).unwrap();
     }
@@ -1010,7 +940,7 @@ mod tests {
         let skills = dir.path().join(".agents/skills");
         write_glab_wrapper(&skills);
 
-        let mut options = options_with_mcp(&["duo"]);
+        let mut options = options_for(&["duo"]);
         options.skill = SkillRequest {
             kind: Some(SkillKind::Full),
             full_tree: Some(crate::skill::embedded_full_tree().unwrap()),
@@ -1034,7 +964,7 @@ mod tests {
         std::fs::create_dir_all(skills.join("orbit")).unwrap();
         std::fs::write(skills.join("orbit/extra.md"), "newer\n").unwrap();
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
 
         assert_eq!(
             std::fs::read_to_string(skills.join("orbit.orbit-backup.1/extra.md")).unwrap(),
@@ -1045,7 +975,7 @@ mod tests {
     #[test]
     fn uninstalling_one_agent_keeps_the_skill_the_others_share() {
         let dir = tempfile::tempdir().unwrap();
-        install_with_mcp(&["claude", "codex", "duo"], dir.path());
+        install_default(&["claude", "codex", "duo"], dir.path());
         let shared = dir.path().join(".agents/skills/orbit");
 
         uninstall_named(&["codex"], dir.path());
@@ -1069,10 +999,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let installed = dir.path().join(".agents/skills/orbit");
 
-        install_with_mcp(&["duo"], dir.path());
+        install_default(&["duo"], dir.path());
         assert!(installed.join("references/local/cli.md").is_file());
 
-        install_with_mcp(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
         assert!(installed.join("references/local/cli.md").is_file());
 
         let wrapper = Options {
@@ -1081,7 +1011,7 @@ mod tests {
                 full_tree: None,
                 search_path: None,
             },
-            ..options_with_mcp(&["claude"])
+            ..options_for(&["claude"])
         };
         install(wrapper, project(dir.path()), &bare_machine()).unwrap();
         assert!(!installed.join("references").exists());
@@ -1091,7 +1021,7 @@ mod tests {
     fn a_marker_left_behind_does_not_hide_a_recreated_skill_from_the_backup() {
         let dir = tempfile::tempdir().unwrap();
         let skills = dir.path().join(".agents/skills");
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
         std::fs::remove_dir_all(skills.join("orbit")).unwrap();
 
         uninstall_named(&["codex"], dir.path());
@@ -1099,7 +1029,7 @@ mod tests {
 
         std::fs::create_dir_all(skills.join("orbit")).unwrap();
         std::fs::write(skills.join("orbit/notes.md"), "mine\n").unwrap();
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
 
         assert_eq!(
             std::fs::read_to_string(skills.join("orbit.orbit-backup/notes.md")).unwrap(),
@@ -1111,7 +1041,7 @@ mod tests {
     fn a_skill_recreated_by_hand_is_backed_up_even_when_the_record_is_stale() {
         let dir = tempfile::tempdir().unwrap();
         let skills = dir.path().join(".agents/skills");
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
         std::fs::remove_dir_all(skills.join("orbit")).unwrap();
         std::fs::create_dir_all(skills.join("orbit")).unwrap();
         std::fs::write(skills.join("orbit/notes.md"), "mine\n").unwrap();
@@ -1119,7 +1049,7 @@ mod tests {
         uninstall_named(&["codex"], dir.path());
         assert!(skills.join("orbit/notes.md").is_file());
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
         assert_eq!(
             std::fs::read_to_string(skills.join("orbit.orbit-backup/notes.md")).unwrap(),
             "mine\n"
@@ -1131,10 +1061,10 @@ mod tests {
     fn a_skill_edited_after_setup_is_backed_up_not_overwritten() {
         let dir = tempfile::tempdir().unwrap();
         let skills = dir.path().join(".agents/skills");
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
         std::fs::write(skills.join("orbit/notes.md"), "mine\n").unwrap();
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
 
         assert!(skills.join("orbit.orbit-backup/notes.md").is_file());
         assert!(!skills.join("orbit/notes.md").exists());
@@ -1144,7 +1074,7 @@ mod tests {
     fn uninstalling_an_edited_shared_skill_still_releases_the_agents() {
         let dir = tempfile::tempdir().unwrap();
         let skills = dir.path().join(".agents/skills");
-        install_with_mcp(&["claude", "codex"], dir.path());
+        install_default(&["claude", "codex"], dir.path());
         let notes = skills.join("orbit/notes.md");
         std::fs::write(&notes, "mine\n").unwrap();
 
@@ -1153,7 +1083,7 @@ mod tests {
         assert!(notes.is_file());
         assert!(!skills.join(".orbit-managed").exists());
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
         assert!(skills.join("orbit.orbit-backup").is_dir());
         uninstall_named(&["codex"], dir.path());
         assert!(!skills.join("orbit").exists());
@@ -1163,7 +1093,7 @@ mod tests {
     fn a_wrapper_from_another_release_is_replaced_not_backed_up() {
         let dir = tempfile::tempdir().unwrap();
         let skills = dir.path().join(".agents/skills");
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
         let manifest = skills.join("orbit/SKILL.md");
         let current = std::fs::read_to_string(&manifest).unwrap();
         let version_line = current
@@ -1174,19 +1104,19 @@ mod tests {
         assert_ne!(other_release, current);
         std::fs::write(&manifest, other_release).unwrap();
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
 
         assert!(!skills.join("orbit.orbit-backup").exists());
         assert_eq!(std::fs::read_to_string(&manifest).unwrap(), current);
 
         std::fs::write(&manifest, "---\nname: orbit\n---\nmine\n").unwrap();
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
         assert!(skills.join("orbit.orbit-backup").is_dir());
     }
 
     fn install_then_edit_wrapper(dir: &Path) -> (PathBuf, String) {
         let manifest = dir.join(".agents/skills/orbit/SKILL.md");
-        install_with_mcp(&["codex"], dir);
+        install_default(&["codex"], dir);
         let edited = format!(
             "{}Always use project X.\n",
             std::fs::read_to_string(&manifest).unwrap()
@@ -1200,7 +1130,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (_, edited) = install_then_edit_wrapper(dir.path());
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
 
         let backup = dir
             .path()
@@ -1222,10 +1152,10 @@ mod tests {
     fn a_finder_file_does_not_count_as_a_change() {
         let dir = tempfile::tempdir().unwrap();
         let skills = dir.path().join(".agents/skills");
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
         std::fs::write(skills.join("orbit/.DS_Store"), "x").unwrap();
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
 
         assert!(!skills.join("orbit.orbit-backup").exists());
     }
@@ -1233,8 +1163,8 @@ mod tests {
     #[test]
     fn the_wrapper_stays_when_no_agent_needs_the_full_skill() {
         let dir = tempfile::tempdir().unwrap();
-        install_with_mcp(&["claude", "codex"], dir.path());
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["claude", "codex"], dir.path());
+        install_default(&["codex"], dir.path());
         assert!(!dir.path().join(".agents/skills/orbit/references").exists());
     }
 
@@ -1250,7 +1180,7 @@ mod tests {
         let legacy_link = dir.path().join(".claude/skills/orbit-cli");
         std::os::unix::fs::symlink("../../.agents/skills/orbit-cli", &legacy_link).unwrap();
 
-        install_with_mcp(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
 
         assert!(!legacy.exists());
         assert!(std::fs::symlink_metadata(&legacy_link).is_err());
@@ -1264,7 +1194,7 @@ mod tests {
         let legacy_copy = dir.path().join(".claude/skills/orbit-cli");
         write_legacy_skill(&legacy_copy);
 
-        install_with_mcp(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
 
         assert!(!legacy_copy.exists());
         assert!(dir.path().join(".claude/skills/orbit/SKILL.md").is_file());
@@ -1298,7 +1228,7 @@ mod tests {
         let elsewhere = dir.path().join(".claude/skills/other");
         std::fs::create_dir_all(&elsewhere).unwrap();
 
-        install_with_mcp(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
 
         let expected = Path::new("../../.agents/skills/orbit");
         assert_eq!(std::fs::read_link(&foreign).unwrap(), expected);
@@ -1310,7 +1240,7 @@ mod tests {
 
         std::fs::remove_file(&foreign).unwrap();
         std::os::unix::fs::symlink(&elsewhere, &foreign).unwrap();
-        install_with_mcp(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
         assert_eq!(std::fs::read_link(&foreign).unwrap(), expected);
         assert!(elsewhere.is_dir());
     }
@@ -1323,7 +1253,7 @@ mod tests {
         std::fs::write(legacy.join("my-notes.md"), "mine\n").unwrap();
         std::fs::write(legacy.join("references/local/sql.md"), "my edit\n").unwrap();
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
 
         assert_eq!(
             std::fs::read_to_string(legacy.join("my-notes.md")).unwrap(),
@@ -1349,7 +1279,7 @@ mod tests {
         )
         .unwrap();
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
 
         assert!(!legacy.join("SKILL.md").exists());
         assert_eq!(
@@ -1374,7 +1304,7 @@ mod tests {
         .unwrap();
         std::fs::write(legacy.join("SKILL.md.orbit-backup"), "first\n").unwrap();
 
-        install_with_mcp(&["codex"], dir.path());
+        install_default(&["codex"], dir.path());
 
         assert!(!legacy.join("SKILL.md").exists());
         assert_eq!(
@@ -1414,7 +1344,7 @@ mod tests {
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         std::fs::write(&settings, r#"{"permissions":{"allow":["Bash(ls)"]}}"#).unwrap();
 
-        install_with_mcp(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
 
         let allow = read_json(&settings)["permissions"]["allow"].clone();
         assert_eq!(
@@ -1426,7 +1356,7 @@ mod tests {
             ])
         );
 
-        install_with_mcp(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
         assert_eq!(read_json(&settings)["permissions"]["allow"], allow);
 
         uninstall_named(&["claude"], dir.path());
@@ -1461,7 +1391,7 @@ mod tests {
         )
         .unwrap();
 
-        install_with_mcp(&["opencode"], dir.path());
+        install_default(&["opencode"], dir.path());
 
         assert!(!plugins.join("orbit-ui.js").exists());
         assert!(plugins.join("orbit-ui/index.js").is_file());
@@ -1618,7 +1548,7 @@ mod tests {
         std::fs::create_dir_all(&plugins).unwrap();
         std::fs::write(plugins.join("orbit-ui.js"), "// my own toast plugin\n").unwrap();
 
-        install_with_mcp(&["opencode"], dir.path());
+        install_default(&["opencode"], dir.path());
         uninstall_named(&["opencode"], dir.path());
 
         assert_eq!(
@@ -1635,7 +1565,7 @@ mod tests {
         let jsonc = "{\n  // my settings\n  \"plugins\": [\"./plugins/mine\"]\n}\n";
         std::fs::write(&opencode_config, jsonc).unwrap();
 
-        install_with_mcp(&["opencode"], dir.path());
+        install_default(&["opencode"], dir.path());
         uninstall_named(&["opencode"], dir.path());
 
         assert_eq!(std::fs::read_to_string(&opencode_config).unwrap(), jsonc);
@@ -1658,8 +1588,8 @@ mod tests {
         )
         .unwrap();
 
-        install_with_mcp(&["claude", "codex", "opencode"], dir.path());
-        install_with_mcp(&["claude", "codex", "opencode"], dir.path());
+        install_default(&["claude", "codex", "opencode"], dir.path());
+        install_default(&["claude", "codex", "opencode"], dir.path());
 
         let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
         assert_eq!(agents.matches("<!-- orbit:setup:begin -->").count(), 1);
@@ -1684,8 +1614,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let every_agent = ["claude", "codex", "duo", "opencode", "pi"];
 
-        install_with_mcp(&every_agent, dir.path());
-        install_with_mcp(&every_agent, dir.path());
+        install_default(&every_agent, dir.path());
+        install_default(&every_agent, dir.path());
         uninstall_named(&every_agent, dir.path());
 
         let leftovers: Vec<_> = std::fs::read_dir(dir.path())
@@ -1698,7 +1628,7 @@ mod tests {
     #[test]
     fn opencode_plugin_looks_for_the_graph_where_orbit_writes_it() {
         let dir = tempfile::tempdir().unwrap();
-        install_with_mcp(&["opencode"], dir.path());
+        install_default(&["opencode"], dir.path());
 
         let plugin =
             std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit.js")).unwrap();
@@ -1711,7 +1641,7 @@ mod tests {
     #[test]
     fn opencode_ui_plugin_reports_orbit_calls_to_its_tui_part() {
         let dir = tempfile::tempdir().unwrap();
-        install_with_mcp(&["opencode"], dir.path());
+        install_default(&["opencode"], dir.path());
 
         let ui = dir.path().join(".opencode/plugins/orbit-ui");
         let read = |part: &str| std::fs::read_to_string(ui.join(part)).unwrap();
@@ -1736,7 +1666,7 @@ mod tests {
     fn uninstall_keeps_a_template_file_the_user_edited() {
         let dir = tempfile::tempdir().unwrap();
         let plugin = dir.path().join(".opencode/plugins/orbit.js");
-        install_with_mcp(&["opencode"], dir.path());
+        install_default(&["opencode"], dir.path());
 
         let edited = format!(
             "{}\n// my tweak\n",
@@ -1759,7 +1689,7 @@ mod tests {
         )
         .unwrap();
 
-        install_with_mcp(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
 
         let settings = read_json(&dir.path().join(".claude/settings.json"));
         assert_eq!(settings["permissions"]["allow"][0], "Bash");
@@ -1790,15 +1720,12 @@ mod tests {
         )]);
         let machine = Machine::new(home.path().to_path_buf(), env);
         let target = || Target::Global(machine.clone());
-        let options = || Options {
-            components: Component::from_flags(&[Component::Mcp], &[]).unwrap(),
-            ..options_for(&["claude"])
-        };
+        let options = || options_for(&["claude"]);
 
         install(options(), target(), &machine).unwrap();
 
         assert!(config.path().join("CLAUDE.md").is_file());
-        assert!(config.path().join(".claude.json").is_file());
+        assert!(!config.path().join(".claude.json").exists());
         assert!(config.path().join("skills/orbit").exists());
         let settings = read_json(&config.path().join("settings.json"));
         assert!(settings["hooks"]["PreToolUse"].is_array());
@@ -1853,16 +1780,16 @@ mod tests {
     fn global_claude_setup_without_claude_config_dir_stays_under_home() {
         let home = tempfile::tempdir().unwrap();
         let machine = Machine::new(home.path().to_path_buf(), BTreeMap::new());
-        let options = Options {
-            components: Component::from_flags(&[Component::Mcp], &[]).unwrap(),
-            ..options_for(&["claude"])
-        };
-
-        install(options, Target::Global(machine.clone()), &machine).unwrap();
+        install(
+            options_for(&["claude"]),
+            Target::Global(machine.clone()),
+            &machine,
+        )
+        .unwrap();
 
         assert!(home.path().join(".claude/CLAUDE.md").is_file());
         assert!(home.path().join(".claude/settings.json").is_file());
-        assert!(home.path().join(".claude.json").is_file());
+        assert!(!home.path().join(".claude.json").exists());
     }
 
     #[test]
@@ -2229,9 +2156,9 @@ mod tests {
 
     #[test]
     fn install_and_skip_of_one_component_is_an_error() {
-        assert!(Component::from_flags(&[Component::Mcp], &[Component::Mcp]).is_err());
+        assert!(Component::from_flags(&[Component::Hooks], &[Component::Hooks]).is_err());
         let defaults = Component::from_flags(&[], &[]).unwrap();
-        assert!(defaults.contains(&Component::AgentPlugins) && !defaults.contains(&Component::Mcp));
+        assert_eq!(defaults.into_iter().collect::<Vec<_>>(), Component::ALL);
     }
 
     #[test]
@@ -2312,7 +2239,7 @@ mod tests {
     #[test]
     fn launcher_tokens_resolve_in_installed_artifacts() {
         let dir = tempfile::tempdir().unwrap();
-        install_with_mcp(&["claude", "opencode"], dir.path());
+        install_default(&["claude", "opencode"], dir.path());
 
         let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
         assert!(

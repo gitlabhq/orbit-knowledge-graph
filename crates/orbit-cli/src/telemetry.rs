@@ -16,8 +16,6 @@ use crate::settings;
 const DEFAULT_COLLECTOR_URL: &str = "https://events.gitlab.net";
 const APP_ID: &str = "orbit";
 const CATEGORY: &str = "orbit_cli";
-const MCP_COMMAND: &str = "mcp";
-const MCP_TOOL_CALL_ACTION: &str = "mcp_tool_call";
 pub const AGENTS_CONFIGURED_ACTION: &str = "agents_configured";
 pub const AGENTS_REMOVED_ACTION: &str = "agents_removed";
 
@@ -108,32 +106,6 @@ pub fn emit_command_event<T: AnalyticsTracker + ?Sized>(
     );
 }
 
-pub fn emit_tool_call_event<T: AnalyticsTracker + ?Sized>(
-    tracker: &T,
-    tool_name: &str,
-    success: bool,
-    duration: Duration,
-    coding_agent: Option<&str>,
-) {
-    let (Ok(command), Ok(tool_name)) = (MCP_COMMAND.parse(), tool_name.parse()) else {
-        return;
-    };
-    let outcome = orbit_cli_command::OrbitCliCommand {
-        command,
-        tool_name: Some(tool_name),
-        success,
-        exit_code: None,
-        duration_ms: i64::try_from(duration.as_millis()).ok(),
-        cli_version: env!("ORBIT_VERSION").parse().ok(),
-    };
-    track_event(
-        tracker,
-        MCP_TOOL_CALL_ACTION,
-        OrbitCliCommandContext::new(outcome),
-        coding_agent,
-    );
-}
-
 pub fn emit_setup_event<T: AnalyticsTracker + ?Sized>(
     tracker: &T,
     action: &str,
@@ -171,7 +143,6 @@ impl From<&SetupRun> for orbit_cli_setup::OrbitCliSetup {
                     Component::Instructions => Some(Item::Instructions),
                     Component::Hooks => Some(Item::Hooks),
                     Component::Skill => Some(Item::Skill),
-                    Component::Mcp => Some(Item::Mcp),
                     Component::AgentPlugins => None,
                 })
                 .collect(),
@@ -393,7 +364,6 @@ mod tests {
     fn every_event_reports_cli_build() {
         let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
         emit_command_event(&tracker, "query", 0, Duration::ZERO, None);
-        emit_tool_call_event(&tracker, "index", true, Duration::ZERO, None);
         emit_setup_event(&tracker, AGENTS_CONFIGURED_ACTION, &setup_run(), None);
         for event in tracker.drain() {
             let cli = context_data(&event, orbit_analytics::ORBIT_CLI_SCHEMA);
@@ -421,10 +391,9 @@ mod tests {
     fn emitted_contexts_validate_against_iglu_schemas() {
         let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
         emit_command_event(&tracker, "query", 1, Duration::from_millis(42), None);
-        emit_tool_call_event(&tracker, "index", true, Duration::from_millis(9), None);
         emit_setup_event(&tracker, AGENTS_CONFIGURED_ACTION, &setup_run(), None);
         let events = tracker.drain();
-        assert_eq!(events[2].action(), "agents_configured");
+        assert_eq!(events[1].action(), "agents_configured");
         for event in events {
             assert_contexts_match_iglu_schemas(&event);
         }
@@ -452,7 +421,7 @@ mod tests {
         SetupRun {
             detected_agents: vec!["claude".into(), "codex".into()],
             selected_agents: vec!["claude".into()],
-            components: Component::from_flags(&[Component::Mcp], &[]).unwrap(),
+            components: Component::from_flags(&[], &[]).unwrap(),
             global: true,
             interactive: false,
             graph_first: Some(false),
@@ -475,27 +444,12 @@ mod tests {
         assert_eq!(setup["selected_agents"], serde_json::json!(["claude"]));
         assert_eq!(
             setup["components"],
-            serde_json::json!(["instructions", "hooks", "skill", "mcp"])
+            serde_json::json!(["instructions", "hooks", "skill"])
         );
         assert_eq!(setup["scope"], "global");
         assert_eq!(setup["outcome"], "applied");
         let common = context_data(&events[0], orbit_analytics::ORBIT_COMMON_SCHEMA);
         assert_eq!(common["coding_agent"], "codex");
-    }
-
-    #[test]
-    fn tool_call_reports_tool_name_under_mcp() {
-        let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
-        emit_tool_call_event(&tracker, "run_sql", false, Duration::from_millis(7), None);
-        let events = tracker.drain();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].action(), "mcp_tool_call");
-        let command = context_data(&events[0], orbit_analytics::ORBIT_CLI_COMMAND_SCHEMA);
-        assert_eq!(command["command"], "mcp");
-        assert_eq!(command["tool_name"], "run_sql");
-        assert_eq!(command["success"], false);
-        assert_eq!(command["duration_ms"], 7);
-        assert!(command["exit_code"].is_null());
     }
 
     #[test]

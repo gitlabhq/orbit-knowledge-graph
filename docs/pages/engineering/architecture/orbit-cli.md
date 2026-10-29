@@ -37,7 +37,6 @@ Orbit skill to each agent. Then it indexes the current repository. The
 `glab orbit uninstall` command removes what setup wrote, except files you
 edited since.
 
-The `glab orbit workspace mcp serve` command serves the local graph to any MCP agent.
 The `glab orbit skills` command fetches the skills that match your GitLab
 instance.
 

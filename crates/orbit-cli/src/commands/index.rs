@@ -86,21 +86,6 @@ pub(crate) fn index_before_first_query(path: PathBuf, db: Option<PathBuf>) -> Re
     tui::outro("Indexed.")
 }
 
-pub(crate) fn collect(
-    path: PathBuf,
-    stats: bool,
-    db: Option<PathBuf>,
-) -> Result<Vec<incremental::IndexOutput>> {
-    incremental::index(
-        path,
-        incremental::Options {
-            stats,
-            db,
-            ..Default::default()
-        },
-    )
-}
-
 fn index_showing_progress(
     path: PathBuf,
     options: incremental::Options,

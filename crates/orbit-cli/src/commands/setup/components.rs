@@ -47,7 +47,6 @@ pub(super) fn installer_for(component: Component) -> &'static dyn Installer {
         Component::Instructions => &instructions::Instructions,
         Component::Hooks => &hooks::Hooks,
         Component::Skill => &skill::WITHOUT_FILES,
-        Component::Mcp => &mcp::McpServer,
         Component::AgentPlugins => &agent_plugins::AgentPlugins,
     }
 }

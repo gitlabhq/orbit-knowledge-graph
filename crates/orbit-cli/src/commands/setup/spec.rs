@@ -1,9 +1,3 @@
-//! Declarative agent specs embedded from `config/setup/agents/`. Each YAML file describes
-//! one agent as generic operations (detection paths, instruction file, marker-owned JSON
-//! merges, templated files, string registrations, MCP entry, skill directories), so adding an
-//! agent means adding a YAML file, not Rust. The instruction block, hook nudges, MCP server,
-//! and template values live in `config/setup/setup.yaml`.
-
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -29,7 +23,6 @@ struct AgentPluginAssets;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SetupTexts {
-    mcp_server: McpServerText,
     instructions: String,
     #[serde(default)]
     remote: BTreeMap<String, String>,
@@ -103,29 +96,6 @@ pub(crate) fn gitlab_nudge_text() -> &'static str {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct McpServerText {
-    name: String,
-    command: String,
-}
-
-pub(super) struct McpServer {
-    pub(super) name: &'static str,
-    pub(super) command: String,
-    pub(super) args: Vec<String>,
-}
-
-pub(super) fn mcp_server() -> McpServer {
-    let rendered = substitute_launcher(&TEXTS.mcp_server.command, launcher());
-    let mut words = rendered.split_whitespace().map(str::to_string);
-    McpServer {
-        name: &TEXTS.mcp_server.name,
-        command: words.next().expect("mcp_server.command is non-empty"),
-        args: words.collect(),
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct AgentSpec {
     pub(super) name: String,
     pub(super) title: String,
@@ -139,7 +109,6 @@ pub(super) struct AgentSpec {
     pub(super) registrations: Vec<Registration>,
     #[serde(default)]
     pub(super) retired: Retired,
-    pub(super) mcp: Option<McpEntry>,
     pub(super) skills: Option<SkillDirs>,
     pub(super) plugin: Option<PluginSpec>,
 }
@@ -206,7 +175,6 @@ impl PluginSpec {
 pub(super) struct McpEntry {
     pub(super) file: ScopedPath,
     pub(super) format: McpFormat,
-    pub(super) coding_agent: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -279,6 +247,8 @@ pub(super) struct Retired {
     pub(super) template_files: Vec<RetiredFile>,
     #[serde(default)]
     pub(super) registrations: Vec<Registration>,
+    #[serde(default)]
+    pub(super) mcp: Option<McpEntry>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -471,13 +441,7 @@ mod tests {
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }
 
-    const UNLABELED: &[&str] = &[
-        "hook-guard",
-        "send-event",
-        "refresh",
-        "mcp serve",
-        "workspace mcp serve",
-    ];
+    const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh"];
 
     #[derive(serde::Deserialize)]
     struct CallLabels {
@@ -726,7 +690,7 @@ mod tests {
                         .flat_map(|r| [&r.file.global, &r.value.global]),
                 )
                 .chain(spec.retired.template_files.iter().map(|f| &f.path.global))
-                .chain(spec.mcp.iter().map(|entry| &entry.file.global))
+                .chain(spec.retired.mcp.iter().map(|entry| &entry.file.global))
                 .chain(
                     spec.plugin
                         .iter()

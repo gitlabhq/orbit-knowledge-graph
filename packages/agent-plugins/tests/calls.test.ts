@@ -25,6 +25,7 @@ test('unknown, removed, and internal subcommands are not Orbit rows', () => {
     'glab orbit repo-map overview',
     'glab orbit hook-guard',
     'glab orbit mcp serve',
+    'glab orbit workspace mcp serve',
     'glab orbit workspace',
     'glab orbit constructor',
   ]) {

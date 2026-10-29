@@ -19,12 +19,12 @@ json_merges:
         hooks:
           - type: command
             command: "{{orbit}} hook-guard search{{hook_gitlab}}"
-mcp:
-  file:
-    project: .mcp.json
-    global: "${CLAUDE_CONFIG_DIR:-~}/.claude.json"
-  format: claude
-  coding_agent: claude-code
+retired:
+  mcp:
+    file:
+      project: .mcp.json
+      global: "${CLAUDE_CONFIG_DIR:-~}/.claude.json"
+    format: claude
 skills:
   dir:
     project: .agents/skills

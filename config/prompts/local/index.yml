@@ -1,12 +1,3 @@
 name: index
-version: 1.3.0
+version: 2.0.0
 short: Index a code repository into the local graph
-description: >-
-  Index a code repository into the local graph
-
-
-  Pass a repository path, or a directory that holds several repositories.
-  Indexing takes seconds to minutes, so call it sparingly. `SELECT * FROM
-  _orbit_manifest` via `run_sql` shows what is already indexed. Returns JSON
-  graph statistics. Indexing a repository again re-indexes only what changed
-  since the last run, including uncommitted edits.

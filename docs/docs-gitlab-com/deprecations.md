@@ -166,7 +166,7 @@ GitLab Orbit does not support SQL on the local graph.
 | `orbit sql` | Deprecated | `orbit grep` or `orbit context` |
 | `orbit list` | Deprecated | `orbit workspace list` |
 | `orbit schema <table>` | Deprecated | No replacement |
-| `orbit mcp serve` | Deprecated | `orbit workspace mcp serve` |
+| `orbit mcp serve` | Removed in 0.165.0 | `orbit grep` or `orbit context` |
 | `orbit graph-status` | Deprecated | `orbit status --full-path <path>` |
 | `orbit ontology` | Deprecated | `orbit schema` |
 | `orbit skill` | Deprecated | `orbit skills` |
@@ -178,6 +178,23 @@ GitLab Orbit does not support SQL on the local graph.
 The other deprecated commands work with no warning.
 
 In GitLab Orbit CLI 0.160.0 and later, `orbit schema` with no argument shows the graph schema of your GitLab instance.
+
+## Local MCP server
+
+GitLab Orbit CLI 0.165.0 removed the local MCP server.
+Your agents read the local graph with `orbit grep` and `orbit context` instead.
+To connect an MCP client to GitLab Orbit, use the [GitLab Orbit MCP endpoint](agents/mcp.md).
+
+| Removed | Use instead |
+|---------|-------------|
+| `orbit workspace mcp serve` | `orbit grep` or `orbit context` |
+| `orbit setup --install mcp` | `orbit setup` |
+| MCP tool `run_sql` | `orbit grep` or `orbit context` |
+| MCP tool `get_graph_schema` | No replacement |
+| MCP tool `index` | `orbit workspace index` |
+
+Earlier versions of `orbit setup` could add an `orbit` MCP server to the configuration of your agents.
+In GitLab Orbit CLI 0.165.0 and later, `orbit setup` and `orbit uninstall` remove that entry.
 
 ## Output of `orbit status`
 

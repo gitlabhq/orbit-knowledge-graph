@@ -6,8 +6,8 @@ mod background_index;
 mod revisions;
 
 use integration_testkit::cli::{
-    create_test_repo, git, init_repo_at, mcp_roundtrip, mcp_roundtrip_in, mcp_tool_call,
-    mcp_tool_text, orbit_cmd, orbit_index, orbit_sql, rows, rows_where, sorted_ids,
+    create_test_repo, git, init_repo_at, orbit_cmd, orbit_index, orbit_sql, rows, rows_where,
+    sorted_ids,
 };
 use serde_json::{Value, json};
 
@@ -1044,144 +1044,30 @@ fn schema_unknown_table_exits_with_error() {
 }
 
 #[test]
-fn mcp_tools_mirror_cli_surface() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let resps = mcp_roundtrip(
-        data_dir.path(),
-        &[serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})],
-    );
-
-    let tools = resps[0]["result"]["tools"].as_array().unwrap();
-    let names: BTreeSet<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(
-        names,
-        BTreeSet::from(["get_graph_schema", "index", "run_sql"])
-    );
-    for tool in tools {
-        assert!(!tool["description"].as_str().unwrap().is_empty());
-    }
-}
-
-#[test]
-fn mcp_index_then_query() {
+fn workspace_sql_indexes_the_current_repository_on_first_use() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
 
-    let resps = mcp_roundtrip(
-        data_dir.path(),
-        &[
-            mcp_tool_call(1, "run_sql", json!({"sql": ["SELECT 1"]})),
-            mcp_tool_call(2, "index", json!({"path": repo.path})),
-            mcp_tool_call(3, "get_graph_schema", json!({})),
-            mcp_tool_call(
-                4,
-                "run_sql",
-                json!({"sql": [
-                    "SELECT name FROM gl_file WHERE name IS NOT NULL ORDER BY name",
-                    "SELECT COUNT(*) AS n FROM gl_definition",
-                ]}),
-            ),
-        ],
-    );
+    let out = orbit_cmd()
+        .args([
+            "workspace",
+            "sql",
+            "-F",
+            "json",
+            "SELECT COUNT(*) AS n FROM gl_file",
+        ])
+        .current_dir(&repo.path)
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
 
-    assert_eq!(resps[0]["result"]["isError"], true);
-    assert!(mcp_tool_text(&resps[0]).contains("no local graph found"));
-
-    assert_eq!(resps[1]["result"]["isError"], false);
-    let indexed: Value = serde_json::from_str(mcp_tool_text(&resps[1])).unwrap();
-    assert_eq!(indexed.as_array().unwrap().len(), 1);
-
-    let schema: Value = serde_json::from_str(mcp_tool_text(&resps[2])).unwrap();
-    assert!(rows_where(&schema, "table_name", "gl_file").len() > 1);
-
-    let results: Value = serde_json::from_str(mcp_tool_text(&resps[3])).unwrap();
-    let names: Vec<&str> = rows(&results[0])
-        .iter()
-        .map(|r| r["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(names, ["main.py", "utils.py"]);
-    assert!(results[1][0]["n"].as_i64().unwrap() > 0);
-}
-
-#[test]
-fn mcp_query_tools_index_the_server_repository_on_first_use() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let repo = create_test_repo();
-
-    let resps = mcp_roundtrip_in(
-        &repo.path,
-        data_dir.path(),
-        &[
-            mcp_tool_call(1, "get_graph_schema", json!({})),
-            mcp_tool_call(
-                2,
-                "run_sql",
-                json!({"sql": ["SELECT COUNT(*) AS n FROM gl_file"]}),
-            ),
-        ],
-    );
-
-    assert_eq!(
-        resps[0]["result"]["isError"],
-        false,
+    assert!(
+        out.status.success(),
         "{}",
-        mcp_tool_text(&resps[0])
+        String::from_utf8_lossy(&out.stderr)
     );
-    let schema: Value = serde_json::from_str(mcp_tool_text(&resps[0])).unwrap();
-    assert!(rows_where(&schema, "table_name", "gl_file").len() > 1);
-    let counts: Value = serde_json::from_str(mcp_tool_text(&resps[1])).unwrap();
-    assert_eq!(counts[0][0]["n"], 2);
-}
-
-#[test]
-fn mcp_bad_sql_is_recoverable_tool_error() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let repo = create_test_repo();
-    assert!(orbit_index(&repo.path, data_dir.path()));
-
-    let resps = mcp_roundtrip(
-        data_dir.path(),
-        &[mcp_tool_call(
-            1,
-            "run_sql",
-            json!({"sql": ["SELECT 1", "SELECT nope FROM does_not_exist"]}),
-        )],
-    );
-
-    assert_eq!(resps[0]["result"]["isError"], true);
-    let msg = mcp_tool_text(&resps[0]);
-    assert!(
-        msg.contains("statement 1"),
-        "missing statement index: {msg}"
-    );
-    assert!(msg.contains("does_not_exist"), "missing SQL preview: {msg}");
-}
-
-#[test]
-fn mcp_index_on_non_git_path_is_recoverable_tool_error() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let not_a_repo = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        not_a_repo.path().join("a.go"),
-        "package main\nfunc Alpha() {}\n",
-    )
-    .unwrap();
-
-    let resps = mcp_roundtrip(
-        data_dir.path(),
-        &[mcp_tool_call(
-            1,
-            "index",
-            json!({"path": not_a_repo.path()}),
-        )],
-    );
-
-    assert_eq!(resps[0]["result"]["isError"], true);
-    let msg = mcp_tool_text(&resps[0]);
-    assert!(
-        msg.contains("no git repository found"),
-        "expected no-repository error: {msg}"
-    );
+    let counts: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(counts, json!([{"n": 2}]));
 }
 
 /// `orbit` with no credentials and no glab on PATH, so skills commands never
