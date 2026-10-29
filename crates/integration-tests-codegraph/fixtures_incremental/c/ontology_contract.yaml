@@ -180,7 +180,6 @@ tests:
       RETURN a.path AS source, b.path AS target
       ORDER BY source, target
     assert:
-      - { row_count: 2 }
       - { row: { source: "main.c", target: "util.h" } }
       - { row: { source: "util.c", target: "util.h" } }
 

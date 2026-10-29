@@ -174,7 +174,8 @@ edges:
     - { edge: Extends, from: Definition, to: Definition, target_tag: { kind: [Interface, Trait] }, kind: IMPLEMENTS }
     - { edge: Extends, from: Definition, to: Definition, kind: EXTENDS }
     - { edge: Overrides, from: Definition, to: Definition, kind: OVERRIDES }
-    - { edge: DependsOn, from: File, to: File, kind: DEPENDS_ON }
+    - { edge: Imports, from: Import, to: Definition, lift: File, kind: DEPENDS_ON }
+    - { edge: Imports, from: Import, to: File, lift: File, kind: DEPENDS_ON }
     - { edge: Imports, from: Import, to: Definition, kind: RESOLVES_TO }
     - { edge: Imports, from: Import, to: File, kind: RESOLVES_TO }
     - { edge: Imports, from: Definition, to: Import, kind: CALLS, fallback: true }

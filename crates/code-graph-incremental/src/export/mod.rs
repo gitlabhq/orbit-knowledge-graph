@@ -673,36 +673,68 @@ fn write_edges(
                 .cloned()
                 .unwrap_or_default(),
         };
+        let resolution = match e.resolution {
+            Resolution::None if e.kind != crate::tree::EdgeKind::Defines => {
+                match e.from_tree == e.to_tree {
+                    true => Resolution::Local,
+                    false => Resolution::Import,
+                }
+            }
+            resolution => resolution,
+        };
+        let line = e
+            .site
+            .map(|site| forest.cursor(e.from_tree, site).start_row() as i64 + 1);
+        let enclosing = |tree: u32, node: u32, entity: usize| {
+            std::iter::once((tree, node))
+                .chain(forest.ancestors(tree, node))
+                .find_map(|loc| ids.get(&loc).filter(|found| found.1 == entity))
+                .map(|found| found.0)
+        };
+        let mut matched = Vec::new();
         for (from, from_entity) in sources {
-            let rule = plan.graph.iter().find(|g| {
+            let admits = |g: &&GraphEdge| {
                 g.edge == e.kind
                     && g.to == to_entity
                     && g.from.is_none_or(|f| f == from_entity)
                     && g.admits(e, forest)
-            });
-            let Some(rule) = rule else {
-                continue;
             };
-            if rule.fallback && e.call_resolution != CallResolution::Unknown {
-                continue;
+            let rule = plan.graph.iter().filter(|g| g.lift.is_none()).find(admits);
+            if let Some(rule) = rule
+                && !(rule.fallback && e.call_resolution != CallResolution::Unknown)
+            {
+                matched.push((rule, (from, from_entity), (to, to_entity), resolution, line));
             }
+            for rule in plan
+                .graph
+                .iter()
+                .filter(|g| g.lift.is_some())
+                .filter(admits)
+            {
+                let entity = rule.lift.expect("a lifted rule");
+                let ends = enclosing(e.from_tree, e.from_node, entity)
+                    .zip(enclosing(e.to_tree, e.to_node, entity))
+                    .filter(|(a, b)| a != b);
+                if let Some((a, b)) = ends {
+                    matched.push((rule, (a, entity), (b, entity), Resolution::None, None));
+                }
+            }
+        }
+        for (rule, (from, from_entity), (to, to_entity), resolution, line) in matched {
             let kind = rule.kind.as_str();
-            let line = e
-                .site
-                .map(|site| forest.cursor(e.from_tree, site).start_row() as i64 + 1);
             let at = *merged.entry((from, kind, to)).or_insert_with(|| {
                 rows.push(EdgeRow {
                     source: (from, entity_name(from_entity)),
                     kind,
                     target: (to, entity_name(to_entity)),
                     lines: Vec::new(),
-                    resolution: e.resolution,
+                    resolution,
                     set: &rule.set,
                 });
                 rows.len() - 1
             });
             let row = &mut rows[at];
-            row.resolution = row.resolution.min(e.resolution);
+            row.resolution = row.resolution.min(resolution);
             row.lines.extend(line);
         }
     }
