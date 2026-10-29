@@ -5,7 +5,7 @@ use super::Component;
 use super::components::{Outcome, Report};
 use super::detect::Machine;
 use super::index_repo::IndexOutcome;
-use super::plan::Plan;
+use super::plan::{AgentPlan, Plan};
 use super::spec::{self, Agent};
 use crate::commands::index::{example_repository_path, grep_command_line, index_command_line};
 use crate::tui::{Choice, align_columns};
@@ -47,6 +47,30 @@ pub(super) fn agent_picker_choices(
             section: None,
         })
         .collect()
+}
+
+pub(super) fn format_configured_per_agent(plan: &Plan, report: &Report) -> String {
+    let skipped: Vec<&str> = report.skipped_agent_plugins().collect();
+    let installed = Plan {
+        scope: plan.scope.clone(),
+        agents: plan
+            .agents
+            .iter()
+            .map(|agent| AgentPlan {
+                title: agent.title.clone(),
+                components: agent
+                    .components
+                    .iter()
+                    .filter(|(component, _)| {
+                        *component != Component::AgentPlugins
+                            || !skipped.contains(&agent.title.as_str())
+                    })
+                    .cloned()
+                    .collect(),
+            })
+            .collect(),
+    };
+    format_components_per_agent(&installed)
 }
 
 pub(super) fn format_components_per_agent(plan: &Plan) -> String {

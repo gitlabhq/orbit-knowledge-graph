@@ -9,8 +9,9 @@ use super::{
     Installer, Report, backup_once, file_mentions, remove_file_and_empty_parents, write_file,
 };
 use super::{hooks, json};
-use crate::commands::setup::Target;
+use crate::commands::setup::plan::Plan;
 use crate::commands::setup::spec::{Agent, PluginSpec};
+use crate::commands::setup::{Component, Target};
 
 const MANIFEST: &str = ".orbit-setup.json";
 
@@ -76,6 +77,56 @@ impl Installer for AgentPlugins {
     }
 }
 
+fn skip_reason(agent: Agent, plugin: &PluginSpec, target: &Target) -> Option<String> {
+    let found = run(&plugin.version_command, target)
+        .ok()
+        .and_then(|stdout| stdout.split_whitespace().next().map(str::to_string));
+    if found
+        .as_deref()
+        .is_some_and(|version| at_least(version, &plugin.min_version))
+    {
+        return None;
+    }
+    Some(format!(
+        "Orbit UI skipped: needs {} {}+ (you have {})",
+        agent.title,
+        plugin.min_version,
+        found.as_deref().unwrap_or("none")
+    ))
+}
+
+/// Removes the plugin paths install would skip from `plan` and notes each skip in `report`.
+pub(in crate::commands::setup) fn drop_skipped_plugins(
+    plan: &mut Plan,
+    agents: &[Agent],
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    report.start_group(Component::AgentPlugins.label());
+    for (planned, agent) in plan.agents.iter_mut().zip(agents) {
+        let selected = planned
+            .components
+            .iter()
+            .any(|(component, _)| *component == Component::AgentPlugins);
+        let Some(plugin) = agent.plugin.as_ref().filter(|_| selected) else {
+            continue;
+        };
+        let Some(reason) = skip_reason(*agent, plugin, target) else {
+            continue;
+        };
+        let (_, dir_label) = target.resolve(&plugin.dir)?;
+        let (_, settings_label) = target.resolve(&plugin.settings)?;
+        for (component, paths) in &mut planned.components {
+            if *component == Component::AgentPlugins {
+                paths.retain(|path| *path != dir_label && *path != settings_label);
+            }
+        }
+        planned.components.retain(|(_, paths)| !paths.is_empty());
+        report.note_plugin_skipped(&agent.title, &dir_label, reason);
+    }
+    Ok(())
+}
+
 fn install_plugin(
     agent: Agent,
     plugin: &PluginSpec,
@@ -83,22 +134,8 @@ fn install_plugin(
     report: &mut Report,
 ) -> Result<()> {
     let (dir, dir_label) = target.resolve(&plugin.dir)?;
-    let found = run(&plugin.version_command, target)
-        .ok()
-        .and_then(|stdout| stdout.split_whitespace().next().map(str::to_string));
-    if !found
-        .as_deref()
-        .is_some_and(|version| at_least(version, &plugin.min_version))
-    {
-        report.note(
-            &dir_label,
-            format!(
-                "Orbit UI skipped: needs {} {}+ (you have {})",
-                agent.title,
-                plugin.min_version,
-                found.as_deref().unwrap_or("none")
-            ),
-        );
+    if let Some(reason) = skip_reason(agent, plugin, target) {
+        report.note_plugin_skipped(&agent.title, &dir_label, reason);
         return Ok(());
     }
 
