@@ -15,7 +15,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'src/user.rs' AND d.name = 'User'
         AND d.language_kind = 'Struct'
-      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+      RETURN d.start_line AS sl, d.start_column AS sc, d.start_byte AS sb
     assert:
       - { row_count: 1 }
       - { row: { sl: 1, sc: 1, sb: 0 } }

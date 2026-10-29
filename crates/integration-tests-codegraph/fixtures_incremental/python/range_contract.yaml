@@ -17,7 +17,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'pkg/user.py' AND d.name = 'User'
-      RETURN d.start_line AS sl, d.end_line AS el, d.start_char AS sc, d.end_char AS ec, d.start_byte AS sb
+      RETURN d.start_line AS sl, d.end_line AS el, d.start_column AS sc, d.end_column AS ec, d.start_byte AS sb
     assert:
       - { row_count: 1 }
       - { row: { sl: 1, el: 3, sc: 1, ec: 19, sb: 0 } }
@@ -26,7 +26,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'pkg/user.py' AND d.name = 'name'
-      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+      RETURN d.start_line AS sl, d.start_column AS sc, d.start_byte AS sb
     assert:
       - { row_count: 1 }
       - { row: { sl: 2, sc: 5, sb: 16 } }
@@ -36,7 +36,7 @@ tests:
     query: |
       MATCH (i:Import)
       WHERE i.file_path = 'pkg/imports.py'
-      RETURN i.import_path AS path, i.name AS name, i.start_line AS sl, i.end_line AS el, i.start_char AS sc, i.start_byte AS sb
+      RETURN i.import_path AS path, i.name AS name, i.start_line AS sl, i.end_line AS el, i.start_column AS sc, i.start_byte AS sb
       ORDER BY sl
     assert:
       - { row_count: 2 }
