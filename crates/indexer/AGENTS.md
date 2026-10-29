@@ -87,14 +87,14 @@ applies: an object survives if its base name (after stripping the `v<N>_` prefix
 A node row emits one FK edge per mapping. `target_id` is part of the `ReplacingMergeTree` identity,
 so a new key writes a new edge row and the old one stays live. A delete arrives from siphon as the
 lake key plus defaults, so its FK columns are empty and the transform writes no edge tombstone.
-`modules::sdlc::edge_diff::EdgeDiff` closes both gaps at write time. After a node page is written,
-one `INSERT … SELECT` per edge table runs in ClickHouse. It selects the page's keys by their
-`(traversal_path, id)` range and oldest page version. Plans that page by another sort key bind
-their ids instead. For each key it compares the newest row with the latest older one. Each edge
-key the older row emitted and the newest row does not gets a tombstone at the newest version. Keys
-come from the ontology mappings, including derived kinds and array elements. So each node stores
-the FK columns and arrays its edges are built from. The statements finish before the page
-checkpoint is saved.
+`modules::sdlc::edge_diff::EdgeDiff` closes both gaps at write time. While a page is transformed,
+it reads the two latest stored versions of each page key from the node table. The read is bounded
+by the page's `traversal_path` range and binds the page ids in chunks. The previous row is the
+latest stored version older than the page row. A replayed page therefore still finds the row
+before its own. An edge key the previous row emitted that the page row drops gets a tombstone. It takes the
+page row's version and is written with the page's other edge rows. Keys come from the ontology mappings,
+including derived kinds and array elements. So each node stores the FK columns and arrays its edges
+are built from.
 
 ### Entry point
 

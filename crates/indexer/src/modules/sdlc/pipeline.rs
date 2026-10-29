@@ -257,26 +257,49 @@ impl Pipeline {
                 self.retry_config.halving_min_block_size,
             );
 
+            let diff_page = match &plan.edge_diff {
+                Some(diff) => diff.page(&page.batches)?,
+                None => None,
+            };
+            let read_stored = async {
+                match (&plan.edge_diff, &diff_page) {
+                    (Some(diff), Some(diff_page)) => {
+                        diff.read_stored(&self.edge_diff, diff_page).await.map(Some)
+                    }
+                    _ => Ok(None),
+                }
+            };
+
             let transform_start = Instant::now();
-            let grouped = self
-                .transform_page(transform.as_ref(), std::mem::take(&mut page.batches))
-                .await?;
+            let (grouped, stored) = tokio::join!(
+                self.transform_page(transform.as_ref(), std::mem::take(&mut page.batches)),
+                read_stored,
+            );
+            let (grouped, stored) = (grouped?, stored?);
             let transform_elapsed = transform_start.elapsed();
             self.metrics
                 .record_transform_duration(transform_elapsed.as_secs_f64());
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
-            let diff_page = match (&plan.edge_diff, node_output) {
-                (Some(diff), Some(index)) => diff.page(&grouped[index])?,
-                _ => None,
+            let tombstones = match (&plan.edge_diff, node_output, &stored) {
+                (Some(diff), Some(index), Some(stored)) => {
+                    diff.tombstones(&grouped[index], stored)?
+                }
+                _ => Vec::new(),
             };
+            let writes = tombstones
+                .into_iter()
+                .map(|(table, batch)| (table, vec![batch]))
+                .chain(
+                    grouped
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(_, batches)| !batches.is_empty())
+                        .map(|(index, batches)| (outputs[index].clone(), batches)),
+                );
 
             let mut write_futures = FuturesUnordered::new();
-            for (index, batches) in grouped.into_iter().enumerate() {
-                if batches.is_empty() {
-                    continue;
-                }
-                let table = outputs[index].clone();
+            for (table, batches) in writes {
                 let w = Arc::clone(&context.writer);
                 let d = durability.data_writes;
                 write_futures.push(async move {
@@ -307,9 +330,6 @@ impl Pipeline {
                     observer.record_graph_write(&report.table, report.rows, report.bytes);
                     stats.written_rows += report.rows;
                     stats.written_bytes += report.bytes;
-                }
-                if let (Some(diff), Some(page)) = (&plan.edge_diff, &diff_page) {
-                    diff.retire(&self.edge_diff, page).await?;
                 }
                 Ok::<_, HandlerError>(write_start.elapsed())
             };

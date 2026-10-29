@@ -100,7 +100,7 @@ pub async fn register_handlers(
         Arc::clone(&transform_registry),
         edge_diff::EdgeDiffClient::new(
             clients.graph.clone(),
-            entity_handler_config.edge_diff_max_concurrent_statements,
+            entity_handler_config.edge_diff_max_concurrent_reads,
         ),
     ));
 
