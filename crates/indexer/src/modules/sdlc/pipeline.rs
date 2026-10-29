@@ -12,7 +12,7 @@ use orbit_log_fields::{debug, info, warn};
 use serde_json::Value;
 use thiserror::Error;
 
-use super::edge_diff::EdgeDiffClient;
+use super::edge_diff::{EdgeDiffClient, page_keys};
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
@@ -298,8 +298,7 @@ impl Pipeline {
 
             let read_previous: OptionFuture<_> = edge_diff
                 .map(|(diff, _)| {
-                    diff.page_keys(&page.batches)
-                        .map(|keys| diff.read_previous(&self.edge_diff, keys))
+                    page_keys(&page.batches).map(|keys| diff.read_previous(&self.edge_diff, keys))
                 })
                 .transpose()?
                 .into();

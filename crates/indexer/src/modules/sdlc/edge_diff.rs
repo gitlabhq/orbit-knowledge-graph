@@ -5,6 +5,7 @@ use arrow::array::{
     Array, ArrayData, ArrayRef, AsArray, BooleanArray, Int64Array, ListArray, StringArray,
     TimestampMicrosecondArray, downcast_array,
 };
+use arrow::buffer::OffsetBuffer;
 use arrow::compute::cast;
 use arrow::datatypes::{DataType, Field, Int64Type, TimeUnit};
 use arrow::record_batch::RecordBatch;
@@ -61,7 +62,7 @@ struct Keyer {
     relationship_kind: String,
     node_kind: String,
     node_is_source: bool,
-    parent_ids: usize,
+    parent_column: usize,
     parent_kind: ParentKind,
     routes: Vec<Route>,
 }
@@ -82,7 +83,7 @@ struct Route {
     table: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct EdgeKey<'a> {
     table: &'a str,
     traversal_path: &'a str,
@@ -109,14 +110,13 @@ enum Value {
     Ids(Vec<i64>),
 }
 
-#[derive(Debug)]
 pub(in crate::modules::sdlc) struct PageKeys {
     lo_path: String,
     hi_path: String,
     ids: Vec<i64>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(in crate::modules::sdlc) struct PreviousRows(HashMap<RowKey, Vec<NodeRow>>);
 
 impl PreviousRows {
@@ -149,31 +149,6 @@ impl EdgeDiff {
 
     pub(in crate::modules::sdlc) fn node_table(&self) -> &str {
         &self.node_table
-    }
-
-    pub(in crate::modules::sdlc) fn page_keys(
-        &self,
-        extracted: &[RecordBatch],
-    ) -> Result<PageKeys, HandlerError> {
-        let keys = extracted
-            .iter()
-            .map(key_columns)
-            .collect::<Result<Vec<_>, _>>()?;
-        let paths = || {
-            keys.iter()
-                .flat_map(|(paths, _)| (0..paths.len()).map(|row| paths.value(row)))
-        };
-        let mut ids: Vec<i64> = keys
-            .iter()
-            .flat_map(|(_, ids)| ids.values().iter().copied())
-            .collect();
-        ids.sort_unstable();
-        ids.dedup();
-        Ok(PageKeys {
-            lo_path: paths().min().unwrap_or_default().to_owned(),
-            hi_path: paths().max().unwrap_or_default().to_owned(),
-            ids,
-        })
     }
 
     pub(in crate::modules::sdlc) async fn read_previous(
@@ -339,7 +314,7 @@ impl Keyer {
                 .find(|field| field.column_name() == Some(source_field))
                 .map(|field| field.name.clone())
         };
-        let parent_ids = Column {
+        let parent_column = Column {
             name: stored(&parent.field)?,
             shape: mapping
                 .array_field
@@ -371,7 +346,7 @@ impl Keyer {
             relationship_kind: mapping.label.clone(),
             node_kind: node.name.clone(),
             node_is_source,
-            parent_ids: columns.insert_full(parent_ids).0,
+            parent_column: columns.insert_full(parent_column).0,
             parent_kind,
             routes,
         })
@@ -382,7 +357,7 @@ impl Keyer {
         (traversal_path, id): &'a RowKey,
         row: &'a NodeRow,
     ) -> impl Iterator<Item = EdgeKey<'a>> {
-        let parent_ids: &[i64] = match &row.values[self.parent_ids] {
+        let parent_ids: &[i64] = match &row.values[self.parent_column] {
             Some(Value::Int(id)) => std::slice::from_ref(id),
             Some(Value::Ids(ids)) => ids,
             _ => &[],
@@ -437,18 +412,22 @@ impl Column {
                         self.name
                     ))
                 };
-                let lists = batch
-                    .column_by_name(&self.name)
-                    .and_then(|array| array.as_list_opt::<i32>())
+                let lists = column(batch, &self.name)?
+                    .as_list_opt::<i32>()
                     .ok_or_else(not_a_tuple_list)?;
-                let ids = lists
-                    .values()
+                let offsets = lists.offsets();
+                let start = offsets[0];
+                let items = lists.values().slice(
+                    start as usize,
+                    (offsets[offsets.len() - 1] - start) as usize,
+                );
+                let ids = items
                     .as_struct_opt()
                     .and_then(|items| items.column_by_name(field))
                     .ok_or_else(not_a_tuple_list)?;
                 Ok(Arc::new(ListArray::new(
                     Arc::new(Field::new_list_field(DataType::Int64, true)),
-                    lists.offsets().clone(),
+                    OffsetBuffer::new(offsets.iter().map(|offset| offset - start).collect()),
                     cast(ids, &DataType::Int64).map_err(|err| {
                         HandlerError::Processing(format!("edge diff: {field}: {err}"))
                     })?,
@@ -478,6 +457,30 @@ impl Column {
     }
 }
 
+pub(in crate::modules::sdlc) fn page_keys(
+    extracted: &[RecordBatch],
+) -> Result<PageKeys, HandlerError> {
+    let keys = extracted
+        .iter()
+        .map(key_columns)
+        .collect::<Result<Vec<_>, _>>()?;
+    let paths = || {
+        keys.iter()
+            .flat_map(|(paths, _)| (0..paths.len()).map(|row| paths.value(row)))
+    };
+    let mut ids: Vec<i64> = keys
+        .iter()
+        .flat_map(|(_, ids)| ids.values().iter().copied())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    Ok(PageKeys {
+        lo_path: paths().min().unwrap_or_default().to_owned(),
+        hi_path: paths().max().unwrap_or_default().to_owned(),
+        ids,
+    })
+}
+
 fn key_columns(batch: &RecordBatch) -> Result<(StringArray, Int64Array), HandlerError> {
     Ok((
         typed(batch, "traversal_path", &DataType::Utf8)?,
@@ -498,11 +501,14 @@ fn cast_column(
     name: &str,
     data_type: &DataType,
 ) -> Result<ArrayRef, HandlerError> {
-    let array = batch
-        .column_by_name(name)
-        .ok_or_else(|| HandlerError::Processing(format!("edge diff: page has no column {name}")))?;
-    cast(array, data_type)
+    cast(column(batch, name)?, data_type)
         .map_err(|err| HandlerError::Processing(format!("edge diff: column {name}: {err}")))
+}
+
+fn column<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a ArrayRef, HandlerError> {
+    batch
+        .column_by_name(name)
+        .ok_or_else(|| HandlerError::Processing(format!("edge diff: page has no column {name}")))
 }
 
 fn tombstone_batch<'a>(edges: &[(EdgeKey<'a>, i64)]) -> Result<RecordBatch, HandlerError> {
@@ -536,7 +542,7 @@ fn tombstone_batch<'a>(edges: &[(EdgeKey<'a>, i64)]) -> Result<RecordBatch, Hand
 #[cfg(test)]
 mod tests {
     use arrow::array::{StructArray, UInt64Array};
-    use arrow::buffer::OffsetBuffer;
+    use arrow::buffer::NullBuffer;
     use arrow::datatypes::{Fields, Schema};
 
     use super::*;
@@ -581,6 +587,13 @@ mod tests {
                 ("user_id", Value::Int(user)),
             ],
         )
+    }
+
+    fn deleted_job(diff: &EdgeDiff, version: i64) -> NodeRow {
+        NodeRow {
+            deleted: true,
+            ..job(diff, version, 1)
+        }
     }
 
     fn job_batch(diff: &EdgeDiff, version: i64, user: i64) -> RecordBatch {
@@ -629,7 +642,7 @@ mod tests {
     #[test]
     fn a_deleted_row_retires_every_edge_it_emitted() {
         let diff = diff_for("Job");
-        let retired = retired(&diff, &job(&diff, 1, 1), &row(&diff, 2, true, &[]));
+        let retired = retired(&diff, &job(&diff, 1, 1), &deleted_job(&diff, 2));
         for expected in [
             ("HAS_JOB".to_string(), 6001, 7001),
             ("HAS_JOB".to_string(), 5001, 7001),
@@ -662,9 +675,11 @@ mod tests {
     #[test]
     fn nothing_is_retired_without_a_live_previous_row() {
         let diff = diff_for("Job");
-        let incoming = row(&diff, 2, true, &[]);
-        assert!(PreviousRows::default().before(&key(), &incoming).is_none());
-        assert!(retired(&diff, &row(&diff, 1, true, &[]), &incoming).is_empty());
+        let tombstones = diff
+            .tombstones(&[job_batch(&diff, 2, 2)], &PreviousRows::default())
+            .expect("tombstones build");
+        assert!(tombstones.is_empty());
+        assert!(retired(&diff, &deleted_job(&diff, 1), &job(&diff, 2, 2)).is_empty());
     }
 
     #[test]
@@ -735,23 +750,29 @@ mod tests {
         let fields = Fields::from(vec![Field::new("user_id", DataType::UInt64, false)]);
         let items = StructArray::new(
             fields.clone(),
-            vec![Arc::new(UInt64Array::from(vec![4u64, 5]))],
+            vec![Arc::new(UInt64Array::from(vec![1u64, 4, 5]))],
             None,
         );
         let list = ListArray::new(
             Arc::new(Field::new("item", DataType::Struct(fields), false)),
-            OffsetBuffer::from_lengths([2]),
+            OffsetBuffer::from_lengths([1, 0, 0, 2]),
             Arc::new(items),
-            None,
+            Some(NullBuffer::from(vec![true, false, true, true])),
         );
         let batch = RecordBatch::try_from_iter([("reviewers", Arc::new(list) as ArrayRef)])
-            .expect("batch builds");
+            .expect("batch builds")
+            .slice(1, 3);
         let column = Column {
             name: "reviewers".to_string(),
             shape: Shape::Elements("user_id".to_string()),
         };
         let array = column.read(&batch).expect("reads");
-        assert_eq!(column.value(&array, 0), Some(Value::Ids(vec![4, 5])));
+        assert_eq!(
+            (0..3)
+                .map(|row| column.value(&array, row))
+                .collect::<Vec<_>>(),
+            vec![None, Some(Value::Ids(vec![])), Some(Value::Ids(vec![4, 5]))]
+        );
     }
 
     #[test]
@@ -771,7 +792,14 @@ mod tests {
 
     #[test]
     fn the_stored_read_keeps_two_distinct_versions_per_key() {
-        let sql = diff_for("Job").stored_rows_sql();
+        let sql = diff_for("Note").stored_rows_sql();
+        assert!(
+            sql.starts_with(
+                "SELECT traversal_path, id, _version, _deleted, \
+                 author_id, project_id, noteable_type, noteable_id FROM ("
+            ),
+            "{sql}"
+        );
         assert!(
             sql.contains("LIMIT 1 BY traversal_path, id, _version"),
             "{sql}"
@@ -798,6 +826,25 @@ mod tests {
         assert_eq!(tombstones.len(), 1);
         let batch = &tombstones[0].1;
         assert_eq!(batch.num_rows(), 1);
+        let text = |name: &str| Field::new(name, DataType::Utf8, false);
+        let int = |name: &str| Field::new(name, DataType::Int64, false);
+        assert_eq!(
+            *batch.schema(),
+            Schema::new(vec![
+                text("traversal_path"),
+                text("relationship_kind"),
+                int("source_id"),
+                text("source_kind"),
+                int("target_id"),
+                text("target_kind"),
+                Field::new(
+                    "_version",
+                    DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+                    false,
+                ),
+                Field::new("_deleted", DataType::Boolean, false),
+            ])
+        );
         let versions = batch
             .column_by_name("_version")
             .and_then(|column| column.as_any().downcast_ref::<TimestampMicrosecondArray>())
