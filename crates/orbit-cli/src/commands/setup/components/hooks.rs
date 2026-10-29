@@ -182,7 +182,7 @@ pub(super) fn install_files<'a>(
 }
 
 pub(in crate::commands::setup) const KEPT_RETIRED: &str =
-    "kept (no longer used, and OpenCode 2 fails to load it; delete it by hand)";
+    "kept (no longer used by Orbit; delete it by hand)";
 const KEPT_EDITED: &str = "kept (edited since install; delete it by hand)";
 
 fn remove_file(
