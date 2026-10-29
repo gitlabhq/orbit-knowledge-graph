@@ -1,0 +1,177 @@
+name: "C++: the code graph contract columns for every definition and import kind"
+
+fixtures:
+  - path: util.hpp
+    content: |
+      int helper();
+
+  - path: util.cpp
+    content: |
+      #include "util.hpp"
+
+      int helper() { return 1; }
+
+  - path: main.cpp
+    content: |
+      #include <vector>
+      #include "util.hpp"
+
+      namespace billing {
+
+      /// An order.
+      ///
+      /// Second paragraph.
+      class Order {
+      public:
+          Order(int id);
+          virtual int total() const override;
+          static int count;
+          static Order make();
+          inline void touch() final {}
+      private:
+          int id_;
+      };
+
+      struct Pt { int x; };
+
+      enum class Color { Red, Green = 2 };
+
+      int Order::total() const { return id_; }
+
+      Order::Order(int id) : id_(id) {}
+
+      Order::~Order() {}
+
+      template <typename T>
+      T maxv(T a, T b) { return a > b ? a : b; }
+
+      using IntVec = std::vector<int>;
+      }
+
+      class Shape {
+      public:
+          Shape() {}
+          virtual double area() = 0;
+          friend bool operator==(const Shape& a, const Shape& b) { return true; }
+      };
+
+      class Square final : public Shape {};
+
+      union Value { int i; float f; };
+
+      typedef int myint;
+
+      template <typename T>
+      concept Addable = requires(T a) { a + a; };
+
+      void scoped() {
+          struct Local { int a; } l;
+      }
+
+      TEST(OrderTest, Total) { billing::Order o(1); }
+
+      int main() { billing::Order o(1); return o.total() + helper(); }
+
+tests:
+  - name: "every definition has its kind, language kind, category, and scope"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope
+      ORDER BY fqn, kind
+      LIMIT 100
+    assert:
+      - { row: { fqn: "main::billing", kind: "Module", language_kind: "Namespace", category: "Module", scope: "top_level" } }
+      - { row: { fqn: "main::billing::Order", kind: "Class", language_kind: "Class", category: "Type", scope: "member" } }
+      - { row: { fqn: "main::billing::Order::total", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "main::billing::Order::count", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "main::billing::Order::make", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "main::billing::Order::Order", kind: "Constructor", language_kind: "Constructor", category: "Callable", scope: "member" } }
+      - { row: { fqn: "main::billing::Order::~Order", kind: "Method", language_kind: "Destructor", category: "Callable", scope: "member" } }
+      - { row: { fqn: "main::billing::Pt", kind: "Struct", language_kind: "Struct", category: "Type", scope: "member" } }
+      - { row: { fqn: "main::billing::Pt::x", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "main::billing::Color", kind: "Enum", language_kind: "Enum", category: "Type", scope: "member" } }
+      - { row: { fqn: "main::billing::Color::Red", kind: "EnumMember", language_kind: "EnumMember", category: "Value", scope: "member" } }
+      - { row: { fqn: "main::billing::maxv", kind: "Function", language_kind: "Function", category: "Callable", scope: "member" } }
+      - { row: { fqn: "main::billing::IntVec", kind: "TypeAlias", language_kind: "TypeAlias", category: "Type", scope: "member" } }
+      - { row: { fqn: "main::Shape", kind: "Class", language_kind: "Class", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main::Shape::Shape", kind: "Constructor", language_kind: "Constructor", category: "Callable", scope: "member" } }
+      - { row: { fqn: "main::Shape::area", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "main::Shape::operator==", kind: "Function", language_kind: "Function", category: "Callable", scope: "member" } }
+      - { row: { fqn: "main::Value", kind: "Struct", language_kind: "Union", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main::myint", kind: "TypeAlias", language_kind: "Typedef", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main::Addable", kind: "Interface", language_kind: "Concept", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main::scoped::Local", kind: "Struct", language_kind: "Struct", category: "Type", scope: "local" } }
+      - { row: { fqn: "main::TEST", kind: "Test", language_kind: "Test", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "main::main", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "util::helper", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+
+  - name: "an in-class declaration and its out-of-class definition are two rows"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'main::billing::Order::total'
+      RETURN d.signature AS signature
+      ORDER BY signature
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: signature, values: ["int Order::total() const", "virtual int total() const override"] } }
+
+  - name: "definitions carry signature, parameters, types, doc comment, and modifiers"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.language AS language
+      ORDER BY fqn, signature
+      LIMIT 100
+    assert:
+      - { row: { fqn: "main::billing", signature: "namespace billing", parameters: [], return_type: null, declared_type: null, doc_comment: "", modifiers: [], language: "cpp" } }
+      - { row: { fqn: "main::billing::Order", signature: "class Order", doc_comment: "An order.", modifiers: [] } }
+      - { row: { fqn: "main::billing::Order::total", signature: "virtual int total() const override", parameters: [], return_type: "int", modifiers: ["override", "virtual"] } }
+      - { row: { fqn: "main::billing::Order::total", signature: "int Order::total() const", return_type: "int", modifiers: [] } }
+      - { row: { fqn: "main::billing::Order::count", signature: "static int count", declared_type: "int", modifiers: ["static"] } }
+      - { row: { fqn: "main::billing::Order::make", signature: "static Order make()", return_type: "Order", modifiers: ["static"] } }
+      - { row: { fqn: "main::billing::Order::touch", signature: "inline void touch() final", return_type: "void", modifiers: ["final", "inline"] } }
+      - { row: { fqn: "main::billing::Order::id_", signature: "int id_", declared_type: "int", modifiers: [] } }
+      - { row: { fqn: "main::billing::Order::Order", signature: "Order::Order(int id)", parameters: ["int id"], return_type: null } }
+      - { row: { fqn: "main::billing::Order::~Order", signature: "Order::~Order()", parameters: [], return_type: null } }
+      - { row: { fqn: "main::billing::Color", signature: "enum class Color" } }
+      - { row: { fqn: "main::billing::Color::Green", signature: "Green", declared_type: null } }
+      - { row: { fqn: "main::billing::maxv", signature: "T maxv(T a, T b)", parameters: ["T a", "T b"], return_type: "T" } }
+      - { row: { fqn: "main::billing::IntVec", signature: "using IntVec = std::vector<int>" } }
+      - { row: { fqn: "main::Shape::area", signature: "virtual double area() = 0", return_type: "double", modifiers: ["abstract", "virtual"] } }
+      - { row: { fqn: "main::Shape::operator==", signature: "bool operator==(const Shape& a, const Shape& b)", parameters: ["const Shape& a", "const Shape& b"], return_type: "bool" } }
+      - { row: { fqn: "main::Square", signature: "class Square final : public Shape", modifiers: ["final"] } }
+      - { row: { fqn: "main::Value", signature: "union Value" } }
+      - { row: { fqn: "main::myint", signature: "typedef int myint" } }
+      - { row: { fqn: "main::Addable", signature: "concept Addable" } }
+      - { row: { fqn: "main::TEST", signature: "TEST(OrderTest, Total)" } }
+      - { row: { fqn: "main::main", signature: "int main()", parameters: [], return_type: "int" } }
+
+  - name: "C++ fills no visibility"
+    query: |
+      MATCH (d:Definition) WHERE d.visibility IS NOT NULL
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "C++ has no generated definitions"
+    query: |
+      MATCH (d:Definition) WHERE d.generated_by IS NOT NULL
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "an include is a wildcard import of the header"
+    query: |
+      MATCH (i:Import)
+      WHERE i.file_path = 'main.cpp'
+      RETURN i.name AS name, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+      ORDER BY import_path
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "*", import_kind: "wildcard", language_kind: "WildcardImport", import_path: "vector", fqn: null } }
+      - { row: { name: "*", import_kind: "wildcard", language_kind: "WildcardImport", import_path: '"util.hpp"', fqn: null, is_external: false } }
+
+  - name: "every definition kind is in the closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
+      RETURN d.fqn
+    assert:
+      - { empty: true }

@@ -1,0 +1,97 @@
+name: "Lua: the code graph contract columns for every definition and import kind"
+
+fixtures:
+  - path: lua/weather.lua
+    content: |
+      local json = require("json")
+      local helpers = require("helpers")
+      require("side.effect")
+
+      --- Weather module.
+      -- More text.
+      local M = {}
+
+      --- Fetches a forecast.
+      function M.fetch(city, days)
+        local function inner(x)
+          return x
+        end
+        return helpers.load(inner(city))
+      end
+
+      function M:run(...)
+        return self.fetch("x")
+      end
+
+      local function secret(a)
+        return a
+      end
+
+      return M
+
+  - path: lua/helpers.lua
+    content: |
+      local H = {}
+
+      function H.load(city)
+        return city
+      end
+
+      return H
+
+tests:
+  - name: "every definition has its kind, language kind, category, and scope"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row_count: 7 }
+      - { row: { fqn: "M", kind: "Module", language_kind: "Table", category: "Module", scope: "top_level" } }
+      - { row: { fqn: "M.fetch", kind: "Function", language_kind: "Function", category: "Callable", scope: "member" } }
+      - { row: { fqn: "M.fetch.inner", kind: "Function", language_kind: "Function", category: "Callable", scope: "local" } }
+      - { row: { fqn: "M.run", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "secret", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "H", kind: "Module", language_kind: "Table", category: "Module", scope: "top_level" } }
+      - { row: { fqn: "H.load", kind: "Function", language_kind: "Function", category: "Callable", scope: "member" } }
+
+  - name: "definitions carry signature, parameters, and doc comment"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.signature AS signature, d.parameters AS parameters, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.language AS language
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row: { fqn: "M", signature: "local M", parameters: [], doc_comment: "Weather module. More text.", modifiers: [], language: "lua" } }
+      - { row: { fqn: "M.fetch", signature: "function M.fetch(city, days)", parameters: ["city", "days"], doc_comment: "Fetches a forecast." } }
+      - { row: { fqn: "M.fetch.inner", signature: "local function inner(x)", parameters: ["x"], doc_comment: "" } }
+      - { row: { fqn: "M.run", signature: "function M:run(...)", parameters: ["..."] } }
+      - { row: { fqn: "secret", signature: "local function secret(a)", parameters: ["a"] } }
+      - { row: { fqn: "H.load", signature: "function H.load(city)", parameters: ["city"] } }
+
+  - name: "Lua declares no types, visibility, or generated definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE NOT (d.return_type IS NULL AND d.declared_type IS NULL AND d.visibility IS NULL AND d.generated_by IS NULL)
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "imports carry their kind, construct, path, and full name"
+    query: |
+      MATCH (i:Import)
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+      ORDER BY import_path, name
+      LIMIT 100
+    assert:
+      - { row: { name: "json", alias: "json", import_kind: "module", language_kind: "AliasedImport", import_path: "json", fqn: "json", is_external: true } }
+      - { row: { name: "helpers", alias: "helpers", import_kind: "module", language_kind: "AliasedImport", import_path: "helpers", fqn: "helpers", is_external: false } }
+      - { row: { name: "effect", import_kind: "side_effect", import_path: "side.effect", fqn: "side.effect", is_external: true } }
+
+  - name: "every kind is in the closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
+      RETURN d.fqn
+    assert:
+      - { empty: true }

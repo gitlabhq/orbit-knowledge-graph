@@ -1,0 +1,661 @@
+name: "TypeScript: every Definition and Import column of the ontology contract"
+
+fixtures:
+  - path: src/shapes.ts
+    content: |
+      import { helper } from './util';
+      import * as path from 'path';
+      import './side';
+
+      /** Shapes with an area. */
+      export abstract class Shape {
+        protected readonly id: number = 1;
+        static count = 0;
+
+        constructor(public owner: string) {}
+
+        abstract area(): number;
+
+        /** Scales the shape. */
+        public static async scale(factor: number, label?: string): Promise<number> {
+          return factor;
+        }
+
+        get label(): string {
+          return helper(this.id);
+        }
+
+        *items(): Generator<number> {
+          yield 1;
+        }
+
+        private describe() {
+          function inner(x: number) { return x; }
+          return inner(path.sep.length);
+        }
+      }
+
+      export interface Named {
+        name: string;
+      }
+
+      export enum Color { Red, Green = 2 }
+
+      export type Id = string | number;
+
+      export namespace Geometry {
+        export function dist(a: number, b: number): number {
+          return a - b;
+        }
+      }
+
+      export const double = (x: number): number => x * 2;
+      export const MAX: number = 10;
+      export let counter = 0;
+
+  - path: src/util.ts
+    content: |
+      /** Formats a number. */
+      export function helper(n: number): string {
+        return String(n);
+      }
+
+  - path: src/side.ts
+    content: |
+      export const loaded = true;
+
+  - path: src/shapes.test.ts
+    content: |
+      import { helper } from './util';
+
+      describe('formatting', () => {
+        it('formats numbers', () => {
+          helper(1);
+        });
+      });
+
+tests:
+  - name: "Shape is a Class"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Shape' AND d.kind = 'Class'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Class"
+          language_kind: "Class"
+          category: "Type"
+          scope: "top_level"
+          signature: "abstract class Shape"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: "Shapes with an area."
+          modifiers: ["abstract"]
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "Shape::id is a Field"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Shape::id' AND d.kind = 'Field'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Field"
+          language_kind: "Field"
+          category: "Value"
+          scope: "member"
+          signature: "protected readonly id: number"
+          parameters: []
+          return_type: null
+          declared_type: "number"
+          doc_comment: ""
+          modifiers: ["readonly"]
+          visibility: "protected"
+          generated_by: null
+          language: "typescript"
+
+  - name: "Shape::count is a Field"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Shape::count' AND d.kind = 'Field'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Field"
+          language_kind: "Field"
+          category: "Value"
+          scope: "member"
+          signature: "static count"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: ["static"]
+          visibility: "public"
+          generated_by: null
+          language: "typescript"
+
+  - name: "Shape::constructor is a Constructor"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Shape::constructor' AND d.kind = 'Constructor'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Constructor"
+          language_kind: "Constructor"
+          category: "Callable"
+          scope: "member"
+          signature: "constructor(public owner: string)"
+          parameters: ["public owner: string"]
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "typescript"
+
+  - name: "A parameter property is a Field with language_kind Property"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Shape::constructor::owner' AND d.kind = 'Field'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Field"
+          language_kind: "Property"
+          category: "Value"
+          signature: "public owner: string"
+          parameters: []
+          return_type: null
+          declared_type: "string"
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "typescript"
+
+  - name: "Shape::area is a Method"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Shape::area' AND d.kind = 'Method'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Method"
+          language_kind: "Method"
+          category: "Callable"
+          scope: "member"
+          signature: "abstract area(): number"
+          parameters: []
+          return_type: "number"
+          declared_type: null
+          doc_comment: ""
+          modifiers: ["abstract"]
+          visibility: "public"
+          generated_by: null
+          language: "typescript"
+
+  - name: "Shape::scale is a Method"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Shape::scale' AND d.kind = 'Method'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Method"
+          language_kind: "Method"
+          category: "Callable"
+          scope: "member"
+          signature: "public static async scale(factor: number, label?: string): Promise<number>"
+          parameters: ["factor: number", "label?: string"]
+          return_type: "Promise<number>"
+          declared_type: null
+          doc_comment: "Scales the shape."
+          modifiers: ["async", "static"]
+          visibility: "public"
+          generated_by: null
+          language: "typescript"
+
+  - name: "A get accessor is a Field with language_kind Property"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Shape::label' AND d.kind = 'Field'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Field"
+          language_kind: "Property"
+          category: "Value"
+          scope: "member"
+          signature: "get label(): string"
+          parameters: []
+          return_type: null
+          declared_type: "string"
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "typescript"
+
+  - name: "Shape::items is a Method"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Shape::items' AND d.kind = 'Method'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Method"
+          language_kind: "Method"
+          category: "Callable"
+          scope: "member"
+          signature: "*items(): Generator<number>"
+          parameters: []
+          return_type: "Generator<number>"
+          declared_type: null
+          doc_comment: ""
+          modifiers: ["generator"]
+          visibility: "public"
+          generated_by: null
+          language: "typescript"
+
+  - name: "Shape::describe is a Method"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Shape::describe' AND d.kind = 'Method'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Method"
+          language_kind: "Method"
+          category: "Callable"
+          scope: "member"
+          signature: "private describe()"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "private"
+          generated_by: null
+          language: "typescript"
+
+  - name: "Shape::describe::inner is a Function"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Shape::describe::inner' AND d.kind = 'Function'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Function"
+          language_kind: "Function"
+          category: "Callable"
+          scope: "local"
+          signature: "function inner(x: number)"
+          parameters: ["x: number"]
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "Named is a Interface"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Named' AND d.kind = 'Interface'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Interface"
+          language_kind: "Interface"
+          category: "Type"
+          scope: "top_level"
+          signature: "interface Named"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "Color is a Enum"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Color' AND d.kind = 'Enum'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Enum"
+          language_kind: "Enum"
+          category: "Type"
+          scope: "top_level"
+          signature: "enum Color"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "Color::Red is a EnumMember"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Color::Red' AND d.kind = 'EnumMember'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "EnumMember"
+          language_kind: "EnumMember"
+          category: "Value"
+          scope: "member"
+          signature: "Red"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "Color::Green is a EnumMember"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Color::Green' AND d.kind = 'EnumMember'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "EnumMember"
+          language_kind: "EnumMember"
+          category: "Value"
+          scope: "member"
+          signature: "Green"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "Id is a TypeAlias"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Id' AND d.kind = 'TypeAlias'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "TypeAlias"
+          language_kind: "TypeAlias"
+          category: "Type"
+          scope: "top_level"
+          signature: "type Id"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "Geometry is a Module"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Geometry' AND d.kind = 'Module'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Module"
+          language_kind: "Namespace"
+          category: "Module"
+          scope: "top_level"
+          signature: "namespace Geometry"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "Geometry::dist is a Function"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Geometry::dist' AND d.kind = 'Function'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Function"
+          language_kind: "Function"
+          category: "Callable"
+          scope: "member"
+          signature: "function dist(a: number, b: number): number"
+          parameters: ["a: number", "b: number"]
+          return_type: "number"
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "double is a Function"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'double' AND d.kind = 'Function'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Function"
+          language_kind: "ArrowFunction"
+          category: "Callable"
+          scope: "top_level"
+          signature: "double = (x: number): number"
+          parameters: ["x: number"]
+          return_type: "number"
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "MAX is a Constant"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'MAX' AND d.kind = 'Constant'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Constant"
+          language_kind: "Constant"
+          category: "Value"
+          scope: "top_level"
+          signature: "const MAX: number"
+          parameters: []
+          return_type: null
+          declared_type: "number"
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "counter is a Variable"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'counter' AND d.kind = 'Variable'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Variable"
+          language_kind: "Variable"
+          category: "Value"
+          scope: "top_level"
+          signature: "let counter"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "helper is a Function"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'helper' AND d.kind = 'Function' AND d.file_path = 'src/util.ts'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Function"
+          language_kind: "Function"
+          category: "Callable"
+          scope: "top_level"
+          signature: "function helper(n: number): string"
+          parameters: ["n: number"]
+          return_type: "string"
+          declared_type: null
+          doc_comment: "Formats a number."
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "loaded is a Constant"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'loaded' AND d.kind = 'Constant' AND d.file_path = 'src/side.ts'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Constant"
+          language_kind: "Constant"
+          category: "Value"
+          scope: "top_level"
+          signature: "const loaded"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "A describe block is a Test with language_kind ExampleGroup"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'formatting' AND d.kind = 'Test' AND d.file_path = 'src/shapes.test.ts'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Test"
+          language_kind: "ExampleGroup"
+          category: "Callable"
+          scope: "top_level"
+          signature: "describe('formatting')"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "An it block is a Test with language_kind Example"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'formatting::formats numbers' AND d.kind = 'Test' AND d.file_path = 'src/shapes.test.ts'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Test"
+          language_kind: "Example"
+          category: "Callable"
+          scope: "local"
+          signature: "it('formats numbers')"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "typescript"
+
+  - name: "Import helper from ./util is symbol"
+    query: |
+      MATCH (i:Import) WHERE i.import_path = './util' AND i.name = 'helper' AND i.file_path = 'src/shapes.ts'
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+    assert:
+      - { row_count: 1 }
+      - row:
+          name: "helper"
+          alias: ""
+          import_kind: "symbol"
+          language_kind: "NamedImport"
+          import_path: "./util"
+          fqn: "src/util.helper"
+          is_external: false
+
+  - name: "Import * from path is module"
+    query: |
+      MATCH (i:Import) WHERE i.import_path = 'path' AND i.name = '*'
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+    assert:
+      - { row_count: 1 }
+      - row:
+          name: "*"
+          alias: "path"
+          import_kind: "module"
+          language_kind: "NamespaceImport"
+          import_path: "path"
+          fqn: "path"
+          is_external: true
+
+  - name: "Import ./side from ./side is side_effect"
+    query: |
+      MATCH (i:Import) WHERE i.import_path = './side' AND i.name = './side'
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+    assert:
+      - { row_count: 1 }
+      - row:
+          name: "./side"
+          alias: ""
+          import_kind: "side_effect"
+          language_kind: "SideEffectImport"
+          import_path: "./side"
+          fqn: "src/side"
+          is_external: false
+
+  - name: "The it block calls the function it tests"
+    query: |
+      MATCH (t:Definition)-[:CALLS]->(f:Definition)
+      WHERE t.kind = 'Test' AND f.fqn = 'helper' AND f.kind = 'Function'
+      RETURN t.name AS test
+    assert:
+      - { row_count: 1 }
+      - { row: { test: "formats numbers" } }
+
+  - name: "Every definition kind is in the closed kind list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
+      RETURN d.fqn LIMIT 100
+    assert:
+      - { empty: true }

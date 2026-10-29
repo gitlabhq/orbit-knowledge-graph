@@ -1,0 +1,121 @@
+name: "C: the code graph contract columns for every definition and import kind"
+
+fixtures:
+  - path: util.h
+    content: |
+      int helper(void);
+
+  - path: util.c
+    content: |
+      #include "util.h"
+
+      int helper(void) { return 1; }
+
+  - path: main.c
+    content: |
+      #include <stdio.h>
+      #include "util.h"
+
+      #define MAX 10
+      #define SQ(x) ((x) * (x))
+
+      /* A point. */
+      struct Point { int x; int y; };
+
+      union Value { int i; float f; };
+
+      enum Color { RED, GREEN = 2 };
+
+      typedef struct Point Point_t;
+
+      /**
+       * Adds two ints.
+       *
+       * Second paragraph.
+       */
+      static inline int add(int a, int b) { return a + b; }
+
+      void scoped(void) {
+          struct Local { int a; } l;
+      }
+
+      int main(void) { printf("%d", add(1, SQ(2))); return helper(); }
+
+tests:
+  - name: "every definition has its kind, language kind, category, and scope"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row: { fqn: "main::MAX", kind: "Macro", language_kind: "Macro", category: "Macro", scope: "top_level" } }
+      - { row: { fqn: "main::SQ", kind: "Macro", language_kind: "Macro", category: "Macro", scope: "top_level" } }
+      - { row: { fqn: "main::Point", kind: "Struct", language_kind: "Struct", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main::Point::x", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "main::Value", kind: "Struct", language_kind: "Union", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main::Color", kind: "Enum", language_kind: "Enum", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main::Color::RED", kind: "EnumMember", language_kind: "EnumMember", category: "Value", scope: "member" } }
+      - { row: { fqn: "main::Point_t", kind: "TypeAlias", language_kind: "Typedef", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main::add", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "main::scoped::Local", kind: "Struct", language_kind: "Struct", category: "Type", scope: "local" } }
+      - { row: { fqn: "main::main", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "util::helper", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+
+  - name: "a prototype is not a definition"
+    query: |
+      MATCH (d:Definition) WHERE d.file_path = 'util.h'
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "definitions carry signature, parameters, types, doc comment, and modifiers"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.language AS language
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row: { fqn: "main::MAX", signature: "#define MAX", parameters: [], return_type: null, declared_type: null, doc_comment: "", modifiers: [], language: "c" } }
+      - { row: { fqn: "main::SQ", signature: "#define SQ(x)" } }
+      - { row: { fqn: "main::Point", signature: "struct Point", doc_comment: "A point." } }
+      - { row: { fqn: "main::Point::x", signature: "int x", declared_type: "int" } }
+      - { row: { fqn: "main::Value", signature: "union Value" } }
+      - { row: { fqn: "main::Color", signature: "enum Color" } }
+      - { row: { fqn: "main::Color::GREEN", signature: "GREEN", declared_type: null } }
+      - { row: { fqn: "main::Point_t", signature: "typedef struct Point Point_t" } }
+      - { row: { fqn: "main::add", signature: "static inline int add(int a, int b)", parameters: ["int a", "int b"], return_type: "int", doc_comment: "Adds two ints.", modifiers: ["inline", "static"] } }
+      - { row: { fqn: "main::main", signature: "int main(void)", parameters: [], return_type: "int", modifiers: [] } }
+      - { row: { fqn: "util::helper", signature: "int helper(void)", return_type: "int" } }
+
+  - name: "C fills no visibility"
+    query: |
+      MATCH (d:Definition) WHERE d.visibility IS NOT NULL
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "C has no generated definitions"
+    query: |
+      MATCH (d:Definition) WHERE d.generated_by IS NOT NULL
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "an include is a wildcard import of the header"
+    query: |
+      MATCH (i:Import)
+      WHERE i.file_path = 'main.c'
+      RETURN i.name AS name, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+      ORDER BY import_path
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "*", import_kind: "wildcard", language_kind: "WildcardImport", import_path: "<stdio.h>", fqn: null } }
+      - { row: { name: "*", import_kind: "wildcard", language_kind: "WildcardImport", import_path: '"util.h"', fqn: null, is_external: false } }
+
+  - name: "every definition kind is in the closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
+      RETURN d.fqn
+    assert:
+      - { empty: true }

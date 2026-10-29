@@ -1,0 +1,206 @@
+name: "Python: the code graph contract columns for every definition and import kind"
+
+fixtures:
+  - path: shop/orders.py
+    content: |
+      import os
+      from typing import Final
+      from shop.money import Money as Cash
+      from shop.money import *
+
+      MAX: Final = 10
+      count: int = 0
+
+
+      class Order(Base):
+          """An order.
+
+          More text."""
+          status: str
+
+          def __init__(self, total: int = 0):
+              self.total = total
+
+          @staticmethod
+          async def charge(amount: int, *args, **kw) -> Cash:
+              """Charge the card."""
+              def inner():
+                  return 1
+              return Cash(amount)
+
+
+      double = lambda x: x * 2
+
+  - path: shop/money.py
+    content: |
+      class Money:
+          def __init__(self, value):
+              self.value = value
+
+  - path: tests/test_orders.py
+    content: |
+      from shop.orders import Order
+
+
+      def test_charge():
+          Order.charge(1)
+
+tests:
+  - name: "every definition has its kind, language kind, category, and scope"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.language AS language
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row_count: 11 }
+      - { row: { fqn: "shop.orders.MAX", kind: "Constant", language_kind: "Constant", category: "Value", scope: "top_level", language: "python" } }
+      - { row: { fqn: "shop.orders.count", kind: "Variable", language_kind: "Variable", category: "Value", scope: "top_level" } }
+      - { row: { fqn: "shop.orders.Order", kind: "Class", language_kind: "Class", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "shop.orders.Order.status", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "shop.orders.Order.__init__", kind: "Constructor", language_kind: "Initializer", category: "Callable", scope: "member" } }
+      - { row: { fqn: "shop.orders.Order.charge", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "shop.orders.Order.charge.inner", kind: "Function", language_kind: "Function", category: "Callable", scope: "local" } }
+      - { row: { fqn: "shop.orders.double", kind: "Function", language_kind: "Lambda", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "tests.test_orders.test_charge", kind: "Test", language_kind: "Test", category: "Callable", scope: "top_level" } }
+
+  - name: "callables carry signature, parameters, return type, doc comment, and modifiers"
+    query: |
+      MATCH (d:Definition {name: 'charge'})
+      RETURN d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.declared_type AS declared_type
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "async def charge(amount: int, *args, **kw) -> Cash", parameters: ["amount: int", "*args", "**kw"], return_type: "Cash", doc_comment: "Charge the card.", modifiers: ["async", "static"], declared_type: null } }
+
+  - name: "a constructor keeps its parameters as written and has no return type"
+    query: |
+      MATCH (d:Definition {fqn: 'shop.orders.Order.__init__'})
+      RETURN d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type
+    assert:
+      - { row: { signature: "def __init__(self, total: int = 0)", parameters: ["self", "total: int = 0"], return_type: null } }
+
+  - name: "a class keeps the first paragraph of its docstring"
+    query: |
+      MATCH (d:Definition {fqn: 'shop.orders.Order'})
+      RETURN d.signature AS signature, d.doc_comment AS doc_comment, d.parameters AS parameters
+    assert:
+      - { row: { signature: "class Order(Base)", doc_comment: "An order.", parameters: [] } }
+
+  - name: "values carry their declared type and a signature without the initializer"
+    query: |
+      MATCH (d:Definition {category: 'Value'})
+      RETURN d.fqn AS fqn, d.signature AS signature, d.declared_type AS declared_type
+      ORDER BY fqn
+    assert:
+      - { row: { fqn: "shop.orders.MAX", signature: "MAX: Final", declared_type: "Final" } }
+      - { row: { fqn: "shop.orders.count", signature: "count: int", declared_type: "int" } }
+      - { row: { fqn: "shop.orders.Order.status", signature: "status: str", declared_type: "str" } }
+
+  - name: "Python has no visibility rule"
+    query: |
+      MATCH (d:Definition) WHERE d.visibility IS NOT NULL RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Python has no generated members"
+    query: |
+      MATCH (d:Definition) WHERE d.generated_by IS NOT NULL RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "imports carry their kind, construct, path, and full name"
+    query: |
+      MATCH (i:Import)
+      RETURN i.file_path AS file, i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+      ORDER BY file, import_path, name
+    assert:
+      - { row: { file: "shop/orders.py", name: "os", alias: "", import_kind: "module", language_kind: "Import", import_path: "os", fqn: "os", is_external: true } }
+      - { row: { file: "shop/orders.py", name: "Final", import_kind: "symbol", language_kind: "NamedImport", import_path: "typing", fqn: "typing.Final", is_external: true } }
+      - { row: { file: "shop/orders.py", name: "Money", alias: "Cash", import_kind: "symbol", language_kind: "AliasedImport", import_path: "shop.money", fqn: "shop.money.Money", is_external: false } }
+      - { row: { file: "shop/orders.py", name: "*", import_kind: "wildcard", language_kind: "WildcardImport", import_path: "shop.money", fqn: null } }
+      - { row: { file: "tests/test_orders.py", name: "Order", import_kind: "symbol", fqn: "shop.orders.Order", is_external: false } }
+
+  - name: "an import resolves to the definition it names"
+    query: |
+      MATCH (i:Import {name: 'Money'})-[r:RESOLVES_TO]->(d:Definition)
+      WHERE r.resolution = 'import'
+      RETURN d.fqn AS target
+    assert:
+      - { row: { target: "shop.money.Money" } }
+
+  - name: "the importing file depends on the imported file"
+    query: |
+      MATCH (a:File {path: 'tests/test_orders.py'})-[:DEPENDS_ON]->(b:File)
+      RETURN b.path AS path
+    assert:
+      - { row: { path: "shop/orders.py" } }
+
+  - name: "a test calls the method it covers through the import"
+    query: |
+      MATCH (t:Definition {kind: 'Test'})-[c:CALLS]->(f:Definition)
+      WHERE c.resolution = 'import'
+      RETURN t.name AS test, f.fqn AS callee
+    assert:
+      - { row: { test: "test_charge", callee: "shop.orders.Order.charge" } }
+
+  - name: "a call of a class instantiates it"
+    query: |
+      MATCH (f:Definition {name: 'charge'})-[:INSTANTIATES]->(t:Definition)
+      RETURN t.fqn AS target
+    assert:
+      - { row: { target: "shop.money.Money" } }
+
+  - name: "a test file is flagged and nothing is vendored or generated"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+      ORDER BY path
+    assert:
+      - { row: { path: "shop/money.py", is_test: false, is_vendored: false, is_generated: false, skip_reason: "" } }
+      - { row: { path: "shop/orders.py", is_test: false } }
+      - { row: { path: "tests/test_orders.py", is_test: true } }
+
+  - name: "every kind is in its closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro'] RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "every category is in its closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.category IN ['Type','Callable','Value','Module','Macro'] RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "every scope is in its closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.scope IN ['top_level','member','local'] RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "the id of a definition before the edit"
+    query: |
+      MATCH (d:Definition {fqn: 'shop.money.Money'})
+      RETURN d.start_line AS line, d.id AS id
+    assert:
+      - { row: { line: 1, id: 5678537043871612082 } }
+
+steps:
+  - name: add a line above the class
+    snapshot: true
+    modify:
+      - path: shop/money.py
+        content: |
+          import json
+
+
+          class Money:
+              def __init__(self, value):
+                  self.value = value
+    tests:
+      - name: "a line above a definition keeps its id"
+        query: |
+          MATCH (d:Definition {fqn: 'shop.money.Money'})
+          RETURN d.start_line AS line, d.id AS id
+        assert:
+          - { row: { line: 4, id: 5678537043871612082 } }

@@ -1,0 +1,438 @@
+name: "C#: every Definition and Import column of the code graph contract"
+
+fixtures:
+  - path: src/Money.cs
+    content: |
+      namespace Acme.Billing.Util
+      {
+          public sealed class Money
+          {
+              public static Money Zero() => new Money();
+          }
+      }
+
+  - path: src/Order.cs
+    content: |
+      using System;
+      using Acme.Billing.Util;
+      using Strings = Vendor.Text.StringUtils;
+
+      namespace Acme.Billing
+      {
+          /// <summary>
+          /// An order with lines.
+          /// </summary>
+          public abstract class Order : IPayable
+          {
+              /// <summary>Most lines per order.</summary>
+              public const int MaxLines = 50;
+              private readonly int count;
+
+              public string Label { get; set; }
+
+              public Order(int count)
+              {
+                  this.count = count;
+              }
+
+              public abstract void Pay();
+
+              /// <summary>Charges the <see cref="T:Money"/>.</summary>
+              public static async Task<Money> ChargeAsync(Money amount, string card)
+              {
+                  int Local(int x) => x;
+                  return Money.Zero();
+              }
+
+              protected virtual int Size() => 0;
+          }
+
+          interface IPayable
+          {
+              void Pay();
+          }
+
+          public struct Point
+          {
+              public int X;
+          }
+
+          public record Line(string Sku, int Qty);
+
+          enum Status
+          {
+              Open,
+              Closed
+          }
+
+          public class OrderTest
+          {
+              [Fact]
+              public void ChargesTheCard()
+              {
+                  Order.ChargeAsync(null, Strings.Trim("x"));
+              }
+          }
+      }
+
+tests:
+  - name: "every definition in src/Money.cs carries the contract columns"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/Money.cs'
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+      ORDER BY d.fqn
+      LIMIT 100
+    assert:
+      - { row_count: 2 }
+      - row:
+          fqn: "Acme.Billing.Util.Money"
+          kind: "Class"
+          language_kind: "Class"
+          category: "Type"
+          scope: "top_level"
+          signature: "public sealed class Money"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: ["sealed"]
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Util.Money.Zero"
+          kind: "Method"
+          language_kind: "Method"
+          category: "Callable"
+          scope: "member"
+          signature: "public static Money Zero()"
+          parameters: []
+          return_type: "Money"
+          declared_type: null
+          doc_comment: ""
+          modifiers: ["static"]
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+
+  - name: "every definition in src/Order.cs carries the contract columns"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/Order.cs'
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+      ORDER BY d.fqn
+      LIMIT 100
+    assert:
+      - { row_count: 19 }
+      - row:
+          fqn: "Acme.Billing.Order"
+          kind: "Class"
+          language_kind: "Class"
+          category: "Type"
+          scope: "top_level"
+          signature: "public abstract class Order : IPayable"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: "An order with lines."
+          modifiers: ["abstract"]
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Order.MaxLines"
+          kind: "Constant"
+          language_kind: "Constant"
+          category: "Value"
+          scope: "member"
+          signature: "public const int MaxLines"
+          parameters: []
+          return_type: null
+          declared_type: "int"
+          doc_comment: "Most lines per order."
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Order.count"
+          kind: "Field"
+          language_kind: "Field"
+          category: "Value"
+          scope: "member"
+          signature: "private readonly int count"
+          parameters: []
+          return_type: null
+          declared_type: "int"
+          doc_comment: ""
+          modifiers: ["readonly"]
+          visibility: "private"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Order.Label"
+          kind: "Field"
+          language_kind: "Property"
+          category: "Value"
+          scope: "member"
+          signature: "public string Label"
+          parameters: []
+          return_type: null
+          declared_type: "string"
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Order.Order"
+          kind: "Constructor"
+          language_kind: "Constructor"
+          category: "Callable"
+          scope: "member"
+          signature: "public Order(int count)"
+          parameters: ["int count"]
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Order.Pay"
+          kind: "Method"
+          language_kind: "Method"
+          category: "Callable"
+          scope: "member"
+          signature: "public abstract void Pay()"
+          parameters: []
+          return_type: "void"
+          declared_type: null
+          doc_comment: ""
+          modifiers: ["abstract"]
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Order.ChargeAsync"
+          kind: "Method"
+          language_kind: "Method"
+          category: "Callable"
+          scope: "member"
+          signature: "public static async Task<Money> ChargeAsync(Money amount, string card)"
+          parameters: ["Money amount", "string card"]
+          return_type: "Task<Money>"
+          declared_type: null
+          doc_comment: "Charges the Money."
+          modifiers: ["async", "static"]
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Order.ChargeAsync.Local"
+          kind: "Function"
+          language_kind: "Function"
+          category: "Callable"
+          scope: "local"
+          signature: "int Local(int x)"
+          parameters: ["int x"]
+          return_type: "int"
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Order.Size"
+          kind: "Method"
+          language_kind: "Method"
+          category: "Callable"
+          scope: "member"
+          signature: "protected virtual int Size()"
+          parameters: []
+          return_type: "int"
+          declared_type: null
+          doc_comment: ""
+          modifiers: ["virtual"]
+          visibility: "protected"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.IPayable"
+          kind: "Interface"
+          language_kind: "Interface"
+          category: "Type"
+          scope: "top_level"
+          signature: "interface IPayable"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "internal"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.IPayable.Pay"
+          kind: "Method"
+          language_kind: "Method"
+          category: "Callable"
+          scope: "member"
+          signature: "void Pay()"
+          parameters: []
+          return_type: "void"
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Point"
+          kind: "Struct"
+          language_kind: "Struct"
+          category: "Type"
+          scope: "top_level"
+          signature: "public struct Point"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Point.X"
+          kind: "Field"
+          language_kind: "Field"
+          category: "Value"
+          scope: "member"
+          signature: "public int X"
+          parameters: []
+          return_type: null
+          declared_type: "int"
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Line"
+          kind: "Class"
+          language_kind: "Record"
+          category: "Type"
+          scope: "top_level"
+          signature: "public record Line(string Sku, int Qty)"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Status"
+          kind: "Enum"
+          language_kind: "Enum"
+          category: "Type"
+          scope: "top_level"
+          signature: "enum Status"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "internal"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Status.Open"
+          kind: "EnumMember"
+          language_kind: "EnumMember"
+          category: "Value"
+          scope: "member"
+          signature: "Open"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.Status.Closed"
+          kind: "EnumMember"
+          language_kind: "EnumMember"
+          category: "Value"
+          scope: "member"
+          signature: "Closed"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.OrderTest"
+          kind: "Class"
+          language_kind: "Class"
+          category: "Type"
+          scope: "top_level"
+          signature: "public class OrderTest"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+      - row:
+          fqn: "Acme.Billing.OrderTest.ChargesTheCard"
+          kind: "Test"
+          language_kind: "Test"
+          category: "Callable"
+          scope: "member"
+          signature: "public void ChargesTheCard()"
+          parameters: []
+          return_type: "void"
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "csharp"
+
+  - name: "imports carry import_kind, language_kind, fqn, and is_external"
+    query: |
+      MATCH (i:Import)
+      WHERE i.file_path = 'src/Order.cs'
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+      ORDER BY i.import_path, i.name
+    assert:
+      - { row_count: 3 }
+      - row: { name: "*", alias: "", import_kind: "wildcard", language_kind: "WildcardImport", import_path: "Acme.Billing.Util", fqn: null }
+      - row: { name: "*", alias: "", import_kind: "wildcard", language_kind: "WildcardImport", import_path: "System", fqn: null }
+      - row: { name: "StringUtils", alias: "Strings", import_kind: "symbol", language_kind: "AliasedImport", import_path: "Vendor.Text.StringUtils", fqn: "Vendor.Text.StringUtils", is_external: true }
+
+  - name: "a type has no return type, declared type, or generator"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Acme.Billing.Order' AND d.return_type IS NULL AND d.declared_type IS NULL AND d.generated_by IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "no definition has a kind outside the closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro'] RETURN d.fqn
+    assert:
+      - { empty: true }

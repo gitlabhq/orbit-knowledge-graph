@@ -1,0 +1,474 @@
+name: "Zig: every Definition and Import column of the ontology contract"
+
+fixtures:
+  - path: src/main.zig
+    content: |
+      const std = @import("std");
+      const util = @import("util.zig");
+
+      /// A point in space.
+      ///
+      /// Points are values.
+      pub const Point = struct {
+          /// The x coordinate.
+          x: f32,
+          y: f32 = 0,
+
+          pub fn init(x: f32) Point {
+              return Point{ .x = x };
+          }
+
+          fn norm(self: Point) f32 {
+              return self.x;
+          }
+      };
+
+      const Color = enum { red, green };
+
+      pub const Value = union(enum) { int: i64, float: f64 };
+
+      pub const MAX: u32 = 10;
+      var counter: u32 = 0;
+
+      /// Adds two numbers.
+      pub fn add(a: i32, b: i32) i32 {
+          const sum = a + b;
+          return sum;
+      }
+
+      export fn exported() void {}
+
+      inline fn fast() void {}
+
+      test "adds numbers" {
+          _ = add(1, 2);
+      }
+
+  - path: src/util.zig
+    content: |
+      pub fn helper() void {}
+
+tests:
+  - name: "std is a Constant"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'std' AND d.kind = 'Constant'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Constant"
+          language_kind: "Constant"
+          category: "Value"
+          scope: "top_level"
+          signature: "const std"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "private"
+          generated_by: null
+          language: "zig"
+
+  - name: "Point is a Struct"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Point' AND d.kind = 'Struct'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Struct"
+          language_kind: "Struct"
+          category: "Type"
+          scope: "top_level"
+          signature: "pub const Point = struct"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: "A point in space."
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "zig"
+
+  - name: "Point.x is a Field"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Point.x' AND d.kind = 'Field'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Field"
+          language_kind: "Field"
+          category: "Value"
+          scope: "member"
+          signature: "x: f32"
+          parameters: []
+          return_type: null
+          declared_type: "f32"
+          doc_comment: "The x coordinate."
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "zig"
+
+  - name: "Point.y is a Field"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Point.y' AND d.kind = 'Field'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Field"
+          language_kind: "Field"
+          category: "Value"
+          scope: "member"
+          signature: "y: f32"
+          parameters: []
+          return_type: null
+          declared_type: "f32"
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "zig"
+
+  - name: "Point.init is a Method"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Point.init' AND d.kind = 'Method'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Method"
+          language_kind: "Method"
+          category: "Callable"
+          scope: "member"
+          signature: "pub fn init(x: f32) Point"
+          parameters: ["x: f32"]
+          return_type: "Point"
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "zig"
+
+  - name: "Point.norm is a Method"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Point.norm' AND d.kind = 'Method'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Method"
+          language_kind: "Method"
+          category: "Callable"
+          scope: "member"
+          signature: "fn norm(self: Point) f32"
+          parameters: ["self: Point"]
+          return_type: "f32"
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "private"
+          generated_by: null
+          language: "zig"
+
+  - name: "Color is a Enum"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Color' AND d.kind = 'Enum'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Enum"
+          language_kind: "Enum"
+          category: "Type"
+          scope: "top_level"
+          signature: "const Color = enum"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "private"
+          generated_by: null
+          language: "zig"
+
+  - name: "Color.red is a EnumMember"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Color.red' AND d.kind = 'EnumMember'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "EnumMember"
+          language_kind: "EnumMember"
+          category: "Value"
+          scope: "member"
+          signature: "red"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "zig"
+
+  - name: "Value is a Struct"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Value' AND d.kind = 'Struct'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Struct"
+          language_kind: "Union"
+          category: "Type"
+          scope: "top_level"
+          signature: "pub const Value = union(enum)"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "zig"
+
+  - name: "Value.int is a Field"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'Value.int' AND d.kind = 'Field'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Field"
+          language_kind: "Field"
+          category: "Value"
+          scope: "member"
+          signature: "int: i64"
+          parameters: []
+          return_type: null
+          declared_type: "i64"
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "zig"
+
+  - name: "MAX is a Constant"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'MAX' AND d.kind = 'Constant'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Constant"
+          language_kind: "Constant"
+          category: "Value"
+          scope: "top_level"
+          signature: "pub const MAX: u32"
+          parameters: []
+          return_type: null
+          declared_type: "u32"
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "zig"
+
+  - name: "counter is a Variable"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'counter' AND d.kind = 'Variable'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Variable"
+          language_kind: "Variable"
+          category: "Value"
+          scope: "top_level"
+          signature: "var counter: u32"
+          parameters: []
+          return_type: null
+          declared_type: "u32"
+          doc_comment: ""
+          modifiers: []
+          visibility: "private"
+          generated_by: null
+          language: "zig"
+
+  - name: "add is a Function"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'add' AND d.kind = 'Function'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Function"
+          language_kind: "Function"
+          category: "Callable"
+          scope: "top_level"
+          signature: "pub fn add(a: i32, b: i32) i32"
+          parameters: ["a: i32", "b: i32"]
+          return_type: "i32"
+          declared_type: null
+          doc_comment: "Adds two numbers."
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "zig"
+
+  - name: "add.sum is a Constant"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'add.sum' AND d.kind = 'Constant'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Constant"
+          language_kind: "Constant"
+          category: "Value"
+          scope: "local"
+          signature: "const sum"
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "zig"
+
+  - name: "exported is a Function"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'exported' AND d.kind = 'Function'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Function"
+          language_kind: "Function"
+          category: "Callable"
+          scope: "top_level"
+          signature: "export fn exported() void"
+          parameters: []
+          return_type: "void"
+          declared_type: null
+          doc_comment: ""
+          modifiers: ["extern"]
+          visibility: "private"
+          generated_by: null
+          language: "zig"
+
+  - name: "fast is a Function"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'fast' AND d.kind = 'Function'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Function"
+          language_kind: "Function"
+          category: "Callable"
+          scope: "top_level"
+          signature: "inline fn fast() void"
+          parameters: []
+          return_type: "void"
+          declared_type: null
+          doc_comment: ""
+          modifiers: ["inline"]
+          visibility: "private"
+          generated_by: null
+          language: "zig"
+
+  - name: "A test block is a Test named by its string"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'adds numbers' AND d.kind = 'Test'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Test"
+          language_kind: "Test"
+          category: "Callable"
+          scope: "top_level"
+          signature: 'test "adds numbers"'
+          parameters: []
+          return_type: null
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: null
+          generated_by: null
+          language: "zig"
+
+  - name: "helper is a Function"
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'helper' AND d.kind = 'Function' AND d.file_path = 'src/util.zig'
+      RETURN d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+    assert:
+      - { row_count: 1 }
+      - row:
+          kind: "Function"
+          language_kind: "Function"
+          category: "Callable"
+          scope: "top_level"
+          signature: "pub fn helper() void"
+          parameters: []
+          return_type: "void"
+          declared_type: null
+          doc_comment: ""
+          modifiers: []
+          visibility: "public"
+          generated_by: null
+          language: "zig"
+
+  - name: "Import * from std is module"
+    query: |
+      MATCH (i:Import) WHERE i.import_path = 'std' AND i.name = '*'
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+    assert:
+      - { row_count: 1 }
+      - row:
+          name: "*"
+          alias: "std"
+          import_kind: "module"
+          language_kind: "AliasedImport"
+          import_path: "std"
+          fqn: "std"
+          is_external: true
+
+  - name: "Import * from util.zig is module"
+    query: |
+      MATCH (i:Import) WHERE i.import_path = 'util.zig' AND i.name = '*'
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+    assert:
+      - { row_count: 1 }
+      - row:
+          name: "*"
+          alias: "util"
+          import_kind: "module"
+          language_kind: "AliasedImport"
+          import_path: "util.zig"
+          fqn: "src/util.zig"
+          is_external: false
+
+  - name: "The test block calls the function it tests"
+    query: |
+      MATCH (t:Definition)-[:CALLS]->(f:Definition)
+      WHERE t.kind = 'Test' AND f.fqn = 'add'
+      RETURN t.name AS test
+    assert:
+      - { row_count: 1 }
+      - { row: { test: "adds numbers" } }
+
+  - name: "Every definition kind is in the closed kind list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
+      RETURN d.fqn LIMIT 100
+    assert:
+      - { empty: true }
