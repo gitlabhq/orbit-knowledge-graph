@@ -9,10 +9,13 @@ use super::predicates::{Column, Predicate};
 use super::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 use crate::input::{FilterOp, Input, InputFilter, PredicateTarget};
 
+pub type NullAsEpochColumns = HashMap<String, ontology::DataType>;
+
+/// The type of each compared column that stores null as the epoch, so the epoch literal matches it.
 #[derive(Clone, Copy, PartialEq)]
 pub struct NullAsEpoch {
-    pub column: bool,
-    pub rhs: bool,
+    pub column: Option<ontology::DataType>,
+    pub rhs: Option<ontology::DataType>,
 }
 
 #[derive(Clone)]
@@ -150,8 +153,9 @@ pub fn bind_filter(
         unique: property_id.is_some_and(|property| model.property_unique(property)),
         immutable: property_id.is_some_and(|property| !model.property_mutable(property)),
         null_as_epoch: NullAsEpoch {
-            column: property_id.is_some_and(|property| model.null_as_epoch(property)),
-            rhs: false,
+            column: data_type
+                .filter(|_| property_id.is_some_and(|property| model.null_as_epoch(property))),
+            rhs: None,
         },
     }
 }

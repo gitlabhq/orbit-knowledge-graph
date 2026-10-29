@@ -1,11 +1,9 @@
 //! Predicates and projections the planner attaches to relations, and the facts about a predicate the
 //! planner asks for: selective, a point lookup, or filtering the sort key.
 
-use std::collections::HashSet;
-
 use ontology::constants::*;
 
-use super::filters::{BoundFilter, NullAsEpoch};
+use super::filters::{BoundFilter, NullAsEpoch, NullAsEpochColumns};
 use super::graph::RelationId;
 use crate::input::{BooleanExpression, FilterOp, InputFilter};
 
@@ -164,7 +162,7 @@ impl Predicate {
 #[derive(Clone, PartialEq)]
 pub enum OutputValue {
     Column(Column),
-    EpochAsNull(Column),
+    EpochAsNull(Column, ontology::DataType),
     Text(String),
     Depth(u32),
     Path(Vec<(Column, Column)>),
@@ -181,17 +179,16 @@ pub enum OutputValue {
 }
 
 impl OutputValue {
-    pub fn property(null_as_epoch: &HashSet<String>, column: Column) -> Self {
-        if null_as_epoch.contains(&column.name) {
-            Self::EpochAsNull(column)
-        } else {
-            Self::Column(column)
+    pub fn property(null_as_epoch: &NullAsEpochColumns, column: Column) -> Self {
+        match null_as_epoch.get(&column.name) {
+            Some(data_type) => Self::EpochAsNull(column, *data_type),
+            None => Self::Column(column),
         }
     }
 
     pub fn column(&self) -> Option<&Column> {
         match self {
-            Self::Column(column) | Self::EpochAsNull(column) => Some(column),
+            Self::Column(column) | Self::EpochAsNull(column, _) => Some(column),
             _ => None,
         }
     }
