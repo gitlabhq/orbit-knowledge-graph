@@ -65,6 +65,13 @@ fn gql_count_distinct_renders_distinct_aggregates() {
 }
 
 #[test]
+fn gql_count_distinct_property_renders_one_distinct_aggregate() {
+    let orbit_query = "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id}, count(DISTINCT n.confidential) AS flags LIMIT 10";
+    let result = compile(orbit_query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
+    assert_eq!(result.base.render().matches("countDistinct").count(), 1);
+}
+
+#[test]
 fn group_by_property_truncate_month_wraps_column() {
     let orbit_query = "MATCH (u:Note {confidential: false}) RETURN date_trunc('month', u.created_at), count(u) AS n LIMIT 50";
     let result = compile(orbit_query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
