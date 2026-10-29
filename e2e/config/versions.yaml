@@ -41,26 +41,26 @@ gitlab_lanes:
     ref: "e9d659672da832985a6e2a3d8ebbbdae8cbb3198"
     images:
       webservice:
-        digest: "sha256:cd923cd8ba7d43bbcdc9769f2a707dd0670bd1e0d02e841d3f91d9ca59e1f4f3"
+        digest: "sha256:0bae019f37599425e7f1f039f329a52d80946c8fcad0661a1c6ed8d372c577b0"
       workhorse:
-        digest: "sha256:5a2677d023a4cc5b6bec93bb422a14db95fd328d8d200b7c8a4ff2d817f0f16a"
+        digest: "sha256:84c069d8be936a43b3c28c976e1db3d44f3e05073503aa4e09bb1da55d4a088a"
       sidekiq:
-        digest: "sha256:b03b40dc4e2586be2cb4c983cc21a12105183e3439408bf267cbc38764c76aee"
+        digest: "sha256:38844b3525c486f9c15b0bd4ff750fdaffb720a9cbcfb13e3a565cf8b4b6a529"
       toolbox:
-        digest: "sha256:10212b18a047a6246e03a30ab248dce6c173f9024e7e8f82dd7b78e3f12be7c0"
+        digest: "sha256:b8d120556c2e9758e6274221ca4bc829e32df9df8ca8d1109017b6fc7671e3eb"
     repository: registry.gitlab.com/gitlab-org/build/cng-mirror
   "19-5":
     chart: "10.5.1"
     ref: "afad57791f099fd9d8a0e7c584dc8e08b4c0cb5c"
     images:
       webservice:
-        digest: "sha256:180dc6f71344b89d97d796eb009416aa15345ab6fdac516bc3576d9571d33cd0"
+        digest: "sha256:52645c59726c2367b6d2621fcb638a18702a8a59eb42f57f6cc7bb9eee4fae84"
       workhorse:
-        digest: "sha256:333c4f55493f117401fc32c688b839e31a32a7049e0592596da1d9f7e7cc5149"
+        digest: "sha256:67812cb9c6e01781e0767c092ffa1b3e790f72877784d1a5419f435c5ac10ea1"
       sidekiq:
-        digest: "sha256:56280cd163672c8cf1a223c188ba9365d2187255cb1dbd6578baeeea56477b1b"
+        digest: "sha256:eb86278242fe761440a8a420abd58e9ccff734419a7df12fd633860adf632bab"
       toolbox:
-        digest: "sha256:04d4aa3abef5138116b2c27113a6bc4357a81e3f78f47a1a7455313928d3bc38"
+        digest: "sha256:15bb326d9d4fb893c84761b4e524de20d29323d22e3997adaa9b2e6693d6932a"
     repository: registry.gitlab.com/gitlab-org/build/cng-mirror
 gkg:
   chart: "4.1.0"
