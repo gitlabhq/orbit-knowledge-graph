@@ -229,13 +229,23 @@ impl Pipeline {
 
         let transform = self.registry.build(plan)?;
         let outputs = transform.outputs().to_vec();
-        let node_diff = plan.edge_diff.as_ref().map(|diff| {
-            let previous_edges = self.registry.sql(
-                format!("{} edge diff", plan.name),
-                diff.key_transforms().to_vec(),
-            );
-            (diff, previous_edges)
-        });
+        let node_diff = plan
+            .edge_diff
+            .as_ref()
+            .map(|diff| {
+                if !diff.probes_match(&outputs) {
+                    return Err(HandlerError::Processing(format!(
+                        "plan {} edge diff probes do not match its outputs",
+                        plan.name
+                    )));
+                }
+                let previous_edges = self.registry.sql(
+                    format!("{} edge diff", plan.name),
+                    diff.key_transforms().to_vec(),
+                );
+                Ok((diff, previous_edges))
+            })
+            .transpose()?;
         let params = base_query.params();
         let plan_limit = base_query.batch_size();
         base_query.set_batch_size(first_page_limit(plan_limit));

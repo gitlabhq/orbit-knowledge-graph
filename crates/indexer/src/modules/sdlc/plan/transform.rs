@@ -208,7 +208,7 @@ pub(in crate::modules::sdlc) fn fk_edge_key_transform(
     namespaced: bool,
     ontology: &Ontology,
 ) -> Result<Vec<Transformation>, ontology::OntologyError> {
-    edge_transformations(
+    Ok(edge_transformations(
         &mapping.label,
         mapping,
         namespaced,
@@ -216,7 +216,13 @@ pub(in crate::modules::sdlc) fn fk_edge_key_transform(
         Vec::new(),
         false,
         ontology,
-    )
+    )?
+    .into_iter()
+    .map(|transformation| Transformation {
+        dict_encode_columns: HashSet::new(),
+        ..transformation
+    })
+    .collect())
 }
 
 fn fk_edge_filters(mapping: &EdgeMapping) -> Vec<EdgeFilter> {
