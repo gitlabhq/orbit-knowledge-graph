@@ -211,11 +211,11 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         }
         let prefix = relation.column_prefix();
         let suffixes = [
-            EDGE_TYPE_SUFFIX,
+            EDGE_KIND_SUFFIX,
             EDGE_SRC_SUFFIX,
-            EDGE_SRC_TYPE_SUFFIX,
+            EDGE_SRC_KIND_SUFFIX,
             EDGE_DST_SUFFIX,
-            EDGE_DST_TYPE_SUFFIX,
+            EDGE_DST_KIND_SUFFIX,
         ];
         self.outputs.extend(
             values
@@ -309,11 +309,11 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
     }
 
     fn ids_reached_by(&mut self, source: RelationId, column: &str) -> IdSet {
-        let bound = self.graph.bind(source, "_id_source");
+        let bound = self.graph.bind(source, id_source_alias());
         let id = self.graph.project(
             bound,
             vec![Projection::new(
-                OutputValue::Column(Column::new("_id_source", column)),
+                OutputValue::Column(Column::new(id_source_alias(), column)),
                 DEFAULT_PRIMARY_KEY,
             )],
         );

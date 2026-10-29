@@ -14,6 +14,6 @@ physical:
   clickhouse:
     emitted:
       expect:
-        - (Union ALL AS e (_) (_))
-        - (Scan Table(gl_code_edge) AS _e)
-        - (Scan Table(gl_edge) AS _e)
+        - (Union ALL AS _orbit_neighbor_edge (_) (_))
+        - (Scan Table(gl_code_edge) AS _orbit_neighbor_edge_arm)
+        - (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm)

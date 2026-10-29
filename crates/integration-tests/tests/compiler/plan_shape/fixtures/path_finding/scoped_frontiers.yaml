@@ -28,12 +28,12 @@ physical:
         - (Filter b.id = 2, ... (NodeScan Definition AS b))
     emitted:
       ctes:
-        exact_order: [_nf_a, _nf_b, _path_scope_traversal_paths, forward, backward]
+        exact_order: [_orbit_nf_a, _orbit_nf_b, _orbit_path_scope, _orbit_forward, _orbit_backward]
       expect:
-        - (CTE _path_scope_traversal_paths (Union ALL (_) (_)))
-        - (Filter e1.traversal_path IN _path_scope_traversal_paths.traversal_path, e1.source_id IN _nf_a.id, ... (_))
-        - (Filter e1.traversal_path IN _path_scope_traversal_paths.traversal_path, e1.target_id IN _nf_b.id, ... (_))
-        - (Join ON (f.end_id = b.end_id) AND (f.end_kind = b.end_kind) AND (f.traversal_path = b.traversal_path) (_) (_))
+        - (CTE _orbit_path_scope (Union ALL (_) (_)))
+        - (Filter _orbit_e1.traversal_path IN _orbit_path_scope.traversal_path, _orbit_e1.source_id IN _orbit_nf_a.id, ... (_))
+        - (Filter _orbit_e1.traversal_path IN _orbit_path_scope.traversal_path, _orbit_e1.target_id IN _orbit_nf_b.id, ... (_))
+        - (Join ON (_orbit_forward._orbit_end_node = _orbit_backward._orbit_end_node) AND (_orbit_forward._orbit_end_kind = _orbit_backward._orbit_end_kind) AND (_orbit_forward.traversal_path = _orbit_backward.traversal_path) (_) (_))
   duckdb:
     planned:
       expect:
@@ -42,4 +42,4 @@ physical:
       expect:
         - (CTE _ (_))
         - (Scan Table(gl_edge) ...)
-        - (Join ON (f.end_id = b.end_id) AND (f.end_kind = b.end_kind) AND (f.traversal_path = b.traversal_path) (_) (_))
+        - (Join ON (_orbit_forward._orbit_end_node = _orbit_backward._orbit_end_node) AND (_orbit_forward._orbit_end_kind = _orbit_backward._orbit_end_kind) AND (_orbit_forward.traversal_path = _orbit_backward.traversal_path) (_) (_))

@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use query_data_model::OrbitQueryModel;
 
 use super::{EdgeRelation, Fk, NodePlan};
-use crate::constants::internal_column_prefix;
+use crate::constants::{EDGE_PATH_NODES_SUFFIX, edge_column_prefix, edge_relation_alias};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::filters::{FilterOwner, ordered_filters};
@@ -32,11 +32,11 @@ impl EdgeRelation {
     }
 
     pub fn column_prefix(&self) -> String {
-        if self.max_hops > 1 {
-            format!("hop_e{}_", self.input_index)
-        } else {
-            format!("e{}_", self.input_index)
-        }
+        edge_column_prefix(self.input_index, self.max_hops > 1)
+    }
+
+    pub fn path_nodes_column(&self) -> String {
+        format!("{}{EDGE_PATH_NODES_SUFFIX}", self.column_prefix())
     }
 
     pub(super) fn endpoint_column(&self, node: &str) -> Option<&'static str> {
@@ -144,7 +144,7 @@ where
                     .iter()
                     .filter_map(|kind| model.graph().relationship_id(kind))
                     .collect(),
-                alias: format!("{}edge_{input_index}", internal_column_prefix()),
+                alias: edge_relation_alias(input_index),
                 source_entity: model.graph().entity_id(source),
                 target_entity: model.graph().entity_id(target),
                 from_node: relationship.from.clone(),

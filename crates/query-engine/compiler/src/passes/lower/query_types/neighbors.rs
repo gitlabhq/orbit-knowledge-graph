@@ -39,7 +39,7 @@ pub(crate) fn emit(plan: &Plan<Neighbors>, input: &Input) -> Result<Emitted> {
             TARGET_KIND_COLUMN,
         ]
         .into_iter()
-        .map(|column| OrderExpr::asc(Expr::col("e", column)))
+        .map(|column| OrderExpr::asc(Expr::col(neighbor_edge_alias(), column)))
         .collect(),
     };
     Ok(Emitted {
@@ -84,9 +84,8 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     let center_node_ids = cnp.node_ids.clone();
     let center_filters = cnp.filters.clone();
     let center_id_range = cnp.id_range.clone();
-    let edge_alias = "e";
-
-    let center_rows = "_ctr";
+    let edge_alias = neighbor_edge_alias();
+    let center_rows = center_rows_cte();
     let center_lookup = |edge: &str, edge_col: &str| Expr::InSelect {
         expr: Box::new(Expr::col(edge, edge_col)),
         query: Box::new(Query {

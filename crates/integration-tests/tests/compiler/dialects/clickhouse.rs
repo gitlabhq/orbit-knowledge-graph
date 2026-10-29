@@ -302,8 +302,14 @@ fn path_finding_query() {
     let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("forward AS"), "should have forward CTE");
-    assert!(rendered.contains("backward AS"), "should have backward CTE");
+    assert!(
+        rendered.contains("_orbit_forward AS"),
+        "should have forward CTE"
+    );
+    assert!(
+        rendered.contains("_orbit_backward AS"),
+        "should have backward CTE"
+    );
     assert!(rendered.contains("UNION ALL"));
     assert!(
         rendered.contains("arrayConcat"),
@@ -314,7 +320,8 @@ fn path_finding_query() {
         "path nodes should be typed tuples"
     );
     assert!(
-        rendered.contains("f.end_id") && rendered.contains("b.end_id"),
+        rendered.contains("_orbit_forward._orbit_end_node")
+            && rendered.contains("_orbit_backward._orbit_end_node"),
         "should join forward and backward on end_id"
     );
 }
@@ -380,9 +387,9 @@ fn neighbors_query() {
     let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("_orbit_neighbor_id"));
-    assert!(rendered.contains("_orbit_neighbor_type"));
-    assert!(rendered.contains("_orbit_relationship_type"));
+    assert!(rendered.contains("_orbit_neighbor_node"));
+    assert!(rendered.contains("_orbit_neighbor_kind"));
+    assert!(rendered.contains("_orbit_relationship_kind"));
     assert!(
         rendered.contains("_orbit_neighbor_is_outgoing"),
         "bidirectional should include direction"
@@ -393,7 +400,10 @@ fn neighbors_query() {
         "pinned both should scan each direction on its own id column; a fused \
          source_id OR target_id scan stops the primary key and both bloom indexes"
     );
-    assert!(rendered.contains("(e.source_id = 100)") && rendered.contains("(e.target_id = 100)"));
+    assert!(
+        rendered.contains("(_orbit_neighbor_edge.source_id = 100)")
+            && rendered.contains("(_orbit_neighbor_edge.target_id = 100)")
+    );
 }
 
 #[test]
@@ -412,8 +422,8 @@ fn neighbors_project_the_edge_path_only_when_it_is_the_neighbors_own() {
     );
     assert!(
         authored
-            .contains("((e.relationship_kind = 'AUTHORED') AND (e.target_kind = 'MergeRequest'))")
-            && authored.contains("e.traversal_path, '') AS _orbit_neighbor_tp"),
+            .contains("((_orbit_neighbor_edge.relationship_kind = 'AUTHORED') AND (_orbit_neighbor_edge.target_kind = 'MergeRequest'))")
+            && authored.contains("_orbit_neighbor_edge.traversal_path, '') AS _orbit_neighbor_traversal_path"),
         "{authored}"
     );
 
@@ -422,7 +432,7 @@ fn neighbors_project_the_edge_path_only_when_it_is_the_neighbors_own() {
         "MATCH (p:Project {id: 1})-[:IN_PROJECT]-(n) RETURN p, n",
     );
     assert!(
-        in_project.contains("'' AS _orbit_neighbor_tp"),
+        in_project.contains("'' AS _orbit_neighbor_traversal_path"),
         "{in_project}"
     );
 }
@@ -777,7 +787,7 @@ fn multi_table_neighbors_scans_all_tables() {
 
 use crate::compiler::setup::{admin_ctx, embedded_ontology};
 
-const SCOPED_LOOKUP: &str = "FROM gl_project AS _scope WHERE";
+const SCOPED_LOOKUP: &str = "FROM gl_project AS _orbit_scope WHERE";
 
 fn render_scoped(json: &str, orbit_query: &str) -> String {
     compile_pair(json, orbit_query, &embedded_ontology(), &admin_ctx())
@@ -801,7 +811,7 @@ fn scoped_traversal_injects_tight_prefix() {
     }"#;
     let sql = render_scoped(json, orbit_query);
     assert!(
-        sql.contains(SCOPED_LOOKUP) && sql.contains("(_scope.id = 1)"),
+        sql.contains(SCOPED_LOOKUP) && sql.contains("(_orbit_scope.id = 1)"),
         "{sql}"
     );
 }
@@ -820,7 +830,8 @@ fn scoped_authorization_join_injects_tight_prefix() {
     }"#;
     let sql = render_scoped(json, orbit_query);
     assert!(
-        sql.contains("startsWith(c.traversal_path, (SELECT") && sql.contains("(_scope.id = 5)"),
+        sql.contains("startsWith(c.traversal_path, (SELECT")
+            && sql.contains("(_orbit_scope.id = 5)"),
         "the caller's authorization scan must carry the project prefix: {sql}"
     );
 }
@@ -841,7 +852,7 @@ fn scoped_aggregation_injects_tight_prefix() {
     }"#;
     let sql = render_scoped(json, orbit_query);
     assert!(
-        sql.contains(SCOPED_LOOKUP) && sql.contains("(_scope.id = 1)"),
+        sql.contains(SCOPED_LOOKUP) && sql.contains("(_orbit_scope.id = 1)"),
         "{sql}"
     );
 }
@@ -869,8 +880,8 @@ fn scoped_count_condition_excludes_the_scope_lookup() {
         .split(" AS n")
         .next()
         .unwrap();
-    assert!(!count_arg.contains("_scope"), "{sql}");
-    assert!(sql.contains("FROM gl_group AS _scope WHERE"), "{sql}");
+    assert!(!count_arg.contains("_orbit_scope"), "{sql}");
+    assert!(sql.contains("FROM gl_group AS _orbit_scope WHERE"), "{sql}");
 }
 
 #[test]

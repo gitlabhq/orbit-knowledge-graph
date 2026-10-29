@@ -14,4 +14,4 @@ cases:
           expect:
             - (Deduplicate LimitBy ... (_))
             - (Scan Table(gl_ci_edge) AS _orbit_edge_0)
-            - (Project _orbit_edge_0.relationship_kind AS e0_type, ... (_))
+            - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, ... (_))

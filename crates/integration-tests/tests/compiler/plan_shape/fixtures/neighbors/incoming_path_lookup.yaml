@@ -15,6 +15,6 @@ physical:
       expect: ["(Neighbors center=g direction=incoming directional ... (_))"]
     emitted:
       expect:
-        - (SemiJoin e.target_id IN subquery (Filter e.target_kind = 'Group', e.target_id = 100, e.relationship_kind = 'MEMBER_OF' (Scan Table(gl_edge) AS e)) (Project _ctr.id AS id (Scan Table(_ctr) AS _ctr)))
+        - (SemiJoin _orbit_neighbor_edge.target_id IN subquery (Filter _orbit_neighbor_edge.target_kind = 'Group', _orbit_neighbor_edge.target_id = 100, _orbit_neighbor_edge.relationship_kind = 'MEMBER_OF' (Scan Table(gl_edge) AS _orbit_neighbor_edge)) (Project _orbit_center_rows.id AS id (Scan Table(_orbit_center_rows) AS _orbit_center_rows)))
       reject:
-        - (SemiJoin e.traversal_path IN subquery (_))
+        - (SemiJoin _orbit_neighbor_edge.traversal_path IN subquery (_))
