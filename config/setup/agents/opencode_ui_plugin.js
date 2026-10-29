@@ -1,12 +1,53 @@
 /*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
 var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/;
-function simpleCommands(command) {
+var SUBSTITUTION = /\$\(|`/;
+function arithmeticEnd(command, open) {
+  let depth = 2;
+  for (let i = open + 2;i < command.length; i++) {
+    if (command[i] === "(")
+      depth++;
+    else if (command[i] === ")") {
+      if (depth === 2 && command[i + 1] === ")")
+        return i + 2;
+      if (--depth < 2)
+        return -1;
+    }
+  }
+  return -1;
+}
+function heredocOperand(command, from) {
+  let i = from;
+  let delimiter = "";
+  let quoted = false;
+  while (i < command.length && !/[\s;&|<>()]/.test(command[i] ?? "")) {
+    const c = command[i] ?? "";
+    if (c === "'" || c === '"') {
+      const close = command.indexOf(c, i + 1);
+      quoted = true;
+      delimiter += command.slice(i + 1, close < 0 ? command.length : close);
+      i = close < 0 ? command.length : close + 1;
+    } else if (c === "\\") {
+      quoted = true;
+      delimiter += command[i + 1] ?? "";
+      i += 2;
+    } else {
+      delimiter += c;
+      i++;
+    }
+  }
+  return { delimiter, quoted, end: i };
+}
+function parseCommands(command) {
   const commands = [];
   let words = [];
   let word = "";
   let inWord = false;
   let quote = "";
+  let ansiQuote = false;
+  let dollarAt = -1;
   let piped = false;
+  let unparsed = false;
+  const heredocs = [];
   const endWord = () => {
     if (inWord)
       words.push(word);
@@ -20,18 +61,38 @@ function simpleCommands(command) {
     words = [];
     piped = false;
   };
+  const skipHeredocBodies = (newline) => {
+    let at = newline + 1;
+    for (const { delimiter, stripTabs, quoted } of heredocs.splice(0)) {
+      let closed = false;
+      while (at < command.length && !closed) {
+        const end = command.indexOf(`
+`, at);
+        const line = command.slice(at, end < 0 ? command.length : end);
+        at = end < 0 ? command.length : end + 1;
+        closed = (stripTabs ? line.replace(/^\t+/, "") : line) === delimiter;
+        if (!closed && !quoted && SUBSTITUTION.test(line))
+          words.push("$(");
+      }
+      if (!closed)
+        unparsed = true;
+    }
+    return at - 1;
+  };
   for (let i = 0;i < command.length; i++) {
     const c = command[i] ?? "";
     if (quote !== "'" && (c === "`" || c === "$" && command[i + 1] === "("))
       words.push(c === "`" ? "`" : "$(");
     if (quote) {
-      if (c === quote)
+      if (c === quote) {
         quote = "";
-      else if (c === "\\" && quote === '"' && i + 1 < command.length)
+        ansiQuote = false;
+      } else if (c === "\\" && (quote === '"' || ansiQuote) && i + 1 < command.length)
         word += command[++i];
       else
         word += c;
     } else if (c === "'" || c === '"') {
+      ansiQuote = c === "'" && inWord && dollarAt === i - 1;
       quote = c;
       inWord = true;
     } else if (c === "\\" && command[i + 1] === `
@@ -41,6 +102,13 @@ function simpleCommands(command) {
     } else if (c === "\\" && i + 1 < command.length) {
       word += command[++i];
       inWord = true;
+    } else if (c === "$" && command[i + 1] === "(" && command[i + 2] === "(" && arithmeticEnd(command, i + 1) >= 0 || c === "(" && command[i + 1] === "(" && !inWord && (words.length === 0 || words[0] === "for") && arithmeticEnd(command, i) >= 0) {
+      const end = arithmeticEnd(command, c === "$" ? i + 1 : i);
+      if (SUBSTITUTION.test(command.slice(i, end)))
+        words.push("$(");
+      if (c === "$")
+        inWord = true;
+      i = end - 1;
     } else if ("&>".includes(c) && HARMLESS_REDIRECT.test(command.slice(i))) {
       if (/^\d+$/.test(word) && /\d/.test(command[i - 1] ?? "")) {
         word = "";
@@ -48,6 +116,33 @@ function simpleCommands(command) {
       } else
         endWord();
       i += (command.slice(i).match(HARMLESS_REDIRECT)?.[0].length ?? 1) - 1;
+    } else if (c === "<" || c === ">" || c === "&" && command[i + 1] === ">") {
+      if (inWord && /^\d+$/.test(word) && /\d/.test(command[i - 1] ?? "")) {
+        word = "";
+        inWord = false;
+      } else
+        endWord();
+      if (c === "&")
+        i++;
+      const operator = command[i] ?? c;
+      if (operator === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
+        i += 2;
+        words.push("<");
+      } else if (operator === "<" && command[i + 1] === "<") {
+        const stripTabs = command[i + 2] === "-";
+        const operand = heredocOperand(command, i + (stripTabs ? 3 : 2) + (command.slice(i + (stripTabs ? 3 : 2)).match(/^[ \t]*/)?.[0].length ?? 0));
+        if (!operand.delimiter)
+          unparsed = true;
+        else
+          heredocs.push({ delimiter: operand.delimiter, stripTabs, quoted: operand.quoted });
+        i = operand.end - 1;
+      } else {
+        if (operator === ">" && command[i + 1] === ">")
+          i++;
+        if (operator === ">" && (command[i + 1] === "|" || command[i + 1] === "&"))
+          i++;
+        words.push(operator);
+      }
     } else if (c === "|" && command[i + 1] !== "|") {
       endCommand();
       piped = true;
@@ -55,21 +150,27 @@ function simpleCommands(command) {
         i++;
     } else if (c === `
 ` || ";&|()".includes(c)) {
+      if (c === `
+` && heredocs.length)
+        i = skipHeredocBodies(i);
       endCommand();
       if ("&|".includes(c) && command[i + 1] === c)
         i++;
-    } else if ("<>".includes(c) || c === "#" && !inWord) {
-      endWord();
-      words.push(c);
+    } else if (c === "#" && !inWord) {
+      while (i + 1 < command.length && command[i + 1] !== `
+`)
+        i++;
     } else if (/\s/.test(c)) {
       endWord();
     } else {
+      if (c === "$")
+        dollarAt = i;
       word += c;
       inWord = true;
     }
   }
   endCommand();
-  return commands;
+  return { commands, unparsed: unparsed || quote !== "" };
 }
 function orbitWords(words) {
   let i = 0;
@@ -86,50 +187,88 @@ function orbitWords(words) {
   return words.slice(i);
 }
 var PREFIX_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
-function runnable(command) {
-  const out = [];
-  let heredoc = "";
-  for (const words of simpleCommands(command)) {
-    if (heredoc) {
-      if (words.join(" ") === heredoc)
-        heredoc = "";
+var SUBSTITUTION_MARKERS = ["$(", "`"];
+function withoutRedirects(words) {
+  const kept = [];
+  const writes = [];
+  let readsInput = false;
+  for (let i = 0;i < words.length; i++) {
+    const word = words[i] ?? "";
+    if (word !== "<" && word !== ">") {
+      kept.push(word);
       continue;
     }
-    const at = words.findIndex((word, i) => word === "<" && words[i + 1] === "<");
-    if (at >= 0)
-      heredoc = (words[at + 2] ?? "").replace(/^-/, "");
-    const piped = words[0] === "|";
-    let i = piped ? 1 : 0;
+    const target = words[i + 1];
+    const hasTarget = target !== undefined && !["<", ">", ...SUBSTITUTION_MARKERS].includes(target);
+    if (word === "<")
+      readsInput = true;
+    else if (hasTarget)
+      writes.push(target);
+    if (hasTarget)
+      i++;
+  }
+  return { words: kept, readsInput, writes };
+}
+function runnable(command) {
+  const { commands, unparsed } = parseCommands(command);
+  const runs = [];
+  for (const raw of commands) {
+    const piped = raw[0] === "|";
+    const { words, readsInput, writes } = withoutRedirects(piped ? raw.slice(1) : raw);
+    let i = 0;
     while (PREFIX_WORDS.has(words[i] ?? ""))
       i++;
-    if (i < words.length)
-      out.push({ piped, words: words.slice(i) });
+    const substitutes = raw.some((word) => SUBSTITUTION_MARKERS.includes(word));
+    if (i < words.length || writes.length || substitutes)
+      runs.push({ piped, words: words.slice(i), readsInput, writes, substitutes });
   }
-  return out;
+  return { runs, unparsed };
 }
 function orbitInvocations(command) {
-  return runnable(command).map(({ words }) => orbitWords(words)).filter((words) => words !== null);
+  return runnable(command).runs.map(({ words }) => orbitWords(words)).filter((words) => words !== null);
 }
 var SHELL_WORDS = new Set(["cd", "pushd", "popd", "true", ":", "fi", "done", "esac", "}"]);
-var READ_ONLY_FILTERS = new Set(["head", "tail", "wc", "grep", "jq", "cut"]);
-function otherCommands(command) {
-  const others = new Set;
-  for (const { piped, words } of runnable(command)) {
-    if (words.includes("$(") || words.includes("`"))
-      others.add("$(...)");
-    words.forEach((word, i) => {
-      if (word === ">" && words[i + 1] !== ">")
-        others.add("> " + (words[i + 1] ?? ""));
-    });
-    if (orbitWords(words))
-      continue;
-    const program = words.find((word) => !/^\w+=/.test(word))?.split("/").pop();
-    if (!program || ["$(", "`", "<", ">", "#"].includes(program) || SHELL_WORDS.has(program))
-      continue;
-    if (!(piped && READ_ONLY_FILTERS.has(program)))
-      others.add(program);
+var FILTER_MAX_OPERANDS = { head: 0, tail: 0, wc: 0, cut: 0, grep: 1, jq: 1 };
+var FILTER_FILE_OPTIONS = {
+  grep: /^-[A-Za-z]*[rRdf]|^--(?:recursive|dereference-recursive|directories|file)/,
+  jq: /^-[A-Za-z]*[fL]|^--(?:from-file|slurpfile|rawfile|argfile)/
+};
+var OPTION_TAKING_NUMBER = /^-[A-Za-z]*[nNcmABCfb]$|^--(?:lines|bytes|max-count|after-context|before-context|context)$/;
+function isQuietFilter(program, args, readsInput) {
+  const maxOperands = FILTER_MAX_OPERANDS[program];
+  if (maxOperands === undefined || readsInput)
+    return false;
+  let operands = 0;
+  for (const [i, arg] of args.entries()) {
+    if (arg.startsWith("-")) {
+      if (FILTER_FILE_OPTIONS[program]?.test(arg))
+        return false;
+    } else if (!(/^\d+$/.test(arg) && OPTION_TAKING_NUMBER.test(args[i - 1] ?? "")))
+      operands++;
   }
-  return [...others];
+  return operands <= maxOperands;
+}
+function otherCommands(command, orbitExtras = []) {
+  const { runs, unparsed } = runnable(command);
+  const programs = new Set(unparsed ? ["unparsed"] : []);
+  const writes = new Set;
+  for (const run of runs) {
+    if (run.substitutes)
+      programs.add("$(...)");
+    for (const target of run.writes)
+      writes.add("> " + target);
+    if (orbitWords(run.words))
+      continue;
+    const at = run.words.findIndex((word) => !/^\w+=/.test(word));
+    const program = run.words[at];
+    if (program === undefined || SUBSTITUTION_MARKERS.includes(program))
+      continue;
+    const bare = !program.includes("/");
+    if (bare && (SHELL_WORDS.has(program) || run.piped && isQuietFilter(program, run.words.slice(at + 1), run.readsInput)))
+      continue;
+    programs.add(program);
+  }
+  return [...programs, ...orbitExtras, ...writes];
 }
 function subcommandOf(words, known) {
   const [sub, ...rest] = words;
@@ -355,7 +494,7 @@ function callOf(label, detail) {
   return { label: label.done, active: label.running, detail };
 }
 function clip(text, max) {
-  const flat = text.replace(/\s+/g, " ").trim();
+  const flat = text.replace(/\s+/g, " ").replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim();
   return flat.length > max ? flat.slice(0, max - 1) + "\u2026" : flat;
 }
 function firstArg(args, valueFlags) {
@@ -389,24 +528,39 @@ function stringField(input, key) {
   return typeof value === "string" ? value : undefined;
 }
 var MAX_DETAIL = 96;
-var MAX_OTHERS = 48;
+var MAX_OTHER_LENGTH = 40;
+var MAX_OTHERS_SHOWN = 6;
+function invocationOf(words, known) {
+  if (words.length === 0 || words.some((arg) => arg === "--help" || arg === "-h"))
+    return null;
+  const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
+  if (!sub)
+    return { call: null, name: "orbit " + words[0] };
+  const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
+  const label = isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY;
+  return { call: callOf(label, detailFor(sub.key, sub.args, known)), name: "orbit " + sub.key };
+}
 function describeCommand(command, known = NO_ENTITIES) {
-  const calls = orbitInvocations(command).flatMap((words) => {
-    const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
-    if (!sub || sub.args.some((arg) => arg === "--help" || arg === "-h"))
-      return [];
-    const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
-    return [callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args, known))];
-  });
+  const invocations = orbitInvocations(command).flatMap((words) => invocationOf(words, known) ?? []);
+  const calls = invocations.flatMap(({ call }) => call ?? []);
   const [first] = calls;
   if (!first)
     return null;
   const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(", ");
-  const others = otherCommands(command);
+  const otherOrbit = invocations.filter(({ call }) => call?.label !== first.label).map(({ name }) => name);
+  const others = otherCommands(command, [...new Set(otherOrbit)]);
   return { ...first, detail: clip(detail, MAX_DETAIL), ...others.length ? { others } : {} };
 }
+function otherLabel(other) {
+  const text = clip(other, MAX_OTHER_LENGTH);
+  return /[,\s]/.test(text) && !text.startsWith("> ") ? `'${text}'` : text;
+}
 function othersText(call) {
-  return call.others?.length ? "  + " + clip(call.others.join(", "), MAX_OTHERS) : "";
+  if (!call.others?.length)
+    return "";
+  const shown = call.others.slice(0, MAX_OTHERS_SHOWN).map(otherLabel);
+  const hidden = call.others.length - shown.length;
+  return "  + " + shown.join(", ") + (hidden > 0 ? `, \u2026 +${hidden} more` : "");
 }
 function describeOrbitCall(tool, input, known = NO_ENTITIES) {
   const command = stringField(input, "command");
