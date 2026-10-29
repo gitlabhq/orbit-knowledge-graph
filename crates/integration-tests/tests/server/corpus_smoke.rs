@@ -455,7 +455,7 @@ fn push_shell_doc_queries(
 ) {
     const QUERY_KEYWORDS: &str = "MATCH|CALL";
     static COMMAND: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r"\borbit\s+query\b(.*)").unwrap());
+        LazyLock::new(|| regex::Regex::new(r"\borbit\s+query\b").unwrap());
     static QUERY_WORD: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(&format!(r"(?i)\b({QUERY_KEYWORDS})\b")).unwrap());
     static QUERY_START: LazyLock<regex::Regex> =
@@ -466,27 +466,32 @@ fn push_shell_doc_queries(
         LazyLock::new(|| regex::Regex::new(r"(?i)<[a-z][\w./-]*>").unwrap());
 
     for (offset, command_line) in shell_command_lines(body) {
-        let Some(args) = COMMAND
-            .captures(&command_line)
-            .map(|caps| caps.get(1).unwrap())
-        else {
-            continue;
-        };
-        let args = args.as_str();
-        if !QUERY_WORD.is_match(args) || PLACEHOLDER.is_match(args) {
-            continue;
-        }
-        let key = format!("{path_label}:{}", line + 1 + offset);
-        let query = QUOTED
-            .captures_iter(args)
-            .filter_map(|caps| caps.get(1).or_else(|| caps.get(2)))
-            .map(|m| m.as_str())
-            .find(|quoted| QUERY_START.is_match(quoted));
-        match query {
-            Some(query) => cases.push(SmokeCase::runs(key, query.to_string(), Frontend::Gql)),
-            None => failures.push(format!(
-                "{key}: cannot read the query on this `orbit query` line; put the whole query in one pair of quotes"
-            )),
+        let starts: Vec<usize> = COMMAND.find_iter(&command_line).map(|m| m.end()).collect();
+        let ends = COMMAND
+            .find_iter(&command_line)
+            .skip(1)
+            .map(|m| m.start())
+            .chain([command_line.len()]);
+        for args in starts
+            .iter()
+            .zip(ends)
+            .map(|(&start, end)| &command_line[start..end])
+        {
+            if !QUERY_WORD.is_match(args) || PLACEHOLDER.is_match(args) {
+                continue;
+            }
+            let key = format!("{path_label}:{}", line + 1 + offset);
+            let query = QUOTED
+                .captures_iter(args)
+                .filter_map(|caps| caps.get(1).or_else(|| caps.get(2)))
+                .map(|m| m.as_str())
+                .find(|quoted| QUERY_START.is_match(quoted));
+            match query {
+                Some(query) => cases.push(SmokeCase::runs(key, query.to_string(), Frontend::Gql)),
+                None => failures.push(format!(
+                    "{key}: cannot read the query on this `orbit query` line; put the whole query in one pair of quotes"
+                )),
+            }
         }
     }
 }
