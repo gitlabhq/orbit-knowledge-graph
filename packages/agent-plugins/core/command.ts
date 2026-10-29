@@ -76,7 +76,7 @@ function orbitWords(words: readonly string[]): string[] | null {
 
 const PREFIX_WORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', 'time', '{'])
 const STRUCTURE = new Set(['for', 'done', 'fi', 'esac', 'case', '}'])
-const QUIET = new Set(['cd', 'echo', 'true', 'printf', 'head', 'tail'])
+const QUIET = new Set(['cd', 'echo', 'true', 'printf', 'head', 'tail', 'date', 'sort', 'uniq', 'wc', 'jq', 'cut', 'tr', 'column', 'cat', 'grep', 'sleep'])
 
 function runnable(command: string): string[][] {
   const out: string[][] = []

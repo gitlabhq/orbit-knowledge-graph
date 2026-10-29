@@ -27,10 +27,11 @@ test('a finished Orbit call draws the mark, the label, and the path', async ($, 
   expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeUndefined()
 })
 
-test('a failed Orbit call says so', async ($, on) => {
+test('a failed Orbit call shows its mark in the error color and no extra text', async ($, on) => {
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
   const ui = await $.ui.mount(toolUse(QUERY, { isErrored: true }))
-  expect(await ui.find({ type: 'Text', text: '  · failed' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: '◎' }))?.props.color).toBe('error')
+  expect(await ui.find({ type: 'Text', text: /failed/ })).toBeUndefined()
 })
 
 test('other tool calls keep Claude Code row', async ($, on) => {

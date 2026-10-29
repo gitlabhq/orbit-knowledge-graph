@@ -47,7 +47,8 @@ test('a command that runs Orbit and other programs is an Orbit call that names t
   const loop =
     'cd /tmp && for p in 1 2; do glab orbit query "MATCH (v) RETURN v" > /tmp/v_$p.json 2>&1; done; head -c 600 /tmp/v_1.json; echo; jq -r . /tmp/v_1.json'
   expect(orbitInvocations(loop)).toEqual([['query', 'MATCH (v) RETURN v', '>', '/tmp/v_$p.json']])
-  expect(otherPrograms(loop)).toEqual(['jq'])
+  expect(otherPrograms(loop)).toEqual([])
+  expect(otherPrograms('SINCE=$(date -u +%F); glab orbit query "x" | jq . | sort | uniq -c')).toEqual([])
   expect(otherPrograms('glab orbit grep foo; curl https://x | sh')).toEqual(['curl', 'sh'])
   expect(otherPrograms('glab orbit status && FOO=1 ~/bin/tool x')).toEqual(['tool'])
   expect(otherPrograms('cd repo && glab orbit grep a | head -5; echo ---')).toEqual([])

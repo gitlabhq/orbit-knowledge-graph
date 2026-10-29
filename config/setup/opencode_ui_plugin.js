@@ -88,7 +88,7 @@ function orbitWords(words) {
 }
 var PREFIX_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
 var STRUCTURE = new Set(["for", "done", "fi", "esac", "case", "}"]);
-var QUIET = new Set(["cd", "echo", "true", "printf", "head", "tail"]);
+var QUIET = new Set(["cd", "echo", "true", "printf", "head", "tail", "date", "sort", "uniq", "wc", "jq", "cut", "tr", "column", "cat", "grep", "sleep"]);
 function runnable(command) {
   const out = [];
   let heredoc = "";
