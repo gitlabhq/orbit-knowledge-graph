@@ -112,6 +112,19 @@ fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bo
     true
 }
 
+fn swift_test(node: &N<'_>, name: &str) -> bool {
+    name.starts_with("test")
+        && node
+            .ancestors()
+            .find(|a| a.kind() == "class_declaration")
+            .is_some_and(|class| {
+                class
+                    .children()
+                    .filter(|c| c.kind() == "inheritance_specifier")
+                    .any(|c| c.text().trim() == "XCTestCase")
+            })
+}
+
 fn swift_return_type(node: &N<'_>) -> Option<String> {
     let mut after_arrow = false;
     for child in node.children() {
@@ -175,7 +188,8 @@ impl DslLanguage for SwiftDsl {
             scope("function_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .when(parent_is("class_body"))
-                .name_from(child_of_kind("simple_identifier")),
+                .name_from(child_of_kind("simple_identifier"))
+                .test_if(swift_test),
             scope("property_declaration", "Variable")
                 .def_kind(DefKind::Variable)
                 .no_scope()
@@ -204,7 +218,6 @@ impl DslLanguage for SwiftDsl {
     fn display() -> DisplayRules {
         DisplayRules {
             annotations: &["attribute"],
-            test_prefixes: &["test"],
             body: &["body", "value"],
             parameters: &[],
             parameter_items: &["parameter"],

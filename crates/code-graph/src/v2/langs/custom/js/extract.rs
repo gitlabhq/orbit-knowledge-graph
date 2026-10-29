@@ -282,7 +282,7 @@ fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, 
         extension,
         language,
         size: source.len() as u64,
-        definitions: canonical_definitions(&analysis),
+        definitions: canonical_definitions(&mut analysis),
         imports: canonical_imports(&analysis.imports),
         bindings: module_bindings(&analysis),
         star_reexports: dedup_and_cap_star_reexports(&analysis.module_info.star_export_sources),
@@ -380,7 +380,7 @@ fn normalize_relative_path(path: &str, root_path: &str) -> String {
         .unwrap_or_else(|_| path.to_string())
 }
 
-fn canonical_definitions(analysis: &JsFileAnalysis) -> Vec<CanonicalDefinition> {
+fn canonical_definitions(analysis: &mut JsFileAnalysis) -> Vec<CanonicalDefinition> {
     let extends_by_fqn: FxHashMap<_, _> = analysis
         .classes
         .iter()
@@ -388,21 +388,22 @@ fn canonical_definitions(analysis: &JsFileAnalysis) -> Vec<CanonicalDefinition> 
             class
                 .extends
                 .as_ref()
-                .map(|extends| (class.fqn.as_str(), extends.clone()))
+                .map(|extends| (class.fqn.clone(), extends.clone()))
         })
         .collect();
 
     analysis
         .defs
-        .iter()
+        .iter_mut()
         .map(|definition| {
-            canonical_definition(definition, extends_by_fqn.get(definition.fqn.as_str()))
+            let extends = extends_by_fqn.get(definition.fqn.as_str());
+            canonical_definition(definition, extends)
         })
         .collect()
 }
 
-fn canonical_definition(definition: &JsDef, extends: Option<&String>) -> CanonicalDefinition {
-    let display = &definition.display;
+fn canonical_definition(definition: &mut JsDef, extends: Option<&String>) -> CanonicalDefinition {
+    let display = std::mem::take(&mut *definition.display);
     let mut metadata = DefinitionMetadata {
         type_annotation: definition
             .type_annotation
@@ -412,11 +413,11 @@ fn canonical_definition(definition: &JsDef, extends: Option<&String>) -> Canonic
         ..DefinitionMetadata::default()
     };
     let mut def_display = crate::v2::types::DefDisplay::new(
-        display.signature.clone(),
-        display.return_type.clone(),
-        display.declared_type.clone(),
-        display.doc_comment.clone(),
-        display.parameters.clone(),
+        display.signature,
+        display.return_type,
+        display.declared_type,
+        display.doc_comment,
+        display.parameters,
     );
     def_display.modifiers = display.modifiers;
     def_display.visibility = display.visibility;

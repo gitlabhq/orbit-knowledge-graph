@@ -243,6 +243,7 @@ pub struct DisplayRules {
     pub annotations: &'static [&'static str],
     pub test_annotations: &'static [&'static str],
     pub test_prefixes: &'static [&'static str],
+    pub test_files: &'static [&'static str],
     pub doc_comments: &'static [&'static str],
     pub doc_prefixes: &'static [&'static str],
     pub doc_markers: &'static [&'static str],

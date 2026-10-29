@@ -136,6 +136,7 @@ impl DslLanguage for GoDsl {
     fn display() -> DisplayRules {
         DisplayRules {
             body: &["body", "field_declaration_list", "{", "value"],
+            test_files: &["_test.go"],
             parameters: &["parameters"],
             return_type: &["result"],
             declared_type: &["type"],

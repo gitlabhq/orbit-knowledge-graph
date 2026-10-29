@@ -1,8 +1,8 @@
 use oxc::ast::AstKind;
 use oxc::ast::ast::{
     ArrowFunctionExpression, Class, Expression, FormalParameters, Function, MethodDefinition,
-    MethodDefinitionType, PropertyDefinition, PropertyKey, TSAccessibility, TSTypeAnnotation,
-    VariableDeclarator,
+    MethodDefinitionKind, MethodDefinitionType, PropertyDefinition, PropertyKey, TSAccessibility,
+    TSTypeAnnotation, VariableDeclarator,
 };
 use oxc::semantic::AstNodes;
 use oxc::span::{GetSpan, Span};
@@ -68,8 +68,8 @@ pub(super) fn doc_before(source: &str, start: u32) -> Option<String> {
         }
     }
     let body = head.strip_suffix("*/")?;
-    let open = body.rfind("/**")?;
-    let comment = &body[open + 3..];
+    let open = body.rfind("/*")?;
+    let comment = body[open..].strip_prefix("/**")?;
     text::doc_paragraph(text::strip_comment_markers(comment, &["*"]))
 }
 
@@ -170,6 +170,16 @@ pub(super) fn method(source: &str, m: &MethodDefinition<'_>) -> JsDisplay {
         doc_comment: doc_before(source, m.span.start),
         modifiers,
         visibility: Some(member_visibility(m.accessibility, &m.key)),
+        language_kind: match m.kind {
+            MethodDefinitionKind::Get => Some("Getter"),
+            MethodDefinitionKind::Set => Some("Setter"),
+            _ => None,
+        },
+        kind: matches!(
+            m.kind,
+            MethodDefinitionKind::Get | MethodDefinitionKind::Set
+        )
+        .then_some(DefKind::Field),
         ..JsDisplay::default()
     }
 }

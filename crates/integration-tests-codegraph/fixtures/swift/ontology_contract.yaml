@@ -33,7 +33,7 @@ fixtures:
 
   - path: Tests/ShopTests/OrderTests.swift
     content: |
-      class OrderTests {
+      class OrderTests: XCTestCase {
           func testCharge() {}
       }
 

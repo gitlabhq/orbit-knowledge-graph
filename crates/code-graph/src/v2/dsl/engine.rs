@@ -157,6 +157,7 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
+        file_path: &str,
         resolve: impl Fn(String, &Node<StrDoc<SupportLang>>) -> String,
     ) -> Option<ScopeMatch> {
         let indices = self.scope_dispatch.get(node_kind)?;
@@ -171,9 +172,16 @@ impl LanguageSpec {
             .or_else(|| rule.default_name.map(|s| s.to_string()))?;
         let label = rule.resolve_label(node);
         let def_kind = rule.kind_for_label(label)?;
-        let (def_kind, label) = if rule.is_test(node, &name)
-            || (matches!(def_kind, DefKind::Function | DefKind::Method)
-                && self.display.is_test(node, &name))
+        let in_test_file = self.display.test_files.is_empty()
+            || self
+                .display
+                .test_files
+                .iter()
+                .any(|s| file_path.ends_with(s));
+        let (def_kind, label) = if in_test_file
+            && (rule.is_test(node, &name)
+                || (matches!(def_kind, DefKind::Function | DefKind::Method)
+                    && self.display.is_test(node, &name)))
         {
             (DefKind::Test, "Test")
         } else {
@@ -880,7 +888,7 @@ impl LanguageSpec {
             state.scope_stack.push(Arc::from(name.as_str()));
         }
 
-        let scope_match = self.evaluate_scope(node, nk, |bare, _origin| {
+        let scope_match = self.evaluate_scope(node, nk, state.file_path, |bare, _origin| {
             if let Some(fqn) = state.import_map.get(&bare) {
                 return fqn.clone();
             }

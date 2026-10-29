@@ -34,13 +34,13 @@ tests:
     assert:
       - { row: { name: "makeSound", fqn: "Animal::makeSound", type: "Method" } }
 
-  - name: "Abstract getter name is extracted with Class::method FQN"
+  - name: "Abstract getter is a Field with language_kind Getter and a Class::member FQN"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Animal::name'
-      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type
+      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type, d.language_kind AS lk
     assert:
-      - { row: { name: "name", fqn: "Animal::name", type: "Method" } }
+      - { row: { name: "name", fqn: "Animal::name", type: "Field", lk: "Getter" } }
 
   - name: "Concrete method move is extracted"
     query: |

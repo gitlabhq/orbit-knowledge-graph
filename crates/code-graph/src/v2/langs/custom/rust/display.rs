@@ -29,9 +29,11 @@ fn signature(node: &SyntaxNode) -> Option<String> {
         .find(|c| BODY_KINDS.contains(&c.kind()) || (stops_at_value && c.kind() == SyntaxKind::EQ))
         .map_or(node.text_range().end(), |c| c.text_range().start());
     let base = node.text_range().start();
-    let text = node.text().to_string();
-    let slice = text.get(usize::from(start - base)..usize::from(end - base))?;
-    text::signature(slice)
+    let slice = node
+        .text()
+        .slice(ra_ap_syntax::TextRange::new(start - base, end - base))
+        .to_string();
+    text::signature(&slice)
 }
 
 fn doc_comment(node: &SyntaxNode) -> Option<String> {
