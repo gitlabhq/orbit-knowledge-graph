@@ -158,6 +158,24 @@ async function graphStatusRuns(
   return runs
 }
 
+test('a query scoped to a group asks graph-status for the group by namespace id or full path', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  Project[1]{id}:\n    1\n' } }))
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    runs.push(e.argv)
+    return { value: graphOf(500) }
+  })
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (g:Group) WHERE g.id = 9 RETURN g"' })
+  await $.tool.call({ tool: 'Bash', command: `glab orbit query "MATCH (g:Group {full_path: 'a/b'}) RETURN g"` })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+
+  expect(runs).toEqual([
+    ['glab', 'orbit', 'graph-status', '--namespace-id', '9', '--response-format', 'raw'],
+    ['glab', 'orbit', 'graph-status', '--full-path', 'a/b', '--response-format', 'raw'],
+  ])
+})
+
 test('graph-status runs through a fixed launcher after a successful query', async ($, on) => {
   const runs = await graphStatusRuns($, on, './orbit query "MATCH (u:User {id: 1}) RETURN u"', { result: { stdout: 'nodes:\n' } })
   expect(runs).toEqual([['glab', 'orbit', 'graph-status', '--response-format', 'raw'], ['orbit', 'graph-status', '--response-format', 'raw']])
