@@ -1,12 +1,6 @@
 description: A center aliased like a generated neighbor column keeps its neighbors
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "neighbor", "entity": "Group", "node_ids": [100]}],
-      "neighbors": {"direction": "both"}
-    }
   gql: |
     MATCH (neighbor:Group {id: 100})--(n) RETURN neighbor, n
 
