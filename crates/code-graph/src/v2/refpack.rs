@@ -7,10 +7,15 @@
 //! index buffers backed by a shared [`StringPool`] arena; Phase 2 decodes
 //! one ref at a time into reusable scratch buffers.
 
+use std::hash::{Hash, Hasher};
+
 use crate::v2::dsl::engine::CollectedRef;
+use crate::v2::linker::graph::EdgeTriple;
 use crate::v2::types::ssa::ParseValue;
 use crate::v2::types::{ExpressionStep, RefKind, TypeUsage};
 use orbit_utils::strings::{StrId, StringPool};
+use rustc_hash::{FxHashMap, FxHasher};
+use smallvec::SmallVec;
 use smol_str::SmolStr;
 
 const NO_CHAIN: u32 = u32::MAX;
@@ -78,8 +83,8 @@ enum StepTag {
 #[derive(Debug)]
 struct PackedStep {
     tag: StepTag,
-    /// `None` for `This`/`Super`, which carry no identifier.
-    name: Option<StrId>,
+    /// The empty string for `This`/`Super`, which carry no identifier.
+    name: StrId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -93,9 +98,8 @@ enum ValueTag {
 #[derive(Debug)]
 struct PackedValue {
     tag: ValueTag,
+    /// The index into `type_names` for `Type`.
     num: u32,
-    /// `Some` only for `Type`.
-    name: Option<StrId>,
 }
 
 #[derive(Default)]
@@ -104,6 +108,8 @@ pub struct RefPack {
     refs: Vec<PackedRef>,
     steps: Vec<PackedStep>,
     values: Vec<PackedValue>,
+    type_names: Vec<StrId>,
+    repeats: Vec<(u32, u32)>,
 }
 
 pub struct DecodedRef<'a> {
@@ -116,78 +122,117 @@ pub struct DecodedRef<'a> {
 
 impl RefPack {
     pub fn from_refs(refs: &[CollectedRef]) -> Self {
-        let mut pack = RefPack {
-            strings: StringPool::new(),
-            refs: Vec::with_capacity(refs.len()),
-            steps: Vec::new(),
-            values: Vec::new(),
-        };
+        Self::pack(refs).0
+    }
 
-        for r in refs {
-            let name = pack.strings.alloc(r.name.as_str());
-
-            let (chain_start, chain_len) = match &r.chain {
-                None => (NO_CHAIN, 0),
-                Some(chain) => {
-                    let start = pack.steps.len() as u32;
-                    for step in chain {
-                        let (tag, ident) = match step {
-                            ExpressionStep::Ident(s) => (StepTag::Ident, Some(s)),
-                            ExpressionStep::Field(s) => (StepTag::Field, Some(s)),
-                            ExpressionStep::Call(s) => (StepTag::Call, Some(s)),
-                            ExpressionStep::New(s) => (StepTag::New, Some(s)),
-                            ExpressionStep::This => (StepTag::This, None),
-                            ExpressionStep::Super => (StepTag::Super, None),
-                        };
-                        let name = ident.map(|s| pack.strings.alloc(s.as_str()));
-                        pack.steps.push(PackedStep { tag, name });
-                    }
-                    (start, (chain.len() as u32).min(LEN_MASK))
-                }
-            };
-
-            let values_start = pack.values.len() as u32;
-            for v in &r.reaching {
-                let packed = match v {
-                    ParseValue::LocalDef(i) => PackedValue {
-                        tag: ValueTag::LocalDef,
-                        num: *i,
-                        name: None,
-                    },
-                    ParseValue::ImportRef(i) => PackedValue {
-                        tag: ValueTag::ImportRef,
-                        num: *i,
-                        name: None,
-                    },
-                    ParseValue::Type(s) => PackedValue {
-                        tag: ValueTag::Type,
-                        num: 0,
-                        name: Some(pack.strings.alloc(s.as_str())),
-                    },
-                    ParseValue::Opaque => PackedValue {
-                        tag: ValueTag::Opaque,
-                        num: 0,
-                        name: None,
-                    },
-                };
-                pack.values.push(packed);
+    /// Pack `refs`, folding refs that differ only by line into one slot.
+    /// Returns the slot of every input ref.
+    pub fn pack(refs: &[CollectedRef]) -> (Self, Vec<u32>) {
+        let mut pack = RefPack::default();
+        let mut slots = Vec::with_capacity(refs.len());
+        let mut firsts: Vec<usize> = Vec::new();
+        let mut by_site: FxHashMap<u64, SmallVec<[u32; 1]>> = FxHashMap::default();
+        for (i, r) in refs.iter().enumerate() {
+            let candidates = by_site.entry(site_hash(r)).or_default();
+            if let Some(&slot) = candidates
+                .iter()
+                .find(|&&slot| same_site(&refs[firsts[slot as usize]], r))
+            {
+                pack.repeats.push((slot, r.line));
+                slots.push(slot);
+                continue;
             }
-
-            pack.refs.push(PackedRef {
-                name,
-                enclosing_def: r.enclosing_def.unwrap_or(NO_ENCLOSING),
-                chain_start,
-                kind_and_chain_len: (encode_kind(r.kind) << KIND_SHIFT) | chain_len,
-                values_start,
-                values_len: r.reaching.len() as u32,
-                line: r.line,
-            });
+            let slot = pack.refs.len() as u32;
+            candidates.push(slot);
+            firsts.push(i);
+            slots.push(slot);
+            pack.push(r);
         }
+        pack.finish();
+        (pack, slots)
+    }
 
-        pack.strings.shrink_to_arena();
-        pack.steps.shrink_to_fit();
-        pack.values.shrink_to_fit();
-        pack
+    fn push(&mut self, r: &CollectedRef) {
+        let name = self.strings.alloc(r.name.as_str());
+        let (chain_start, chain_len) = match &r.chain {
+            None => (NO_CHAIN, 0),
+            Some(chain) => {
+                let start = self.steps.len() as u32;
+                for step in chain {
+                    let (tag, ident) = match step {
+                        ExpressionStep::Ident(s) => (StepTag::Ident, s.as_str()),
+                        ExpressionStep::Field(s) => (StepTag::Field, s.as_str()),
+                        ExpressionStep::Call(s) => (StepTag::Call, s.as_str()),
+                        ExpressionStep::New(s) => (StepTag::New, s.as_str()),
+                        ExpressionStep::This => (StepTag::This, ""),
+                        ExpressionStep::Super => (StepTag::Super, ""),
+                    };
+                    let name = self.strings.alloc(ident);
+                    self.steps.push(PackedStep { tag, name });
+                }
+                (start, (chain.len() as u32).min(LEN_MASK))
+            }
+        };
+        let values_start = self.values.len() as u32;
+        for v in &r.reaching {
+            let packed = match v {
+                ParseValue::LocalDef(i) => PackedValue {
+                    tag: ValueTag::LocalDef,
+                    num: *i,
+                },
+                ParseValue::ImportRef(i) => PackedValue {
+                    tag: ValueTag::ImportRef,
+                    num: *i,
+                },
+                ParseValue::Type(s) => self.type_value(s.as_str()),
+                ParseValue::Opaque => PackedValue {
+                    tag: ValueTag::Opaque,
+                    num: 0,
+                },
+            };
+            self.values.push(packed);
+        }
+        self.refs.push(PackedRef {
+            name,
+            enclosing_def: r.enclosing_def.unwrap_or(NO_ENCLOSING),
+            chain_start,
+            kind_and_chain_len: (encode_kind(r.kind) << KIND_SHIFT) | chain_len,
+            values_start,
+            values_len: r.reaching.len() as u32,
+            line: r.line,
+        });
+    }
+
+    fn finish(&mut self) {
+        self.strings.shrink_to_arena();
+        self.refs.shrink_to_fit();
+        self.steps.shrink_to_fit();
+        self.values.shrink_to_fit();
+        self.type_names.shrink_to_fit();
+        self.repeats.sort_unstable();
+        self.repeats.shrink_to_fit();
+    }
+
+    /// The lines of the refs folded into slot `idx`, after its own line.
+    pub fn repeated_lines(&self, idx: usize) -> impl Iterator<Item = u32> + '_ {
+        let idx = idx as u32;
+        let start = self.repeats.partition_point(|&(slot, _)| slot < idx);
+        self.repeats[start..]
+            .iter()
+            .take_while(move |&&(slot, _)| slot == idx)
+            .map(|&(_, line)| line)
+    }
+
+    /// Copy the edges from `edges[from..]` that carry lines once per folded line of slot `idx`.
+    pub fn repeat_edges(&self, idx: usize, edges: &mut Vec<EdgeTriple>, from: usize) {
+        let end = edges.len();
+        for line in self.repeated_lines(idx) {
+            for k in from..end {
+                if let Some(edge) = edges[k].2.at_line(line) {
+                    edges.push((edges[k].0, edges[k].1, edge));
+                }
+            }
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -229,7 +274,7 @@ impl RefPack {
             values_buf.push(match v.tag {
                 ValueTag::LocalDef => ParseValue::LocalDef(v.num),
                 ValueTag::ImportRef => ParseValue::ImportRef(v.num),
-                ValueTag::Type => ParseValue::Type(self.sym(v.name)),
+                ValueTag::Type => ParseValue::Type(self.sym(self.type_names[v.num as usize])),
                 ValueTag::Opaque => ParseValue::Opaque,
             });
         }
@@ -263,11 +308,15 @@ impl RefPack {
     pub fn subset(&self, indices: impl IntoIterator<Item = usize>) -> Self {
         let mut chain_buf = Vec::new();
         let mut values_buf = Vec::new();
-        let refs: Vec<CollectedRef> = indices
-            .into_iter()
-            .map(|i| self.collected(i, &mut chain_buf, &mut values_buf))
-            .collect();
-        Self::from_refs(&refs)
+        let mut pack = RefPack::default();
+        for i in indices {
+            let slot = pack.refs.len() as u32;
+            pack.push(&self.collected(i, &mut chain_buf, &mut values_buf));
+            pack.repeats
+                .extend(self.repeated_lines(i).map(|line| (slot, line)));
+        }
+        pack.finish();
+        pack
     }
 
     /// Set ref `idx`'s reaching values to a single `Type(fqn)`; out-of-range `idx` does nothing.
@@ -275,21 +324,39 @@ impl RefPack {
         if idx >= self.refs.len() {
             return;
         }
-        let name = Some(self.strings.alloc(fqn));
         let values_start = self.values.len() as u32;
-        self.values.push(PackedValue {
-            tag: ValueTag::Type,
-            num: 0,
-            name,
-        });
+        let value = self.type_value(fqn);
+        self.values.push(value);
         self.refs[idx].values_start = values_start;
         self.refs[idx].values_len = 1;
     }
 
-    /// Return the interned name, or an empty string when `name` is `None`.
-    fn sym(&self, name: Option<StrId>) -> SmolStr {
-        name.map_or_else(SmolStr::default, |id| SmolStr::from(self.strings.get(id)))
+    fn type_value(&mut self, name: &str) -> PackedValue {
+        let num = self.type_names.len() as u32;
+        self.type_names.push(self.strings.alloc(name));
+        PackedValue {
+            tag: ValueTag::Type,
+            num,
+        }
     }
+
+    fn sym(&self, name: StrId) -> SmolStr {
+        SmolStr::from(self.strings.get(name))
+    }
+}
+
+fn site_hash(r: &CollectedRef) -> u64 {
+    let mut hasher = FxHasher::default();
+    (&r.name, &r.chain, &r.reaching, r.enclosing_def, r.kind).hash(&mut hasher);
+    hasher.finish()
+}
+
+fn same_site(a: &CollectedRef, b: &CollectedRef) -> bool {
+    a.name == b.name
+        && a.chain == b.chain
+        && a.reaching == b.reaching
+        && a.enclosing_def == b.enclosing_def
+        && a.kind == b.kind
 }
 
 #[cfg(test)]
@@ -378,6 +445,23 @@ mod tests {
             .collect();
         let pack = RefPack::from_refs(&refs);
         assert_eq!(pack.strings.len(), 1);
+        assert_eq!(pack.len(), 1);
+    }
+
+    #[test]
+    fn refs_that_differ_by_line_share_a_slot() {
+        let site = |line| CollectedRef {
+            name: SmolStr::from("helper"),
+            chain: None,
+            reaching: vec![],
+            enclosing_def: Some(2),
+            kind: RefKind::Call,
+            line,
+        };
+        let (pack, slots) = RefPack::pack(&[site(3), site(7), site(5)]);
+        assert_eq!(pack.len(), 1);
+        assert_eq!(slots, vec![0, 0, 0]);
+        assert_eq!(pack.repeated_lines(0).collect::<Vec<_>>(), vec![5, 7]);
     }
 
     #[test]

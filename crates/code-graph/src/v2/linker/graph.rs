@@ -136,6 +136,13 @@ impl Lines {
 }
 
 impl GraphEdge {
+    pub fn at_line(&self, line: u32) -> Option<Self> {
+        (self.lines != Lines::none()).then(|| Self {
+            lines: Lines::one(line),
+            ..self.clone()
+        })
+    }
+
     pub fn new(relationship: Relationship) -> Self {
         Self {
             relationship,

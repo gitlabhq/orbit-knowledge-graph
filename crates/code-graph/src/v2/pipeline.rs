@@ -1323,7 +1323,10 @@ impl FamilyPipeline {
                     cb(f.language, result.phase_cpu);
                 }
 
-                let refs = crate::v2::refpack::RefPack::from_refs(&result.refs);
+                let (refs, slots) = crate::v2::refpack::RefPack::pack(&result.refs);
+                for (slot, _) in &mut result.unresolved_aliases {
+                    *slot = slots[*slot] as usize;
+                }
                 result.refs = Vec::new();
                 result.definitions.shrink_to_fit();
                 result.imports.shrink_to_fit();
@@ -1583,6 +1586,7 @@ impl FamilyPipeline {
                     } else {
                         edges.extend(import_edges);
                     }
+                    fwr.refs.repeat_edges(i, &mut edges, before);
                 }
                 let resolve_ms = t_resolve.elapsed().as_secs_f64() * 1000.0;
 
@@ -1724,6 +1728,7 @@ impl FamilyPipeline {
                                 edges.extend(import_edges);
                             }
                         }
+                        failed.refs.repeat_edges(index, &mut edges, before);
                     }
                     ResolvedEdges::merged(edges)
                 })
