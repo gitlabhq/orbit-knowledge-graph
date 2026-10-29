@@ -90,14 +90,14 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Enum" } }
 
-  - name: Drawable protocol is indexed with Protocol type
+  - name: Drawable protocol is indexed with Interface kind
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Drawable'
       RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Protocol" } }
+      - { row: { type: "Interface" } }
 
   - name: Identifiable protocol is indexed
     query: |
@@ -106,7 +106,7 @@ tests:
       RETURN d.kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Protocol" } }
+      - { row: { type: "Interface" } }
 
   - name: Animal.speak is scoped under Animal FQN
     query: |

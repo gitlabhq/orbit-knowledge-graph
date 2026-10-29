@@ -56,4 +56,4 @@ tests:
     assert:
       - { row_count: 2 }
       - { row: { file_path: "frontend/src/App.js", fqn: "App", type: "Function" } }
-      - { row: { file_path: "backend/coverage/prettify.js", fqn: "generated", type: "Const" } }
+      - { row: { file_path: "backend/coverage/prettify.js", fqn: "generated", type: "Constant" } }
