@@ -70,6 +70,17 @@ tests:
         assert:
           - { empty: true }
 
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['infra/main.tf']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "aws_instance", signature: 'resource "aws_instance" "web"' } }
+          - { row: { name: "region", signature: 'variable "region"' } }
+
   - name: "No modifier rules"
     queries:
       - query: |
@@ -129,14 +140,5 @@ tests:
       - query: |
           MATCH (a:Definition)-[:OVERRIDES]->(b:Definition)
           RETURN a.id AS id
-        assert:
-          - { empty: true }
-
-  - name: "No declaration text for this language"
-    queries:
-      - query: |
-          MATCH (d:Definition)
-          WHERE d.signature <> ''
-          RETURN d.fqn AS fqn
         assert:
           - { empty: true }

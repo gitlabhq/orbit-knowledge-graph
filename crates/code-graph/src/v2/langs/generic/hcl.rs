@@ -86,7 +86,7 @@ impl DslLanguage for HclDsl {
 
     fn display() -> DisplayRules {
         DisplayRules {
-            signature_with: Some(|_| None),
+            body: &["block_start", "body"],
             ..DisplayRules::default()
         }
     }
