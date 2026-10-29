@@ -53,14 +53,18 @@ mod tests {
             .execute(
                 "CREATE TABLE gl_definition (
                     id BIGINT, project_id BIGINT, commit_sha VARCHAR, fqn VARCHAR, name VARCHAR,
-                    kind VARCHAR, file_path VARCHAR, start_line BIGINT, end_line BIGINT
+                    kind VARCHAR, file_path VARCHAR, start_line BIGINT, end_line BIGINT,
+                    signature VARCHAR DEFAULT '', language_kind VARCHAR DEFAULT '',
+                    category VARCHAR DEFAULT '', branch VARCHAR DEFAULT 'main'
                 )",
                 &[],
             )
             .unwrap();
         client
             .execute(
-                "INSERT INTO gl_definition VALUES
+                "INSERT INTO gl_definition
+                    (id, project_id, commit_sha, fqn, name, kind, file_path, start_line, end_line)
+                VALUES
                     (7, 11, 'current', 'Same::name', 'name', 'Method', 'src/a.rs', 3, 5),
                     (8, 11, 'current', 'Same::name', 'name', 'Method', 'src/b.rs', 7, 9),
                     (7, 12, 'current', 'Wrong::project', 'name', 'Method', 'src/x.rs', 1, 1),

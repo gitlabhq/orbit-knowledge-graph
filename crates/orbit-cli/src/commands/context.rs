@@ -990,15 +990,15 @@ fn callers(
             "WITH defs AS (
   SELECT id, name, start_line FROM gl_definition
   WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
-    AND kind NOT IN ('Variable', 'Field')
+    AND language_kind NOT IN ('Variable', 'Field', 'Property')
     AND ((start_line >= ?4 AND end_line <= ?5)
       OR (start_line = (SELECT max(start_line) FROM gl_definition
                         WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
-                          AND kind NOT IN ('Variable', 'Field')
+                          AND language_kind NOT IN ('Variable', 'Field', 'Property')
                           AND start_line <= ?4 AND end_line >= ?5)
           AND NOT EXISTS (SELECT 1 FROM gl_definition
                           WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
-                            AND kind NOT IN ('Variable', 'Field')
+                            AND language_kind NOT IN ('Variable', 'Field', 'Property')
                             AND start_line >= ?4 AND end_line <= ?5)
           AND start_line <= ?4 AND end_line >= ?5))
 )
@@ -1281,7 +1281,7 @@ fn definitions_in_files(
     )?;
     let mut nodes = definition::resolve_ids(client, git, hydrator, &i64_column(&selected, "id"))?;
     nodes.retain(|node| {
-        node.properties["kind"] != "Variable"
+        node.properties["language_kind"] != "Variable"
             || !node.properties["fqn"]
                 .as_str()
                 .is_some_and(|fqn| fqn.contains('@'))

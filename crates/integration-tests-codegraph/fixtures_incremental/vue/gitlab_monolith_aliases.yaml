@@ -123,7 +123,7 @@ tests:
     # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/sidebar/components/sidebar_dropdown_widget.vue'
         AND i.import_path = 'ee_else_ce/sidebar/constants'
         AND i.name = 'dropdowni18nText'
@@ -148,7 +148,7 @@ tests:
     # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
         AND i.import_path = '~/repository/components/header_area/blob_overflow_menu.vue'
       RETURN i.language_kind AS language_kind, d.fqn AS target
@@ -160,7 +160,7 @@ tests:
     # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
         AND i.import_path = 'ee_else_ce/repository/queries/project_info.query.graphql'
       RETURN i.language_kind AS language_kind, d.fqn AS target
@@ -172,7 +172,7 @@ tests:
     # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
         AND i.import_path = '@gitlab/svgs/dist/icons.svg'
       RETURN i.language_kind AS language_kind, d.fqn AS target

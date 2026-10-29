@@ -87,34 +87,41 @@ properties:
       1: AliasedExternCrate
       2: AliasedImport
       3: AliasedUse
-      4: Autoload
-      5: CjsRequire
-      6: DefaultImport
-      7: Extend
-      8: ExternCrate
-      9: FromImport
-      10: FutureImport
-      11: GlobUse
-      12: GroupedImport
-      13: Import
-      14: Include
-      15: ModDeclaration
-      16: Module
-      17: NamedImport
-      18: NamespaceImport
-      19: Prepend
-      20: PubUse
-      21: PubUseGroup
-      22: ReExport
-      23: ReExportAliased
-      24: ReExportGlob
-      25: Require
-      26: RequireRelative
-      27: Source
-      28: StaticImport
-      29: Use
-      30: UseGroup
-      31: WildcardImport
+      4: ArgoCdSource
+      5: Autoload
+      6: CiComponentInclude
+      7: CiLocalInclude
+      8: CiProjectInclude
+      9: CiRemoteInclude
+      10: CiTemplateInclude
+      11: CjsRequire
+      12: DefaultImport
+      13: Extend
+      14: ExternCrate
+      15: FromImport
+      16: FutureImport
+      17: GlobUse
+      18: GroupedImport
+      19: HelmChartDependency
+      20: Import
+      21: Include
+      22: ModDeclaration
+      23: Module
+      24: NamedImport
+      25: NamespaceImport
+      26: Prepend
+      27: PubUse
+      28: PubUseGroup
+      29: ReExport
+      30: ReExportAliased
+      31: ReExportGlob
+      32: Require
+      33: RequireRelative
+      34: Source
+      35: StaticImport
+      36: Use
+      37: UseGroup
+      38: WildcardImport
 
   import_path:
     type: string

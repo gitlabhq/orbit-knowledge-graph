@@ -20,9 +20,9 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'Run'
-      RETURN t.name AS callee, t.kind AS kind
+      RETURN t.name AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 3 }
-      - { row: { callee: "Factory", kind: "Property" } }
-      - { row: { callee: "Check", kind: "Property" } }
-      - { row: { callee: "Hook", kind: "Property" } }
+      - { row: { callee: "Factory", language_kind: "Property" } }
+      - { row: { callee: "Check", language_kind: "Property" } }
+      - { row: { callee: "Hook", language_kind: "Property" } }

@@ -139,9 +139,9 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'cross_file_read'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
-      - { not: true, row: { kind: "Method" } }
+      - { not: true, row: { language_kind: "Method" } }
 
   - name: a cross-file field read targets the field
     # Known gap: a bare field read on a receiver from another file is not linked, on main too.

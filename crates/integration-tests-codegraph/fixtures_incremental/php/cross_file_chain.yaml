@@ -63,7 +63,7 @@ tests:
 
   - name: "the use declaration resolves to the class"
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'src/Start.php'
       RETURN d.name AS target, d.file_path AS file
     assert:

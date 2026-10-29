@@ -128,7 +128,7 @@ tests:
   - name: Direction enum entries are indexed
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'EnumEntry'
+      WHERE d.language_kind = 'EnumEntry'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 6 }
@@ -154,7 +154,7 @@ tests:
   - name: All top-level types are in the same file
     query: |
       MATCH (d:Definition)
-      WHERE d.kind IN ['Class', 'Struct', 'Enum', 'Interface']
+      WHERE d.language_kind IN ['Class', 'Struct', 'Enum', 'Interface']
       RETURN d.name AS name, d.file_path AS file
     assert:
       - { no_nulls: file }

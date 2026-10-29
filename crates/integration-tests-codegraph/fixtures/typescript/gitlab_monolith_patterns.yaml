@@ -194,7 +194,7 @@ fixtures:
 tests:
   - name: jh_else_ce default import targets the CE default export proxy
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/root_entry.js'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -203,7 +203,7 @@ tests:
 
   - name: default imported CE entry preserves aliased helper target
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
       RETURN i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -212,7 +212,7 @@ tests:
 
   - name: aliased import from star barrel preserves identity
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/feature_flags/store/actions.ts'
       RETURN i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -243,7 +243,7 @@ tests:
 
   - name: CommonJS require through alias targets the primary export proxy
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/legacy_entry.js'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -262,7 +262,7 @@ tests:
 
   - name: explicit default reexports target the barrel proxy
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
         AND i.name = 'ProjectsApp'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
@@ -272,7 +272,7 @@ tests:
 
   - name: project barrel imports preserve explicit, star, and constant targets
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
         AND i.language_kind = 'NamedImport'
       RETURN i.name AS name, d.fqn AS target
@@ -285,7 +285,7 @@ tests:
 
   - name: namespace imports over alias barrels target the synthesized barrel module
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
         AND i.language_kind = 'NamespaceImport'
       RETURN i.import_path AS path, d.fqn AS target
@@ -316,7 +316,7 @@ tests:
 
   - name: ee alias helper imports target enterprise utility definitions
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/security_inventory/index.ts'
       RETURN i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -325,7 +325,7 @@ tests:
 
   - name: direct ee Vue imports target the component definition
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/direct_form_spec.ts'
       RETURN i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -345,7 +345,7 @@ tests:
 
   - name: external Vue package imports remain unresolved inside monolith SFCs
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue'
         AND i.import_path = '@gitlab/ui'
       RETURN d.fqn AS target
@@ -354,7 +354,7 @@ tests:
 
   - name: ee Vue barrels preserve explicit default reexports
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/index_spec.ts'
       RETURN i.name AS name, d.fqn AS target
     assert:

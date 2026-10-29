@@ -23,7 +23,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'app/models/merge_request.rb'
         AND d.name = 'MergeRequest'
-        AND d.kind = 'Class'
+        AND d.language_kind = 'Class'
       RETURN d.start_line AS start_line
     assert:
       - { row_count: 1 }

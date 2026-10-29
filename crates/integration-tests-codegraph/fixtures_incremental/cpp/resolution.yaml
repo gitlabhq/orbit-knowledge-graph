@@ -95,7 +95,7 @@ tests:
   - name: "Function definitions with namespaced FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Function'
+      WHERE d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { no_nulls: fqn }
@@ -112,7 +112,7 @@ tests:
   - name: "Class definitions with namespace scoping"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Class'
+      WHERE d.language_kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: "vec::math::Vec3" } }
@@ -122,7 +122,7 @@ tests:
   - name: "Namespace definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Class'
+      WHERE d.language_kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: "vec::math" } }
@@ -132,7 +132,7 @@ tests:
   - name: "Enum constants with full scope"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'EnumVariant'
+      WHERE d.language_kind = 'EnumVariant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }

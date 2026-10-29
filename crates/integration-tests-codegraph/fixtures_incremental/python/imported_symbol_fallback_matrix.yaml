@@ -89,7 +89,7 @@ tests:
 
   - name: "top-level imported calls target imported symbols from the file"
     query: |
-      MATCH (file:File)-[e:IMPORTS]->(sym:Import)
+      MATCH (file:File)-[e:DEFINES]->(sym:Import)
       WHERE file.path = 'main.py'
         AND sym.import_path = 'sdk.helpers'
       RETURN file.path AS file, sym.import_path AS path, sym.name AS name, sym.alias AS alias

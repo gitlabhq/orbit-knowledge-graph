@@ -65,7 +65,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
         AND d.name = 'foo'
-        AND d.kind IN ['Method', 'Function']
+        AND d.language_kind IN ['Method', 'Function']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }

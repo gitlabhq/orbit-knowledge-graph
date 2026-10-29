@@ -183,7 +183,7 @@ tests:
   - name: Next pages router local imports resolve
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
       RETURN i.file_path AS file_path, i.import_path AS path, i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
       ORDER BY file_path, path, name
@@ -210,7 +210,7 @@ tests:
 
   - name: Next pages router package type imports have no local targets
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/api/users.ts']
         AND i.import_path IN ['next/app', 'next']
       RETURN i.import_path AS path, d.fqn AS target
@@ -347,7 +347,7 @@ tests:
 
   - name: Next pages router document imports have no local targets
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'pages/_document.tsx'
         AND i.import_path = 'next/document'
       RETURN i.import_path AS path, d.fqn AS target

@@ -40,7 +40,7 @@ tests:
 
   - name: "the import resolves to the definition"
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'src/Toolbar.tsx' AND i.name = 'Button'
       RETURN d.file_path AS target
     assert:

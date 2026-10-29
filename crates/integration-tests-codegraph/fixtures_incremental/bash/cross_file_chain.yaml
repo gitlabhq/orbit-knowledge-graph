@@ -37,7 +37,7 @@ tests:
 
   - name: "each source command is an import"
     query: |
-      MATCH (f:File)-[:IMPORTS]->(s:Import)
+      MATCH (f:File)-[:DEFINES]->(s:Import)
       WHERE f.path IN ['b.sh', 'c.sh']
       RETURN f.path AS file, s.import_path AS path
     assert:

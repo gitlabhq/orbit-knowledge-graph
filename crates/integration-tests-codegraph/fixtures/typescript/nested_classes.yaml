@@ -24,8 +24,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.ts'
-        AND d.kind IN ['Class', 'Method', 'Function']
-      RETURN d.name AS name, d.kind AS type
+        AND d.language_kind IN ['Class', 'Method', 'Function']
+      RETURN d.name AS name, d.language_kind AS type
       ORDER BY name
     assert:
       - { row_count: 5 }

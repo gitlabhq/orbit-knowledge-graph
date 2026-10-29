@@ -14,7 +14,7 @@ fixtures:
 tests:
   - name: "source and dot both emit Source ImportedSymbols keyed on the path argument"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:Import)
+      MATCH (f:File)-[e:DEFINES]->(s:Import)
       WHERE f.path = 'scripts/main.sh'
         AND s.language_kind = 'Source'
       RETURN s.import_path AS path
@@ -26,7 +26,7 @@ tests:
 
   - name: "Ordinary commands (echo) do not produce imports"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:Import)
+      MATCH (f:File)-[e:DEFINES]->(s:Import)
       WHERE f.path = 'scripts/main.sh'
       RETURN s.import_path AS path
     assert:

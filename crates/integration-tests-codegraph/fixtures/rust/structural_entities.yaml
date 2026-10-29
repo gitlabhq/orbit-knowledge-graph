@@ -110,7 +110,7 @@ tests:
           'inventory::Runner::run',
           'inventory::Runner::build'
         ]
-      RETURN d.fqn AS fqn, d.kind AS type
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 4 }
       - { row: { fqn: "inventory::Runner::KIND", type: "Constant" } }
@@ -129,7 +129,7 @@ tests:
           'inventory::Service::build',
           'inventory::Service::inherent'
         ]
-      RETURN d.fqn AS fqn, d.kind AS type
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 5 }
       - { row: { fqn: "inventory::Service::KIND", type: "Constant" } }

@@ -68,7 +68,7 @@ tests:
   - name: "Classes carry namespace-qualified FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Class'
+      WHERE d.language_kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { no_nulls: fqn }
@@ -79,7 +79,7 @@ tests:
   - name: "Methods are scoped under their class"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Method'
+      WHERE d.language_kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Models\Model\save' } }
@@ -91,7 +91,7 @@ tests:
   - name: "Top-level function FQN"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Function'
+      WHERE d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\bootstrap' } }

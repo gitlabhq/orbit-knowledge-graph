@@ -152,7 +152,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.fqn IN ['App\Query\Builder', 'App\Logging\Logger',
                       'App\Repo\UserRepo']
-        AND d.kind = 'Class'
+        AND d.language_kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }

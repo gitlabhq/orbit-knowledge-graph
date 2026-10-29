@@ -89,6 +89,24 @@ async fn query_nodes(client: &OrbitClient, query: &str) -> Result<Vec<Value>, Re
         .unwrap_or_default())
 }
 
+const KIND: &str = "kind";
+const LEGACY_KIND: &str = "definition_type";
+
+async fn definition_nodes(
+    client: &OrbitClient,
+    id: i64,
+    branch: &str,
+    name: &str,
+) -> Result<(Vec<Value>, &'static str), RemoteError> {
+    match query_nodes(client, &definition_query(id, branch, name, KIND)).await {
+        Ok(nodes) => Ok((nodes, KIND)),
+        Err(error) => query_nodes(client, &definition_query(id, branch, name, LEGACY_KIND))
+            .await
+            .map(|nodes| (nodes, LEGACY_KIND))
+            .map_err(|_| error),
+    }
+}
+
 /// The project id and default branch name from the graph.
 async fn project_branch(client: &OrbitClient, project: &str) -> Result<(i64, String), RemoteError> {
     let query = format!(
@@ -120,11 +138,11 @@ pub(crate) async fn read(
     code: &Code,
 ) -> Result<String, RemoteError> {
     let (id, branch) = project_branch(client, project).await?;
-    let nodes = match code {
-        Code::Symbol(name) => query_nodes(client, &definition_query(id, &branch, name)).await?,
-        Code::File { path, .. } => file_nodes(client, id, &branch, path).await?,
+    let (nodes, kind) = match code {
+        Code::Symbol(name) => definition_nodes(client, id, &branch, name).await?,
+        Code::File { path, .. } => (file_nodes(client, id, &branch, path).await?, KIND),
     };
-    Ok(render(project, &branch, code, &nodes))
+    Ok(render(project, &branch, code, &nodes, kind))
 }
 
 /// Finds the file without content, which costs no Gitaly call, then reads only the one it picks.
@@ -145,14 +163,14 @@ async fn file_nodes(
     query_nodes(client, &file_query(id, branch, chosen, true)).await
 }
 
-fn definition_query(project_id: i64, branch: &str, name: &str) -> String {
+fn definition_query(project_id: i64, branch: &str, name: &str, kind: &str) -> String {
     let by = match name.contains(['.', ':', '#']) {
         true => format!("d.fqn ENDS WITH {}", gql_string(name)),
         false => format!("d.name = {}", gql_string(name)),
     };
     format!(
         "MATCH (d:Definition {{project_id: {project_id}, branch: {}}}) WHERE {by} \
-         RETURN d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line, d.content LIMIT 5",
+         RETURN d.fqn, d.{kind}, d.file_path, d.start_line, d.end_line, d.content LIMIT 5",
         gql_string(branch)
     )
 }
@@ -185,7 +203,7 @@ fn numbered(out: &mut String, content: &str, first: usize, range: Option<(usize,
     }
 }
 
-fn render(project: &str, branch: &str, code: &Code, nodes: &[Value]) -> String {
+fn render(project: &str, branch: &str, code: &Code, nodes: &[Value], kind: &str) -> String {
     let mut out = String::new();
     if nodes.is_empty() {
         let _ = writeln!(
@@ -205,7 +223,7 @@ fn render(project: &str, branch: &str, code: &Code, nodes: &[Value]) -> String {
                     text("file_path"),
                     start,
                     node["end_line"].as_u64().unwrap_or(0),
-                    text("definition_type"),
+                    text(kind),
                     text("fqn")
                 );
                 numbered(&mut out, text("content"), start, None);

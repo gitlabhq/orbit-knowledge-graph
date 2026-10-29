@@ -1054,7 +1054,7 @@ i06_file_imports:
   desc: "File imports"
   category: code_graph
   query: |
-    MATCH (f:File {id: {{FILE_ID}}})-[:IMPORTS]->(s:Import)
+    MATCH (f:File {id: {{FILE_ID}}})-[:DEFINES]->(s:Import)
     RETURN s.import_path, s.name
 
 i07_defs_fqn_contains:

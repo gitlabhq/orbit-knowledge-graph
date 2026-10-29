@@ -5,16 +5,16 @@ config:
     paths: ["1/100/1000/"]
   extra_seed:
     gl_code_edge:
-      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition, source_tags: ["kind:function"] }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition, source_tags: ["kind:Function"] }
     gl_definition:
-      - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: function, fqn: function, kind: function }
+      - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: function, fqn: function, kind: Function }
 
 query:
   json: |
-    {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[99000],"filters":{"kind":[{"eq":"function"},{"eq":"class"}]}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"aggregations":[{"count":"b","as":"n"}]}
+    {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[99000],"filters":{"kind":[{"eq":"Function"},{"eq":"Class"}]}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"aggregations":[{"count":"b","as":"n"}]}
   gql: |
     MATCH (a:Definition {id: 99000})-[:CALLS]->(b:Definition)
-    WHERE a.kind = 'function' AND a.kind = 'class'
+    WHERE a.kind = 'Function' AND a.kind = 'Class'
     RETURN count(b) AS n
 
 expect:

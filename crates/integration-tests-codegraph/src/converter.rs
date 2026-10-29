@@ -103,16 +103,7 @@ pub fn convert_v2_graph(
                 FileRow::to_record_batch(&rows, &specs, &ctx)?
             }
             "Definition" => {
-                let rows: Vec<_> = graph
-                    .definitions()
-                    .map(|(idx, file_path, def)| DefinitionRow {
-                        file_path,
-                        def,
-                        pool: &graph.strings,
-                        id: ids[idx.index()],
-                    })
-                    .collect();
-                DefinitionRow::to_record_batch(&rows, &specs, &ctx)?
+                DefinitionRow::to_record_batch(&graph.definition_rows(&ids), &specs, &ctx)?
             }
             "Import" => {
                 let rows: Vec<_> = graph

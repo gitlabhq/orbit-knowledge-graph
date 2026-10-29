@@ -92,7 +92,7 @@ tests:
   - name: "All class definitions with correct FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Class'
+      WHERE d.language_kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -123,9 +123,9 @@ tests:
   - name: "Method definitions with correct FQNs and types"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Method'
+      WHERE d.language_kind = 'Method'
         AND d.fqn STARTS WITH 'MyApp.'
-      RETURN d.fqn AS fqn, d.kind AS type
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 6 }
       - { unique: fqn }
@@ -140,8 +140,8 @@ tests:
   - name: "Property definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Property'
-      RETURN d.fqn AS fqn, d.kind AS type
+      WHERE d.language_kind = 'Property'
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 2 }
       - { row: { fqn: MyApp.Models.User.Name, type: Property } }
@@ -150,7 +150,7 @@ tests:
   - name: "Enum members with correct FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'EnumMember'
+      WHERE d.language_kind = 'EnumMember'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }

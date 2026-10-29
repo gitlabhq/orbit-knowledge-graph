@@ -51,7 +51,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Point'
-      RETURN d.name AS name, d.kind AS type
+      RETURN d.name AS name, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "CaseClass" } }
@@ -78,7 +78,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Zoo'
-      RETURN d.name AS name, d.kind AS type
+      RETURN d.name AS name, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Object" } }
@@ -112,7 +112,7 @@ tests:
   - name: All top-level types are in the same file
     query: |
       MATCH (d:Definition)
-      WHERE d.kind IN ['Class', 'CaseClass', 'Trait', 'Object']
+      WHERE d.language_kind IN ['Class', 'CaseClass', 'Trait', 'Object']
       RETURN d.name AS name, d.file_path AS file
     assert:
       - { no_nulls: file }

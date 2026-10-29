@@ -29,10 +29,10 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'readComponents' AND t.name = 'targetType'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Indexer.CachedState.targetType", kind: "Method" } }
+      - { row: { callee: "Indexer.CachedState.targetType", language_kind: "Method" } }
 
   - name: a component read through a parameter links to the component
     query: |

@@ -52,7 +52,7 @@ async fn drained_namespace_sweeps_unclaimed_rows_once() {
         .execute(&format!(
             "INSERT INTO {} \
              (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version) \
-             VALUES ('{traversal_path}', 111, 'File', 'ON_BRANCH', 999, 'Branch', '{PRE_WATERMARK}')",
+             VALUES ('{traversal_path}', 111, 'File', 'DEFINES', 999, 'Definition', '{PRE_WATERMARK}')",
             t("gl_edge")
         ))
         .await;

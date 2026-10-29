@@ -29,7 +29,7 @@ tests:
   - name: "Generic function extracted as Function"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'Map' AND d.kind = 'Function'
+      WHERE d.name = 'Map' AND d.language_kind = 'Function'
       RETURN d.name AS name
     assert:
       - { row: { name: "Map" } }
@@ -37,7 +37,7 @@ tests:
   - name: "Generic struct extracted as Struct"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'Set' AND d.kind = 'Struct'
+      WHERE d.name = 'Set' AND d.language_kind = 'Struct'
       RETURN d.name AS name
     assert:
       - { row: { name: "Set" } }
@@ -45,7 +45,7 @@ tests:
   - name: "Constructor for generic type extracted as Function"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'NewSet' AND d.kind = 'Function'
+      WHERE d.name = 'NewSet' AND d.language_kind = 'Function'
       RETURN d.name AS name
     assert:
       - { row: { name: "NewSet" } }
@@ -53,7 +53,7 @@ tests:
   - name: "Method on generic type extracted as Method"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'Add' AND d.kind = 'Method'
+      WHERE d.name = 'Add' AND d.language_kind = 'Method'
       RETURN d.name AS name
     assert:
       - { row: { name: "Add" } }

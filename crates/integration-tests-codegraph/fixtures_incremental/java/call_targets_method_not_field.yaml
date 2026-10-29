@@ -68,19 +68,19 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'readField' AND t.name = 'e4'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Main.SampleElements.e4", kind: "Field" } }
+      - { row: { callee: "Main.SampleElements.e4", language_kind: "Field" } }
 
   - name: a field read with the method declared first keeps the field as its target
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'readLate' AND t.name = 'e4'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Main.LateElements.e4", kind: "Field" } }
+      - { row: { callee: "Main.LateElements.e4", language_kind: "Field" } }
 
   - name: a receiver chain through a field does not type by the method of the same name
     query: |

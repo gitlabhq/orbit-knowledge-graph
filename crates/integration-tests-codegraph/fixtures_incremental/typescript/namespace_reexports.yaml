@@ -38,7 +38,7 @@ fixtures:
 tests:
   - name: "namespace import edges follow their own call sites"
     query: |
-      MATCH (symbol:Import)-[:IMPORTS]->(target:Definition)
+      MATCH (symbol:Import)-[:RESOLVES_TO]->(target:Definition)
       WHERE symbol.file_path = 'namespace.ts' AND symbol.language_kind = 'NamespaceImport'
       RETURN symbol.alias AS alias, target.file_path AS file, target.name AS name
     assert:

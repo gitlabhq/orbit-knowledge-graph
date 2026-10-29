@@ -1,6 +1,6 @@
 # Code-graph query corpus.
 #
-# CALLS / EXTENDS / DEFINES / IMPORTS over File / Definition / Import.
+# CALLS / EXTENDS / DEFINES / RESOLVES_TO over File / Definition / Import.
 # Canonical corpus entry: desc / category / suite / query (inline GQL).
 # Placeholders: `x.id IN $sample` / `$sample:N` bind to real in-scope ids at run time.
 

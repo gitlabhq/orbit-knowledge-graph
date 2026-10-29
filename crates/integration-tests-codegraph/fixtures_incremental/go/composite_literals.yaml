@@ -43,7 +43,7 @@ tests:
   - name: "Config and Server structs defined"
     query: |
       MATCH (d:Definition)
-      WHERE d.name IN ['Config', 'Server'] AND d.kind = 'Struct'
+      WHERE d.name IN ['Config', 'Server'] AND d.language_kind = 'Struct'
       RETURN d.name AS name, d.fqn AS fqn
       ORDER BY name
     assert:
