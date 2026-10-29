@@ -1,0 +1,21 @@
+stages: []
+
+display:
+  - name: derived
+    rules:
+      - match: '(__name)'
+        tag:
+          name_resolved: '@$ROOT|has_outgoing("Imports")'
+          import_resolved: '@$ROOT|has_outgoing("Imports", "parent")'
+      - match: '(__name)'
+        tag:
+          import_reach: '@$ROOT|concat(":", "tag:import_kind", "tag:import_resolved")'
+      - match: '(__name)'
+        tag:
+          is_external: '@$ROOT|concat(":", "tag:name_resolved", "tag:import_reach")|regex_replace("^(?:true:.*|false:(?:module|wildcard|side_effect):true)$", "false")|regex_replace("^.*:.*$", "true")'
+      - match: '(__import)'
+        tag:
+          is_external: '@$ROOT|has_outgoing("Imports")|map("true:false", "false:true")'
+      - match: '(__import_type)'
+        tag:
+          is_external: '@$ROOT|has_outgoing("Imports")|map("true:false", "false:true")'

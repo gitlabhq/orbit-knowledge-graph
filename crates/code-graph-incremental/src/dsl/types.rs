@@ -239,6 +239,7 @@ pub struct TagEntry {
     pub slot: u16,
     pub val: Tf,
     pub keep_last: Option<Tf>,
+    pub reads_source: bool,
 }
 
 pub enum Out {

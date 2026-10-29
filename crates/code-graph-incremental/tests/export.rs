@@ -810,6 +810,7 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
             &|_| true,
             only,
             &code_graph_incremental::Sentinel::disabled(),
+            &mut Vec::new(),
         )
         .unwrap(),
     };

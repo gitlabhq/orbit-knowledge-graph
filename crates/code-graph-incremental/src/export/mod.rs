@@ -15,7 +15,7 @@ use crate::dsl::types::{EdgeCtx, EdgeIndex, Tf};
 use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
-use crate::sentinel::Sentinel;
+use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{CallResolution, Compact, Resolution};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
@@ -47,9 +47,7 @@ impl Scalar<'_> {
             Scalar::Str(s) => Cow::Borrowed(s),
             Scalar::Bool(value) => Cow::Owned(value.to_string()),
             Scalar::Text(s) => Cow::Borrowed(s),
-            Scalar::List(values) => Cow::Owned(values.join("\u{1f}")),
-            Scalar::Ints(values) => Cow::Owned(format!("{values:?}")),
-            Scalar::Null => Cow::Borrowed(""),
+            Scalar::List(_) | Scalar::Ints(_) | Scalar::Null => Cow::Borrowed(""),
         }
     }
 
@@ -75,9 +73,6 @@ impl Scalar<'_> {
             }
             (Self::Text(value), ColumnType::Str | ColumnType::DictStr) => {
                 builder.col(name)?.push_str(value)
-            }
-            (Self::Str(value), ColumnType::Bool) if matches!(value, "true" | "false") => {
-                builder.col(name)?.push_bool(value == "true")
             }
             (Self::List(values), ColumnType::StrList | ColumnType::DictStrList) => {
                 let values: Vec<&str> = values.iter().map(Cow::as_ref).collect();
@@ -252,7 +247,7 @@ impl<'a> Row<'a> {
         &self,
         column: &'a EntityColumn,
         value: Scalar<'a>,
-    ) -> Result<Option<Scalar<'a>>, Error> {
+    ) -> Result<Option<Scalar<'a>>, Killed> {
         let Scalar::Str(text) = value else {
             return Ok(Some(value));
         };
@@ -301,14 +296,8 @@ impl<'a> Row<'a> {
         }))
     }
 
-    fn not_allowed(&self, column: &EntityColumn, value: &str) -> Error {
-        LoadError::new(format!(
-            "export: column '{}' has {value:?} in {}, which is not one of {:?}",
-            column.name,
-            self.tree.label,
-            column.allowed.as_deref().unwrap_or_default()
-        ))
-        .into()
+    fn not_allowed(&self, column: &EntityColumn, value: &str) -> Killed {
+        Killed::limit(format!("{}={value}", column.name), &self.tree.label, 0, 0)
     }
 
     fn span(&self) -> String {
@@ -353,6 +342,7 @@ pub fn export(
     include_directories: bool,
     owns_file: &dyn Fn(&str) -> bool,
     run: &Sentinel,
+    rejected: &mut Vec<Killed>,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     export_trees(
         trees,
@@ -364,6 +354,7 @@ pub fn export(
         owns_file,
         None,
         run,
+        rejected,
     )
 }
 
@@ -390,6 +381,7 @@ pub fn export_directories(
         &|_| false,
         Some(&FxHashSet::default()),
         &Sentinel::disabled(),
+        &mut Vec::new(),
     )
 }
 
@@ -404,6 +396,7 @@ pub fn export_trees(
     owns_file: &dyn Fn(&str) -> bool,
     only: Option<&FxHashSet<u32>>,
     run: &Sentinel,
+    rejected: &mut Vec<Killed>,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     envelope.check(plan)?;
     run.check()?;
@@ -443,6 +436,7 @@ pub fn export_trees(
                 _ => only.is_none_or(|only| only.contains(&index)),
             },
             run,
+            rejected,
         )?;
     }
     run.check()?;
@@ -467,6 +461,7 @@ fn write_entity(
     wanted: &dyn Fn(u32) -> bool,
     emit: &dyn Fn(u32, &Tree) -> bool,
     run: &Sentinel,
+    rejected: &mut Vec<Killed>,
 ) -> Result<(), Error> {
     let mut builder = BatchBuilder::new(&entity.specs, 0)?;
     let b = &mut builder;
@@ -536,18 +531,24 @@ fn write_entity(
                     .columns
                     .iter()
                     .map(|column| row.finish(column, row.value(column, lang)))
-                    .collect::<Result<Option<Vec<_>>, Error>>()?;
-                let Some(values) = values else {
-                    continue;
+                    .collect::<Result<Option<Vec<_>>, Killed>>();
+                let values = match values {
+                    Ok(Some(values)) => values,
+                    Ok(None) => continue,
+                    Err(killed) => {
+                        rejected.push(killed);
+                        continue;
+                    }
                 };
                 let id = envelope.id(plan, &entity.id_seed, &parts);
                 let emitted = emit(ti, tree);
                 ids.insert((ti, expanded.index()), (id, index, emitted));
                 if expanded.index() != node.index() {
-                    fanout
-                        .entry((ti, node.index()))
-                        .or_default()
-                        .push((id, index));
+                    fanout.entry((ti, node.index())).or_default().push((
+                        id,
+                        index,
+                        expanded.index(),
+                    ));
                 }
                 if !emitted {
                     continue;
@@ -574,7 +575,7 @@ fn write_entity(
 }
 
 type Enclosing = FxHashMap<(usize, (u32, u32)), Option<(u32, u32)>>;
-type Fanout = FxHashMap<(u32, u32), Vec<(i64, usize)>>;
+type Fanout = FxHashMap<(u32, u32), Vec<(i64, usize, u32)>>;
 
 const MAX_LINES: usize = 64;
 
@@ -588,9 +589,10 @@ struct EdgeRow<'a> {
 }
 
 impl GraphEdge {
-    fn admits(&self, e: &crate::tree::Edge, forest: &Forest) -> bool {
+    fn admits(&self, e: &crate::tree::Edge, source: u32, forest: &Forest) -> bool {
         let site = e.site.map(|s| forest.cursor(e.from_tree, s));
         let target = forest.cursor(e.to_tree, e.to_node);
+        let source = forest.cursor(e.from_tree, source);
         (self.site.is_empty() || site.is_some_and(|c| self.site.contains(&c.kind())))
             && self.site_child.is_none_or(|(kind, text)| {
                 site.is_some_and(|c| {
@@ -607,6 +609,10 @@ impl GraphEdge {
                 .target_tag
                 .iter()
                 .all(|(key, values)| target.tag(*key).is_some_and(|v| values.contains(&v)))
+            && self
+                .source_tag
+                .iter()
+                .all(|(key, values)| source.tag(*key).is_some_and(|v| values.contains(&v)))
             && (!self.reference || e.call_resolution == CallResolution::Reference)
     }
 }
@@ -680,21 +686,13 @@ fn write_edges(
             continue;
         };
         let sources = match ids.get(&(e.from_tree, e.from_node)) {
-            Some(&(from, entity, _)) => vec![(from, entity)],
+            Some(&(from, entity, _)) => vec![(from, entity, e.from_node)],
             None => fanout
                 .get(&(e.from_tree, e.from_node))
                 .cloned()
                 .unwrap_or_default(),
         };
-        let resolution = match e.resolution {
-            Resolution::None if e.kind != crate::tree::EdgeKind::Defines => {
-                match e.from_tree == e.to_tree {
-                    true => Resolution::Local,
-                    false => Resolution::Import,
-                }
-            }
-            resolution => resolution,
-        };
+        let resolution = e.resolution;
         let line = e
             .site
             .map(|site| forest.cursor(e.from_tree, site).start_row() as i64 + 1);
@@ -705,12 +703,12 @@ fn write_edges(
                 .map(|found| found.0)
         };
         let mut matched = Vec::new();
-        for (from, from_entity) in sources {
+        for (from, from_entity, source) in sources {
             let admits = |g: &&GraphEdge| {
                 g.edge == e.kind
                     && g.to == to_entity
                     && g.from.is_none_or(|f| f == from_entity)
-                    && g.admits(e, forest)
+                    && g.admits(e, source, forest)
             };
             let rule = plan.graph.iter().filter(|g| g.lift.is_none()).find(admits);
             if let Some(rule) = rule
@@ -767,11 +765,12 @@ fn write_edges(
                 .iter()
                 .find(|(name, _)| *name == column.name)
                 .map(|(_, value)| Scalar::Str(value));
-            let value = match &column.source {
-                RowSource::Const(value) => set
-                    .or_else(|| envelope.get(&column.name))
-                    .unwrap_or(Scalar::Str(value)),
-                RowSource::Value(name) => match name.as_str() {
+            let value = match (&column.source, set) {
+                (_, Some(set)) => set,
+                (RowSource::Const(value), None) => {
+                    envelope.get(&column.name).unwrap_or(Scalar::Str(value))
+                }
+                (RowSource::Value(name), None) => match name.as_str() {
                     "source.id" => Scalar::Int(row.source.0),
                     "source.entity" => Scalar::Str(row.source.1),
                     "kind" => Scalar::Str(row.kind),

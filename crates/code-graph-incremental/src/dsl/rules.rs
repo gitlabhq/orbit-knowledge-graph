@@ -469,6 +469,7 @@ fn compile_tags(
             Ok(TagEntry {
                 key,
                 slot,
+                reads_source: val.reads_source(),
                 val,
                 keep_last,
             })

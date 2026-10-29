@@ -685,6 +685,7 @@ impl Phase<Displayed> for Export<'_> {
             true,
             &|_| true,
             &context.run,
+            &mut context.report.limited,
         )?;
         Ok(Exported { state, tables })
     }
