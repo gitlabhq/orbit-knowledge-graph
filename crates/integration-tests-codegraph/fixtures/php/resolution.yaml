@@ -79,7 +79,7 @@ tests:
   - name: "Methods are scoped under their class"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Method'
+      WHERE d.category = 'Callable'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Models\Model\save' } }

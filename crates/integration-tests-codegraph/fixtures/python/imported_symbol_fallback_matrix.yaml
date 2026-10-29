@@ -50,7 +50,7 @@ tests:
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path
     assert:
-      - { row_count: 4 }
+      - { row_count: 5 }
       - { row: { caller: "main.package_import_call", path: "httpx", name: null, alias: "external_httpx" } }
       - { row: { caller: "main.package_import_call", path: "requests", name: null, alias: null } }
       - { row: { caller: "main.package_import_call", path: "urllib.parse", name: null, alias: null } }

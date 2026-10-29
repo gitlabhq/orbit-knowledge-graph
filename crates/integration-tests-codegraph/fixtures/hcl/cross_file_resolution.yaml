@@ -98,7 +98,7 @@ tests:
         AND caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 4 }
+      - { row_count: 3 }
       - { row: { caller: "aws_instance", callee: "var.instance_type" } }
       - { row: { caller: "aws_vpc", callee: "var.vpc_cidr" } }
       - { row: { caller: "locals", callee: "var.region" } }
@@ -127,7 +127,7 @@ tests:
       - { row_count: 1 }
       - { row: { sf: main.tf, tf: variables.tf } }
 
-  - name: "locals reference var.region cross-file at both usages"
+  - name: "locals reference var.region cross-file in one edge"
     query: |
       MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'locals'
@@ -135,7 +135,7 @@ tests:
         AND caller.file_path <> callee.file_path
       RETURN callee.fqn AS callee
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   - name: "Local, DataSource and Resource references also resolve cross-file"
     query: |

@@ -238,9 +238,9 @@ tests:
       - { row: { fqn: "DELETE", type: "Function" } }
       - { row: { fqn: "HEAD", type: "Function" } }
       - { row: { fqn: "OPTIONS", type: "Function" } }
-      - { row: { fqn: "runtime", type: "Variable" } }
-      - { row: { fqn: "dynamic", type: "Variable" } }
-      - { row: { fqn: "revalidate", type: "Variable" } }
+      - { row: { fqn: "runtime", type: "Const" } }
+      - { row: { fqn: "dynamic", type: "Const" } }
+      - { row: { fqn: "revalidate", type: "Const" } }
 
   - name: Next jsconfig baseUrl paths aliases and barrels resolve imports
     query: |

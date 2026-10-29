@@ -46,7 +46,7 @@ tests:
       RETURN d.kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Function" } }
+      - { row: { type: "Method" } }
 
   - name: "data-class subclass Const is extracted as a DataClass"
     query: |
@@ -75,7 +75,7 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Object" } }
 
-  - name: "Each subclass overrides eval() as a Function definition"
+  - name: "Each subclass overrides eval() as a Method definition"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN [
@@ -83,7 +83,7 @@ tests:
           'com.example.sealed.Add.eval',
           'com.example.sealed.Zero.eval'
         ]
-        AND d.language_kind = 'Function'
+        AND d.language_kind = 'Method'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:
@@ -98,7 +98,7 @@ tests:
           'com.example.sealed.Add',
           'com.example.sealed.Zero'
         ]
-        AND m.language_kind = 'Function'
+        AND m.language_kind = 'Method'
       RETURN m.fqn AS fqn
       ORDER BY m.fqn
     assert:

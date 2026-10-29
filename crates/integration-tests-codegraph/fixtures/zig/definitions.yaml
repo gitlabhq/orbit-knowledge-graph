@@ -103,7 +103,7 @@ tests:
       RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { name: "init", type: "Function" } }
+      - { row: { name: "init", type: "Method" } }
 
   - name: Point.normSquared is scoped under Point FQN
     query: |

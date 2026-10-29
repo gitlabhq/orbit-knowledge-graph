@@ -26,7 +26,7 @@ tests:
       ORDER BY name
     assert:
       - { row_count: 6 }
-      - { row: { name: "VERSION", fqn: "VERSION", type: "Variable" } }
+      - { row: { name: "VERSION", fqn: "VERSION", type: "Const" } }
       - { row: { name: "Widget", fqn: "Widget", type: "Interface" } }
       - { row: { name: "WidgetImpl", fqn: "WidgetImpl", type: "Class" } }
       - { row: { name: "bootstrap", fqn: "bootstrap", type: "Function" } }

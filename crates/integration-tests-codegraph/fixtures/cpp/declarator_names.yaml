@@ -121,7 +121,7 @@ tests:
   - name: "Inline conversion operators normalize to operator <type>, keeping pointer/ref/cv"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.name STARTS WITH 'operator'
+      WHERE d.language_kind = 'Method' AND d.name STARTS WITH 'operator'
       RETURN d.name AS name
     assert:
       - { row_count: 6 }

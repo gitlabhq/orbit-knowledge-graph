@@ -30,7 +30,7 @@ tests:
       WHERE caller.name = 'async_caller' AND callee.name = 'async_func'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
       - { row: { caller: "main.async_caller", callee: "main.async_func" } }
 
   - name: Async generator exists

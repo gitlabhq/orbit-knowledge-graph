@@ -28,8 +28,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.ts'
-        AND d.language_kind IN ['Function', 'Class', 'Interface', 'TypeAlias', 'Enum']
-      RETURN d.name AS name, d.language_kind AS type
+        AND d.kind IN ['Function', 'Class', 'Interface', 'TypeAlias', 'Enum']
+      RETURN d.name AS name, d.kind AS type
       ORDER BY name
     assert:
       - { row_count: 6 }

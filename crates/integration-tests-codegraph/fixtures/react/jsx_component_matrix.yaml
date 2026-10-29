@@ -175,7 +175,7 @@ tests:
       - { row: { file_path: "src/components/card.tsx", fqn: "CardFooter", type: "Function" } }
       - { row: { file_path: "src/components/icons.tsx", fqn: "StatusIcon", type: "Function" } }
       - { row: { file_path: "src/components/icons.tsx", fqn: "WarningIcon", type: "Function" } }
-      - { row: { file_path: "src/components/icons.tsx", fqn: "Icons", type: "Variable" } }
+      - { row: { file_path: "src/components/icons.tsx", fqn: "Icons", type: "Constant" } }
       - { row: { file_path: "src/Home.tsx", fqn: "Home", type: "Function" } }
       - { row: { file_path: "src/Home.tsx", fqn: "Panel", type: "Function" } }
       - { row: { file_path: "src/Home.tsx", fqn: "FragmentHost", type: "Function" } }

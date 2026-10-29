@@ -28,7 +28,7 @@ tests:
   - name: "suspend fun fetchUser extracted as Function"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'fetchUser' AND d.language_kind = 'Function'
+      WHERE d.name = 'fetchUser' AND d.category = 'Callable'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row: { name: "fetchUser", fqn: "com.example.UserService.fetchUser" } }
@@ -36,7 +36,7 @@ tests:
   - name: "suspend interface method findById extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'findById' AND d.language_kind = 'Function'
+      WHERE d.name = 'findById' AND d.category = 'Callable'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row: { name: "findById", fqn: "com.example.UserRepository.findById" } }
@@ -44,7 +44,7 @@ tests:
   - name: "non-suspend fun startLoading extracted as Function"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'startLoading' AND d.language_kind = 'Function'
+      WHERE d.name = 'startLoading' AND d.category = 'Callable'
       RETURN d.name AS name
     assert:
       - { row: { name: "startLoading" } }

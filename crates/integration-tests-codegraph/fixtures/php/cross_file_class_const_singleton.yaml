@@ -113,14 +113,14 @@ tests:
     assert:
       - { row_count: 1 }
 
-  - name: "Inherited method dispatch via both static-factory chains: register -> Container.get (2 call sites)"
+  - name: "Inherited method dispatch via both static-factory chains: register -> Container.get (one edge for 2 call sites)"
     query: |
       MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\register'
         AND callee.fqn = 'App\Di\Container\get'
       RETURN caller.fqn AS caller
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   - name: "Foo::class does not create a spurious edge to a member literally named 'class'"
     query: |

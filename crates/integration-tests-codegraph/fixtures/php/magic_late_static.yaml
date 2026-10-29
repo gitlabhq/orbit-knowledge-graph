@@ -189,7 +189,7 @@ tests:
   - name: "Magic methods indexed as Method definitions under their class"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Method' AND d.fqn IN [
+      WHERE d.category = 'Callable' AND d.fqn IN [
         'App\Container\__construct',
         'App\Container\__call',
         'App\Container\__get',

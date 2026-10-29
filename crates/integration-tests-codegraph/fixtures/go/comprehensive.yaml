@@ -178,7 +178,7 @@ tests:
       WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Greet'
       RETURN callee.fqn AS callee
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   # ── Intra-service method calls ──
 

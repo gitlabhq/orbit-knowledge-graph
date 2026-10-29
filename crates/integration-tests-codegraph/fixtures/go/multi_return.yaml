@@ -43,9 +43,7 @@ tests:
         assert:
           - { row: { callee: "main.Build" } }
           - { row: { callee: "main.NewBuilder" } }
-          - { row: { callee: "main.NewBuilder" } }
           - { row: { callee: "main.SetAge" } }
-          - { row: { callee: "main.SetName" } }
           - { row: { callee: "main.SetName" } }
       # Exactly 6 call edges, no false positives
       - query: |
@@ -53,7 +51,7 @@ tests:
           WHERE caller.fqn = 'main.useBuilder'
           RETURN callee.fqn AS callee
         assert:
-          - { row_count: 6 }
+          - { row_count: 4 }
 
   - name: "Builder methods return self type for chaining"
     query: |

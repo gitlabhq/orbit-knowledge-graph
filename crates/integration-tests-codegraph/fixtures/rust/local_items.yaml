@@ -79,7 +79,7 @@ tests:
       WHERE caller.name = 'outer' AND callee.name = 'Local'
       RETURN callee.fqn AS fqn, callee.kind AS type
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
       - { row: { fqn: "outer::Local", type: "Struct" } }
 
   - name: "local enum variant constructors resolve to the local variant"
