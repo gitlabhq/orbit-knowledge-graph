@@ -250,6 +250,11 @@ fn apply_and_report(
         show_outcomes_per_component(&report)?;
     } else {
         show_outcomes_per_component(&report.only_plugin_skips())?;
+        for outcome in &report.outcomes {
+            if outcome.action == components::KEPT_RETIRED {
+                tui::warning(format!("{}: {}", outcome.label, outcome.action));
+            }
+        }
     }
     outcome?;
     Ok(report)
@@ -617,14 +622,11 @@ mod tests {
         assert!(agents.contains("<!-- orbit:setup:begin -->"));
         assert!(agents.contains("# My rules"));
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
-        assert_eq!(
-            read_json(&opencode_config)["plugin"],
-            json!([
-                "other.js",
-                ".opencode/plugins/orbit.js",
-                ".opencode/plugins/orbit-ui.js"
-            ])
-        );
+        for part in ["index.js", "rpc.ts", "tui.tsx"] {
+            let path = dir.path().join(".opencode/plugins/orbit-ui").join(part);
+            assert!(path.is_file(), "{}", path.display());
+        }
+        assert_eq!(read_json(&opencode_config), json!({"plugin": ["other.js"]}));
         assert_eq!(
             read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],
             json!({
@@ -1707,14 +1709,27 @@ mod tests {
     }
 
     #[test]
-    fn opencode_plugin_shows_a_toast_for_orbit_calls() {
+    fn opencode_ui_plugin_reports_orbit_calls_to_its_tui_part() {
         let dir = tempfile::tempdir().unwrap();
         install_with_mcp(&["opencode"], dir.path());
 
-        let plugin =
-            std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit-ui.js")).unwrap();
-        assert!(plugin.contains(r#""tool.execute.before""#), "{plugin}");
-        assert!(plugin.contains("client.tui.showToast"), "{plugin}");
+        let ui = dir.path().join(".opencode/plugins/orbit-ui");
+        let read = |part: &str| std::fs::read_to_string(ui.join(part)).unwrap();
+        let server = read("index.js");
+        assert!(
+            server.contains(r#"ctx.tool.hook("execute.before""#),
+            "{server}"
+        );
+        assert!(
+            server.contains(r#"ctx.tool.hook("execute.after""#),
+            "{server}"
+        );
+        assert!(server.contains(r#"from "./rpc.ts""#), "{server}");
+        assert!(read("rpc.ts").contains("id: 'orbit.ui'"));
+        let tui = read("tui.tsx");
+        assert!(tui.contains("'session.composer.top'"), "{tui}");
+        assert!(tui.contains("'prompt.footer.status'"), "{tui}");
+        assert!(!dir.path().join(".opencode/plugins/orbit-ui.js").exists());
     }
 
     #[test]

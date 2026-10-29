@@ -173,7 +173,3 @@ test('an orbit call that runs other commands names them in its detail', async ()
   await hooks.before(call('glab orbit grep login && rm -rf build'))
   expect(sent[0]?.detail).toBe('login  + rm')
 })
-
-test('an orbit call that runs other commands names them in its toast', async () => {
-  expect(await toastsFor(['glab orbit grep login && rm -rf build'])).toEqual(['◎ Searching code  login  + rm'])
-})
