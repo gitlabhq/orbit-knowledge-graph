@@ -95,7 +95,6 @@ fn skip_reason(agent: Agent, plugin: &PluginSpec, target: &Target) -> Option<Str
     ))
 }
 
-/// Removes the plugin paths install would skip from `plan` and notes each skip in `report`.
 pub(in crate::commands::setup) fn drop_skipped_plugins(
     plan: &mut Plan,
     agents: &[Agent],
@@ -280,28 +279,32 @@ fn remove_plugin(plugin: &PluginSpec, target: &Target, report: &mut Report) -> R
     Ok(())
 }
 
-fn is_stale_orbit_marketplace(plugin: &PluginSpec, current: &str, name: &str, path: &str) -> bool {
-    name != current
-        && name.starts_with(&format!("{}-", plugin.marketplace))
-        && !Path::new(path).exists()
+fn stale_orbit_marketplaces<'a>(
+    plugin: &PluginSpec,
+    current: &str,
+    marketplaces: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Vec<String> {
+    let prefix = format!("{}-", plugin.marketplace);
+    marketplaces
+        .into_iter()
+        .filter(|(name, path)| {
+            *name != current && name.starts_with(&prefix) && !Path::new(path).exists()
+        })
+        .map(|(name, _)| name.to_string())
+        .collect()
 }
 
-/// Drops `enabledPlugins` and `extraKnownMarketplaces` entries of Orbit
-/// marketplaces whose directory is gone, such as after a project move.
 fn prune_stale_entries(plugin: &PluginSpec, current: &str, root: &mut Value) -> bool {
-    let stale: Vec<String> = root["extraKnownMarketplaces"]
+    let directories = root["extraKnownMarketplaces"]
         .as_object()
         .into_iter()
         .flatten()
-        .filter(|(name, entry)| {
+        .filter_map(|(name, entry)| {
             let source = &entry["source"];
-            source["source"] == "directory"
-                && source["path"]
-                    .as_str()
-                    .is_some_and(|path| is_stale_orbit_marketplace(plugin, current, name, path))
-        })
-        .map(|(name, _)| name.clone())
-        .collect();
+            let path = source["path"].as_str()?;
+            (source["source"] == "directory").then_some((name.as_str(), path))
+        });
+    let stale = stale_orbit_marketplaces(plugin, current, directories);
     for name in &stale {
         for (section, key) in [
             ("extraKnownMarketplaces", name.clone()),
@@ -320,8 +323,6 @@ fn prune_stale_entries(plugin: &PluginSpec, current: &str, root: &mut Value) -> 
     !stale.is_empty()
 }
 
-/// Unregisters Orbit marketplaces whose directory is gone from Claude's
-/// user-level state, which setup in a since-deleted project left behind.
 fn prune_stale_user_marketplaces(plugin: &PluginSpec, current: &str, target: &Target) {
     let list = [program(plugin), "plugin", "marketplace", "list", "--json"];
     let Ok(stdout) = run(&list.map(str::to_string), target) else {
@@ -330,18 +331,14 @@ fn prune_stale_user_marketplaces(plugin: &PluginSpec, current: &str, target: &Ta
     let Ok(Value::Array(entries)) = serde_json::from_str::<Value>(&stdout) else {
         return;
     };
-    for entry in entries {
-        let (Some(name), Some("directory"), Some(path)) = (
-            entry["name"].as_str(),
-            entry["source"].as_str(),
-            entry["path"].as_str(),
-        ) else {
-            continue;
-        };
-        if is_stale_orbit_marketplace(plugin, current, name, path) {
-            let remove = [program(plugin), "plugin", "marketplace", "remove", name];
-            let _ = run(&remove.map(str::to_string), target);
-        }
+    let directories = entries.iter().filter_map(|entry| {
+        let name = entry["name"].as_str()?;
+        let path = entry["path"].as_str()?;
+        (entry["source"] == "directory").then_some((name, path))
+    });
+    for name in stale_orbit_marketplaces(plugin, current, directories) {
+        let remove = [program(plugin), "plugin", "marketplace", "remove", &name];
+        let _ = run(&remove.map(str::to_string), target);
     }
 }
 
