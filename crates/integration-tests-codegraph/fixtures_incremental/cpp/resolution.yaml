@@ -92,10 +92,11 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a C++ member function is kind Method and a constructor is kind Constructor; category Callable holds every callable
   - name: "Function definitions with namespaced FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function'
+      WHERE d.category = 'Callable'
       RETURN d.fqn AS fqn
     assert:
       - { no_nulls: fqn }
@@ -119,20 +120,22 @@ tests:
       - { row: { fqn: "shape::shapes::Shape" } }
       - { row: { fqn: "circle::shapes::Circle" } }
 
+  # corrected: contract: a C++ namespace is kind Module with language_kind Namespace
   - name: "Namespace definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Class'
+      WHERE d.language_kind = 'Namespace'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: "vec::math" } }
       - { row: { fqn: "shape::shapes" } }
       - { row: { fqn: "circle::shapes" } }
 
+  # corrected: contract: an enum constant is kind EnumMember
   - name: "Enum constants with full scope"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'EnumVariant'
+      WHERE d.kind = 'EnumMember'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }

@@ -15,9 +15,10 @@ fixtures:
           h()
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: All call edges from use_handler
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'use_handler'
       RETURN callee.fqn AS callee
     assert:

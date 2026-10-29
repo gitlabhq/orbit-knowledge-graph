@@ -39,9 +39,10 @@ fixtures:
           cls()
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "Class joins call the original declarations, including local classes"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      MATCH (caller:Definition)-[:INSTANTIATES]->(target:Definition)
       WHERE caller.name IN ['branched', 'local_classes', 'rebound_name']
       RETURN caller.name AS caller, target.name AS target
     assert:

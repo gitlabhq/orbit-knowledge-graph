@@ -29,11 +29,12 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a Rust function in an impl or trait block is kind Method; without a self parameter its language_kind is AssociatedFunction
   - name: Struct and all associated functions/methods exist
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.rs'
-        AND d.language_kind IN ['Struct', 'Function', 'Method', 'Function']
+        AND d.language_kind IN ['Struct', 'Function', 'Method', 'AssociatedFunction']
       RETURN d.name AS name, d.language_kind AS type
       ORDER BY name
     assert:
@@ -41,8 +42,8 @@ tests:
       - { row: { name: "Point", type: "Struct" } }
       - { row: { name: "distance", type: "Method" } }
       - { row: { name: "main", type: "Function" } }
-      - { row: { name: "new", type: "Function" } }
-      - { row: { name: "origin", type: "Function" } }
+      - { row: { name: "new", type: "AssociatedFunction" } }
+      - { row: { name: "origin", type: "AssociatedFunction" } }
 
   - name: origin calls new (associated function calling associated function)
     query: |

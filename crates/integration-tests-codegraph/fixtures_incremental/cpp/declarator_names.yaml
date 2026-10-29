@@ -89,39 +89,43 @@ tests:
       - { row_count: 1 }
       - { row: { name: "mscall", fqn: "funcs::mscall" } }
 
+  # corrected: contract: a C++ member function is kind Method and a constructor is kind Constructor; category Callable holds every callable
   - name: "Out-of-line member keeps its class qualifier (single level)"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.name IN ['Foo::bar', 'Foo::baz']
+      WHERE d.category = 'Callable' AND d.name IN ['Foo::bar', 'Foo::baz']
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 2 }
       - { row: { name: "Foo::bar", fqn: "members::Foo::bar" } }
       - { row: { name: "Foo::baz", fqn: "members::Foo::baz" } }
 
+  # corrected: contract: a C++ member function is kind Method and a constructor is kind Constructor; category Callable holds every callable
   - name: "Out-of-line member keeps the full nested qualifier"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.fqn = 'members::A::B::deep'
+      WHERE d.category = 'Callable' AND d.fqn = 'members::A::B::deep'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
       - { row: { name: "A::B::deep", fqn: "members::A::B::deep" } }
 
+  # corrected: contract: a C++ member function is kind Method and a constructor is kind Constructor; category Callable holds every callable
   - name: "Operator and destructor names keep the qualifier, drop params"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.name IN ['Foo::operator==', 'Foo::~Foo']
+      WHERE d.category = 'Callable' AND d.name IN ['Foo::operator==', 'Foo::~Foo']
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 2 }
       - { row: { name: "Foo::operator==", fqn: "members::Foo::operator==" } }
       - { row: { name: "Foo::~Foo", fqn: "members::Foo::~Foo" } }
 
+  # corrected: contract: a C++ member function is kind Method and a constructor is kind Constructor; category Callable holds every callable
   - name: "Inline conversion operators normalize to operator <type>, keeping pointer/ref/cv"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.name STARTS WITH 'operator'
+      WHERE d.category = 'Callable' AND d.name STARTS WITH 'operator'
       RETURN d.name AS name
     assert:
       - { row_count: 6 }
@@ -133,10 +137,11 @@ tests:
       - { row: { name: "operator std::string" } }
       - { row: { name: "operator std::function<void(int)>" } }
 
+  # corrected: contract: a C++ member function is kind Method and a constructor is kind Constructor; category Callable holds every callable
   - name: "Out-of-line conversion operator keeps the qualifier at any depth"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function'
+      WHERE d.category = 'Callable'
         AND d.name IN ['Ptr::operator int', 'S::I::operator int']
       RETURN d.name AS name, d.fqn AS fqn
     assert:
@@ -144,10 +149,11 @@ tests:
       - { row: { name: "Ptr::operator int", fqn: "conversions::Ptr::operator int" } }
       - { row: { name: "S::I::operator int", fqn: "conversions::S::I::operator int" } }
 
+  # corrected: contract: a C++ member function is kind Method and a constructor is kind Constructor; category Callable holds every callable
   - name: "Comment before the parameter list does not leak into a conversion operator name"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.name STARTS WITH 'Widget::operator'
+      WHERE d.category = 'Callable' AND d.name STARTS WITH 'Widget::operator'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }

@@ -151,18 +151,20 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "Cross-file interface implementation: OrderService implements Persistable"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:IMPLEMENTS]->(parent:Definition)
       WHERE child.fqn = 'App\Service\OrderService'
         AND parent.fqn = 'App\Contract\Persistable'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a supertype that is a trait is IMPLEMENTS; a PHP trait use is IMPLEMENTS
   - name: "Cross-file trait use: OrderService uses Loggable"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:IMPLEMENTS]->(parent:Definition)
       WHERE child.fqn = 'App\Service\OrderService'
         AND parent.fqn = 'App\Mixin\Loggable'
       RETURN child.fqn AS child
@@ -178,18 +180,20 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "Cross-file interface implementation: OrderRepo implements Persistable"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:IMPLEMENTS]->(parent:Definition)
       WHERE child.fqn = 'App\Repo\OrderRepo'
         AND parent.fqn = 'App\Contract\Persistable'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "Cross-file interface inheritance: Persistable extends Identifiable"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:IMPLEMENTS]->(parent:Definition)
       WHERE child.fqn = 'App\Contract\Persistable'
         AND parent.fqn = 'App\Contract\Identifiable'
       RETURN child.fqn AS child

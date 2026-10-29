@@ -343,20 +343,22 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a Ruby attribute is a Field
   - name: "Project class_attribute"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Project::max_attachment_size'
-        AND d.language_kind = 'Property'
+        AND d.kind = 'Field'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a Ruby attribute is a Field
   - name: "BaseService attr_reader"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN ['BaseService::project', 'BaseService::current_user', 'BaseService::params']
-        AND d.language_kind = 'Property'
+        AND d.kind = 'Field'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -406,9 +408,10 @@ tests:
       - { row: { callee: "MergeRequests::CreateService::create" } }
       - { row: { callee: "MergeRequests::CreateService::after_create" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "CreateService#execute calls MergeRequest (class-ref from constructor chain)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'MergeRequests::CreateService::execute'
         AND callee.fqn = 'MergeRequest'
       RETURN callee.fqn AS callee

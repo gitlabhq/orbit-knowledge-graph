@@ -141,13 +141,14 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: one edge row per source, target, and kind; lines holds each use
   - name: "Scalar and tuple bindings emit no extra calls"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name IN ['swapped', 'ignored', 'opaque', 'initializer_calls', 'before', 'after', 'unchanged']
       RETURN caller.name AS caller, callee.name AS target
     assert:
-      - { row_count: 8 }
+      - { row_count: 7 }
       - { row: { caller: swapped, target: second } }
       - { row: { caller: ignored, target: second } }
       - { row: { caller: initializer_calls, target: make } }
@@ -192,11 +193,12 @@ tests:
       - { row: { caller: mutable_pattern, target: second } }
       - { row: { caller: reference_pattern, target: first } }
 
+  # corrected: contract: one edge row per source, target, and kind; lines holds each use
   - name: "Each source call executes once per expression"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE callee.name = 'make'
       RETURN caller.name AS caller
     assert:
-      - { row_count: 3 }
-      - { column_values: { field: caller, values: [initializer_calls, initializer_calls, source_is_evaluated_once] } }
+      - { row_count: 2 }
+      - { column_values: { field: caller, values: [initializer_calls, source_is_evaluated_once] } }

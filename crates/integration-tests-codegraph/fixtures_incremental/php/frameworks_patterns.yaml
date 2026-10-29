@@ -146,18 +146,20 @@ tests:
       - { unique: fqn }
 
   # One class implementing one interface (FileLogger -> LoggerInterface).
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "FileLogger implements LoggerInterface produces Extends edge"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Support\Logger\FileLogger'
         AND p.fqn = 'App\Contracts\LoggerInterface'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "EloquentUserRepository implements UserRepositoryInterface produces Extends edge"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Repositories\EloquentUserRepository'
         AND p.fqn = 'App\Contracts\UserRepositoryInterface'
       RETURN c.fqn AS c
@@ -196,18 +198,20 @@ tests:
 
   # Factory function wires concrete classes together via `new`. Each `new X(...)`
   # should produce a Calls edge from the enclosing function to the class.
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "bootApp -> FileLogger via new (constructor reference as Calls)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'App\bootApp'
         AND callee.fqn = 'App\Support\Logger\FileLogger'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "bootApp -> EloquentUserRepository via new"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'App\bootApp'
         AND callee.fqn = 'App\Repositories\EloquentUserRepository'
       RETURN caller.fqn AS c

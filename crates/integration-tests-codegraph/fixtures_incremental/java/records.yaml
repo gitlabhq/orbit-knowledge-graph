@@ -263,22 +263,24 @@ tests:
 
   # ── Constructor ───────────────────────────────────────────────────
 
+  # corrected: contract: a constructor is kind Constructor, not Method
   - name: "Explicit canonical constructor in Range is extracted"
     query: |
       MATCH (r:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
-        AND c.language_kind = 'Method'
+        AND c.kind = 'Constructor'
         AND c.name = 'Range'
       RETURN c.name AS name
     assert:
       - { row_count: 1 }
       - { row: { name: "Range" } }
 
+  # corrected: contract: a constructor is kind Constructor, not Method
   - name: "Bounds compact constructor is extracted"
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Bounds' AND m.name = 'Bounds'
-        AND m.language_kind = 'Method'
+        AND m.kind = 'Constructor'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -318,11 +320,12 @@ tests:
 
   # ── Containment edges ─────────────────────────────────────────────
 
+  # corrected: contract: a constructor is kind Constructor, not Method
   - name: "Range record defines its canonical constructor"
     query: |
       MATCH (r:Definition)-[e:DEFINES]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
-        AND c.language_kind = 'Method'
+        AND c.kind = 'Constructor'
         AND c.name = 'Range'
       RETURN c.fqn AS fqn
     assert:
@@ -371,9 +374,10 @@ tests:
   # ── Call resolution into records ──────────────────────────────────
 
   # corrected: one constructor call; the return type is a reference, not a call
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "PointUser.origin() calls Point constructor"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.PointUser.origin'
         AND callee.fqn = 'com.example.records.Point'
       RETURN callee.fqn AS callee
@@ -390,9 +394,10 @@ tests:
     assert:
       - { row_count: 1 }
 
-  - name: "Records Circle and Rectangle extend sealed interface Shape"
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
+  - name: "Records Circle and Rectangle implement sealed interface Shape"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:IMPLEMENTS]->(parent:Definition)
       WHERE parent.fqn = 'com.example.records.Shape'
       RETURN child.fqn AS child
       ORDER BY child
@@ -401,9 +406,10 @@ tests:
       - { row: { child: "com.example.records.Circle" } }
       - { row: { child: "com.example.records.Rectangle" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "ShapeUser.create() calls Circle and Rectangle constructors"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.create'
       RETURN callee.name AS callee
       ORDER BY callee
@@ -411,9 +417,10 @@ tests:
       - { row: { callee: "Circle" } }
       - { row: { callee: "Rectangle" } }
 
+  # corrected: contract: a type named in a declaration (parameter, return, field, local, instanceof, permits) is USES_TYPE
   - name: "ShapeUser.area() instanceof type patterns emit Circle and Rectangle type references"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_TYPE]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.area'
         AND callee.fqn IN ['com.example.records.Circle', 'com.example.records.Rectangle']
       RETURN callee.fqn AS callee
@@ -421,9 +428,10 @@ tests:
     assert:
       - { row_count: 2 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES; contract: a type named in a declaration (parameter, return, field, local, instanceof, permits) is USES_TYPE
   - name: "Outer.make() calls nested record Inner constructor"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES|USES_TYPE]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.Outer.make'
         AND callee.fqn = 'com.example.records.Outer.Inner'
       RETURN callee.fqn AS callee

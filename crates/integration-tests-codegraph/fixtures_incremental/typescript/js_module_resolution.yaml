@@ -553,17 +553,27 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "run", callee: "formatter" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: Constructor, inferred member, and static method calls resolve
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'advanced/consumer.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 5 }
-      - { row: { caller: "process", callee: "Parser" } }
+      - { row_count: 3 }
       - { row: { caller: "process", callee: "Parser::parse" } }
       - { row: { caller: "createParser", callee: "Parser::fromConfig" } }
       - { row: { caller: "runWithService", callee: "Parser::parse" } }
+
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
+  - name: Constructor calls are instantiations
+    query: |
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
+      WHERE caller.file_path = 'advanced/consumer.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "process", callee: "Parser" } }
       - { row: { caller: "Parser::fromConfig", callee: "Parser" } }
 
   - name: Callback passing does not fabricate direct execution edges
@@ -576,27 +586,47 @@ tests:
     assert:
       - { empty: true }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: SSA branch merges preserve multiple candidate receiver types
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'ssa/branch.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 4 }
-      - { row: { caller: "pickParser", callee: "JsonParser" } }
-      - { row: { caller: "pickParser", callee: "CsvParser" } }
+      - { row_count: 2 }
       - { row: { caller: "pickParser", callee: "JsonParser::parse" } }
       - { row: { caller: "pickParser", callee: "CsvParser::parse" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
+  - name: SSA branch arms instantiate both classes
+    query: |
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
+      WHERE caller.file_path = 'ssa/branch.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "pickParser", callee: "JsonParser" } }
+      - { row: { caller: "pickParser", callee: "CsvParser" } }
+
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: SSA alias propagation preserves receiver type through local rebinding
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'ssa/alias.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 2 }
-      - { row: { caller: "aliasRun", callee: "Parser" } }
+      - { row_count: 1 }
       - { row: { caller: "aliasRun", callee: "Parser::parse" } }
+
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
+  - name: SSA alias source instantiates the class
+    query: |
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
+      WHERE caller.file_path = 'ssa/alias.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "aliasRun", callee: "Parser" } }
 
   - name: SSA loop exit preserves initial and loop-carried receiver types
     query: |

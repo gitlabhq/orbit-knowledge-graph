@@ -100,6 +100,7 @@ tests:
       - { row: { fqn: "inventory::Packet::Tuple::0", type: "Field" } }
       - { row: { fqn: "inventory::Packet::Tuple::1", type: "Field" } }
 
+  # corrected: contract: a Rust function in an impl or trait block is kind Method; without a self parameter its language_kind is AssociatedFunction
   - name: "trait associated items are retained on the trait definition"
     query: |
       MATCH (d:Definition)
@@ -116,8 +117,9 @@ tests:
       - { row: { fqn: "inventory::Runner::KIND", type: "Constant" } }
       - { row: { fqn: "inventory::Runner::Output", type: "TypeAlias" } }
       - { row: { fqn: "inventory::Runner::run", type: "Method" } }
-      - { row: { fqn: "inventory::Runner::build", type: "Function" } }
+      - { row: { fqn: "inventory::Runner::build", type: "Method" } }
 
+  # corrected: contract: a Rust function in an impl or trait block is kind Method; without a self parameter its language_kind is AssociatedFunction
   - name: "impl associated items are retained on the concrete type"
     query: |
       MATCH (d:Definition)
@@ -135,8 +137,8 @@ tests:
       - { row: { fqn: "inventory::Service::KIND", type: "Constant" } }
       - { row: { fqn: "inventory::Service::Output", type: "TypeAlias" } }
       - { row: { fqn: "inventory::Service::run", type: "Method" } }
-      - { row: { fqn: "inventory::Service::build", type: "Function" } }
-      - { row: { fqn: "inventory::Service::inherent", type: "Function" } }
+      - { row: { fqn: "inventory::Service::build", type: "Method" } }
+      - { row: { fqn: "inventory::Service::inherent", type: "Method" } }
 
   - name: "variant imports and aliases retain their metadata"
     query: |

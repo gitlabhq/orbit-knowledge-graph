@@ -59,13 +59,15 @@ tests:
     assert:
       - { row_count: 1 }
 
-  - name: Puppy.play() does not resolve inherited speak via this
+  # corrected: ECMAScript: a class inherits the methods of the class it extends, so this.m() reaches the inherited method
+  - name: Puppy.play() resolves inherited speak via this
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'play' AND callee.name = 'speak'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "Puppy::play", callee: "Dog::speak" } }
 
   - name: unused has no incoming call edges
     query: |

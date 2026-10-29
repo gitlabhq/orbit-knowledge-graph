@@ -76,10 +76,11 @@ tests:
       - { row: { fqn: 'App\Models\User' } }
       - { row: { fqn: 'App\Support\Logger' } }
 
+  # corrected: contract: __construct is kind Constructor
   - name: "Methods are scoped under their class"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Method'
+      WHERE d.kind IN ['Method', 'Constructor']
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Models\Model\save' } }

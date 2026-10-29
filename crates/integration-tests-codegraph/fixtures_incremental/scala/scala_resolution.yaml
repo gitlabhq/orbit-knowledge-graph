@@ -34,6 +34,7 @@ tests:
 
   # ── Broader exhaustive checks ────────────────────────────────
 
+  # corrected: contract: a callable that belongs to a type is kind Method
   - name: Exactly 3 definitions with correct types
     query: |
       MATCH (d:Definition)
@@ -45,8 +46,8 @@ tests:
       - { no_nulls: type }
       - { match: { field: file, pattern: "com/example/Service.scala" } }
       - { row: { name: "Service", fqn: "com.example.Service", type: "Class" } }
-      - { row: { name: "process", fqn: "com.example.Service.process", type: "Function" } }
-      - { row: { name: "run", fqn: "com.example.Service.run", type: "Function" } }
+      - { row: { name: "process", fqn: "com.example.Service.process", type: "Method" } }
+      - { row: { name: "run", fqn: "com.example.Service.run", type: "Method" } }
 
   - name: Exactly 2 containment edges
     query: |

@@ -128,10 +128,11 @@ tests:
     assert:
       - { row: { type: Interface } }
 
+  # corrected: contract: an enum case is kind EnumMember
   - name: "Enum cases indexed under the enum"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'EnumVariant'
+      WHERE d.kind = 'EnumMember'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Enums\Status\Active' } }
@@ -163,17 +164,19 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "Product implements Identifiable"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Contracts\Identifiable'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a supertype that is a trait is IMPLEMENTS; a PHP trait use is IMPLEMENTS
   - name: "Product uses Loggable trait (modeled as Extends)"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Concerns\Loggable'
       RETURN c.fqn AS c
     assert:

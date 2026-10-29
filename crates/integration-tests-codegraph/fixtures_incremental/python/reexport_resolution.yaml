@@ -138,10 +138,11 @@ fixtures:
           return Thing()
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "wildcard __init__ re-export resolves to the defining module"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
           WHERE caller.fqn = 'api.handler.build_registry'
             AND callee.fqn = 'prompts.base.BasePromptRegistry'
           RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -155,36 +156,40 @@ tests:
         assert:
           - { empty: true }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "direct module import still binds (no regression)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'api.monitoring.build_registry_direct'
         AND callee.fqn = 'prompts.base.BasePromptRegistry'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "renaming named re-export resolves to the underlying definition"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'selection.caller.load_config'
         AND callee.fqn = 'selection.impl.RealConfig'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "sibling-module re-export resolves to the defining module"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'processing.caller.make_language_id'
         AND callee.fqn = 'processing.typing.LanguageId'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "multi-hop re-export chain resolves to the defining module"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'deep.caller.make_deep'
         AND callee.fqn = 'deep.impl.Deep'
       RETURN caller.fqn AS caller, callee.fqn AS callee

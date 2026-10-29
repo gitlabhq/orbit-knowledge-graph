@@ -56,11 +56,12 @@ tests:
       - { row_count: 1 }
       - { row: { callee: "Main.Foo.bar" } }
 
-  - name: two call sites in one method keep one row per site
+  # corrected: contract: one edge row per source, target, and kind; each use is a line of that row
+  - name: two call sites in one method keep one row
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'twoSites' AND t.name = 'bar'
       RETURN t.fqn AS callee
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
       - { row: { callee: "Main.Foo.bar" } }

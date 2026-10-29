@@ -82,11 +82,12 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Method" } }
 
+  # corrected: contract: a constructor is kind Constructor, not Method
   - name: "struct constructor is extracted"
     query: |
       MATCH (s:Definition)-[e:DEFINES]->(c:Definition)
       WHERE s.fqn = 'Geometry.Point'
-        AND c.language_kind = 'Method'
+        AND c.kind = 'Constructor'
         AND c.name = 'Point'
       RETURN c.name AS name
     assert:

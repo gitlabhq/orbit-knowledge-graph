@@ -48,36 +48,40 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "UserService.createUser → new User (cross-package)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'createUser' AND callee.name = 'User'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
       - { row: { src: "com/example/service/UserService.java", tgt: "com/example/model/User.java" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "App.run → new UserService (explicit import)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'UserService'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
       - { row: { src: "com/example/App.java", tgt: "com/example/service/UserService.java" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "App.run → new User (wildcard import)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'User'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
       - { row: { src: "com/example/App.java", tgt: "com/example/model/User.java" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "App.run → new Project (wildcard import)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'Project'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:

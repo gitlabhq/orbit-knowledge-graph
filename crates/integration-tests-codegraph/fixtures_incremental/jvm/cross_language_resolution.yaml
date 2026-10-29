@@ -96,9 +96,10 @@ tests:
   # JAVA CALLING JAVA (within family)
   # ══════════════════════════════════════════════════════════════
 
+  # corrected: contract: a type named in a declaration (parameter, return, field, local, instanceof, permits) is USES_TYPE
   - name: "Java User.create calls Java User (same file)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|USES_TYPE]->(callee:Definition)
       WHERE caller.fqn = 'com.example.model.User.create'
         AND callee.fqn STARTS WITH 'com.example.model.User'
       RETURN callee.fqn AS callee

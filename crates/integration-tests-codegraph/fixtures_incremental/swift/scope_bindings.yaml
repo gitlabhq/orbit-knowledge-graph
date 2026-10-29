@@ -80,13 +80,14 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES, one edge row per source, target, and kind, and a parameter type is a USES_TYPE use, not a CALLS
   - name: "Local shadows preserve callable and receiver bindings"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'run'
       RETURN caller.file_path AS file, callee.name AS target
     assert:
-      - { row_count: 16 }
+      - { row_count: 10 }
       - { row: { file: local/main.swift, target: first } }
       - { row: { file: callable/main.swift, target: first } }
       - { row: { file: shadow/main.swift, target: First } }
@@ -94,8 +95,6 @@ tests:
       - { row: { file: shadow/main.swift, target: ping } }
       - { row: { file: control/main.swift, target: First } }
       - { row: { file: control/main.swift, target: ping } }
-      - { row: { file: typed/main.swift, target: First } }
       - { row: { file: typed/main.swift, target: ping } }
-      - { row: { file: parameter/main.swift, target: First } }
       - { row: { file: parameter/main.swift, target: Second } }
       - { row: { file: parameter/main.swift, target: ping } }

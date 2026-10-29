@@ -17,9 +17,10 @@ fixtures:
           print(u.email)
 
 tests:
+  # corrected: contract: a member read without a call is USES_VALUE
   - name: "typed dataclass attribute access resolves to the field definition"
     query: |
-      MATCH (caller:Definition)-[r:CALLS|DEFINES|EXTENDS]->(field:Definition)
+      MATCH (caller:Definition)-[r:USES_VALUE]->(field:Definition)
       WHERE caller.fqn = 'main.greet'
         AND field.name = 'email'
       RETURN field.fqn AS field

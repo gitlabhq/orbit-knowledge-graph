@@ -156,29 +156,32 @@ tests:
       - { row_count: 4 }
       - { unique: fqn }
 
+  # corrected: contract: an enum case is kind EnumMember
   - name: "Backed string enum cases get EnumCase + namespace-qualified FQN"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'EnumVariant'
+      WHERE d.kind = 'EnumMember'
         AND d.fqn IN ['App\Domain\Status\Active', 'App\Domain\Status\Inactive', 'App\Domain\Status\Archived']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
       - { unique: fqn }
 
+  # corrected: contract: an enum case is kind EnumMember
   - name: "Backed int enum cases get EnumCase definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'EnumVariant'
+      WHERE d.kind = 'EnumMember'
         AND d.fqn IN ['App\Domain\Priority\Low', 'App\Domain\Priority\Medium', 'App\Domain\Priority\High']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
 
+  # corrected: contract: an enum case is kind EnumMember
   - name: "Pure enum cases (no backing) are still indexed as EnumCase"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'EnumVariant'
+      WHERE d.kind = 'EnumMember'
         AND d.fqn IN ['App\Domain\Direction\North', 'App\Domain\Direction\South',
                       'App\Domain\Direction\East', 'App\Domain\Direction\West']
       RETURN d.fqn AS fqn
@@ -207,17 +210,19 @@ tests:
       - { row_count: 2 }
 
   # ── Inheritance edges ─────────────────────────────────────────
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "Enum implementing an interface produces an Extends edge"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Domain\Status' AND p.fqn = 'App\Domain\HasLabel'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a supertype that is a trait is IMPLEMENTS; a PHP trait use is IMPLEMENTS
   - name: "Enum using a trait produces an Extends edge to the trait"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Domain\Tier' AND p.fqn = 'App\Domain\Describable'
       RETURN c.fqn AS c
     assert:

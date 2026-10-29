@@ -125,10 +125,11 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a Swift enum case is kind EnumMember
   - name: Direction enum entries are indexed
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'EnumVariant'
+      WHERE d.kind = 'EnumMember'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 6 }

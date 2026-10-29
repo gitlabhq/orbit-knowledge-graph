@@ -73,18 +73,21 @@ tests:
       - { row_count: 1 }
       - { row: { fqn: "outer::helper", type: "Function" } }
 
+  # corrected: contract: a call that creates an instance of a type or an enum member is INSTANTIATES
+  # corrected: contract: one edge row per source, target, and kind; lines holds each use
   - name: "local tuple struct constructors resolve to the local struct"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'outer' AND callee.name = 'Local'
       RETURN callee.fqn AS fqn, callee.kind AS type
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
       - { row: { fqn: "outer::Local", type: "Struct" } }
 
+  # corrected: contract: a call that creates an instance of a type or an enum member is INSTANTIATES
   - name: "local enum variant constructors resolve to the local variant"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'outer' AND callee.name = 'Pick'
       RETURN callee.fqn AS fqn, callee.language_kind AS type
     assert:

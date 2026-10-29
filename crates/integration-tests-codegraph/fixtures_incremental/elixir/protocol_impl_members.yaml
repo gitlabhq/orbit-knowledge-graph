@@ -18,24 +18,32 @@ fixtures:
       end
 
 tests:
-  - name: the protocol is a trait definition
+  # corrected: contract: a type that the language keyword calls a protocol is an Interface with language_kind Protocol
+  - name: the protocol is an interface definition
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Size'
-      RETURN d.fqn AS fqn, d.language_kind AS language_kind
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { fqn: "Size", language_kind: "Trait" } }
+      - { row: { fqn: "Size", kind: "Interface", language_kind: "Protocol" } }
 
+  # corrected: contract: an impl block is not a definition; the type defines its methods
   - name: the defimpl is a part of the target module
-    query: |
-      MATCH (d:Definition)
-      WHERE d.name = 'Box'
-      RETURN d.language_kind AS language_kind
-    assert:
-      - { row_count: 2 }
-      - { row: { language_kind: "Class" } }
-      - { row: { language_kind: "Impl" } }
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'Box'
+          RETURN d.kind AS kind
+        assert:
+          - { row_count: 1 }
+          - { row: { kind: "Module" } }
+      - query: |
+          MATCH (o:Definition)-[:DEFINES]->(m:Definition)
+          WHERE o.name = 'Box'
+          RETURN m.name AS member
+        assert:
+          - { row: { member: "size" } }
 
   - name: the defimpl function calls the module function
     query: |

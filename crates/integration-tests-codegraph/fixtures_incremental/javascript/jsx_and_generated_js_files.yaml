@@ -46,6 +46,7 @@ fixtures:
       ";
 
 tests:
+  # corrected: contract: a name the language declares const is kind Constant
   - name: JSX in .js and generated JS lines both index definitions
     query: |
       MATCH (d:Definition)
@@ -56,4 +57,4 @@ tests:
     assert:
       - { row_count: 2 }
       - { row: { file_path: "frontend/src/App.js", fqn: "App", type: "Function" } }
-      - { row: { file_path: "backend/coverage/prettify.js", fqn: "generated", type: "Variable" } }
+      - { row: { file_path: "backend/coverage/prettify.js", fqn: "generated", type: "Constant" } }

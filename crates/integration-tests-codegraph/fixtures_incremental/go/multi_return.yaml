@@ -34,6 +34,7 @@ fixtures:
 
 tests:
   # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
+  # corrected: contract: one edge row per source, target, and kind; lines holds each use
   - name: "useBuilder calls NewBuilder, SetName, SetAge"
     queries:
       - query: |
@@ -48,13 +49,13 @@ tests:
           - { row: { callee: "main.Builder.SetAge" } }
           - { row: { callee: "main.Builder.SetName" } }
           - { row: { callee: "main.Builder.SetName" } }
-      # Exactly 6 call edges, no false positives
+      # Exactly 4 call edges, no false positives
       - query: |
           MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
           WHERE caller.fqn = 'main.useBuilder'
           RETURN callee.fqn AS callee
         assert:
-          - { row_count: 6 }
+          - { row_count: 4 }
 
   - name: "Builder methods return self type for chaining"
     query: |

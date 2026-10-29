@@ -46,36 +46,40 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a member read without a call is USES_VALUE
   - name: a typed promoted property read links to the property
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:USES_VALUE]->(t:Definition)
       WHERE c.name = 'after' AND t.name = 'value'
       RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Probe\\Dependency\\value", language_kind: "Property" } }
 
+  # corrected: contract: a member read without a call is USES_VALUE
   - name: an untyped promoted property read links to the property
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:USES_VALUE]->(t:Definition)
       WHERE c.name = 'after' AND t.name = 'raw'
       RETURN t.fqn AS callee
     assert:
       - { row_count: 1 }
       - { row: { callee: "Probe\\Dependency\\raw" } }
 
+  # corrected: contract: a member read without a call is USES_VALUE
   - name: a promoted property read through a self-typed parameter links to the property
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:USES_VALUE]->(t:Definition)
       WHERE c.name = 'join' AND t.name = 'element'
       RETURN t.fqn AS callee
     assert:
       - { row_count: 1 }
       - { row: { callee: "Probe\\XPathExpr\\element" } }
 
+  # corrected: contract: a member read without a call is USES_VALUE
   - name: a class-typed promoted property read links to the property
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:USES_VALUE]->(t:Definition)
       WHERE c.name = 'next' AND t.name = 'next'
       RETURN t.fqn AS callee
     assert:

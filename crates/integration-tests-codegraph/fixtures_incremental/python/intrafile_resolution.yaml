@@ -129,10 +129,11 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main.call_decorated", callee: "main.decorated_fn" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "Instantiation: create_service calls Service"
     description: "Service() class instantiation produces a call edge to the class definition"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'create_service' AND callee.name = 'Service'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

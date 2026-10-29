@@ -67,13 +67,14 @@ tests:
       - { row: { caller: "main.package_import_call", path: "urllib.parse", name: "urllib.parse", alias: null } }
       - { row: { caller: "main.package_import_call", path: "xml.etree.ElementTree", name: "xml.etree.ElementTree", alias: "ET" } }
 
+  # corrected: contract: one edge row per source, target, and kind; lines holds every use
   - name: "separate dotted package calls retain separate edges"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:Import)
       WHERE caller.name = 'repeated_package_calls'
       RETURN sym.import_path AS path
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
       - { row: { path: "urllib.parse" } }
 
   - name: "from imports target imported symbols"
@@ -97,10 +98,11 @@ tests:
       - { row_count: 1 }
       - { row: { file: "main.py", path: "sdk.helpers", name: "run", alias: "helper_run" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "locally resolved imports do not emit imported-symbol fallback"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
           WHERE caller.name = 'local_import_call'
             AND callee.fqn = 'local_models.LocalClient'
           RETURN caller.fqn AS caller, callee.fqn AS callee

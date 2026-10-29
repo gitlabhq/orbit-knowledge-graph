@@ -53,9 +53,10 @@ tests:
       - { row: { caller: self_call, target: "Caller::save" } }
       - { row: { caller: self_call, target: "Caller::argument" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: Explicit dispatch uses the receiver rather than the enclosing class
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES]->(target:Definition)
       WHERE caller.fqn = 'Caller::explicit'
       RETURN target.fqn AS target
     assert:
@@ -70,9 +71,10 @@ tests:
     assert:
       - { empty: true }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: Dispatch on a constructor result keeps receiver and argument calls
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES]->(target:Definition)
       WHERE caller.fqn = 'Caller::chained'
       RETURN target.fqn AS target
     assert:
@@ -114,9 +116,10 @@ steps:
             end
           end
     tests:
+      # corrected: contract: a call that creates an instance of a type is INSTANTIATES
       - name: Dynamic dispatch removes the old literal target and retains argument calls
         query: |
-          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES]->(target:Definition)
           WHERE caller.fqn = 'Caller::explicit'
           RETURN target.fqn AS target
         assert:

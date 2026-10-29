@@ -75,11 +75,12 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Enum" } }
 
+  # corrected: contract: an enum member is kind EnumMember
   - name: "Members of Status are extracted as EnumMember definitions"
     query: |
       MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Status'
-        AND m.language_kind = 'EnumVariant'
+        AND m.kind = 'EnumMember'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -89,11 +90,12 @@ tests:
       - { row: { name: "Closed" } }
       - { row: { name: "Pending" } }
 
+  # corrected: contract: an enum member is kind EnumMember
   - name: "Explicitly-valued members of Priority are extracted as EnumMember"
     query: |
       MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Priority'
-        AND m.language_kind = 'EnumVariant'
+        AND m.kind = 'EnumMember'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -103,11 +105,12 @@ tests:
       - { row: { name: "Low" } }
       - { row: { name: "Medium" } }
 
+  # corrected: contract: an enum member is kind EnumMember
   - name: "Members of [Flags] enum Permissions are extracted as EnumMember"
     query: |
       MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Permissions'
-        AND m.language_kind = 'EnumVariant'
+        AND m.kind = 'EnumMember'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -118,11 +121,12 @@ tests:
       - { row: { name: "Read" } }
       - { row: { name: "Write" } }
 
+  # corrected: contract: an enum member is kind EnumMember
   - name: "Enum defines its member via a Defines edge"
     query: |
       MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Status'
-        AND m.language_kind = 'EnumVariant'
+        AND m.kind = 'EnumMember'
         AND m.name = 'Active'
       RETURN m.name AS name
     assert:

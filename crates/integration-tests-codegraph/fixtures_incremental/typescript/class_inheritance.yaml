@@ -45,19 +45,23 @@ tests:
       - { row: { name: "play", type: "Method" } }
       - { row: { name: "speak", type: "Method" } }
 
-  - name: Dog.fetch() does not resolve this.greet() cross-class
+  # corrected: ECMAScript: a class inherits the methods of the class it extends, so this.m() reaches the inherited method
+  - name: Dog.fetch() resolves the inherited this.greet() to Animal
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'fetch' AND callee.name = 'greet'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "Dog::fetch", callee: "Animal::greet" } }
 
-  - name: Puppy.play() does not resolve inherited this calls
+  # corrected: ECMAScript: a class inherits the methods of the class it extends, so this.m() reaches the inherited method
+  - name: Puppy.play() resolves inherited this calls
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'play'
-      RETURN callee.name AS callee
+      RETURN callee.fqn AS callee
       ORDER BY callee
     assert:
-      - { empty: true }
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["Animal::greet", "Dog::speak"] } }

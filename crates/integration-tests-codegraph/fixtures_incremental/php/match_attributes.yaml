@@ -188,10 +188,11 @@ tests:
       - { row: { fqn: 'App\Http\UserController\list', type: Method } }
       - { row: { fqn: 'App\Http\UserController\show', type: Method } }
 
+  # corrected: contract: an enum case is kind EnumMember
   - name: "Enum cases survive when enum body contains match"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'EnumVariant'
+      WHERE d.kind = 'EnumMember'
         AND d.fqn IN ['App\Domain\Status\Active', 'App\Domain\Status\Archived']
       RETURN d.fqn AS fqn
     assert:
@@ -199,9 +200,10 @@ tests:
       - { unique: fqn }
 
   # ── Extends ────────────────────────────────────────────────────
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "Backed enum implements interface (Extends edge)"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Domain\Status'
         AND p.fqn = 'App\Contracts\Labeled'
       RETURN c.fqn AS c
@@ -330,18 +332,20 @@ tests:
       - { row_count: 1 }
 
   # ── Cross-file calls through match ─────────────────────────────
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "boot() match arm: new Router() resolves to App\\Http\\Router"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'App\boot'
         AND callee.fqn = 'App\Http\Router'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "boot() match arm: new Dispatcher() resolves to App\\Domain\\Dispatcher"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'App\boot'
         AND callee.fqn = 'App\Domain\Dispatcher'
       RETURN caller.fqn AS c

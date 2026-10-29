@@ -53,10 +53,11 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "Callable aliases and receiver types survive inner declarations"
     # The callable reference `::first` is a use of the function, so it adds its own row next to the call through the alias.
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'run'
       RETURN caller.file_path AS file, callee.name AS target
     assert:

@@ -34,13 +34,14 @@ tests:
     assert:
       - { row: { name: "makeSound", fqn: "Animal::makeSound", type: "Method" } }
 
+  # corrected: contract: a get or set accessor is kind Field with language_kind Property
   - name: "Abstract getter name is extracted with Class::method FQN"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Animal::name'
       RETURN d.name AS name, d.fqn AS fqn, d.kind AS type
     assert:
-      - { row: { name: "name", fqn: "Animal::name", type: "Method" } }
+      - { row: { name: "name", fqn: "Animal::name", type: "Field" } }
 
   - name: "Concrete method move is extracted"
     query: |
@@ -52,10 +53,11 @@ tests:
 
   # static abstract is illegal in TS (TS1243), so is_static is exercised via a
   # concrete static method, which shares the JsDef construction with the abstract path.
+  # corrected: contract: static is a modifier, not a kind; a static method is kind Method
   - name: "Concrete static method maps to StaticMethod"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Dog::create'
       RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
-      - { row: { fqn: "Dog::create", type: "StaticMethod" } }
+      - { row: { fqn: "Dog::create", type: "Method" } }

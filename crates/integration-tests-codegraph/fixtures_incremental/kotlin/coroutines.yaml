@@ -25,26 +25,29 @@ fixtures:
       }
 
 tests:
-  - name: "suspend fun fetchUser extracted as Function"
+  # corrected: contract: a callable that belongs to a type is kind Method
+  - name: "suspend fun fetchUser extracted as Method"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'fetchUser' AND d.language_kind = 'Function'
+      WHERE d.name = 'fetchUser' AND d.kind = 'Method'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row: { name: "fetchUser", fqn: "com.example.UserService.fetchUser" } }
 
+  # corrected: contract: a callable that belongs to a type is kind Method
   - name: "suspend interface method findById extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'findById' AND d.language_kind = 'Function'
+      WHERE d.name = 'findById' AND d.kind = 'Method'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row: { name: "findById", fqn: "com.example.UserRepository.findById" } }
 
-  - name: "non-suspend fun startLoading extracted as Function"
+  # corrected: contract: a callable that belongs to a type is kind Method
+  - name: "non-suspend fun startLoading extracted as Method"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'startLoading' AND d.language_kind = 'Function'
+      WHERE d.name = 'startLoading' AND d.kind = 'Method'
       RETURN d.name AS name
     assert:
       - { row: { name: "startLoading" } }

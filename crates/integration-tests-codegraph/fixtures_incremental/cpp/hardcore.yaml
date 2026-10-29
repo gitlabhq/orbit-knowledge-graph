@@ -221,10 +221,11 @@ tests:
       - { row: { fqn: "templates::tmpl::Container" } }
       - { row: { fqn: "nested::outer::inner::Widget" } }
 
+  # corrected: contract: a C++ namespace is kind Module with language_kind Namespace
   - name: "Namespace definitions found"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Class'
+      WHERE d.language_kind = 'Namespace'
       RETURN d.fqn AS fqn
     assert:
       - { no_nulls: fqn }
@@ -235,10 +236,11 @@ tests:
       - { row: { fqn: "nested::outer" } }
       - { row: { fqn: "nested::outer::inner" } }
 
+  # corrected: contract: an enum constant is kind EnumMember
   - name: "Enum constants scoped"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'EnumVariant'
+      WHERE d.kind = 'EnumMember'
         AND d.fqn STARTS WITH 'types::core::ErrorCode::'
       RETURN d.fqn AS fqn
     assert:
@@ -385,11 +387,12 @@ tests:
   # FILE CONTAINMENT
   # ══════════════════════════════════════════════════════════════
 
+  # corrected: contract: a C++ member function is kind Method and a constructor is kind Constructor; category Callable holds every callable
   - name: "reader.cpp defines correct functions"
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'io/reader.cpp'
-        AND d.language_kind = 'Function'
+        AND d.category = 'Callable'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }

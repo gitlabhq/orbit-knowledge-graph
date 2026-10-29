@@ -58,11 +58,12 @@ tests:
       - { row_count: 1 }
       - { row: { name: "Planet", type: "Enum" } }
 
+  # corrected: contract: an enum constant is kind EnumMember
   - name: "Enum constants are extracted as EnumConstant definitions"
     query: |
       MATCH (e:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
-        AND c.language_kind = 'EnumVariant'
+        AND c.kind = 'EnumMember'
       RETURN c.name AS name
       ORDER BY c.name
     assert:
@@ -71,11 +72,12 @@ tests:
       - { row: { name: "EARTH" } }
       - { row: { name: "MERCURY" } }
 
+  # corrected: contract: a constructor is kind Constructor, not Method
   - name: "Enum constructor is extracted"
     query: |
       MATCH (e:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
-        AND c.language_kind = 'Method'
+        AND c.kind = 'Constructor'
         AND c.name = 'Planet'
       RETURN c.name AS name
     assert:
@@ -109,11 +111,12 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: an enum constant is kind EnumMember
   - name: "Enum defines its constants via Defines edges"
     query: |
       MATCH (e:Definition)-[edge:DEFINES]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
-        AND c.language_kind = 'EnumVariant'
+        AND c.kind = 'EnumMember'
       RETURN c.name AS name
       ORDER BY c.name
     assert:
@@ -122,9 +125,10 @@ tests:
       - { row: { name: "EARTH" } }
       - { row: { name: "MERCURY" } }
 
-  - name: "Enum Planet has an Extends edge to the Describable interface"
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
+  - name: "Enum Planet has an Implements edge to the Describable interface"
     query: |
-      MATCH (e:Definition)-[r:EXTENDS]->(i:Definition)
+      MATCH (e:Definition)-[r:IMPLEMENTS]->(i:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND i.fqn = 'com.example.enums.Describable'
       RETURN i.fqn AS fqn

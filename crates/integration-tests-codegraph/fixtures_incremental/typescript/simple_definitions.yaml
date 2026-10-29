@@ -24,12 +24,13 @@ fixtures:
       const helper = () => "help";
 
 tests:
+  # corrected: contract: a named arrow function is kind Function with language_kind ArrowFunction
   - name: Exactly 6 top-level definitions with correct types
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.ts'
-        AND d.language_kind IN ['Function', 'Class', 'Interface', 'TypeAlias', 'Enum']
-      RETURN d.name AS name, d.language_kind AS type
+        AND d.kind IN ['Function', 'Class', 'Interface', 'TypeAlias', 'Enum']
+      RETURN d.name AS name, d.kind AS type
       ORDER BY name
     assert:
       - { row_count: 6 }
@@ -42,6 +43,7 @@ tests:
       - { row: { name: "greet", type: "Function" } }
       - { row: { name: "helper", type: "Function" } }
 
+  # corrected: contract: a class field is kind Field; language_kind Property only where the language calls it a property
   - name: speak and sound are nested inside Animal via Defines
     query: |
       MATCH (cls:Definition)-[e:DEFINES]->(m:Definition)
@@ -50,7 +52,7 @@ tests:
       ORDER BY method
     assert:
       - { row_count: 2 }
-      - { row: { method: "sound", type: "Property" } }
+      - { row: { method: "sound", type: "Field" } }
       - { row: { method: "speak", type: "Method" } }
 
   - name: All definitions have names

@@ -34,9 +34,10 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "com.example.Service.run", callee: "com.example.Service.process" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: Cross-file constructor call resolves
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

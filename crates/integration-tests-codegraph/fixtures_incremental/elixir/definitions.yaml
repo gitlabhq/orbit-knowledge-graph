@@ -44,10 +44,11 @@ fixtures:
       end
 
 tests:
+  # corrected: contract: Elixir defmodule is a Module
   - name: "Modules are indexed as Module definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Class'
+      WHERE d.kind = 'Module'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 4 }
