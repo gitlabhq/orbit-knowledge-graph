@@ -2,32 +2,32 @@
 set -eu
 
 image=${1:?Usage: check-billing-enforcement.sh image@sha256:digest}
-case "$image" in
-  *@sha256:*) ;;
-  *) echo "Use an immutable image digest" >&2; exit 1 ;;
-esac
+if ! printf '%s' "$image" | grep -Eq '@sha256:[0-9a-f]{64}$'; then
+  echo "Use an immutable image digest" >&2
+  exit 1
+fi
 
 workdir=$(mktemp -d)
 container=
 cleanup() {
   if [ -n "$container" ]; then docker rm -f "$container" >/dev/null 2>&1 || true; fi
-  rm -f "$workdir/config.yaml"
-  rmdir "$workdir"
+  rm -rf "$workdir"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+# Exit on a signal so the EXIT trap cleans up once; otherwise the shell resumes polling.
+trap 'exit 1' HUP INT TERM
 
-check() {
-  name=$1
-  expected=$2
-  billing_enabled=$3
-  quota_enabled=$4
-  collector=$5
-  quota_auth=$6
+start() {
+  billing_enabled=$1
+  quota_enabled=$2
+  collector=$3
+  billing_auth=$4
+  quota_auth=$5
   cat >"$workdir/config.yaml" <<EOF
 billing:
   enabled: $billing_enabled
   collector_url: "$collector"
-  auth_mode: cloud_connector
+  auth_mode: $billing_auth
   quota:
     enabled: $quota_enabled
     customers_dot_url: https://customers.gitlab.com
@@ -38,27 +38,62 @@ EOF
     "$image" --mode=webserver --config=/app/enforcement.yaml)
   docker cp "$workdir/config.yaml" "$container:/app/enforcement.yaml"
   docker start "$container" >/dev/null
+}
+
+# An enforced build logs this only after it accepts the billing configuration.
+accepted() {
+  docker logs "$container" 2>&1 | grep -F 'billing enforcement' | grep -Fq '"enabled":true'
+}
+
+wait_for() {
   attempts=0
   while [ "$(docker inspect --format '{{.State.Running}}' "$container")" = true ]; do
+    if [ "$1" = accept ] && accepted; then return 0; fi
     attempts=$((attempts + 1))
     if [ "$attempts" -ge 30 ]; then
-      echo "$name: image did not reject configuration within 30 seconds" >&2
+      echo "$name: image did not $1 configuration within 30 seconds" >&2
       exit 1
     fi
     sleep 1
   done
+}
+
+finish() {
+  docker rm -f "$container" >/dev/null
+  container=
+  echo "$name: $1 as expected"
+}
+
+reject() {
+  name=$1
+  expected=$2
+  shift 2
+  start "$@"
+  wait_for reject
   status=$(docker inspect --format '{{.State.ExitCode}}' "$container")
   output=$(docker logs "$container" 2>&1)
   if [ "$status" = 0 ] || ! printf '%s\n' "$output" | grep -F "$expected" >/dev/null; then
     printf '%s: expected rejection containing %s; exit=%s\n%s\n' "$name" "$expected" "$status" "$output" >&2
     exit 1
   fi
-  docker rm "$container" >/dev/null
-  container=
-  echo "$name: rejected as expected"
+  finish rejected
 }
 
-check billing-disabled 'this build requires billing.enabled=true' false false https://billing.prdsub.gitlab.net license_checksum
-check quota-disabled 'this build requires billing.quota.enabled=true' true false https://billing.prdsub.gitlab.net license_checksum
-check unknown-endpoint 'must both belong to one environment' true true https://invalid.example.com license_checksum
-check mixed-auth 'cannot be combined with' true true https://billing.prdsub.gitlab.net admin_token
+accept() {
+  name=$1
+  shift
+  start "$@"
+  wait_for accept
+  if ! accepted; then
+    printf '%s: expected the enforced build to accept the configuration\n%s\n' "$name" "$(docker logs "$container" 2>&1)" >&2
+    exit 1
+  fi
+  finish accepted
+}
+
+reject billing-disabled 'this build requires billing.enabled=true' false false https://billing.prdsub.gitlab.net cloud_connector license_checksum
+reject quota-disabled 'this build requires billing.quota.enabled=true' true false https://billing.prdsub.gitlab.net cloud_connector license_checksum
+reject unknown-endpoint 'must both belong to one environment' true true https://invalid.example.com cloud_connector license_checksum
+reject mixed-auth 'cannot be combined with' true true https://billing.prdsub.gitlab.net cloud_connector admin_token
+accept self-managed true true https://billing.prdsub.gitlab.net cloud_connector license_checksum
+accept gitlab-com true true https://billing.prdsub.gitlab.net oidc admin_token
