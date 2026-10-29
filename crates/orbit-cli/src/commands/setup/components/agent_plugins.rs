@@ -25,11 +25,13 @@ impl Installer for AgentPlugins {
             .flat_map(|plugin| [&plugin.dir, &plugin.settings]);
         let files = agent.ui_files(true).map(|file| &file.path);
         let registrations = agent.ui_registrations(true).map(|entry| &entry.file);
-        plugin
+        let mut labels = plugin
             .chain(files)
             .chain(registrations)
             .map(|scoped| target.resolve(scoped).map(|(_, label)| label))
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        labels.extend(hooks::retired_labels(agent, true, target)?);
+        Ok(labels)
     }
 
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
@@ -43,6 +45,7 @@ impl Installer for AgentPlugins {
                 target,
                 report,
             )?;
+            hooks::remove_retired(*agent, true, target, report)?;
         }
         Ok(())
     }
@@ -53,11 +56,12 @@ impl Installer for AgentPlugins {
                 remove_plugin(plugin, target, report)?;
             }
             hooks::remove_files(
-                agent.ui_files(true),
+                agent.ui_files(true).map(|file| &file.path),
                 agent.ui_registrations(true),
                 target,
                 report,
             )?;
+            hooks::remove_retired(*agent, true, target, report)?;
         }
         Ok(())
     }
