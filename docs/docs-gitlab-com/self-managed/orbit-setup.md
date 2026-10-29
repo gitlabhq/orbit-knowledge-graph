@@ -235,12 +235,6 @@ For pod sizes, see [Reference architectures](getting-started.md#reference-archit
 The `billing` settings report GitLab Orbit usage to GitLab and check that your subscription has GitLab Credits available.
 Use them exactly as shown in the example.
 
-Billing requires:
-
-- GitLab 19.5.2 or later.
-- An online cloud license.
-- Outbound HTTPS access from the webserver to GitLab. See [Billing connections](networking.md#billing-connections).
-
 When your subscription has no GitLab Credits available, queries fail with the error `GitLab credits exhausted`.
 
 ## Turn on indexing for a group
