@@ -11,7 +11,9 @@ of truth. Always present results with their coverage caveats. See
    aggregates. When a query falls into one, append a one-line caveat to the
    answer, not a buried footnote.
 2. **Name what shaped the result.** Say in one clause which filter or
-   traversal produced it. Give the full query only when asked.
+   traversal produced it. Never print the query body, its GQL text, or any
+   query syntax unless the user asks to see it. That includes collapsed text
+   and code blocks.
 3. **Do not invent a "Methodology" header that implies rigor the data
    lacks.** Use one only when the query itself is non-obvious. It is not a
    substitute for coverage caveats.
