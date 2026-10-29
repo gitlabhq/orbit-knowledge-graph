@@ -38,7 +38,7 @@ To add a test, add a file. The harness finds it with no registration and no Rust
 
 The command-line and container tests are Rust tests, but they also check only observable behavior.
 The command-line tests run the real binary against temporary repositories.
-They cover concurrent readers and writers, repeated indexing, worktrees, nested repositories, unreadable files, the bundled skills, and the MCP server.
+They cover concurrent readers and writers, repeated indexing, worktrees, nested repositories, unreadable files, and the bundled skills.
 
 ## When they run
 

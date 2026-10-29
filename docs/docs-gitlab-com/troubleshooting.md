@@ -284,7 +284,7 @@ Error: no local graph found. Run `glab orbit workspace index` first.
 
 This issue occurs when you run the command outside a Git repository and nothing is indexed,
 or when the path you gave with `--db` does not exist.
-Inside a repository, `workspace sql`, `workspace schema`, and `workspace mcp serve` index the repository on first use instead.
+Inside a repository, `workspace sql` and `workspace schema` index the repository on first use instead.
 Earlier versions report `Table 'Definition' does not exist`.
 
 To resolve this issue, run `glab orbit workspace index <repository_path>`.

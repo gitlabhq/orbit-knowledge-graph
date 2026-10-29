@@ -11,7 +11,6 @@ export default {
     "workspace sql": { "done": "Queried local graph", "running": "Querying local graph" },
     "workspace schema": { "done": "Read local schema", "running": "Reading local schema" },
     "workspace list": { "done": "Listed repos", "running": "Listing repos" },
-    "workspace mcp": { "done": "Served local graph", "running": "Serving local graph" },
     "workspace reset": { "done": "Reset local graph", "running": "Resetting local graph" },
     "index": { "done": "Indexed repo", "running": "Indexing repo" },
     "sql": { "done": "Queried local graph", "running": "Querying local graph" },

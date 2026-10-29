@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::{
-    Installer, Report, backup_once, drop_backup_when_restored, file_mentions,
+    Installer, Report, backup_once, drop_backup_when_restored, file_mentions, mcp,
     remove_file_and_empty_parents, write_unless_unchanged,
 };
 use crate::commands::setup::Target;
@@ -16,27 +16,30 @@ pub(super) struct Instructions;
 
 impl Installer for Instructions {
     fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>> {
-        Ok(vec![target.resolve(&agent.instruction_file)?.1])
+        let mut files = vec![target.resolve(&agent.instruction_file)?.1];
+        files.extend(mcp::retired_label(agent, target)?);
+        Ok(files)
     }
 
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         for (path, label) in instruction_files(agents, target)? {
             upsert_block_in_file(&path, &label, report)?;
         }
-        Ok(())
+        mcp::remove_retired(agents, target, report)
     }
 
     fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         for (path, label) in instruction_files(agents, target)? {
             strip_block_from_file(&path, target, &label, report)?;
         }
-        Ok(())
+        mcp::remove_retired(agents, target, report)
     }
 
     fn is_installed(&self, agent: Agent, target: &Target) -> bool {
         target
             .resolve(&agent.instruction_file)
             .is_ok_and(|(path, _)| file_mentions(&path, BLOCK_BEGIN))
+            || mcp::retired_label(agent, target).is_ok_and(|label| label.is_some())
     }
 }
 
