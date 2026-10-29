@@ -233,6 +233,8 @@ pub struct DisplayRules {
     pub declared_type: &'static [&'static str],
     pub parameter_items: &'static [&'static str],
     pub annotations: &'static [&'static str],
+    pub test_annotations: &'static [&'static str],
+    pub test_prefixes: &'static [&'static str],
     pub doc_comments: &'static [&'static str],
     pub doc_prefixes: &'static [&'static str],
     pub doc_markers: &'static [&'static str],
@@ -288,14 +290,7 @@ impl DisplayRules {
         let slice = text.get(..end.saturating_sub(start).min(text.len()))?;
         let mut kept = String::with_capacity(slice.len());
         let mut cursor = 0;
-        for annotation in node
-            .children()
-            .flat_map(|c| {
-                let grandchildren: Vec<N<'_>> = c.children().collect();
-                std::iter::once(c).chain(grandchildren)
-            })
-            .filter(|c| self.annotations.contains(&c.kind().as_ref()))
-        {
+        for annotation in self.annotation_nodes(node) {
             let range = annotation.range();
             let (from, to) = (range.start - start, range.end - start);
             if from >= cursor && to <= slice.len() {
@@ -305,6 +300,28 @@ impl DisplayRules {
         }
         kept.push_str(&slice[cursor..]);
         crate::v2::types::text::signature(&kept)
+    }
+
+    fn annotation_nodes<'r>(&self, node: &N<'r>) -> Vec<N<'r>> {
+        node.children()
+            .flat_map(|c| {
+                let grandchildren: Vec<N<'r>> = c.children().collect();
+                std::iter::once(c).chain(grandchildren)
+            })
+            .filter(|c| self.annotations.contains(&c.kind().as_ref()))
+            .collect()
+    }
+
+    pub fn is_test(&self, node: &N<'_>, name: &str) -> bool {
+        self.test_prefixes.iter().any(|p| name.starts_with(p))
+            || self.annotation_nodes(node).iter().any(|a| {
+                a.text().split([',', '[', ']']).any(|item| {
+                    let word = item.split('(').next().unwrap_or_default();
+                    let word = word.trim().trim_start_matches(['@', '#']);
+                    let word = word.rsplit('.').next().unwrap_or_default();
+                    self.test_annotations.contains(&word)
+                })
+            })
     }
 
     pub fn parameters(&self, node: &N<'_>) -> Vec<String> {

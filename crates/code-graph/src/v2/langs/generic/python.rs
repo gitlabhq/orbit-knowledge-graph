@@ -135,10 +135,6 @@ fn yields(node: &N<'_>) -> bool {
     false
 }
 
-fn python_test(_node: &N<'_>, name: &str) -> bool {
-    name.starts_with("test")
-}
-
 impl DslLanguage for PythonDsl {
     fn name() -> &'static str {
         "python"
@@ -183,8 +179,7 @@ impl DslLanguage for PythonDsl {
                 .metadata(class_meta().modifiers_with(python_modifiers)),
             scope("function_definition", "Function")
                 .def_kind(DefKind::Function)
-                .metadata(func_meta())
-                .test_if(python_test),
+                .metadata(func_meta()),
             scope("assignment", "Lambda")
                 .def_kind(DefKind::Lambda)
                 .when(field_kind("right", &["lambda"]))
@@ -211,8 +206,7 @@ impl DslLanguage for PythonDsl {
                 vec![
                     scope("function_definition", "Method")
                         .def_kind(DefKind::Method)
-                        .metadata(func_meta())
-                        .test_if(python_test),
+                        .metadata(func_meta()),
                     scope("function_definition", "Initializer")
                         .def_kind(DefKind::Constructor)
                         .when(has_child_text("__init__"))
@@ -226,6 +220,7 @@ impl DslLanguage for PythonDsl {
 
     fn display() -> DisplayRules {
         DisplayRules {
+            test_prefixes: &["test"],
             body: &["body"],
             parameters: &["parameters"],
             return_type: &["return_type"],

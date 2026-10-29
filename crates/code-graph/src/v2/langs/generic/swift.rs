@@ -175,8 +175,7 @@ impl DslLanguage for SwiftDsl {
             scope("function_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .when(parent_is("class_body"))
-                .name_from(child_of_kind("simple_identifier"))
-                .test_if(|_, name| name.starts_with("test")),
+                .name_from(child_of_kind("simple_identifier")),
             scope("property_declaration", "Variable")
                 .def_kind(DefKind::Variable)
                 .no_scope()
@@ -205,6 +204,7 @@ impl DslLanguage for SwiftDsl {
     fn display() -> DisplayRules {
         DisplayRules {
             annotations: &["attribute"],
+            test_prefixes: &["test"],
             body: &["body", "value"],
             parameters: &[],
             parameter_items: &["parameter"],

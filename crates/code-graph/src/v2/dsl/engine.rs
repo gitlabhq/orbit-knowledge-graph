@@ -170,7 +170,10 @@ impl LanguageSpec {
             .or_else(|| rule.default_name.map(|s| s.to_string()))?;
         let label = rule.resolve_label(node);
         let def_kind = rule.kind_for_label(label)?;
-        let (def_kind, label) = if rule.is_test(node, &name) {
+        let (def_kind, label) = if rule.is_test(node, &name)
+            || (matches!(def_kind, DefKind::Function | DefKind::Method)
+                && self.display.is_test(node, &name))
+        {
             (DefKind::Test, "Test")
         } else {
             rule.conditional_kind(node, &name)

@@ -44,25 +44,6 @@ fn csharp_doc(node: &N<'_>) -> Option<String> {
     crate::v2::types::text::doc_paragraph(plain.lines())
 }
 
-fn csharp_test(node: &N<'_>, _name: &str) -> bool {
-    node.children()
-        .filter(|c| c.kind() == "attribute_list")
-        .flat_map(|l| l.children().collect::<Vec<_>>())
-        .filter(|a| a.kind() == "attribute")
-        .filter_map(|a| a.field("name").map(|n| n.text().to_string()))
-        .any(|name| {
-            let name = name
-                .rsplit('.')
-                .next()
-                .unwrap_or(&name)
-                .trim_end_matches("Attribute");
-            matches!(
-                name,
-                "Fact" | "Theory" | "Test" | "TestMethod" | "TestCase" | "DataTestMethod"
-            )
-        })
-}
-
 fn csharp_visibility(node: &N<'_>, _name: &str) -> Option<Visibility> {
     if matches!(
         node.kind().as_ref(),
@@ -140,6 +121,20 @@ impl DslLanguage for CSharpDsl {
     fn display() -> DisplayRules {
         DisplayRules {
             annotations: &["attribute_list"],
+            test_annotations: &[
+                "Fact",
+                "Theory",
+                "Test",
+                "TestMethod",
+                "TestCase",
+                "DataTestMethod",
+                "FactAttribute",
+                "TheoryAttribute",
+                "TestAttribute",
+                "TestMethodAttribute",
+                "TestCaseAttribute",
+                "DataTestMethodAttribute",
+            ],
             body: &["body", "accessors"],
             parameters: &["parameters"],
             return_type: &["returns"],
@@ -187,7 +182,6 @@ impl DslLanguage for CSharpDsl {
                 .metadata(class_meta()),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
-                .test_if(csharp_test)
                 .metadata(metadata().return_type(field("returns"))),
             scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("property_declaration", "Property")

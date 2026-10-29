@@ -119,15 +119,6 @@ fn kotlin_declared_type(node: &N<'_>) -> Option<String> {
         .map(|c| c.text().to_string())
 }
 
-fn kotlin_test(node: &N<'_>, _name: &str) -> bool {
-    node.children()
-        .filter(|c| c.kind() == "modifiers")
-        .flat_map(|m| m.children().collect::<Vec<_>>())
-        .any(|a| {
-            a.kind() == "annotation" && matches!(a.text().as_ref(), "@Test" | "@ParameterizedTest")
-        })
-}
-
 fn kotlin_const() -> Pred {
     Pred::Exists(Box::new(
         Extract::one(Child, Kind("modifiers"))
@@ -162,8 +153,7 @@ impl DslLanguage for KotlinDsl {
             // conditional rule (ExtensionFunction) is checked before fallback.
             scope("function_declaration", "Function")
                 .def_kind(DefKind::Function)
-                .metadata(metadata().written_return_type(kotlin_return_type))
-                .test_if(kotlin_test),
+                .metadata(metadata().written_return_type(kotlin_return_type)),
             scope("function_declaration", "ExtensionFunction")
                 .def_kind(DefKind::Function)
                 .when(has_child(&["."]))
@@ -175,8 +165,7 @@ impl DslLanguage for KotlinDsl {
             scope("function_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .when(parent_is("class_body").and(!has_child(&["."])))
-                .metadata(metadata().written_return_type(kotlin_return_type))
-                .test_if(kotlin_test),
+                .metadata(metadata().written_return_type(kotlin_return_type)),
             scope("primary_constructor", "PrimaryConstructor")
                 .def_kind(DefKind::Constructor)
                 .name_from(constant("constructor"))
@@ -238,6 +227,7 @@ impl DslLanguage for KotlinDsl {
     fn display() -> DisplayRules {
         DisplayRules {
             annotations: &["annotation"],
+            test_annotations: &["Test", "ParameterizedTest"],
             body: &["class_body", "function_body", "enum_class_body"],
             parameters: &["function_value_parameters"],
             parameter_items: &["class_parameter"],

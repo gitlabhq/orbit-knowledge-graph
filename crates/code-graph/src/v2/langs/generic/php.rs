@@ -24,15 +24,10 @@ const PHP_PRIMITIVE_TYPES: &[&str] = &[
     "callable", "iterable", "never", "self", "static", "parent",
 ];
 
-fn php_test(node: &N<'_>, name: &str) -> bool {
-    name.starts_with("test")
-        || leading_comments(node, &["comment"], &["/**"])
-            .iter()
-            .any(|c| c.contains("@test"))
-        || node
-            .children()
-            .filter(|c| c.kind() == "attribute_list")
-            .any(|c| c.text().contains("Test"))
+fn php_test(node: &N<'_>, _name: &str) -> bool {
+    leading_comments(node, &["comment"], &["/**"])
+        .iter()
+        .any(|c| c.contains("@test"))
 }
 
 fn php_visibility(node: &N<'_>, _name: &str) -> Option<Visibility> {
@@ -149,6 +144,8 @@ impl DslLanguage for PhpDsl {
     fn display() -> DisplayRules {
         DisplayRules {
             annotations: &["attribute_list"],
+            test_annotations: &["Test"],
+            test_prefixes: &["test"],
             body: &["body", "default_value"],
             parameters: &["parameters"],
             return_type: &["return_type"],

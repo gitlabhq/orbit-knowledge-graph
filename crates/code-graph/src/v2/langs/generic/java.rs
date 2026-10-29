@@ -136,24 +136,6 @@ fn java_record_accessors(
     false
 }
 
-fn java_annotations(node: &N<'_>) -> Vec<String> {
-    node.children()
-        .filter(|c| c.kind() == "modifiers")
-        .flat_map(|m| m.children().collect::<Vec<_>>())
-        .filter(|c| matches!(c.kind().as_ref(), "marker_annotation" | "annotation"))
-        .filter_map(|a| a.field("name").map(|n| n.text().to_string()))
-        .collect()
-}
-
-fn java_test(node: &N<'_>, _name: &str) -> bool {
-    java_annotations(node).iter().any(|a| {
-        matches!(
-            a.as_str(),
-            "Test" | "ParameterizedTest" | "RepeatedTest" | "TestFactory" | "TestTemplate"
-        )
-    })
-}
-
 fn java_record_modifiers(_node: &N<'_>) -> Modifiers {
     Modifiers::empty().with(Modifier::Final)
 }
@@ -222,7 +204,6 @@ impl DslLanguage for JavaDsl {
             scope("compact_constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
-                .test_if(java_test)
                 .metadata(
                     metadata()
                         .return_type(field("type").inner("type_arguments", "type_identifier")),
@@ -237,6 +218,13 @@ impl DslLanguage for JavaDsl {
     fn display() -> DisplayRules {
         DisplayRules {
             annotations: &["marker_annotation", "annotation"],
+            test_annotations: &[
+                "Test",
+                "ParameterizedTest",
+                "RepeatedTest",
+                "TestFactory",
+                "TestTemplate",
+            ],
             body: &["body"],
             parameters: &["parameters"],
             return_type: &["type"],
