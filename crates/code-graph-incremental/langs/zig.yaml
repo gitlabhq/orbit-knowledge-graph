@@ -293,3 +293,8 @@ display:
         tag:
           import_kind: module
           fqn: '@$ROOT|ancestor_tag("resolved_source")'
+  - name: language
+    rules:
+      - match: '(__def)'
+        tag:
+          language: '@$ROOT|ancestor_tag("language")'

@@ -443,3 +443,8 @@ display:
         tag: { import_kind: wildcard, fqn: '' }
       - match: '(__name "*")'
         tag: { import_kind: wildcard, fqn: '' }
+  - name: language
+    rules:
+      - match: '(__def)'
+        tag:
+          language: '@$ROOT|ancestor_tag("language")'
