@@ -5,17 +5,17 @@ config:
     paths: ["1/100/1000/"]
   extra_seed:
     gl_code_edge:
-      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition, source_tags: ["kind:Function"] }
-    gl_definition:
-      - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: function, fqn: function, kind: Function }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99000, source_kind: File, relationship_kind: DEFINES, target_id: 12001, target_kind: Definition, source_tags: ["extension:rs", "language:rs"] }
+    gl_file:
+      - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc123, path: src/rs, name: rs, extension: rs, language: rs }
 
 query:
   gql: |
-    MATCH (a:Definition {id: 99000})-[:CALLS]->(b:Definition)
-    WHERE a.kind = a.name
+    MATCH (a:File {id: 99000})-[:DEFINES]->(b:Definition)
+    WHERE a.extension = a.language
     RETURN count(b) AS n
 
 expect:
-  skip_requirements: ["node_ids", "filter:kind"]
+  skip_requirements: ["node_ids", "filter:extension"]
   row_count: 1
   row_values: [{ n: 1 }]

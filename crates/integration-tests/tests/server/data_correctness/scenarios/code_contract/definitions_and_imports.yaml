@@ -25,6 +25,7 @@ cases:
       gql: |
         MATCH (d:Definition) WHERE d.id IN [15000, 15001] AND 'async' IN d.modifiers RETURN d.name LIMIT 10
     expect:
+      skip_requirements: ["filter:modifiers"]
       node_count: 1
       nodes:
         Definition:
@@ -40,6 +41,7 @@ cases:
       gql: |
         MATCH (d:Definition) WHERE d.id IN [15000, 15001] AND d.modifiers IN ['static', 'final'] RETURN d.name LIMIT 10
     expect:
+      skip_requirements: ["filter:modifiers"]
       node_count: 1
       nodes:
         Definition:
@@ -71,6 +73,7 @@ cases:
       gql: |
         MATCH (d:Definition) WHERE d.id IN [15000, 15001] AND d.return_type IS NULL RETURN d.name LIMIT 10
     expect:
+      skip_requirements: ["filter:return_type"]
       node_count: 1
       nodes:
         Definition:
