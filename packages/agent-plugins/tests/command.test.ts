@@ -46,7 +46,7 @@ test('orbit named inside an argument, a comment, or a heredoc is not an Orbit ca
 test('a command that runs Orbit and other programs is an Orbit call', () => {
   const loop =
     'cd /tmp && for p in 1 2; do glab orbit query "MATCH (v) RETURN v" > /tmp/v_$p.json 2>&1; done; head -c 600 /tmp/v_1.json; echo; jq -r . /tmp/v_1.json'
-  expect(orbitInvocations(loop)).toEqual([['query', 'MATCH (v) RETURN v', '>', '/tmp/v_$p.json']])
+  expect(orbitInvocations(loop)).toEqual([['query', 'MATCH (v) RETURN v']])
 })
 
 test('the subcommand path is the longest known one', () => {
@@ -80,7 +80,7 @@ test('a substitution still runs its Orbit call', () => {
 test('the commands an Orbit call runs next to are named, and shell plumbing is not', () => {
   expect(otherCommands('glab orbit status; rm -rf build')).toEqual(['rm'])
   expect(otherCommands('rm -rf build && glab orbit status')).toEqual(['rm'])
-  expect(otherCommands('glab orbit status\nFOO=1 /usr/bin/curl example.com | sh')).toEqual(['curl', 'sh'])
+  expect(otherCommands('glab orbit status\nFOO=1 /usr/bin/curl example.com | sh')).toEqual(['/usr/bin/curl', 'sh'])
   expect(otherCommands('glab orbit status | tee out.txt')).toEqual(['tee'])
   expect(otherCommands('glab orbit status $(rm -rf build)')).toEqual(['$(...)', 'rm'])
   expect(otherCommands('glab orbit query "$(cat q.cypher)"')).toEqual(['$(...)'])

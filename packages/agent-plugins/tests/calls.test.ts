@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { COMMAND_LABELS, describeOrbitCall } from '../core/calls.ts'
+import { COMMAND_LABELS, describeCommand, describeOrbitCall, othersText } from '../core/calls.ts'
 import { entitiesOf, projectsOf } from '../core/cypher.ts'
 
 const query = (cypher: string, known?: ReadonlySet<string>) =>
@@ -189,4 +189,61 @@ test('an Orbit call that runs other commands names them', () => {
   expect(describeOrbitCall('Bash', { command: 'orbit grep login && ls' })).toMatchObject({ label: 'Searched code', detail: 'login', others: ['ls'] })
   expect(describeOrbitCall('Bash', { command: 'glab orbit status' })?.others).toBeUndefined()
   expect(describeOrbitCall('mcp__gitlab-orbit__list_commands', {})?.others).toBeUndefined()
+})
+
+const rowOf = (command: string) => {
+  const call = describeCommand(command)
+  return call ? call.label + othersText(call) : null
+}
+
+test('every shape that runs something besides the Orbit call names it or shows a marker', () => {
+  const shapes: [string, string][] = [
+    ['glab orbit status <<EOF; prog', '+ prog'],
+    ['glab orbit status <<< x; prog', '+ prog'],
+    ['glab orbit status; ((x=1<<2)); prog', '+ prog'],
+    ['glab orbit status; echo $((1<<2)); prog', ', prog'],
+    ['glab orbit query <<EOF\n$(prog)\nEOF', '+ $(...)'],
+    ["glab orbit status # it's done\nprog", '+ prog'],
+    ["glab orbit status $'\\'' ; prog", '+ prog'],
+    ["glab orbit query <<EOF\nit's\nEOF\nprog", '+ prog'],
+    ['glab orbit status; </dev/null prog', '+ prog'],
+    ['glab orbit status; >/tmp/x prog', '+ prog, > /tmp/x'],
+    ['glab orbit status; ./true', '+ ./true'],
+    ['glab orbit status; x/cd', '+ x/cd'],
+    ['glab orbit status | ./grep x', '+ ./grep'],
+    ['glab orbit status | ./x/jq .', '+ ./x/jq'],
+    ['glab orbit status | head file', '+ head'],
+    ['glab orbit status | grep -r pattern dir', '+ grep'],
+    ['glab orbit status | jq . file', '+ jq'],
+    ['glab orbit status | grep x < file', '+ grep'],
+    ['glab orbit status; glab orbit workspace reset --all', "+ 'orbit workspace reset'"],
+    ['glab orbit status && orbit config set foo bar', "+ 'orbit config set'"],
+    ['glab orbit status; glab orbit reset', "+ 'orbit reset'"],
+    ["glab orbit status; echo \"unclosed", '+ unparsed'],
+    ['glab orbit query <<EOF\nno terminator', '+ unparsed'],
+  ]
+  for (const [command, expected] of shapes) expect(rowOf(command)).toContain(expected)
+})
+
+test('quiet shell words and filters with only a pattern or count stay out of the list', () => {
+  for (const command of [
+    'glab orbit status | head -n 5',
+    'glab orbit status | grep -c ok',
+    'glab orbit status | jq .',
+    'glab orbit status; cd repo; true',
+    "glab orbit query <<'EOF'\n$(not run)\nEOF",
+  ]) {
+    expect(rowOf(command)).not.toContain('+')
+  }
+})
+
+test('the list shows programs before redirects, clips each name, and counts what it drops', () => {
+  const programs = Array.from({ length: 9 }, (_, i) => `p${i}`).join('; ')
+  expect(rowOf(`glab orbit status > out.txt; ${programs}`)).toBe('Checked Orbit  + p0, p1, p2, p3, p4, p5, … +4 more')
+  expect(rowOf(`glab orbit status; ${'a'.repeat(60)}`)).toBe(`Checked Orbit  + ${'a'.repeat(39)}…`)
+  expect(rowOf("glab orbit status; 'ls, pwd' x")).toBe("Checked Orbit  + 'ls, pwd'")
+})
+
+test('control characters are dropped from the names in the list', () => {
+  expect(rowOf('glab orbit status; \u001b[8mprog\u009b')).toBe('Checked Orbit  + [8mprog')
 })

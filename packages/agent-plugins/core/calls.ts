@@ -34,7 +34,7 @@ function callOf(label: Label, detail: string): OrbitCall {
 }
 
 function clip(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, ' ').trim()
+  const flat = text.replace(/\s+/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim()
   return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
 }
 
@@ -67,24 +67,41 @@ function stringField(input: unknown, key: string): string | undefined {
 }
 
 const MAX_DETAIL = 96
-const MAX_OTHERS = 48
+const MAX_OTHER_LENGTH = 40
+const MAX_OTHERS_SHOWN = 6
+
+type Invocation = { call: OrbitCall | null; name: string }
+
+function invocationOf(words: readonly string[], known: ReadonlySet<string>): Invocation | null {
+  if (words.length === 0 || words.some((arg) => arg === '--help' || arg === '-h')) return null
+  const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined)
+  if (!sub) return { call: null, name: 'orbit ' + words[0] }
+  const isSchemaQuery = sub.key === 'query' && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg))
+  const label = isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY)
+  return { call: callOf(label, detailFor(sub.key, sub.args, known)), name: 'orbit ' + sub.key }
+}
 
 export function describeCommand(command: string, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {
-  const calls = orbitInvocations(command).flatMap((words) => {
-    const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined)
-    if (!sub || sub.args.some((arg) => arg === '--help' || arg === '-h')) return []
-    const isSchemaQuery = sub.key === 'query' && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg))
-    return [callOf(isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY), detailFor(sub.key, sub.args, known))]
-  })
+  const invocations = orbitInvocations(command).flatMap((words) => invocationOf(words, known) ?? [])
+  const calls = invocations.flatMap(({ call }) => call ?? [])
   const [first] = calls
   if (!first) return null
   const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(', ')
-  const others = otherCommands(command)
+  const otherOrbit = invocations.filter(({ call }) => call?.label !== first.label).map(({ name }) => name)
+  const others = otherCommands(command, [...new Set(otherOrbit)])
   return { ...first, detail: clip(detail, MAX_DETAIL), ...(others.length ? { others } : {}) }
 }
 
+function otherLabel(other: string): string {
+  const text = clip(other, MAX_OTHER_LENGTH)
+  return /[,\s]/.test(text) && !text.startsWith('> ') ? `'${text}'` : text
+}
+
 export function othersText(call: OrbitCall): string {
-  return call.others?.length ? '  + ' + clip(call.others.join(', '), MAX_OTHERS) : ''
+  if (!call.others?.length) return ''
+  const shown = call.others.slice(0, MAX_OTHERS_SHOWN).map(otherLabel)
+  const hidden = call.others.length - shown.length
+  return '  + ' + shown.join(', ') + (hidden > 0 ? `, … +${hidden} more` : '')
 }
 
 export function describeOrbitCall(tool: string, input: unknown, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {
