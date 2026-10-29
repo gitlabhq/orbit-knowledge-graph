@@ -7,11 +7,11 @@ title: Claude Code
 detect: ["$CLAUDE_CONFIG_DIR", "~/.claude", "~/.claude.json"]
 instruction_file:
   project: CLAUDE.md
-  global: "~/.claude/CLAUDE.md"
+  global: "${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md"
 json_merges:
   - file:
       project: .claude/settings.json
-      global: "~/.claude/settings.json"
+      global: "${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json"
     path: [hooks, PreToolUse]
     marker: hook-guard
     entries:
@@ -22,7 +22,7 @@ json_merges:
 mcp:
   file:
     project: .mcp.json
-    global: "~/.claude.json"
+    global: "${CLAUDE_CONFIG_DIR:-~}/.claude.json"
   format: claude
   coding_agent: claude-code
 skills:
@@ -31,21 +31,21 @@ skills:
     global: "~/.agents/skills"
   link:
     project: .claude/skills
-    global: "~/.claude/skills"
+    global: "${CLAUDE_CONFIG_DIR:-~/.claude}/skills"
   permissions:
     file:
       project: .claude/settings.json
-      global: "~/.claude/settings.json"
+      global: "${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json"
     rules:
       - "Bash({{orbit}} skills get orbit)"
       - "Bash({{orbit}} skills get orbit *)"
 plugin:
   dir:
     project: .claude/orbit/claude_plugin
-    global: "~/.claude/orbit/claude_plugin"
+    global: "${CLAUDE_CONFIG_DIR:-~/.claude}/orbit/claude_plugin"
   settings:
     project: .claude/settings.local.json
-    global: "~/.claude/settings.json"
+    global: "${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json"
   marketplace: gitlab-orbit
   name: gitlab-orbit
   min_version: "2.1.287"

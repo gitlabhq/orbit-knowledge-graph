@@ -156,7 +156,7 @@ pub(super) struct PluginSpec {
 impl PluginSpec {
     pub(super) fn marketplace_for(&self, target: &super::Target) -> String {
         match target {
-            super::Target::Global => self.marketplace.clone(),
+            super::Target::Global(_) => self.marketplace.clone(),
             super::Target::Project(root) => {
                 format!(
                     "{}-{}",
@@ -630,7 +630,11 @@ mod tests {
                     std::iter::once(&dirs.dir.global).chain(dirs.link.iter().map(|l| &l.global))
                 }))
             {
-                assert!(global.starts_with("~/"), "{}: {global}", spec.name);
+                assert!(
+                    global.starts_with("~/") || global.starts_with("${"),
+                    "{}: {global}",
+                    spec.name
+                );
             }
         }
     }

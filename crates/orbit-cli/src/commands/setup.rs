@@ -59,7 +59,7 @@ impl SetupRun {
                 .collect(),
             selected_agents: selection.selected_agent_names(),
             components: selection.components.clone(),
-            global: matches!(target, Target::Global),
+            global: matches!(target, Target::Global(_)),
             interactive,
             graph_first: None,
             index: None,
@@ -363,7 +363,7 @@ pub(crate) struct Options {
 }
 
 pub(crate) enum Target {
-    Global,
+    Global(Machine),
     Project(PathBuf),
 }
 
@@ -381,19 +381,17 @@ impl Target {
     fn root(&self) -> Result<PathBuf> {
         match self {
             Target::Project(root) => Ok(root.clone()),
-            Target::Global => dirs::home_dir().context("could not determine home directory"),
+            Target::Global(machine) => Ok(machine.home().to_path_buf()),
         }
     }
 
     fn resolve(&self, scoped: &ScopedPath) -> Result<(PathBuf, String)> {
         match self {
             Target::Project(root) => Ok((root.join(&scoped.project), scoped.project.clone())),
-            Target::Global => {
-                let rest = scoped
-                    .global
-                    .strip_prefix("~/")
-                    .with_context(|| format!("global path {} must start with ~/", scoped.global))?;
-                Ok((self.root()?.join(rest), scoped.global.clone()))
+            Target::Global(machine) => {
+                let path = machine.expand_global_path(&scoped.global)?;
+                let label = machine.display_with_tilde(&path);
+                Ok((path, label))
             }
         }
     }
@@ -401,13 +399,13 @@ impl Target {
     fn registration_value(&self, scoped: &ScopedPath) -> Result<String> {
         match self {
             Target::Project(_) => Ok(scoped.project.clone()),
-            Target::Global => Ok(self.resolve(scoped)?.0.display().to_string()),
+            Target::Global(_) => Ok(self.resolve(scoped)?.0.display().to_string()),
         }
     }
 
     fn scope_label(&self) -> String {
         match self {
-            Target::Global => "your user config".to_string(),
+            Target::Global(_) => "your user config".to_string(),
             Target::Project(root) => format!("project {}", root.display()),
         }
     }
@@ -1550,6 +1548,67 @@ mod tests {
     }
 
     #[test]
+    fn global_claude_setup_follows_claude_config_dir_and_uninstall_cleans_it() {
+        let home = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let env = BTreeMap::from([(
+            "CLAUDE_CONFIG_DIR".to_string(),
+            config.path().display().to_string(),
+        )]);
+        let machine = Machine::new(home.path().to_path_buf(), env);
+        let target = || Target::Global(machine.clone());
+        let options = || Options {
+            components: Component::from_flags(&[Component::Mcp], &[]).unwrap(),
+            ..options_for(&["claude"])
+        };
+
+        install(options(), target(), &machine).unwrap();
+
+        assert!(config.path().join("CLAUDE.md").is_file());
+        assert!(config.path().join(".claude.json").is_file());
+        assert!(config.path().join("skills/orbit").exists());
+        let settings = read_json(&config.path().join("settings.json"));
+        assert!(settings["hooks"]["PreToolUse"].is_array());
+        assert!(settings["permissions"]["allow"].is_array());
+        let marketplace = config.path().join("orbit/claude_plugin");
+        assert_eq!(
+            settings["extraKnownMarketplaces"]["gitlab-orbit"]["source"]["path"],
+            marketplace.display().to_string()
+        );
+        assert!(!home.path().join(".claude").exists());
+        assert!(!home.path().join(".claude.json").exists());
+
+        uninstall(options(), target(), &machine).unwrap();
+
+        assert!(!config.path().join("CLAUDE.md").exists());
+        assert!(!config.path().join(".claude.json").exists());
+        assert!(!config.path().join("skills/orbit").exists());
+        assert!(
+            !config
+                .path()
+                .join("orbit/claude_plugin/.claude-plugin/marketplace.json")
+                .exists()
+        );
+        assert!(!config.path().join("settings.json").exists());
+    }
+
+    #[test]
+    fn global_claude_setup_without_claude_config_dir_stays_under_home() {
+        let home = tempfile::tempdir().unwrap();
+        let machine = Machine::new(home.path().to_path_buf(), BTreeMap::new());
+        let options = Options {
+            components: Component::from_flags(&[Component::Mcp], &[]).unwrap(),
+            ..options_for(&["claude"])
+        };
+
+        install(options, Target::Global(machine.clone()), &machine).unwrap();
+
+        assert!(home.path().join(".claude/CLAUDE.md").is_file());
+        assert!(home.path().join(".claude/settings.json").is_file());
+        assert!(home.path().join(".claude.json").is_file());
+    }
+
+    #[test]
     fn the_claude_plugin_installs_by_default_and_skips_when_asked() {
         let dir = tempfile::tempdir().unwrap();
         let mut skipped = options_for(&["claude"]);
@@ -1752,7 +1811,10 @@ mod tests {
         let a = plugin.marketplace_for(&Target::Project("/repo/a".into()));
         let b = plugin.marketplace_for(&Target::Project("/repo/b".into()));
         assert_ne!(a, b);
-        assert_eq!(plugin.marketplace_for(&Target::Global), "gitlab-orbit");
+        assert_eq!(
+            plugin.marketplace_for(&Target::Global(bare_machine())),
+            "gitlab-orbit"
+        );
     }
 
     #[test]

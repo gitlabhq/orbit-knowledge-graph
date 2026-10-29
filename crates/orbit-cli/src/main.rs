@@ -616,7 +616,9 @@ impl SetupFlags {
         if self.project || self.dir.is_some() {
             commands::setup::Target::project(self.dir.clone())
         } else {
-            Ok(commands::setup::Target::Global)
+            Ok(commands::setup::Target::Global(
+                commands::setup::detect::Machine::current()?,
+            ))
         }
     }
 }
