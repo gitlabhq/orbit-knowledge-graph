@@ -61,7 +61,7 @@ To see the current schema, use one of these methods:
   For more information, see [GitLab Orbit dashboard](dashboard.md).
 - In a terminal, run `glab orbit schema`. To show the properties and relationships of node types,
   add their names, for example `glab orbit schema MergeRequest Project`.
-- In the GraphQL API, query `Query.orbit.schema`. For more information, see [`OrbitSchema`](https://docs.gitlab.com/api/graphql/reference/objects/#orbitschema).
+- In GitLab 19.6 and later, in the GraphQL API, query `Query.orbit.schema`. For more information, see [`OrbitSchema`](https://docs.gitlab.com/api/graphql/reference/objects/#orbitschema).
 - In a query, for example in the **Query editor** tab of the [GitLab Orbit dashboard](dashboard.md) or with `glab orbit query`, run `CALL db.schema()`.
 
 ## Supported languages

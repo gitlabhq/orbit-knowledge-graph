@@ -181,7 +181,8 @@ The endpoint has two tools. `list_commands` lists the GitLab Orbit commands with
 | `get_graph_schema` | Returns the node types and relationship types, and the properties of the node types you pass in `expand_nodes`. |
 | `get_response_format` | Returns the response JSON Schema of `query_graph` and its version. |
 
-Each `query_graph` call counts toward a rate limit of 60 requests per minute for each user.
+Each `query_graph` call counts toward the GitLab Orbit query [rate limit](https://docs.gitlab.com/api/orbit/#rate-limits).
+By default, the limit is 60 requests per minute for each user, and GitLab Orbit API requests count toward the same limit.
 Over the limit, the endpoint returns `429 Too Many Requests` with a `Retry-After` header.
 
 To get the properties and relationships of a node type, pass its name in `expand_nodes`,

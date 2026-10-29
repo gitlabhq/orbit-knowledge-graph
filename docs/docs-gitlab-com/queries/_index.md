@@ -32,12 +32,6 @@ Agents on the [Model Context Protocol (MCP) endpoint](../agents/mcp.md) send the
 
 ## Use the GitLab Orbit API
 
-{{< details >}}
-
-- Status: Beta
-
-{{< /details >}}
-
 From a script, a scheduled report, or a custom tool, send the same query text to the GitLab REST API.
 Authenticate with a personal access token, or with a [service account](../security.md#service-accounts)
 for automation without a personal account.
