@@ -612,13 +612,14 @@ impl SetupFlags {
         }
     }
 
-    fn target(&self) -> Result<commands::setup::Target> {
+    fn target(
+        &self,
+        machine: &commands::setup::detect::Machine,
+    ) -> Result<commands::setup::Target> {
         if self.project || self.dir.is_some() {
             commands::setup::Target::project(self.dir.clone())
         } else {
-            Ok(commands::setup::Target::Global(
-                commands::setup::detect::Machine::current()?,
-            ))
+            Ok(commands::setup::Target::Global(machine.clone()))
         }
     }
 }
@@ -987,7 +988,7 @@ async fn dispatch(
             let ask_agent_plugins =
                 !install.contains(&agent_plugins) && !skip.contains(&agent_plugins);
             let machine = commands::setup::detect::Machine::current()?;
-            let target = flags.target()?;
+            let target = flags.target(&machine)?;
             let options = flags.to_options(
                 agents,
                 all,
@@ -1021,7 +1022,7 @@ async fn dispatch(
                 Default::default(),
             );
             let machine = commands::setup::detect::Machine::current()?;
-            let run = commands::setup::uninstall(options, flags.target()?, &machine)?;
+            let run = commands::setup::uninstall(options, flags.target(&machine)?, &machine)?;
             if let Some(tracker) = &tracker {
                 telemetry::emit_setup_event(
                     tracker,

@@ -26,29 +26,30 @@ impl Machine {
     }
 
     /// Expands a global path: `~/x`, or `${VAR:-~/default}/x` where a non-empty
-    /// `VAR` replaces the default prefix.
+    /// `VAR` replaces the default prefix and must be absolute.
     pub(super) fn expand_global_path(&self, global: &str) -> Result<PathBuf> {
-        let (prefix, rest) = match global.strip_prefix("${") {
-            Some(tail) => {
-                let (spec, rest) = tail
-                    .split_once('}')
-                    .with_context(|| format!("unterminated ${{ in global path {global}"))?;
-                let (name, default) = spec
-                    .split_once(":-")
-                    .with_context(|| format!("global path {global} needs a :- default"))?;
-                let value = self.env.get(name).filter(|value| !value.is_empty());
-                (value.map_or(default, String::as_str), rest)
-            }
-            None => (global, ""),
+        let Some(tail) = global.strip_prefix("${") else {
+            return self.expand_home(global, global);
         };
-        let joined = format!("{prefix}{rest}");
-        let relative = joined
-            .strip_prefix("~/")
-            .map(|relative| self.home.join(relative));
-        match (relative, Path::new(prefix).is_absolute()) {
-            (Some(path), _) => Ok(path),
-            (None, true) => Ok(PathBuf::from(joined)),
-            (None, false) => anyhow::bail!("global path {global} must resolve to ~/ or absolute"),
+        let (spec, rest) = tail
+            .split_once('}')
+            .with_context(|| format!("unterminated ${{ in global path {global}"))?;
+        let (name, default) = spec
+            .split_once(":-")
+            .with_context(|| format!("global path {global} needs a :- default"))?;
+        match self.env.get(name).filter(|value| !value.is_empty()) {
+            Some(value) if Path::new(value).is_absolute() => {
+                Ok(PathBuf::from(format!("{value}{rest}")))
+            }
+            Some(value) => anyhow::bail!("{name}={value} must be an absolute path"),
+            None => self.expand_home(&format!("{default}{rest}"), global),
+        }
+    }
+
+    fn expand_home(&self, path: &str, global: &str) -> Result<PathBuf> {
+        match path.strip_prefix("~/") {
+            Some(relative) => Ok(self.home.join(relative)),
+            None => anyhow::bail!("global path {global} must start with ~/"),
         }
     }
 

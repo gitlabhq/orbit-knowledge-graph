@@ -1593,6 +1593,30 @@ mod tests {
     }
 
     #[test]
+    fn global_claude_setup_rejects_a_claude_config_dir_that_is_not_absolute() {
+        let home = tempfile::tempdir().unwrap();
+        for value in ["~/cfg", "cfg"] {
+            let env = BTreeMap::from([("CLAUDE_CONFIG_DIR".to_string(), value.to_string())]);
+            let machine = Machine::new(home.path().to_path_buf(), env);
+
+            let error = install(
+                options_for(&["claude"]),
+                Target::Global(machine.clone()),
+                &machine,
+            )
+            .unwrap_err();
+
+            assert!(
+                error.to_string().contains(&format!(
+                    "CLAUDE_CONFIG_DIR={value} must be an absolute path"
+                )),
+                "{error}"
+            );
+        }
+        assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+    }
+
+    #[test]
     fn global_claude_setup_without_claude_config_dir_stays_under_home() {
         let home = tempfile::tempdir().unwrap();
         let machine = Machine::new(home.path().to_path_buf(), BTreeMap::new());
