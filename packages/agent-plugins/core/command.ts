@@ -75,8 +75,10 @@ function orbitWords(words: readonly string[]): string[] | null {
 
 const PREFIX_WORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', 'time', '{'])
 
-function runnable(command: string): string[][] {
-  const out: string[][] = []
+type Runnable = { piped: boolean; words: string[] }
+
+function runnable(command: string): Runnable[] {
+  const out: Runnable[] = []
   let heredoc = ''
   for (const words of simpleCommands(command)) {
     if (heredoc) {
@@ -85,17 +87,36 @@ function runnable(command: string): string[][] {
     }
     const at = words.findIndex((word, i) => word === '<' && words[i + 1] === '<')
     if (at >= 0) heredoc = (words[at + 2] ?? '').replace(/^-/, '')
-    let i = words[0] === '|' ? 1 : 0
+    const piped = words[0] === '|'
+    let i = piped ? 1 : 0
     while (PREFIX_WORDS.has(words[i] ?? '')) i++
-    if (i < words.length) out.push(words.slice(i))
+    if (i < words.length) out.push({ piped, words: words.slice(i) })
   }
   return out
 }
 
 export function orbitInvocations(command: string): string[][] {
   return runnable(command)
-    .map(orbitWords)
+    .map(({ words }) => orbitWords(words))
     .filter((words) => words !== null)
+}
+
+const SHELL_WORDS = new Set(['cd', 'pushd', 'popd', 'true', ':', 'fi', 'done', 'esac', '}'])
+const READ_ONLY_FILTERS = new Set(['head', 'tail', 'wc', 'grep', 'jq', 'cut'])
+
+export function otherCommands(command: string): string[] {
+  const others = new Set<string>()
+  for (const { piped, words } of runnable(command)) {
+    if (words.includes('$(') || words.includes('`')) others.add('$(…)')
+    words.forEach((word, i) => {
+      if (word === '>' && words[i + 1] !== '>') others.add('> ' + (words[i + 1] ?? ''))
+    })
+    if (orbitWords(words)) continue
+    const program = words.find((word) => !/^\w+=/.test(word))?.split('/').pop()
+    if (!program || ['$(', '`', '<', '>', '#'].includes(program) || SHELL_WORDS.has(program)) continue
+    if (!(piped && READ_ONLY_FILTERS.has(program))) others.add(program)
+  }
+  return [...others]
 }
 
 export function runsOrbit(command: string): boolean {

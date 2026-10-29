@@ -183,3 +183,10 @@ test('a long list of chained details is clipped', () => {
   const command = Array.from({ length: 30 }, (_, i) => `glab orbit grep term${i}`).join('; ')
   expect(describeOrbitCall('Bash', { command })?.detail.length).toBeLessThanOrEqual(96)
 })
+
+test('an Orbit call that runs other commands names them', () => {
+  expect(describeOrbitCall('Bash', { command: 'glab orbit status; rm -rf build' })).toMatchObject({ label: 'Checked Orbit', others: ['rm'] })
+  expect(describeOrbitCall('Bash', { command: 'orbit grep login && ls' })).toMatchObject({ label: 'Searched code', detail: 'login', others: ['ls'] })
+  expect(describeOrbitCall('Bash', { command: 'glab orbit status' })?.others).toBeUndefined()
+  expect(describeOrbitCall('mcp__gitlab-orbit__list_commands', {})?.others).toBeUndefined()
+})

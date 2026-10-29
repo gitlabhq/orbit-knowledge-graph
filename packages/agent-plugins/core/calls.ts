@@ -1,4 +1,4 @@
-import { orbitInvocations, subcommandOf } from './command.ts'
+import { orbitInvocations, otherCommands, subcommandOf } from './command.ts'
 import { NO_ENTITIES, entitiesOf } from './cypher.ts'
 import labels from './labels.ts'
 
@@ -6,7 +6,7 @@ export const MARK = '◎'
 
 export type Label = { done: string; running: string }
 
-export type OrbitCall = { label: string; active: string; detail: string }
+export type OrbitCall = { label: string; active: string; detail: string; others?: readonly string[] }
 
 export const COMMAND_LABELS: Readonly<Record<string, Label>> = labels.commands
 export const TOOL_LABELS: Readonly<Record<string, Label>> = labels.tools
@@ -67,6 +67,7 @@ function stringField(input: unknown, key: string): string | undefined {
 }
 
 const MAX_DETAIL = 96
+const MAX_OTHERS = 48
 
 export function describeCommand(command: string, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {
   const calls = orbitInvocations(command).flatMap((words) => {
@@ -78,7 +79,12 @@ export function describeCommand(command: string, known: ReadonlySet<string> = NO
   const [first] = calls
   if (!first) return null
   const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(', ')
-  return { ...first, detail: clip(detail, MAX_DETAIL) }
+  const others = otherCommands(command)
+  return { ...first, detail: clip(detail, MAX_DETAIL), ...(others.length ? { others } : {}) }
+}
+
+export function othersText(call: OrbitCall): string {
+  return call.others?.length ? '  + ' + clip(call.others.join(', '), MAX_OTHERS) : ''
 }
 
 export function describeOrbitCall(tool: string, input: unknown, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {

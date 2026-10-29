@@ -98,16 +98,38 @@ function runnable(command) {
     const at = words.findIndex((word, i) => word === "<" && words[i + 1] === "<");
     if (at >= 0)
       heredoc = (words[at + 2] ?? "").replace(/^-/, "");
-    let i = words[0] === "|" ? 1 : 0;
+    const piped = words[0] === "|";
+    let i = piped ? 1 : 0;
     while (PREFIX_WORDS.has(words[i] ?? ""))
       i++;
     if (i < words.length)
-      out.push(words.slice(i));
+      out.push({ piped, words: words.slice(i) });
   }
   return out;
 }
 function orbitInvocations(command) {
-  return runnable(command).map(orbitWords).filter((words) => words !== null);
+  return runnable(command).map(({ words }) => orbitWords(words)).filter((words) => words !== null);
+}
+var SHELL_WORDS = new Set(["cd", "pushd", "popd", "true", ":", "fi", "done", "esac", "}"]);
+var READ_ONLY_FILTERS = new Set(["head", "tail", "wc", "grep", "jq", "cut"]);
+function otherCommands(command) {
+  const others = new Set;
+  for (const { piped, words } of runnable(command)) {
+    if (words.includes("$(") || words.includes("`"))
+      others.add("$(…)");
+    words.forEach((word, i) => {
+      if (word === ">" && words[i + 1] !== ">")
+        others.add("> " + (words[i + 1] ?? ""));
+    });
+    if (orbitWords(words))
+      continue;
+    const program = words.find((word) => !/^\w+=/.test(word))?.split("/").pop();
+    if (!program || ["$(", "`", "<", ">", "#"].includes(program) || SHELL_WORDS.has(program))
+      continue;
+    if (!(piped && READ_ONLY_FILTERS.has(program)))
+      others.add(program);
+  }
+  return [...others];
 }
 function subcommandOf(words, known) {
   const [sub, ...rest] = words;
@@ -367,6 +389,7 @@ function stringField(input, key) {
   return typeof value === "string" ? value : undefined;
 }
 var MAX_DETAIL = 96;
+var MAX_OTHERS = 48;
 function describeCommand(command, known = NO_ENTITIES) {
   const calls = orbitInvocations(command).flatMap((words) => {
     const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
@@ -379,7 +402,11 @@ function describeCommand(command, known = NO_ENTITIES) {
   if (!first)
     return null;
   const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(", ");
-  return { ...first, detail: clip(detail, MAX_DETAIL) };
+  const others = otherCommands(command);
+  return { ...first, detail: clip(detail, MAX_DETAIL), ...others.length ? { others } : {} };
+}
+function othersText(call) {
+  return call.others?.length ? "  + " + clip(call.others.join(", "), MAX_OTHERS) : "";
 }
 function describeOrbitCall(tool, input, known = NO_ENTITIES) {
   const command = stringField(input, "command");
@@ -399,7 +426,7 @@ var OrbitUiPlugin = async ({ client }) => ({
       const call = describeOrbitCall(input.tool, output.args);
       if (!call)
         return;
-      const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "");
+      const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "") + othersText(call);
       client.tui.showToast({ body: { message, variant: "info", duration: 2000 } }).catch(() => {});
     } catch {}
   }
