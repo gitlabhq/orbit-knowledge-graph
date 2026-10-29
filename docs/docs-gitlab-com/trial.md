@@ -25,7 +25,7 @@ On GitLab Self-Managed and GitLab Dedicated, [contact sales](https://about.gitla
 
 ## Start a free trial
 
-Start a free trial to try GitLab Orbit in a top-level group before you buy it.
+Start a free trial to try GitLab Orbit in a top-level group.
 
 Prerequisites:
 
