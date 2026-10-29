@@ -528,8 +528,6 @@ tests:
       - { row_count: 1 }
 
   - name: "edges: CALLS through a declared parameter type has resolution declared_type"
-    # Known gap: the engine writes inferred_type for a call through a declared parameter type.
-    skip: true
     query: |
       MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'Acme.Edges.App.Use' AND b.fqn = 'Acme.Edges.Lib.Base.Run' AND e.resolution = 'declared_type'
@@ -588,8 +586,6 @@ tests:
       - { row_count: 1 }
 
   - name: "edges: USES_TYPE links a field type"
-    # Known gap: a field type without an initializer gives no edge.
-    skip: true
     query: |
       MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
       WHERE a.fqn = 'Acme.Edges.App.held' AND b.fqn = 'Acme.Edges.Lib.Base'
