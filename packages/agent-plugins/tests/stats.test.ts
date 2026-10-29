@@ -63,6 +63,11 @@ test('an ungrouped aggregation with several aggregates counts too', () => {
   expect(parseResponse(text).aggregated).toBe(3216)
 })
 
+test('two count columns, one of them DISTINCT, still read as counted', () => {
+  const text = 'query_type: aggregation\ncolumns[2]:\n  - name: n\n    function: count\n    target: mr\n  - name: d\n    function: count\n    target: mr\n    property: author_id\nrows[1]{n,d}:\n  3222,111\npagination:\n  has_more: false\n  truncated: false\n'
+  expect(parseResponse(text).aggregated).toBeGreaterThanOrEqual(3222)
+})
+
 test('schema and other output reads as empty', () => {
   expect(parseResponse('domains[1]:\n  - name: code_review')).toMatchObject({ nodes: 0, edges: 0, aggregated: 0 })
 })
