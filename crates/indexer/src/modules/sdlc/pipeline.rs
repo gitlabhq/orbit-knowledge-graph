@@ -229,7 +229,7 @@ impl Pipeline {
 
         let transform = self.registry.build(plan)?;
         let outputs = transform.outputs().to_vec();
-        let edge_diff = plan
+        let node_diff = plan
             .edge_diff
             .as_ref()
             .map(|diff| {
@@ -296,7 +296,7 @@ impl Pipeline {
                 self.retry_config.halving_min_block_size,
             );
 
-            let read_previous: OptionFuture<_> = edge_diff
+            let read_previous: OptionFuture<_> = node_diff
                 .map(|(diff, _)| {
                     page_keys(&page.batches).map(|keys| diff.read_previous(&self.edge_diff, keys))
                 })
@@ -314,7 +314,7 @@ impl Pipeline {
                 .record_transform_duration(transform_elapsed.as_secs_f64());
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
-            let tombstones = match (edge_diff, previous) {
+            let tombstones = match (node_diff, previous) {
                 (Some((diff, node_output)), Some(previous)) => {
                     diff.tombstones(&grouped[node_output], &previous)?
                 }

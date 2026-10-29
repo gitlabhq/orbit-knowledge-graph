@@ -176,8 +176,8 @@ impl EdgeDiff {
             .await
             .map_err(|err| HandlerError::Processing(format!("edge diff read failed: {err}")))?;
         let mut previous = PreviousRows::default();
-        for batch in batches.iter().flatten() {
-            for (key, row) in self.rows(batch)? {
+        for batch in batches.into_iter().flatten() {
+            for (key, row) in self.rows(&batch)? {
                 previous.0.entry(key).or_default().push(row);
             }
         }
@@ -207,8 +207,11 @@ impl EdgeDiff {
     pub(in crate::modules::sdlc) fn tombstones(
         &self,
         node_rows: &[RecordBatch],
-        previous: &PreviousRows,
+        stored: &PreviousRows,
     ) -> Result<Vec<(String, RecordBatch)>, HandlerError> {
+        if stored.0.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut page: BTreeMap<RowKey, NodeRow> = BTreeMap::new();
         for batch in node_rows {
             for (key, row) in self.rows(batch)? {
@@ -220,7 +223,7 @@ impl EdgeDiff {
 
         let mut retired: BTreeMap<&str, Vec<(EdgeKey, i64)>> = BTreeMap::new();
         for (key, row) in &page {
-            let Some(previous) = previous.before(key, row) else {
+            let Some(previous) = stored.before(key, row) else {
                 continue;
             };
             for edge in self.retired(key, previous, row) {
@@ -405,35 +408,7 @@ impl Column {
         match &self.shape {
             Shape::Id => cast_column(batch, &self.name, &DataType::Int64),
             Shape::Kind => cast_column(batch, &self.name, &DataType::Utf8),
-            Shape::Elements(field) => {
-                let not_a_tuple_list = || {
-                    HandlerError::Processing(format!(
-                        "edge diff: column {} is not a tuple list with {field}",
-                        self.name
-                    ))
-                };
-                let lists = column(batch, &self.name)?
-                    .as_list_opt::<i32>()
-                    .ok_or_else(not_a_tuple_list)?;
-                let offsets = lists.offsets();
-                let start = offsets[0];
-                let items = lists.values().slice(
-                    start as usize,
-                    (offsets[offsets.len() - 1] - start) as usize,
-                );
-                let ids = items
-                    .as_struct_opt()
-                    .and_then(|items| items.column_by_name(field))
-                    .ok_or_else(not_a_tuple_list)?;
-                Ok(Arc::new(ListArray::new(
-                    Arc::new(Field::new_list_field(DataType::Int64, true)),
-                    OffsetBuffer::new(offsets.iter().map(|offset| offset - start).collect()),
-                    cast(ids, &DataType::Int64).map_err(|err| {
-                        HandlerError::Processing(format!("edge diff: {field}: {err}"))
-                    })?,
-                    lists.nulls().cloned(),
-                )))
-            }
+            Shape::Elements(field) => element_ids(column(batch, &self.name)?, &self.name, field),
         }
     }
 
@@ -481,6 +456,35 @@ pub(in crate::modules::sdlc) fn page_keys(
     })
 }
 
+fn element_ids(array: &ArrayRef, name: &str, field: &str) -> Result<ArrayRef, HandlerError> {
+    let not_a_tuple_list = || {
+        HandlerError::Processing(format!(
+            "edge diff: column {name} is not a tuple list with {field}"
+        ))
+    };
+    let lists = array.as_list_opt::<i32>().ok_or_else(not_a_tuple_list)?;
+    let offsets = lists.offsets();
+    let start = offsets[0];
+    let items = lists.values().slice(
+        start as usize,
+        (offsets[offsets.len() - 1] - start) as usize,
+    );
+    let ids = items
+        .as_struct_opt()
+        .and_then(|items| items.column_by_name(field))
+        .ok_or_else(not_a_tuple_list)?;
+    let ids = cast(ids, &DataType::Int64)
+        .map_err(|err| HandlerError::Processing(format!("edge diff: {field}: {err}")))?;
+    ListArray::try_new(
+        Arc::new(Field::new_list_field(DataType::Int64, true)),
+        OffsetBuffer::new(offsets.iter().map(|offset| offset - start).collect()),
+        ids,
+        lists.nulls().cloned(),
+    )
+    .map(|lists| Arc::new(lists) as ArrayRef)
+    .map_err(|err| HandlerError::Processing(format!("edge diff: {field}: {err}")))
+}
+
 fn key_columns(batch: &RecordBatch) -> Result<(StringArray, Int64Array), HandlerError> {
     Ok((
         typed(batch, "traversal_path", &DataType::Utf8)?,
@@ -523,7 +527,7 @@ fn tombstone_batch<'a>(edges: &[(EdgeKey<'a>, i64)]) -> Result<RecordBatch, Hand
         ))
     };
     let versions = TimestampMicrosecondArray::from_iter_values(edges.iter().map(|(_, v)| *v));
-    RecordBatch::try_from_iter([
+    let columns: [(&str, ArrayRef); 8] = [
         ("traversal_path", text(|key| key.traversal_path)),
         ("relationship_kind", text(|key| key.relationship_kind)),
         ("source_id", int(|key| key.source_id)),
@@ -535,8 +539,9 @@ fn tombstone_batch<'a>(edges: &[(EdgeKey<'a>, i64)]) -> Result<RecordBatch, Hand
             "_deleted",
             Arc::new(BooleanArray::from(vec![true; edges.len()])),
         ),
-    ])
-    .map_err(|err| HandlerError::Processing(format!("edge diff tombstones: {err}")))
+    ];
+    RecordBatch::try_from_iter_with_nullable(columns.map(|(name, array)| (name, array, false)))
+        .map_err(|err| HandlerError::Processing(format!("edge diff tombstones: {err}")))
 }
 
 #[cfg(test)]
@@ -675,8 +680,10 @@ mod tests {
     #[test]
     fn nothing_is_retired_without_a_live_previous_row() {
         let diff = diff_for("Job");
+        let other_key_stored =
+            PreviousRows(HashMap::from([((key().0, 7002), vec![job(&diff, 1, 1)])]));
         let tombstones = diff
-            .tombstones(&[job_batch(&diff, 2, 2)], &PreviousRows::default())
+            .tombstones(&[job_batch(&diff, 2, 2)], &other_key_stored)
             .expect("tombstones build");
         assert!(tombstones.is_empty());
         assert!(retired(&diff, &deleted_job(&diff, 1), &job(&diff, 2, 2)).is_empty());
@@ -693,6 +700,8 @@ mod tests {
         )]));
         let before = previous.before(&key(), &page_row).expect("older row");
         assert_eq!(before, &older);
+        let only_itself = PreviousRows(HashMap::from([(key(), vec![page_row.clone()])]));
+        assert!(only_itself.before(&key(), &page_row).is_none());
         assert_eq!(
             retired(&diff, before, &page_row),
             vec![("TRIGGERED".to_string(), 1, 7001)]
@@ -792,20 +801,46 @@ mod tests {
 
     #[test]
     fn the_stored_read_keeps_two_distinct_versions_per_key() {
-        let sql = diff_for("Note").stored_rows_sql();
-        assert!(
-            sql.starts_with(
-                "SELECT traversal_path, id, _version, _deleted, \
-                 author_id, project_id, noteable_type, noteable_id FROM ("
-            ),
-            "{sql}"
+        let columns = "traversal_path, id, _version, _deleted, \
+                       author_id, project_id, noteable_type, noteable_id";
+        assert_eq!(
+            diff_for("Note").stored_rows_sql(),
+            format!(
+                "SELECT {columns} FROM ( \
+                   SELECT {columns} \
+                   FROM {table} \
+                   WHERE traversal_path >= {{lo_path:String}} AND traversal_path <= {{hi_path:String}} \
+                     AND id IN {{ids:Array(Int64)}} \
+                   ORDER BY traversal_path, id, _version DESC \
+                   LIMIT 1 BY traversal_path, id, _version) \
+                 ORDER BY traversal_path, id, _version DESC \
+                 LIMIT 2 BY traversal_path, id",
+                table = prefixed_table_name("gl_note", *SCHEMA_VERSION),
+            )
         );
-        assert!(
-            sql.contains("LIMIT 1 BY traversal_path, id, _version"),
-            "{sql}"
+    }
+
+    #[test]
+    fn page_keys_bound_the_read_by_path_range_and_sorted_ids() {
+        let batch = |paths: Vec<&str>, ids: Vec<i64>| {
+            RecordBatch::try_from_iter([
+                (
+                    "traversal_path",
+                    Arc::new(StringArray::from(paths)) as ArrayRef,
+                ),
+                ("id", Arc::new(Int64Array::from(ids)) as ArrayRef),
+            ])
+            .expect("batch builds")
+        };
+        let keys = page_keys(&[
+            batch(vec!["1/2/", "1/1/"], vec![9, 3]),
+            batch(vec!["1/3/", "1/2/"], vec![3, 5]),
+        ])
+        .expect("keys build");
+        assert_eq!(
+            (keys.lo_path.as_str(), keys.hi_path.as_str(), keys.ids),
+            ("1/1/", "1/3/", vec![3, 5, 9])
         );
-        assert!(sql.contains("LIMIT 2 BY traversal_path, id"), "{sql}");
-        assert!(sql.contains("id IN {ids:Array(Int64)}"), "{sql}");
     }
 
     #[test]
