@@ -89,29 +89,11 @@ properties:
       6: maintenance
       7: transfer_scheduled
 
-  avatar_url:
-    type: string
-    source: avatar
-    nullable: true
-    description: "Avatar upload filename (not a URL; the full URL is computed at runtime)."
-
   deletion_scheduled_at:
     type: timestamp
     source: deletion_scheduled_at
     nullable: true
     description: "Time the group was scheduled for deletion."
-
-  request_access_enabled:
-    type: boolean
-    source: request_access_enabled
-    nullable: false
-    description: "Users can request access to the group."
-
-  shared_runners_enabled:
-    type: boolean
-    source: shared_runners_enabled
-    nullable: false
-    description: "Instance runners are enabled for the group."
 
   require_two_factor_authentication:
     type: boolean
@@ -124,63 +106,6 @@ properties:
     source: membership_lock
     nullable: true
     description: "Projects in the group cannot add members directly."
-
-  share_with_group_lock:
-    type: boolean
-    source: share_with_group_lock
-    nullable: true
-    description: "Projects in the group cannot be shared with other groups."
-
-  mentions_disabled:
-    type: boolean
-    source: mentions_disabled
-    nullable: true
-    description: "Group mentions do not send notifications."
-
-  auto_devops_enabled:
-    type: boolean
-    source: auto_devops_enabled
-    nullable: true
-    description: "Auto DevOps setting. Null means the group inherits it."
-
-  lfs_enabled:
-    type: boolean
-    source: lfs_enabled
-    nullable: true
-    description: "Git LFS setting. Null means the instance default."
-
-  project_creation_level:
-    type: enum
-    source: project_creation_level
-    nullable: true
-    description: "Minimum role that can create projects. Null means the instance default."
-    values:
-      0: noone
-      1: maintainer
-      2: developer
-      3: administrator
-      4: owner
-
-  subgroup_creation_level:
-    type: enum
-    source: subgroup_creation_level
-    nullable: true
-    description: "Minimum role that can create subgroups. Null means owner."
-    values:
-      0: owner
-      1: maintainer
-
-  default_branch_protection:
-    type: enum
-    source: default_branch_protection
-    nullable: true
-    description: "Default branch protection for new projects. Null means the instance default."
-    values:
-      0: none
-      1: developer_can_push
-      2: full
-      3: developer_can_merge
-      4: developer_can_initial_push
 
   traversal_path:
     type: string
@@ -230,14 +155,6 @@ pipelines:
             kind: Group
           label: CONTAINS
           mutable: true
-        - from:
-            field: creator_id
-            kind: User
-          to:
-            field: id
-            kind: Group
-          label: CREATOR
-          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:
@@ -251,19 +168,9 @@ storage:
     - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: state, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: avatar_url, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: deletion_scheduled_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: request_access_enabled, type: "Bool", default: "false"}
-    - {name: shared_runners_enabled, type: "Bool", default: "false"}
     - {name: require_two_factor_authentication, type: "Bool", default: "false"}
     - {name: membership_lock, type: "Nullable(Bool)"}
-    - {name: share_with_group_lock, type: "Nullable(Bool)"}
-    - {name: mentions_disabled, type: "Nullable(Bool)"}
-    - {name: auto_devops_enabled, type: "Nullable(Bool)"}
-    - {name: lfs_enabled, type: "Nullable(Bool)"}
-    - {name: project_creation_level, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
-    - {name: subgroup_creation_level, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
-    - {name: default_branch_protection, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}

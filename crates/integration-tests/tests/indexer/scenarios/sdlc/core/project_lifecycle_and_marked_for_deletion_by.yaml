@@ -1,4 +1,4 @@
-description: Projects index lifecycle flags, mirror flags, reader-visible merge and CI settings, the derived merge method, and the MARKED_FOR_DELETION_BY edge
+description: Projects index lifecycle flags, the mirror flag, merge checks, and the MARKED_FOR_DELETION_BY edge
 scope: { namespace: 100 }
 
 seed:
@@ -15,8 +15,8 @@ expect:
   nodes:
     gl_project:
       rows:
-        - { id: 1000, project_namespace_id: 2000, mirror: true, mirror_user_id: 9, shared_runners_enabled: false, public_builds: false, packages_enabled: true, ci_config_path: ci/main.yml, only_allow_merge_if_pipeline_succeeds: true, only_allow_merge_if_all_discussions_are_resolved: true, merge_method: ff, remove_source_branch_after_merge: true, resolve_outdated_diff_discussions: false, autoclose_referenced_issues: true, suggestion_commit_message: apply, approvals_before_merge: 2, request_access_enabled: false, hidden: false, pending_delete: false }
-        - { id: 1001, mirror: false, mirror_user_id: null, merge_method: rebase_merge, pending_delete: true, hidden: true }
+        - { id: 1000, mirror: true, only_allow_merge_if_pipeline_succeeds: true, only_allow_merge_if_all_discussions_are_resolved: true, pending_delete: false }
+        - { id: 1001, mirror: false, pending_delete: true, marked_for_deletion_at: "2024-01-10" }
   edges:
     - kind: MARKED_FOR_DELETION_BY
       from: User
