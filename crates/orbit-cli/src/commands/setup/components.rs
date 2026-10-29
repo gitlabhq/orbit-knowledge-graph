@@ -15,6 +15,7 @@ use super::plan::Selection;
 use super::spec::{self, Agent};
 use super::{Component, Target};
 
+pub(super) use hooks::KEPT_RETIRED;
 pub(super) use skill::records_full_skill;
 
 pub(super) trait Installer {

@@ -137,6 +137,8 @@ pub(super) struct AgentSpec {
     pub(super) template_files: Vec<TemplateFile>,
     #[serde(default)]
     pub(super) registrations: Vec<Registration>,
+    #[serde(default)]
+    pub(super) retired: Retired,
     pub(super) mcp: Option<McpEntry>,
     pub(super) skills: Option<SkillDirs>,
     pub(super) plugin: Option<PluginSpec>,
@@ -268,6 +270,25 @@ pub(super) struct Registration {
     pub(super) ui: bool,
 }
 
+/// What an earlier release installed and this one no longer does. Install and uninstall remove
+/// these: a file only while its checksum shows it is unedited, and a registration by its value.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Retired {
+    #[serde(default)]
+    pub(super) template_files: Vec<RetiredFile>,
+    #[serde(default)]
+    pub(super) registrations: Vec<Registration>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RetiredFile {
+    pub(super) path: ScopedPath,
+    #[serde(default)]
+    pub(super) ui: bool,
+}
+
 static AGENT_SPECS: LazyLock<Vec<AgentSpec>> = LazyLock::new(|| {
     let mut specs: Vec<AgentSpec> = SetupAssets::iter()
         .filter_map(|path| {
@@ -308,6 +329,26 @@ impl Agent {
 
     pub(super) fn ui_registrations(self, ui: bool) -> impl Iterator<Item = &'static Registration> {
         self.0
+            .registrations
+            .iter()
+            .filter(move |entry| entry.ui == ui)
+    }
+
+    pub(super) fn retired_files(self, ui: bool) -> impl Iterator<Item = &'static ScopedPath> {
+        self.0
+            .retired
+            .template_files
+            .iter()
+            .filter(move |file| file.ui == ui)
+            .map(|file| &file.path)
+    }
+
+    pub(super) fn retired_registrations(
+        self,
+        ui: bool,
+    ) -> impl Iterator<Item = &'static Registration> {
+        self.0
+            .retired
             .registrations
             .iter()
             .filter(move |entry| entry.ui == ui)
@@ -605,6 +646,66 @@ mod tests {
     }
 
     #[test]
+    fn opencode_plugins_use_the_opencode_2_shape() {
+        let opencode = agent_named("opencode").unwrap();
+        for file in &opencode.template_files {
+            let rendered = file.render();
+            assert!(!rendered.contains("{{"), "{}: unfilled", file.template);
+            assert!(TemplateFile::is_unmodified(&rendered), "{}", file.template);
+        }
+        for template in [
+            "opencode_plugin.js",
+            "agents/opencode_ui/index.js",
+            "agents/opencode_ui/tui.tsx",
+        ] {
+            let text = read_embedded_text(template);
+            assert!(
+                text.contains("export default") || text.contains(" as default"),
+                "{template}"
+            );
+        }
+        assert!(opencode.registrations.is_empty());
+        let ui_dir = |file: &TemplateFile| {
+            std::path::Path::new(&file.path.global)
+                .parent()
+                .map(std::path::Path::to_path_buf)
+        };
+        let ui: Vec<_> = opencode.ui_files(true).collect();
+        assert!(
+            ui.iter().all(|file| ui_dir(file) == ui_dir(ui[0])),
+            "the UI parts form one plugin directory"
+        );
+    }
+
+    #[test]
+    fn retired_paths_and_registrations_never_overlap_the_active_ones() {
+        let same = |a: &ScopedPath, b: &ScopedPath| a.project == b.project || a.global == b.global;
+        for spec in agents() {
+            for retired in &spec.retired.template_files {
+                assert!(
+                    !spec
+                        .template_files
+                        .iter()
+                        .any(|active| same(&active.path, &retired.path)),
+                    "{}: {} is both active and retired",
+                    spec.name,
+                    retired.path.project
+                );
+            }
+            for retired in &spec.retired.registrations {
+                assert!(
+                    !spec.registrations.iter().any(|active| {
+                        same(&active.file, &retired.file) && same(&active.value, &retired.value)
+                    }),
+                    "{}: {} is both registered and retired",
+                    spec.name,
+                    retired.value.project
+                );
+            }
+        }
+    }
+
+    #[test]
     fn instruction_files_are_known_names_and_globals_expand_under_home_or_an_absolute_config_dir() {
         for spec in agents() {
             assert!(
@@ -619,8 +720,10 @@ mod tests {
                 .chain(
                     spec.registrations
                         .iter()
+                        .chain(&spec.retired.registrations)
                         .flat_map(|r| [&r.file.global, &r.value.global]),
                 )
+                .chain(spec.retired.template_files.iter().map(|f| &f.path.global))
                 .chain(spec.mcp.iter().map(|entry| &entry.file.global))
                 .chain(
                     spec.plugin
