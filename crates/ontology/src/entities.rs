@@ -495,6 +495,23 @@ impl DenormDirection {
             Self::Target => &mapping.target,
         }
     }
+
+    pub fn tag_column(&self) -> &'static str {
+        match self {
+            Self::Source => "source_tags",
+            Self::Target => "target_tags",
+        }
+    }
+}
+
+impl EdgeMapping {
+    pub fn own_side(&self, node_name: &str) -> Option<DenormDirection> {
+        match (&self.source.kind, &self.target.kind) {
+            (NodeRefKind::Literal(kind), _) if kind == node_name => Some(DenormDirection::Source),
+            (_, NodeRefKind::Literal(kind)) if kind == node_name => Some(DenormDirection::Target),
+            _ => None,
+        }
+    }
 }
 
 /// A node property denormalized onto an edge table for query optimization.

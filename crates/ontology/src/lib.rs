@@ -160,6 +160,7 @@ pub struct Ontology {
     pub(crate) auxiliary_dictionaries: Vec<AuxiliaryDictionary>,
     /// Node properties denormalized onto edge tables for query optimization.
     pub(crate) denormalized_properties: Vec<DenormalizedProperty>,
+    pub(crate) edge_writer_conflicts: Vec<String>,
     /// Declared pre-joined table chains; see [`denormalized`].
     pub(crate) denormalized_joins: Vec<denormalized::DenormalizedJoin>,
     pub(crate) reordered_tables: Vec<denormalized::ReorderedTable>,
@@ -228,6 +229,7 @@ impl Ontology {
             auxiliary_tables: Vec::new(),
             auxiliary_dictionaries: Vec::new(),
             denormalized_properties: Vec::new(),
+            edge_writer_conflicts: Vec::new(),
             denormalized_joins: Vec::new(),
             reordered_tables: Vec::new(),
             derived_entities: BTreeMap::new(),
@@ -1458,6 +1460,10 @@ impl Ontology {
         &self.denormalized_properties
     }
 
+    pub fn edge_writer_conflicts(&self) -> &[String] {
+        &self.edge_writer_conflicts
+    }
+
     /// Returns the sorted, deduplicated list of columns on a node entity that
     /// carry the `text` storage index, and therefore support the
     /// `token_match`, `all_tokens`, and `any_tokens` query operators.
@@ -1535,11 +1541,16 @@ impl Ontology {
     /// edges carry which denorm tags; both the read path (compiler) and the
     /// write path (indexer) derive from it.
     ///
+    /// The tag is declared when a writer of the label supplies it and every
+    /// other writer of the label does too ([`Self::edge_writer_conflict`]):
+    ///
     /// - A standalone edge projects `column` only when the matching literal
     ///   endpoint maps its ontology property to an extracted input field.
-    /// - An FK edge projects only on the side holding the key.
+    /// - An FK edge projects only on the side holding the key. A self edge
+    ///   names the same node on both sides, so it follows the node-pipeline rule.
     /// - A node-pipeline edge projects only the pipeline's own node, on the
-    ///   side that names it literally; derived-entity edges project nothing.
+    ///   side of its own row ([`EdgeMapping::own_side`]); derived-entity edges
+    ///   project nothing.
     /// - An edge no declared pipeline emits has no writer the ontology can
     ///   consult, so it is assumed to project on both sides.
     pub fn edge_projects_column(
@@ -1549,37 +1560,68 @@ impl Ontology {
         direction: DenormDirection,
         column: &str,
     ) -> bool {
+        self.tag_declared(relationship_kind, node_kind, &direction, column)
+            && self
+                .edge_writers(relationship_kind, node_kind, &direction, column)
+                .iter()
+                .all(|(_, projects)| *projects)
+    }
+
+    pub fn edge_writer_conflict(
+        &self,
+        relationship_kind: &str,
+        node_kind: &str,
+        direction: &DenormDirection,
+        column: &str,
+    ) -> Option<String> {
+        if !self.tag_declared(relationship_kind, node_kind, direction, column) {
+            return None;
+        }
+        let (projecting, empty): (Vec<_>, Vec<_>) = self
+            .edge_writers(relationship_kind, node_kind, direction, column)
+            .into_iter()
+            .partition(|(_, projects)| *projects);
+        if empty.is_empty() {
+            return None;
+        }
+        let names = |writers: Vec<(String, bool)>| {
+            writers
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let supplied = match projecting.is_empty() {
+            true => "no writer projects it".to_string(),
+            false => format!("{} projects it", names(projecting)),
+        };
+        Some(format!(
+            "edge '{relationship_kind}' declares {} for {node_kind}.{column}, but {supplied} and {} writes empty tags",
+            direction.tag_column(),
+            names(empty)
+        ))
+    }
+
+    fn tag_declared(
+        &self,
+        relationship_kind: &str,
+        node_kind: &str,
+        direction: &DenormDirection,
+        column: &str,
+    ) -> bool {
         if let Some(pipelines) = self.get_edge_etl(relationship_kind) {
             return pipelines.iter().any(|pipeline| {
                 pipeline.transform.edges().iter().any(|mapping| {
-                    let node_ref = direction.endpoint(mapping);
-                    let NodeRefKind::Literal(endpoint_kind) = &node_ref.kind else {
-                        return false;
-                    };
-                    endpoint_kind == node_kind
-                        && node_ref.property_inputs.keys().any(|property_name| {
-                            self.get_node(node_kind)
-                                .and_then(|node| {
-                                    node.fields
-                                        .iter()
-                                        .find(|field| field.name == *property_name)
-                                })
-                                .and_then(|field| field.column_name())
-                                == Some(column)
-                        })
+                    self.endpoint_projects(direction.endpoint(mapping), node_kind, column)
                 })
             });
         }
 
-        // An FK edge is indexed from the node holding the key, so only that side
-        // is enriched; the other side's tags stay empty. The `any` guard treats
-        // the whole kind as FK-projecting if a single variant declares an
-        // `fk_column`; this is sound only because every FK-bearing edge declares
-        // it on all variants, except the one mixed edge (`has_identifier`), which
-        // carries an ETL block and already returned above. A future mixed edge
-        // without an ETL block would need per-variant projection instead.
         if let Some(variants) = self.edges.get(relationship_kind)
             && variants.iter().any(|v| v.fk_column.is_some())
+            && !variants
+                .iter()
+                .any(|v| v.source_kind == node_kind && v.target_kind == node_kind)
         {
             return variants.iter().any(|v| {
                 let Some(fk) = v.fk_column.as_deref() else {
@@ -1589,7 +1631,10 @@ impl Ontology {
                     DenormDirection::Source => &v.source_kind,
                     DenormDirection::Target => &v.target_kind,
                 };
-                holder == node_kind && self.node_has_property(holder, fk)
+                holder == node_kind
+                    && self
+                        .get_node(holder)
+                        .is_some_and(|node| node.fields.iter().any(|field| field.name == fk))
             });
         }
 
@@ -1598,12 +1643,81 @@ impl Ontology {
                 .iter()
                 .flat_map(|pipeline| pipeline.transform.edges())
                 .filter(|mapping| mapping.label == relationship_kind)
-                .any(|mapping| {
-                    matches!(&direction.endpoint(mapping).kind, NodeRefKind::Literal(kind) if kind == node_kind)
-                })
+                .any(|mapping| mapping.own_side(node_kind).as_ref() == Some(direction))
         });
 
         own_pipeline_tags_this_side || !self.has_declared_emitter(relationship_kind)
+    }
+
+    fn endpoint_projects(&self, node_ref: &NodeRef, node_kind: &str, column: &str) -> bool {
+        let NodeRefKind::Literal(endpoint_kind) = &node_ref.kind else {
+            return false;
+        };
+        endpoint_kind == node_kind
+            && node_ref.property_inputs.keys().any(|property_name| {
+                self.get_node(node_kind)
+                    .and_then(|node| {
+                        node.fields
+                            .iter()
+                            .find(|field| field.name == *property_name)
+                    })
+                    .and_then(|field| field.column_name())
+                    == Some(column)
+            })
+    }
+
+    fn edge_writers(
+        &self,
+        relationship_kind: &str,
+        node_kind: &str,
+        direction: &DenormDirection,
+        column: &str,
+    ) -> Vec<(String, bool)> {
+        let writes_node = |mapping: &EdgeMapping| {
+            mapping.label == relationship_kind
+                && match &direction.endpoint(mapping).kind {
+                    NodeRefKind::Literal(kind) => kind == node_kind,
+                    NodeRefKind::Derived { mapping, .. } => {
+                        mapping.values().any(|kind| kind == node_kind)
+                    }
+                }
+        };
+        let name =
+            |owner: &str, pipeline: &Pipeline| format!("pipeline '{}' on '{owner}'", pipeline.name);
+        let mut writers = Vec::new();
+        for node in self.nodes() {
+            for pipeline in &node.pipelines {
+                for mapping in pipeline.transform.edges().iter().filter(|m| writes_node(m)) {
+                    let projects = node.name == node_kind
+                        && mapping.own_side(&node.name).as_ref() == Some(direction);
+                    writers.push((name(&node.name, pipeline), projects));
+                }
+            }
+        }
+        for (kind, pipeline) in self.edge_etl_configs() {
+            for mapping in pipeline.transform.edges().iter().filter(|m| writes_node(m)) {
+                let projects =
+                    self.endpoint_projects(direction.endpoint(mapping), node_kind, column);
+                writers.push((name(kind, pipeline), projects));
+            }
+        }
+        let variant_has_node = self.edges.get(relationship_kind).is_some_and(|variants| {
+            variants.iter().any(|variant| match direction {
+                DenormDirection::Source => variant.source_kind == node_kind,
+                DenormDirection::Target => variant.target_kind == node_kind,
+            })
+        });
+        for derived in self.derived_entities() {
+            if variant_has_node
+                && derived
+                    .emits
+                    .iter()
+                    .any(|emitted| emitted == relationship_kind)
+            {
+                writers.push((format!("derived entity '{}'", derived.name), false));
+            }
+        }
+        writers
     }
 
     fn has_declared_emitter(&self, relationship_kind: &str) -> bool {
@@ -1620,11 +1734,6 @@ impl Ontology {
                     .iter()
                     .any(|emitted| emitted == relationship_kind)
             })
-    }
-
-    fn node_has_property(&self, node_kind: &str, property_name: &str) -> bool {
-        self.get_node(node_kind)
-            .is_some_and(|node| node.fields.iter().any(|field| field.name == property_name))
     }
 
     pub fn edge_etl_configs(&self) -> impl Iterator<Item = (&str, &Pipeline)> {
@@ -2067,6 +2176,20 @@ mod tests {
         assert!(ontology.edge_projects_column("HAS_NOTE", "Note", Target, "confidential"));
         assert!(ontology.edge_projects_column("CREATOR", "Project", Target, "archived"));
         assert!(ontology.edge_projects_column("CALLS", "Definition", Source, "definition_type"));
+        assert!(ontology.edge_projects_column("APPROVED", "User", Source, "user_type"));
+        assert!(ontology.edge_projects_column("REVIEWER", "User", Source, "user_type"));
+        assert!(!ontology.edge_projects_column("AUTO_CANCELED_BY", "Pipeline", Target, "status"));
+        assert!(ontology.edge_projects_column("AUTO_CANCELED_BY", "Pipeline", Source, "status"));
+    }
+
+    #[test]
+    fn every_writer_of_an_edge_label_projects_its_denormalized_tags() {
+        let ontology = Ontology::load_embedded().expect("should load embedded ontology");
+        assert!(
+            ontology.edge_writer_conflicts().is_empty(),
+            "{}",
+            ontology.edge_writer_conflicts().join("\n")
+        );
     }
 
     #[test]

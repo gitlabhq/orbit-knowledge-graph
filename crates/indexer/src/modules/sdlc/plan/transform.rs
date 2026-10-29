@@ -353,11 +353,7 @@ fn fk_denormalized_columns(
         .filter(|dp| {
             dp.relationship_kind == mapping.label
                 && dp.node_kind == node_name
-                && matches!(
-                    (&dp.direction, node_ref_direction(mapping, node_name)),
-                    (DenormDirection::Source, Some(DenormDirection::Source))
-                        | (DenormDirection::Target, Some(DenormDirection::Target))
-                )
+                && mapping.own_side(node_name).as_ref() == Some(&dp.direction)
         })
         .map(|dp| {
             let field = ontology
@@ -375,14 +371,6 @@ fn fk_denormalized_columns(
             }
         })
         .collect()
-}
-
-fn node_ref_direction(mapping: &EdgeMapping, node_name: &str) -> Option<DenormDirection> {
-    match (&mapping.source.kind, &mapping.target.kind) {
-        (NodeRefKind::Literal(kind), _) if kind == node_name => Some(DenormDirection::Source),
-        (_, NodeRefKind::Literal(kind)) if kind == node_name => Some(DenormDirection::Target),
-        _ => None,
-    }
 }
 
 fn resolve_edge_id(node_ref: &NodeRef, array_field: Option<&str>) -> EdgeId {

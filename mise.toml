@@ -404,8 +404,11 @@ run = "uvx check-jsonschema --verbose --schemafile config/schemas/versions.schem
 description = "Validate config/versions.yaml against JSON schema"
 
 [tasks."ontology:validate"]
-run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
-description = "Validate ontology YAML files against JSON schema"
+run = [
+  "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json",
+  "cargo test -p ontology --lib every_writer_of_an_edge_label_projects_its_denormalized_tags",
+]
+description = "Validate ontology YAML files against the JSON schema and the edge writer tag rule"
 
 [tasks."named-queries:validate"]
 run = "find config/named_queries -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/named_query.schema.json"

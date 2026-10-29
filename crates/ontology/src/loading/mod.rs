@@ -445,6 +445,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     resolve_transform_property_inputs(&mut ontology, &pipeline_node_metadata)?;
 
     let has_denorm = !denormalization_entries.is_empty();
+    let mut writer_conflicts = Vec::new();
 
     for entry in &denormalization_entries {
         let node = ontology.nodes.get(&entry.node).ok_or_else(|| {
@@ -488,9 +489,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     directions.push(crate::entities::DenormDirection::Target);
                 }
                 for direction in directions {
-                    // Declare the denorm only on edges whose ETL materializes
-                    // the column, so the compiler never pushes a tag onto an
-                    // edge with empty tags.
+                    writer_conflicts.extend(ontology.edge_writer_conflict(
+                        edge_name,
+                        &entry.node,
+                        &direction,
+                        &field_column,
+                    ));
                     if !ontology.edge_projects_column(
                         edge_name,
                         &entry.node,
@@ -499,11 +503,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     ) {
                         continue;
                     }
-                    let edge_column = match direction {
-                        crate::entities::DenormDirection::Source => "source_tags",
-                        crate::entities::DenormDirection::Target => "target_tags",
-                    }
-                    .to_string();
+                    let edge_column = direction.tag_column().to_string();
 
                     let already_exists = ontology.denormalized_properties.iter().any(|dp| {
                         dp.relationship_kind == *edge_name
@@ -529,6 +529,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             }
         }
     }
+    ontology.edge_writer_conflicts = writer_conflicts;
 
     let auto_columns: Vec<crate::entities::StorageColumn> = if has_denorm {
         vec![
@@ -2035,6 +2036,36 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().contains("Project"), "{error}");
         assert!(error.to_string().contains("redaction"), "{error}");
+    }
+
+    #[test]
+    fn a_second_writer_without_the_tag_drops_the_denormalization_and_reports_it() {
+        let ontology = load_modified_sources("nodes/code_review/merge_request.yaml", |node| {
+            node["pipelines"][0]["transform"]["edges"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({
+                    "from": {"field": "approvals", "kind": "User"},
+                    "to": {"field": "id", "kind": "MergeRequest"},
+                    "label": "APPROVED",
+                    "array_field": "user_id",
+                }));
+        })
+        .unwrap();
+        let conflicts = ontology.edge_writer_conflicts().join("; ");
+        for expected in [
+            "edge 'APPROVED' declares source_tags for User.user_type",
+            "pipeline 'APPROVED_siphon_approvals_MergeRequest' on 'APPROVED' projects it",
+            "pipeline 'MergeRequest' on 'MergeRequest' writes empty tags",
+        ] {
+            assert!(conflicts.contains(expected), "{conflicts}");
+        }
+        assert!(!ontology.edge_projects_column(
+            "APPROVED",
+            "User",
+            crate::entities::DenormDirection::Source,
+            "user_type"
+        ));
     }
 
     #[test]
