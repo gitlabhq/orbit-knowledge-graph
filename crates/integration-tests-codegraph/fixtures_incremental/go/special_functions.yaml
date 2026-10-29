@@ -31,14 +31,13 @@ tests:
     assert:
       - { row: { name: "main" } }
 
-  # corrected: contract: two definitions with the same file, fqn, kind and signature are one row
-  - name: "Both init() functions share one Definition row"
+  - name: "Both init() functions are extracted as distinct Definition nodes"
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'init' AND d.language_kind = 'Function'
       RETURN d.name AS name
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
 
   - name: "Both init() functions share the package-scoped FQN main.init"
     query: |

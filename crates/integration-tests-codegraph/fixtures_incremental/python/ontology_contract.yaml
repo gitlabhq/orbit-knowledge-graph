@@ -211,7 +211,7 @@ tests:
       MATCH (d:Definition {fqn: 'shop.money.Money'})
       RETURN d.start_line AS line, d.id AS id
     assert:
-      - { row: { line: 1, id: 5678537043871612082 } }
+      - { row: { line: 1, id: 6218065601328097764 } }
 
   - name: "a member call through an inferred receiver type is CALLS"
     query: |
@@ -328,4 +328,4 @@ steps:
           MATCH (d:Definition {fqn: 'shop.money.Money'})
           RETURN d.start_line AS line, d.id AS id
         assert:
-          - { row: { line: 4, id: 5678537043871612082 } }
+          - { row: { line: 4, id: 6218065601328097764 } }

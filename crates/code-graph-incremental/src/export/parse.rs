@@ -211,6 +211,7 @@ pub(super) struct Column {
 pub(super) enum IdPart {
     Column(usize),
     Span,
+    Occurrence,
 }
 
 pub(super) struct EntityPlan {
@@ -569,6 +570,9 @@ fn compile_entity(
         .map(|part| {
             if part == "span" {
                 return Ok(IdPart::Span);
+            }
+            if part == "occurrence" {
+                return Ok(IdPart::Occurrence);
             }
             columns
                 .iter()

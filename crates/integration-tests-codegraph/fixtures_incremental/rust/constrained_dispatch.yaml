@@ -37,13 +37,13 @@ fixtures:
       }
 
 tests:
-  # corrected: contract: two definitions with the same file, fqn, kind and signature are one row, so the three `run` bodies of Service share one row; the qualified calls still reach each body
-  - name: "explicit contracts reach the requested bodies"
+  - name: "explicit contracts exclude competing and inherent methods"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
       WHERE caller.name IN ['explicit_runner', 'explicit_other', 'explicit_default']
       RETURN caller.name AS caller, body.name AS body
     assert:
+      - { row_count: 3 }
       - { row: { caller: explicit_runner, body: runner_body } }
       - { row: { caller: explicit_other, body: other_body } }
       - { row: { caller: explicit_default, body: default_body } }
@@ -77,13 +77,13 @@ steps:
   - name: restore qualified calls from snapshot
     snapshot: true
     tests:
-      # corrected: contract: two definitions with the same file, fqn, kind and signature are one row
       - name: "qualified implementations survive snapshot loading"
         query: |
           MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
           WHERE caller.name IN ['explicit_runner', 'explicit_other', 'explicit_default']
           RETURN caller.name AS caller, body.name AS body
         assert:
+          - { row_count: 3 }
           - { row: { caller: explicit_runner, body: runner_body } }
           - { row: { caller: explicit_other, body: other_body } }
           - { row: { caller: explicit_default, body: default_body } }

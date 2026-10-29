@@ -1,0 +1,73 @@
+name: "Go: two init functions in one file are two definitions with stable ids"
+
+fixtures:
+  - path: go.mod
+    content: |
+      module example.com/demo
+
+  - path: main.go
+    content: |
+      package main
+
+      var ready bool
+
+      func init() {
+          ready = true
+      }
+
+      func init() {
+          ready = false
+      }
+
+      func main() {}
+
+tests:
+  - name: "each init keeps its own row"
+    query: |
+      MATCH (d:Definition {name: 'init'})
+      RETURN d.fqn AS fqn, d.start_line AS line
+      ORDER BY line
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "main.init", line: 5 } }
+      - { row: { fqn: "main.init", line: 9 } }
+
+  - name: "the ids before an edit"
+    query: |
+      MATCH (d:Definition {name: 'init'})
+      RETURN d.id AS id, d.start_line AS line
+      ORDER BY line
+    assert:
+      - { row: { id: 3442425882828069706, line: 5 } }
+      - { row: { id: 1284561673210609570, line: 9 } }
+
+steps:
+  - name: add a line above both functions
+    snapshot: true
+    modify:
+      - path: main.go
+        content: |
+          package main
+
+          import "fmt"
+
+          var ready bool
+
+          func init() {
+              ready = true
+          }
+
+          func init() {
+              ready = false
+          }
+
+          func main() { fmt.Println(ready) }
+    tests:
+      - name: "both rows keep their ids"
+        query: |
+          MATCH (d:Definition {name: 'init'})
+          RETURN d.id AS id, d.start_line AS line
+          ORDER BY line
+        assert:
+          - { row: { id: 3442425882828069706, line: 7 } }
+          - { row: { id: 1284561673210609570, line: 11 } }
