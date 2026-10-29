@@ -409,25 +409,24 @@ fn canonical_definition(definition: &JsDef, extends: Option<&String>) -> Canonic
             .as_deref()
             .map(truncate_identifier),
         is_exported: definition.is_exported,
-        signature: display.signature.as_deref().map(Into::into),
-        parameters: display
-            .parameters
-            .iter()
-            .map(|p| p.as_str().into())
-            .collect(),
-        declared_return_type: display.return_type.as_deref().map(Into::into),
-        declared_type: display.declared_type.as_deref().map(Into::into),
-        doc_comment: display.doc_comment.as_deref().map(Into::into),
-        modifiers: display.modifiers,
-        visibility: display.visibility,
         ..DefinitionMetadata::default()
     };
+    let mut def_display = crate::v2::types::DefDisplay::new(
+        display.signature.clone(),
+        display.return_type.clone(),
+        display.declared_type.clone(),
+        display.doc_comment.clone(),
+        display.parameters.clone(),
+    );
+    def_display.modifiers = display.modifiers;
+    def_display.visibility = display.visibility;
     if let Some(extends) = extends {
         metadata.super_types.push(truncate_identifier(extends));
     }
 
     let fqn_truncated = truncate_identifier(&definition.fqn);
     CanonicalDefinition {
+        display: def_display,
         definition_type: display.language_kind.unwrap_or(definition.kind.as_str()),
         kind: display.kind.unwrap_or(canonical_def_kind(&definition.kind)),
         name: truncate_identifier(&definition.name),

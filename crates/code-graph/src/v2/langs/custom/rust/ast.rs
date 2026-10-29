@@ -871,7 +871,8 @@ impl RustStructureExtractor {
             fqn: canonical_fqn_parts(fqn_parts),
             range: self.line_index.range(syntax.text_range()),
             is_top_level: top_level,
-            metadata: Some(Box::new(super::display::metadata(syntax))),
+            display: super::display::display(syntax),
+            metadata: None,
         });
     }
 

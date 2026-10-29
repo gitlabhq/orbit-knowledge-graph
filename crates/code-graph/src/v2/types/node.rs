@@ -253,8 +253,84 @@ pub struct CanonicalDefinition {
     pub fqn: Fqn,
     pub range: Range,
     pub is_top_level: bool,
+    pub display: DefDisplay,
     /// `None` for most definitions keeps the common case small.
     pub metadata: Option<Box<DefinitionMetadata>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DefDisplay {
+    text: Box<str>,
+    ends: Box<[u32]>,
+    present: u8,
+    pub modifiers: Modifiers,
+    pub visibility: Option<Visibility>,
+}
+
+impl DefDisplay {
+    const FIELDS: usize = 4;
+
+    pub fn new(
+        signature: Option<String>,
+        return_type: Option<String>,
+        declared_type: Option<String>,
+        doc_comment: Option<String>,
+        parameters: Vec<String>,
+    ) -> Self {
+        let mut text = String::new();
+        let mut ends = Vec::with_capacity(Self::FIELDS + parameters.len());
+        let mut present = 0;
+        for (bit, field) in [signature, return_type, declared_type, doc_comment]
+            .into_iter()
+            .enumerate()
+        {
+            if let Some(field) = field {
+                present |= 1 << bit;
+                text.push_str(&field);
+            }
+            ends.push(text.len() as u32);
+        }
+        for parameter in &parameters {
+            text.push_str(parameter);
+            ends.push(text.len() as u32);
+        }
+        Self {
+            text: text.into_boxed_str(),
+            ends: ends.into_boxed_slice(),
+            present,
+            modifiers: Modifiers::empty(),
+            visibility: None,
+        }
+    }
+
+    fn span(&self, index: usize) -> &str {
+        let start = index.checked_sub(1).map_or(0, |i| self.ends[i] as usize);
+        &self.text[start..self.ends[index] as usize]
+    }
+
+    fn field(&self, bit: usize) -> Option<&str> {
+        (self.present & (1 << bit) != 0).then(|| self.span(bit))
+    }
+
+    pub fn signature(&self) -> Option<&str> {
+        self.field(0)
+    }
+
+    pub fn return_type(&self) -> Option<&str> {
+        self.field(1)
+    }
+
+    pub fn declared_type(&self) -> Option<&str> {
+        self.field(2)
+    }
+
+    pub fn doc_comment(&self) -> Option<&str> {
+        self.field(3)
+    }
+
+    pub fn parameters(&self) -> impl Iterator<Item = &str> {
+        (Self::FIELDS.min(self.ends.len())..self.ends.len()).map(|i| self.span(i))
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -269,13 +345,6 @@ pub struct DefinitionMetadata {
     /// If this is a companion object, the FQN of the owning class.
     pub companion_of: Option<String>,
     pub is_exported: bool,
-    pub signature: Option<Box<str>>,
-    pub parameters: Box<[Box<str>]>,
-    pub declared_return_type: Option<Box<str>>,
-    pub declared_type: Option<Box<str>>,
-    pub doc_comment: Option<Box<str>>,
-    pub modifiers: Modifiers,
-    pub visibility: Option<Visibility>,
     pub generated_by: Option<Box<str>>,
 }
 

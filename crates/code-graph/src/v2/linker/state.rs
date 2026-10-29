@@ -27,11 +27,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use crate::v2::linker::graph::DefId;
-use crate::v2::types::{
-    DefKind, DefScope, DefinitionMetadata, ImportBindingKind, ImportMode, Modifiers, Range,
-    Visibility,
-};
+use crate::v2::types::{DefDisplay, DefKind, DefScope, ImportBindingKind, ImportMode, Range};
 use bumpalo::Bump;
 use petgraph::graph::NodeIndex;
 use rust_lapper::{Interval, Lapper};
@@ -295,6 +291,7 @@ pub struct GraphDef {
     pub range: Range,
     pub is_top_level: bool,
     pub scope: DefScope,
+    pub display: DefDisplay,
     pub metadata: Option<Box<GraphDefMeta>>,
 }
 
@@ -307,122 +304,7 @@ pub struct GraphDefMeta {
     pub decorators: SmallVec<[StrId; 2]>,
     pub companion_of: Option<StrId>,
     pub is_exported: bool,
-}
-
-#[derive(Debug, Default)]
-pub struct DisplayTable {
-    text: String,
-    ends: Vec<u32>,
-    rows: Vec<DisplayRow>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct DisplayRow {
-    first: u32,
-    parameters: u8,
-    present: u8,
-    modifiers: Modifiers,
-    visibility: Option<Visibility>,
-}
-
-#[derive(Clone, Copy)]
-pub struct DefDisplay<'a> {
-    table: &'a DisplayTable,
-    row: DisplayRow,
-}
-
-const SIGNATURE: u32 = 0;
-const RETURN_TYPE: u32 = 1;
-const DECLARED_TYPE: u32 = 2;
-const DOC_COMMENT: u32 = 3;
-const GENERATED_BY: u32 = 4;
-const FIELDS: u32 = 5;
-
-impl DisplayTable {
-    pub fn push(&mut self, meta: Option<&DefinitionMetadata>) {
-        let first = self.ends.len() as u32;
-        let mut present = 0;
-        let fields = meta.map(|m| {
-            [
-                &m.signature,
-                &m.declared_return_type,
-                &m.declared_type,
-                &m.doc_comment,
-                &m.generated_by,
-            ]
-        });
-        for (bit, field) in fields.into_iter().flatten().enumerate() {
-            if let Some(text) = field {
-                present |= 1 << bit;
-                self.text.push_str(text);
-            }
-            self.ends.push(self.text.len() as u32);
-        }
-        let parameters = meta.map_or(&[][..], |m| &m.parameters[..]);
-        for parameter in parameters {
-            self.text.push_str(parameter);
-            self.ends.push(self.text.len() as u32);
-        }
-        self.rows.push(DisplayRow {
-            first,
-            parameters: parameters.len() as u8,
-            present,
-            modifiers: meta.map(|m| m.modifiers).unwrap_or_default(),
-            visibility: meta.and_then(|m| m.visibility),
-        });
-    }
-
-    pub fn get(&self, id: DefId) -> DefDisplay<'_> {
-        DefDisplay {
-            table: self,
-            row: self.rows[id.0 as usize],
-        }
-    }
-
-    fn span(&self, index: u32) -> &str {
-        let start = index.checked_sub(1).map_or(0, |i| self.ends[i as usize]);
-        &self.text[start as usize..self.ends[index as usize] as usize]
-    }
-}
-
-impl<'a> DefDisplay<'a> {
-    fn field(&self, field: u32) -> Option<&'a str> {
-        (self.row.present & (1 << field) != 0).then(|| self.table.span(self.row.first + field))
-    }
-
-    pub fn signature(&self) -> Option<&'a str> {
-        self.field(SIGNATURE)
-    }
-
-    pub fn return_type(&self) -> Option<&'a str> {
-        self.field(RETURN_TYPE)
-    }
-
-    pub fn declared_type(&self) -> Option<&'a str> {
-        self.field(DECLARED_TYPE)
-    }
-
-    pub fn doc_comment(&self) -> Option<&'a str> {
-        self.field(DOC_COMMENT)
-    }
-
-    pub fn generated_by(&self) -> Option<&'a str> {
-        self.field(GENERATED_BY)
-    }
-
-    pub fn parameters(&self) -> impl Iterator<Item = &'a str> {
-        let first = self.row.first + FIELDS;
-        let table = self.table;
-        (first..first + self.row.parameters as u32).map(move |i| table.span(i))
-    }
-
-    pub fn modifiers(&self) -> Modifiers {
-        self.row.modifiers
-    }
-
-    pub fn visibility(&self) -> Option<Visibility> {
-        self.row.visibility
-    }
+    pub generated_by: Option<StrId>,
 }
 
 #[derive(Debug, Clone)]
@@ -453,6 +335,7 @@ impl GraphDef {
                 decorators: m.decorators.iter().map(|s| pool.alloc(s)).collect(),
                 companion_of: m.companion_of.as_deref().map(|s| pool.alloc(s)),
                 is_exported: m.is_exported,
+                generated_by: m.generated_by.as_deref().map(|s| pool.alloc(s)),
             })
         });
         let metadata = metadata.filter(|m| **m != GraphDefMeta::default());
@@ -465,6 +348,7 @@ impl GraphDef {
             range: def.range,
             is_top_level: def.is_top_level,
             scope: DefScope::TopLevel,
+            display: def.display.clone(),
             metadata,
         }
     }
@@ -858,6 +742,7 @@ mod tests {
 
         let mut pool = StringPool::new();
         let cdef = CanonicalDefinition {
+            display: Default::default(),
             definition_type: "Class",
             kind: DefKind::Class,
             name: "UserService".to_string(),

@@ -167,6 +167,7 @@ fn hcl_on_scope(
                         "Resource"
                     };
                     defs.push(crate::v2::types::CanonicalDefinition {
+                        display: Default::default(),
                         definition_type: def_type,
                         kind: DefKind::Class,
                         name,
@@ -185,6 +186,7 @@ fn hcl_on_scope(
                         let name = id.text().to_string();
                         let fqn = Fqn::from_scope(scope_stack, &name, sep);
                         defs.push(crate::v2::types::CanonicalDefinition {
+                            display: Default::default(),
                             definition_type: "Local",
                             kind: DefKind::Variable,
                             name,

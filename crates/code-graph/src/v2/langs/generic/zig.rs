@@ -159,6 +159,7 @@ fn zig_anonymous_test(
     let fqn = Fqn::from_scope(scope_stack, &name, sep);
 
     defs.push(CanonicalDefinition {
+        display: Default::default(),
         definition_type: "Test",
         kind: DefKind::Test,
         name,

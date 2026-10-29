@@ -1,6 +1,6 @@
 use ra_ap_syntax::{AstNode, NodeOrToken, SyntaxKind, SyntaxNode, ast};
 
-use crate::v2::types::{DefinitionMetadata, Modifier, Modifiers, Visibility, text};
+use crate::v2::types::{DefDisplay, Modifier, Modifiers, Visibility, text};
 
 const BODY_KINDS: &[SyntaxKind] = &[
     SyntaxKind::BLOCK_EXPR,
@@ -94,13 +94,10 @@ pub(super) fn is_test(node: &SyntaxNode) -> bool {
         })
 }
 
-pub(super) fn metadata(node: &SyntaxNode) -> DefinitionMetadata {
-    let mut meta = DefinitionMetadata {
-        signature: signature(node).map(String::into_boxed_str),
-        doc_comment: doc_comment(node).map(String::into_boxed_str),
-        visibility: visibility(node),
-        ..DefinitionMetadata::default()
-    };
+pub(super) fn display(node: &SyntaxNode) -> DefDisplay {
+    let mut parameters = Vec::new();
+    let mut return_type = None;
+    let mut modifiers = Modifiers::empty();
     if let Some(function) = ast::Fn::cast(node.clone()) {
         if let Some(params) = function.param_list() {
             let items: Vec<String> = params
@@ -109,17 +106,12 @@ pub(super) fn metadata(node: &SyntaxNode) -> DefinitionMetadata {
                 .into_iter()
                 .chain(params.params().map(|p| p.syntax().text().to_string()))
                 .collect();
-            meta.parameters = text::parameters(items.iter().map(String::as_str))
-                .into_iter()
-                .map(String::into_boxed_str)
-                .collect();
+            parameters = text::parameters(items.iter().map(String::as_str));
         }
-        meta.declared_return_type = function
+        return_type = function
             .ret_type()
             .and_then(|r| r.ty())
-            .and_then(|t| text::type_text(&t.syntax().text().to_string(), text::RETURN_TYPE_CAP))
-            .map(String::into_boxed_str);
-        let mut modifiers = Modifiers::empty();
+            .and_then(|t| text::type_text(&t.syntax().text().to_string(), text::RETURN_TYPE_CAP));
         if function.async_token().is_some() {
             modifiers.insert(Modifier::Async);
         }
@@ -129,20 +121,27 @@ pub(super) fn metadata(node: &SyntaxNode) -> DefinitionMetadata {
         if function.abi().is_some() {
             modifiers.insert(Modifier::Extern);
         }
-        meta.modifiers = modifiers;
     }
     let declared = ast::Const::cast(node.clone())
         .and_then(|c| c.ty())
         .or_else(|| ast::Static::cast(node.clone()).and_then(|s| s.ty()))
         .or_else(|| ast::RecordField::cast(node.clone()).and_then(|f| f.ty()))
         .or_else(|| ast::TupleField::cast(node.clone()).and_then(|f| f.ty()));
-    meta.declared_type = declared
-        .and_then(|t| text::type_text(&t.syntax().text().to_string(), text::DECLARED_TYPE_CAP))
-        .map(String::into_boxed_str);
+    let declared_type = declared
+        .and_then(|t| text::type_text(&t.syntax().text().to_string(), text::DECLARED_TYPE_CAP));
     if let Some(tr) = ast::Trait::cast(node.clone())
         && tr.unsafe_token().is_some()
     {
-        meta.modifiers.insert(Modifier::Unsafe);
+        modifiers.insert(Modifier::Unsafe);
     }
-    meta
+    let mut display = DefDisplay::new(
+        signature(node),
+        return_type,
+        declared_type,
+        doc_comment(node),
+        parameters,
+    );
+    display.modifiers = modifiers;
+    display.visibility = visibility(node);
+    display
 }

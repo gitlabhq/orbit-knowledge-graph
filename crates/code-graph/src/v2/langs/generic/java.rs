@@ -119,10 +119,15 @@ fn java_record_accessors(
             fqn,
             range: crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(&param)),
             is_top_level: false,
+            display: crate::v2::types::DefDisplay::new(
+                written_type.as_ref().map(|t| format!("{t} {accessor}()")),
+                written_type,
+                None,
+                None,
+                Vec::new(),
+            ),
             metadata: Some(Box::new(crate::v2::types::DefinitionMetadata {
                 return_type,
-                declared_return_type: written_type.as_deref().map(Into::into),
-                signature: written_type.map(|t| format!("{t} {accessor}()").into()),
                 generated_by: Some("record".into()),
                 ..Default::default()
             })),

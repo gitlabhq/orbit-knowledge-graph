@@ -85,55 +85,55 @@ impl MetadataRule {
         node: &N<'_>,
         name: &str,
         kind: crate::v2::types::DefKind,
-        meta: &mut crate::v2::types::DefinitionMetadata,
-    ) {
+    ) -> crate::v2::types::DefDisplay {
         use crate::v2::types::text;
-        meta.signature = match rules.signature_with {
+        let signature = match rules.signature_with {
             Some(f) => f(node),
             None => rules.signature(node, self.signature_until),
-        }
-        .map(String::into_boxed_str);
-        meta.parameters = match self.parameters_with {
+        };
+        let parameters = match self.parameters_with {
             Some(f) => text::parameters(f(node).iter().map(String::as_str)),
             None => rules.parameters(node),
-        }
-        .into_iter()
-        .map(String::into_boxed_str)
-        .collect();
+        };
         let category = kind.category();
-        meta.declared_return_type = match category {
+        let return_type = match category {
             crate::v2::types::Category::Callable => {
                 match self.written_return_type.or(rules.return_type_with) {
                     Some(f) => f(node),
                     None => rules.written(node, None, rules.return_type),
                 }
                 .and_then(|t| text::type_text(&t, text::RETURN_TYPE_CAP))
-                .map(String::into_boxed_str)
             }
             _ => None,
         };
-        meta.declared_type = match category {
+        let declared_type = match category {
             crate::v2::types::Category::Value => match self.declared_type_with {
                 Some(f) => f(node),
                 None => rules.written(node, self.declared_type.as_ref(), rules.declared_type),
             }
-            .and_then(|t| text::type_text(&t, text::DECLARED_TYPE_CAP))
-            .map(String::into_boxed_str),
+            .and_then(|t| text::type_text(&t, text::DECLARED_TYPE_CAP)),
             _ => None,
         };
-        meta.doc_comment = match self.doc_with {
+        let doc_comment = match self.doc_with {
             Some(f) => f(node),
             None => rules.doc_comment(node),
-        }
-        .map(String::into_boxed_str);
+        };
         let (mut modifiers, visibility) = rules.modifiers(node);
         if let Some(f) = self.modifiers_with {
             modifiers.extend(f(node));
         }
-        meta.modifiers = modifiers;
-        meta.visibility = rules
+        let mut display = crate::v2::types::DefDisplay::new(
+            signature,
+            return_type,
+            declared_type,
+            doc_comment,
+            parameters,
+        );
+        display.modifiers = modifiers;
+        display.visibility = rules
             .visibility
             .map_or(visibility, |f| visibility.or(f(node, name)));
+        display
     }
 
     pub fn super_types(mut self, f: fn(&N<'_>) -> Vec<String>) -> Self {

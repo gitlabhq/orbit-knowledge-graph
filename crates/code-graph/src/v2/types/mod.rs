@@ -12,7 +12,7 @@ pub use edge::{
 pub use fqn::Fqn;
 pub use node::{
     BindingKind, CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, Category,
-    DefKind, DefScope, DefinitionMetadata, ExpressionStep, ImportBindingKind, ImportMode, Kind,
-    Modifier, Modifiers, Visibility,
+    DefDisplay, DefKind, DefScope, DefinitionMetadata, ExpressionStep, ImportBindingKind,
+    ImportMode, Kind, Modifier, Modifiers, Visibility,
 };
 pub use range::{Position, Range};

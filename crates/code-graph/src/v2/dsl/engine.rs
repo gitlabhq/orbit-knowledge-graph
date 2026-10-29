@@ -147,6 +147,7 @@ struct ScopeMatch {
     def_kind: DefKind,
     range: crate::utils::Range,
     creates_scope: bool,
+    display: crate::v2::types::DefDisplay,
     metadata: Option<Box<DefinitionMetadata>>,
 }
 
@@ -175,15 +176,10 @@ impl LanguageSpec {
             rule.conditional_kind(node, &name)
                 .unwrap_or((def_kind, label))
         };
-        let mut metadata = rule.extract_metadata(node, &resolve).unwrap_or_default();
-        match &rule.metadata_rule {
-            Some(meta_rule) => {
-                meta_rule.display(&self.display, node, &name, def_kind, &mut metadata)
-            }
-            None => {
-                MetadataRule::new().display(&self.display, node, &name, def_kind, &mut metadata)
-            }
-        }
+        let display = match &rule.metadata_rule {
+            Some(meta_rule) => meta_rule.display(&self.display, node, &name, def_kind),
+            None => MetadataRule::new().display(&self.display, node, &name, def_kind),
+        };
         Some(ScopeMatch {
             scope_only: rule.scope_only,
             name,
@@ -191,7 +187,8 @@ impl LanguageSpec {
             def_kind,
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
-            metadata: Some(metadata),
+            display,
+            metadata: rule.extract_metadata(node, &resolve),
         })
     }
 
@@ -957,6 +954,7 @@ impl LanguageSpec {
                 fqn,
                 range: canonical_range(&m.range),
                 is_top_level,
+                display: m.display,
                 metadata: m.metadata,
             });
             let last_def = &state.defs[def_index as usize];

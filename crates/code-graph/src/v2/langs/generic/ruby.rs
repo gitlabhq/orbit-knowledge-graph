@@ -355,6 +355,7 @@ fn ruby_extract_generated_methods(
             if !name.is_empty() {
                 let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
                 defs.push(crate::v2::types::CanonicalDefinition {
+                    display: Default::default(),
                     definition_type: "Method",
                     kind: DefKind::Method,
                     name,
@@ -416,6 +417,7 @@ fn ruby_extract_generated_methods(
             };
             let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
             defs.push(crate::v2::types::CanonicalDefinition {
+                display: Default::default(),
                 definition_type: def_type,
                 kind,
                 name,
@@ -437,6 +439,7 @@ fn ruby_extract_generated_methods(
             };
             let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
             defs.push(crate::v2::types::CanonicalDefinition {
+                display: Default::default(),
                 definition_type: def_type,
                 kind,
                 name,
@@ -475,6 +478,7 @@ fn ruby_extract_generated_methods(
                 }
                 let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
                 defs.push(crate::v2::types::CanonicalDefinition {
+                    display: Default::default(),
                     definition_type: "Method",
                     kind: DefKind::Method,
                     name,
@@ -493,6 +497,7 @@ fn ruby_extract_generated_methods(
                 };
                 let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
                 defs.push(crate::v2::types::CanonicalDefinition {
+                    display: Default::default(),
                     definition_type: "Method",
                     kind: DefKind::Method,
                     name,

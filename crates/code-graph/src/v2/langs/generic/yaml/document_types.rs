@@ -120,6 +120,7 @@ fn push_definition(
     sep: &'static str,
 ) {
     defs.push(CanonicalDefinition {
+        display: Default::default(),
         definition_type: &rule.definition_type,
         kind: DefKind::Variable,
         name: parts[parts.len() - 1].to_string(),

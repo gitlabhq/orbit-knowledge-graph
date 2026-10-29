@@ -278,6 +278,7 @@ impl JsModuleGraphBuilder {
 
 fn synthesize_module_definition(file_path: &str) -> CanonicalDefinition {
     CanonicalDefinition {
+        display: Default::default(),
         definition_type: "Module",
         kind: DefKind::Module,
         name: file_path.to_string(),
@@ -304,6 +305,7 @@ fn synthesize_export_definition(
         .unwrap_or((MODULE_EXPORT_TYPE, DefKind::Variable));
 
     CanonicalDefinition {
+        display: Default::default(),
         definition_type,
         kind,
         name: member_name.to_string(),
@@ -335,6 +337,7 @@ mod tests {
 
     fn local_def(name: &str, kind: DefKind) -> CanonicalDefinition {
         CanonicalDefinition {
+            display: Default::default(),
             definition_type: match kind {
                 DefKind::Function => "Function",
                 DefKind::Class => "Class",
