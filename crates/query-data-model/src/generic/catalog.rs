@@ -37,6 +37,7 @@ pub struct Relationship {
     pub id: RelationshipId,
     pub name: String,
     pub variants: Vec<RelationshipVariantId>,
+    pub properties: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Default)]
@@ -170,6 +171,17 @@ impl GraphCatalog {
                 id: relationship_id,
                 name: relationship_name.to_string(),
                 variants: relationship_variants,
+                properties: ontology
+                    .edge_properties(relationship_name)
+                    .iter()
+                    .map(|field| {
+                        let labels = field.enum_values.iter().flatten();
+                        (
+                            field.name.clone(),
+                            labels.map(|(_, label)| label.clone()).collect(),
+                        )
+                    })
+                    .collect(),
             });
         }
 
@@ -261,6 +273,27 @@ impl GraphCatalog {
         let target = self.entity_id(target)?;
         self.variant_id(relationship, source, target)
             .map(|id| self.variant(id))
+    }
+
+    pub fn relationship_enum_values(&self, names: &[String], property: &str) -> Vec<String> {
+        let any = names.is_empty() || names.iter().any(|name| name == "*");
+        let mut values: Vec<String> = self
+            .relationships()
+            .filter(|relationship| any || names.contains(&relationship.name))
+            .filter_map(|relationship| relationship.properties.get(property))
+            .flatten()
+            .cloned()
+            .collect();
+        values.sort();
+        values.dedup();
+        values
+    }
+
+    pub fn relationships_declaring(&self, property: &str) -> Vec<&str> {
+        self.relationships()
+            .filter(|relationship| relationship.properties.contains_key(property))
+            .map(|relationship| relationship.name.as_str())
+            .collect()
     }
 
     pub fn relationship_names(&self, source: Option<&str>, target: Option<&str>) -> Vec<String> {

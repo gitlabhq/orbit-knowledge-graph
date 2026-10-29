@@ -86,6 +86,11 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             && relation.max_hops == 1
             && relation.endpoint_column(node).is_some()
             && self
+                .model
+                .graph()
+                .relationships_declaring(property)
+                .is_empty()
+            && self
                 .edge_columns(relation)
                 .is_some_and(|columns| columns.contains(property))
     }

@@ -50,11 +50,13 @@ impl crate::Relational<ClickHouse> {
                     edge.storage
                         .columns
                         .iter()
+                        .chain(&edge.storage.property_columns)
                         .chain(&edge.storage.denormalized_columns),
                 ),
                 column_types: edge
                     .columns
                     .iter()
+                    .chain(&edge.property_columns)
                     .map(|column| (column.name.trim_matches('`').to_string(), column.data_type))
                     .chain(system_types())
                     .collect(),

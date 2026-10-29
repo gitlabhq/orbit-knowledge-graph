@@ -1084,6 +1084,7 @@ pub(crate) mod tests {
             depth: None,
             path_id: None,
             step: None,
+            properties: serde_json::Map::new(),
         }
     }
 

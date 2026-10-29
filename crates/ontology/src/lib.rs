@@ -107,6 +107,7 @@ pub struct EdgeTableConfig {
     pub domains: BTreeSet<String>,
     pub sort_key: Vec<String>,
     pub columns: Vec<EdgeColumn>,
+    pub property_columns: Vec<EdgeColumn>,
     pub storage: EdgeTableStorage,
 }
 
@@ -136,6 +137,7 @@ pub struct Ontology {
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
     pub(crate) edge_descriptions: BTreeMap<String, String>,
+    pub(crate) edge_properties: BTreeMap<String, Vec<Field>>,
     pub(crate) edge_pipelines: BTreeMap<String, Vec<Pipeline>>,
     /// Reindex trigger tables per edge relationship kind, resolved from each
     /// edge's `indexer` block. Parallels `edge_pipelines`; the pipeline model
@@ -186,6 +188,7 @@ impl Ontology {
             domains: BTreeSet::new(),
             sort_key: default_sort_key,
             columns: Vec::new(),
+            property_columns: Vec::new(),
             storage: EdgeTableStorage::default(),
         };
         Self {
@@ -201,6 +204,7 @@ impl Ontology {
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
             edge_descriptions: BTreeMap::new(),
+            edge_properties: BTreeMap::new(),
             edge_pipelines: BTreeMap::new(),
             edge_reindex_sources: BTreeMap::new(),
             etl_settings: EtlSettings {
@@ -338,6 +342,7 @@ impl Ontology {
                 domains: BTreeSet::new(),
                 sort_key,
                 columns: Vec::new(),
+                property_columns: Vec::new(),
                 storage: EdgeTableStorage::default(),
             },
         );
@@ -414,7 +419,13 @@ impl Ontology {
     pub fn get_edge_table_column_type(&self, table: &str, name: &str) -> Option<DataType> {
         self.edge_table_configs
             .get(table)
-            .and_then(|config| config.columns.iter().find(|c| c.name == name))
+            .and_then(|config| {
+                config
+                    .columns
+                    .iter()
+                    .chain(&config.property_columns)
+                    .find(|c| c.name == name)
+            })
             .map(|c| c.data_type)
     }
 
@@ -1487,6 +1498,12 @@ impl Ontology {
         self.edge_descriptions.get(name).map(|s| s.as_str())
     }
 
+    pub fn edge_properties(&self, relationship_kind: &str) -> &[Field] {
+        self.edge_properties
+            .get(relationship_kind)
+            .map_or(&[], Vec::as_slice)
+    }
+
     /// Returns `Some` only for edges sourced from standalone pipelines.
     pub fn get_edge_etl(&self, relationship_kind: &str) -> Option<&[Pipeline]> {
         self.edge_pipelines
@@ -2241,6 +2258,96 @@ mod tests {
         .unwrap();
         let err = Ontology::load_embedded_with_overlay(dir.path()).unwrap_err();
         assert!(err.to_string().contains("at least one hop"), "got: {err}");
+    }
+
+    fn edge_property_overlay(
+        reviewer: &str,
+        approved: Option<&str>,
+    ) -> Result<Ontology, OntologyError> {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("edges")).unwrap();
+        std::fs::write(dir.path().join("edges/reviewer.yaml"), reviewer).unwrap();
+        if let Some(approved) = approved {
+            std::fs::write(dir.path().join("edges/approved.yaml"), approved).unwrap();
+        }
+        Ontology::load_embedded_with_overlay(dir.path())
+    }
+
+    const REVIEWER_STATE: &str = "properties:\n  state:\n    type: enum\n    source: state\n    values: {0: unreviewed, 1: reviewed}\n";
+
+    #[test]
+    fn edge_properties_become_columns_of_every_table_the_edge_routes_to() {
+        let ontology = edge_property_overlay(REVIEWER_STATE, None).unwrap();
+        let fields = ontology.edge_properties("REVIEWER");
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name, "state");
+        let table = ontology.edge_table_config("gl_edge").unwrap();
+        assert_eq!(table.property_columns.len(), 1);
+        assert_eq!(table.property_columns[0].data_type, DataType::Enum);
+        assert_eq!(
+            table.storage.property_columns[0].ch_type,
+            "LowCardinality(String)"
+        );
+        assert_eq!(
+            table.storage.property_columns[0].default.as_deref(),
+            Some("''")
+        );
+        assert_eq!(
+            ontology.get_edge_table_column_type("gl_edge", "state"),
+            Some(DataType::Enum)
+        );
+        assert!(ontology.edge_properties("APPROVED").is_empty());
+    }
+
+    #[test]
+    fn two_edges_may_share_a_property_column_only_with_one_storage() {
+        let same = edge_property_overlay(REVIEWER_STATE, Some(REVIEWER_STATE)).unwrap();
+        assert_eq!(
+            same.edge_table_config("gl_edge")
+                .unwrap()
+                .property_columns
+                .len(),
+            1
+        );
+        let other = "properties:\n  state:\n    type: string\n    source: state\n";
+        let err = edge_property_overlay(REVIEWER_STATE, Some(other)).unwrap_err();
+        assert!(err.to_string().contains("different types"), "got: {err}");
+    }
+
+    #[test]
+    fn edge_properties_reject_admin_only_and_reserved_names() {
+        let admin =
+            REVIEWER_STATE.replace("source: state\n", "source: state\n    admin_only: true\n");
+        let err = edge_property_overlay(&admin, None).unwrap_err();
+        assert!(err.to_string().contains("take type, source"), "got: {err}");
+        for name in ["source_kind", "depth", "kind"] {
+            let reserved = REVIEWER_STATE.replace("state", name);
+            let err = edge_property_overlay(&reserved, None).unwrap_err();
+            assert!(
+                err.to_string().contains("reserved edge column"),
+                "got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn edge_properties_need_a_writer_that_extracts_the_source_column() {
+        let mentions = "properties:\n  weight:\n    type: int\n    source: weight\n";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("edges")).unwrap();
+        std::fs::write(dir.path().join("edges/mentions.yaml"), mentions).unwrap();
+        let err = Ontology::load_embedded_with_overlay(dir.path()).unwrap_err();
+        assert!(
+            err.to_string().contains("emits it without them"),
+            "got: {err}"
+        );
+        std::fs::remove_file(dir.path().join("edges/mentions.yaml")).unwrap();
+        std::fs::write(dir.path().join("edges/scans.yaml"), mentions).unwrap();
+        let err = Ontology::load_embedded_with_overlay(dir.path()).unwrap_err();
+        assert!(
+            err.to_string().contains("extracts no column 'weight'"),
+            "got: {err}"
+        );
     }
 
     #[test]

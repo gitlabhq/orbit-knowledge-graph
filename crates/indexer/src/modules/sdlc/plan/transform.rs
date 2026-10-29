@@ -231,6 +231,7 @@ fn edge_transformations(
 
     let source_kind_sql = edge_kind_sql(&source_kind);
     let target_kind_sql = edge_kind_sql(&target_kind);
+    let properties = property_columns(ontology.edge_properties(relationship_kind), mapping);
     let routes = ontology.edge_routes_for_mapping(mapping);
     if routes.is_empty() {
         return Err(ontology::OntologyError::Validation(format!(
@@ -274,6 +275,7 @@ fn edge_transformations(
                     &target_kind_sql,
                     namespaced,
                     &denormalized,
+                    &properties,
                     &filters,
                     &meta.sort_key,
                 ),
@@ -401,6 +403,48 @@ fn resolve_node_ref_kind(
     }
 }
 
+fn property_columns(fields: &[Field], mapping: &EdgeMapping) -> Vec<NodeColumn> {
+    node_columns(fields)
+        .into_iter()
+        .map(|column| match mapping.array_column() {
+            Some(array) => column.inside_array(array),
+            None => column,
+        })
+        .collect()
+}
+
+impl NodeColumn {
+    fn inside_array(self, array: &str) -> Self {
+        let element = |field: String| {
+            edge_id_sql(&EdgeId::ArrayElement {
+                column: array.to_string(),
+                field,
+            })
+        };
+        match self {
+            Self::Identity(name) => Self::Rename {
+                source: element(name.clone()),
+                target: name,
+            },
+            Self::Rename { source, target } => Self::Rename {
+                source: element(source),
+                target,
+            },
+            Self::IntEnum {
+                source,
+                target,
+                values,
+                nullable,
+            } => Self::IntEnum {
+                source: element(source),
+                target,
+                values,
+                nullable,
+            },
+        }
+    }
+}
+
 fn node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
     fields
         .iter()
@@ -475,7 +519,11 @@ fn edge_table_metadata(table: &str, ontology: &Ontology) -> EdgeTableMetadata {
         .unwrap_or_default();
     let dict_columns = ontology
         .edge_table_config(table)
-        .map(|config| low_cardinality_columns(&config.storage.columns))
+        .map(|config| {
+            let mut columns = low_cardinality_columns(&config.storage.columns);
+            columns.extend(low_cardinality_columns(&config.storage.property_columns));
+            columns
+        })
         .unwrap_or_default();
     EdgeTableMetadata {
         sort_key,
@@ -566,6 +614,7 @@ fn build_edge_transform_sql(
     target_kind: &str,
     namespaced: bool,
     denormalized: &[DenormalizedColumnProjection],
+    properties: &[NodeColumn],
     filters: &[EdgeFilter],
     sort_key: &[String],
 ) -> String {
@@ -577,6 +626,7 @@ fn build_edge_transform_sql(
         target_kind,
         namespaced,
         denormalized,
+        properties,
     );
     let mut sql = format!("SELECT {} FROM {SOURCE_DATA_TABLE}", select_list.join(", "));
     if let Some(where_sql) = edge_filters_sql(filters) {
@@ -590,6 +640,10 @@ fn build_edge_transform_sql(
     sql
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "SQL builder takes each edge-transform input as a distinct typed parameter"
+)]
 fn edge_select_list(
     source_id: &str,
     source_kind: &str,
@@ -598,6 +652,7 @@ fn edge_select_list(
     target_kind: &str,
     namespaced: bool,
     denormalized: &[DenormalizedColumnProjection],
+    properties: &[NodeColumn],
 ) -> Vec<String> {
     let traversal_path = if namespaced {
         "traversal_path".to_string()
@@ -615,6 +670,7 @@ fn edge_select_list(
         VERSION_COLUMN.to_string(),
         DELETED_COLUMN.to_string(),
     ];
+    cols.extend(properties.iter().map(node_column_sql));
 
     let mut tag_groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for d in denormalized {
@@ -776,11 +832,56 @@ mod tests {
             "'MergeRequest'",
             true,
             &projections,
+            &[],
         )
         .join(", ");
         assert!(!sql.contains("user_state = 0"), "sql: {sql}");
         assert!(
             sql.contains("concat('state:', CAST(user_state AS VARCHAR))"),
+            "sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn edge_properties_project_from_the_source_column_and_the_array_element() {
+        let ontology = Ontology::load_embedded_with_overlay(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/seeds/overlays/edge_properties"
+        ))
+        .expect("overlay should load");
+        let pipeline = &ontology
+            .get_edge_etl("REVIEWER")
+            .expect("REVIEWER pipeline")[0];
+        let mapping = &pipeline.transform.edges()[0];
+        let TransformSpec::DataFusion(transforms) =
+            edge_transform("REVIEWER", mapping, EtlScope::Namespaced, &ontology).unwrap()
+        else {
+            panic!("datafusion transform")
+        };
+        let sql = &transforms[0].sql;
+        assert!(sql.contains("WHEN state = 1 THEN 'reviewed'"), "sql: {sql}");
+        assert!(sql.contains("ELSE 'unknown' END AS state"), "sql: {sql}");
+        assert!(sql.contains(", created_at,"), "sql: {sql}");
+        assert!(transforms[0].destination_table.ends_with("gl_prop_edge"));
+
+        let merge_request = ontology.get_node("MergeRequest").unwrap();
+        let array_mapping = merge_request
+            .pipelines
+            .iter()
+            .flat_map(|pipeline| pipeline.transform.edges())
+            .find(|mapping| mapping.label == "REVIEWER")
+            .expect("MergeRequest emits REVIEWER from its reviewers array");
+        let sql = fk_edge_transform(array_mapping, "MergeRequest", true, &ontology)
+            .unwrap()
+            .pop()
+            .unwrap()
+            .sql;
+        assert!(
+            sql.contains("WHEN unnest(reviewers)['state'] = 1 THEN 'reviewed'"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("unnest(reviewers)['created_at'] AS created_at"),
             "sql: {sql}"
         );
     }

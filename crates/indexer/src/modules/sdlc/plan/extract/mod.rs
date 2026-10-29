@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use indexmap::IndexSet;
 use ontology::sql_template;
 use ontology::{
-    ClickHouseExtract, DataType, EtlScope, Extract, ExtractQuery, NodeEntity, Pipeline,
+    ClickHouseExtract, DataType, EtlScope, Extract, ExtractQuery, Field, NodeEntity, Pipeline,
     constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN},
 };
 
@@ -102,7 +102,11 @@ impl ExtractTemplate {
 
 impl SourceColumn {
     pub(super) fn from_node(node: &NodeEntity) -> Vec<SourceColumn> {
-        node.fields
+        Self::from_fields(&node.fields)
+    }
+
+    fn from_fields(fields: &[Field]) -> Vec<SourceColumn> {
+        fields
             .iter()
             .filter_map(|field| {
                 field.column_name().map(|name| SourceColumn {
@@ -137,10 +141,13 @@ impl ClickHouseExtractDeclaration {
         )
     }
 
-    pub(super) fn from_edge_pipeline(pipeline: &Pipeline) -> Self {
+    pub(super) fn from_edge_pipeline(pipeline: &Pipeline, properties: &[Field]) -> Self {
         let Extract::ClickHouse(extract) = &pipeline.extract;
         let lookup_joins = PointLookupJoin::get_from_extract_declaration(extract, pipeline.scope);
-        let source_columns = get_edge_source_columns(extract, lookup_joins.is_empty());
+        let property_columns = SourceColumn::from_fields(properties);
+        let mut source_columns = get_edge_source_columns(extract, lookup_joins.is_empty());
+        source_columns.retain(|column| !property_columns.iter().any(|p| p.name == column.name));
+        source_columns.extend(property_columns);
         Self::from_pipeline_and_source_columns(pipeline, extract, source_columns, lookup_joins)
     }
 

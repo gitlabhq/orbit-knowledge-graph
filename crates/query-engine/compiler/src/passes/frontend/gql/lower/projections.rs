@@ -143,6 +143,27 @@ impl Lowering {
                 Expression::Property(property) => {
                     let span = property.span;
                     let PropertyRef { node, property } = property.into();
+                    if let Some(&relationship) = self.edges.get(&node) {
+                        if aggregate {
+                            return Err(invalid(
+                                span,
+                                "grouping by a relationship property is not supported yet",
+                            ));
+                        }
+                        let variable = Name {
+                            span,
+                            value: node.clone(),
+                        };
+                        self.one_hop(span, &variable)?;
+                        self.relationship_item(
+                            span,
+                            alias,
+                            format!("{node}.{property}"),
+                            relationship,
+                            RelationshipColumnKind::Property(property),
+                        )?;
+                        continue;
+                    }
                     if aggregate {
                         self.input
                             .aggregation
@@ -260,7 +281,7 @@ impl Lowering {
             return Err(invalid(
                 span,
                 &format!(
-                    "properties({}) is not supported; relationships have no properties",
+                    "properties({0}) is not supported yet; return {0}.<property>",
                     variable.value
                 ),
             ));
@@ -362,6 +383,14 @@ impl Lowering {
         kind: RelationshipColumnKind,
     ) -> Result<()> {
         if self.input.query_type != QueryType::Traversal {
+            if let RelationshipColumnKind::Property(property) = &kind {
+                return Err(invalid(
+                    span,
+                    &format!(
+                        "{written}: neighbors and path finding do not return relationship properties; match the relationship in a traversal to read {property}"
+                    ),
+                ));
+            }
             return match alias {
                 Some(alias) => Err(invalid(
                     span,
@@ -452,24 +481,22 @@ impl Lowering {
             QueryType::Traversal => {
                 let PropertyRef { node, property } = match sort.key {
                     SortKey::Property(key) if self.edges.contains_key(&key.node.value) => {
-                        let relationship = key.node.value;
-                        return Err(invalid(
-                            key.span,
-                            &format!(
-                                "ORDER BY cannot sort by a relationship property; sort by a node property or by type({relationship})"
-                            ),
-                        ));
+                        let relationship = self.edges[&key.node.value];
+                        self.one_hop(key.span, &key.node)?;
+                        let PropertyRef { property, .. } = key.into();
+                        self.order_by_relationship(relationship, Some(property), sort.direction);
+                        return Ok(());
                     }
                     SortKey::Property(key) => key.into(),
                     SortKey::RelationshipType(name) => {
                         let relationship = self.relationship_index(name.span, &name)?;
                         self.one_hop(name.span, &name)?;
-                        self.order_by_relationship(relationship, sort.direction);
+                        self.order_by_relationship(relationship, None, sort.direction);
                         return Ok(());
                     }
                     SortKey::Variable(name) => {
                         if let Some(relationship) = self.type_column(&name.value) {
-                            self.order_by_relationship(relationship, sort.direction);
+                            self.order_by_relationship(relationship, None, sort.direction);
                             return Ok(());
                         }
                         match self.aliases.get(&name.value) {
@@ -514,9 +541,15 @@ impl Lowering {
             .map(|column| column.relationship)
     }
 
-    fn order_by_relationship(&mut self, relationship: usize, direction: OrderDirection) {
+    fn order_by_relationship(
+        &mut self,
+        relationship: usize,
+        property: Option<String>,
+        direction: OrderDirection,
+    ) {
         self.input.relationship_return.sort = Some(RelationshipOrder {
             relationship,
+            property,
             direction,
         });
     }

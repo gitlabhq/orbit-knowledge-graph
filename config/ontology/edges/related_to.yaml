@@ -2,16 +2,6 @@
 
 description: Related or blocking relationship between work items
 
-properties:
-  link_type:
-    type: enum
-    source: link_type
-    nullable: false
-    description: "Type of relationship between work items."
-    values:
-      0: relates_to
-      1: blocks
-
 variants:
   - from_node: { type: WorkItem, id: id }
     to_node: { type: WorkItem, id: id }

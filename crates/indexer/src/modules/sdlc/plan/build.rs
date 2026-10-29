@@ -126,7 +126,10 @@ fn build_edge_plan(
         scope: pipeline.scope,
     };
 
-    let extract_declaration = ClickHouseExtractDeclaration::from_edge_pipeline(pipeline);
+    let extract_declaration = ClickHouseExtractDeclaration::from_edge_pipeline(
+        pipeline,
+        ontology.edge_properties(relationship_kind),
+    );
     let spec = compile_extract_spec(&extract_declaration)?;
     let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
 
@@ -308,7 +311,7 @@ mod tests {
             .edge_etl_configs()
             .find(|(_, pipeline)| pipeline.name == "APPROVED_siphon_approvals_MergeRequest")
             .expect("APPROVED pipeline");
-        let original_declaration = ClickHouseExtractDeclaration::from_edge_pipeline(pipeline);
+        let original_declaration = ClickHouseExtractDeclaration::from_edge_pipeline(pipeline, &[]);
         let original_extract =
             compile_extract_spec(&original_declaration).expect("original extract");
 
@@ -318,7 +321,7 @@ mod tests {
         };
         edges[0].source.field = "different_user_id".to_string();
         let changed_declaration =
-            ClickHouseExtractDeclaration::from_edge_pipeline(&changed_pipeline);
+            ClickHouseExtractDeclaration::from_edge_pipeline(&changed_pipeline, &[]);
         let changed_extract = compile_extract_spec(&changed_declaration).expect("changed extract");
 
         assert_eq!(
