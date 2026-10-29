@@ -143,6 +143,20 @@ fn execute_cypher(
     let window = compiled.input.limit as usize;
     let has_more = batch.num_rows() > window;
     let batch = batch.slice(0, batch.num_rows().min(window));
+    let edges: Vec<String> = regex::Regex::new(r"\[(\w+)\s*:")
+        .unwrap()
+        .captures_iter(&clean_query)
+        .map(|caps| caps[1].to_string())
+        .collect();
+    let aliases: Vec<_> = aliases
+        .into_iter()
+        .map(
+            |(var, prop, alias)| match edges.iter().position(|edge| *edge == var) {
+                Some(index) => (format!("e{index}"), prop, alias),
+                None => (var, prop, alias),
+            },
+        )
+        .collect();
     Ok((apply_aliases(batch, &compiled.input, &aliases), has_more))
 }
 

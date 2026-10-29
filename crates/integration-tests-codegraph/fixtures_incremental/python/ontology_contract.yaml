@@ -166,10 +166,10 @@ tests:
   - name: "a test calls the method it covers through the import"
     query: |
       MATCH (t:Definition {kind: 'Test'})-[c:CALLS]->(f:Definition)
-      WHERE c.resolution = 'import'
-      RETURN t.name AS test, f.fqn AS callee
+      WHERE c.resolution = 'import' AND 5 IN c.lines
+      RETURN t.name AS test, f.fqn AS callee, c.lines AS lines, c.resolution AS resolution
     assert:
-      - { row: { test: "test_charge", callee: "shop.orders.Order.charge" } }
+      - { row: { test: "test_charge", callee: "shop.orders.Order.charge", lines: [5], resolution: "import" } }
 
   - name: "a call of a class instantiates it"
     query: |
