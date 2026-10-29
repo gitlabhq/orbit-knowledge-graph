@@ -270,7 +270,7 @@ fn prune_stale_entries(plugin: &PluginSpec, current: &str, root: &mut Value) -> 
             ("extraKnownMarketplaces", name.clone()),
             ("enabledPlugins", plugin.id(name)),
         ] {
-            if let Some(map) = root[section].as_object_mut() {
+            if let Some(map) = root.get_mut(section).and_then(Value::as_object_mut) {
                 map.remove(&key);
                 if map.is_empty() {
                     root.as_object_mut().map(|root| root.remove(section));
