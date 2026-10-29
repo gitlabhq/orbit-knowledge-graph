@@ -2956,9 +2956,12 @@ style:
                 "id",
                 "name",
                 "fqn",
+                "signature",
                 "kind",
+                "language_kind",
+                "category",
+                "branch",
                 "file_path",
-                "commit_sha",
                 "start_line",
                 "end_line"
             ]
@@ -3222,6 +3225,10 @@ properties:
                 "target_id",
                 "target_kind",
                 "traversal_path",
+                "lines",
+                "resolution",
+                "access",
+                "usage",
             ]
         );
     }
