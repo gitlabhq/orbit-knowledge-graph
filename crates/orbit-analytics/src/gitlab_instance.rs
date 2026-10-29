@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gitlab_client::{GitlabClient, GitlabInstance, InstanceIdentity};
+use gitlab_client::{GitlabClient, GitlabInstance, InstanceIdentity, InstanceSettings};
 use labkit_events::StructuredEvent;
 use orbit_log_fields::warn;
 use orbit_server_config::AnalyticsConfig;
@@ -61,10 +61,26 @@ impl GitlabInstanceWatch {
     }
 
     pub fn product_usage_data_enabled(&self) -> bool {
+        self.setting(|settings| settings.product_usage_data_enabled)
+    }
+
+    pub fn service_ping_enabled(&self) -> bool {
+        self.setting(|settings| settings.service_ping_enabled)
+    }
+
+    pub fn service_ping_generation_enabled(&self) -> bool {
+        self.setting(|settings| settings.service_ping_generation_enabled)
+    }
+
+    pub fn service_ping_optional_metrics_enabled(&self) -> bool {
+        self.setting(|settings| settings.service_ping_optional_metrics_enabled)
+    }
+
+    fn setting(&self, read: impl FnOnce(&InstanceSettings) -> bool) -> bool {
         self.latest
             .read()
             .as_ref()
-            .is_some_and(|instance| instance.settings.product_usage_data_enabled)
+            .is_some_and(|instance| read(&instance.settings))
     }
 }
 
@@ -96,5 +112,36 @@ impl AnalyticsTracker for ConsentGate {
         if allowed {
             self.tracker.track(event);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn service_ping_settings_are_false_before_the_first_refresh() {
+        let watch = GitlabInstanceWatch::default();
+
+        assert!(!watch.service_ping_enabled());
+        assert!(!watch.service_ping_generation_enabled());
+        assert!(!watch.service_ping_optional_metrics_enabled());
+    }
+
+    #[test]
+    fn service_ping_settings_read_each_field_from_the_latest_instance() {
+        let watch = GitlabInstanceWatch::fixed(GitlabInstance {
+            identity: InstanceIdentity::default(),
+            settings: InstanceSettings {
+                product_usage_data_enabled: false,
+                service_ping_enabled: true,
+                service_ping_generation_enabled: false,
+                service_ping_optional_metrics_enabled: true,
+            },
+        });
+
+        assert!(watch.service_ping_enabled());
+        assert!(!watch.service_ping_generation_enabled());
+        assert!(watch.service_ping_optional_metrics_enabled());
     }
 }

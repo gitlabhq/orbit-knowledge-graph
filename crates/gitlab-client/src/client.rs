@@ -732,7 +732,12 @@ mod tests {
                         "host_name": "gitlab.example.com",
                         "instance_version": "18.6.0-ee",
                     },
-                    "settings": { "product_usage_data_enabled": true },
+                    "settings": {
+                        "product_usage_data_enabled": true,
+                        "service_ping_enabled": true,
+                        "service_ping_generation_enabled": false,
+                        "service_ping_optional_metrics_enabled": true,
+                    },
                 }))
             }),
         );
@@ -753,8 +758,43 @@ mod tests {
                 },
                 settings: InstanceSettings {
                     product_usage_data_enabled: true,
+                    service_ping_enabled: true,
+                    service_ping_generation_enabled: false,
+                    service_ping_optional_metrics_enabled: true,
                 },
             })
+        );
+    }
+
+    #[tokio::test]
+    async fn instance_defaults_service_ping_settings_to_false_when_gitlab_does_not_send_them() {
+        use axum::Router;
+        use axum::routing::get;
+
+        let app = Router::new().route(
+            "/api/v4/internal/orbit/instance",
+            get(|| async {
+                axum::Json(serde_json::json!({
+                    "identity": { "instance_id": "a1b2" },
+                    "settings": { "product_usage_data_enabled": true },
+                }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let client =
+            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
+
+        assert_eq!(
+            client.instance().await.unwrap().unwrap().settings,
+            InstanceSettings {
+                product_usage_data_enabled: true,
+                service_ping_enabled: false,
+                service_ping_generation_enabled: false,
+                service_ping_optional_metrics_enabled: false,
+            }
         );
     }
 

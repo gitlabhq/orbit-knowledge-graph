@@ -25,6 +25,9 @@ pub struct InstanceIdentity {
 #[serde(default)]
 pub struct InstanceSettings {
     pub product_usage_data_enabled: bool,
+    pub service_ping_enabled: bool,
+    pub service_ping_generation_enabled: bool,
+    pub service_ping_optional_metrics_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
