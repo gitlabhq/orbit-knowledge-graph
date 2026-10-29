@@ -1,20 +1,14 @@
 //! Security filter injection for multi-tenant isolation: a `traversal_path` prefix
 //! filter per role floor and, below the `admin` claim, an owner-column equality.
 
-use std::sync::OnceLock;
-
-use regex::Regex;
-
 use serde_json::Value;
 
 use crate::ast::visit::{visit_queries_mut, visit_relations};
 use crate::ast::{Expr, Function, Node, TableRef};
-use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
+use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::Result;
 pub use crate::types::SecurityContext;
 use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
-
-static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 
 /// Per-alias role floors come from the query data model.
 /// Tables without authorization metadata keep the historical Reporter floor.
@@ -34,18 +28,11 @@ pub fn apply_security_context(
     let Node::Query(query) = node else {
         return Ok(());
     };
-    let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
-        Regex::new(&format!(
-            r"^(?:v\d+_)?{}.+$",
-            regex::escape(GL_TABLE_PREFIX)
-        ))
-        .expect("valid regex")
-    });
     visit_queries_mut(query, &mut |query| {
         let mut aliased_tables = Vec::new();
         visit_relations(&query.from, &mut |relation| {
             if let TableRef::Scan { table, alias, .. } = relation
-                && graph_table_pattern.is_match(table)
+                && ontology::is_graph_table(table)
             {
                 aliased_tables.push((alias.clone(), table.clone()));
             }

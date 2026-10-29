@@ -1686,6 +1686,12 @@ pub(crate) fn strip_schema_version_prefix(table: &str) -> &str {
     rest[digits..].strip_prefix('_').unwrap_or(table)
 }
 
+pub fn is_graph_table(table: &str) -> bool {
+    strip_schema_version_prefix(table)
+        .strip_prefix(GL_TABLE_PREFIX)
+        .is_some_and(|rest| !rest.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2152,6 +2158,25 @@ mod tests {
         assert_eq!(strip_schema_version_prefix("version_gl_x"), "version_gl_x");
         // Missing underscore after digits — leave untouched.
         assert_eq!(strip_schema_version_prefix("v1gl_user"), "v1gl_user");
+    }
+
+    #[test]
+    fn graph_tables_carry_the_gl_prefix_under_an_optional_version() {
+        for table in ["gl_user", "gl_edge", "v1_gl_user", "v118_gl_note"] {
+            assert!(is_graph_table(table), "{table}");
+        }
+        for table in [
+            "gl_",
+            "v118_gl_",
+            "v_gl_user",
+            "vx1_gl_user",
+            "v1gl_user",
+            "path_cte",
+            "nodes",
+            "siphon_notes",
+        ] {
+            assert!(!is_graph_table(table), "{table}");
+        }
     }
 
     fn ontology_with_role(node: &str, role: RequiredRole) -> Ontology {
