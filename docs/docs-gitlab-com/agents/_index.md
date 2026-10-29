@@ -37,9 +37,10 @@ To set up your agent:
 1. Run `glab orbit setup`.
    On first use, `glab` asks to download the GitLab Orbit CLI.
 1. In the list of agents, keep or clear the agents that setup selected, then press <kbd>Enter</kbd>.
-1. If setup asks to install the agent plugins, answer **Yes** to [show GitLab Orbit calls in Claude Code](#show-gitlab-orbit-calls-in-claude-code) and OpenCode.
+1. When setup asks to install the agent plugins, press <kbd>Enter</kbd>.
 
-Setup installs the GitLab Orbit skill for your agents and indexes the repository for code search.
+Setup installs the GitLab Orbit skill for your agents and a [plugin that shows GitLab Orbit calls in Claude Code](#show-gitlab-orbit-calls-in-claude-code).
+It then indexes the repository for code search.
 To check that the repository is indexed, run `glab orbit workspace list`.
 To load the skill, start a new session of your agent.
 To update the setup, run the command again.
@@ -51,7 +52,7 @@ To run setup without a terminal, for example from an agent or a script, confirm 
 glab orbit --yes setup --yes
 ```
 
-The first `--yes` confirms the download. The second skips the setup prompts and uses the default answers.
+The first `--yes` confirms the download. The second skips the setup prompts.
 
 To query your GitLab data, also [sign in with `glab`](../cli.md#query-gitlab-orbit).
 
@@ -89,7 +90,7 @@ By default, setup writes to your user configuration, so the changes affect only 
 | Instructions | All | A block between `<!-- orbit:setup:begin -->` and `<!-- orbit:setup:end -->` in the instruction file of the agent. The block tells the agent to search with `orbit grep` and to read code with `orbit context`. |
 | Hooks | Claude Code, OpenCode | A reminder to use `orbit grep`. For Claude Code, the reminder comes when the agent runs `grep`, `rg`, `ack`, or `ag` in an indexed repository, and never blocks the call. For OpenCode, the reminder comes once each session. |
 | Skill | Claude Code, Codex, GitLab Duo, OpenCode | The `orbit` skill, in `~/.agents/skills/orbit`. For GitLab Duo, setup writes the full skill files. For Claude Code, setup also links the skill in `~/.claude/skills/`, and allows the skill command in `settings.json` so that the skill loads without a prompt. |
-| Agent plugins | Claude Code, OpenCode | For Claude Code, the `gitlab-orbit` plugin, in `~/.claude/orbit/claude_plugin`. Setup adds the folder as a plugin marketplace and turns on the plugin in `settings.json`. With `--project` or `--dir`, setup uses `.claude/settings.local.json`. For OpenCode, the `orbit-ui.js` plugin, which shows a notice for each GitLab Orbit call. For more information, see [show GitLab Orbit calls in Claude Code](#show-gitlab-orbit-calls-in-claude-code). |
+| Agent plugins | Claude Code, OpenCode | A plugin that shows each GitLab Orbit call. For Claude Code, setup installs the `gitlab-orbit` plugin in `~/.claude/orbit/claude_plugin` and turns it on in `settings.json`. For OpenCode, setup installs the `orbit-ui.js` plugin. |
 
 Other agents that support the [Agent Skills specification](https://agentskills.io/specification), such as Gemini CLI,
 can also load the skill from `~/.agents/skills/orbit`.
@@ -113,26 +114,17 @@ Setup follows these rules:
 
 ## Show GitLab Orbit calls in Claude Code
 
-The GitLab Orbit plugin for Claude Code marks each GitLab Orbit call in the transcript with the GitLab Orbit icon and a short label.
-For example, a code search shows as `◎ Searched code  login`.
-After the first call, a summary of the session's GitLab Orbit calls shows below the prompt.
-To show the size of the graph, the plugin runs `glab orbit graph-status` once for each project that a query names.
+`glab orbit setup` installs a plugin for Claude Code that marks each GitLab Orbit call in the transcript, for example `◎ Searched code  login`.
+The plugin also shows a summary of the session's calls below the prompt.
 
 Prerequisites:
 
-- Claude Code 2.1.287 or later. To check your version, run `claude --version`.
-  On an earlier version, setup skips the plugin and says so.
+- Claude Code 2.1.287 or later.
 
-To install the plugin, which setup includes by default:
+To install the plugin, run `glab orbit setup`, then start a new Claude Code session.
 
-1. Run `glab orbit setup`, and answer **Yes** when setup asks to install the agent plugins.
-1. Start a new Claude Code session.
-1. To check that the plugin loaded, run `/plugin`. `gitlab-orbit` is listed on the **Installed** tab.
-
-To set up without the plugin, run `glab orbit setup --skip agent-plugins`.
-To turn off the plugin, in Claude Code, run `/plugin`, and on the **Installed** tab, turn off `gitlab-orbit`.
-Running setup again turns the plugin back on. To keep it off, add `--skip agent-plugins`.
-To remove the plugin and the rest of the setup, see [remove the setup](#remove-the-setup).
+To turn off the plugin, in Claude Code, run `/plugin` and turn off `gitlab-orbit`.
+To set up without it, run `glab orbit setup --skip agent-plugins`.
 
 ## Remove the setup
 
