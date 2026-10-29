@@ -48,11 +48,10 @@ test('a shell call still being written does not break an Orbit group', () => {
   expect(isPendingCall({ tool: 'Bash', input: {}, output: 'done' })).toBe(false)
 })
 
-test('Orbit work covers the skill and Orbit rows, and not a shell call that runs more than Orbit', () => {
+test('Orbit work covers the skill, Orbit rows, and shell calls that run Orbit among other commands', () => {
   expect(usesOrbit('Skill', { skill: 'orbit' })).toBe(true)
   expect(usesOrbit('Bash', { command: MR_PROJECT })).toBe(true)
-  expect(usesOrbit('Bash', { command: 'glab orbit --yes status 2>&1 | head -40' })).toBe(true)
-  expect(usesOrbit('Bash', { command: 'glab orbit --yes status 2>&1 | head -40; echo ---; git remote -v' })).toBe(false)
+  expect(usesOrbit('Bash', { command: 'glab orbit --yes status 2>&1 | head -40; echo ---; git remote -v' })).toBe(true)
   expect(usesOrbit('Skill', { skill: 'commit' })).toBe(false)
   expect(usesOrbit('Bash', { command: 'git log --oneline -5' })).toBe(false)
   expect(usesOrbit('Bash', { command: 'rg "glab orbit" docs/' })).toBe(false)

@@ -1,5 +1,5 @@
 import { describeOrbitCall, type OrbitCall } from '../core/calls.ts'
-import { isOrbitPrefix } from '../core/command.ts'
+import { isOrbitPrefix, runsOrbit } from '../core/command.ts'
 
 export type GroupCall<P extends { isRunning: boolean }> = { props: P; i: number; call: OrbitCall }
 
@@ -29,8 +29,10 @@ export function isPendingCall(props: { tool: string; input: unknown; output?: un
 }
 
 export function usesOrbit(tool: string, input: unknown): boolean {
-  if (tool === 'Skill') return (input as { skill?: unknown } | undefined)?.skill === 'orbit'
-  return describeOrbitCall(tool, input) !== null
+  if (describeOrbitCall(tool, input)) return true
+  const { command, skill } = (input ?? {}) as { command?: unknown; skill?: unknown }
+  if (tool === 'Skill') return skill === 'orbit'
+  return tool === 'Bash' && typeof command === 'string' && runsOrbit(command)
 }
 
 export function isProgressText(text: string): boolean {

@@ -1,4 +1,4 @@
-import { orbitCalls, subcommandOf } from './command.ts'
+import { orbitInvocations, subcommandOf } from './command.ts'
 import { NO_ENTITIES, entitiesOf } from './cypher.ts'
 import labels from './labels.ts'
 
@@ -69,18 +69,15 @@ function stringField(input: unknown, key: string): string | undefined {
 const MAX_DETAIL = 96
 
 export function describeCommand(command: string, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {
-  const invocations = orbitCalls(command)
-  if (!invocations) return null
-  const calls: OrbitCall[] = []
-  for (const words of invocations) {
+  const calls = orbitInvocations(command).flatMap((words) => {
     const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined)
-    if (!sub || sub.args.some((arg) => arg === '--help' || arg === '-h')) return null
+    if (!sub || sub.args.some((arg) => arg === '--help' || arg === '-h')) return []
     const isSchemaQuery = sub.key === 'query' && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg))
-    calls.push(callOf(isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY), detailFor(sub.key, sub.args, known)))
-  }
+    return [callOf(isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY), detailFor(sub.key, sub.args, known))]
+  })
   const [first] = calls
-  if (!first || calls.some((call) => call.label !== first.label)) return null
-  const detail = [...new Set(calls.map((call) => call.detail).filter(Boolean))].join(', ')
+  if (!first) return null
+  const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(', ')
   return { ...first, detail: clip(detail, MAX_DETAIL) }
 }
 

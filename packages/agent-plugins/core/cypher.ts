@@ -1,8 +1,8 @@
-import { orbitCalls } from './command.ts'
+import { orbitInvocations } from './command.ts'
 import { sumBy, uniqBy } from './lib.js'
 
 export function queryOf(command: string): string {
-  for (const words of orbitCalls(command) ?? []) {
+  for (const words of orbitInvocations(command)) {
     if (words[0] !== 'query' || words.includes('--file')) continue
     for (let i = 1; i < words.length; i++) {
       const word = words[i] ?? ''

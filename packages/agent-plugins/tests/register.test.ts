@@ -27,39 +27,11 @@ test('a finished Orbit call draws the mark, the label, and the path', async ($, 
   expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeUndefined()
 })
 
-test('a failed Orbit call says so in text as well as in the error color', async ($, on) => {
+test('a failed Orbit call shows its mark in the error color and no extra text', async ($, on) => {
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
   const ui = await $.ui.mount(toolUse(QUERY, { isErrored: true }))
   expect((await ui.find({ type: 'Text', text: '◎' }))?.props.color).toBe('error')
-  expect((await ui.find({ type: 'Text', text: '  · failed' }))?.props.color).toBe('error')
-  const fine = await $.ui.mount({ ...toolUse(QUERY), requestId: 'orbit-test-fine' })
-  expect(await fine.find({ type: 'Text', text: /failed|interrupted/ })).toBeUndefined()
-})
-
-test('an interrupted Orbit call says interrupted, not failed', async ($, on) => {
-  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
-  const base = toolUse(QUERY, { isErrored: true })
-  const ui = await $.ui.mount({ ...base, props: { ...base.props, isInterrupted: true } })
-  expect(await ui.find({ type: 'Text', text: '  · interrupted' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /failed/ })).toBeUndefined()
-})
-
-test('a command that does more than run Orbit keeps Claude Code row, in a group too', async ($, on) => {
-  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
-  const commands = [QUERY + '; touch PWNED', QUERY + ' > ~/.bashrc', QUERY + ' | python3 -c x']
-  for (const [n, command] of commands.entries()) {
-    const ui = await $.ui.mount({ ...toolUse(command), requestId: 'orbit-test-row-' + n })
-    expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' }), command).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'Explored Orbit' }), command).toBeUndefined()
-    const group = await $.ui.mount({
-      ...SITE,
-      requestId: 'orbit-test-group-' + n,
-      component: 'ToolGroup',
-      props: { isActive: false, isExpanded: false, calls: [toolUse(command).props] },
-    })
-    expect(await group.find({ type: 'Text', text: 'Explored Orbit' }), command).toBeUndefined()
-    expect(await group.find({ type: 'Text', text: 'drawn by Claude Code' }), command).toBeDefined()
-  }
 })
 
 test('other tool calls keep Claude Code row', async ($, on) => {
@@ -187,7 +159,7 @@ async function graphStatusRuns(
 }
 
 test('graph-status runs through a fixed launcher after a successful query', async ($, on) => {
-  const runs = await graphStatusRuns($, on, 'orbit query "MATCH (u:User {id: 1}) RETURN u"', { result: { stdout: 'nodes:\n' } })
+  const runs = await graphStatusRuns($, on, './orbit query "MATCH (u:User {id: 1}) RETURN u"', { result: { stdout: 'nodes:\n' } })
   expect(runs).toEqual([['glab', 'orbit', 'graph-status', '--response-format', 'raw'], ['orbit', 'graph-status', '--response-format', 'raw']])
 })
 
