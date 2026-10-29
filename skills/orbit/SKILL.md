@@ -86,7 +86,7 @@ Orbit answers come from graph queries, not an authoritative source. Flag known c
 
 ## Managed CLI
 
-`glab orbit` downloads, verifies, and runs the GitLab Orbit CLI binary from the `orbit-cli` package (macOS, Linux, and Windows). `grep` and `context` read the local graph and index the working tree on their own. `workspace` groups the other local-graph commands (`index`, `sql`, `schema`, `list`, `mcp serve`, `reset`). The top-level `index`, `sql`, and `list` are deprecated aliases, and top-level `schema` is the remote schema, not the local one. `query`, `status`, and `schema` call the GitLab Orbit API.
+`glab orbit` downloads, verifies, and runs the GitLab Orbit CLI binary from the `orbit-cli` package (macOS, Linux, and Windows). `grep` and `context` read the local graph and index the working tree on their own. `workspace` groups the other local-graph commands (`index`, `list`, `mcp serve`, `reset`). The top-level `index` and `list` still run as deprecated aliases. `query`, `status`, and `schema` call the GitLab Orbit API.
 
 glab handles `--install`, `--update`, and `--yes` itself and forwards everything else to the binary. `--install` and `--update` are mutually exclusive. `--yes` skips the confirmation prompts, so pass it in scripts and agent runs. Put these flags before the subcommand (`glab orbit --yes status`); the binary rejects `--yes` after other subcommands, except for `setup` and `uninstall`, which take their own. glab's own `update` command also takes `--yes`. `glab help orbit` shows the wrapper help. `glab orbit help` and `glab orbit <command> --help` show the binary's.
 

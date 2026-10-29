@@ -113,7 +113,7 @@ Line ranges show only the numbered lines.
 <!-- orbit:section quick-start -->
 ## Choose the command
 
-- `orbit grep 'a|b'` searches code, tests, config, and docs and labels each match with its enclosing definition. A plain query also searches the GitLab group behind `origin` over the network. For code only, pass the repository top-level as the path (`$(git rev-parse --show-toplevel)`). `.` scopes the search to the current directory. Exit 1 means no match.
+- `orbit grep 'a|b'` searches code, tests, config, and docs and labels each match with its enclosing definition. A plain query also searches the GitLab group behind `origin` over the network. For code only, pass the repository top-level as the path (`$(git rev-parse --show-toplevel)`). `.` scopes the search to the current directory, and widens when nothing matches there. Exit 1 means no match.
 - `orbit context <name> <path>:<lines> mr:42 job:9` reads several targets in one call. Definitions come with their callers and tests, and GitLab merge requests, issues, branches, pipelines, and jobs come with the local code they point at. A bare `orbit context` reads the current branch's merge request and CI failures.
 - `orbit query` answers relationship and aggregation questions across GitLab entities through the GitLab Orbit API. Examples: who reviewed which merge requests, or which changes to an area failed CI. Write the query in the language below.
 
