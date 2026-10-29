@@ -89,6 +89,7 @@ tests:
       - { row: { name: "User", fqn: "main.User" } }
       - { row: { name: "UserService", fqn: "main.UserService" } }
 
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "All methods defined with correct FQNs"
     query: |
       MATCH (d:Definition)
@@ -96,13 +97,13 @@ tests:
       RETURN d.name AS name, d.fqn AS fqn
       ORDER BY fqn
     assert:
-      - { row: { name: "Close", fqn: "main.Close" } }
-      - { row: { name: "DeleteUser", fqn: "main.DeleteUser" } }
-      - { row: { name: "FindUser", fqn: "main.FindUser" } }
-      - { row: { name: "Greet", fqn: "main.Greet" } }
-      - { row: { name: "Promote", fqn: "main.Promote" } }
-      - { row: { name: "Query", fqn: "main.Query" } }
-      - { row: { name: "Save", fqn: "main.Save" } }
+      - { row: { name: "Close", fqn: "main.Database.Close" } }
+      - { row: { name: "DeleteUser", fqn: "main.UserService.DeleteUser" } }
+      - { row: { name: "FindUser", fqn: "main.UserService.FindUser" } }
+      - { row: { name: "Greet", fqn: "main.User.Greet" } }
+      - { row: { name: "Promote", fqn: "main.Admin.Promote" } }
+      - { row: { name: "Query", fqn: "main.Database.Query" } }
+      - { row: { name: "Save", fqn: "main.User.Save" } }
 
   - name: "Constructor functions defined"
     query: |
@@ -128,6 +129,7 @@ tests:
 
   # ── Simple function calls from main ──
 
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "main calls exactly NewDatabase, NewUserService, FindUser, Greet, Promote, Query"
     queries:
       - query: |
@@ -136,13 +138,13 @@ tests:
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "main.FindUser" } }
-          - { row: { callee: "main.Greet" } }
-          - { row: { callee: "main.Greet" } }
+          - { row: { callee: "main.UserService.FindUser" } }
+          - { row: { callee: "main.User.Greet" } }
+          - { row: { callee: "main.User.Greet" } }
           - { row: { callee: "main.NewDatabase" } }
           - { row: { callee: "main.NewUserService" } }
-          - { row: { callee: "main.Promote" } }
-          - { row: { callee: "main.Query" } }
+          - { row: { callee: "main.Admin.Promote" } }
+          - { row: { callee: "main.Database.Query" } }
       # No false positives: main does NOT call Close, Save, or DeleteUser
       - query: |
           MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -154,18 +156,19 @@ tests:
 
   # ── Method chaining via return types ──
 
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "db.Query resolves to Database.Query via NewDatabase return type"
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Query'
+          WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Database.Query'
           RETURN callee.fqn AS callee
         assert:
           - { row_count: 1 }
       # No false positive to Close
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Close'
+          WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Database.Close'
           RETURN callee.fqn
         assert:
           - { empty: true }
@@ -176,27 +179,28 @@ tests:
   - name: "admin.Greet resolves via User embedding"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Greet'
+      WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.User.Greet'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   # ── Intra-service method calls ──
 
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "DeleteUser calls exactly FindUser and Save"
     queries:
       - query: |
           MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
-          WHERE caller.fqn = 'main.DeleteUser'
+          WHERE caller.fqn = 'main.UserService.DeleteUser'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "main.FindUser" } }
-          - { row: { callee: "main.Save" } }
+          - { row: { callee: "main.UserService.FindUser" } }
+          - { row: { callee: "main.User.Save" } }
       # No false positive to other UserService methods
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.DeleteUser'
+          WHERE caller.fqn = 'main.UserService.DeleteUser'
             AND callee.name IN ['Query', 'Close', 'Greet', 'Promote']
           RETURN callee.name
         assert:

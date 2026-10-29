@@ -64,6 +64,7 @@ tests:
           - { row: { child: "ReadWriter", parent: "Reader" } }
           - { row: { child: "ReadWriter", parent: "Writer" } }
 
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "useRWC calls Read, Write, Close via promoted methods"
     queries:
       - query: |
@@ -72,9 +73,9 @@ tests:
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "main.Close" } }
-          - { row: { callee: "main.Read" } }
-          - { row: { callee: "main.Write" } }
+          - { row: { callee: "main.Closer.Close" } }
+          - { row: { callee: "main.Reader.Read" } }
+          - { row: { callee: "main.Writer.Write" } }
 
   # Diamond embedding: Foo and Bar both define Dup(). Go would reject
   # this as ambiguous at compile time. The resolver walks all ancestors

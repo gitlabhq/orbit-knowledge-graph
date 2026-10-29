@@ -15,10 +15,11 @@ fixtures:
       }
 
 tests:
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: svc.Run() resolves to Service's Run method
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'main' AND callee.name = 'Run'
       RETURN callee.fqn AS callee
     assert:
-      - { row: { callee: "main.Run" } }
+      - { row: { callee: "main.Service.Run" } }

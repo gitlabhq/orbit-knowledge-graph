@@ -19,6 +19,7 @@ fixtures:
       }
 
 tests:
+  # corrected: Orbit code ontology: a member added to a type outside its body has an fqn that starts with the receiver type (`fun A.show()` is `A.show`)
   - name: "A().show() resolves to the extension on A only"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -26,5 +27,5 @@ tests:
       RETURN callee.fqn AS callee, callee.start_line AS line
     assert:
       - { row_count: 2 }
-      - { row: { callee: com.ex.ext.show, line: 4 } }
-      - { row: { callee: com.ex.ext.show, line: 5 } }
+      - { row: { callee: A.show, line: 4 } }
+      - { row: { callee: B.show, line: 5 } }

@@ -39,6 +39,7 @@ fixtures:
       }
 
 tests:
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "varDecl calls Meow via var declaration type"
     queries:
       - query: |
@@ -46,7 +47,7 @@ tests:
           WHERE caller.fqn = 'main.varDecl'
           RETURN callee.fqn AS callee
         assert:
-          - { row: { callee: "main.Meow" } }
+          - { row: { callee: "main.Cat.Meow" } }
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'main.varDecl' AND callee.name = 'Bark'
@@ -54,6 +55,7 @@ tests:
         assert:
           - { empty: true }
 
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "separateVars calls Meow and Bark without cross-contamination"
     queries:
       - query: |
@@ -62,9 +64,10 @@ tests:
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "main.Bark" } }
-          - { row: { callee: "main.Meow" } }
+          - { row: { callee: "main.Dog.Bark" } }
+          - { row: { callee: "main.Cat.Meow" } }
 
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "reassigned: both Meow and Bark resolve (phi merges both types)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -72,9 +75,10 @@ tests:
       RETURN callee.fqn AS callee
       ORDER BY callee
     assert:
-      - { row: { callee: "main.Bark" } }
-      - { row: { callee: "main.Meow" } }
+      - { row: { callee: "main.Dog.Bark" } }
+      - { row: { callee: "main.Cat.Meow" } }
 
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "groupedParams: both a and b resolve Query"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -82,4 +86,4 @@ tests:
         AND callee.name = 'Query'
       RETURN callee.fqn AS callee
     assert:
-      - { row: { callee: "main.Query" } }
+      - { row: { callee: "main.Repository.Query" } }

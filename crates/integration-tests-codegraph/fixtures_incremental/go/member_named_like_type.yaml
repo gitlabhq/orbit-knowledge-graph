@@ -51,6 +51,7 @@ fixtures:
       }
 
 tests:
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "A struct field named Manager leaves the Manager type to calls in other files"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -58,8 +59,9 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { callee: "mgr.Check" } }
+      - { row: { callee: "mgr.Manager.Check" } }
 
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "An interface method named Store leaves the Store type to calls in other files"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -67,4 +69,4 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { callee: "mgr.Save" } }
+      - { row: { callee: "mgr.Store.Save" } }
