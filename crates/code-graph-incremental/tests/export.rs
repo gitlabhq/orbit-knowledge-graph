@@ -613,7 +613,7 @@ fn definitions_imports_and_edges_export_as_ontology_rows() {
         [
             strs(&["Store", "utils", "NamedImport", "main.py"]),
             strs(&["helper", "utils", "NamedImport", "main.py"]),
-            strs(&["missing", "missing", "Import", "main.py"]),
+            strs(&["missing", "missing", "NamedImport", "main.py"]),
         ]
     );
     let edges = table(&exported, "gl_edge");

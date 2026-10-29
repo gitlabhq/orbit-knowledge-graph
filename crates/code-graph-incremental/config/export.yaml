@@ -151,11 +151,12 @@ edges:
   graph:
     - { edge: Calls, to: Definition, site: [__decorator], kind: ANNOTATED_BY }
     - { edge: Imports, from: Definition, to: Import, site: [__decorator], kind: ANNOTATED_BY }
-    - { edge: Calls, to: Definition, site_child: __type=parameter, kind: USES_TYPE, set: { usage: parameter } }
-    - { edge: Calls, to: Definition, site_child: __type=return, kind: USES_TYPE, set: { usage: return } }
-    - { edge: Calls, to: Definition, site_child: __type=generic, kind: USES_TYPE, set: { usage: generic } }
-    - { edge: Calls, to: Definition, site_child: __type=cast, kind: USES_TYPE, set: { usage: cast } }
-    - { edge: Calls, to: Definition, site_child: __type, kind: USES_TYPE, set: { usage: field } }
+    - { edge: Calls, from: Definition, to: Definition, site_child: __type=parameter, kind: USES_TYPE, set: { usage: parameter } }
+    - { edge: Calls, from: Definition, to: Definition, site_child: __type=return, kind: USES_TYPE, set: { usage: return } }
+    - { edge: Calls, from: Definition, to: Definition, site_child: __type=generic, kind: USES_TYPE, set: { usage: generic } }
+    - { edge: Calls, from: Definition, to: Definition, site_child: __type=cast, kind: USES_TYPE, set: { usage: cast } }
+    - { edge: Calls, from: Definition, to: Definition, site_child: __type, kind: USES_TYPE, set: { usage: field } }
+    - { edge: Calls, to: Definition, site_child: __type, drop: true, kind: USES_TYPE }
     - { edge: Calls, to: Definition, reference: true, kind: USES_VALUE, set: { access: read } }
     - edge: Calls
       to: Definition
