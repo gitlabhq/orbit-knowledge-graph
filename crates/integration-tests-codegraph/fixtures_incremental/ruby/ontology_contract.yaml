@@ -1,0 +1,166 @@
+name: "Ruby: the code graph contract columns for every definition and import kind"
+
+fixtures:
+  - path: lib/weather_app.rb
+    content: |
+      require 'json'
+      require_relative 'helpers'
+
+      # Weather app namespace.
+      #
+      # Second paragraph.
+      module WeatherApp
+        MAX_DAYS = 7
+
+        # Holds a forecast.
+        class Forecast < Base
+          include Helpers
+          attr_accessor :city
+          delegate :size, to: :city
+
+          # Builds a forecast.
+          def initialize(city, days = 3)
+            @city = city
+          end
+
+          # Runs the app.
+          def self.run(city)
+            new(city).fetch
+          end
+
+          def fetch
+            Helpers.load(@city)
+          end
+        end
+      end
+
+      def top_level_helper(x)
+        local_fn = ->(y) { y }
+        local_fn.call(x)
+      end
+
+      ADDER = ->(a, b) { a + b }
+
+  - path: lib/helpers.rb
+    content: |
+      module Helpers
+        def self.load(city)
+          city
+        end
+      end
+
+  - path: spec/forecast_spec.rb
+    content: |
+      def charge(amount)
+        amount
+      end
+
+      RSpec.describe WeatherApp::Forecast do
+        context 'when cold' do
+          it 'charges the card' do
+            charge(1)
+          end
+        end
+      end
+
+  - path: test/forecast_test.rb
+    content: |
+      class ForecastTest < Minitest::Test
+        def test_fetch
+          top_level_helper(2)
+        end
+      end
+
+tests:
+  - name: "every definition has its kind, language kind, category, and scope"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope
+      ORDER BY fqn, kind
+      LIMIT 100
+    assert:
+      - { row_count: 19 }
+      - { row: { fqn: "WeatherApp", kind: "Module", language_kind: "Module", category: "Module", scope: "top_level" } }
+      - { row: { fqn: "WeatherApp::MAX_DAYS", kind: "Constant", language_kind: "Constant", category: "Value", scope: "member" } }
+      - { row: { fqn: "WeatherApp::Forecast", kind: "Class", language_kind: "Class", category: "Type", scope: "member" } }
+      - { row: { fqn: "WeatherApp::Forecast::city", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "WeatherApp::Forecast::size", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "WeatherApp::Forecast::initialize", kind: "Constructor", language_kind: "Initializer", category: "Callable", scope: "member" } }
+      - { row: { fqn: "WeatherApp::Forecast::run", kind: "Method", language_kind: "SingletonMethod", category: "Callable", scope: "member" } }
+      - { row: { fqn: "WeatherApp::Forecast::fetch", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "top_level_helper", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "top_level_helper::local_fn", kind: "Function", language_kind: "Lambda", category: "Callable", scope: "local" } }
+      - { row: { fqn: "ADDER", kind: "Function", language_kind: "Lambda", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "Helpers", kind: "Module", language_kind: "Module", category: "Module", scope: "top_level" } }
+      - { row: { fqn: "Helpers::load", kind: "Method", language_kind: "SingletonMethod", category: "Callable", scope: "member" } }
+      - { row: { fqn: "WeatherApp::Forecast", kind: "Test", language_kind: "ExampleGroup", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "WeatherApp::Forecast::when cold", kind: "Test", language_kind: "ExampleGroup", category: "Callable", scope: "local" } }
+      - { row: { fqn: "WeatherApp::Forecast::when cold::charges the card", kind: "Test", language_kind: "Example", category: "Callable", scope: "local" } }
+      - { row: { fqn: "charge", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "ForecastTest", kind: "Class", language_kind: "Class", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "ForecastTest::test_fetch", kind: "Test", language_kind: "Test", category: "Callable", scope: "member" } }
+
+  - name: "an RSpec block is named by its description string"
+    query: |
+      MATCH (d:Definition {kind: 'Test', language_kind: 'Example'})
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "charges the card" } }
+
+  - name: "a test block owns the calls inside it"
+    query: |
+      MATCH (t:Definition {fqn: 'WeatherApp::Forecast::when cold::charges the card'})-[:CALLS]->(f:Definition)
+      RETURN f.fqn AS callee
+    assert:
+      - { row: { callee: "charge" } }
+
+  - name: "definitions carry signature, parameters, doc comment, modifiers, and generated_by"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.kind AS kind, d.signature AS signature, d.parameters AS parameters, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.generated_by AS generated_by, d.language AS language
+      ORDER BY fqn, kind
+      LIMIT 100
+    assert:
+      - { row: { fqn: "WeatherApp", signature: "module WeatherApp", doc_comment: "Weather app namespace.", modifiers: [], generated_by: null, language: "ruby" } }
+      - { row: { fqn: "WeatherApp::MAX_DAYS", signature: "MAX_DAYS", parameters: [], doc_comment: "" } }
+      - { row: { fqn: "WeatherApp::Forecast", kind: "Class", signature: "class Forecast < Base", doc_comment: "Holds a forecast." } }
+      - { row: { fqn: "WeatherApp::Forecast::city", signature: "attr_accessor :city", generated_by: "attr_accessor" } }
+      - { row: { fqn: "WeatherApp::Forecast::size", signature: "delegate :size", generated_by: "delegate" } }
+      - { row: { fqn: "WeatherApp::Forecast::initialize", signature: "def initialize(city, days = 3)", parameters: ["city", "days = 3"], doc_comment: "Builds a forecast.", generated_by: null } }
+      - { row: { fqn: "WeatherApp::Forecast::run", signature: "def self.run(city)", parameters: ["city"], doc_comment: "Runs the app.", modifiers: ["static"] } }
+      - { row: { fqn: "WeatherApp::Forecast::fetch", signature: "def fetch", parameters: [], modifiers: [] } }
+      - { row: { fqn: "top_level_helper", signature: "def top_level_helper(x)", parameters: ["x"] } }
+      - { row: { fqn: "ADDER", signature: "ADDER = ->(a, b)", parameters: ["a", "b"] } }
+      - { row: { fqn: "WeatherApp::Forecast", kind: "Test", signature: "RSpec.describe WeatherApp::Forecast" } }
+      - { row: { fqn: "WeatherApp::Forecast::when cold::charges the card", signature: "it 'charges the card'" } }
+      - { row: { fqn: "ForecastTest::test_fetch", signature: "def test_fetch" } }
+
+  - name: "Ruby declares no types and has no visibility rule"
+    query: |
+      MATCH (d:Definition)
+      WHERE NOT (d.return_type IS NULL AND d.declared_type IS NULL AND d.visibility IS NULL)
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "imports carry their kind, construct, path, and full name"
+    query: |
+      MATCH (i:Import)
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+      ORDER BY import_path, name
+      LIMIT 100
+    assert:
+      - { row: { name: "*", import_kind: "wildcard", language_kind: "Require", import_path: "json", fqn: null } }
+      - { row: { name: "*", import_kind: "wildcard", language_kind: "RequireRelative", import_path: "helpers", fqn: null } }
+      - { row: { name: "Helpers", import_kind: "module", language_kind: "Include", fqn: "Helpers" } }
+      - { row: { name: "Base", import_kind: "symbol", language_kind: "Autoload", import_path: "Base", fqn: "Base", is_external: true } }
+      - { row: { name: "Helpers", import_kind: "symbol", language_kind: "Autoload", import_path: "Helpers", fqn: "Helpers", is_external: false } }
+      - { row: { name: "Test", import_kind: "symbol", language_kind: "Autoload", import_path: "Minitest", fqn: "Minitest::Test", is_external: true } }
+
+  - name: "every kind is in the closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
+      RETURN d.fqn
+    assert:
+      - { empty: true }

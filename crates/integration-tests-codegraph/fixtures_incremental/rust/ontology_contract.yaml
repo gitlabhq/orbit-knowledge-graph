@@ -1,0 +1,191 @@
+name: "Rust: the code graph contract columns for every definition and import kind"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "demo"
+      version = "0.1.0"
+
+  - path: src/util.rs
+    content: |
+      pub fn helper() -> i32 { 1 }
+
+  - path: src/lib.rs
+    content: |
+      mod util;
+      extern crate alloc;
+      use crate::util::helper;
+      use serde::Deserialize;
+      use std::collections::HashMap as Dict;
+      use std::io::*;
+
+      /// A point on a plane.
+      ///
+      /// Second paragraph.
+      #[derive(Debug)]
+      pub struct Point {
+          pub x: i32,
+          pub(crate) y: i32,
+      }
+
+      pub union Raw { a: u32, b: f32 }
+
+      pub struct Pair(pub i32, u8);
+
+      /** Colors we know. */
+      pub enum Color { Red, Green(u8) }
+
+      pub trait Store: Sized {
+          type Item;
+          fn get(&self, key: &str) -> Option<String>;
+          fn make() -> Self;
+      }
+
+      pub type Map = Dict<String, i32>;
+      pub const MAX: usize = 10;
+      static mut COUNT: u32 = 0;
+
+      impl Point {
+          /// Make a point.
+          pub fn new(x: i32, y: i32) -> Self { Point { x, y } }
+          pub(crate) async fn dist(&self, other: &Point) -> f64 { 0.0 }
+      }
+
+      impl Store for Point {
+          type Item = i32;
+          fn get(&self, key: &str) -> Option<String> { None }
+          fn make() -> Self { Point::new(0, 0) }
+      }
+
+      pub unsafe extern "C" fn raw_call(p: *const u8) {}
+
+      pub fn outer() -> i32 {
+          fn inner() -> i32 { helper() }
+          inner()
+      }
+
+      macro_rules! square { ($x:expr) => { $x * $x }; }
+
+      #[cfg(test)]
+      mod tests {
+          use super::*;
+          #[test]
+          fn it_works() { helper(); }
+      }
+
+tests:
+  - name: "every definition has its kind, language kind, category, and scope"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope
+      ORDER BY fqn, kind
+      LIMIT 100
+    assert:
+      - { row: { fqn: "Point", kind: "Struct", language_kind: "Struct", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "Point::x", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "Raw", kind: "Struct", language_kind: "Union", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "Raw::a", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "Pair::0", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "Color", kind: "Enum", language_kind: "Enum", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "Color::Red", kind: "EnumMember", language_kind: "Variant", category: "Value", scope: "member" } }
+      - { row: { fqn: "Color::Green::0", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "Store", kind: "Trait", language_kind: "Trait", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "Store::Item", kind: "TypeAlias", language_kind: "AssociatedType", category: "Type", scope: "member" } }
+      - { row: { fqn: "Store::get", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "Store::make", kind: "Method", language_kind: "AssociatedFunction", category: "Callable", scope: "member" } }
+      - { row: { fqn: "Map", kind: "TypeAlias", language_kind: "TypeAlias", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "MAX", kind: "Constant", language_kind: "Constant", category: "Value", scope: "top_level" } }
+      - { row: { fqn: "COUNT", kind: "Variable", language_kind: "Static", category: "Value", scope: "top_level" } }
+      - { row: { fqn: "Point::new", kind: "Method", language_kind: "AssociatedFunction", category: "Callable", scope: "member" } }
+      - { row: { fqn: "Point::dist", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "Point::Item", kind: "TypeAlias", language_kind: "AssociatedType", category: "Type", scope: "member" } }
+      - { row: { fqn: "Point::make", kind: "Method", language_kind: "AssociatedFunction", category: "Callable", scope: "member" } }
+      - { row: { fqn: "raw_call", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "outer", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "outer::inner", kind: "Function", language_kind: "Function", category: "Callable", scope: "local" } }
+      - { row: { fqn: "square", kind: "Macro", language_kind: "Macro", category: "Macro", scope: "top_level" } }
+      - { row: { fqn: "tests", kind: "Module", language_kind: "Module", category: "Module", scope: "top_level" } }
+      - { row: { fqn: "tests::it_works", kind: "Test", language_kind: "Test", category: "Callable", scope: "member" } }
+      - { row: { fqn: "util::helper", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+
+  - name: "types and values carry their declaration text, declared type, doc comment, and visibility"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.category IN ['Type', 'Value', 'Module', 'Macro']
+      RETURN d.fqn AS fqn, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by, d.language AS language
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row: { fqn: "Point", signature: "pub struct Point", parameters: [], return_type: null, declared_type: null, doc_comment: "A point on a plane.", modifiers: [], visibility: "public", generated_by: null, language: "rust" } }
+      - { row: { fqn: "Point::x", signature: "pub x: i32", declared_type: "i32", doc_comment: "", visibility: "public" } }
+      - { row: { fqn: "Point::y", signature: "pub(crate) y: i32", declared_type: "i32", visibility: "internal" } }
+      - { row: { fqn: "Raw", signature: "pub union Raw", visibility: "public" } }
+      - { row: { fqn: "Raw::a", signature: "a: u32", declared_type: "u32", visibility: "private" } }
+      - { row: { fqn: "Pair", signature: "pub struct Pair(pub i32, u8)", visibility: "public" } }
+      - { row: { fqn: "Pair::0", signature: "i32", declared_type: "i32", visibility: "public" } }
+      - { row: { fqn: "Pair::1", signature: "u8", declared_type: "u8", visibility: "private" } }
+      - { row: { fqn: "Color", signature: "pub enum Color", doc_comment: "Colors we know.", visibility: "public" } }
+      - { row: { fqn: "Color::Red", signature: "Red", declared_type: null, visibility: "public" } }
+      - { row: { fqn: "Color::Green", signature: "Green(u8)", visibility: "public" } }
+      - { row: { fqn: "Store", signature: "pub trait Store: Sized", visibility: "public" } }
+      - { row: { fqn: "Store::Item", signature: "type Item", visibility: "public" } }
+      - { row: { fqn: "Map", signature: "pub type Map = Dict<String, i32>", visibility: "public" } }
+      - { row: { fqn: "MAX", signature: "pub const MAX: usize", declared_type: "usize", visibility: "public" } }
+      - { row: { fqn: "COUNT", signature: "static mut COUNT: u32", declared_type: "u32", modifiers: [], visibility: "private" } }
+      - { row: { fqn: "square", signature: "macro_rules! square", visibility: "private" } }
+      - { row: { fqn: "tests", signature: "mod tests", visibility: "private" } }
+
+  - name: "callables carry signature, parameters, return type, modifiers, and visibility"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.category = 'Callable'
+      RETURN d.fqn AS fqn, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.visibility AS visibility, d.generated_by AS generated_by
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row: { fqn: "Point::new", signature: "pub fn new(x: i32, y: i32) -> Self", parameters: ["x: i32", "y: i32"], return_type: "Self", declared_type: null, doc_comment: "Make a point.", modifiers: [], visibility: "public", generated_by: null } }
+      - { row: { fqn: "Point::dist", signature: "pub(crate) async fn dist(&self, other: &Point) -> f64", parameters: ["&self", "other: &Point"], return_type: "f64", modifiers: ["async"], visibility: "internal" } }
+      - { row: { fqn: "Point::get", signature: "fn get(&self, key: &str) -> Option<String>", parameters: ["&self", "key: &str"], return_type: "Option<String>", visibility: "public" } }
+      - { row: { fqn: "Point::make", signature: "fn make() -> Self", parameters: [], return_type: "Self", visibility: "public" } }
+      - { row: { fqn: "Store::get", signature: "fn get(&self, key: &str) -> Option<String>", visibility: "public" } }
+      - { row: { fqn: "raw_call", signature: 'pub unsafe extern "C" fn raw_call(p: *const u8)', parameters: ["p: *const u8"], return_type: null, modifiers: ["extern", "unsafe"], visibility: "public" } }
+      - { row: { fqn: "outer", signature: "pub fn outer() -> i32", return_type: "i32", visibility: "public" } }
+      - { row: { fqn: "outer::inner", signature: "fn inner() -> i32", return_type: "i32", visibility: "private" } }
+      - { row: { fqn: "tests::it_works", signature: "fn it_works()", parameters: [], return_type: null, visibility: "private" } }
+
+  - name: "Rust has no generated definitions"
+    query: |
+      MATCH (d:Definition) WHERE d.generated_by IS NOT NULL
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "every Rust definition has a visibility"
+    query: |
+      MATCH (d:Definition) WHERE d.visibility IS NULL
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "imports carry their kind, construct, path, and full name"
+    query: |
+      MATCH (i:Import)
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+      ORDER BY import_path, name
+      LIMIT 100
+    assert:
+      - { row: { name: "util", import_kind: "module", language_kind: "ModDeclaration", import_path: "util", fqn: "util" } }
+      - { row: { name: "alloc", import_kind: "module", language_kind: "ExternCrate", import_path: "alloc", fqn: "alloc", is_external: true } }
+      - { row: { name: "helper", import_kind: "symbol", language_kind: "Use", import_path: "crate::util::helper", fqn: "crate::util::helper", is_external: false } }
+      - { row: { name: "Deserialize", import_kind: "symbol", language_kind: "Use", import_path: "serde::Deserialize", fqn: "serde::Deserialize", is_external: true } }
+      - { row: { name: "HashMap", alias: "Dict", import_kind: "symbol", language_kind: "AliasedUse", fqn: "std::collections::HashMap" } }
+      - { row: { name: "*", import_kind: "wildcard", language_kind: "GlobUse", import_path: "std::io", fqn: null } }
+      - { row: { name: "*", import_kind: "wildcard", language_kind: "GlobUse", import_path: "super", fqn: null } }
+
+  - name: "every definition kind is in the closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
+      RETURN d.fqn
+    assert:
+      - { empty: true }

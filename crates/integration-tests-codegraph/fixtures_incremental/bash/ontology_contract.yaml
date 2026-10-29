@@ -1,0 +1,82 @@
+name: "Bash: the code graph contract columns for every definition and import kind"
+
+fixtures:
+  - path: main.sh
+    content: |
+      #!/bin/bash
+      source ./lib/helpers.sh
+      . /etc/profile
+
+      # Prints a greeting.
+      #
+      # Second paragraph.
+      greet() {
+        echo "hi $1"
+        helper_fn
+      }
+
+      function deploy {
+        inner() {
+          echo in
+        }
+        inner
+        greet
+      }
+
+  - path: lib/helpers.sh
+    content: |
+      helper_fn() {
+        echo ok
+      }
+
+tests:
+  - name: "every definition is a function with its category and scope"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row_count: 4 }
+      - { row: { fqn: "main.greet", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "main.deploy", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "main.deploy.inner", kind: "Function", language_kind: "Function", category: "Callable", scope: "local" } }
+      - { row: { fqn: "helpers.helper_fn", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+
+  - name: "definitions carry signature and doc comment"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.signature AS signature, d.parameters AS parameters, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.language AS language
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row: { fqn: "main.greet", signature: "greet()", parameters: [], doc_comment: "Prints a greeting.", modifiers: [], language: "bash" } }
+      - { row: { fqn: "main.deploy", signature: "function deploy", parameters: [], doc_comment: "" } }
+      - { row: { fqn: "main.deploy.inner", signature: "inner()" } }
+      - { row: { fqn: "helpers.helper_fn", signature: "helper_fn()" } }
+
+  - name: "Bash declares no types, visibility, or generated definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE NOT (d.return_type IS NULL AND d.declared_type IS NULL AND d.visibility IS NULL AND d.generated_by IS NULL)
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "a sourced script is a wildcard import"
+    query: |
+      MATCH (i:Import)
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+      ORDER BY import_path, name
+      LIMIT 100
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "*", import_kind: "wildcard", language_kind: "Source", import_path: "./lib/helpers.sh", fqn: null, is_external: false } }
+      - { row: { name: "*", import_kind: "wildcard", language_kind: "Source", import_path: "/etc/profile", fqn: null } }
+
+  - name: "every kind is in the closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
+      RETURN d.fqn
+    assert:
+      - { empty: true }

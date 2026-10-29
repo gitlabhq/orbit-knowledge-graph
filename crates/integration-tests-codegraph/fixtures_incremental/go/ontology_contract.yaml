@@ -1,0 +1,161 @@
+name: "Go: the code graph contract columns for every definition and import kind"
+
+fixtures:
+  - path: go.mod
+    content: |
+      module example.com/demo
+
+      go 1.22
+
+  - path: util/util.go
+    content: |
+      package util
+
+      func Help() int { return 1 }
+
+  - path: main_test.go
+    content: |
+      package main
+
+      import "testing"
+
+      func TestArea(t *testing.T) { NewPoint(1, 2) }
+
+  - path: main.go
+    content: |
+      package main
+
+      import (
+      	"fmt"
+      	str "strings"
+      	. "math"
+      	_ "embed"
+      	"example.com/demo/util"
+      	"github.com/acme/ext"
+      )
+
+      // Celsius is a temperature.
+      // It has a unit.
+      //
+      // Second paragraph.
+      type Celsius float64
+
+      type Alias = string
+
+      // Shape draws.
+      type Shape interface {
+      	Area() float64
+      }
+
+      type Point struct {
+      	X, Y int
+      	Name string `json:"name"`
+      }
+
+      const MaxSize = 10
+
+      var counter int = 0
+
+      // Area computes the area.
+      func (p *Point) Area() float64 { return 0 }
+
+      func (p Point) Move(dx int, dy int) (int, error) { return 0, nil }
+
+      func NewPoint(x, y int) *Point { return &Point{X: x} }
+
+      func main() {
+      	var local int = 1
+      	fmt.Println(str.ToUpper("a"), Sqrt(2), util.Help(), ext.Run(), local)
+      }
+
+tests:
+  - name: "every definition has its kind, language kind, category, and scope"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row: { fqn: "main.Celsius", kind: "Class", language_kind: "DefinedType", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main.Alias", kind: "TypeAlias", language_kind: "TypeAlias", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main.Shape", kind: "Interface", language_kind: "Interface", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main.Shape.Area", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "main.Point", kind: "Struct", language_kind: "Struct", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "main.Point.X", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "main.Point.Name", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "main.MaxSize", kind: "Constant", language_kind: "Constant", category: "Value", scope: "top_level" } }
+      - { row: { fqn: "main.counter", kind: "Variable", language_kind: "Variable", category: "Value", scope: "top_level" } }
+      - { row: { fqn: "main.Point.Area", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "main.Point.Move", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
+      - { row: { fqn: "main.NewPoint", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "main.main", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "main.main.local", kind: "Variable", language_kind: "Variable", category: "Value", scope: "local" } }
+      - { row: { fqn: "main.TestArea", kind: "Test", language_kind: "Test", category: "Callable", scope: "top_level" } }
+      - { row: { fqn: "util.Help", kind: "Function", language_kind: "Function", category: "Callable", scope: "top_level" } }
+
+  - name: "the receiver type defines its methods"
+    query: |
+      MATCH (t:Definition {fqn: 'main.Point'})-[:DEFINES]->(m:Definition)
+      WHERE m.kind = 'Method'
+      RETURN m.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: name, values: ["Area", "Move"] } }
+
+  - name: "definitions carry signature, parameters, types, and doc comment"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.signature AS signature, d.parameters AS parameters, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc_comment, d.modifiers AS modifiers, d.language AS language
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row: { fqn: "main.Celsius", signature: "Celsius float64", parameters: [], return_type: null, declared_type: null, doc_comment: "Celsius is a temperature. It has a unit.", modifiers: [], language: "go" } }
+      - { row: { fqn: "main.Alias", signature: "Alias = string", doc_comment: "" } }
+      - { row: { fqn: "main.Shape", signature: "Shape interface", doc_comment: "Shape draws." } }
+      - { row: { fqn: "main.Shape.Area", signature: "Area() float64", parameters: [], return_type: "float64" } }
+      - { row: { fqn: "main.Point", signature: "Point struct" } }
+      - { row: { fqn: "main.Point.X", signature: "X, Y int", declared_type: "int" } }
+      - { row: { fqn: "main.Point.Name", signature: "Name string", declared_type: "string" } }
+      - { row: { fqn: "main.MaxSize", signature: "MaxSize", declared_type: null } }
+      - { row: { fqn: "main.counter", signature: "counter int", declared_type: "int" } }
+      - { row: { fqn: "main.Point.Area", signature: "func (p *Point) Area() float64", parameters: [], return_type: "float64", doc_comment: "Area computes the area." } }
+      - { row: { fqn: "main.Point.Move", signature: "func (p Point) Move(dx int, dy int) (int, error)", parameters: ["dx int", "dy int"], return_type: "(int, error)" } }
+      - { row: { fqn: "main.NewPoint", signature: "func NewPoint(x, y int) *Point", parameters: ["x", "y int"], return_type: "*Point", modifiers: [] } }
+      - { row: { fqn: "main.main", signature: "func main()", parameters: [], return_type: null } }
+      - { row: { fqn: "main.TestArea", signature: "func TestArea(t *testing.T)", parameters: ["t *testing.T"], return_type: null } }
+
+  - name: "Go fills no visibility"
+    query: |
+      MATCH (d:Definition) WHERE d.visibility IS NOT NULL
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Go has no generated definitions"
+    query: |
+      MATCH (d:Definition) WHERE d.generated_by IS NOT NULL
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "imports carry their kind, path, and full name"
+    query: |
+      MATCH (i:Import)
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+      ORDER BY import_path, name
+      LIMIT 100
+    assert:
+      - { row: { name: "fmt", import_kind: "module", language_kind: "Import", import_path: "fmt", fqn: "fmt" } }
+      - { row: { name: "strings", alias: "str", import_kind: "module", import_path: "strings", fqn: "strings" } }
+      - { row: { name: "math", import_kind: "wildcard", import_path: "math", fqn: null } }
+      - { row: { name: "embed", import_kind: "side_effect", import_path: "embed", fqn: "embed" } }
+      - { row: { name: "util", import_kind: "module", import_path: "example.com/demo/util", fqn: "example.com/demo/util", is_external: false } }
+      - { row: { name: "ext", import_kind: "module", import_path: "github.com/acme/ext", fqn: "github.com/acme/ext", is_external: true } }
+
+  - name: "every definition kind is in the closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
+      RETURN d.fqn
+    assert:
+      - { empty: true }

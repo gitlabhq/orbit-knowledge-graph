@@ -1,0 +1,135 @@
+name: "Elixir: the code graph contract columns for every definition and import kind"
+
+fixtures:
+  - path: lib/weather/forecast.ex
+    content: |
+      defmodule Weather.Forecast do
+        @moduledoc """
+        Holds a forecast.
+
+        More text.
+        """
+        alias Weather.Helpers
+        alias Weather.Store, as: S
+        import Enum
+        require Logger
+
+        defstruct [:city, days: 3]
+
+        @doc """
+        Fetches the forecast.
+        """
+        @spec fetch(String.t(), integer) :: map
+        def fetch(city, days \\ 3) do
+          Helpers.load(city)
+        end
+
+        defp secret(a) when is_integer(a), do: a
+
+        defmacro twice(ast) do
+          ast
+        end
+      end
+
+      defprotocol Weather.Size do
+        def size(data)
+      end
+
+      defimpl Weather.Size, for: Map do
+        def size(map), do: map_size(map)
+      end
+
+  - path: lib/weather/helpers.ex
+    content: |
+      defmodule Weather.Helpers do
+        def load(city), do: city
+      end
+
+  - path: test/forecast_test.exs
+    content: |
+      defmodule Weather.ForecastTest do
+        use ExUnit.Case
+
+        describe "fetch/2" do
+          test "returns the city" do
+            Weather.Forecast.fetch("x")
+          end
+        end
+      end
+
+tests:
+  - name: "every definition has its kind, language kind, category, and scope"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.kind AS kind, d.language_kind AS language_kind, d.category AS category, d.scope AS scope
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row_count: 14 }
+      - { row: { fqn: "Weather.Forecast", kind: "Module", language_kind: "Module", category: "Module", scope: "top_level" } }
+      - { row: { fqn: "Weather.Forecast.city", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "Weather.Forecast.days", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "Weather.Forecast.fetch", kind: "Function", language_kind: "Function", category: "Callable", scope: "member" } }
+      - { row: { fqn: "Weather.Forecast.secret", kind: "Function", language_kind: "Function", category: "Callable", scope: "member" } }
+      - { row: { fqn: "Weather.Forecast.twice", kind: "Macro", language_kind: "Macro", category: "Macro", scope: "member" } }
+      - { row: { fqn: "Weather.Size", kind: "Interface", language_kind: "Protocol", category: "Type", scope: "top_level" } }
+      - { row: { fqn: "Weather.Size.size", kind: "Function", language_kind: "Function", category: "Callable", scope: "member" } }
+      - { row: { fqn: "Weather.Helpers", kind: "Module", language_kind: "Module", category: "Module", scope: "top_level" } }
+      - { row: { fqn: "Weather.Helpers.load", kind: "Function", language_kind: "Function", category: "Callable", scope: "member" } }
+      - { row: { fqn: "Weather.ForecastTest", kind: "Module", language_kind: "Module", category: "Module", scope: "top_level" } }
+      - { row: { fqn: "Weather.ForecastTest.fetch/2", kind: "Test", language_kind: "ExampleGroup", category: "Callable", scope: "member" } }
+      - { row: { fqn: "Weather.ForecastTest.fetch/2.returns the city", kind: "Test", language_kind: "Test", category: "Callable", scope: "local" } }
+
+  - name: "an ExUnit test is named by its description string and calls the function it tests"
+    query: |
+      MATCH (t:Definition {name: 'returns the city'})-[:CALLS]->(f:Definition)
+      RETURN t.kind AS kind, f.fqn AS callee
+    assert:
+      - { row: { kind: "Test", callee: "Weather.Forecast.fetch" } }
+
+  - name: "definitions carry signature, parameters, doc comment, visibility, and generated_by"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.signature AS signature, d.parameters AS parameters, d.doc_comment AS doc_comment, d.visibility AS visibility, d.generated_by AS generated_by, d.modifiers AS modifiers, d.language AS language
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row: { fqn: "Weather.Forecast", signature: "defmodule Weather.Forecast", doc_comment: "Holds a forecast.", visibility: null, generated_by: null, modifiers: [], language: "elixir" } }
+      - { row: { fqn: "Weather.Forecast.city", signature: "city", parameters: [], visibility: null, generated_by: "defstruct" } }
+      - { row: { fqn: "Weather.Forecast.days", signature: "days", generated_by: "defstruct" } }
+      - { row: { fqn: "Weather.Forecast.fetch", signature: 'def fetch(city, days \\ 3)', parameters: ["city", 'days \\ 3'], doc_comment: "Fetches the forecast.", visibility: "public", generated_by: null } }
+      - { row: { fqn: "Weather.Forecast.secret", signature: "defp secret(a) when is_integer(a)", parameters: ["a"], doc_comment: "", visibility: "private" } }
+      - { row: { fqn: "Weather.Forecast.twice", signature: "defmacro twice(ast)", parameters: ["ast"], visibility: "public" } }
+      - { row: { fqn: "Weather.Size", signature: "defprotocol Weather.Size", visibility: null } }
+      - { row: { fqn: "Weather.Size.size", signature: "def size(data)", parameters: ["data"] } }
+      - { row: { fqn: "Weather.ForecastTest.fetch/2", signature: 'describe "fetch/2"', visibility: null } }
+      - { row: { fqn: "Weather.ForecastTest.fetch/2.returns the city", signature: 'test "returns the city"', parameters: [] } }
+
+  - name: "Elixir declares no return or value types"
+    query: |
+      MATCH (d:Definition)
+      WHERE NOT (d.return_type IS NULL AND d.declared_type IS NULL)
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "imports carry their kind, construct, path, and full name"
+    query: |
+      MATCH (i:Import)
+      RETURN i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
+      ORDER BY import_path, name
+      LIMIT 100
+    assert:
+      - { row: { name: "Helpers", import_kind: "module", language_kind: "Alias", import_path: "Weather", fqn: "Weather.Helpers" } }
+      - { row: { name: "Store", alias: "S", import_kind: "module", language_kind: "Alias", import_path: "Weather", fqn: "Weather.Store" } }
+      - { row: { name: "Enum", import_kind: "wildcard", language_kind: "Import", import_path: "Enum", fqn: null } }
+      - { row: { name: "Logger", import_kind: "module", language_kind: "Require", fqn: "Logger", is_external: true } }
+      - { row: { name: "Case", import_kind: "module", language_kind: "Use", import_path: "ExUnit", fqn: "ExUnit.Case", is_external: true } }
+      - { row: { name: "Forecast", import_kind: "module", language_kind: "Module", import_path: "Weather.Forecast", fqn: "Weather.Forecast", is_external: false } }
+
+  - name: "every kind is in the closed list"
+    query: |
+      MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
+      RETURN d.fqn
+    assert:
+      - { empty: true }
