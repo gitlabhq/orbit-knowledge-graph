@@ -138,7 +138,11 @@ pub(crate) async fn install(
     apply_and_report(&options, |report| {
         components::install(&selection, &target, report)
     })?;
-    tui::card("Configured", summary::format_components_per_agent(&plan))?;
+    let configured = plan::for_selection(&selection, &target)?;
+    tui::card(
+        "Configured",
+        summary::format_components_per_agent(&configured),
+    )?;
     if selection.components.contains(&Component::Instructions) && !spec::reaches_gitlab() {
         tui::card(
             "GitLab",
@@ -237,6 +241,12 @@ fn apply_and_report(
     let outcome = apply(&mut report);
     if options.verbose || outcome.is_err() {
         show_outcomes_per_component(&report)?;
+    } else {
+        for outcome in &report.outcomes {
+            if outcome.action == components::KEPT_RETIRED {
+                tui::warning(format!("{}: {}", outcome.label, outcome.action));
+            }
+        }
     }
     outcome?;
     Ok(report)
@@ -379,6 +389,12 @@ impl Target {
     }
 
     fn root(&self) -> Result<PathBuf> {
+        #[cfg(test)]
+        if let (Target::Global, Some(home)) =
+            (self, tests::TEST_HOME.with(|home| home.borrow().clone()))
+        {
+            return Ok(home);
+        }
         match self {
             Target::Project(root) => Ok(root.clone()),
             Target::Global => dirs::home_dir().context("could not determine home directory"),
@@ -428,6 +444,10 @@ mod tests {
             .build()
             .unwrap()
             .block_on(super::install(options, target, machine))
+    }
+
+    thread_local! {
+        pub(super) static TEST_HOME: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
     }
 
     fn project(dir: &Path) -> Target {
@@ -610,7 +630,6 @@ mod tests {
             let path = dir.path().join(".opencode/plugins/orbit-ui").join(part);
             assert!(path.is_file(), "{}", path.display());
         }
-        // OpenCode discovers both plugins, so the user's plugin list is not touched.
         assert_eq!(read_json(&opencode_config), json!({"plugin": ["other.js"]}));
         assert_eq!(
             read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],
@@ -1451,6 +1470,144 @@ mod tests {
         assert!(!plugins.join("orbit-ui.js").exists());
         assert!(plugins.join("orbit-ui/index.js").is_file());
         assert_eq!(read_json(&opencode_config), json!({"plugin": ["other.js"]}));
+    }
+
+    const OLD_SERVER: &str = "export const OrbitPlugin = async () => ({});\n";
+    const OLD_UI: &str = "export const OrbitUiPlugin = async () => ({});\n";
+
+    fn write_old_layout(plugins: &Path, config: &Path, entries: &[&str]) {
+        std::fs::create_dir_all(plugins).unwrap();
+        std::fs::write(plugins.join("orbit.js"), stamped(OLD_SERVER)).unwrap();
+        std::fs::write(plugins.join("orbit-ui.js"), stamped(OLD_UI)).unwrap();
+        std::fs::write(config, json!({ "plugin": entries }).to_string()).unwrap();
+    }
+
+    fn tree(root: &Path) -> BTreeMap<PathBuf, String> {
+        fn walk(dir: &Path, root: &Path, found: &mut BTreeMap<PathBuf, String>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, root, found);
+                } else {
+                    let relative = path.strip_prefix(root).unwrap().to_path_buf();
+                    found.insert(relative, std::fs::read_to_string(&path).unwrap_or_default());
+                }
+            }
+        }
+        let mut found = BTreeMap::new();
+        walk(root, root, &mut found);
+        found
+    }
+
+    #[test]
+    fn global_upgrade_removes_the_retired_plugin_and_its_absolute_registrations() {
+        let home = tempfile::tempdir().unwrap();
+        TEST_HOME.with(|slot| *slot.borrow_mut() = Some(home.path().to_path_buf()));
+        let config_dir = home.path().join(".config/opencode");
+        let plugins = config_dir.join("plugins");
+        let config = config_dir.join("opencode.json");
+        let server = plugins.join("orbit.js").display().to_string();
+        let ui = plugins.join("orbit-ui.js").display().to_string();
+        write_old_layout(&plugins, &config, &["other.js", &server, &ui]);
+
+        install(options_for(&["opencode"]), Target::Global, &bare_machine()).unwrap();
+
+        assert!(!plugins.join("orbit-ui.js").exists());
+        assert!(plugins.join("orbit-ui/index.js").is_file());
+        assert_ne!(
+            std::fs::read_to_string(plugins.join("orbit.js")).unwrap(),
+            stamped(OLD_SERVER)
+        );
+        assert_eq!(read_json(&config), json!({"plugin": ["other.js"]}));
+    }
+
+    #[test]
+    fn uninstall_straight_from_the_old_layout_removes_both_plugins_and_registrations() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = dir.path().join(".opencode/plugins");
+        let config = dir.path().join(".opencode/opencode.json");
+        write_old_layout(
+            &plugins,
+            &config,
+            &[
+                "other.js",
+                ".opencode/plugins/orbit.js",
+                ".opencode/plugins/orbit-ui.js",
+            ],
+        );
+
+        uninstall_named(&["opencode"], dir.path());
+
+        assert!(!plugins.join("orbit.js").exists());
+        assert!(!plugins.join("orbit-ui.js").exists());
+        assert_eq!(read_json(&config), json!({"plugin": ["other.js"]}));
+    }
+
+    #[test]
+    fn an_orbit_only_opencode_config_is_deleted_on_upgrade() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = dir.path().join(".opencode/plugins");
+        let config = dir.path().join(".opencode/opencode.json");
+        write_old_layout(
+            &plugins,
+            &config,
+            &[
+                ".opencode/plugins/orbit.js",
+                ".opencode/plugins/orbit-ui.js",
+            ],
+        );
+
+        install_default(&["opencode"], dir.path());
+
+        assert!(!config.exists());
+        assert!(plugins.join("orbit-ui/index.js").is_file());
+    }
+
+    #[test]
+    fn a_second_install_after_an_upgrade_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = dir.path().join(".opencode/plugins");
+        let config = dir.path().join(".opencode/opencode.json");
+        write_old_layout(
+            &plugins,
+            &config,
+            &[
+                "other.js",
+                ".opencode/plugins/orbit.js",
+                ".opencode/plugins/orbit-ui.js",
+            ],
+        );
+        install_default(&["opencode"], dir.path());
+        let upgraded = tree(dir.path());
+
+        install_default(&["opencode"], dir.path());
+
+        assert_eq!(tree(dir.path()), upgraded);
+    }
+
+    #[test]
+    fn the_plan_lists_the_retired_cleanup_only_while_something_is_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = project(dir.path());
+        let opencode = spec::agent_named("opencode").unwrap();
+        let planned = |component| {
+            components::installer_for(component)
+                .plan(opencode, &target)
+                .unwrap()
+        };
+        let retired_ui = ".opencode/plugins/orbit-ui.js".to_string();
+        let config = ".opencode/opencode.json".to_string();
+        assert!(!planned(Component::AgentPlugins).contains(&retired_ui));
+        assert!(!planned(Component::Hooks).contains(&config));
+
+        write_old_layout(
+            &dir.path().join(".opencode/plugins"),
+            &dir.path().join(".opencode/opencode.json"),
+            &[".opencode/plugins/orbit.js"],
+        );
+
+        assert!(planned(Component::AgentPlugins).contains(&retired_ui));
+        assert!(planned(Component::Hooks).contains(&config));
     }
 
     #[test]

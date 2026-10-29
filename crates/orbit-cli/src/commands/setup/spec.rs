@@ -652,7 +652,6 @@ mod tests {
             assert!(!rendered.contains("{{"), "{}: unfilled", file.template);
             assert!(TemplateFile::is_unmodified(&rendered), "{}", file.template);
         }
-        // OpenCode 2 loads a default export with an id and setup(); a named export fails to load.
         for template in [
             "opencode_plugin.js",
             "agents/opencode_ui/index.js",
@@ -664,7 +663,6 @@ mod tests {
                 "{template}"
             );
         }
-        // OpenCode 2 skips a single-file entry in its plugin list, and discovers these anyway.
         assert!(opencode.registrations.is_empty());
         let ui_dir = |file: &TemplateFile| {
             std::path::Path::new(&file.path.global)
@@ -676,6 +674,34 @@ mod tests {
             ui.iter().all(|file| ui_dir(file) == ui_dir(ui[0])),
             "the UI parts form one plugin directory"
         );
+    }
+
+    #[test]
+    fn retired_paths_and_registrations_never_overlap_the_active_ones() {
+        let same = |a: &ScopedPath, b: &ScopedPath| a.project == b.project || a.global == b.global;
+        for spec in agents() {
+            for retired in &spec.retired.template_files {
+                assert!(
+                    !spec
+                        .template_files
+                        .iter()
+                        .any(|active| same(&active.path, &retired.path)),
+                    "{}: {} is both active and retired",
+                    spec.name,
+                    retired.path.project
+                );
+            }
+            for retired in &spec.retired.registrations {
+                assert!(
+                    !spec.registrations.iter().any(|active| {
+                        same(&active.file, &retired.file) && same(&active.value, &retired.value)
+                    }),
+                    "{}: {} is both registered and retired",
+                    spec.name,
+                    retired.value.project
+                );
+            }
+        }
     }
 
     #[test]

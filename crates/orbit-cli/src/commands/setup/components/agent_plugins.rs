@@ -24,11 +24,13 @@ impl Installer for AgentPlugins {
             .flat_map(|plugin| [&plugin.dir, &plugin.settings]);
         let files = agent.ui_files(true).map(|file| &file.path);
         let registrations = agent.ui_registrations(true).map(|entry| &entry.file);
-        plugin
+        let mut labels = plugin
             .chain(files)
             .chain(registrations)
             .map(|scoped| target.resolve(scoped).map(|(_, label)| label))
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        labels.extend(hooks::retired_labels(agent, true, target)?);
+        Ok(labels)
     }
 
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {

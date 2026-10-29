@@ -23,6 +23,8 @@ impl Installer for Hooks {
             .chain(agent.ui_registrations(false).map(|entry| &entry.file))
             .map(|scoped| target.resolve(scoped).map(|(_, label)| label))
             .collect::<Result<_>>()?;
+        let mut files = files;
+        files.extend(retired_labels(agent, false, target)?);
         Ok(files.into_iter().collect())
     }
 
@@ -111,7 +113,9 @@ pub(super) fn remove_retired(
     target: &Target,
     report: &mut Report,
 ) -> Result<()> {
-    remove_files(agent.retired_files(ui), std::iter::empty(), target, report)?;
+    for file in agent.retired_files(ui) {
+        remove_file(file, KEPT_RETIRED, target, report)?;
+    }
     for registration in agent.retired_registrations(ui) {
         let (path, _) = target.resolve(&registration.file)?;
         let value = target.registration_value(&registration.value)?;
@@ -125,6 +129,25 @@ pub(super) fn remove_retired(
         }
     }
     Ok(())
+}
+
+/// The labels of the retired files and config files that setup would touch to clean up.
+pub(super) fn retired_labels(agent: Agent, ui: bool, target: &Target) -> Result<Vec<String>> {
+    let mut labels = Vec::new();
+    for file in agent.retired_files(ui) {
+        let (path, label) = target.resolve(file)?;
+        if path.exists() {
+            labels.push(label);
+        }
+    }
+    for registration in agent.retired_registrations(ui) {
+        let (path, label) = target.resolve(&registration.file)?;
+        let value = target.registration_value(&registration.value)?;
+        if file_mentions(&path, &value) {
+            labels.push(label);
+        }
+    }
+    Ok(labels)
 }
 
 pub(super) fn install_files<'a>(
@@ -158,6 +181,31 @@ pub(super) fn install_files<'a>(
     Ok(())
 }
 
+pub(in crate::commands::setup) const KEPT_RETIRED: &str =
+    "kept (no longer used, and OpenCode 2 fails to load it; delete it by hand)";
+const KEPT_EDITED: &str = "kept (edited since install; delete it by hand)";
+
+fn remove_file(
+    file: &ScopedPath,
+    kept_note: &str,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    let (path, label) = target.resolve(file)?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let current = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    if !TemplateFile::is_unmodified(&current) {
+        report.note(&label, kept_note);
+        return Ok(());
+    }
+    remove_file_and_empty_parents(&path, target)?;
+    report.note(&label, "removed");
+    Ok(())
+}
+
 pub(super) fn remove_files<'a>(
     files: impl Iterator<Item = &'a ScopedPath>,
     registrations: impl Iterator<Item = &'a Registration>,
@@ -165,18 +213,7 @@ pub(super) fn remove_files<'a>(
     report: &mut Report,
 ) -> Result<()> {
     for file in files {
-        let (path, label) = target.resolve(file)?;
-        if !path.exists() {
-            continue;
-        }
-        let current = std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        if !TemplateFile::is_unmodified(&current) {
-            report.note(&label, "kept (edited since install; delete it by hand)");
-            continue;
-        }
-        remove_file_and_empty_parents(&path, target)?;
-        report.note(&label, "removed");
+        remove_file(file, KEPT_EDITED, target, report)?;
     }
     for registration in registrations {
         let (path, label) = target.resolve(&registration.file)?;
@@ -209,5 +246,32 @@ fn substitute_tokens_in_json(value: &Value) -> Value {
                 .collect(),
         ),
         other => other.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_edited_retired_file_is_kept_with_a_note_that_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
+        let retired = dir.path().join(".opencode/plugins/orbit-ui.js");
+        std::fs::create_dir_all(retired.parent().unwrap()).unwrap();
+        std::fs::write(&retired, "// my own plugin\n").unwrap();
+        let mut report = Report::default();
+
+        remove_retired(
+            spec::agent_named("opencode").unwrap(),
+            true,
+            &target,
+            &mut report,
+        )
+        .unwrap();
+
+        assert!(retired.is_file());
+        assert_eq!(report.outcomes.len(), 1);
+        assert_eq!(report.outcomes[0].action, KEPT_RETIRED);
     }
 }

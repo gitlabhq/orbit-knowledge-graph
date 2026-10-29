@@ -30,7 +30,6 @@ template_files:
       global: "~/.config/opencode/plugins/orbit-ui/tui.tsx"
     template: agents/opencode_ui/tui.tsx
     ui: true
-# What earlier releases installed: the OpenCode 1 toast plugin and both plugin-list entries.
 retired:
   template_files:
     - path:

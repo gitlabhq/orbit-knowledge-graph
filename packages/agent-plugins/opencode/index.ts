@@ -4,8 +4,6 @@ import { describeOrbitCall } from '../core/calls.ts'
 import { parseResponse } from '../core/stats.ts'
 import { type Activity, OrbitUi } from './rpc.ts'
 
-// OpenCode 2 has no hook into its transcript rows, so tui.tsx shows each call above the prompt.
-
 function resultText(result: ToolResult): string {
   if (typeof result.content === 'string' && result.content) return result.content
   if (Array.isArray(result.content)) {
