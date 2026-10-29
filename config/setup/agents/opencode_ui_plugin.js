@@ -792,6 +792,14 @@ function stringField(input, key) {
 }
 var MAX_DETAIL = 96;
 var MAX_OTHERS_SHOWN = 6;
+var CHANGES_STATE = new Set([
+  "orbit setup",
+  "orbit uninstall",
+  "orbit index",
+  "orbit workspace index",
+  "orbit workspace reset",
+  "orbit config set"
+]);
 function invocationOf(words, known) {
   if (words.length === 0 || words.some((arg) => arg === "--help" || arg === "-h"))
     return null;
@@ -809,7 +817,7 @@ function describeCommand(command, known = NO_ENTITIES) {
   if (!first)
     return null;
   const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(", ");
-  const otherOrbit = invocations.filter(({ call }) => call?.label !== first.label).map(({ name }) => name);
+  const otherOrbit = invocations.filter(({ call, name }) => call === null || call.label !== first.label && CHANGES_STATE.has(name)).map(({ name }) => name);
   const others = otherCommands(command, [...new Set(otherOrbit)]);
   return { ...first, detail: clip(detail, MAX_DETAIL), ...others.length ? { others } : {} };
 }

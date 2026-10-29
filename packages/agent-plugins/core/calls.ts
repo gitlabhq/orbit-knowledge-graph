@@ -63,6 +63,9 @@ function stringField(input: unknown, key: string): string | undefined {
 
 const MAX_DETAIL = 96
 const MAX_OTHERS_SHOWN = 6
+const CHANGES_STATE = new Set([
+  'orbit setup', 'orbit uninstall', 'orbit index', 'orbit workspace index', 'orbit workspace reset', 'orbit config set',
+])
 
 type Invocation = { call: OrbitCall | null; name: string }
 
@@ -81,7 +84,9 @@ export function describeCommand(command: string, known: ReadonlySet<string> = NO
   const [first] = calls
   if (!first) return null
   const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(', ')
-  const otherOrbit = invocations.filter(({ call }) => call?.label !== first.label).map(({ name }) => name)
+  const otherOrbit = invocations
+    .filter(({ call, name }) => call === null || (call.label !== first.label && CHANGES_STATE.has(name)))
+    .map(({ name }) => name)
   const others = otherCommands(command, [...new Set(otherOrbit)])
   return { ...first, detail: clip(detail, MAX_DETAIL), ...(others.length ? { others } : {}) }
 }
