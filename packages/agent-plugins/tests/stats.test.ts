@@ -78,9 +78,14 @@ test('a response whose only count is DISTINCT in the tabled form reads as zero',
   expect(parseResponse(aggregation(columns, 'count_distinct_mr_author_id,total', '111,5000')).aggregated).toBe(0)
 })
 
-test('a response whose only count is DISTINCT in the listed form reads as zero', () => {
-  const columns = `columns[2]:\n${listedCount('count_distinct_mr_author_id', 'mr', 'author_id')}  - name: s\n    function: sum\n    target: mr\n    property: iid\n`
-  expect(parseResponse(aggregation(columns, 'count_distinct_mr_author_id,s', '111,5000')).aggregated).toBe(0)
+test('a DISTINCT property count next to a DISTINCT node count reads as the node count', () => {
+  const columns = `columns[2]:\n${listedCount('count_distinct_mr', 'mr')}${listedCount('count_distinct_mr_author_id', 'mr', 'author_id')}`
+  expect(parseResponse(aggregation(columns, 'count_distinct_mr,count_distinct_mr_author_id', '3,111')).aggregated).toBe(3)
+})
+
+test('a plain property count next to a DISTINCT node count reads as the property count', () => {
+  const columns = `columns[2]:\n${listedCount('count_distinct_mr', 'mr')}${listedCount('count_mr_merged_at', 'mr', 'merged_at')}`
+  expect(parseResponse(aggregation(columns, 'count_distinct_mr,count_mr_merged_at', '3,3000')).aggregated).toBe(3000)
 })
 
 test('a plain count of a property reads as counted', () => {
@@ -99,7 +104,7 @@ test('an aliased count of a property reads as DISTINCT', () => {
 })
 
 test('two plain counts on different targets read as the larger one', () => {
-  const columns = `columns[2]:\n${listedCount('mrs', 'mr')}${listedCount('users', 'u')}`
+  const columns = 'columns[2]{name,function,target}:\n  mrs,count,mr\n  users,count,u\n'
   expect(parseResponse(aggregation(columns, 'mrs,users', '3222,111')).aggregated).toBe(3222)
 })
 
