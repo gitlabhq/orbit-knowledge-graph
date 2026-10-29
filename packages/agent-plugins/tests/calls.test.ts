@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
+import { clip } from '../core/command.ts'
 import { COMMAND_LABELS, describeCommand, describeOrbitCall, othersText } from '../core/calls.ts'
 import { entitiesOf, projectsOf } from '../core/cypher.ts'
 
@@ -236,9 +237,12 @@ test('every shape that runs something besides the Orbit call names it or shows a
     ['glab orbit status; cd\\\nprog', '+ cdprog'],
     ['glab orbit status; : a\\\n#; prog', '+ prog'],
     ['glab orbit status; "pro\\\ng"', '+ prog'],
-    ['glab orbit status <(true)#; prog', ', prog'],
+    ['glab orbit status <(true)#; prog', '+ #, prog'],
     ['glab orbit status; : ${x:- #}; prog', '+ prog'],
     ['glab orbit status; : ${x:-$(prog)}', '+ $(...)'],
+    ['glab orbit status; : "${x:-"a #"}"; prog', '+ prog'],
+    ['glab orbit status; : "$(echo "a #")"; prog', '+ $(...), prog'],
+    ['glab orbit status; : "${x:-unclosed', '+ unparsed'],
     ['glab orbit status; FOO+=1 prog', '+ prog'],
     ['glab orbit status; time -p prog', '+ prog'],
     ['glab orbit status | wc --files0-from=list', '+ wc'],
@@ -259,6 +263,7 @@ test('quiet shell words and filters with only a pattern or count stay out of the
     'glab orbit status | jq .',
     'glab orbit status | grep -epat',
     'glab orbit status | grep -e pat',
+    'glab orbit status | grep -e p1 -e p2',
     'glab orbit status; if ((x<<2)); then true; fi',
     'glab orbit status; i=$((i+1))',
     'glab orbit status; ((i++))',
@@ -297,4 +302,8 @@ test('format and variation-selector characters are dropped from the names in the
 test('names that differ only after the clipped prefix are listed separately', () => {
   const long = 'a'.repeat(45)
   expect(rowOf(`glab orbit status; ${long}1; ${long}2`)).toBe(`Checked Orbit  + ${'a'.repeat(39)}…, ${'a'.repeat(39)}…`)
+})
+
+test('clip removes invisible characters before it collapses blanks', () => {
+  expect(clip('a \u200b b', 10)).toBe('a b')
 })

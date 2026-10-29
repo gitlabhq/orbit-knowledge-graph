@@ -39,10 +39,8 @@ function operandCount(spec, args, patternOptions) {
       optionsEnded = true;
     else if (spec.fileOptions?.test(arg))
       return Infinity;
-    else if (patternOptions[i] === "separate" && i + 1 < args.length) {
-      operands++;
+    else if (patternOptions[i] === "separate")
       i++;
-    }
   }
   return operands;
 }
@@ -51,7 +49,7 @@ function isQuietFilter(program, args, readsInput) {
   if (!spec || readsInput || args.some((arg) => spec.notQuiet?.test(arg)))
     return false;
   const patternOptions = args.map((arg) => spec.patternOption?.(arg) ?? null);
-  const maxOperands = patternOptions.includes("attached") ? 0 : spec.maxOperands;
+  const maxOperands = patternOptions.some(Boolean) ? 0 : spec.maxOperands;
   return operandCount(spec, args, patternOptions) <= maxOperands;
 }
 
@@ -60,7 +58,7 @@ var QUOTE_FORMS = {
   ansi: { close: "'", escapes: true, substitutions: false, lineContinuation: false },
   double: { close: '"', escapes: true, substitutions: true, lineContinuation: true }
 };
-var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/;
+var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|[ \t]*\/dev\/null)(?=[\s;&|)]|$)/;
 var SUBSTITUTION = /\$\(|`/;
 var PREFIX_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
 var COMMENT_PRECEDERS = new Set([" ", "\t", `
@@ -97,6 +95,24 @@ function arithmeticEnd(src, open) {
   }
   return -1;
 }
+function parenEnd(src, open) {
+  let depth = 0;
+  for (let i = open;i < src.length; i++) {
+    const c = src[i];
+    if (c === "\\")
+      i++;
+    else if (c === "'" || c === '"') {
+      const { end, closed } = scanQuoted(src, i + 1, c === "'" ? QUOTE_FORMS.single : QUOTE_FORMS.double);
+      if (!closed)
+        return -1;
+      i = end - 1;
+    } else if (c === "(")
+      depth++;
+    else if (c === ")" && --depth === 0)
+      return i + 1;
+  }
+  return -1;
+}
 function startsArithmetic(src, open) {
   return src[open] === "(" && src[open + 1] === "(" && arithmeticEnd(src, open) >= 0;
 }
@@ -105,6 +121,13 @@ function startsSubstitution(src, at) {
     return true;
   return src[at] === "$" && src[at + 1] === "(" && !startsArithmetic(src, at + 1);
 }
+function nestedEnd(src, at) {
+  if (src[at + 1] === "{")
+    return braceEnd(src, at + 1);
+  if (src[at + 1] === "(" && !startsArithmetic(src, at + 1))
+    return parenEnd(src, at + 1);
+  return at;
+}
 function scanQuoted(src, start, form) {
   let text = "";
   let substitutes = false;
@@ -112,7 +135,14 @@ function scanQuoted(src, start, form) {
     const c = src[i] ?? "";
     if (c === form.close)
       return { text, end: i + 1, closed: true, substitutes };
-    if (form.lineContinuation && c === "\\" && src[i + 1] === `
+    const nested = form.substitutions && c === "$" ? nestedEnd(src, i) : i;
+    if (nested < 0)
+      return { text, end: src.length, closed: false, substitutes };
+    if (nested > i) {
+      text += src.slice(i, nested);
+      substitutes ||= SUBSTITUTION.test(src.slice(i, nested));
+      i = nested - 1;
+    } else if (form.lineContinuation && c === "\\" && src[i + 1] === `
 `)
       i++;
     else if (form.escapes && c === "\\" && i + 1 < src.length)

@@ -44,10 +44,7 @@ function operandCount(spec: FilterSpec, args: readonly string[], patternOptions:
       if (!isNumberValue) operands++
     } else if (arg === '--') optionsEnded = true
     else if (spec.fileOptions?.test(arg)) return Infinity
-    else if (patternOptions[i] === 'separate' && i + 1 < args.length) {
-      operands++
-      i++
-    }
+    else if (patternOptions[i] === 'separate') i++
   }
   return operands
 }
@@ -56,6 +53,6 @@ export function isQuietFilter(program: string, args: readonly string[], readsInp
   const spec = Object.hasOwn(FILTERS, program) ? FILTERS[program] : undefined
   if (!spec || readsInput || args.some((arg) => spec.notQuiet?.test(arg))) return false
   const patternOptions = args.map((arg) => spec.patternOption?.(arg) ?? null)
-  const maxOperands = patternOptions.includes('attached') ? 0 : spec.maxOperands
+  const maxOperands = patternOptions.some(Boolean) ? 0 : spec.maxOperands
   return operandCount(spec, args, patternOptions) <= maxOperands
 }

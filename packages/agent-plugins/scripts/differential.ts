@@ -18,7 +18,8 @@ const FRAGMENTS = [
   '# it\'s a comment\nprog', "echo $'\\'' ; prog", '((x=1<<2)); prog', 'echo $((1<<2)); prog',
   'if ((x<<2)); then prog; fi', 'while ((i<1)); do prog; done', 'for i in 1 2; do prog; done',
   'for ((i=0;i<1;i++)); do prog; done', 'for ((i=0;i<1;i++)) do prog; done', 'for ((i=0;i<1;i++)) { prog; }', 'for i do prog; done',
-  'pro\\\ng', ': a\\\n#; prog', '"pro\\\ng"', 'cat <(true)#; prog', ': ${x:- #}; prog', 'FOO+=1 prog', 'time -p prog', 'case x in x) prog;; esac', 'f() { prog; }; f',
+  'pro\\\ng', ': a\\\n#; prog', '"pro\\\ng"', 'cat <(true)#; prog', ': ${x:- #}; prog', 'FOO+=1 prog', 'time -p prog',
+  ': "${x:-"a #"}"; prog', ': "$(echo "a #")"; prog', 'case x in x) prog;; esac', 'f() { prog; }; f',
   'head -n 1', 'head file.txt', 'head -- -file', 'grep -c ok', 'grep -r pattern .', 'grep -epat file.txt',
   'grep -e pat file.txt', 'grep --regexp=pat file.txt', 'grep -- -x file.txt', 'grep x < file.txt',
   'jq .', 'jq . file.txt', 'jq -n env', 'cd .', 'true', ': noop',
@@ -94,6 +95,10 @@ function main(): number {
   }
   const seed = flag('--seed', 1)
   const count = flag('--count', 300)
+  if (!(count > 0)) {
+    console.log('--count must be a positive number')
+    return 2
+  }
   const { dir, bin } = setup()
   const failures: string[] = []
   try {
@@ -102,14 +107,15 @@ function main(): number {
       return 2
     }
     let logged = 0
-    for (const command of generate(prng(seed), count)) {
+    const alone = FRAGMENTS.map((fragment) => `${ORBIT_CALLS[0]}${SEPARATORS[0]}${fragment}`)
+    for (const command of [...alone, ...generate(prng(seed), count)]) {
       const ran = ranStubs(command, dir, bin)
       if (ran.some((name) => name !== 'glab' && name !== 'orbit')) logged++
       const missing = unnamed(command, ran)
       if (missing.length) failures.push(`${JSON.stringify(command)} ran unnamed: ${missing.join(', ')}  row: ${describeCommand(command) ? othersText(describeCommand(command)!) : ''}`)
     }
-    if (logged < count / 2) {
-      console.log(`only ${logged} of ${count} commands logged a stub program, so the check is not exercising the row`)
+    if (logged < (alone.length + count) / 2) {
+      console.log(`only ${logged} commands logged a stub program, so the check is not exercising the row`)
       return 2
     }
   } finally {

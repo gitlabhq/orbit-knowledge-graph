@@ -15,7 +15,7 @@ const QUOTE_FORMS = {
   double: { close: '"', escapes: true, substitutions: true, lineContinuation: true },
 } as const satisfies Record<string, QuoteForm>
 
-const HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/
+const HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|[ \t]*\/dev\/null)(?=[\s;&|)]|$)/
 export const SUBSTITUTION = /\$\(|`/
 export const PREFIX_WORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', 'time', '{'])
 const COMMENT_PRECEDERS = new Set([' ', '\t', '\n', ';', '&', '|', '('])
@@ -47,6 +47,21 @@ function arithmeticEnd(src: string, open: number): number {
   return -1
 }
 
+function parenEnd(src: string, open: number): number {
+  let depth = 0
+  for (let i = open; i < src.length; i++) {
+    const c = src[i]
+    if (c === '\\') i++
+    else if (c === "'" || c === '"') {
+      const { end, closed } = scanQuoted(src, i + 1, c === "'" ? QUOTE_FORMS.single : QUOTE_FORMS.double)
+      if (!closed) return -1
+      i = end - 1
+    } else if (c === '(') depth++
+    else if (c === ')' && --depth === 0) return i + 1
+  }
+  return -1
+}
+
 function startsArithmetic(src: string, open: number): boolean {
   return src[open] === '(' && src[open + 1] === '(' && arithmeticEnd(src, open) >= 0
 }
@@ -58,13 +73,25 @@ function startsSubstitution(src: string, at: number): boolean {
 
 type Quoted = { text: string; end: number; closed: boolean; substitutes: boolean }
 
+function nestedEnd(src: string, at: number): number {
+  if (src[at + 1] === '{') return braceEnd(src, at + 1)
+  if (src[at + 1] === '(' && !startsArithmetic(src, at + 1)) return parenEnd(src, at + 1)
+  return at
+}
+
 function scanQuoted(src: string, start: number, form: QuoteForm): Quoted {
   let text = ''
   let substitutes = false
   for (let i = start; i < src.length; i++) {
     const c = src[i] ?? ''
     if (c === form.close) return { text, end: i + 1, closed: true, substitutes }
-    if (form.lineContinuation && c === '\\' && src[i + 1] === '\n') i++
+    const nested = form.substitutions && c === '$' ? nestedEnd(src, i) : i
+    if (nested < 0) return { text, end: src.length, closed: false, substitutes }
+    if (nested > i) {
+      text += src.slice(i, nested)
+      substitutes ||= SUBSTITUTION.test(src.slice(i, nested))
+      i = nested - 1
+    } else if (form.lineContinuation && c === '\\' && src[i + 1] === '\n') i++
     else if (form.escapes && c === '\\' && i + 1 < src.length) text += src[++i]
     else {
       if (form.substitutions && startsSubstitution(src, i)) substitutes = true
