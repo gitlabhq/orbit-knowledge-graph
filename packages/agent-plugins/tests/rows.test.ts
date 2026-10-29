@@ -27,6 +27,9 @@ test('each different query gets its own row', () => {
 test('a query repeated back to back shares one row with a count', () => {
   const rows = mergeRuns(calls(CALLS, CALLS, CALLS))
   expect(rows.map((row) => row.call.detail)).toEqual(['Definitions  ×3'])
+  const [ok, failed] = calls(CALLS, CALLS)
+  if (!ok || !failed) throw new Error('two calls expected')
+  expect(mergeRuns<{ isRunning: boolean; isErrored?: boolean }>([ok, { ...failed, props: { isRunning: false, isErrored: true } }]).length).toBe(2)
 })
 
 test('each schema read and each search gets its own row', () => {

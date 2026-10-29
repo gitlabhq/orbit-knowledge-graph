@@ -7,11 +7,12 @@ export type Row<P extends { isRunning: boolean }> = GroupCall<P> & { isRunning: 
 
 export type TranscriptMessage = { role: string; text: string; toolUses: readonly { tool: string; input: unknown }[] }
 
-export function mergeRuns<P extends { isRunning: boolean }>(calls: readonly GroupCall<P>[]): Row<P>[] {
+export function mergeRuns<P extends { isRunning: boolean; isErrored?: boolean }>(calls: readonly GroupCall<P>[]): Row<P>[] {
   const groups: GroupCall<P>[][] = []
   for (const x of calls) {
     const last = groups[groups.length - 1]
-    if (last && last[0]?.call.label === x.call.label && last[0]?.call.detail === x.call.detail) last.push(x)
+    const first = last?.[0]
+    if (last && first?.call.label === x.call.label && first.call.detail === x.call.detail && !first.props.isErrored === !x.props.isErrored) last.push(x)
     else groups.push([x])
   }
   return groups.flatMap((group): Row<P>[] => {
