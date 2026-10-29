@@ -140,16 +140,16 @@ struct PageWrite {
 }
 
 fn write_phases(
-    tombstones: Vec<(String, Vec<RecordBatch>)>,
+    tombstones: Vec<(String, RecordBatch)>,
     grouped: Vec<Vec<RecordBatch>>,
     outputs: &[String],
     data_durability: Option<WriteDurability>,
 ) -> Vec<Vec<PageWrite>> {
     let tombstones: Vec<PageWrite> = tombstones
         .into_iter()
-        .map(|(table, batches)| PageWrite {
+        .map(|(table, batch)| PageWrite {
             table,
-            batches,
+            batches: vec![batch],
             durability: Some(WriteDurability::Durable),
         })
         .collect();
@@ -230,10 +230,11 @@ impl Pipeline {
         let transform = self.registry.build(plan)?;
         let outputs = transform.outputs().to_vec();
         let node_diff = plan.edge_diff.as_ref().map(|diff| {
-            let edge_keys = self
-                .registry
-                .sql(plan.name.clone(), diff.edge_keys().to_vec());
-            (diff, edge_keys)
+            let previous_edges = self.registry.sql(
+                format!("{} edge diff", plan.name),
+                diff.key_transforms().to_vec(),
+            );
+            (diff, previous_edges)
         });
         let params = base_query.params();
         let plan_limit = base_query.batch_size();
@@ -287,9 +288,10 @@ impl Pipeline {
 
             let read_previous: OptionFuture<_> = node_diff
                 .as_ref()
-                .map(|(diff, edge_keys)| {
-                    page_rows(&page.batches)
-                        .map(|rows| diff.previous_edges(&self.edge_diff, edge_keys.as_ref(), rows))
+                .map(|(diff, previous_edges)| {
+                    page_rows(&page.batches).map(|rows| {
+                        diff.previous_edges(&self.edge_diff, previous_edges.as_ref(), rows)
+                    })
                 })
                 .transpose()?
                 .into();
@@ -797,7 +799,7 @@ mod tests {
     fn edge_tombstones_are_written_durably_before_the_page_rows() {
         let batch = test_batch(1);
         let phases = write_phases(
-            vec![("v1_gl_edge".to_string(), vec![batch.clone()])],
+            vec![("v1_gl_edge".to_string(), batch.clone())],
             vec![vec![batch.clone()], vec![], vec![batch]],
             &[
                 "v1_gl_job".to_string(),

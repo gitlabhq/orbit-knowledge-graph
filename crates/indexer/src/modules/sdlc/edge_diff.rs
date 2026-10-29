@@ -1,11 +1,11 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use arrow::array::{
     ArrayRef, BooleanArray, Int64Array, StringArray, TimestampMicrosecondArray, downcast_array,
 };
-use arrow::compute::{cast, filter_record_batch, interleave_record_batch};
-use arrow::datatypes::{DataType, TimeUnit};
+use arrow::compute::{cast, concat_batches, filter, interleave_record_batch};
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use arrow::row::{RowConverter, Rows, SortField};
@@ -91,7 +91,7 @@ impl EdgeDiff {
         }))
     }
 
-    pub(in crate::modules::sdlc) fn edge_keys(&self) -> &[Transformation] {
+    pub(in crate::modules::sdlc) fn key_transforms(&self) -> &[Transformation] {
         &self.edge_keys
     }
 
@@ -102,7 +102,47 @@ impl EdgeDiff {
         page: PageRows,
     ) -> Result<Vec<(String, RecordBatch)>, HandlerError> {
         let stored = self.read_stored(client, &page).await?;
-        edges_before(&stored, &page, edge_keys).await
+        self.edges_before(&stored, &page, edge_keys).await
+    }
+
+    async fn edges_before(
+        &self,
+        stored: &[RecordBatch],
+        page: &PageRows,
+        edge_keys: &dyn BlockTransform,
+    ) -> Result<Vec<(String, RecordBatch)>, HandlerError> {
+        let (rows, versions): (Vec<_>, Vec<_>) = previous_rows(stored, page)?.into_iter().unzip();
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        let stored: Vec<&RecordBatch> = stored.iter().collect();
+        let previous = interleave_record_batch(&stored, &rows)
+            .and_then(|previous| stamped(previous, versions))
+            .and_then(|previous| self.source_named(previous))
+            .map_err(|err| HandlerError::Processing(format!("edge diff previous rows: {err}")))?;
+        Ok(edge_keys
+            .transform(&previous)
+            .await?
+            .into_iter()
+            .map(|edges| (edge_keys.outputs()[edges.output_index].clone(), edges.batch))
+            .collect())
+    }
+
+    fn source_named(&self, batch: RecordBatch) -> Result<RecordBatch, ArrowError> {
+        let fields: Vec<Field> = batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| {
+                let source = self
+                    .columns
+                    .iter()
+                    .find(|column| column.stored == *field.name())
+                    .map_or(field.name().as_str(), |column| column.source.as_str());
+                field.as_ref().clone().with_name(source)
+            })
+            .collect();
+        RecordBatch::try_new(Arc::new(Schema::new(fields)), batch.columns().to_vec())
     }
 
     async fn read_stored(
@@ -140,22 +180,14 @@ impl EdgeDiff {
     }
 
     fn stored_rows_sql(&self) -> String {
-        let select = |column: fn(&StoredColumn) -> String| -> String {
-            self.columns
-                .iter()
-                .map(|stored| format!(", {}", column(stored)))
-                .collect()
-        };
-        let sources = select(|column| {
-            if column.stored == column.source {
-                column.stored.clone()
-            } else {
-                format!("{} AS {}", column.stored, column.source)
-            }
-        });
+        let columns: String = self
+            .columns
+            .iter()
+            .map(|column| format!(", {}", column.stored))
+            .collect();
         format!(
-            "SELECT traversal_path, id, _version, _deleted{sources} FROM ( \
-               SELECT traversal_path, id, _version, _deleted{stored} \
+            "SELECT traversal_path, id, _version, _deleted{columns} FROM ( \
+               SELECT traversal_path, id, _version, _deleted{columns} \
                FROM {table} \
                WHERE traversal_path >= {{lo_path:String}} AND traversal_path <= {{hi_path:String}} \
                  AND id IN {{ids:Array(Int64)}} \
@@ -163,7 +195,6 @@ impl EdgeDiff {
                LIMIT 1 BY traversal_path, id, _version) \
              ORDER BY traversal_path, id, _version DESC \
              LIMIT 2 BY traversal_path, id",
-            stored = select(|column| column.stored.clone()),
             table = self.node_table,
         )
     }
@@ -173,7 +204,7 @@ impl EdgeDiff {
         previous: &[(String, RecordBatch)],
         outputs: &[String],
         grouped: &[Vec<RecordBatch>],
-    ) -> Result<Vec<(String, Vec<RecordBatch>)>, HandlerError> {
+    ) -> Result<Vec<(String, RecordBatch)>, HandlerError> {
         if previous.is_empty() {
             return Ok(Vec::new());
         }
@@ -184,35 +215,57 @@ impl EdgeDiff {
                 .collect(),
         )
         .map_err(|err| HandlerError::Processing(format!("edge diff keys: {err}")))?;
-        let page = outputs
+        let previous = previous
             .iter()
-            .zip(grouped)
-            .filter(|(table, _)| **table != self.node_table)
-            .flat_map(|(table, batches)| batches.iter().map(move |batch| (table.as_str(), batch)))
-            .map(|(table, batch)| Ok((table, edge_rows(&converter, batch)?)))
+            .map(|(table, batch)| {
+                let columns = edge_columns(batch)?;
+                let rows = edge_rows(&converter, &columns)?;
+                Ok((table.as_str(), columns, rows))
+            })
             .collect::<Result<Vec<_>, HandlerError>>()?;
-        let emitted: HashSet<_> = page
+        let mut probe = HashMap::new();
+        for (index, (table, _, rows)) in previous.iter().enumerate() {
+            probe.extend(
+                rows.iter()
+                    .enumerate()
+                    .map(|(row, key)| ((*table, key), (index, row))),
+            );
+        }
+        let mut emitted: Vec<Vec<bool>> = previous
             .iter()
-            .flat_map(|(table, rows)| rows.iter().map(move |row| (*table, row)))
+            .map(|(_, _, rows)| vec![false; rows.num_rows()])
             .collect();
+        for (table, batches) in outputs.iter().zip(grouped) {
+            if !previous.iter().any(|(previous, ..)| previous == table) {
+                continue;
+            }
+            for batch in batches {
+                let rows = edge_rows(&converter, &edge_columns(batch)?)?;
+                for key in rows.iter() {
+                    if let Some((index, row)) = probe.get(&(table.as_str(), key)) {
+                        emitted[*index][*row] = true;
+                    }
+                }
+            }
+        }
         let mut retired: BTreeMap<&str, Vec<RecordBatch>> = BTreeMap::new();
-        for (table, batch) in previous {
-            let dropped: BooleanArray = edge_rows(&converter, batch)?
-                .iter()
-                .map(|row| Some(!emitted.contains(&(table.as_str(), row))))
-                .collect();
-            let deleted = Arc::new(BooleanArray::from(vec![true; batch.num_rows()]));
-            let tombstones = replace_column(batch.clone(), "_deleted", deleted)
-                .and_then(|batch| filter_record_batch(&batch, &dropped))
+        for ((table, columns, _), emitted) in previous.iter().zip(emitted) {
+            let dropped =
+                BooleanArray::from_iter(emitted.into_iter().map(|emitted| Some(!emitted)));
+            let tombstones = tombstone_batch(columns, &dropped)
                 .map_err(|err| HandlerError::Processing(format!("edge diff tombstones: {err}")))?;
             if tombstones.num_rows() > 0 {
                 retired.entry(table).or_default().push(tombstones);
             }
         }
-        Ok(retired
+        retired
             .into_iter()
-            .map(|(table, batches)| (table.to_owned(), batches))
-            .collect())
+            .map(|(table, batches)| {
+                concat_batches(&batches[0].schema(), &batches)
+                    .map(|batch| (table.to_owned(), batch))
+                    .map_err(|err| HandlerError::Processing(format!("edge diff tombstones: {err}")))
+            })
+            .collect()
     }
 }
 
@@ -228,27 +281,6 @@ pub(in crate::modules::sdlc) fn page_rows(
         }
     }
     Ok(PageRows(page))
-}
-
-async fn edges_before(
-    stored: &[RecordBatch],
-    page: &PageRows,
-    edge_keys: &dyn BlockTransform,
-) -> Result<Vec<(String, RecordBatch)>, HandlerError> {
-    let (rows, versions): (Vec<_>, Vec<_>) = previous_rows(stored, page)?.into_iter().unzip();
-    if rows.is_empty() {
-        return Ok(Vec::new());
-    }
-    let stored: Vec<&RecordBatch> = stored.iter().collect();
-    let previous = interleave_record_batch(&stored, &rows)
-        .and_then(|previous| stamped(previous, versions))
-        .map_err(|err| HandlerError::Processing(format!("edge diff previous rows: {err}")))?;
-    Ok(edge_keys
-        .transform(&previous)
-        .await?
-        .into_iter()
-        .map(|edges| (edge_keys.outputs()[edges.output_index].clone(), edges.batch))
-        .collect())
 }
 
 fn stored_columns(node: &NodeEntity, mapping: &EdgeMapping) -> Option<Vec<StoredColumn>> {
@@ -326,14 +358,35 @@ fn replace_column(
     RecordBatch::try_new(schema, columns)
 }
 
-fn edge_rows(converter: &RowConverter, batch: &RecordBatch) -> Result<Rows, HandlerError> {
-    let columns = EDGE_KEY
+fn edge_columns(batch: &RecordBatch) -> Result<Vec<ArrayRef>, HandlerError> {
+    EDGE_KEY
         .iter()
         .map(|(name, data_type)| column(batch, name, data_type))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect()
+}
+
+fn edge_rows(converter: &RowConverter, columns: &[ArrayRef]) -> Result<Rows, HandlerError> {
     converter
-        .convert_columns(&columns)
+        .convert_columns(columns)
         .map_err(|err| HandlerError::Processing(format!("edge diff keys: {err}")))
+}
+
+fn tombstone_batch(
+    columns: &[ArrayRef],
+    dropped: &BooleanArray,
+) -> Result<RecordBatch, ArrowError> {
+    let mut fields = Vec::new();
+    for ((name, _), column) in EDGE_KEY.iter().zip(columns) {
+        let mut column = filter(column, dropped)?;
+        if *name == "_version" {
+            let versions: TimestampMicrosecondArray = downcast_array(&column);
+            column = Arc::new(versions.with_timezone("UTC"));
+        }
+        fields.push((*name, column, false));
+    }
+    let deleted = Arc::new(BooleanArray::from(vec![true; dropped.true_count()]));
+    fields.push(("_deleted", deleted, false));
+    RecordBatch::try_from_iter_with_nullable(fields)
 }
 
 fn versions(batch: &RecordBatch) -> Result<impl Iterator<Item = (RowKey, i64)>, HandlerError> {
@@ -349,9 +402,9 @@ fn versions(batch: &RecordBatch) -> Result<impl Iterator<Item = (RowKey, i64)>, 
 }
 
 fn column(batch: &RecordBatch, name: &str, data_type: &DataType) -> Result<ArrayRef, HandlerError> {
-    let array = batch
-        .column_by_name(name)
-        .ok_or_else(|| HandlerError::Processing(format!("edge diff: page has no column {name}")))?;
+    let array = batch.column_by_name(name).ok_or_else(|| {
+        HandlerError::Processing(format!("edge diff: batch has no column {name}"))
+    })?;
     cast(array, data_type)
         .map_err(|err| HandlerError::Processing(format!("edge diff: column {name}: {err}")))
 }
@@ -431,17 +484,56 @@ mod tests {
     #[test]
     fn only_dropped_keys_of_the_latest_page_row_are_retired() {
         let table = "v1_gl_edge".to_string();
-        let previous = vec![(table.clone(), edges(&[(1, 20), (2, 20), (3, 20)]))];
+        let retyped = |batch: RecordBatch| {
+            let kinds = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
+            let schema = batch.schema();
+            let columns = schema
+                .fields()
+                .iter()
+                .zip(batch.columns())
+                .map(|(field, array)| {
+                    let array = match field.name().as_str() {
+                        "source_id" => cast(array, &DataType::UInt64).expect("casts"),
+                        "source_kind" => cast(array, &kinds).expect("casts"),
+                        _ => array.clone(),
+                    };
+                    (field.name().clone(), array)
+                });
+            RecordBatch::try_from_iter(columns).expect("retypes")
+        };
+        let previous = vec![
+            (table.clone(), edges(&[(1, 20), (2, 20)])),
+            (table.clone(), retyped(edges(&[(3, 20)]))),
+        ];
         let page = edges(&[(1, 20), (2, 10)]);
         let tombstones = diff_for("Job")
             .tombstones(&previous, std::slice::from_ref(&table), &[vec![page]])
             .expect("tombstones build");
-        let [(retired_table, batches)] = tombstones.as_slice() else {
+        let [(retired_table, batch)] = tombstones.as_slice() else {
             panic!("one table retires edges: {tombstones:?}");
         };
         assert_eq!(retired_table, &table);
+        let text = |name: &str| Field::new(name, DataType::Utf8, false);
+        let int = |name: &str| Field::new(name, DataType::Int64, false);
+        assert_eq!(
+            *batch.schema(),
+            Schema::new(vec![
+                text("traversal_path"),
+                text("relationship_kind"),
+                int("source_id"),
+                text("source_kind"),
+                int("target_id"),
+                text("target_kind"),
+                Field::new(
+                    "_version",
+                    DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+                    false,
+                ),
+                Field::new("_deleted", DataType::Boolean, false),
+            ])
+        );
         let read =
-            |name: &str, data_type: &DataType| column(&batches[0], name, data_type).expect("reads");
+            |name: &str, data_type: &DataType| column(batch, name, data_type).expect("reads");
         let sources: Int64Array = downcast_array(&read("source_id", &DataType::Int64));
         let versions: TimestampMicrosecondArray = downcast_array(&read("_version", &VERSION));
         let deleted: BooleanArray = downcast_array(&read("_deleted", &DataType::Boolean));
@@ -451,14 +543,14 @@ mod tests {
     }
 
     #[test]
-    fn the_stored_read_selects_source_names_and_two_versions_per_key() {
-        let keys = "traversal_path, id, _version, _deleted, project_id, stage_id, user_id";
-        let rest = "runner_id, upstream_pipeline_id, auto_canceled_by_id";
+    fn the_stored_read_keeps_two_distinct_versions_per_key() {
+        let columns = "traversal_path, id, _version, _deleted, project_id, stage_id, user_id, \
+                       pipeline_id, runner_id, upstream_pipeline_id, auto_canceled_by_id";
         assert_eq!(
             diff_for("Job").stored_rows_sql(),
             format!(
-                "SELECT {keys}, pipeline_id AS commit_id, {rest} FROM ( \
-                   SELECT {keys}, pipeline_id, {rest} \
+                "SELECT {columns} FROM ( \
+                   SELECT {columns} \
                    FROM {table} \
                    WHERE traversal_path >= {{lo_path:String}} AND traversal_path <= {{hi_path:String}} \
                      AND id IN {{ids:Array(Int64)}} \
