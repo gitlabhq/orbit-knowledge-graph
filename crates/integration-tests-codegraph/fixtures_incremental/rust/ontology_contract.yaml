@@ -67,11 +67,25 @@ fixtures:
 
       macro_rules! square { ($x:expr) => { $x * $x }; }
 
+      pub struct Holder { pub point: Point }
+
+      impl Point {
+          pub fn sum(&self) -> i32 { self.x }
+      }
+
+      pub fn read_sum(p: &Point) -> i32 { p.sum() }
+
+      pub fn read_x(p: &Point) -> i32 { p.x }
+
+      pub fn inferred_sum() -> i32 { let q = Point::new(1, 2); q.sum() }
+
+      pub fn external_map() -> Map { Dict::new() }
+
       #[cfg(test)]
       mod tests {
           use super::*;
           #[test]
-          fn it_works() { helper(); }
+          fn it_works() { helper(); outer(); }
       }
 
 tests:
@@ -189,3 +203,146 @@ tests:
       RETURN d.fqn
     assert:
       - { empty: true }
+
+  - name: "a call to a function in the same file is CALLS with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'outer' AND e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "outer", target: "outer::inner" } }
+
+  - name: "a call to an imported function is CALLS with resolution import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'outer::inner' AND e.resolution = 'import'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "outer::inner", target: "util::helper" } }
+
+  - name: "a method call on a typed parameter is CALLS with resolution declared_type"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'read_sum' AND e.resolution = 'declared_type'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "read_sum", target: "Point::sum" } }
+
+  - name: "a method call on a local bound to a call result is CALLS with resolution inferred_type"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'inferred_sum' AND e.resolution = 'inferred_type'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "inferred_sum", target: "Point::sum" } }
+
+  - name: "a call to a name from an external crate ends at its Import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Import)
+      WHERE a.fqn = 'external_map' AND e.resolution = 'import'
+      RETURN a.fqn AS source, b.name AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "external_map", target: "HashMap" } }
+
+  - name: "a struct expression is INSTANTIATES of the struct"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'Point::new' AND e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "Point::new", target: "Point" } }
+
+  - name: "a field read without a call is USES_VALUE"
+    query: |
+      MATCH (a:Definition)-[e:USES_VALUE]->(b:Definition)
+      WHERE a.fqn = 'read_x' AND e.resolution = 'declared_type'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "read_x", target: "Point::x" } }
+
+  - name: "a trait impl is IMPLEMENTS of the trait"
+    query: |
+      MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+      WHERE e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "Point", target: "Store" } }
+
+  - name: "Rust has no inheritance between types, so no EXTENDS"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { empty: true }
+
+  - name: "a trait impl method OVERRIDES the trait method of the same name"
+    query: |
+      MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+      WHERE e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 2 }
+      - { row: { source: "Point::get", target: "Store::get" } }
+      - { row: { source: "Point::make", target: "Store::make" } }
+
+  - name: "the type defines the members of its impl blocks"
+    query: |
+      MATCH (a:Definition)-[e:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'Point' AND b.kind = 'Method'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 5 }
+      - { row: { source: "Point", target: "Point::dist" } }
+      - { row: { source: "Point", target: "Point::get" } }
+      - { row: { source: "Point", target: "Point::make" } }
+      - { row: { source: "Point", target: "Point::new" } }
+      - { row: { source: "Point", target: "Point::sum" } }
+
+  - name: "a use of a project item RESOLVES_TO its definition"
+    query: |
+      MATCH (a:Import)-[e:RESOLVES_TO]->(b:Definition)
+      WHERE e.resolution = 'import'
+      RETURN a.import_path AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "crate::util::helper", target: "util::helper" } }
+
+  - name: "a mod declaration RESOLVES_TO its file"
+    query: |
+      MATCH (a:Import)-[e:RESOLVES_TO]->(b:File)
+      WHERE a.import_path = 'util' AND e.resolution = 'import'
+      RETURN a.import_path AS source, b.path AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "util", target: "src/util.rs" } }
+
+  - name: "a file that imports from another file DEPENDS_ON it"
+    query: |
+      MATCH (a:File)-[e:DEPENDS_ON]->(b:File)
+      WHERE b.path = 'src/util.rs'
+      RETURN a.path AS source, b.path AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "src/lib.rs", target: "src/util.rs" } }

@@ -57,6 +57,28 @@ fixtures:
         end
       end
 
+  - path: lib/shop/item.ex
+    content: |
+      defprotocol Shop.Priced do
+        def price(data)
+      end
+
+      defmodule Shop.Item do
+        defstruct [:price]
+      end
+
+      defimpl Shop.Priced, for: Shop.Item do
+        def price(item), do: item.price
+      end
+
+  - path: lib/shop/cart.ex
+    content: |
+      defmodule Shop.Cart do
+        def total(item), do: double(Shop.Priced.price(item))
+
+        defp double(x), do: x * 2
+      end
+
 tests:
   - name: "every definition has its kind, language kind, category, and scope"
     query: |
@@ -65,7 +87,7 @@ tests:
       ORDER BY fqn
       LIMIT 100
     assert:
-      - { row_count: 14 }
+      - { row_count: 22 }
       - { row: { fqn: "Weather.Forecast", kind: "Module", language_kind: "Module", category: "Module", scope: "top_level" } }
       - { row: { fqn: "Weather.Forecast.city", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
       - { row: { fqn: "Weather.Forecast.days", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
@@ -131,5 +153,82 @@ tests:
     query: |
       MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
       RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "a call of a private function in the module is CALLS"
+    query: |
+      MATCH (a:Definition)-[r:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Shop.Cart.total' AND b.name = 'double' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Shop.Cart.total", target: "Shop.Cart.double" } }
+
+  - name: "a remote call is CALLS"
+    query: |
+      MATCH (a:Definition)-[r:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Shop.Cart.total' AND b.name = 'price' AND r.resolution = 'import'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Shop.Cart.total", target: "Shop.Priced.price" } }
+
+  - name: "a defimpl for a module is IMPLEMENTS of the protocol"
+    query: |
+      MATCH (a:Definition)-[r:IMPLEMENTS]->(b:Definition)
+      WHERE a.fqn = 'Shop.Item' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Shop.Item", target: "Shop.Priced" } }
+
+  - name: "a defimpl function is OVERRIDES of the protocol function"
+    query: |
+      MATCH (a:Definition)-[r:OVERRIDES]->(b:Definition)
+      WHERE a.file_path = 'lib/shop/item.ex' AND a.name = 'price' AND a.kind = 'Function' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "price", target: "Shop.Priced.price" } }
+
+  - name: "the target module defines the defimpl functions"
+    query: |
+      MATCH (a:Definition)-[r:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'Shop.Item' AND b.name = 'price'
+      RETURN a.fqn AS source, b.kind AS target
+    assert:
+      - { row: { source: "Shop.Item", target: "Function" } }
+
+  - name: "an alias resolves to the module"
+    query: |
+      MATCH (a:Import)-[r:RESOLVES_TO]->(b:Definition)
+      WHERE a.name = 'Helpers' AND r.resolution = 'import'
+      RETURN a.name AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Helpers", target: "Weather.Helpers" } }
+
+  - name: "a file depends on the module file it calls"
+    query: |
+      MATCH (a:File)-[r:DEPENDS_ON]->(b:File)
+      WHERE a.path = 'lib/shop/cart.ex'
+      RETURN a.path AS source, b.path AS target
+    assert:
+      - { row: { source: "lib/shop/cart.ex", target: "lib/shop/item.ex" } }
+
+  - name: "Elixir has no inheritance, so nothing is EXTENDS"
+    query: |
+      MATCH (a:Definition)-[:EXTENDS]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Elixir has no annotations, so nothing is ANNOTATED_BY"
+    query: |
+      MATCH (a:Definition)-[:ANNOTATED_BY]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "an Elixir struct field declares no type, so nothing is USES_TYPE"
+    query: |
+      MATCH (a:Definition)-[:USES_TYPE]->(b:Definition)
+      RETURN a.fqn
     assert:
       - { empty: true }

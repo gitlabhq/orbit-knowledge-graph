@@ -65,6 +65,51 @@ fixtures:
           return $a + $b;
       }
 
+  - path: src/Models/Circle.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      use App\Support\Helper;
+      use App\Support\Formatter;
+
+      #[Tracked]
+      final class Circle extends Base implements HasArea
+      {
+          private Helper $helper;
+
+          public const RATIO = 3;
+
+          public function area(): float
+          {
+              $this->helper = new Helper();
+              $f = new Formatter();
+              Helper::fmt($f);
+              return self::RATIO * $this->radius() * VERSION;
+          }
+
+          private function radius(): float
+          {
+              return 1.0;
+          }
+
+          public function compare(Shape $other): int
+          {
+              return $other->loose;
+          }
+      }
+
+      class Base
+      {
+          public function area(): float
+          {
+              return 0.0;
+          }
+      }
+
+      #[\Attribute]
+      class Tracked {}
+
   - path: src/Support/Helper.php
     content: |
       <?php
@@ -603,3 +648,103 @@ tests:
       RETURN d.fqn LIMIT 100
     assert:
       - { empty: true }
+
+  - name: "A $this call to a method of the same class is CALLS with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Circle\area' AND e.resolution = 'local'
+      RETURN b.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: 'App\Models\Circle\radius' } }
+
+  - name: "A static call through a use import is CALLS with resolution import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Circle\area' AND e.resolution = 'import' AND b.kind = 'Method'
+      RETURN b.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: 'App\Support\Helper\fmt' } }
+
+  - name: "new of an imported class is INSTANTIATES with resolution import"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Circle\area' AND b.fqn = 'App\Support\Formatter' AND e.resolution = 'import'
+      RETURN b.kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: "Class" } }
+
+  - name: "new static() is INSTANTIATES of the declaring class with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Shape\make' AND e.resolution = 'local'
+      RETURN b.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: 'App\Models\Shape' } }
+
+  - name: "A self:: class constant read is USES_VALUE with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:USES_VALUE]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Circle\area' AND e.resolution = 'local'
+      RETURN b.fqn AS target, b.kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { target: 'App\Models\Circle\RATIO', kind: Constant } }
+
+  - name: "A superclass in the same file is EXTENDS with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Circle' AND e.resolution = 'local'
+      RETURN b.fqn AS parent
+    assert:
+      - { row_count: 1 }
+      - { row: { parent: 'App\Models\Base' } }
+
+  - name: "An implemented interface and a used trait are IMPLEMENTS with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Shape' AND e.resolution = 'local'
+      RETURN b.fqn AS parent, b.kind AS kind
+    assert:
+      - { row_count: 2 }
+      - { row: { parent: 'App\Models\HasArea', kind: Interface } }
+      - { row: { parent: 'App\Models\Loggable', kind: Trait } }
+
+  - name: "A method that replaces a superclass method is OVERRIDES with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Circle\area' AND e.resolution = 'local'
+      RETURN b.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: 'App\Models\Base\area' } }
+
+  - name: "A class attribute is ANNOTATED_BY"
+    query: |
+      MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Circle'
+      RETURN b.fqn AS attribute
+    assert:
+      - { row_count: 1 }
+      - { row: { attribute: 'App\Models\Tracked' } }
+
+  - name: "A use import RESOLVES_TO the class with resolution import"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(d:Definition)
+      WHERE i.file_path = 'src/Models/Circle.php' AND i.name = 'Helper' AND e.resolution = 'import'
+      RETURN d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: 'App\Support\Helper' } }
+
+  - name: "A file that uses a class of another file DEPENDS_ON it"
+    query: |
+      MATCH (a:File)-[e:DEPENDS_ON]->(b:File)
+      WHERE a.path = 'tests/ShapeTest.php'
+      RETURN b.path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "src/Support/Helper.php" } }

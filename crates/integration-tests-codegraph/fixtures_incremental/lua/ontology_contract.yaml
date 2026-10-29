@@ -39,6 +39,27 @@ fixtures:
 
       return H
 
+  - path: lua/shop.lua
+    content: |
+      local helpers = require("helpers")
+
+      local Shop = {}
+
+      Shop.limit = 3
+
+      function Shop.new()
+        return setmetatable({}, Shop)
+      end
+
+      function Shop.total(n)
+        local function double(x)
+          return x * 2
+        end
+        return double(n) + Shop.limit + helpers.load(n)
+      end
+
+      return Shop
+
 tests:
   - name: "every definition has its kind, language kind, category, and scope"
     query: |
@@ -47,7 +68,7 @@ tests:
       ORDER BY fqn
       LIMIT 100
     assert:
-      - { row_count: 7 }
+      - { row_count: 11 }
       - { row: { fqn: "M", kind: "Module", language_kind: "Table", category: "Module", scope: "top_level" } }
       - { row: { fqn: "M.fetch", kind: "Function", language_kind: "Function", category: "Callable", scope: "member" } }
       - { row: { fqn: "M.fetch.inner", kind: "Function", language_kind: "Function", category: "Callable", scope: "local" } }
@@ -93,5 +114,95 @@ tests:
     query: |
       MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
       RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "a call of a local function is CALLS"
+    query: |
+      MATCH (a:Definition)-[r:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Shop.total' AND b.name = 'double' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Shop.total", target: "Shop.total.double" } }
+
+  - name: "a call through a required module is CALLS"
+    query: |
+      MATCH (a:Definition)-[r:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Shop.total' AND b.name = 'load' AND r.resolution = 'import'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Shop.total", target: "H.load" } }
+
+  - name: "a call on self is CALLS through the declared table"
+    query: |
+      MATCH (a:Definition)-[r:CALLS]->(b:Definition)
+      WHERE a.fqn = 'M.run' AND r.resolution = 'declared_type'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "M.run", target: "M.fetch" } }
+
+  - name: "a table defines the functions declared on it"
+    query: |
+      MATCH (a:Definition)-[r:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'Shop' AND a.kind = 'Module' AND b.name = 'total'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Shop", target: "Shop.total" } }
+
+  - name: "a require resolves to the required file"
+    query: |
+      MATCH (a:Import)-[r:RESOLVES_TO]->(b:File)
+      WHERE a.file_path = 'lua/shop.lua' AND a.name = 'helpers' AND r.resolution = 'import'
+      RETURN a.name AS source, b.path AS target
+    assert:
+      - { row: { source: "helpers", target: "lua/helpers.lua" } }
+
+  - name: "a file depends on the file it requires"
+    query: |
+      MATCH (a:File)-[r:DEPENDS_ON]->(b:File)
+      WHERE a.path = 'lua/shop.lua'
+      RETURN a.path AS source, b.path AS target
+    assert:
+      - { row: { source: "lua/shop.lua", target: "lua/helpers.lua" } }
+
+  - name: "Lua has no constructors, so nothing is INSTANTIATES"
+    query: |
+      MATCH (a:Definition)-[:INSTANTIATES]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Lua has no inheritance, so nothing is EXTENDS"
+    query: |
+      MATCH (a:Definition)-[:EXTENDS]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Lua has no interfaces, so nothing is IMPLEMENTS"
+    query: |
+      MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Lua has no inheritance, so nothing is OVERRIDES"
+    query: |
+      MATCH (a:Definition)-[:OVERRIDES]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Lua has no annotations, so nothing is ANNOTATED_BY"
+    query: |
+      MATCH (a:Definition)-[:ANNOTATED_BY]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Lua declares no types, so nothing is USES_TYPE"
+    query: |
+      MATCH (a:Definition)-[:USES_TYPE]->(b:Definition)
+      RETURN a.fqn
     assert:
       - { empty: true }

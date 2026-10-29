@@ -41,6 +41,10 @@ fixtures:
 
       int main(void) { printf("%d", add(1, SQ(2))); return helper(); }
 
+      int counter = 0;
+
+      int read_x(struct Point *p) { return p->x + counter; }
+
 tests:
   - name: "every definition has its kind, language kind, category, and scope"
     query: |
@@ -117,5 +121,108 @@ tests:
     query: |
       MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
       RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "a call to a function in the same file is CALLS with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'main::main' AND e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main::main", target: "main::add" } }
+
+  - name: "a call to a function declared in an included header is CALLS with resolution wildcard_import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'main::main' AND e.resolution = 'wildcard_import'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main::main", target: "util::helper" } }
+
+  - name: "a call to a name from a system header ends at the include Import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Import)
+      WHERE a.fqn = 'main::main' AND e.resolution = 'wildcard_import'
+      RETURN a.fqn AS source, b.name AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main::main", target: "*" } }
+
+  - name: "an include RESOLVES_TO the header file"
+    query: |
+      MATCH (a:Import)-[e:RESOLVES_TO]->(b:File)
+      WHERE a.file_path = 'main.c' AND e.resolution = 'import'
+      RETURN a.import_path AS source, b.path AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: '"util.h"', target: "util.h" } }
+
+  - name: "an include RESOLVES_TO the definitions the header declares"
+    query: |
+      MATCH (a:Import)-[e:RESOLVES_TO]->(b:Definition)
+      WHERE a.file_path = 'main.c' AND e.resolution = 'wildcard_import'
+      RETURN a.import_path AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: '"util.h"', target: "util::helper" } }
+
+  - name: "a file that includes a header DEPENDS_ON it"
+    query: |
+      MATCH (a:File)-[e:DEPENDS_ON]->(b:File)
+      RETURN a.path AS source, b.path AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 2 }
+      - { row: { source: "main.c", target: "util.h" } }
+      - { row: { source: "util.c", target: "util.h" } }
+
+  - name: "a struct defines its fields"
+    query: |
+      MATCH (a:Definition)-[e:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'main::Point'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 2 }
+      - { row: { source: "main::Point", target: "main::Point::x" } }
+      - { row: { source: "main::Point", target: "main::Point::y" } }
+
+  - name: "C has no constructors, so no INSTANTIATES"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { empty: true }
+
+  - name: "C has no inheritance, so no EXTENDS"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { empty: true }
+
+  - name: "C has no interfaces, so no IMPLEMENTS"
+    query: |
+      MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { empty: true }
+
+  - name: "C has no methods, so no OVERRIDES"
+    query: |
+      MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
     assert:
       - { empty: true }

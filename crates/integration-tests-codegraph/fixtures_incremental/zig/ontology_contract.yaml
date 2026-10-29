@@ -48,6 +48,27 @@ fixtures:
     content: |
       pub fn helper() void {}
 
+  - path: src/shapes.zig
+    content: |
+      const main = @import("main.zig");
+
+      pub const Line = struct {
+          start: main.Point,
+          end: Segment,
+
+          pub fn length(self: Line) f32 {
+              return self.end.len + main.add(1, 2);
+          }
+      };
+
+      const Segment = struct {
+          len: f32,
+
+          fn make() Segment {
+              return Segment{ .len = 1 };
+          }
+      };
+
 tests:
   - name: "std is a Constant"
     query: |
@@ -470,5 +491,97 @@ tests:
     query: |
       MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro']
       RETURN d.fqn LIMIT 100
+    assert:
+      - { empty: true }
+
+  - name: "a call of a file function is CALLS"
+    query: |
+      MATCH (a:Definition)-[r:CALLS]->(b:Definition)
+      WHERE a.name = 'adds numbers' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "adds numbers", target: "add" } }
+
+  - name: "a call through an imported file is CALLS"
+    query: |
+      MATCH (a:Definition)-[r:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Line.length' AND r.resolution = 'import'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Line.length", target: "add" } }
+
+  - name: "a struct literal is INSTANTIATES"
+    query: |
+      MATCH (a:Definition)-[r:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'Point.init' AND r.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Point.init", target: "Point" } }
+
+  - name: "a field read through a typed parameter is USES_VALUE"
+    query: |
+      MATCH (a:Definition)-[r:USES_VALUE]->(b:Definition)
+      WHERE a.fqn = 'Point.norm' AND r.resolution = 'declared_type'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Point.norm", target: "Point.x" } }
+
+  - name: "a struct defines its functions"
+    query: |
+      MATCH (a:Definition)-[r:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'Point' AND b.name = 'init'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "Point", target: "Point.init" } }
+
+  - name: "an @import resolves to the imported file"
+    query: |
+      MATCH (a:Import)-[r:RESOLVES_TO]->(b:File)
+      WHERE a.alias = 'util' AND r.resolution = 'import'
+      RETURN a.alias AS source, b.path AS target
+    assert:
+      - { row: { source: "util", target: "src/util.zig" } }
+
+  - name: "an @import resolves to the definitions used through it"
+    query: |
+      MATCH (a:Import)-[r:RESOLVES_TO]->(b:Definition)
+      WHERE a.alias = 'main' AND r.resolution = 'import'
+      RETURN a.alias AS source, b.fqn AS target
+    assert:
+      - { row: { source: "main", target: "add" } }
+
+  - name: "a file depends on the file it imports"
+    query: |
+      MATCH (a:File)-[r:DEPENDS_ON]->(b:File)
+      WHERE a.path = 'src/shapes.zig'
+      RETURN a.path AS source, b.path AS target
+    assert:
+      - { row: { source: "src/shapes.zig", target: "src/main.zig" } }
+
+  - name: "Zig has no inheritance, so nothing is EXTENDS"
+    query: |
+      MATCH (a:Definition)-[:EXTENDS]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Zig has no interfaces, so nothing is IMPLEMENTS"
+    query: |
+      MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Zig has no inheritance, so nothing is OVERRIDES"
+    query: |
+      MATCH (a:Definition)-[:OVERRIDES]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }
+
+  - name: "Zig has no annotations, so nothing is ANNOTATED_BY"
+    query: |
+      MATCH (a:Definition)-[:ANNOTATED_BY]->(b:Definition)
+      RETURN a.fqn
     assert:
       - { empty: true }

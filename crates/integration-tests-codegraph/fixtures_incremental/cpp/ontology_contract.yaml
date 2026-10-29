@@ -57,6 +57,21 @@ fixtures:
 
       class Square final : public Shape {};
 
+      struct Center { int x; };
+
+      class Circle : public Shape {
+      public:
+          double area() override { return this->r; }
+          double r;
+          Center center;
+      };
+
+      double measure(Circle& c) { return c.area(); }
+
+      double build() { Circle c = Circle(); return c.area(); }
+
+      double infer() { auto c = Circle(); return c.area(); }
+
       union Value { int i; float f; };
 
       typedef int myint;
@@ -175,3 +190,116 @@ tests:
       RETURN d.fqn
     assert:
       - { empty: true }
+
+  - name: "a call to a function declared in an included header is CALLS with resolution wildcard_import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'main::main' AND e.resolution = 'wildcard_import'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main::main", target: "util::helper" } }
+
+  - name: "a method call on a typed parameter is CALLS with resolution declared_type"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'main::measure' AND e.resolution = 'declared_type'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main::measure", target: "main::Circle::area" } }
+
+  - name: "a constructor call is INSTANTIATES of the class"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'main::build' AND e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main::build", target: "main::Circle" } }
+
+  - name: "a base class is EXTENDS"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+      WHERE e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 2 }
+      - { row: { source: "main::Circle", target: "main::Shape" } }
+      - { row: { source: "main::Square", target: "main::Shape" } }
+
+  - name: "C++ has no interface or trait keyword, so no IMPLEMENTS"
+    query: |
+      MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { empty: true }
+
+  - name: "a method with the name of a base class method OVERRIDES it"
+    query: |
+      MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+      WHERE e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main::Circle::area", target: "main::Shape::area" } }
+
+  - name: "a class defines its in-class members"
+    query: |
+      MATCH (a:Definition)-[e:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'main::billing::Order'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 5 }
+      - { row: { source: "main::billing::Order", target: "main::billing::Order::count" } }
+      - { row: { source: "main::billing::Order", target: "main::billing::Order::id_" } }
+      - { row: { source: "main::billing::Order", target: "main::billing::Order::make" } }
+      - { row: { source: "main::billing::Order", target: "main::billing::Order::total" } }
+      - { row: { source: "main::billing::Order", target: "main::billing::Order::touch" } }
+
+  - name: "an include RESOLVES_TO the header file"
+    query: |
+      MATCH (a:Import)-[e:RESOLVES_TO]->(b:File)
+      WHERE a.file_path = 'main.cpp' AND e.resolution = 'import'
+      RETURN a.import_path AS source, b.path AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: '"util.hpp"', target: "util.hpp" } }
+
+  - name: "an include RESOLVES_TO the definitions the header declares"
+    query: |
+      MATCH (a:Import)-[e:RESOLVES_TO]->(b:Definition)
+      WHERE a.file_path = 'main.cpp' AND e.resolution = 'wildcard_import'
+      RETURN a.import_path AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: '"util.hpp"', target: "util::helper" } }
+
+  - name: "a file that includes a header DEPENDS_ON it"
+    query: |
+      MATCH (a:File)-[e:DEPENDS_ON]->(b:File)
+      RETURN a.path AS source, b.path AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 2 }
+      - { row: { source: "main.cpp", target: "util.hpp" } }
+      - { row: { source: "util.cpp", target: "util.hpp" } }
+
+  - name: "a method call on an auto local bound to a constructor call is CALLS with resolution inferred_type"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'main::infer' AND e.resolution = 'inferred_type'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main::infer", target: "main::Circle::area" } }

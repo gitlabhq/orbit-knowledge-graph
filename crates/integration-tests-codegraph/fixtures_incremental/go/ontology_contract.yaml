@@ -63,6 +63,24 @@ fixtures:
 
       func NewPoint(x, y int) *Point { return &Point{X: x} }
 
+      type Base struct {
+      	ID int
+      }
+
+      type Derived struct {
+      	Base
+      	Label string
+      }
+
+      func (d Derived) Show() string { return d.Label }
+
+      func usePoint(p *Point) float64 { return p.Area() }
+
+      func inferPoint() float64 {
+      	q := NewPoint(1, 2)
+      	return q.Area()
+      }
+
       func main() {
       	var local int = 1
       	fmt.Println(str.ToUpper("a"), Sqrt(2), util.Help(), ext.Run(), local)
@@ -159,3 +177,132 @@ tests:
       RETURN d.fqn
     assert:
       - { empty: true }
+
+  - name: "a call to a function in the same file is CALLS with resolution local"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'main.inferPoint' AND e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main.inferPoint", target: "main.NewPoint" } }
+
+  - name: "a call through an imported package is CALLS with resolution import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'main.main' AND e.resolution = 'import'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main.main", target: "util.Help" } }
+
+  - name: "a method call on a typed parameter is CALLS with resolution declared_type"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'main.usePoint' AND e.resolution = 'declared_type'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main.usePoint", target: "main.Point.Area" } }
+
+  - name: "a method call on a local bound to a call result is CALLS with resolution inferred_type"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'main.inferPoint' AND e.resolution = 'inferred_type'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main.inferPoint", target: "main.Point.Area" } }
+
+  - name: "a call through a dot import ends at the Import with resolution wildcard_import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Import)
+      WHERE a.fqn = 'main.main' AND e.resolution = 'wildcard_import'
+      RETURN a.fqn AS source, b.name AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main.main", target: "math" } }
+
+  - name: "a call to an external package ends at its Import"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Import)
+      WHERE a.fqn = 'main.main' AND e.resolution = 'import'
+      RETURN a.fqn AS source, b.name AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 3 }
+      - { row: { source: "main.main", target: "ext" } }
+      - { row: { source: "main.main", target: "fmt" } }
+      - { row: { source: "main.main", target: "strings" } }
+
+  - name: "a field read on the receiver is USES_VALUE"
+    query: |
+      MATCH (a:Definition)-[e:USES_VALUE]->(b:Definition)
+      WHERE a.fqn = 'main.Derived.Show' AND e.resolution = 'declared_type'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main.Derived.Show", target: "main.Derived.Label" } }
+
+  - name: "an embedded struct is EXTENDS"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+      WHERE e.resolution = 'local'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main.Derived", target: "main.Base" } }
+
+  - name: "Go has no method overriding, so no OVERRIDES"
+    query: |
+      MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { empty: true }
+
+  - name: "Go has no annotations, so no ANNOTATED_BY"
+    query: |
+      MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { empty: true }
+
+  - name: "the receiver type defines its receiver methods"
+    query: |
+      MATCH (a:Definition)-[e:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'main.Point' AND b.kind = 'Method'
+      RETURN a.fqn AS source, b.fqn AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 2 }
+      - { row: { source: "main.Point", target: "main.Point.Area" } }
+      - { row: { source: "main.Point", target: "main.Point.Move" } }
+
+  - name: "an import of a project package RESOLVES_TO its file"
+    query: |
+      MATCH (a:Import)-[e:RESOLVES_TO]->(b:File)
+      WHERE e.resolution = 'import'
+      RETURN a.import_path AS source, b.path AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "example.com/demo/util", target: "util/util.go" } }
+
+  - name: "a file that imports a project package DEPENDS_ON its file"
+    query: |
+      MATCH (a:File)-[e:DEPENDS_ON]->(b:File)
+      WHERE b.path = 'util/util.go'
+      RETURN a.path AS source, b.path AS target
+      ORDER BY source, target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "main.go", target: "util/util.go" } }

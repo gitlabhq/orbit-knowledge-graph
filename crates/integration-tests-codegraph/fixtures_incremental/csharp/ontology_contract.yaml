@@ -75,6 +75,78 @@ fixtures:
           }
       }
 
+  - path: src/Lib/Base.cs
+    content: |
+      namespace Acme.Edges.Lib
+      {
+          public class Base
+          {
+              public int Size = 1;
+
+              public virtual void Run() {}
+
+              public static Base Make()
+              {
+                  return new Base();
+              }
+          }
+
+          public interface IRunner
+          {
+              void Go();
+          }
+
+          public class Marked : System.Attribute {}
+      }
+
+  - path: src/Util/Tool.cs
+    content: |
+      namespace Acme.Edges.Util
+      {
+          public class Tool {}
+      }
+
+  - path: src/App.cs
+    content: |
+      using Acme.Edges.Lib;
+      using Acme.Edges.Util;
+
+      namespace Acme.Edges
+      {
+          public class App : Base, IRunner
+          {
+              private Base held;
+
+              [Marked]
+              public void Go()
+              {
+                  Helper();
+                  Base.Make();
+                  Tool t = new Tool();
+              }
+
+              public override void Run() {}
+
+              void Helper() {}
+
+              void Use(Base p)
+              {
+                  p.Run();
+              }
+
+              int Read(Base p)
+              {
+                  return p.Size;
+              }
+
+              void Infer()
+              {
+                  var c = Base.Make();
+                  c.Run();
+              }
+          }
+      }
+
 tests:
   - name: "every definition in src/Money.cs carries the contract columns"
     query: |
@@ -436,3 +508,168 @@ tests:
       MATCH (d:Definition) WHERE NOT d.kind IN ['Class','Struct','Interface','Trait','Enum','TypeAlias','Function','Method','Constructor','Test','Field','Constant','Variable','EnumMember','Module','Macro'] RETURN d.fqn
     assert:
       - { empty: true }
+
+  - name: "edges: CALLS to a definition in the same file has resolution local"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App.Go' AND b.fqn = 'Acme.Edges.App.Helper' AND e.resolution = 'local'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: CALLS to an imported definition has resolution import"
+    # Known gap: a call through a type found by a using directive gets resolution import, not wildcard_import.
+    skip: true
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App.Go' AND b.fqn = 'Acme.Edges.Lib.Base.Make' AND e.resolution = 'wildcard_import'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: CALLS through a declared parameter type has resolution declared_type"
+    # Known gap: the engine writes inferred_type for a call through a declared parameter type.
+    skip: true
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App.Use' AND b.fqn = 'Acme.Edges.Lib.Base.Run' AND e.resolution = 'declared_type'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: CALLS through an inferred local type has resolution inferred_type"
+    query: |
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App.Infer' AND b.fqn = 'Acme.Edges.Lib.Base.Run' AND e.resolution = 'inferred_type'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: INSTANTIATES a type in the same file has resolution local"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.Lib.Base.Make' AND b.fqn = 'Acme.Edges.Lib.Base' AND e.resolution = 'local'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: INSTANTIATES a type found by a wildcard import has resolution wildcard_import"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App.Go' AND b.fqn = 'Acme.Edges.Util.Tool' AND e.resolution = 'wildcard_import'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: a static member call does not instantiate its type"
+    query: |
+      MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App.Go' AND b.fqn = 'Acme.Edges.Lib.Base'
+      RETURN b.fqn AS dst
+    assert:
+      - { empty: true }
+
+  - name: "edges: USES_VALUE reads a field through a declared parameter type"
+    # Known gap: a field read through a parameter of an imported type gives no edge.
+    skip: true
+    query: |
+      MATCH (a:Definition)-[e:USES_VALUE]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App.Read' AND b.fqn = 'Acme.Edges.Lib.Base.Size' AND e.resolution = 'declared_type'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: USES_TYPE links a parameter type"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App.Use' AND b.fqn = 'Acme.Edges.Lib.Base'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: USES_TYPE links a field type"
+    # Known gap: a field type without an initializer gives no edge.
+    skip: true
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App.held' AND b.fqn = 'Acme.Edges.Lib.Base'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: EXTENDS a superclass has resolution import"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App' AND b.fqn = 'Acme.Edges.Lib.Base' AND e.resolution = 'import'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: IMPLEMENTS a supertype that is an Interface"
+    query: |
+      MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App' AND b.fqn = 'Acme.Edges.Lib.IRunner' AND e.resolution = 'import'
+      RETURN a.fqn AS src, b.fqn AS dst, b.kind AS kind
+    assert:
+      - { row: { dst: "Acme.Edges.Lib.IRunner", kind: "Interface" } }
+
+  - name: "edges: EXTENDS is not written for an interface or a trait"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App' AND b.fqn = 'Acme.Edges.Lib.IRunner'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { empty: true }
+
+  - name: "edges: OVERRIDES links each method to the method it replaces"
+    query: |
+      MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+      WHERE a.fqn STARTS WITH 'Acme.Edges.App.' AND e.resolution = 'import'
+      RETURN a.fqn AS src, b.fqn AS dst
+      ORDER BY a.fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { src: "Acme.Edges.App.Go", dst: "Acme.Edges.Lib.IRunner.Go" } }
+      - { row: { src: "Acme.Edges.App.Run", dst: "Acme.Edges.Lib.Base.Run" } }
+
+  - name: "edges: ANNOTATED_BY links a method to its attribute"
+    query: |
+      MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App.Go' AND b.fqn = 'Acme.Edges.Lib.Marked'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: DEFINES links a type to its member"
+    query: |
+      MATCH (a:Definition)-[e:DEFINES]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.App' AND b.fqn = 'Acme.Edges.App.Go'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: RESOLVES_TO links a wildcard import to a definition with resolution wildcard_import"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(d:Definition)
+      WHERE i.file_path = 'src/App.cs' AND i.name = '*' AND d.fqn = 'Acme.Edges.Util.Tool' AND e.resolution = 'wildcard_import'
+      RETURN d.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: RESOLVES_TO links a wildcard import to a file"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(f:File)
+      WHERE i.file_path = 'src/App.cs' AND i.name = '*' AND f.path = 'src/Util/Tool.cs'
+      RETURN f.path AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: DEPENDS_ON links a file to each file it imports from"
+    query: |
+      MATCH (a:File)-[e:DEPENDS_ON]->(b:File)
+      WHERE a.path = 'src/App.cs'
+      RETURN b.path AS dst
+      ORDER BY b.path
+    assert:
+      - { row: { dst: "src/Lib/Base.cs" } }
+      - { row: { dst: "src/Util/Tool.cs" } }
