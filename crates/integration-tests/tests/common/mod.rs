@@ -97,8 +97,8 @@ pub async fn resolve_owners(
     server_extensions.insert(Arc::new(ctx.create_client()));
     server_extensions.insert(derive_clickhouse_data_model(&ontology));
     let mut pipeline_ctx = QueryPipelineContext {
-        frontend: Frontend::JsonDsl,
-        query_json: String::new(),
+        query: String::new(),
+        frontend: Frontend::Gql,
         compiled: Some(Arc::new(compiled.clone())),
         ontology,
         security_context: Some(test_security_context()),
