@@ -2055,19 +2055,11 @@ mod tests {
 
     #[test]
     fn accepts_distinct_count_and_rejects_it_on_other_functions() {
-        assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{"count": "u.username", "distinct": true, "as": "n"}]
-            }"#,
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{"sum": "u.id", "distinct": true, "as": "n"}]
-            }"#,
+        assert_ok("MATCH (u:User {id: 1}) RETURN count(DISTINCT u.username) AS n");
+        assert_input_rejects(
+            mutated("MATCH (u:User {id: 1}) RETURN sum(u.id) AS n", |input| {
+                input.aggregation.metrics[0].distinct = true
+            }),
             "\"distinct\" works only with \"count\"",
         );
     }
