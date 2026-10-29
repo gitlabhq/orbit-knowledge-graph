@@ -1518,6 +1518,9 @@ impl Ontology {
         column: &str,
     ) -> bool {
         if let Some(pipelines) = self.get_edge_etl(relationship_kind) {
+            if self.other_node_pipeline_writes_endpoint(relationship_kind, node_kind, &direction) {
+                return false;
+            }
             return pipelines.iter().any(|pipeline| {
                 pipeline.transform.edges().iter().any(|mapping| {
                     let node_ref = direction.endpoint(mapping);
@@ -1572,6 +1575,23 @@ impl Ontology {
         });
 
         own_pipeline_tags_this_side || !self.has_declared_emitter(relationship_kind)
+    }
+
+    fn other_node_pipeline_writes_endpoint(
+        &self,
+        relationship_kind: &str,
+        node_kind: &str,
+        direction: &DenormDirection,
+    ) -> bool {
+        self.nodes().filter(|node| node.name != node_kind).any(|node| {
+            node.pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+                .filter(|mapping| mapping.label == relationship_kind)
+                .any(|mapping| {
+                    matches!(&direction.endpoint(mapping).kind, NodeRefKind::Literal(kind) if kind == node_kind)
+                })
+        })
     }
 
     fn has_declared_emitter(&self, relationship_kind: &str) -> bool {
@@ -2035,6 +2055,25 @@ mod tests {
         assert!(ontology.edge_projects_column("HAS_NOTE", "Note", Target, "confidential"));
         assert!(ontology.edge_projects_column("CREATOR", "Project", Target, "archived"));
         assert!(ontology.edge_projects_column("CALLS", "Definition", Source, "definition_type"));
+    }
+
+    #[test]
+    fn denorm_not_declared_on_endpoints_a_node_pipeline_also_writes() {
+        use crate::entities::DenormDirection::{Source, Target};
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        for edge in ["REVIEWER", "APPROVED"] {
+            for column in ["user_type", "state"] {
+                assert!(
+                    !ontology.edge_projects_column(edge, "User", Source, column),
+                    "{edge} must not project User.{column}: the MergeRequest pipeline writes it untagged"
+                );
+            }
+            assert!(
+                ontology.edge_projects_column(edge, "MergeRequest", Target, "state_id"),
+                "{edge} keeps MergeRequest.state on target_tags"
+            );
+        }
     }
 
     #[test]
