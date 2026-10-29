@@ -20,7 +20,7 @@ function grepPatternOption(arg: string): PatternOption {
 const FILTERS: Readonly<Record<string, FilterSpec>> = {
   head: { maxOperands: 0 },
   tail: { maxOperands: 0 },
-  wc: { maxOperands: 0 },
+  wc: { maxOperands: 0, fileOptions: /^--files0-from/ },
   cut: { maxOperands: 0 },
   grep: {
     maxOperands: 1,

@@ -13,7 +13,7 @@ function grepPatternOption(arg) {
 var FILTERS = {
   head: { maxOperands: 0 },
   tail: { maxOperands: 0 },
-  wc: { maxOperands: 0 },
+  wc: { maxOperands: 0, fileOptions: /^--files0-from/ },
   cut: { maxOperands: 0 },
   grep: {
     maxOperands: 1,
@@ -56,13 +56,33 @@ function isQuietFilter(program, args, readsInput) {
 }
 
 var QUOTE_FORMS = {
-  single: { close: "'", escapes: false, substitutions: false },
-  ansi: { close: "'", escapes: true, substitutions: false },
-  double: { close: '"', escapes: true, substitutions: true }
+  single: { close: "'", escapes: false, substitutions: false, lineContinuation: false },
+  ansi: { close: "'", escapes: true, substitutions: false, lineContinuation: false },
+  double: { close: '"', escapes: true, substitutions: true, lineContinuation: true }
 };
 var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/;
 var SUBSTITUTION = /\$\(|`/;
-var KEYWORDS_BEFORE_ARITHMETIC = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
+var PREFIX_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
+var COMMENT_PRECEDERS = new Set([" ", "\t", `
+`, ";", "&", "|", "("]);
+function braceEnd(src, open) {
+  let depth = 0;
+  for (let i = open;i < src.length; i++) {
+    const c = src[i];
+    if (c === "\\")
+      i++;
+    else if (c === "'" || c === '"') {
+      const { end, closed } = scanQuoted(src, i + 1, c === "'" ? QUOTE_FORMS.single : QUOTE_FORMS.double);
+      if (!closed)
+        return -1;
+      i = end - 1;
+    } else if (c === "{" && src[i - 1] === "$")
+      depth++;
+    else if (c === "}" && --depth === 0)
+      return i + 1;
+  }
+  return -1;
+}
 function arithmeticEnd(src, open) {
   let depth = 2;
   for (let i = open + 2;i < src.length; i++) {
@@ -92,7 +112,10 @@ function scanQuoted(src, start, form) {
     const c = src[i] ?? "";
     if (c === form.close)
       return { text, end: i + 1, closed: true, substitutes };
-    if (form.escapes && c === "\\" && i + 1 < src.length)
+    if (form.lineContinuation && c === "\\" && src[i + 1] === `
+`)
+      i++;
+    else if (form.escapes && c === "\\" && i + 1 < src.length)
       text += src[++i];
     else {
       if (form.substitutions && startsSubstitution(src, i))
@@ -166,9 +189,9 @@ class Lexer {
     else if (c === "$")
       this.dollar();
     else if (c === "`")
-      this.substitution(1);
+      this.substitution();
     else if (c === "(" && this.startsArithmeticCommand())
-      this.arithmetic(this.pos, 0);
+      this.arithmeticCommand();
     else if (c === "<" || c === ">" || c === "&" && this.src[this.pos + 1] === ">")
       this.redirect(c);
     else if (c === "|" && this.src[this.pos + 1] !== "|")
@@ -176,9 +199,9 @@ class Lexer {
     else if (c === `
 ` || ";&|()".includes(c))
       this.separator(c);
-    else if (c === "#" && this.word === null)
+    else if (c === "#" && this.startsComment())
       this.comment();
-    else if (/\s/.test(c))
+    else if (c === " " || c === "\t")
       this.whitespace();
     else
       this.plain(c);
@@ -205,7 +228,7 @@ class Lexer {
     if (this.word !== null || !startsArithmetic(this.src, this.pos))
       return false;
     const words = this.currentCommandWords();
-    return words.every((word) => KEYWORDS_BEFORE_ARITHMETIC.has(word)) || words[0] === "for";
+    return words.every((word) => PREFIX_WORDS.has(word)) || words[0] === "for";
   }
   quoted(form, openingLength) {
     const { text, end, closed, substitutes } = scanQuoted(this.src, this.pos + openingLength, QUOTE_FORMS[form]);
@@ -219,10 +242,9 @@ class Lexer {
   escape() {
     const next = this.src[this.pos + 1];
     if (next === `
-`) {
-      this.endWord();
+`)
       this.pos += 2;
-    } else if (next === undefined)
+    else if (next === undefined)
       this.plain("\\");
     else {
       this.append(next);
@@ -234,22 +256,37 @@ class Lexer {
     if (next === "'")
       this.quoted("ansi", 2);
     else if (startsSubstitution(this.src, this.pos))
-      this.substitution(1);
+      this.substitution();
     else if (next === "(" && startsArithmetic(this.src, this.pos + 1))
-      this.arithmetic(this.pos + 1, 1);
+      this.arithmeticExpansion();
+    else if (next === "{" && braceEnd(this.src, this.pos + 1) >= 0)
+      this.parameterExpansion();
     else
       this.plain("$");
   }
-  substitution(length) {
+  substitution() {
     this.tokens.push({ kind: "substitution" });
-    this.pos += length;
+    this.pos++;
   }
-  arithmetic(open, dollar) {
+  skipArithmetic(open) {
     const end = arithmeticEnd(this.src, open);
     if (SUBSTITUTION.test(this.src.slice(open + 2, end - 2)))
       this.tokens.push({ kind: "substitution" });
-    if (dollar)
-      this.append("");
+    this.pos = end;
+  }
+  arithmeticCommand() {
+    this.skipArithmetic(this.pos);
+  }
+  arithmeticExpansion() {
+    this.append("");
+    this.skipArithmetic(this.pos + 1);
+  }
+  parameterExpansion() {
+    const end = braceEnd(this.src, this.pos + 1);
+    const text = this.src.slice(this.pos, end);
+    if (SUBSTITUTION.test(text))
+      this.tokens.push({ kind: "substitution" });
+    this.append(text);
     this.pos = end;
   }
   redirect(c) {
@@ -319,6 +356,9 @@ class Lexer {
     }
     this.pos = at - 1;
   }
+  startsComment() {
+    return this.word === null && (this.pos === 0 || COMMENT_PRECEDERS.has(this.src[this.pos - 1] ?? ""));
+  }
   comment() {
     const newline = this.src.indexOf(`
 `, this.pos);
@@ -340,7 +380,7 @@ function lex(src) {
 var MAX_NAME_LENGTH = 40;
 var INVISIBLE = /[\p{Cc}\p{Cf}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]/gu;
 function clip(text, max) {
-  const flat = text.replace(/\s+/g, " ").replace(INVISIBLE, "").trim();
+  const flat = text.replace(INVISIBLE, "").replace(/\s+/g, " ").trim();
   return flat.length > max ? flat.slice(0, max - 1) + "\u2026" : flat;
 }
 function displayName(name) {
@@ -401,17 +441,24 @@ function orbitWords(words) {
     i++;
   return words.slice(i);
 }
-var PREFIX_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
-var HEADER_WORDS = new Set(["for", "select", "case"]);
+var ASSIGNMENT = /^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/;
+var LOOP_HEADERS = new Set(["for", "select"]);
 function withoutKeywords(words) {
   let i = 0;
   for (;i < words.length; i++) {
     const word = words[i] ?? "";
-    if (HEADER_WORDS.has(word))
+    if (word === "case")
       return [];
+    if (LOOP_HEADERS.has(word)) {
+      const body = words.findIndex((candidate, at) => at > i && (candidate === "do" || candidate === "{"));
+      return body < 0 ? [] : withoutKeywords(words.slice(body + 1));
+    }
     if (word === "function")
       i++;
-    else if (!PREFIX_WORDS.has(word))
+    else if (PREFIX_WORDS.has(word)) {
+      if (word === "time" && words[i + 1] === "-p")
+        i++;
+    } else
       break;
   }
   return words.slice(i);
@@ -424,7 +471,6 @@ function runnable(command) {
 function orbitInvocations(command) {
   return runnable(command).runs.map(({ words }) => orbitWords(words)).filter((words) => words !== null);
 }
-var SUBSTITUTION_IN_WORD = /\$\(|`/;
 var SHELL_WORDS = new Set(["cd", "pushd", "popd", "true", ":", "fi", "done", "esac", "}"]);
 function isQuiet(program, args, run) {
   if (program.includes("/"))
@@ -444,9 +490,9 @@ function otherCommands(command, orbitExtras = []) {
       writes.set(target, "> " + displayName(target));
     if (orbitWords(run.words))
       continue;
-    const at = run.words.findIndex((word) => !/^\w+=/.test(word));
+    const at = run.words.findIndex((word) => !ASSIGNMENT.test(word));
     const program = run.words[at];
-    if (program === undefined || SUBSTITUTION_IN_WORD.test(program))
+    if (program === undefined || SUBSTITUTION.test(program))
       continue;
     if (!isQuiet(program, run.words.slice(at + 1), run))
       listed.set(program, displayName(program));

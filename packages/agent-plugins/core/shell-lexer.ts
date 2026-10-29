@@ -7,17 +7,33 @@ export type Token =
 export type Lexed = { tokens: Token[]; unparsed: boolean }
 
 type Heredoc = { delimiter: string; stripTabs: boolean; quoted: boolean }
-type QuoteForm = { close: string; escapes: boolean; substitutions: boolean }
+type QuoteForm = { close: string; escapes: boolean; substitutions: boolean; lineContinuation: boolean }
 
 const QUOTE_FORMS = {
-  single: { close: "'", escapes: false, substitutions: false },
-  ansi: { close: "'", escapes: true, substitutions: false },
-  double: { close: '"', escapes: true, substitutions: true },
+  single: { close: "'", escapes: false, substitutions: false, lineContinuation: false },
+  ansi: { close: "'", escapes: true, substitutions: false, lineContinuation: false },
+  double: { close: '"', escapes: true, substitutions: true, lineContinuation: true },
 } as const satisfies Record<string, QuoteForm>
 
 const HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/
-const SUBSTITUTION = /\$\(|`/
-const KEYWORDS_BEFORE_ARITHMETIC = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', 'time', '{'])
+export const SUBSTITUTION = /\$\(|`/
+export const PREFIX_WORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', 'time', '{'])
+const COMMENT_PRECEDERS = new Set([' ', '\t', '\n', ';', '&', '|', '('])
+
+function braceEnd(src: string, open: number): number {
+  let depth = 0
+  for (let i = open; i < src.length; i++) {
+    const c = src[i]
+    if (c === '\\') i++
+    else if (c === "'" || c === '"') {
+      const { end, closed } = scanQuoted(src, i + 1, c === "'" ? QUOTE_FORMS.single : QUOTE_FORMS.double)
+      if (!closed) return -1
+      i = end - 1
+    } else if (c === '{' && src[i - 1] === '$') depth++
+    else if (c === '}' && --depth === 0) return i + 1
+  }
+  return -1
+}
 
 function arithmeticEnd(src: string, open: number): number {
   let depth = 2
@@ -48,7 +64,8 @@ function scanQuoted(src: string, start: number, form: QuoteForm): Quoted {
   for (let i = start; i < src.length; i++) {
     const c = src[i] ?? ''
     if (c === form.close) return { text, end: i + 1, closed: true, substitutes }
-    if (form.escapes && c === '\\' && i + 1 < src.length) text += src[++i]
+    if (form.lineContinuation && c === '\\' && src[i + 1] === '\n') i++
+    else if (form.escapes && c === '\\' && i + 1 < src.length) text += src[++i]
     else {
       if (form.substitutions && startsSubstitution(src, i)) substitutes = true
       text += c
@@ -113,13 +130,13 @@ class Lexer {
     else if (c === '"') this.quoted('double', 1)
     else if (c === '\\') this.escape()
     else if (c === '$') this.dollar()
-    else if (c === '`') this.substitution(1)
-    else if (c === '(' && this.startsArithmeticCommand()) this.arithmetic(this.pos, 0)
+    else if (c === '`') this.substitution()
+    else if (c === '(' && this.startsArithmeticCommand()) this.arithmeticCommand()
     else if (c === '<' || c === '>' || (c === '&' && this.src[this.pos + 1] === '>')) this.redirect(c)
     else if (c === '|' && this.src[this.pos + 1] !== '|') this.pipe()
     else if (c === '\n' || ';&|()'.includes(c)) this.separator(c)
-    else if (c === '#' && this.word === null) this.comment()
-    else if (/\s/.test(c)) this.whitespace()
+    else if (c === '#' && this.startsComment()) this.comment()
+    else if (c === ' ' || c === '\t') this.whitespace()
     else this.plain(c)
   }
 
@@ -144,7 +161,7 @@ class Lexer {
   private startsArithmeticCommand(): boolean {
     if (this.word !== null || !startsArithmetic(this.src, this.pos)) return false
     const words = this.currentCommandWords()
-    return words.every((word) => KEYWORDS_BEFORE_ARITHMETIC.has(word)) || words[0] === 'for'
+    return words.every((word) => PREFIX_WORDS.has(word)) || words[0] === 'for'
   }
 
   private quoted(form: keyof typeof QUOTE_FORMS, openingLength: number): void {
@@ -157,10 +174,8 @@ class Lexer {
 
   private escape(): void {
     const next = this.src[this.pos + 1]
-    if (next === '\n') {
-      this.endWord()
-      this.pos += 2
-    } else if (next === undefined) this.plain('\\')
+    if (next === '\n') this.pos += 2
+    else if (next === undefined) this.plain('\\')
     else {
       this.append(next)
       this.pos += 2
@@ -170,20 +185,37 @@ class Lexer {
   private dollar(): void {
     const next = this.src[this.pos + 1]
     if (next === "'") this.quoted('ansi', 2)
-    else if (startsSubstitution(this.src, this.pos)) this.substitution(1)
-    else if (next === '(' && startsArithmetic(this.src, this.pos + 1)) this.arithmetic(this.pos + 1, 1)
+    else if (startsSubstitution(this.src, this.pos)) this.substitution()
+    else if (next === '(' && startsArithmetic(this.src, this.pos + 1)) this.arithmeticExpansion()
+    else if (next === '{' && braceEnd(this.src, this.pos + 1) >= 0) this.parameterExpansion()
     else this.plain('$')
   }
 
-  private substitution(length: number): void {
+  private substitution(): void {
     this.tokens.push({ kind: 'substitution' })
-    this.pos += length
+    this.pos++
   }
 
-  private arithmetic(open: number, dollar: 0 | 1): void {
+  private skipArithmetic(open: number): void {
     const end = arithmeticEnd(this.src, open)
     if (SUBSTITUTION.test(this.src.slice(open + 2, end - 2))) this.tokens.push({ kind: 'substitution' })
-    if (dollar) this.append('')
+    this.pos = end
+  }
+
+  private arithmeticCommand(): void {
+    this.skipArithmetic(this.pos)
+  }
+
+  private arithmeticExpansion(): void {
+    this.append('')
+    this.skipArithmetic(this.pos + 1)
+  }
+
+  private parameterExpansion(): void {
+    const end = braceEnd(this.src, this.pos + 1)
+    const text = this.src.slice(this.pos, end)
+    if (SUBSTITUTION.test(text)) this.tokens.push({ kind: 'substitution' })
+    this.append(text)
     this.pos = end
   }
 
@@ -246,6 +278,10 @@ class Lexer {
       at = body.end
     }
     this.pos = at - 1
+  }
+
+  private startsComment(): boolean {
+    return this.word === null && (this.pos === 0 || COMMENT_PRECEDERS.has(this.src[this.pos - 1] ?? ''))
   }
 
   private comment(): void {

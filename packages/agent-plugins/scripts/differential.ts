@@ -4,19 +4,21 @@ import { join } from 'node:path'
 
 import { describeCommand, othersText } from '../core/calls.ts'
 
-const STUBS = ['prog', 'tool', 'helper', 'glab', 'orbit']
-const MARKERS = ['$(...)', 'unparsed']
+const STUBS = ['prog', 'tool', 'helper', 'inner', 'glab', 'orbit']
+const SUBSTITUTION_MARKER = '$(...)'
+const UNPARSED_MARKER = 'unparsed'
 
 const ORBIT_CALLS = ['glab orbit status', 'glab orbit grep term', 'orbit query "MATCH (n) RETURN n"', 'glab orbit query <<EOF\nMATCH (n) RETURN n\nEOF']
 const SEPARATORS = [' ; ', ' && ', ' || ', ' | ', '\n', ' & ', ' |& ']
 const FRAGMENTS = [
   'prog', 'tool x', './prog', 'FOO=1 prog', '(prog)', '{ prog; }', '! prog', 'time prog',
-  '$(prog)', '`prog`', '"$(prog)"', '<(prog)', '> >(prog)',
+  '$(inner)', '`inner`', '"$(inner)"', '<(inner)', '> >(inner)', ': ${x:-$(inner)}',
   '</dev/null prog', '>out.txt prog', '> out.txt', '2>&1', '&>out.txt',
-  '<<EOF; prog', '<<< text; prog', 'cat <<EOF\n$(prog)\nEOF', "cat <<'EOF'\n$(prog)\nEOF", 'cat <<EOF\nit\'s\nEOF\nprog',
+  '<<EOF; prog', '<<< text; prog', 'cat <<EOF\n$(inner)\nEOF', "cat <<'EOF'\n$(inner)\nEOF", 'cat <<EOF\nit\'s\nEOF\nprog',
   '# it\'s a comment\nprog', "echo $'\\'' ; prog", '((x=1<<2)); prog', 'echo $((1<<2)); prog',
   'if ((x<<2)); then prog; fi', 'while ((i<1)); do prog; done', 'for i in 1 2; do prog; done',
-  'for ((i=0;i<1;i++)); do prog; done', 'case x in x) prog;; esac', 'f() { prog; }; f',
+  'for ((i=0;i<1;i++)); do prog; done', 'for ((i=0;i<1;i++)) do prog; done', 'for ((i=0;i<1;i++)) { prog; }', 'for i do prog; done',
+  'pro\\\ng', ': a\\\n#; prog', '"pro\\\ng"', 'cat <(true)#; prog', ': ${x:- #}; prog', 'FOO+=1 prog', 'time -p prog', 'case x in x) prog;; esac', 'f() { prog; }; f',
   'head -n 1', 'head file.txt', 'head -- -file', 'grep -c ok', 'grep -r pattern .', 'grep -epat file.txt',
   'grep -e pat file.txt', 'grep --regexp=pat file.txt', 'grep -- -x file.txt', 'grep x < file.txt',
   'jq .', 'jq . file.txt', 'jq -n env', 'cd .', 'true', ': noop',
@@ -64,8 +66,7 @@ let runs = 0
 function ranStubs(command: string, dir: string, bin: string): string[] {
   const log = join(dir, `stub-${runs++}.log`)
   writeFileSync(log, '')
-  const script = 'bash -c "$1"; sleep 0.05'
-  Bun.spawnSync(['sh', '-c', script, 'sh', command], {
+  Bun.spawnSync(['bash', '-c', `${command}\nwait`], {
     cwd: dir,
     env: { PATH: `${bin}:/usr/bin:/bin`, STUB_LOG: log, HOME: dir },
     stdin: 'ignore',
@@ -80,21 +81,36 @@ function unnamed(command: string, ran: readonly string[]): string[] {
   const call = describeCommand(command)
   if (!call) return ['<no Orbit row>']
   const listed = call.others ?? []
-  if (listed.some((item) => MARKERS.includes(item))) return []
+  if (listed.includes(UNPARSED_MARKER)) return []
   const named = (name: string) => listed.some((item) => item === name || item.endsWith('/' + name))
-  return ran.filter((name) => name !== 'glab' && name !== 'orbit' && !named(name))
+  const covered = (name: string) => name === 'inner' && listed.includes(SUBSTITUTION_MARKER)
+  return ran.filter((name) => name !== 'glab' && name !== 'orbit' && !covered(name) && !named(name))
 }
 
 function main(): number {
-  const flag = (name: string, fallback: number) => Number(process.argv[process.argv.indexOf(name) + 1] || fallback)
+  const flag = (name: string, fallback: number) => {
+    const at = process.argv.indexOf(name)
+    return at < 0 ? fallback : Number(process.argv[at + 1])
+  }
   const seed = flag('--seed', 1)
   const count = flag('--count', 300)
   const { dir, bin } = setup()
   const failures: string[] = []
   try {
+    if (!ranStubs('glab orbit status; prog', dir, bin).includes('prog')) {
+      console.log('positive control failed: a stub did not log, so the check cannot see anything')
+      return 2
+    }
+    let logged = 0
     for (const command of generate(prng(seed), count)) {
-      const missing = unnamed(command, ranStubs(command, dir, bin))
+      const ran = ranStubs(command, dir, bin)
+      if (ran.some((name) => name !== 'glab' && name !== 'orbit')) logged++
+      const missing = unnamed(command, ran)
       if (missing.length) failures.push(`${JSON.stringify(command)} ran unnamed: ${missing.join(', ')}  row: ${describeCommand(command) ? othersText(describeCommand(command)!) : ''}`)
+    }
+    if (logged < count / 2) {
+      console.log(`only ${logged} of ${count} commands logged a stub program, so the check is not exercising the row`)
+      return 2
     }
   } finally {
     rmSync(dir, { recursive: true, force: true })
