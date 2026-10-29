@@ -429,22 +429,10 @@ display:
       - match: '(__def (__class))'
         tag:
           kind: '@$ROOT|tag("language_kind")|map("Namespace:Module")|regex_replace("^(Module)$|(?s).*", "$1")|default("Class")'
-      - match: '(__def (__struct))'
-        tag: { kind: Struct }
-      - match: '(__def (__enum))'
-        tag: { kind: Enum }
-      - match: '(__def (__enum_variant))'
-        tag: { kind: EnumMember }
-      - match: '(__def (__interface))'
-        tag: { kind: Interface }
       - match: '(__def (__type_alias))'
         tag:
           kind: TypeAlias
           language_kind: '@$ROOT|source("16")|regex_replace("(?s)\Atypedef\b.*\z", "Typedef")|regex_replace("^(Typedef)$|(?s).*", "$1")'
-      - match: '(__def (__field_def))'
-        tag: { kind: Field }
-      - match: '(__def (__impl))'
-        tag: { kind: Impl }
   - name: content
     rules:
       - match: '(__def !(__impl))'

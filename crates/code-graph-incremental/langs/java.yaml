@@ -438,16 +438,8 @@ display:
         tag: { def_type: TypeAlias }
   - name: kind
     rules:
-      - match: '(__def (__class))'
-        tag: { kind: Class }
-      - match: '(__def (__interface))'
-        tag: { kind: Interface }
-      - match: '(__def (__enum))'
-        tag: { kind: Enum }
       - match: '(__def (__enum_variant))'
         tag: { kind: EnumMember, language_kind: EnumConstant }
-      - match: '(__def (__constant))'
-        tag: { kind: Constant }
       - match: '(__def (__field_def))'
         tag:
           kind: '@$ROOT|source("1024")|top_until("=|;", "()[]{}<>")|regex_replace("(?s)\b(static|final)\b|.", "$1 ")|regex_replace("\s+", " ")|regex_replace("^ | $", "")|regex_replace("^(?:static final|final static)$", "Constant")|regex_replace("^(Constant)$|(?s).*", "$1")|default("Field")'
@@ -525,7 +517,6 @@ display:
           resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name)'
         tag:
-          import_kind: symbol
           fqn: '@$ROOT|concat(".", "ancestor_tag:source_path", "id")'
       - match: '(__name "*")'
         tag: { import_kind: wildcard, fqn: '' }

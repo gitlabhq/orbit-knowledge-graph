@@ -360,31 +360,15 @@ display:
           signature: '@$ROOT|source("4096")|top_until("\s\{", "()[]{}")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
       - match: '(__def (__method))'
         tag: *go_callable
-      - match: '(__def (__function))'
-        tag: { kind: Function }
       - match: '(__def (__defname "/^Test(?:[^\p{Ll}]|$)/") (__function))'
         tag:
           kind: '@$ROOT|tag("signature")|regex_replace("(?s)\A.*\(\s*\w+\s+\*\s*testing\.T\s*\).*\z", "Test")|regex_replace("^(Test)$|(?s).*", "$1")|default("Function")'
-      - match: '(__def (__method))'
-        tag: { kind: Method }
-      - match: '(__def (__struct))'
-        tag: { kind: Struct }
-      - match: '(__def (__interface))'
-        tag: { kind: Interface }
       - match: '(__def (__type_alias))'
         tag:
           kind: '@$ROOT|source("1024")|regex_replace("(?s)\A\w+\s*(?:\[[^=]*?\])?\s*=.*\z", "TypeAlias")|regex_replace("^(TypeAlias)$|(?s).*", "$1")|default("Class")'
       - match: '(__def (__type_alias))'
         tag:
           language_kind: '@$ROOT|tag("kind")|map("Class:DefinedType")|regex_replace("^(DefinedType)$|(?s).*", "$1")'
-      - match: '(__def (__impl))'
-        tag: { kind: Impl }
-      - match: '(__def (__variable))'
-        tag: { kind: Variable }
-      - match: '(__def (__constant))'
-        tag: { kind: Constant }
-      - match: '(__def (__field_def))'
-        tag: { kind: Field }
       - match: '(__def !(__impl))'
         tag:
           visibility: '@$ROOT|child_sym("__defname")|regex_first("(?s)\A(?:(\p{Lu}).*|.*)\z", "$1")|regex_replace("^\p{Lu}$", "public")|default("package")'

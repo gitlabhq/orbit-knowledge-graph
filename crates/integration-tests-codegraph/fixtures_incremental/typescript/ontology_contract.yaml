@@ -128,6 +128,23 @@ fixtures:
         return new Item();
       }
 
+  - path: src/ext.ts
+    content: |
+      import { Session, Remote, RETRIES } from 'vendor-lib';
+      import { Nope } from './util';
+      import * as utilns from './util';
+
+      export class Client extends Remote {
+        session: Session;
+
+        open(s: Session): void {}
+      }
+
+      export function limit(): number {
+        const n = RETRIES;
+        return n;
+      }
+
 tests:
   # corrected: convention: a module-level TypeScript definition is public when exported and file otherwise
   - name: "Shape is a Class"
@@ -893,3 +910,104 @@ tests:
     assert:
       - { row_count: 2 }
       - { column_values: { field: target, values: ["src/shapes.ts", "src/util.ts"] } }
+
+  - name: "a class has no return type, so return_type is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shape' AND d.return_type IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "a function has no declared type, so declared_type is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'helper' AND d.declared_type IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "a local function has no visibility, so visibility is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shape::describe::inner' AND d.visibility IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "no TypeScript definition is generated, so generated_by is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'helper' AND d.generated_by IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "every TypeScript import names a module or symbol, so no import has a null full name"
+    query: |
+      MATCH (i:Import) WHERE i.fqn IS NULL
+      RETURN i.file_path AS file, i.name AS name
+    assert:
+      - { empty: true }
+
+  - name: "edges: a parameter typed with an external import is USES_TYPE to the Import with usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(i:Import)
+      WHERE a.fqn = 'Client::open' AND i.name = 'Session' AND e.usage = 'parameter'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "Client::open", target: "Session" } }
+
+  - name: "edges: a field typed with an external import is USES_TYPE to the Import with usage field"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(i:Import)
+      WHERE a.fqn = 'Client::session' AND i.name = 'Session' AND e.usage = 'field'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "Client::session", target: "Session" } }
+
+  - name: "edges: a binding that reads an external import is USES_VALUE to the Import"
+    query: |
+      MATCH (a:Definition)-[e:USES_VALUE]->(i:Import)
+      WHERE a.fqn = 'limit' AND i.name = 'RETRIES'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "limit", target: "RETRIES" } }
+
+  - name: "edges: a superclass from an external import is EXTENDS to the Import"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(i:Import)
+      WHERE a.fqn = 'Client' AND i.name = 'Remote'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "Client", target: "Remote" } }
+
+  - name: "a name that no indexed file exports is external"
+    query: |
+      MATCH (i:Import)
+      WHERE i.file_path = 'src/ext.ts' AND i.name = 'Nope'
+      RETURN i.name AS name, i.is_external AS is_external
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Nope", is_external: true } }
+
+  - name: "edges: a name that no indexed file exports does not RESOLVES_TO a file"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(f:File)
+      WHERE i.file_path = 'src/ext.ts' AND i.name = 'Nope'
+      RETURN f.path AS target
+    assert:
+      - { empty: true }
+
+  - name: "edges: a namespace import RESOLVES_TO the module file"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(f:File)
+      WHERE i.file_path = 'src/ext.ts' AND i.import_kind = 'module' AND i.import_path = './util'
+      RETURN f.path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "src/util.ts" } }

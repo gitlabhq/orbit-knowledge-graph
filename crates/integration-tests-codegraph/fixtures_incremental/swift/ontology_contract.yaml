@@ -769,3 +769,42 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { source: "Shape", target: "Shape.area" } }
+
+  - name: "a class has no return type, so return_type is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shape' AND d.return_type IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "a function has no declared type, so declared_type is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'helper' AND d.declared_type IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "a local constant has no access level, so visibility is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shape.save.copy' AND d.visibility IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "no Swift definition is generated, so generated_by is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'helper' AND d.generated_by IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "every Swift import names a module or symbol, so no import has a null full name"
+    query: |
+      MATCH (i:Import) WHERE i.fqn IS NULL
+      RETURN i.file_path AS file, i.name AS name
+    assert:
+      - { empty: true }

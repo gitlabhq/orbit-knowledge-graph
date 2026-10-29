@@ -72,6 +72,27 @@ fixtures:
           item.describe()
           return item.price
 
+  - path: shop/external.py
+    content: |
+      import shop.money
+      from requests import Session
+      from requests.adapters import DEFAULT_RETRIES
+      from shop.money import Nope
+      from collections import OrderedDict
+
+
+      class Registry(OrderedDict):
+          session: Session
+
+
+      def connect(s: Session):
+          return s
+
+
+      def limit():
+          n = DEFAULT_RETRIES
+          return n
+
 tests:
   - name: "every definition has its kind, language kind, category, and scope"
     query: |
@@ -80,7 +101,7 @@ tests:
       ORDER BY fqn
       LIMIT 100
     assert:
-      - { row_count: 18 }
+      - { row_count: 22 }
       - { row: { fqn: "shop.orders.MAX", kind: "Constant", language_kind: "Constant", category: "Value", scope: "top_level", language: "python" } }
       - { row: { fqn: "shop.orders.count", kind: "Variable", language_kind: "Variable", category: "Value", scope: "top_level" } }
       - { row: { fqn: "shop.orders.Order", kind: "Class", language_kind: "Class", category: "Type", scope: "top_level" } }
@@ -309,6 +330,70 @@ tests:
       RETURN a.path AS source, b.path AS target
     assert:
       - { row: { source: "shop/edges.py", target: "shop/money.py" } }
+
+  - name: "a parameter typed with an external import is USES_TYPE to the Import with usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(i:Import)
+      WHERE a.fqn = 'shop.external.connect' AND i.name = 'Session' AND e.usage = 'parameter'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "shop.external.connect", target: "Session" } }
+
+  - name: "a field typed with an external import is USES_TYPE to the Import with usage field"
+    # Known gap: a class-body annotation has no type site, so a field type gives no USES_TYPE edge.
+    skip: true
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(i:Import)
+      WHERE a.fqn = 'shop.external.Registry.session' AND i.name = 'Session' AND e.usage = 'field'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "shop.external.Registry.session", target: "Session" } }
+
+  - name: "a binding that reads an external import is USES_VALUE to the Import"
+    query: |
+      MATCH (a:Definition)-[e:USES_VALUE]->(i:Import)
+      WHERE a.fqn = 'shop.external.limit' AND i.name = 'DEFAULT_RETRIES'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "shop.external.limit", target: "DEFAULT_RETRIES" } }
+
+  - name: "a base class from an external import is EXTENDS to the Import"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(i:Import)
+      WHERE a.fqn = 'shop.external.Registry' AND i.name = 'OrderedDict'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "shop.external.Registry", target: "OrderedDict" } }
+
+  - name: "a name that no indexed file defines is external"
+    query: |
+      MATCH (i:Import)
+      WHERE i.file_path = 'shop/external.py' AND i.name = 'Nope'
+      RETURN i.name AS name, i.is_external AS is_external
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Nope", is_external: true } }
+
+  - name: "a name that no indexed file defines does not RESOLVES_TO a file"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(f:File)
+      WHERE i.file_path = 'shop/external.py' AND i.name = 'Nope'
+      RETURN f.path AS target
+    assert:
+      - { empty: true }
+
+  - name: "a module import RESOLVES_TO the module file"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(f:File)
+      WHERE i.file_path = 'shop/external.py' AND i.import_kind = 'module' AND i.import_path = 'shop.money'
+      RETURN f.path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "shop/money.py" } }
 
 steps:
   - name: add a line above the class

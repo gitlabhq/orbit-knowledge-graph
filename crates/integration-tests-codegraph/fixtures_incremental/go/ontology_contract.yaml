@@ -335,3 +335,44 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { source: "main.go", target: "util/util.go" } }
+
+  - name: "a struct has no return type, so return_type is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'main.Point' AND d.return_type IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "a function has no declared type, so declared_type is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'main.NewPoint' AND d.declared_type IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "a local variable has no visibility, so visibility is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'main.main.local' AND d.visibility IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "no Go definition is generated, so generated_by is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'main.NewPoint' AND d.generated_by IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "a dot import is a wildcard import, so it has no full name"
+    query: |
+      MATCH (i:Import)
+      WHERE i.file_path = 'main.go' AND i.import_path = 'math' AND i.fqn IS NULL
+      RETURN i.name AS name, i.import_kind AS import_kind
+    assert:
+      - { row_count: 1 }
+      - { row: { import_kind: "wildcard" } }

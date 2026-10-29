@@ -479,9 +479,6 @@ display:
         tag: { def_type: TypeAlias }
   - name: kind
     rules:
-      - match: '(__def (__class))'
-        tag:
-          kind: '@$ROOT|tag("kind")|default("Class")'
       - match: '(__def (__method))'
         tag:
           kind: '@$ROOT|ancestor_tag("kind")|regex_replace("^(Class|Module)$|(?s).+", "$1")|regex_replace("^(?:Class|Module)$", "Method")|default("Function")'
@@ -499,8 +496,6 @@ display:
         tag: { kind: Function, language_kind: Lambda }
       - match: '(__def (__property))'
         tag: { kind: Field, language_kind: Attribute }
-      - match: '(__def (__constant))'
-        tag: { kind: Constant }
   - name: content
     rules:
       - match: '(__def (__property))'

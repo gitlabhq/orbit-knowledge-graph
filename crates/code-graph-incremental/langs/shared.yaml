@@ -9,3 +9,39 @@ display:
       - match: '(__def)'
         tag:
           language: '@$ROOT|ancestor_tag("language")'
+  - name: kind
+    rules:
+      - match: '(__def (__function))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Function")' }
+      - match: '(__def (__method))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Method")' }
+      - match: '(__def (__class))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Class")' }
+      - match: '(__def (__struct))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Struct")' }
+      - match: '(__def (__interface))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Interface")' }
+      - match: '(__def (__trait))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Trait")' }
+      - match: '(__def (__enum))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Enum")' }
+      - match: '(__def (__enum_variant))'
+        tag: { kind: '@$ROOT|tag("kind")|default("EnumMember")' }
+      - match: '(__def (__type_alias))'
+        tag: { kind: '@$ROOT|tag("kind")|default("TypeAlias")' }
+      - match: '(__def (__constant))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Constant")' }
+      - match: '(__def (__variable))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Variable")' }
+      - match: '(__def (__field_def))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Field")' }
+      - match: '(__def (__property))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Field")' }
+      - match: '(__def (__macro))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Macro")' }
+      - match: '(__def (__impl))'
+        tag: { kind: '@$ROOT|tag("kind")|default("Impl")' }
+  - name: imports
+    rules:
+      - match: '(__name)'
+        tag: { import_kind: '@$ROOT|tag("import_kind")|default("symbol")' }

@@ -369,14 +369,10 @@ display:
           kind: '@$ROOT|ancestor_tag("kind")|map("Class:ClassMethod")|regex_replace("^(ClassMethod)$|(?s).*", "$1")|map("ClassMethod:Method")|default("Function")'
       - match: '(__def (__defname "^test") (__function))'
         tag: { kind: Test }
-      - match: '(__def (__method))'
-        tag: { kind: Method }
       - match: '(__def (__defname "^test") (__method))'
         tag: { kind: Test }
       - match: '(__def (__defname "__init__") (__method))'
         tag: { kind: Constructor, language_kind: Initializer }
-      - match: '(__def (__class))'
-        tag: { kind: Class }
       - match: '(__def (__lambda))'
         tag: { kind: Function, language_kind: Lambda }
       - match: '(__def (__field_def))'
@@ -424,7 +420,6 @@ display:
           resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name)'
         tag:
-          import_kind: '@$ROOT|tag("import_kind")|default("symbol")'
           qualified: '@$ROOT|concat(".", "ancestor_tag:source_path", "id")'
       - match: '(__name "*")'
         tag: { import_kind: wildcard, qualified: '' }

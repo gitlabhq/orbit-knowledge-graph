@@ -354,18 +354,6 @@ display:
         tag: { def_type: TypeAlias }
   - name: kind
     rules:
-      - match: '(__def (__class))'
-        tag: { kind: Class }
-      - match: '(__def (__struct))'
-        tag: { kind: Struct }
-      - match: '(__def (__interface))'
-        tag: { kind: Interface }
-      - match: '(__def (__enum))'
-        tag: { kind: Enum }
-      - match: '(__def (__enum_variant))'
-        tag: { kind: EnumMember }
-      - match: '(__def (__function))'
-        tag: { kind: Function }
       - match: '(__def (__method))'
         tag:
           kind: '@$ROOT|tag("ctor")|map("true:Constructor")|default("Method")'
@@ -445,7 +433,6 @@ display:
           resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name)'
         tag:
-          import_kind: symbol
           fqn: '@$ROOT|ancestor_tag("source_path")'
       - match: '(__name "*")'
         tag: { import_kind: wildcard, fqn: '' }
