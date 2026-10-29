@@ -17,8 +17,6 @@ cases:
   - name: endpoint_contradiction
     description: A target_kind that the pattern's labeled endpoint cannot have rejects instead of returning nothing
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[100]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","filters":{"target_kind":"Group"}}],"limit":10}
       gql: |
         MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.target_kind = 'Group' RETURN p LIMIT 10
     expect:
@@ -35,8 +33,6 @@ cases:
   - name: relationship_kind_outside_pattern
     description: A relationship_kind outside the pattern's declared types rejects instead of returning nothing
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[100]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","filters":{"relationship_kind":"AUTHORED"}}],"limit":10}
       gql: |
         MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.relationship_kind = 'AUTHORED' RETURN p LIMIT 10
     expect:
