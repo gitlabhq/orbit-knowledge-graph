@@ -559,7 +559,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
 
     /// Validate cross-node references that JSON Schema cannot express.
     pub fn check_references(&self, input: &Input) -> Result<()> {
-        self.check_duplicate_node_ids(input)?;
+        self.check_node_ids(input)?;
         self.check_relationships(input)?;
         self.check_aggregations(input)?;
         self.check_order_by(input)?;
@@ -1612,14 +1612,27 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         Ok(())
     }
 
-    fn check_duplicate_node_ids(&self, input: &Input) -> Result<()> {
-        let mut seen = std::collections::HashSet::new();
-        for node in &input.nodes {
-            if !seen.insert(&node.id) {
-                return Err(QueryError::ReferenceError(format!(
-                    "duplicate node id \"{}\"",
-                    node.id
-                )));
+    /// Output columns are `{node id}_{property}`, so two ids overlap when one is the
+    /// other's prefix followed by `_`.
+    fn check_node_ids(&self, input: &Input) -> Result<()> {
+        for (index, node) in input.nodes.iter().enumerate() {
+            for other in &input.nodes[index + 1..] {
+                if node.id == other.id {
+                    return Err(QueryError::ReferenceError(format!(
+                        "duplicate node id \"{}\"",
+                        node.id
+                    )));
+                }
+                let (short, long) = if node.id.len() < other.id.len() {
+                    (&node.id, &other.id)
+                } else {
+                    (&other.id, &node.id)
+                };
+                if long.starts_with(&format!("{short}_")) {
+                    return Err(QueryError::Validation(format!(
+                        "node ids \"{short}\" and \"{long}\" overlap; rename one so neither starts with the other followed by \"_\""
+                    )));
+                }
             }
         }
         Ok(())

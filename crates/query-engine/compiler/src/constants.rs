@@ -1,6 +1,39 @@
 // Re-export so existing `crate::constants::` paths keep working.
 pub use ontology::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 
+// Per-node columns embed a user alias and end in one of these suffixes. No other
+// internal name may, or an alias could reproduce it; the const asserts enforce that.
+const PER_NODE_SUFFIXES: [&str; 4] = ["pk", "id", "type", "tp"];
+
+const fn takes_per_node_suffix(name: &str) -> bool {
+    let mut index = 0;
+    while index < PER_NODE_SUFFIXES.len() {
+        if ends_with_word(name.as_bytes(), PER_NODE_SUFFIXES[index].as_bytes()) {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+const fn ends_with_word(name: &[u8], word: &[u8]) -> bool {
+    if name.len() < word.len() {
+        return false;
+    }
+    let start = name.len() - word.len();
+    if start > 0 && name[start - 1] != b'_' {
+        return false;
+    }
+    let mut index = 0;
+    while index < word.len() {
+        if name[start + index] != word[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
 /// Loaded once at startup from the embedded ontology YAML.
 /// Every name the compiler invents (column, table alias, CTE) starts with this prefix,
 /// and validation rejects user identifiers that use it, so the two never collide.
@@ -17,6 +50,10 @@ pub fn internal_column_prefix() -> &'static str {
 
 macro_rules! internal_name {
     ($vis:vis $fn_name:ident, $suffix:literal) => {
+        const _: () = assert!(
+            !takes_per_node_suffix($suffix),
+            concat!("internal name ", $suffix, " ends in a per-node suffix")
+        );
         $vis fn $fn_name() -> &'static str {
             static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             V.get_or_init(|| format!("{}{}", internal_column_prefix(), $suffix))
@@ -51,9 +88,6 @@ internal_name!(pub(crate) neighbor_edge_alias, "neighbor_edge");
 internal_name!(pub(crate) center_rows_cte, "center_rows");
 internal_name!(pub(crate) scope_lookup_alias, "scope");
 internal_name!(pub(crate) id_source_alias, "id_source");
-
-// Per-node columns embed a user alias and end in `_pk`, `_id`, `_type`, or `_tp`.
-// No other internal column may end in those suffixes, or an alias could reproduce it.
 
 // _orbit_{alias}_pk  — always the entity's primary key (for hydration lookups)
 pub fn primary_key_column(alias: &str) -> String {
@@ -112,3 +146,22 @@ pub const EDGE_SRC_KIND_SUFFIX: &str = "src_kind";
 pub const EDGE_DST_SUFFIX: &str = "dst";
 pub const EDGE_DST_KIND_SUFFIX: &str = "dst_kind";
 pub const EDGE_PATH_NODES_SUFFIX: &str = "path_nodes";
+
+const _: () = {
+    let suffixes = [
+        EDGE_KIND_SUFFIX,
+        EDGE_SRC_SUFFIX,
+        EDGE_SRC_KIND_SUFFIX,
+        EDGE_DST_SUFFIX,
+        EDGE_DST_KIND_SUFFIX,
+        EDGE_PATH_NODES_SUFFIX,
+    ];
+    let mut index = 0;
+    while index < suffixes.len() {
+        assert!(
+            !takes_per_node_suffix(suffixes[index]),
+            "edge column suffix ends in a per-node suffix"
+        );
+        index += 1;
+    }
+};
