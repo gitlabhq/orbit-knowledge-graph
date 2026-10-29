@@ -72,13 +72,21 @@ impl TransformRegistry {
         }
     }
 
+    pub(in crate::modules::sdlc) fn sql(
+        &self,
+        name: String,
+        transforms: Vec<Transformation>,
+    ) -> Arc<dyn BlockTransform> {
+        (self.sql)(name, transforms)
+    }
+
     pub(in crate::modules::sdlc) fn build(
         &self,
         plan: &Plan,
     ) -> Result<Arc<dyn BlockTransform>, HandlerError> {
         match &plan.transform {
             TransformSpec::DataFusion(transforms) => {
-                Ok((self.sql)(plan.name.clone(), transforms.clone()))
+                Ok(self.sql(plan.name.clone(), transforms.clone()))
             }
             TransformSpec::Rust(name) => self
                 .factories

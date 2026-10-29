@@ -190,26 +190,41 @@ fn fk_edge_transform(
     namespaced: bool,
     ontology: &Ontology,
 ) -> Result<Vec<Transformation>, ontology::OntologyError> {
-    let mut filters = Vec::new();
-    for node_ref in [&mapping.source, &mapping.target] {
-        if node_ref.field == DEFAULT_PRIMARY_KEY {
-            continue;
-        }
-        filters.push(if mapping.array_field.is_some() {
-            EdgeFilter::ArrayNotEmpty(node_ref.field.clone())
-        } else {
-            EdgeFilter::IsNotNull(node_ref.field.clone())
-        });
-    }
     let denormalized = fk_denormalized_columns(mapping, node_name, ontology);
     edge_transformations(
         &mapping.label,
         mapping,
         namespaced,
-        filters,
+        fk_edge_filters(mapping),
         denormalized,
         ontology,
     )
+}
+
+pub(in crate::modules::sdlc) fn fk_edge_key_transform(
+    mapping: &EdgeMapping,
+    namespaced: bool,
+    ontology: &Ontology,
+) -> Result<Vec<Transformation>, ontology::OntologyError> {
+    edge_transformations(
+        &mapping.label,
+        mapping,
+        namespaced,
+        fk_edge_filters(mapping),
+        Vec::new(),
+        ontology,
+    )
+}
+
+fn fk_edge_filters(mapping: &EdgeMapping) -> Vec<EdgeFilter> {
+    [&mapping.source, &mapping.target]
+        .into_iter()
+        .filter(|node_ref| node_ref.field != DEFAULT_PRIMARY_KEY)
+        .map(|node_ref| match mapping.array_field {
+            Some(_) => EdgeFilter::ArrayNotEmpty(node_ref.field.clone()),
+            None => EdgeFilter::IsNotNull(node_ref.field.clone()),
+        })
+        .collect()
 }
 
 fn edge_transformations(

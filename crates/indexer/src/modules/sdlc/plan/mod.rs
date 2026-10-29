@@ -5,7 +5,9 @@ mod transform;
 pub(in crate::modules::sdlc) use build::{Sizing, build_plans};
 pub(in crate::modules::sdlc) use extract::ExtractTemplate;
 pub use transform::Transformation;
-pub(in crate::modules::sdlc) use transform::{TransformDeclaration, TransformSpec};
+pub(in crate::modules::sdlc) use transform::{
+    TransformDeclaration, TransformSpec, fk_edge_key_transform,
+};
 
 pub const SOURCE_DATA_TABLE: &str = "source_data";
 

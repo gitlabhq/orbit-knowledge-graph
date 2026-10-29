@@ -94,7 +94,7 @@ fn build_node_plan(
 
     let mut plan = assemble(pipeline, pipeline.name.clone(), spec, transform, sizing);
     if pipeline.scope == EtlScope::Namespaced {
-        plan.edge_diff = EdgeDiff::for_node(node, pipeline.transform.edges(), ontology);
+        plan.edge_diff = EdgeDiff::for_node(node, pipeline.transform.edges(), ontology)?;
     }
     Ok(plan)
 }

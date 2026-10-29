@@ -12,7 +12,7 @@ use orbit_log_fields::{debug, info, warn};
 use serde_json::Value;
 use thiserror::Error;
 
-use super::edge_diff::{EdgeDiffClient, page_keys};
+use super::edge_diff::{EdgeDiffClient, page_rows};
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
@@ -140,16 +140,16 @@ struct PageWrite {
 }
 
 fn write_phases(
-    tombstones: Vec<(String, RecordBatch)>,
+    tombstones: Vec<(String, Vec<RecordBatch>)>,
     grouped: Vec<Vec<RecordBatch>>,
     outputs: &[String],
     data_durability: Option<WriteDurability>,
 ) -> Vec<Vec<PageWrite>> {
     let tombstones: Vec<PageWrite> = tombstones
         .into_iter()
-        .map(|(table, batch)| PageWrite {
+        .map(|(table, batches)| PageWrite {
             table,
-            batches: vec![batch],
+            batches,
             durability: Some(WriteDurability::Durable),
         })
         .collect();
@@ -229,23 +229,12 @@ impl Pipeline {
 
         let transform = self.registry.build(plan)?;
         let outputs = transform.outputs().to_vec();
-        let node_diff = plan
-            .edge_diff
-            .as_ref()
-            .map(|diff| {
-                outputs
-                    .iter()
-                    .position(|table| table == diff.node_table())
-                    .map(|node_output| (diff, node_output))
-                    .ok_or_else(|| {
-                        HandlerError::Processing(format!(
-                            "plan {} writes no {} output to diff edges against",
-                            plan.name,
-                            diff.node_table()
-                        ))
-                    })
-            })
-            .transpose()?;
+        let node_diff = plan.edge_diff.as_ref().map(|diff| {
+            let edge_keys = self
+                .registry
+                .sql(plan.name.clone(), diff.edge_keys().to_vec());
+            (diff, edge_keys)
+        });
         let params = base_query.params();
         let plan_limit = base_query.batch_size();
         base_query.set_batch_size(first_page_limit(plan_limit));
@@ -297,8 +286,10 @@ impl Pipeline {
             );
 
             let read_previous: OptionFuture<_> = node_diff
-                .map(|(diff, _)| {
-                    page_keys(&page.batches).map(|keys| diff.read_previous(&self.edge_diff, keys))
+                .as_ref()
+                .map(|(diff, edge_keys)| {
+                    page_rows(&page.batches)
+                        .map(|rows| diff.previous_edges(&self.edge_diff, edge_keys.as_ref(), rows))
                 })
                 .transpose()?
                 .into();
@@ -314,9 +305,9 @@ impl Pipeline {
                 .record_transform_duration(transform_elapsed.as_secs_f64());
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
-            let tombstones = match (node_diff, previous) {
-                (Some((diff, node_output)), Some(previous)) => {
-                    diff.tombstones(&grouped[node_output], &previous)?
+            let tombstones = match (&node_diff, previous) {
+                (Some((diff, _)), Some(previous)) => {
+                    diff.tombstones(&previous, &outputs, &grouped)?
                 }
                 _ => Vec::new(),
             };
@@ -806,7 +797,7 @@ mod tests {
     fn edge_tombstones_are_written_durably_before_the_page_rows() {
         let batch = test_batch(1);
         let phases = write_phases(
-            vec![("v1_gl_edge".to_string(), batch.clone())],
+            vec![("v1_gl_edge".to_string(), vec![batch.clone()])],
             vec![vec![batch.clone()], vec![], vec![batch]],
             &[
                 "v1_gl_job".to_string(),

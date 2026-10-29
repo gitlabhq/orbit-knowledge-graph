@@ -91,10 +91,10 @@ lake key plus defaults, so its FK columns are empty and the transform writes no 
 it reads the two latest stored versions of each page key from the node table. The read is bounded
 by the page's `traversal_path` range and binds the page ids in chunks. The previous row is the
 latest stored version older than the page row. A replayed page therefore still finds the row
-before its own. An edge key the previous row emitted that the page row drops gets a tombstone. It takes the
-page row's version and is written with the page's other edge rows. Keys come from the ontology mappings,
-including derived kinds and array elements. So each node stores the FK columns and arrays its edges
-are built from.
+before its own. The read selects the stored FK columns under their source names. The node's own
+FK edge transforms then run without tags and rebuild the edges the previous row emitted. An edge the latest page
+row no longer emits gets a tombstone stamped with that page row's version. Tombstones are written
+durably before the page rows. So each node stores the FK columns and arrays its edges are built from.
 
 ### Entry point
 
