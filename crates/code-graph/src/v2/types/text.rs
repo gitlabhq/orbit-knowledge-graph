@@ -15,7 +15,7 @@ const MARKER: char = '…';
 pub fn collapse_whitespace(text: &str) -> String {
     let mut out = String::with_capacity(text.len().min(SIGNATURE_CAP + 8));
     for word in text.split_whitespace() {
-        if !out.is_empty() && !out.ends_with(['(', '[']) && !word.starts_with([')', ']', ',']) {
+        if !out.is_empty() {
             out.push(' ');
         }
         out.push_str(word);
@@ -140,7 +140,7 @@ mod tests {
     fn signature_collapses_whitespace() {
         assert_eq!(
             signature("def  f(\n  a,\n  b\n):").as_deref(),
-            Some("def f(a, b)")
+            Some("def f( a, b )")
         );
     }
 

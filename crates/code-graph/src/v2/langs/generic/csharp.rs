@@ -139,6 +139,7 @@ impl DslLanguage for CSharpDsl {
 
     fn display() -> DisplayRules {
         DisplayRules {
+            annotations: &["attribute_list"],
             body: &["body", "accessors"],
             parameters: &["parameters"],
             return_type: &["returns"],

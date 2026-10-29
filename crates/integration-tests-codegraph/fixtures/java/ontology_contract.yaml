@@ -125,7 +125,7 @@ tests:
         assert:
           - { row: { name: "Order", signature: "public final class Order extends Entity implements Payable", doc: "Order of goods. More text." } }
           - { row: { name: "MAX", signature: "private static final int MAX", declared_type: "int", return_type: null } }
-          - { row: { name: "pay", signature: "@Override public String pay(int amount)", return_type: "String", declared_type: null } }
+          - { row: { name: "pay", signature: "public String pay(int amount)", return_type: "String", declared_type: null } }
           - { row: { name: "note", return_type: "String", doc: "" } }
 
   - name: "Parameters of note"

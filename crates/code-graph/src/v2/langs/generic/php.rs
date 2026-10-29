@@ -148,6 +148,7 @@ impl DslLanguage for PhpDsl {
 
     fn display() -> DisplayRules {
         DisplayRules {
+            annotations: &["attribute_list"],
             body: &["body", "default_value"],
             parameters: &["parameters"],
             return_type: &["return_type"],

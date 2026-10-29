@@ -231,6 +231,7 @@ impl DslLanguage for JavaDsl {
 
     fn display() -> DisplayRules {
         DisplayRules {
+            annotations: &["marker_annotation", "annotation"],
             body: &["body"],
             parameters: &["parameters"],
             return_type: &["type"],

@@ -237,6 +237,7 @@ impl DslLanguage for KotlinDsl {
 
     fn display() -> DisplayRules {
         DisplayRules {
+            annotations: &["annotation"],
             body: &["class_body", "function_body", "enum_class_body"],
             parameters: &["function_value_parameters"],
             parameter_items: &["class_parameter"],

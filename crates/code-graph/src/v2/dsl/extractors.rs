@@ -232,6 +232,7 @@ pub struct DisplayRules {
     pub return_type: &'static [&'static str],
     pub declared_type: &'static [&'static str],
     pub parameter_items: &'static [&'static str],
+    pub annotations: &'static [&'static str],
     pub doc_comments: &'static [&'static str],
     pub doc_prefixes: &'static [&'static str],
     pub doc_markers: &'static [&'static str],
@@ -285,7 +286,25 @@ impl DisplayRules {
             .unwrap_or(node.range().end);
         let text = node.text();
         let slice = text.get(..end.saturating_sub(start).min(text.len()))?;
-        crate::v2::types::text::signature(slice)
+        let mut kept = String::with_capacity(slice.len());
+        let mut cursor = 0;
+        for annotation in node
+            .children()
+            .flat_map(|c| {
+                let grandchildren: Vec<N<'_>> = c.children().collect();
+                std::iter::once(c).chain(grandchildren)
+            })
+            .filter(|c| self.annotations.contains(&c.kind().as_ref()))
+        {
+            let range = annotation.range();
+            let (from, to) = (range.start - start, range.end - start);
+            if from >= cursor && to <= slice.len() {
+                kept.push_str(&slice[cursor..from]);
+                cursor = to;
+            }
+        }
+        kept.push_str(&slice[cursor..]);
+        crate::v2::types::text::signature(&kept)
     }
 
     pub fn parameters(&self, node: &N<'_>) -> Vec<String> {

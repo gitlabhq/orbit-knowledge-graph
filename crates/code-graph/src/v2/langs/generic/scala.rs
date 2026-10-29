@@ -243,6 +243,7 @@ impl DslLanguage for ScalaDsl {
 
     fn display() -> DisplayRules {
         DisplayRules {
+            annotations: &["annotation"],
             body: &["body", "value"],
             parameters: &["parameters"],
             parameter_items: &["class_parameter"],

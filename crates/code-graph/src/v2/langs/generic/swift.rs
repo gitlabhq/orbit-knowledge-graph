@@ -204,6 +204,7 @@ impl DslLanguage for SwiftDsl {
 
     fn display() -> DisplayRules {
         DisplayRules {
+            annotations: &["attribute"],
             body: &["body", "value"],
             parameters: &[],
             parameter_items: &["parameter"],

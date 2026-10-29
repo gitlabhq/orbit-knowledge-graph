@@ -130,7 +130,12 @@ pub(super) fn class(source: &str, c: &Class<'_>, visibility: Option<Visibility>)
         modifiers.insert(Modifier::Abstract);
     }
     JsDisplay {
-        signature: signature(source, c.span.start, Some(c.body.span.start), c.span.end),
+        signature: signature(
+            source,
+            c.decorators.last().map_or(c.span.start, |d| d.span.end),
+            Some(c.body.span.start),
+            c.span.end,
+        ),
         doc_comment: doc_before(source, c.span.start),
         modifiers,
         visibility,
@@ -152,7 +157,7 @@ pub(super) fn method(source: &str, m: &MethodDefinition<'_>) -> JsDisplay {
     JsDisplay {
         signature: signature(
             source,
-            m.span.start,
+            m.decorators.last().map_or(m.span.start, |d| d.span.end),
             m.value.body.as_ref().map(|b| b.span.start),
             m.span.end,
         ),
@@ -183,7 +188,7 @@ pub(super) fn property(source: &str, p: &PropertyDefinition<'_>) -> JsDisplay {
     JsDisplay {
         signature: signature(
             source,
-            p.span.start,
+            p.decorators.last().map_or(p.span.start, |d| d.span.end),
             p.value.as_ref().map(|v| v.span().start),
             p.span.end,
         ),
