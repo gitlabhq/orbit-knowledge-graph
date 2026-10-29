@@ -11,6 +11,8 @@
 #   - the minor must not exceed that same minor
 #   - the minor must be at least every module's go minor (golang images set
 #     GOTOOLCHAIN=local, so an older image cannot build the module)
+# Only a scalar `image: golang:X.Y` line in CI_FILE is detected; images set
+# through variables, anchors or other files are not checked.
 # All violations are reported before the script exits non-zero. Failures to
 # fetch or parse CNG data also exit non-zero.
 #
@@ -110,9 +112,12 @@ for go_mod in ${GO_MODS}; do
   toolchain=$(awk '/^toolchain[[:space:]]+go[0-9]/ { print $2; exit }' "${go_mod}" | tr -d '\r' | sed 's/^go//')
   echo "${go_mod}: go ${go_version}${toolchain:+, toolchain go${toolchain}}"
 
+  if ! [[ "${go_version}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+    violation "${go_mod}: the go directive (${go_version}) is not X.Y or X.Y.Z"
+    continue
+  fi
   if ! [[ "${go_version}" =~ ^[0-9]+\.[0-9]+(\.0)?$ ]]; then
     violation "${go_mod}: the go directive (${go_version}) must have a .0 patch version"
-    continue
   fi
   module_minor=$(minor_of "${go_version}")
   if minor_gt "${module_minor}" "${OLDEST_SHIPPED_MINOR}"; then

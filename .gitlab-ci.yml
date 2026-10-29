@@ -1299,7 +1299,6 @@ check-go-version-policy:
     - bash scripts/checks/check-go-version-policy.sh
   rules:
     - !reference [.skip-on-solo-schedule, rules]
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
     - if: $CI_COMMIT_TAG
       when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
