@@ -72,7 +72,7 @@ entities:
   Definition:
     source: __def
     exclude_tag: { kind: [Impl] }
-    id: { seed: def, columns: [file_path, fqn, kind, signature] }
+    id: { seed: def, columns: [file_path, fqn, kind, signature, occurrence] }
     columns:
       - { name: file_path, type: Utf8, from: ancestor_tag("file_path") }
       - { name: language, type: Utf8, from: tag("language") }

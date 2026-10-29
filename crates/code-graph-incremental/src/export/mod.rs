@@ -470,9 +470,9 @@ fn write_entity(
 ) -> Result<(), Error> {
     let mut builder = BatchBuilder::new(&entity.specs, 0)?;
     let b = &mut builder;
-    let mut written = FxHashSet::default();
     for (ti, tree) in forest.all().filter(|(ti, _)| wanted(*ti)) {
         run.check()?;
+        let mut occurrences: FxHashMap<Vec<String>, usize> = FxHashMap::default();
         let ctx = EdgeCtx {
             tree_index: ti,
             edges: edge_index,
@@ -511,7 +511,7 @@ fn write_entity(
                     node,
                     expanded,
                 };
-                let parts: Vec<String> = entity
+                let mut parts: Vec<String> = entity
                     .id_parts
                     .iter()
                     .map(|part| match part {
@@ -519,8 +519,18 @@ fn write_entity(
                         IdPart::Column(i) => {
                             row.value(&entity.columns[*i], lang).text().into_owned()
                         }
+                        IdPart::Occurrence => String::new(),
                     })
                     .collect();
+                if let Some(at) = entity
+                    .id_parts
+                    .iter()
+                    .position(|part| matches!(part, IdPart::Occurrence))
+                {
+                    let seen = occurrences.entry(parts.clone()).or_insert(0usize);
+                    parts[at] = seen.to_string();
+                    *seen += 1;
+                }
                 let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
                 let values = entity
                     .columns
@@ -539,7 +549,7 @@ fn write_entity(
                         .or_default()
                         .push((id, index));
                 }
-                if !emitted || !written.insert(id) {
+                if !emitted {
                     continue;
                 }
                 for column in &entity.header {

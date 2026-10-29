@@ -1,0 +1,79 @@
+name: "Rust: same-name methods from two trait impls are two definitions with stable ids"
+
+fixtures:
+  - path: src/lib.rs
+    content: |
+      use std::fmt;
+
+      pub struct A;
+
+      impl fmt::Display for A {
+          fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+              write!(f, "a")
+          }
+      }
+
+      impl fmt::Debug for A {
+          fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+              write!(f, "A")
+          }
+      }
+
+tests:
+  - name: "each impl keeps its own fmt row"
+    query: |
+      MATCH (d:Definition {name: 'fmt'})
+      RETURN d.fqn AS fqn, d.start_line AS line
+      ORDER BY line
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "A::fmt", line: 6 } }
+      - { row: { fqn: "A::fmt", line: 12 } }
+
+  - name: "the type defines both"
+    query: |
+      MATCH (t:Definition {name: 'A'})-[:DEFINES]->(m:Definition {name: 'fmt'})
+      RETURN m.start_line AS line
+    assert:
+      - { row_count: 2 }
+
+  - name: "the ids before an edit"
+    query: |
+      MATCH (d:Definition {name: 'fmt'})
+      RETURN d.id AS id, d.start_line AS line
+      ORDER BY line
+    assert:
+      - { row: { id: 7306582616915697923, line: 6 } }
+      - { row: { id: 5148718407298237787, line: 12 } }
+
+steps:
+  - name: add a line above both impls
+    snapshot: true
+    modify:
+      - path: src/lib.rs
+        content: |
+          use std::fmt;
+          use std::io;
+
+          pub struct A;
+
+          impl fmt::Display for A {
+              fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                  write!(f, "a")
+              }
+          }
+
+          impl fmt::Debug for A {
+              fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                  write!(f, "A")
+              }
+          }
+    tests:
+      - name: "both rows keep their ids"
+        query: |
+          MATCH (d:Definition {name: 'fmt'})
+          RETURN d.id AS id, d.start_line AS line
+          ORDER BY line
+        assert:
+          - { row: { id: 7306582616915697923, line: 7 } }
+          - { row: { id: 5148718407298237787, line: 13 } }
