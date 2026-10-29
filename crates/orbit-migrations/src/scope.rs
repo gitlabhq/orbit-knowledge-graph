@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use ontology::migrations::EdgeRows;
 use ontology::pipelines::PipelineDescriptor;
 use ontology::{EtlScope, Ontology};
 use query_data_model::{Relational, implementations::clickhouse::layout::ClickHouse};
@@ -23,7 +24,10 @@ pub enum LedgerScope {
 pub enum MigrationScope {
     Full,
     Code,
-    Sdlc(BTreeSet<String>),
+    Sdlc {
+        entities: BTreeSet<String>,
+        edge_rows: EdgeRows,
+    },
     None,
 }
 
@@ -32,30 +36,28 @@ impl MigrationScope {
         match self {
             Self::Full => "full",
             Self::Code => "code",
-            Self::Sdlc(_) => "sdlc",
+            Self::Sdlc { .. } => "sdlc",
             Self::None => "none",
         }
     }
 
     pub fn sdlc_entities(&self) -> Option<String> {
         match self {
-            Self::Sdlc(entities) if !entities.is_empty() => {
+            Self::Sdlc { entities, .. } if !entities.is_empty() => {
                 Some(entities.iter().cloned().collect::<Vec<_>>().join(","))
             }
             _ => None,
         }
     }
 
-    #[must_use]
-    pub fn includes(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Full, _) | (_, Self::None) => true, // full covers all, none needs nothing
-            (Self::Code, Self::Code) => true,          // same domain
-            (Self::Sdlc(covering), Self::Sdlc(required)) => {
-                covering.is_empty() || (!required.is_empty() && required.is_subset(covering))
+    pub fn keeps_edge_rows(&self) -> bool {
+        matches!(
+            self,
+            Self::Sdlc {
+                edge_rows: EdgeRows::Unchanged,
+                ..
             }
-            _ => false, // cross-domain or insufficient
-        }
+        )
     }
 
     #[must_use]
@@ -64,11 +66,25 @@ impl MigrationScope {
             (Self::Full, _) | (_, Self::Full) => Self::Full, // full absorbs all
             (Self::None, kept) | (kept, Self::None) => kept.clone(), // none is identity
             (Self::Code, Self::Code) => Self::Code,          // same domain
-            (Self::Sdlc(left), Self::Sdlc(right)) if left.is_empty() || right.is_empty() => {
-                Self::Sdlc(BTreeSet::new()) // "all sdlc" absorbs subsets
-            }
-            (Self::Sdlc(left), Self::Sdlc(right)) => {
-                Self::Sdlc(left.union(right).cloned().collect()) // union subsets
+            (
+                Self::Sdlc {
+                    entities: left,
+                    edge_rows: left_edge_rows,
+                },
+                Self::Sdlc {
+                    entities: right,
+                    edge_rows: right_edge_rows,
+                },
+            ) => {
+                let entities = if left.is_empty() || right.is_empty() {
+                    BTreeSet::new() // "all sdlc" absorbs subsets
+                } else {
+                    left.union(right).cloned().collect() // union subsets
+                };
+                Self::Sdlc {
+                    entities,
+                    edge_rows: left_edge_rows.widened_with(*right_edge_rows),
+                }
             }
             _ => Self::Full, // mixed domains escalate
         }
@@ -81,8 +97,8 @@ impl std::fmt::Display for MigrationScope {
             Self::Full => write!(f, "scope \"*\""),
             Self::None => write!(f, "scope none"),
             Self::Code => write!(f, "scope code"),
-            Self::Sdlc(entities) if entities.is_empty() => write!(f, "scope sdlc"),
-            Self::Sdlc(entities) => {
+            Self::Sdlc { entities, .. } if entities.is_empty() => write!(f, "scope sdlc"),
+            Self::Sdlc { entities, .. } => {
                 let list = entities.iter().cloned().collect::<Vec<_>>().join(", ");
                 write!(f, "scope sdlc, entities [{list}]")
             }
@@ -167,8 +183,12 @@ pub fn widen_scope_for_shared_table_writers(
         return MigrationScope::Full;
     }
 
+    let edge_tables = ontology.edge_tables();
     for table in storage.versioned_tables().map(|table| &table.name) {
         if matches!(requested_scope, MigrationScope::Code) && table == ontology.edge_table() {
+            continue;
+        }
+        if requested_scope.keeps_edge_rows() && edge_tables.contains(&table.as_str()) {
             continue;
         }
 
@@ -195,12 +215,14 @@ pub fn classify_tables_for_scope(
     scope: &MigrationScope,
 ) -> BTreeMap<String, TableMigrationAction> {
     let invalidated = invalidated_entities(ontology, scope);
+    let edge_tables = ontology.edge_tables();
 
     let mut actions: BTreeMap<_, _> = storage
         .versioned_tables()
         .map(|table| table.name.clone())
         .map(|table| {
-            let action = migration_action_for_table(storage, &table, scope, &invalidated);
+            let action =
+                migration_action_for_table(storage, &table, scope, &invalidated, &edge_tables);
             (table, action)
         })
         .collect();
@@ -276,8 +298,8 @@ fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet
             .into_iter()
             .chain(code_entity_names(ontology))
             .collect(),
-        MigrationScope::Sdlc(entities) if entities.is_empty() => sdlc_entity_names(ontology),
-        MigrationScope::Sdlc(entities) => {
+        MigrationScope::Sdlc { entities, .. } if entities.is_empty() => sdlc_entity_names(ontology),
+        MigrationScope::Sdlc { entities, .. } => {
             let mut invalidated = entities.clone();
             for descriptor in ontology.pipeline_descriptors() {
                 if !descriptor.reindex_targets.is_disjoint(entities) {
@@ -296,7 +318,12 @@ fn migration_action_for_table(
     table: &str,
     scope: &MigrationScope,
     invalidated: &BTreeSet<String>,
+    edge_tables: &[&str],
 ) -> TableMigrationAction {
+    if scope.keeps_edge_rows() && edge_tables.contains(&table) {
+        return TableMigrationAction::CloneFromActive;
+    }
+
     if table == CODE_INDEXING_CHECKPOINT_TABLE {
         return if matches!(scope, MigrationScope::Code) {
             TableMigrationAction::RebuildEmpty
@@ -324,10 +351,13 @@ fn is_code_domain_table(ontology: &Ontology, table: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::entity_set;
+    use crate::test_helpers::{entity_set, sdlc_scope};
 
-    fn sdlc_scope(names: &[&str]) -> MigrationScope {
-        MigrationScope::Sdlc(entity_set(names))
+    fn sdlc_scope_keeping_edge_rows(names: &[&str]) -> MigrationScope {
+        MigrationScope::Sdlc {
+            entities: entity_set(names),
+            edge_rows: EdgeRows::Unchanged,
+        }
     }
 
     fn classify(scope: MigrationScope) -> BTreeMap<String, TableMigrationAction> {
@@ -372,6 +402,31 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_edge_rows_clone_every_edge_table_and_rebuild_sdlc_node_tables() {
+        let map = classify(sdlc_scope_keeping_edge_rows(&[]));
+        for table in [
+            "gl_edge",
+            "gl_ci_edge",
+            "gl_sec_edge",
+            "gl_diff_edge",
+            "gl_code_edge",
+        ] {
+            assert_eq!(
+                action(&map, table),
+                TableMigrationAction::CloneFromActive,
+                "{table} should clone when edge rows are unchanged"
+            );
+        }
+        for table in ["gl_note", "gl_job", "gl_merge_request"] {
+            assert_eq!(
+                action(&map, table),
+                TableMigrationAction::RebuildEmpty,
+                "{table} should rebuild under whole sdlc scope"
+            );
+        }
+    }
+
+    #[test]
     fn note_scope_rebuilds_only_its_node_table() {
         let map = classify(sdlc_scope(&["Note"]));
         assert_eq!(action(&map, "gl_note"), TableMigrationAction::RebuildEmpty);
@@ -387,7 +442,7 @@ mod tests {
 
     #[test]
     fn full_sdlc_scope_rebuilds_sdlc_tables_and_clones_code() {
-        let map = classify(MigrationScope::Sdlc(BTreeSet::new()));
+        let map = classify(sdlc_scope(&[]));
         assert_eq!(action(&map, "gl_note"), TableMigrationAction::RebuildEmpty);
         assert_eq!(action(&map, "gl_edge"), TableMigrationAction::RebuildEmpty);
         assert_eq!(

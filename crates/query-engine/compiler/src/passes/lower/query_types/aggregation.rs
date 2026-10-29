@@ -68,7 +68,7 @@ fn aggregation(plan: &AggregationPlan, output: EmitOutput, limit: u32) -> Query 
                         .argument
                         .as_ref()
                         .map(|value| Box::new(output_value(value))),
-                    distinct: false,
+                    distinct: measure.distinct,
                     condition: condition.clone().map(Box::new),
                 },
                 &measure.name,

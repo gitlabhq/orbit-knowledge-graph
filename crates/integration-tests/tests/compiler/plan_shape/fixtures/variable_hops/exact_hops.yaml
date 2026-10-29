@@ -21,17 +21,17 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Union ALL AS _orbit_edge_0 (Filter _orbit_edge_0.target_kind = 'Definition' (Bind _orbit_edge_0 (Project 2 AS depth, ... (_)))))
-        - (Join ON (_depth_1.target_id = e2.source_id) AND (_depth_1.target_kind = e2.source_kind) (_) (_))
-        - (Filter e2._deleted = false (Deduplicate LimitBy ... (Filter e2.relationship_kind = 'CALLS', e2.source_id IN ?.target_id (_))))
+        - (Union ALL AS _orbit_edge_0 (Filter _orbit_edge_0.target_kind = 'Definition' (Bind _orbit_edge_0 (Project 2 AS _orbit_depth, ... (_)))))
+        - (Join ON (_orbit_depth_1.target_id = _orbit_e2.source_id) AND (_orbit_depth_1.target_kind = _orbit_e2.source_kind) (_) (_))
+        - (Filter _orbit_e2._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e2.relationship_kind = 'CALLS', _orbit_e2.source_id IN ?.target_id (_))))
       reject:
-        - (Project 3 AS depth, ... (_))
+        - (Project 3 AS _orbit_depth, ... (_))
       occurrences:
         - pattern: (Union ALL AS _orbit_edge_0 (_))
           count: 1
   duckdb:
     planned:
       expect:
-        - (Union ALL AS _orbit_edge_0 (Filter _orbit_edge_0.target_kind = 'Definition' (Bind _orbit_edge_0 (Project 2 AS depth, ... (_)))))
+        - (Union ALL AS _orbit_edge_0 (Filter _orbit_edge_0.target_kind = 'Definition' (Bind _orbit_edge_0 (Project 2 AS _orbit_depth, ... (_)))))
       reject:
-        - (Project 3 AS depth, ... (_))
+        - (Project 3 AS _orbit_depth, ... (_))

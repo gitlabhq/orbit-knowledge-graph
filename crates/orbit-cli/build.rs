@@ -1,8 +1,5 @@
 fn main() {
-    #[cfg(target_os = "macos")]
-    {
-        println!("cargo:rustc-link-arg-bin=orbit=-Wl,-rpath,@loader_path/deps");
-    }
+    link_downloaded_duckdb();
 
     validate_prompts();
     validate_skills();
@@ -13,6 +10,7 @@ fn main() {
             .join("setup")
             .display()
     );
+    println!("cargo:rerun-if-changed=../../packages/agent-plugins");
 
     // Release jobs run on `vX.Y.Z` tags (.gitlab/ci/release-local.yml), so
     // CI_COMMIT_TAG is the authoritative release version. `git describe` is a
@@ -73,4 +71,24 @@ fn validate_skills() {
             .collect::<Vec<_>>()
             .join(",")
     );
+}
+
+/// libduckdb-sys 2.0 no longer adds an rpath for a downloaded libduckdb, so a debug `orbit` run
+/// outside Cargo finds the library only through this one. libduckdb-sys publishes the download
+/// directory, which holds the headers and the library, as DEP_DUCKDB_INCLUDE. Release builds
+/// compile DuckDB in, so they must not carry a path to the build machine, and Windows linkers
+/// have no rpath.
+fn link_downloaded_duckdb() {
+    println!("cargo:rerun-if-env-changed=DUCKDB_DOWNLOAD_LIB");
+    let downloads = std::env::var("DUCKDB_DOWNLOAD_LIB")
+        .is_ok_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true"));
+    let unix = std::env::var("CARGO_CFG_TARGET_FAMILY")
+        .is_ok_and(|families| families.split(',').any(|family| family == "unix"));
+    let debug = std::env::var("PROFILE").is_ok_and(|profile| profile == "debug");
+    if !(downloads && unix && debug) {
+        return;
+    }
+    if let Ok(lib_dir) = std::env::var("DEP_DUCKDB_INCLUDE") {
+        println!("cargo:rustc-link-arg-bin=orbit=-Wl,-rpath,{lib_dir}");
+    }
 }

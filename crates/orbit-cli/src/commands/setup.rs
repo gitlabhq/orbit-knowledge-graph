@@ -96,6 +96,25 @@ pub(crate) async fn install(
             &location_hints,
         )?;
     }
+    let ui_agents: Vec<&str> = selection
+        .agents
+        .iter()
+        .filter(|agent| agent.has_ui())
+        .map(|agent| agent.title.as_str())
+        .collect();
+    if interactive
+        && options.ask_agent_plugins
+        && !ui_agents.is_empty()
+        && !tui::confirm(
+            &format!(
+                "Install the agent plugins for {}? They show each Orbit call.",
+                ui_agents.join(" and ")
+            ),
+            true,
+        )?
+    {
+        selection.components.remove(&Component::AgentPlugins);
+    }
     if selection.agents.is_empty() {
         tui::outro_cancel(format!(
             "No agent selected. Name one to configure it: orbit setup <{}>",
@@ -120,6 +139,16 @@ pub(crate) async fn install(
         components::install(&selection, &target, report)
     })?;
     tui::card("Configured", summary::format_components_per_agent(&plan))?;
+    if selection.components.contains(&Component::Instructions) && !spec::reaches_gitlab() {
+        tui::card(
+            "GitLab",
+            format!(
+                "Not signed in, so agent instructions cover local code only. Run `glab auth \
+                 login`, then `{} setup` again to add GitLab search.",
+                spec::launcher()
+            ),
+        )?;
+    }
 
     let index_outcome = match index_repo::repository_root(&target) {
         None => IndexOutcome::OutsideRepository,
@@ -239,22 +268,35 @@ pub(crate) enum Component {
     Hooks,
     Skill,
     Mcp,
+    AgentPlugins,
 }
 
 impl Component {
-    pub(super) const ALL: [Component; 4] = [
+    pub(super) const ALL: [Component; 5] = [
         Component::Instructions,
         Component::Hooks,
         Component::Skill,
         Component::Mcp,
+        Component::AgentPlugins,
     ];
 
-    pub(crate) fn from_flags(mcp: bool, skip: &[Component]) -> BTreeSet<Component> {
-        Component::ALL
+    pub(crate) fn from_flags(
+        install: &[Component],
+        skip: &[Component],
+    ) -> Result<BTreeSet<Component>> {
+        if let Some(both) = install.iter().find(|component| skip.contains(component)) {
+            let name =
+                clap::ValueEnum::to_possible_value(both).map(|value| value.get_name().to_string());
+            anyhow::bail!(
+                "--install and --skip both name {}",
+                name.unwrap_or_default()
+            );
+        }
+        Ok(Component::ALL
             .into_iter()
-            .filter(|component| *component != Component::Mcp || mcp)
+            .filter(|component| *component != Component::Mcp || install.contains(component))
             .filter(|component| !skip.contains(component))
-            .collect()
+            .collect())
     }
 
     fn label(self) -> &'static str {
@@ -263,6 +305,7 @@ impl Component {
             Component::Hooks => "hooks",
             Component::Skill => "skill",
             Component::Mcp => "mcp server",
+            Component::AgentPlugins => "agent plugins",
         }
     }
 }
@@ -315,6 +358,7 @@ pub(crate) struct Options {
     pub(crate) verbose: bool,
     pub(crate) index: bool,
     pub(crate) components: BTreeSet<Component>,
+    pub(crate) ask_agent_plugins: bool,
     pub(crate) skill: SkillRequest,
 }
 
@@ -415,16 +459,21 @@ mod tests {
             dry_run: false,
             verbose: false,
             index: false,
-            components: Component::from_flags(false, &[]),
+            components: Component::from_flags(&[], &[]).unwrap(),
+            ask_agent_plugins: false,
             skill: SkillRequest::default(),
         }
     }
 
     fn options_with_mcp(names: &[&str]) -> Options {
         Options {
-            components: Component::from_flags(true, &[]),
+            components: Component::from_flags(&[Component::Mcp], &[]).unwrap(),
             ..options_for(names)
         }
+    }
+
+    fn install_default(names: &[&str], dir: &Path) {
+        install(options_for(names), project(dir), &bare_machine()).unwrap();
     }
 
     fn bare_machine() -> Machine {
@@ -512,8 +561,11 @@ mod tests {
     fn skipped_components_are_left_alone() {
         let dir = tempfile::tempdir().unwrap();
         let mut only_instructions = options_for(&["claude", "opencode"]);
-        only_instructions.components =
-            Component::from_flags(false, &[Component::Hooks, Component::Skill]);
+        only_instructions.components = Component::from_flags(
+            &[],
+            &[Component::Hooks, Component::Skill, Component::AgentPlugins],
+        )
+        .unwrap();
         install(only_instructions, project(dir.path()), &bare_machine()).unwrap();
 
         assert!(dir.path().join("CLAUDE.md").is_file());
@@ -556,20 +608,27 @@ mod tests {
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
         assert_eq!(
             read_json(&opencode_config)["plugin"],
-            json!(["other.js", ".opencode/plugins/orbit.js"])
+            json!([
+                "other.js",
+                ".opencode/plugins/orbit.js",
+                ".opencode/plugins/orbit-ui.js"
+            ])
         );
         assert_eq!(
             read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],
             json!({
                 "type": "local",
-                "command": ["orbit", "mcp", "serve"],
+                "command": ["orbit", "workspace", "mcp", "serve"],
                 "enabled": true,
                 "environment": {"AI_AGENT": "opencode"}
             })
         );
         let codex = std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap();
         assert!(codex.contains("[mcp_servers.orbit]"), "{codex}");
-        assert!(codex.contains(r#"args = ["mcp", "serve"]"#), "{codex}");
+        assert!(
+            codex.contains(r#"args = ["workspace", "mcp", "serve"]"#),
+            "{codex}"
+        );
         assert!(codex.contains(r#"env = { AI_AGENT = "codex" }"#), "{codex}");
         assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
 
@@ -622,7 +681,7 @@ mod tests {
             json!({
                 "type": "stdio",
                 "command": "orbit",
-                "args": ["mcp", "serve"],
+                "args": ["workspace", "mcp", "serve"],
                 "env": {"AI_AGENT": "claude-code"}
             })
         );
@@ -1432,6 +1491,17 @@ mod tests {
     }
 
     #[test]
+    fn opencode_plugin_shows_a_toast_for_orbit_calls() {
+        let dir = tempfile::tempdir().unwrap();
+        install_with_mcp(&["opencode"], dir.path());
+
+        let plugin =
+            std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit-ui.js")).unwrap();
+        assert!(plugin.contains(r#""tool.execute.before""#), "{plugin}");
+        assert!(plugin.contains("client.tui.showToast"), "{plugin}");
+    }
+
+    #[test]
     fn uninstall_keeps_a_template_file_the_user_edited() {
         let dir = tempfile::tempdir().unwrap();
         let plugin = dir.path().join(".opencode/plugins/orbit.js");
@@ -1480,13 +1550,282 @@ mod tests {
     }
 
     #[test]
+    fn the_claude_plugin_installs_by_default_and_skips_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut skipped = options_for(&["claude"]);
+        skipped.components = Component::from_flags(&[], &[Component::AgentPlugins]).unwrap();
+        install(skipped, project(dir.path()), &bare_machine()).unwrap();
+        assert!(!dir.path().join(".claude/orbit").exists());
+        assert!(!dir.path().join(".claude/settings.local.json").exists());
+
+        install_default(&["claude", "codex"], dir.path());
+
+        let marketplace = dunce::canonicalize(dir.path())
+            .unwrap()
+            .join(".claude/orbit/claude_plugin");
+        assert!(
+            marketplace
+                .join(".claude-plugin/marketplace.json")
+                .is_file()
+        );
+        assert!(marketplace.join("gitlab-orbit/hooks/register.ts").is_file());
+        assert!(!marketplace.join("gitlab-orbit/tests").exists());
+        assert!(!marketplace.join("gitlab-orbit/tsconfig.json").exists());
+        let settings = read_json(&dir.path().join(".claude/settings.local.json"));
+        let name = read_json(&marketplace.join(".claude-plugin/marketplace.json"))["name"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(name.starts_with("gitlab-orbit-"), "{name}");
+        assert_eq!(
+            settings["enabledPlugins"][format!("gitlab-orbit@{name}")],
+            true
+        );
+        assert_eq!(
+            settings["extraKnownMarketplaces"][&name]["source"],
+            json!({"source": "directory", "path": marketplace.display().to_string()})
+        );
+        assert!(!dir.path().join(".codex/orbit").exists());
+    }
+
+    #[test]
+    fn the_claude_plugin_registers_its_marketplace_and_removes_only_its_own_record() {
+        let dir = tempfile::tempdir().unwrap();
+        components::agent_plugins::TEST_RUNS.with(|runs| runs.borrow_mut().clear());
+        install_default(&["claude"], dir.path());
+        uninstall_named(&["claude"], dir.path());
+        let runs = components::agent_plugins::TEST_RUNS.with(|runs| runs.borrow().clone());
+        let name = runs[1][4].clone();
+        assert!(name.starts_with("gitlab-orbit-"), "{name}");
+        assert_eq!(runs[0][3], "add");
+        assert_eq!(runs[0][5..], ["--scope", "local"]);
+        assert_eq!(
+            runs[1],
+            ["claude", "plugin", "marketplace", "remove", name.as_str()]
+        );
+    }
+
+    #[test]
+    fn a_plugin_file_a_newer_release_drops_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        install_default(&["claude"], dir.path());
+        let root = dir.path().join(".claude/orbit/claude_plugin");
+        let old = root.join("gitlab-orbit/core/old.ts");
+        std::fs::write(&old, "export {}\n").unwrap();
+        let manifest = root.join(".orbit-setup.json");
+        let mut recorded = read_json(&manifest);
+        recorded["gitlab-orbit/core/old.ts"] = json!(sha2_hex(b"export {}\n"));
+        std::fs::write(&manifest, recorded.to_string()).unwrap();
+        install_default(&["claude"], dir.path());
+        assert!(!old.exists());
+    }
+
+    #[test]
+    fn a_manifest_path_outside_the_plugin_folder_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("victim.txt");
+        std::fs::write(&outside, "keep\n").unwrap();
+        let root = dir.path().join(".claude/orbit/claude_plugin");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".orbit-setup.json"),
+            json!({ "../../../victim.txt": sha2_hex(b"keep\n") }).to_string(),
+        )
+        .unwrap();
+        assert!(
+            install(
+                options_for(&["claude"]),
+                project(dir.path()),
+                &bare_machine()
+            )
+            .is_err()
+        );
+        assert!(outside.is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn uninstall_never_follows_a_symlinked_folder_in_the_plugin() {
+        let dir = tempfile::tempdir().unwrap();
+        install_default(&["claude"], dir.path());
+        let elsewhere = tempfile::tempdir().unwrap();
+        let victim = elsewhere.path().join("l.txt");
+        std::fs::write(&victim, "keep\n").unwrap();
+        let root = dir.path().join(".claude/orbit/claude_plugin");
+        std::os::unix::fs::symlink(elsewhere.path(), root.join("gitlab-orbit/linkdir")).unwrap();
+        let manifest = root.join(".orbit-setup.json");
+        let mut recorded = read_json(&manifest);
+        recorded["gitlab-orbit/linkdir/l.txt"] = json!(sha2_hex(b"keep\n"));
+        std::fs::write(&manifest, recorded.to_string()).unwrap();
+        uninstall_named(&["claude"], dir.path());
+        assert!(victim.is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_plugin_folder_or_manifest_is_refused_and_nothing_leaves_the_project() {
+        use std::os::unix::fs::symlink;
+        type Shape = (&'static str, fn(&Path, &Path));
+        let shapes: [Shape; 4] = [
+            ("the plugin folder", |project, outside| {
+                std::fs::create_dir_all(project.join(".claude/orbit")).unwrap();
+                symlink(outside, project.join(".claude/orbit/claude_plugin")).unwrap();
+            }),
+            ("a .claude folder with no plugin yet", |project, outside| {
+                symlink(outside, project.join(".claude")).unwrap();
+            }),
+            (
+                "a .claude/orbit folder with no plugin yet",
+                |project, outside| {
+                    std::fs::create_dir_all(project.join(".claude")).unwrap();
+                    symlink(outside, project.join(".claude/orbit")).unwrap();
+                },
+            ),
+            ("the manifest", |project, outside| {
+                install_default(&["claude"], project);
+                let manifest = project.join(".claude/orbit/claude_plugin/.orbit-setup.json");
+                std::fs::remove_file(&manifest).unwrap();
+                symlink(outside.join("victim.json"), manifest).unwrap();
+            }),
+        ];
+        for (name, make_link) in shapes {
+            for removing in [false, true] {
+                let repo = tempfile::tempdir().unwrap();
+                let outside = tempfile::tempdir().unwrap();
+                std::fs::write(outside.path().join("victim.json"), "keep\n").unwrap();
+                std::fs::write(outside.path().join(".gitignore"), "keep\n").unwrap();
+                make_link(repo.path(), outside.path());
+                let result = if removing {
+                    uninstall(
+                        options_for(&["claude"]),
+                        project(repo.path()),
+                        &bare_machine(),
+                    )
+                } else {
+                    install(
+                        options_for(&["claude"]),
+                        project(repo.path()),
+                        &bare_machine(),
+                    )
+                };
+                assert!(result.is_err(), "{name}, uninstall: {removing}");
+                for plugin_entry in [
+                    "gitlab-orbit",
+                    ".claude-plugin",
+                    ".orbit-setup.json",
+                    "orbit",
+                    "claude_plugin",
+                ] {
+                    let leaked = outside.path().join(plugin_entry).exists();
+                    assert!(
+                        !leaked,
+                        "{plugin_entry} written by {name}, uninstall: {removing}"
+                    );
+                }
+                for file in ["victim.json", ".gitignore"] {
+                    let kept = std::fs::read_to_string(outside.path().join(file)).unwrap();
+                    assert_eq!(kept, "keep\n", "{name}, uninstall: {removing}");
+                }
+            }
+        }
+    }
+
+    fn sha2_hex(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    #[test]
+    fn install_and_skip_of_one_component_is_an_error() {
+        assert!(Component::from_flags(&[Component::Mcp], &[Component::Mcp]).is_err());
+        let defaults = Component::from_flags(&[], &[]).unwrap();
+        assert!(defaults.contains(&Component::AgentPlugins) && !defaults.contains(&Component::Mcp));
+    }
+
+    #[test]
+    fn each_project_gets_its_own_claude_plugin_marketplace() {
+        let claude = spec::agent_named("claude").unwrap();
+        let plugin = claude.plugin.as_ref().unwrap();
+        let a = plugin.marketplace_for(&Target::Project("/repo/a".into()));
+        let b = plugin.marketplace_for(&Target::Project("/repo/b".into()));
+        assert_ne!(a, b);
+        assert_eq!(plugin.marketplace_for(&Target::Global), "gitlab-orbit");
+    }
+
+    #[test]
+    fn the_claude_plugin_is_skipped_on_an_old_or_missing_claude() {
+        for version in [Some("2.1.286"), None] {
+            components::agent_plugins::TEST_VERSION
+                .with(|fake| *fake.borrow_mut() = version.map(str::to_string));
+            let dir = tempfile::tempdir().unwrap();
+            install_default(&["claude"], dir.path());
+            assert!(!dir.path().join(".claude/orbit").exists(), "{version:?}");
+            assert!(
+                !dir.path().join(".claude/settings.local.json").exists(),
+                "{version:?}"
+            );
+        }
+        components::agent_plugins::TEST_VERSION
+            .with(|fake| *fake.borrow_mut() = Some("2.1.308".to_string()));
+    }
+
+    #[test]
+    fn uninstall_removes_the_claude_plugin_and_keeps_foreign_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+        std::fs::write(
+            dir.path().join(".claude/settings.local.json"),
+            r#"{"enabledPlugins": {"other@team": true}}"#,
+        )
+        .unwrap();
+
+        install_default(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
+        uninstall_named(&["claude"], dir.path());
+
+        assert_eq!(
+            read_json(&dir.path().join(".claude/settings.local.json")),
+            json!({"enabledPlugins": {"other@team": true}})
+        );
+        assert!(!dir.path().join(".claude/orbit").exists());
+    }
+
+    #[test]
+    fn uninstall_keeps_a_claude_plugin_file_the_user_edited() {
+        let dir = tempfile::tempdir().unwrap();
+        install_default(&["claude"], dir.path());
+        let register = dir
+            .path()
+            .join(".claude/orbit/claude_plugin/gitlab-orbit/hooks/register.ts");
+        let edited = format!(
+            "{}\n// my tweak\n",
+            std::fs::read_to_string(&register).unwrap()
+        );
+        std::fs::write(&register, &edited).unwrap();
+
+        uninstall_named(&["claude"], dir.path());
+
+        assert_eq!(std::fs::read_to_string(&register).unwrap(), edited);
+        assert!(
+            !dir.path()
+                .join(".claude/orbit/claude_plugin/.claude-plugin/marketplace.json")
+                .exists()
+        );
+        assert!(!dir.path().join(".claude/settings.local.json").exists());
+    }
+
+    #[test]
     fn launcher_tokens_resolve_in_installed_artifacts() {
         let dir = tempfile::tempdir().unwrap();
         install_with_mcp(&["claude", "opencode"], dir.path());
 
         let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
         assert!(
-            settings.contains("\"orbit hook-guard search\""),
+            settings.contains("\"orbit hook-guard search\"")
+                || settings.contains("\"orbit hook-guard search --gitlab\""),
             "{settings}"
         );
         assert!(!settings.contains("--mode"));

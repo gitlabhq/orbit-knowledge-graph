@@ -103,11 +103,3 @@ cases:
         MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest) WHERE g.full_path STARTS WITH 'public' AND p.name CONTAINS 'Project' RETURN count(mr) AS n
     expect:
       compile_only: true
-
-  - name: traversal_path_prefix_compiles
-    description: A traversal_path prefix works on an ungrouped node
-    query:
-      gql: |
-        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.traversal_path STARTS WITH '1/100/' RETURN g, count(w) AS n
-    expect:
-      compile_only: true

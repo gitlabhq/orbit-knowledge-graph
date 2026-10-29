@@ -1,0 +1,51 @@
+# Crate map
+
+Every `[workspace]` member needs a row here; `crates/xtask/build.rs` enforces this.
+
+Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, HealthCheck, ClickhouseSetup via `--mode`).
+
+| Crate | Role |
+|---|---|
+| `orbit-server` | gRPC server, all 5 modes, JWT auth, config loading, schema-version readiness gate (`active_schema.rs`), MCP tool registry, Orbit agent command registry (`CommandRegistry`), and the whole-tree contract of the skill GitLab Orbit serves (`ListSkills`/`GetSkill`) |
+| `orbit-server-config` | All config struct definitions (`AppConfig`, `ClickHouseConfiguration`, `NatsConfiguration`, `EngineConfiguration`, `QuerySettings`, etc.) and `OnceLock` global for query settings; avoids circular dep between server and compiler |
+| `orbit-analytics` | Consumer-owned Snowplow context types (`OrbitCommonContext`, `OrbitQueryContext`) and tracker infrastructure (`AnalyticsTracker` trait, `SnowplowAnalyticsTracker`, `InMemoryAnalyticsTracker`). Context wrappers implement `labkit_events::SnowplowContext` over typify-codegen'd data types. `build.rs` runs `typify::TypeSpace` over `config/schemas/iglu/<name>/<version>.json` at build time and emits a module per schema (struct + `SCHEMA_URI` + `SCHEMA_JSON` consts) into `OUT_DIR/iglu_schemas.rs`; runtime never reads schema files. `load_schema_json()` returns the embedded JSON for test-time validator compilation. |
+| `orbit-billing` | Snowplow billing-event emission (`BillingObserver`, `BillingTracker`, `BillingInputs`) and CDot quota enforcement (`QuotaService`). Licensed as `LicenseRef-EE`. The billing adapter in `orbit-server/src/billing_adapter.rs` is the single `Claims → BillingInputs` conversion point (SOX auditable surface). Billing event metrics: `gkg.billing.events.{emitted,dropped,rejected,delivered,delivery_failed}`. |
+| `object-storage` | Reference client over the `object_store` crate: builds an S3 or GCS store from `AppConfig::object_storage` and exposes write, read and delete. `examples/roundtrip.rs` exercises a config file against a real bucket |
+| `orbit-prompts` | Embeds and validates the versioned YAML prompts under `config/prompts/`, and validates the standalone GitLab Orbit and GitLab Orbit CLI skill trees at build time: matching placeholders and sections, unique combined paths, relative links, and documented CLI commands against the clap source inventory |
+| `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
+| `query-engine/compiler` | JSON DSL and typed Input -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
+| `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
+| `query-engine/types` | Type-safe result schema for redaction processing |
+| `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |
+| `query-engine/shared` | Shared pipeline stages (compilation, extraction, output), virtual column resolution (`ColumnResolver` trait, `ColumnResolverRegistry`, `resolve_virtual_columns`) |
+| `query-engine/formatters` | Result formatters (graph, raw row, toon, gql) |
+| `orbit-observability` | Central metric catalog: `MetricSpec` consts + typed `build_*` instrument factories, shared bucket sets, per-domain modules (indexer, query, server). `catalog()` feeds the xtask catalog generator; consumers call `meter()` and the typed builders instead of constructing instruments inline |
+| `orbit-log-fields` | Names of every log and span field, split into `safe` (always written; the server's expanded logs allowlist) and `expanded` (written only on expanded log lines), and the log macros that name fields with `safe(NAME)` and `expanded(NAME)` |
+| `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema/version.rs`), migration orchestrator (`schema/migration.rs`), migration completion detection and dead-version GC (`orchestrator/scheduled/migration_completion.rs`). **See `crates/indexer/AGENTS.md` (reuse-infra checklist) before adding a handler.** |
+| `indexer/datafusion` | DataFusion SQL projection for `data_fusion` SDLC plans, injected into `indexer::run` (kept as a separate sub-crate for compile-time isolation) |
+| `ontology` | Loads/validates YAML ontology, query validation helpers |
+| `query-data-model` | Derives shared graph and access-path contracts, backend catalogs, and authorization catalogs; the ClickHouse implementation owns storage definitions used by its DDL and migration consumers |
+| `code-graph` | Code parsing and linking pipeline under `src/v2/` (`pipeline`, `registry`, `config`, `types`, `linker`, `dsl`, `langs/{generic,custom}`); the old `src/legacy/` parser and linker have been removed. Shared `Range`/`Position`/`IntervalTree` live at `src/utils.rs`. |
+| `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper (kept as a separate sub-crate for compile-time isolation) |
+| `code-graph-incremental` | Incremental code graph engine: YAML rewrite rules per language under `langs/`, typed `Pipeline<T>` (parse, rewrite, link, resolve, export), snapshots and reindex. Suites under `integration-tests-codegraph/fixtures_incremental/` |
+| `orbit-migrations` | Schema migrations |
+| `orbit-versions` | Typed access to the pins in `config/versions.yaml` (`Versions`, `VERSIONS`); depends only on serde so build scripts can use it |
+| `utils` | Shared SQL parameter types (`ScalarType`, `SqlType`), ClickHouse encoding helpers, strict-mode YAML parse/serialize helpers (`yaml`) |
+| `utils/arrow` | Arrow extraction utilities, `BatchBuilder`, generic `AsRecordBatch<Ctx>` trait, logical byte sizes (kept as a separate sub-crate for compile-time isolation) |
+| `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
+| `named-queries` | Named queries: parses/validates YAML under `config/named_queries/` with a JSON and a GQL spelling per query, embeds it via `rust-embed`, and renders the selected spelling with JSON-schema-validated client parameters and separate server-derived `BindingValues` (`$binding`/`$param` placeholders for JSON, MiniJinja `binding`/`param`/`identifier`/`integer` lookups for GQL); `orbit-server` executes `QUERY_TYPE_NAMED` with the spelling and frontend selected by the separate Rails-derived `QueryLanguage` value, and its unit tests compile both examples against the ontology |
+| `nats-client` | Shared NATS client wrapper (`NatsClient`), KV bucket services (`KvServices`), circuit-breaking decorator (`CircuitBreakingNatsClient`), testkit feature |
+| `circuit-breaker` | Generic circuit breaker (`CircuitBreaker`, `CircuitBreakableError`) with observer hooks and per-circuit config |
+| `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
+| `gitaly-protos` | Gitaly protobuf types for gRPC repository operations |
+| `health-check` | Networked aggregate health for configured Kubernetes workloads and ClickHouse, plus NATS code work queue depth for autoscaling code indexer pods |
+| `orbit-cli` | Local `orbit workspace index`, `orbit workspace sql`, `orbit workspace schema`, and `orbit workspace mcp serve` (stateless stdio MCP server: `run_sql`, `get_graph_schema`, `index`; descriptions shared with the CLI via `descriptions.rs`) commands; writes the property graph to DuckDB and exposes it as raw SQL (no DSL); workspace management (`Workspace`, `GitInfo`, manifest in DuckDB). Release artifacts include glibc 2.28 Linux builds plus fully static musl Linux builds for Alpine, scratch, and distroless environments. |
+| `orbit-search` | Store-agnostic grep helpers: OR-alternative parsing and the kind filter (`grep`), and the shared corpus policy (source extensions, test/vendor exclusions) in `corpus` |
+| `duckdb-client` | DuckDB client with read-write retry backoff, read-only concurrent access, ontology-driven graph converter, shared SQL-literal/Arrow-column helpers |
+| `gitlab-client` | GitLab REST/JWT client for Rails API calls |
+| `orbit-cli/graphql` | Typed GitLab GraphQL queries, checked at compile time against the vendored GitLab schema |
+| `integration-testkit` | Shared ClickHouse service helpers, `MockRedactionService`, `ResponseView` assertion framework, YAML query scenario runner (`query_scenario` module: `QueryScenario` format, preset system, assertion enforcement), indexer scenario runner (`scenario`), plan-shape runner (`plan_shape`), `GKG_TEST_ONTOLOGY_OVERLAY` loader, CLI test harness (`cli` module) |
+| `integration-tests` | Test binaries: `local` (compiler, plan shape), `server_containers`, `indexer_containers`, `cli`, and `billing_boundary`. See [Testing](../testing/README.md) |
+| `integration-tests-codegraph` | YAML suites for `code-graph` (`fixtures/`) and `code-graph-incremental` (`fixtures_incremental/`); `build.rs` generates one test per suite |
+| `fuzz` | Bolero fuzz targets for the JSON and GQL query frontends, code parsers, and indexer messages |
+| `xtask` | Developer task runner (synthetic data generation, query evaluation, schema management) |

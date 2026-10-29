@@ -1682,7 +1682,7 @@ func (*GetQueryDslResponse_FormattedText) isGetQueryDslResponse_Content() {}
 // Request for the embedded skill catalog.
 type ListSkillsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Language      QueryLanguage          `protobuf:"varint,1,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"` // Selects the query mode the served skills teach
+	Language      QueryLanguage          `protobuf:"varint,1,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"` // Query language of the caller; both modes serve the GQL skills
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1850,7 +1850,7 @@ type GetSkillRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	MetadataOnly  bool                   `protobuf:"varint,2,opt,name=metadata_only,json=metadataOnly,proto3" json:"metadata_only,omitempty"` // true omits files for a cheap cache revalidation
-	Language      QueryLanguage          `protobuf:"varint,3,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"` // Selects the query mode the served skill teaches
+	Language      QueryLanguage          `protobuf:"varint,3,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"` // Query language of the caller; both modes serve the GQL skill
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

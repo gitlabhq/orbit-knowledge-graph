@@ -5,6 +5,7 @@
 //! and template values live in `config/setup/setup.yaml`.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::LazyLock;
 
 use ontology::migrations::sha256_hex;
@@ -16,12 +17,24 @@ use serde_json::Value;
 #[folder = "$CONFIG_DIR/setup"]
 struct SetupAssets;
 
+#[derive(Embed)]
+#[folder = "$CARGO_MANIFEST_DIR/../../packages/agent-plugins"]
+#[include = ".claude-plugin/plugin.json"]
+#[include = "hooks/*"]
+#[include = "core/*"]
+#[exclude = "*.test.ts"]
+#[exclude = "*.d.ts"]
+struct AgentPluginAssets;
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SetupTexts {
     mcp_server: McpServerText,
     instructions: String,
+    #[serde(default)]
+    remote: BTreeMap<String, String>,
     nudge_search: String,
+    nudge_gitlab: String,
     #[serde(default)]
     template_vars: BTreeMap<String, String>,
 }
@@ -37,7 +50,7 @@ pub(crate) const GLAB_LAUNCHER: &str = "glab orbit";
 
 pub(crate) fn launcher() -> &'static str {
     static LAUNCHER: LazyLock<&'static str> = LazyLock::new(|| {
-        if std::env::var("GITLAB_ORBIT_DISTRIBUTION").as_deref() == Ok("glab") {
+        if crate::telemetry::detect_distribution(|key| std::env::var(key).ok()).is_some() {
             GLAB_LAUNCHER
         } else {
             DIRECT_LAUNCHER
@@ -50,11 +63,25 @@ fn substitute_launcher(text: &str, launcher: &str) -> String {
     text.replace("{{orbit}}", launcher)
 }
 
-fn render_instructions(launcher: &str) -> String {
-    substitute_launcher(TEXTS.instructions.trim_end(), launcher)
+fn render_instructions(launcher: &str, remote: bool) -> String {
+    let mut text = TEXTS.instructions.trim_end().to_string();
+    for (name, value) in &TEXTS.remote {
+        let value = if remote { value.as_str() } else { "" };
+        text = text.replace(&format!("{{{{{name}}}}}"), value);
+    }
+    let text = text.replace("{{query_syntax}}", crate::descriptions::gql_syntax());
+    substitute_launcher(&text, launcher)
 }
 
-static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| render_instructions(launcher()));
+static REACHES_GITLAB: LazyLock<bool> =
+    LazyLock::new(|| crate::remote::client::gitlab_usable(Path::new(".")));
+
+static RENDERED_INSTRUCTIONS: LazyLock<String> =
+    LazyLock::new(|| render_instructions(launcher(), reaches_gitlab()));
+
+pub(crate) fn reaches_gitlab() -> bool {
+    *REACHES_GITLAB
+}
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
@@ -65,6 +92,13 @@ pub(crate) fn instructions_text() -> &'static str {
 
 pub(crate) fn search_nudge_text() -> &'static str {
     &RENDERED_NUDGE_SEARCH
+}
+
+static RENDERED_NUDGE_GITLAB: LazyLock<String> =
+    LazyLock::new(|| substitute_launcher(TEXTS.nudge_gitlab.trim_end(), launcher()));
+
+pub(crate) fn gitlab_nudge_text() -> &'static str {
+    &RENDERED_NUDGE_GITLAB
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,6 +139,64 @@ pub(super) struct AgentSpec {
     pub(super) registrations: Vec<Registration>,
     pub(super) mcp: Option<McpEntry>,
     pub(super) skills: Option<SkillDirs>,
+    pub(super) plugin: Option<PluginSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PluginSpec {
+    pub(super) dir: ScopedPath,
+    pub(super) settings: ScopedPath,
+    pub(super) marketplace: String,
+    pub(super) name: String,
+    pub(super) min_version: String,
+    pub(super) version_command: Vec<String>,
+}
+
+impl PluginSpec {
+    pub(super) fn marketplace_for(&self, target: &super::Target) -> String {
+        match target {
+            super::Target::Global => self.marketplace.clone(),
+            super::Target::Project(root) => {
+                format!(
+                    "{}-{}",
+                    self.marketplace,
+                    &sha256_hex(&root.display().to_string())[..8]
+                )
+            }
+        }
+    }
+
+    pub(super) fn id(&self, marketplace: &str) -> String {
+        format!("{}@{marketplace}", self.name)
+    }
+
+    pub(super) fn files(&self, marketplace: &str) -> Vec<(String, Vec<u8>)> {
+        let marketplace = serde_json::json!({
+            "name": marketplace,
+            "owner": { "name": "GitLab" },
+            "plugins": [{ "name": self.name, "source": format!("./{}", self.name) }],
+        });
+        let plugin = AgentPluginAssets::iter().map(|path| {
+            let file = AgentPluginAssets::get(&path).expect("embedded file must be readable");
+            let mut data = file.data.into_owned();
+            if path == ".claude-plugin/plugin.json" {
+                let mut manifest: Value =
+                    serde_json::from_slice(&data).expect("plugin.json is JSON");
+                manifest["version"] = Value::String(env!("ORBIT_VERSION").to_string());
+                data = serde_json::to_vec_pretty(&manifest).unwrap();
+            }
+            (format!("{}/{path}", self.name), data)
+        });
+        [(".gitignore".to_string(), b"*\n".to_vec())]
+            .into_iter()
+            .chain(std::iter::once((
+                ".claude-plugin/marketplace.json".to_string(),
+                serde_json::to_vec_pretty(&marketplace).unwrap(),
+            )))
+            .chain(plugin)
+            .collect()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,6 +254,8 @@ pub(super) struct JsonMerge {
 pub(super) struct TemplateFile {
     pub(super) path: ScopedPath,
     pub(super) template: String,
+    #[serde(default)]
+    pub(super) ui: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,6 +264,8 @@ pub(super) struct Registration {
     pub(super) file: ScopedPath,
     pub(super) path: Vec<String>,
     pub(super) value: ScopedPath,
+    #[serde(default)]
+    pub(super) ui: bool,
 }
 
 static AGENT_SPECS: LazyLock<Vec<AgentSpec>> = LazyLock::new(|| {
@@ -199,6 +295,26 @@ impl std::ops::Deref for Agent {
 
     fn deref(&self) -> &AgentSpec {
         self.0
+    }
+}
+
+impl Agent {
+    pub(super) fn ui_files(self, ui: bool) -> impl Iterator<Item = &'static TemplateFile> {
+        self.0
+            .template_files
+            .iter()
+            .filter(move |file| file.ui == ui)
+    }
+
+    pub(super) fn ui_registrations(self, ui: bool) -> impl Iterator<Item = &'static Registration> {
+        self.0
+            .registrations
+            .iter()
+            .filter(move |entry| entry.ui == ui)
+    }
+
+    pub(super) fn has_ui(self) -> bool {
+        self.plugin.is_some() || self.ui_files(true).next().is_some()
     }
 }
 
@@ -276,29 +392,208 @@ mod tests {
             (DIRECT_LAUNCHER, "`orbit grep"),
             (GLAB_LAUNCHER, "`glab orbit grep"),
         ] {
-            let rendered = render_instructions(launcher);
-            assert!(rendered.contains(expected), "{launcher}: {rendered}");
-            assert!(!rendered.contains("{{orbit}}"), "{launcher}");
-            for phrase in [
-                " grep` must be used for search",
-                "Ignores case, `_`, `-`",
-                "`a|b` OR",
-                "definitions you need in one call",
-            ] {
-                assert!(rendered.contains(phrase), "{launcher}: {phrase}");
+            for remote in [true, false] {
+                let rendered = render_instructions(launcher, remote);
+                assert!(rendered.contains(expected), "{launcher}: {rendered}");
+                assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
+                for phrase in [
+                    " grep` must be used for search",
+                    "Ignores case, `_`, `-`",
+                    "`a|b` OR",
+                    "Batch all reads and searches you can name",
+                ] {
+                    assert!(rendered.contains(phrase), "{launcher}: {phrase}");
+                }
+                assert_eq!(
+                    rendered.contains("GitLab"),
+                    remote,
+                    "{launcher}: {rendered}"
+                );
+                assert!(
+                    rendered.contains("instead of glab and glab api") == remote,
+                    "{launcher}"
+                );
+                assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
+                let budget = if remote { 250 } else { 75 };
+                assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
-            assert!(rendered.split_whitespace().count() <= 90, "{launcher}");
         }
+        let local = render_instructions(DIRECT_LAUNCHER, false);
+        assert_eq!(
+            local.lines().filter(|line| line.starts_with("- ")).count(),
+            2,
+            "{local}"
+        );
         assert!(search_nudge_text().contains("MANDATORY"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }
 
+    const UNLABELED: &[&str] = &[
+        "hook-guard",
+        "send-event",
+        "refresh",
+        "mcp serve",
+        "workspace mcp serve",
+    ];
+
+    #[derive(serde::Deserialize)]
+    struct CallLabels {
+        commands: BTreeMap<String, Value>,
+        tools: BTreeMap<String, Value>,
+    }
+
+    fn call_labels() -> CallLabels {
+        let source = include_str!("../../../../../packages/agent-plugins/core/labels.ts");
+        serde_json::from_str(source.trim_start_matches("export default ")).unwrap()
+    }
+
+    struct CliCommand {
+        path: String,
+        aliases: Vec<String>,
+        ancestors: Vec<String>,
+        has_subcommands: bool,
+    }
+
+    fn cli_commands(command: &clap::Command, ancestors: &[String], out: &mut Vec<CliCommand>) {
+        let prefix = ancestors
+            .last()
+            .map(|p| format!("{p} "))
+            .unwrap_or_default();
+        for sub in command.get_subcommands() {
+            let path = format!("{prefix}{}", sub.get_name());
+            let mut lineage = ancestors.to_vec();
+            lineage.push(path.clone());
+            cli_commands(sub, &lineage, out);
+            out.push(CliCommand {
+                aliases: sub
+                    .get_all_aliases()
+                    .map(|a| format!("{prefix}{a}"))
+                    .collect(),
+                ancestors: ancestors.to_vec(),
+                has_subcommands: sub.has_subcommands(),
+                path,
+            });
+        }
+    }
+
+    #[test]
+    fn call_labels_name_real_commands_and_cover_every_command() {
+        use clap::CommandFactory;
+        let labels = call_labels().commands;
+        let mut commands = Vec::new();
+        cli_commands(&crate::Cli::command(), &[], &mut commands);
+        let known: Vec<&str> = commands
+            .iter()
+            .flat_map(|c| std::iter::once(&c.path).chain(&c.aliases))
+            .map(String::as_str)
+            .collect();
+
+        for key in labels.keys() {
+            assert!(
+                known.contains(&key.as_str()),
+                "labels.ts: `{key}` is not an orbit command"
+            );
+        }
+        for command in &commands {
+            if labels.contains_key(&command.path) {
+                for alias in &command.aliases {
+                    assert!(
+                        labels.contains_key(alias),
+                        "labels.ts: label `{alias}` like `{}`",
+                        command.path
+                    );
+                }
+            }
+            let labeled = labels.contains_key(&command.path)
+                || command.ancestors.iter().any(|a| labels.contains_key(a));
+            assert!(
+                labeled || command.has_subcommands || UNLABELED.contains(&command.path.as_str()),
+                "labels.ts: label `{}`, or add it to UNLABELED",
+                command.path
+            );
+        }
+    }
+
+    #[test]
+    fn call_labels_name_real_orbit_tools() {
+        let prompts = orbit_prompts::Prompts::load_embedded("remote").unwrap();
+        let tools: Vec<&str> = prompts.iter().map(|(_, prompt)| prompt.name()).collect();
+        for tool in call_labels().tools.keys() {
+            assert!(
+                tools.contains(&tool.as_str()),
+                "labels.ts: `{tool}` is not an Orbit tool"
+            );
+        }
+    }
+
+    #[test]
+    fn the_claude_plugin_embeds_its_marketplace_and_plugin() {
+        let claude = agent_named("claude").unwrap();
+        let plugin = claude.plugin.as_ref().unwrap();
+        let mut files: Vec<String> = plugin
+            .files(&plugin.marketplace)
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect();
+        files.sort();
+        let shipped = [
+            "core/calls.ts",
+            "core/command.ts",
+            "core/cypher.ts",
+            "core/labels.ts",
+            "core/lib.js",
+            "core/stats.ts",
+            "hooks/highlight.ts",
+            "hooks/hooks.json",
+            "hooks/orbit-mark.ts",
+            "hooks/register.ts",
+            "hooks/rows.ts",
+            "hooks/theme.ts",
+        ];
+        let mut expected = vec![
+            ".claude-plugin/marketplace.json".to_string(),
+            ".gitignore".to_string(),
+            "gitlab-orbit/.claude-plugin/plugin.json".to_string(),
+        ];
+        expected.extend(shipped.iter().map(|path| format!("gitlab-orbit/{path}")));
+        assert_eq!(files, expected);
+        let manifest = plugin
+            .files(&plugin.marketplace)
+            .into_iter()
+            .find(|(path, _)| path.ends_with("plugin.json"))
+            .unwrap()
+            .1;
+        let manifest: Value = serde_json::from_slice(&manifest).unwrap();
+        assert_eq!(manifest["version"], env!("ORBIT_VERSION"));
+        let marketplace: Value = serde_json::from_slice(
+            &plugin
+                .files(&plugin.marketplace)
+                .into_iter()
+                .find(|(path, _)| path == ".claude-plugin/marketplace.json")
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        assert_eq!(marketplace["name"], plugin.marketplace.as_str());
+        assert_eq!(marketplace["plugins"][0]["name"], plugin.name.as_str());
+        assert!(
+            marketplace["plugins"][0]["source"]
+                .as_str()
+                .is_some_and(|source| source.starts_with("./")),
+            "the plugin needs a relative source so it loads without an install step"
+        );
+    }
+
     #[test]
     fn opencode_plugins_are_shell_safe() {
-        let contents = agent_named("opencode").unwrap().template_files[0].render();
-        assert!(!contents.contains('`'));
-        assert!(!contents.contains("$("));
+        let template = read_embedded_text("opencode_plugin.js");
+        assert_eq!(
+            template.matches("{{").count(),
+            1,
+            "the reminder is the only placeholder"
+        );
+        assert!(template.contains(r#""{{reminder}}""#));
 
         for (name, text) in &TEXTS.template_vars {
             assert!(
@@ -326,6 +621,11 @@ mod tests {
                         .flat_map(|r| [&r.file.global, &r.value.global]),
                 )
                 .chain(spec.mcp.iter().map(|entry| &entry.file.global))
+                .chain(
+                    spec.plugin
+                        .iter()
+                        .flat_map(|plugin| [&plugin.dir.global, &plugin.settings.global]),
+                )
                 .chain(spec.skills.iter().flat_map(|dirs| {
                     std::iter::once(&dirs.dir.global).chain(dirs.link.iter().map(|l| &l.global))
                 }))

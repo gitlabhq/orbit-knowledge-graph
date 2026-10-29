@@ -15,7 +15,7 @@ physical:
       expect: ["(Neighbors center=mr direction=outgoing directional ... (_))"]
     emitted:
       expect:
-        - (Union ALL AS e (_) (_))
-        - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE'], ... (Scan Table(gl_ci_edge) AS _e))
-        - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE'], ... (Scan Table(gl_edge) AS _e))
+        - (Union ALL AS _orbit_neighbor_edge (_) (_))
+        - (Filter _orbit_neighbor_edge_arm.source_kind = 'MergeRequest', _orbit_neighbor_edge_arm.source_id = 1, _orbit_neighbor_edge_arm.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE'], ... (Scan Table(gl_ci_edge) AS _orbit_neighbor_edge_arm))
+        - (Filter _orbit_neighbor_edge_arm.source_kind = 'MergeRequest', _orbit_neighbor_edge_arm.source_id = 1, _orbit_neighbor_edge_arm.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE'], ... (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm))
       reject: ["(Bind _orbit_fused (_))"]

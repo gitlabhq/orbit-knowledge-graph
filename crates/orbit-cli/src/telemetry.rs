@@ -23,6 +23,8 @@ pub const AGENTS_REMOVED_ACTION: &str = "agents_removed";
 
 const ENABLED_ENV: &str = "ORBIT_TELEMETRY_ENABLED";
 const COLLECTOR_URL_ENV: &str = "ORBIT_TELEMETRY_COLLECTOR_URL";
+const DISTRIBUTION_ENV: &str = "GITLAB_ORBIT_DISTRIBUTION";
+const GLAB_DISTRIBUTION: &str = "glab";
 
 static SAFE_IDENTIFIER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9._-]{1,64}$").expect("static regex"));
@@ -165,11 +167,12 @@ impl From<&SetupRun> for orbit_cli_setup::OrbitCliSetup {
             components: run
                 .components
                 .iter()
-                .map(|component| match component {
-                    Component::Instructions => Item::Instructions,
-                    Component::Hooks => Item::Hooks,
-                    Component::Skill => Item::Skill,
-                    Component::Mcp => Item::Mcp,
+                .filter_map(|component| match component {
+                    Component::Instructions => Some(Item::Instructions),
+                    Component::Hooks => Some(Item::Hooks),
+                    Component::Skill => Some(Item::Skill),
+                    Component::Mcp => Some(Item::Mcp),
+                    Component::AgentPlugins => None,
                 })
                 .collect(),
             scope: match run.global {
@@ -209,6 +212,8 @@ fn build_cli_context() -> OrbitCliContext {
         cli_version: env!("ORBIT_VERSION").parse().ok(),
         os: std::env::consts::OS.parse().ok(),
         arch: std::env::consts::ARCH.parse().ok(),
+        distribution: detect_distribution(|key| std::env::var(key).ok())
+            .and_then(|d| d.parse().ok()),
     })
 }
 
@@ -265,6 +270,11 @@ pub fn detect_coding_agent(get_env: impl Fn(&str) -> Option<String>) -> Option<S
         Some("zed") => Some("zed-terminal".into()),
         _ => None,
     }
+}
+
+/// glab sets `GITLAB_ORBIT_DISTRIBUTION=glab` on the binary it runs for `glab orbit`.
+pub fn detect_distribution(get_env: impl Fn(&str) -> Option<String>) -> Option<&'static str> {
+    (get_env(DISTRIBUTION_ENV).as_deref() == Some(GLAB_DISTRIBUTION)).then_some(GLAB_DISTRIBUTION)
 }
 
 fn resolve(
@@ -442,7 +452,7 @@ mod tests {
         SetupRun {
             detected_agents: vec!["claude".into(), "codex".into()],
             selected_agents: vec!["claude".into()],
-            components: Component::from_flags(true, &[]),
+            components: Component::from_flags(&[Component::Mcp], &[]).unwrap(),
             global: true,
             interactive: false,
             graph_first: Some(false),

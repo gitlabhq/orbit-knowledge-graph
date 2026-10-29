@@ -82,7 +82,7 @@ proj_id_pipeline_in_project_eq:
     LIMIT 100
 
 proj_full_path_pipeline_source_filter:
-  desc: "Pipeline IN_PROJECT scoped by project full_path WITH the canonical source='merge_request_event' filter (per recipes.md). Gives Pipeline a full_path-scoped case plus a column-filter-plus-prefix interaction."
+  desc: "Pipeline IN_PROJECT scoped by project full_path WITH the canonical source='merge_request_event' filter (per the Pipelines that ran for one merge request section of gql.md). Gives Pipeline a full_path-scoped case plus a column-filter-plus-prefix interaction."
   category: traversal
   suite: scoping
   query: |
@@ -303,7 +303,7 @@ ns_subgroup_id_scopes_to_subtree:
   suite: scoping
   query: |
     MATCH (g:Group {id: {{SUBGROUP_ID}}})
-    RETURN g{.id, .full_path, .traversal_path}
+    RETURN g{.id, .full_path}
     LIMIT 50
 
 ns_project_namespace_id_GAP:

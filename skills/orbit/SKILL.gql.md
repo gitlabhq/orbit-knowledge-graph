@@ -1,9 +1,9 @@
 ---
 name: orbit
-description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.33.17+gql
+description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
+version: 0.35.13+gql
 license: MIT
-compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
+compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
   audience: developers
   keywords: orbit, knowledge-graph, gkg, graph, query, glab
@@ -14,7 +14,7 @@ metadata:
 
 # Orbit skill
 
-Query GitLab Orbit (previously GitLab Knowledge Graph) through the flat `glab orbit` command tree. It needs glab v1.117.0 or later. Hosted commands handle authentication, response framing, and exit codes. Local commands use the managed binary and the local DuckDB graph.
+Query GitLab Orbit (previously GitLab Knowledge Graph) through the flat `glab orbit` command tree. It needs glab v1.126.0 or later. Hosted commands handle authentication, response framing, and exit codes. Local commands use the managed binary and the local DuckDB graph.
 
 ## Prerequisites
 
@@ -28,19 +28,25 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 ## Query language
 
-Queries use read-only openCypher 9-based syntax (`MATCH ... RETURN`). `glab orbit dsl` is unavailable.
+Queries use read-only openCypher 9-based syntax (`MATCH ... RETURN`). If you find a legacy JSON query, run `glab orbit skills get orbit-gql-migration` to convert it.
 
 ## Discovery
 
-`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/sql.md` to print a file.
+`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/cli.md` to print a file.
 
-For entity properties and relationship types, run `CALL db.schema('Node')` with an explicit node name. `CALL db.schema()` lists every node and relationship type; call it at most once per session, because the schema does not change mid-session. Query syntax and paste-ready queries are in [`references/gql.md`](references/gql.md).
+Run `CALL db.schema()` once per session, because the schema does not change mid-session. It lists every relationship as `(Source)-[:TYPE]->(Target)` and the properties of the common nodes, such as `User`, `Project`, `Group`, `MergeRequest`, and `WorkItem`. Run `CALL db.schema('Node')` only for a node it does not list properties for. Query syntax and paste-ready queries are in [`references/gql.md`](references/gql.md).
+
+Batch schema reads: make every schema read a question needs in one shell command, not one command per read. Each `CALL db.schema` call takes one node. On the first read, chain the overview with the nodes that the question names. Later, batch only the new node reads.
+
+```shell
+glab orbit query 'CALL db.schema()'; echo; glab orbit query "CALL db.schema('Vulnerability')"; echo; glab orbit query "CALL db.schema('Pipeline')"
+```
 
 The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in your mode. Do not reuse discovery results across users or mode changes. Entries contain only `name`, `description`, and `raw_query`; there is no client language selector. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one aggregate query, with `count(...)` in `RETURN`, over N lookups for "how many X grouped by Y", and batch related lookups.
 
-When editing Orbit docs or skills, fence executable JSON queries as `json orbit-query` and GQL queries as `gql orbit-query` so docs smoke tests run them.
+When editing Orbit docs or skills, fence executable GQL queries as `gql orbit-query` so docs smoke tests run them.
 
 ## Running a query
 
@@ -52,7 +58,7 @@ glab orbit query "CALL db.schema('Project')"
 glab orbit query "MATCH (p:Project {full_path: 'gitlab-org/gitlab'}) RETURN p.id, p.full_path LIMIT 1"
 ```
 
-With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted string literals then need double quotes around the query. Inline query text needs Orbit CLI 0.130.0 or later. If `glab orbit query` rejects the text argument, run `glab orbit --update`.
+With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted string literals then need double quotes around the query.
 
 `--file` reads a JSON request envelope whose `query` field holds the query text, not a bare query file. `--file -` reads that envelope from stdin. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
 
@@ -66,7 +72,7 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - Prefer a single anchored node when you can bound the target directly. Extra anchor nodes can change the row shape and skew aggregate counts.
 - To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
-- There is no `OR`, `XOR`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`.
+- There is no `OR`, `XOR`, `RETURN DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`. `DISTINCT` works only inside `count()`: `count(DISTINCT pl)`.
 
 ## Iteration budget
 
@@ -74,20 +80,15 @@ Resolve a user question in at most 5 query attempts, validation errors included.
 
 ## Reporting results
 
-Orbit answers come from graph queries, not an authoritative source. Show the query body and its coverage gaps with every result. Full guidance: [`references/reporting.md`](references/reporting.md).
-
-## Repository map helpers
-
-For code-structure orientation before you plan a change, use `glab orbit repo-map` on a local checkout.
-See the repository-map rows in [References](#references).
+Orbit answers come from graph queries, not an authoritative source. Flag known coverage gaps inline when they affect the result. Full guidance: [`references/reporting.md`](references/reporting.md).
 
 <!-- orbit:include local:quick-start -->
 
 ## Managed CLI
 
-`glab orbit` downloads, verifies, and runs the Orbit binary from the `orbit-cli` package (macOS, Linux, and Windows). The command selects the backend. `index`, `grep`, `context`, `sql`, `schema`, `list`, `mcp`, and `repo-map` use the local graph. `query`, `status`, `ontology`, `tools`, and `graph-status` use Orbit Remote.
+`glab orbit` downloads, verifies, and runs the GitLab Orbit CLI binary from the `orbit-cli` package (macOS, Linux, and Windows). `grep` and `context` read the local graph and index the working tree on their own. `workspace` groups the other local-graph commands (`index`, `list`, `mcp serve`). `query`, `status`, and `schema` call the GitLab Orbit API.
 
-glab handles `--install`, `--update`, and `--yes` itself and forwards everything else to the binary. `--install` and `--update` are mutually exclusive. `--yes` skips the confirmation prompts, so pass it in scripts and agent runs. Put these flags before the subcommand (`glab orbit --yes list`); the binary rejects `--yes` after other subcommands, except for `setup` and `uninstall`, which take their own. glab's own `update` command also takes `--yes`. `glab help orbit` shows the wrapper help. `glab orbit help` and `glab orbit <command> --help` show the binary's.
+glab handles `--install`, `--update`, and `--yes` itself and forwards everything else to the binary. `--install` and `--update` are mutually exclusive. `--yes` skips the confirmation prompts, so pass it in scripts and agent runs. Put these flags before the subcommand (`glab orbit --yes status`); the binary rejects `--yes` after other subcommands, except for `setup` and `uninstall`, which take their own. glab's own `update` command also takes `--yes`. `glab help orbit` shows the wrapper help. `glab orbit help` and `glab orbit <command> --help` show the binary's.
 
 ```shell
 glab orbit --install --yes   # install without running
@@ -104,5 +105,4 @@ Skip the confirmation prompts for good with `glab config set orbit_cli_auto_run 
 | openCypher 9-based syntax and paste-ready queries | [`references/gql.md`](references/gql.md) |
 | Empty results and query validation errors | [`references/gql.md`](references/gql.md#troubleshooting) |
 | Reporting results and coverage caveats | [`references/reporting.md`](references/reporting.md) |
-| Local repository map command (`glab orbit repo-map`) | [`references/local_repo_map.md`](references/local_repo_map.md) |
 | Maintaining this skill (contributing, doc sync) | [`references/maintaining.md`](references/maintaining.md) |

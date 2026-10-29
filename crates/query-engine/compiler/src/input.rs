@@ -1,8 +1,6 @@
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
-use ontology::constants::{
-    DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TRAVERSAL_PATH_COLUMN,
-};
+use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
@@ -305,6 +303,7 @@ pub struct InputFilter {
     /// When set, compare against another node's column instead of a literal.
     /// Format: `(node_alias, property_name)`. Mutually exclusive with `value`.
     pub rhs_column: Option<(String, String)>,
+    pub from_temporal_literal: bool,
 }
 
 impl InputFilter {
@@ -544,13 +543,20 @@ pub struct InputAggregationMetric {
     pub expr: AggExpr,
     #[serde(rename = "as", default)]
     pub alias: Option<String>,
+    #[serde(default)]
+    pub distinct: bool,
 }
 
 impl InputAggregationMetric {
     pub fn output_name(&self) -> String {
-        self.alias
-            .clone()
-            .unwrap_or_else(|| self.expr.derived_name())
+        self.alias.clone().unwrap_or_else(|| {
+            let name = self.expr.derived_name();
+            if self.distinct {
+                name.replacen('_', "_distinct_", 1)
+            } else {
+                name
+            }
+        })
     }
 }
 

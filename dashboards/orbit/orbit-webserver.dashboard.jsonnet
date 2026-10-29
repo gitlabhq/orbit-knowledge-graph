@@ -340,19 +340,18 @@ local schema = [
 // Mirrors the indexer Resources row exactly. Selector flips to
 // the webserver container. cAdvisor + kube-state-metrics, no app
 // instrumentation needed.
-local KUBE_SEL = SEL + ', namespace="gkg"';
 local resources = [
   o.row('Resources'),
   o.gaugeStat(
     'CPU: usage / limit (5m)',
     'Aggregate CPU seconds used per second divided by configured CPU limit, across all webserver replicas. 1.0 means the pool is fully consuming its quota.',
-    '(sum(rate(container_cpu_usage_seconds_total{%s, cpu="total"}[5m]))) / (sum(kube_pod_container_resource_limits{%s, resource="cpu"}) > 0)' % [SEL, KUBE_SEL],
+    '(sum(rate(container_cpu_usage_seconds_total{%s, cpu="total"}[5m]))) / (sum(kube_pod_container_resource_limits{%s, resource="cpu"}) > 0)' % [SEL, SEL],
     DS, 'percentunit', 6,
   ),
   o.gaugeStat(
     'Memory: working set / limit',
     'Working-set memory across all replicas as a fraction of the aggregate memory limit. Watch for sustained values above ~0.85 — that is OOM-kill territory.',
-    '(sum(container_memory_working_set_bytes{%s})) / (sum(kube_pod_container_resource_limits{%s, resource="memory"}) > 0)' % [SEL, KUBE_SEL],
+    '(sum(container_memory_working_set_bytes{%s})) / (sum(kube_pod_container_resource_limits{%s, resource="memory"}) > 0)' % [SEL, SEL],
     DS, 'percentunit', 6,
   ),
   o.gaugeStat(
@@ -364,7 +363,7 @@ local resources = [
   o.gaugeStat(
     'Restarts (1h)',
     'Container restarts across webserver replicas in the selected time range. Crash-loops show up here before they show up in the app metrics.',
-    'sum(increase(kube_pod_container_status_restarts_total{%s}[1h]))' % [KUBE_SEL],
+    'sum(increase(kube_pod_container_status_restarts_total{%s}[1h]))' % [SEL],
     DS, 'short', 6,
   ),
   o.timeseries(
@@ -376,7 +375,7 @@ local resources = [
         '{{pod}}', DS, 'A',
       ),
       o.target(
-        'avg(kube_pod_container_resource_limits{%s, resource="cpu"})' % [KUBE_SEL],
+        'avg(kube_pod_container_resource_limits{%s, resource="cpu"})' % [SEL],
         'limit', DS, 'B',
       ),
     ],
@@ -400,7 +399,7 @@ local resources = [
         '{{pod}}', DS, 'A',
       ),
       o.target(
-        'avg(kube_pod_container_resource_limits{%s, resource="memory"})' % [KUBE_SEL],
+        'avg(kube_pod_container_resource_limits{%s, resource="memory"})' % [SEL],
         'limit', DS, 'B',
       ),
     ],

@@ -16,10 +16,10 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Filter e1.relationship_kind = 'CALLS', e1.project_id = 9, ... (_))
-        - (Filter e2.relationship_kind = 'CALLS', e2.project_id = 9, ... (_))
+        - (Filter _orbit_e1.relationship_kind = 'CALLS', _orbit_e1.project_id = 9, ... (_))
+        - (Filter _orbit_e2.relationship_kind = 'CALLS', _orbit_e2.project_id = 9, ... (_))
   duckdb:
     planned:
       expect:
-        - (Filter e1._deleted = false, e1.project_id = 9 (Bind e1 (Filter ..., e1.relationship_kind = 'CALLS' (_))))
-        - (Filter e2._deleted = false, e2.project_id = 9 (Bind e2 (Filter ..., e2.relationship_kind = 'CALLS' (_))))
+        - (Filter _orbit_e1._deleted = false, _orbit_e1.project_id = 9 (Bind _orbit_e1 (Filter ..., _orbit_e1.relationship_kind = 'CALLS' (_))))
+        - (Filter _orbit_e2._deleted = false, _orbit_e2.project_id = 9 (Bind _orbit_e2 (Filter ..., _orbit_e2.relationship_kind = 'CALLS' (_))))

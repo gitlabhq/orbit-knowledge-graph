@@ -1,5 +1,33 @@
 {
+  "name": "orbit",
+  "version": "0.163.0",
   "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.4",
+  "workspaces": {
+    "packages": [
+      "packages/*"
+    ],
+    "catalog": {
+      "@gitlab-org/orbit-markdown": "0.12.1",
+      "@gitlab-org/orbit-site": "0.12.1",
+      "@tanstack/react-router": "1.170.17",
+      "@types/bun": "1.4.4",
+      "@types/react": "19.2.17",
+      "es-toolkit": "1.52.0",
+      "@types/react-dom": "19.2.3",
+      "react": "19.2.7",
+      "react-dom": "19.2.7",
+      "typescript": "7.0.2",
+      "vite": "8.1.4",
+      "yaml": "2.9.1"
+    }
+  },
+  "scripts": {
+    "build": "bun run --filter '*' build",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun run --filter '*' test"
+  },
   "devDependencies": {
     "@commitlint/cli": "21.2.0",
     "@commitlint/config-conventional": "21.2.0",
@@ -10,6 +38,7 @@
     "@semantic-release/gitlab": "13.3.2",
     "@semantic-release/release-notes-generator": "14.1.0",
     "conventional-changelog-conventionalcommits": "9.3.1",
+    "markdownlint-cli2": "0.22.1",
     "prettier": "3.9.10",
     "semantic-release": "25.0.3",
     "semantic-release-slack-bot": "4.0.2"

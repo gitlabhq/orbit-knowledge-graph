@@ -5,7 +5,7 @@ use compiler::input::DynamicColumnMode;
 use compiler::{Frontend, QueryError, compile};
 use ontology::introspection::{
     IntrospectionScope::{All, Local},
-    build_schema_response,
+    build_compact_schema_response,
 };
 
 #[test]
@@ -89,6 +89,34 @@ fn aggregation_query() {
 
     assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
     assert!(rendered.contains("GROUP BY"));
+}
+
+#[test]
+fn gql_count_distinct_renders_distinct_aggregates() {
+    let orbit_query = "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id}, count(n) AS notes, count(DISTINCT n) AS distinct_notes, count(DISTINCT n.confidential) AS flags LIMIT 10";
+    let result = compile(orbit_query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert_eq!(rendered.matches("countDistinct").count(), 2, "{rendered}");
+    assert!(rendered.contains("AS notes"), "{rendered}");
+}
+
+#[test]
+fn json_distinct_count_matches_gql_count_distinct() {
+    let orbit_query = "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id}, count(DISTINCT n.confidential) AS flags LIMIT 10";
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "n", "entity": "Note", "node_ids": [1]},
+            {"id": "u", "entity": "User", "columns": ["id"]}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+        "group_by": ["u"],
+        "aggregations": [{"count": "n.confidential", "distinct": true, "as": "flags"}],
+        "limit": 10
+    }"#;
+
+    let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
+    assert_eq!(result.base.render().matches("countDistinct").count(), 1);
 }
 
 #[test]
@@ -274,8 +302,14 @@ fn path_finding_query() {
     let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("forward AS"), "should have forward CTE");
-    assert!(rendered.contains("backward AS"), "should have backward CTE");
+    assert!(
+        rendered.contains("_orbit_forward AS"),
+        "should have forward CTE"
+    );
+    assert!(
+        rendered.contains("_orbit_backward AS"),
+        "should have backward CTE"
+    );
     assert!(rendered.contains("UNION ALL"));
     assert!(
         rendered.contains("arrayConcat"),
@@ -286,7 +320,8 @@ fn path_finding_query() {
         "path nodes should be typed tuples"
     );
     assert!(
-        rendered.contains("f.end_id") && rendered.contains("b.end_id"),
+        rendered.contains("_orbit_forward._orbit_end_node")
+            && rendered.contains("_orbit_backward._orbit_end_node"),
         "should join forward and backward on end_id"
     );
 }
@@ -352,9 +387,9 @@ fn neighbors_query() {
     let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("_orbit_neighbor_id"));
-    assert!(rendered.contains("_orbit_neighbor_type"));
-    assert!(rendered.contains("_orbit_relationship_type"));
+    assert!(rendered.contains("_orbit_neighbor_node"));
+    assert!(rendered.contains("_orbit_neighbor_kind"));
+    assert!(rendered.contains("_orbit_relationship_kind"));
     assert!(
         rendered.contains("_orbit_neighbor_is_outgoing"),
         "bidirectional should include direction"
@@ -365,7 +400,10 @@ fn neighbors_query() {
         "pinned both should scan each direction on its own id column; a fused \
          source_id OR target_id scan stops the primary key and both bloom indexes"
     );
-    assert!(rendered.contains("(e.source_id = 100)") && rendered.contains("(e.target_id = 100)"));
+    assert!(
+        rendered.contains("(_orbit_neighbor_edge.source_id = 100)")
+            && rendered.contains("(_orbit_neighbor_edge.target_id = 100)")
+    );
 }
 
 #[test]
@@ -384,8 +422,8 @@ fn neighbors_project_the_edge_path_only_when_it_is_the_neighbors_own() {
     );
     assert!(
         authored
-            .contains("((e.relationship_kind = 'AUTHORED') AND (e.target_kind = 'MergeRequest'))")
-            && authored.contains("e.traversal_path, '') AS _orbit_neighbor_tp"),
+            .contains("((_orbit_neighbor_edge.relationship_kind = 'AUTHORED') AND (_orbit_neighbor_edge.target_kind = 'MergeRequest'))")
+            && authored.contains("_orbit_neighbor_edge.traversal_path, '') AS _orbit_neighbor_traversal_path"),
         "{authored}"
     );
 
@@ -394,7 +432,7 @@ fn neighbors_project_the_edge_path_only_when_it_is_the_neighbors_own() {
         "MATCH (p:Project {id: 1})-[:IN_PROJECT]-(n) RETURN p, n",
     );
     assert!(
-        in_project.contains("'' AS _orbit_neighbor_tp"),
+        in_project.contains("'' AS _orbit_neighbor_traversal_path"),
         "{in_project}"
     );
 }
@@ -749,7 +787,7 @@ fn multi_table_neighbors_scans_all_tables() {
 
 use crate::compiler::setup::{admin_ctx, embedded_ontology};
 
-const SCOPED_LOOKUP: &str = "FROM gl_project AS _scope WHERE";
+const SCOPED_LOOKUP: &str = "FROM gl_project AS _orbit_scope WHERE";
 
 fn render_scoped(json: &str, orbit_query: &str) -> String {
     compile_pair(json, orbit_query, &embedded_ontology(), &admin_ctx())
@@ -773,7 +811,7 @@ fn scoped_traversal_injects_tight_prefix() {
     }"#;
     let sql = render_scoped(json, orbit_query);
     assert!(
-        sql.contains(SCOPED_LOOKUP) && sql.contains("(_scope.id = 1)"),
+        sql.contains(SCOPED_LOOKUP) && sql.contains("(_orbit_scope.id = 1)"),
         "{sql}"
     );
 }
@@ -792,7 +830,8 @@ fn scoped_authorization_join_injects_tight_prefix() {
     }"#;
     let sql = render_scoped(json, orbit_query);
     assert!(
-        sql.contains("startsWith(c.traversal_path, (SELECT") && sql.contains("(_scope.id = 5)"),
+        sql.contains("startsWith(c.traversal_path, (SELECT")
+            && sql.contains("(_orbit_scope.id = 5)"),
         "the caller's authorization scan must carry the project prefix: {sql}"
     );
 }
@@ -813,7 +852,7 @@ fn scoped_aggregation_injects_tight_prefix() {
     }"#;
     let sql = render_scoped(json, orbit_query);
     assert!(
-        sql.contains(SCOPED_LOOKUP) && sql.contains("(_scope.id = 1)"),
+        sql.contains(SCOPED_LOOKUP) && sql.contains("(_orbit_scope.id = 1)"),
         "{sql}"
     );
 }
@@ -841,8 +880,8 @@ fn scoped_count_condition_excludes_the_scope_lookup() {
         .split(" AS n")
         .next()
         .unwrap();
-    assert!(!count_arg.contains("_scope"), "{sql}");
-    assert!(sql.contains("FROM gl_group AS _scope WHERE"), "{sql}");
+    assert!(!count_arg.contains("_orbit_scope"), "{sql}");
+    assert!(sql.contains("FROM gl_group AS _orbit_scope WHERE"), "{sql}");
 }
 
 #[test]
@@ -1351,8 +1390,8 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u",
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
+        "MATCH (u:User {id: 1}) RETURN sum(DISTINCT u.id) AS n",
         "MATCH (u:User) RETURN collect(u.username)",
-        "MATCH (u:User {id: 1}) RETURN u LIMIT 1 SKIP 1",
         "MATCH (u:User {id: 1}) RETURN u SKIP 1 SKIP 1",
         "MATCH (u:User {id: 1}) RETURN u SKIP -1",
         "MATCH (u:User {id: 1}) RETURN u SKIP 10001",
@@ -1438,11 +1477,6 @@ fn orbit_query_preserves_ontology_validation_and_security() {
     for (json, orbit_query) in cases {
         compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap_err();
     }
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/"}}}]}"#;
-    let orbit_query = "MATCH (p:Project) WHERE p.traversal_path STARTS WITH '1/' RETURN p";
-    let context = compiler::SecurityContext::new(1, vec!["1/24/".into()]).unwrap();
-    let error = compile_pair(json, orbit_query, &embedded_ontology(), &context).unwrap_err();
-    assert!(matches!(error, QueryError::Authorization(_)));
 }
 
 #[test]
@@ -1510,14 +1544,6 @@ fn orbit_query_caps_reject_during_lowering() {
             "{error:?}"
         );
     }
-}
-
-#[test]
-fn orbit_query_rejects_traversal_path_column_comparisons() {
-    let context = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
-    let query = "MATCH (p:Project {id: 5}) WHERE p.traversal_path = p.full_path RETURN p";
-    let error = compile(query, Frontend::Gql, &embedded_ontology(), &context).unwrap_err();
-    assert!(matches!(error, QueryError::Validation(_)), "{error:?}");
 }
 
 #[test]
@@ -2017,18 +2043,11 @@ fn gql_prepares_queries_and_scoped_schema() {
             let node = serde_json::to_value(&response.domains[0].nodes[0]).unwrap();
             assert_eq!(node["name"], name);
             assert!(!node["props"].as_array().unwrap().is_empty());
-            assert!(!response.edges.is_empty());
-            assert!(response.edges.iter().all(|edge| {
-                ontology
-                    .get_edge(edge)
-                    .unwrap()
-                    .iter()
-                    .any(|edge| edge.source_kind == name || edge.target_kind == name)
-            }));
+            assert!(response.edges.is_empty());
         } else {
             assert_eq!(
                 serde_json::to_value(response).unwrap(),
-                serde_json::to_value(build_schema_response(&ontology, scope, &[]).unwrap())
+                serde_json::to_value(build_compact_schema_response(&ontology, scope, None))
                     .unwrap(),
             );
         }

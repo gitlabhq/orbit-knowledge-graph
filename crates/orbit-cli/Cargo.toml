@@ -11,13 +11,21 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+# libduckdb-sys is used only by build.rs, which reads the download directory it publishes as
+# DEP_DUCKDB_INCLUDE. cargo-shear does not see build-script use of links metadata.
+[package.metadata.cargo-shear]
+ignored = ["libduckdb-sys"]
+
 [dependencies]
 mimalloc = { workspace = true }
+tempfile = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
 code-graph-incremental = { path = "../code-graph-incremental" }
 duckdb-client = { path = "../duckdb-client" }
+libduckdb-sys = { workspace = true }
 labkit-events = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
+orbit-cli-graphql = { workspace = true }
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-markers"] }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
@@ -26,6 +34,7 @@ ontology = { path = "../ontology" }
 gitalisk-core = { workspace = true }
 clap = { workspace = true }
 cliclack = { workspace = true }
+cynic = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 orbit-log-fields = { workspace = true }
@@ -41,7 +50,7 @@ ignore = { workspace = true }
 globset = { workspace = true }
 reqwest = { workspace = true, features = ["gzip", "brotli", "zstd"] }
 rmcp = { workspace = true }
-rust-embed = { workspace = true }
+rust-embed = { workspace = true, features = ["include-exclude"] }
 rustls = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
@@ -50,10 +59,15 @@ rustc-hash = { workspace = true }
 sha2 = { workspace = true }
 strum = { workspace = true }
 toml_edit = { workspace = true }
+toon-format = { workspace = true }
 uuid = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true }
+
+# musl's malloc serializes under contention and C deps (DuckDB, tree-sitter) call it directly.
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = { workspace = true, features = ["override"] }
 
 [build-dependencies]
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
@@ -62,4 +76,3 @@ orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 flate2 = { workspace = true }
 jsonschema = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
-tempfile = { workspace = true }

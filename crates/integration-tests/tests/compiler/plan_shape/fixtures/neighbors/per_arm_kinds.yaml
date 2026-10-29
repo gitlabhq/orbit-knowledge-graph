@@ -16,5 +16,5 @@ physical:
     emitted:
       expect:
         - (Union ALL (_) (_))
-        - (Filter e.source_kind = 'MergeRequest', e.source_id = 1, e.relationship_kind = 'HAS_HEAD_PIPELINE', ... (Scan Table(gl_ci_edge) AS e))
-        - (Filter e.target_kind = 'MergeRequest', e.target_id = 1, e.relationship_kind = 'AUTHORED', ... (Scan Table(gl_edge) AS e))
+        - (Filter _orbit_neighbor_edge.source_kind = 'MergeRequest', _orbit_neighbor_edge.source_id = 1, _orbit_neighbor_edge.relationship_kind = 'HAS_HEAD_PIPELINE', ... (Scan Table(gl_ci_edge) AS _orbit_neighbor_edge))
+        - (Filter _orbit_neighbor_edge.target_kind = 'MergeRequest', _orbit_neighbor_edge.target_id = 1, _orbit_neighbor_edge.relationship_kind = 'AUTHORED', ... (Scan Table(gl_edge) AS _orbit_neighbor_edge))

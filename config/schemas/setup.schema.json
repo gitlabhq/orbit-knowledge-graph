@@ -4,12 +4,20 @@
   "title": "Orbit setup texts",
   "description": "Every string `orbit setup` writes into an assistant's files: the managed instruction block, the two hook nudges, the MCP server entry, and the values filling {{name}} placeholders in assistant templates. Read by crates/orbit-cli/src/commands/setup/spec.rs.",
   "type": "object",
-  "required": ["mcp_server", "instructions", "nudge_search"],
+  "required": [
+    "mcp_server",
+    "instructions",
+    "nudge_search",
+    "nudge_gitlab"
+  ],
   "additionalProperties": false,
   "properties": {
     "mcp_server": {
       "type": "object",
-      "required": ["name", "command"],
+      "required": [
+        "name",
+        "command"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -30,6 +38,13 @@
       "minLength": 1,
       "description": "Markdown spliced into each assistant's instruction file between the orbit:setup markers."
     },
+    "remote": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Values for {{name}} placeholders in `instructions`, filled when Orbit can reach GitLab at setup time and left empty otherwise."
+    },
     "nudge_search": {
       "type": "string",
       "minLength": 1,
@@ -38,8 +53,15 @@
     "template_vars": {
       "type": "object",
       "minProperties": 1,
-      "additionalProperties": { "type": "string" },
+      "additionalProperties": {
+        "type": "string"
+      },
       "description": "Values substituted for {{name}} placeholders in the templates assistants declare. They reach a shell echo, so they must not contain quotes, backticks, or $(."
+    },
+    "nudge_gitlab": {
+      "type": "string",
+      "minLength": 1,
+      "description": "PreToolUse nudge for glab calls when Orbit reaches GitLab; `{{orbit}}` is the launcher."
     }
   }
 }

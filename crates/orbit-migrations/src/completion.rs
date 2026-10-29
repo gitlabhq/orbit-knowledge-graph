@@ -14,11 +14,14 @@ use crate::scope::{
 use crate::version::{read_active_version, table_prefix};
 
 static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
-    let deleted_column = ontology::siphon_deleted_column();
+    let version = ontology::siphon_version_column();
+    let deleted = ontology::siphon_deleted_column();
     format!(
         "SELECT DISTINCT root_namespace_id, traversal_path \
-         FROM siphon_knowledge_graph_enabled_namespaces \
-         WHERE {deleted_column} = false"
+         FROM (SELECT root_namespace_id, argMax(traversal_path, {version}) AS traversal_path \
+               FROM siphon_knowledge_graph_enabled_namespaces \
+               GROUP BY root_namespace_id, id \
+               HAVING argMax({deleted}, {version}) = false)"
     )
 });
 

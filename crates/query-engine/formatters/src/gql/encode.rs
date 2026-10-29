@@ -32,7 +32,6 @@ pub fn table(output: &PipelineOutput) -> Table {
 
 fn node_table(output: &PipelineOutput) -> Table {
     let context = &output.result_context;
-    let prefixes = edge_prefixes(context);
     let input = &output.compiled.input;
     let aliases: Vec<String> = input.nodes.iter().map(|n| n.id.clone()).collect();
     let relationships = &input.relationship_return.columns;
@@ -55,7 +54,7 @@ fn node_table(output: &PipelineOutput) -> Table {
         .map(|row| {
             let cells: Vec<String> = aliases
                 .iter()
-                .map(|alias| row_node(row, context, &prefixes, alias).unwrap_or_else(null))
+                .map(|alias| row_node(row, context, alias).unwrap_or_else(null))
                 .chain(
                     relationships
                         .iter()
@@ -99,10 +98,9 @@ fn relationship_cell(
 }
 
 fn path_table(output: &PipelineOutput) -> Table {
-    let prefixes = edge_prefixes(&output.result_context);
     let rows = output.query_result.authorized_rows().filter_map(|row| {
         match output.compiled.input.query_type {
-            QueryType::Neighbors => neighbor_path(row, output, &prefixes),
+            QueryType::Neighbors => neighbor_path(row, output),
             _ => shortest_path(row),
         }
     });
@@ -146,14 +144,9 @@ fn aggregation_table(output: &PipelineOutput) -> Table {
     (columns, rows)
 }
 
-fn row_node(
-    row: &QueryResultRow,
-    context: &ResultContext,
-    prefixes: &[&str],
-    alias: &str,
-) -> Option<String> {
+fn row_node(row: &QueryResultRow, context: &ResultContext, alias: &str) -> Option<String> {
     let node = context.get(alias)?;
-    let properties = json_properties(&row.entity_properties(alias, prefixes));
+    let properties = json_properties(&row.entity_properties(alias));
     Some(node_literal(
         row.get_type(node)?,
         row.get_public_id(node)?,
@@ -161,16 +154,12 @@ fn row_node(
     ))
 }
 
-fn neighbor_path(
-    row: &QueryResultRow,
-    output: &PipelineOutput,
-    prefixes: &[&str],
-) -> Option<String> {
+fn neighbor_path(row: &QueryResultRow, output: &PipelineOutput) -> Option<String> {
     let input = &output.compiled.input;
     let center = input
         .nodes
         .first()
-        .and_then(|center| row_node(row, &output.result_context, prefixes, &center.id))
+        .and_then(|center| row_node(row, &output.result_context, &center.id))
         .unwrap_or_else(null);
     let neighbor = dynamic_node(row.neighbor_node()?);
     let relationship = row
@@ -249,14 +238,6 @@ fn json_properties(properties: &HashMap<String, ColumnValue>) -> Map<String, Val
         .iter()
         .filter(|(key, _)| !is_reserved_node_key(key))
         .map(|(key, value)| (key.clone(), column_value_to_json(value)))
-        .collect()
-}
-
-fn edge_prefixes(context: &ResultContext) -> Vec<&str> {
-    context
-        .edges()
-        .iter()
-        .map(|edge| edge.column_prefix.as_str())
         .collect()
 }
 

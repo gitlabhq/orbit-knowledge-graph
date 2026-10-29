@@ -8,10 +8,8 @@
 //! token-operator validation enforces — so the table is fully derivable and
 //! must never be hand-edited.
 //!
-//! The same table appears in two committed mirrors, both updated here:
-//! - `docs/source/remote/queries/query-language.md` (published reference)
-//! - `skills/orbit/references/query_language.md` (agent skill copy, kept in
-//!   sync by the `orbit-skill-docs-sync` hook)
+//! The table appears in the committed published reference, which is updated here:
+//! - `docs/docs-gitlab-com/queries/query-language.md`
 //!
 //! The generated table lives between HTML marker comments in each doc:
 //!
@@ -32,10 +30,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use ontology::Ontology;
 
 /// Paths are relative to the workspace root.
-const DEFAULT_DOCS: &[&str] = &[
-    "docs/source/remote/queries/query-language.md",
-    "skills/orbit/references/query_language.md",
-];
+const DEFAULT_DOCS: &[&str] = &["docs/docs-gitlab-com/queries/query-language.md"];
 
 const BEGIN_MARKER: &str = "<!-- BEGIN GENERATED: text-indexed-properties -->";
 const END_MARKER: &str = "<!-- END GENERATED: text-indexed-properties -->";

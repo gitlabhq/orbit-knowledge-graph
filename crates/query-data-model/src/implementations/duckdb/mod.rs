@@ -52,6 +52,14 @@ impl RelationalMapping for DuckDbBindings {
         false
     }
 
+    fn entity_high_fan_out(&self, _entity: EntityId) -> bool {
+        false
+    }
+
+    fn property_is_foreign_key(&self, _property: PropertyId) -> bool {
+        false
+    }
+
     fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
         self.entity(entity)
             .map(|layout| layout.default_properties.as_slice())

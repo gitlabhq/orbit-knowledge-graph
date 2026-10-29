@@ -142,8 +142,8 @@ cases:
       clickhouse:
         emitted:
           expect:
-            - (Limit 21 (Offset 20 (Sort _orbit_mr_id, _orbit_neighbor_id, _orbit_relationship_type, _orbit_neighbor_is_outgoing (Union ALL (_) (_) (_)))))
-          reject: ["(Sort e.source_id, ... (_))"]
+            - (Limit 21 (Offset 20 (Sort _orbit_mr_id, _orbit_neighbor_node, _orbit_relationship_kind, _orbit_neighbor_is_outgoing (Union ALL (_) (_) (_)))))
+          reject: ["(Sort _orbit_neighbor_edge.source_id, ... (_))"]
 
   - name: Path-finding SKIP sorts on the path arrays
     query:
@@ -156,7 +156,7 @@ cases:
       clickhouse:
         emitted:
           expect:
-            - (Limit 3 (Offset 2 (Deduplicate LimitBy 1 BY paths.path_start_id, paths.path_end_id (Sort paths.depth, ToString(paths._orbit_path), ToString(paths._orbit_edge_kinds) (_)))))
+            - (Limit 3 (Offset 2 (Deduplicate LimitBy 1 BY _orbit_paths._orbit_path_start, _orbit_paths._orbit_path_end (Sort _orbit_paths._orbit_depth, ToString(_orbit_paths._orbit_path), ToString(_orbit_paths._orbit_edge_kinds) (_)))))
 
   - name: Path-finding LIMIT without SKIP orders only by depth
     query:
@@ -169,7 +169,7 @@ cases:
     physical:
       clickhouse:
         emitted:
-          expect: ["(Limit 3 (Deduplicate LimitBy 1 BY paths.path_start_id, paths.path_end_id (Sort paths.depth (_))))"]
+          expect: ["(Limit 3 (Deduplicate LimitBy 1 BY _orbit_paths._orbit_path_start, _orbit_paths._orbit_path_end (Sort _orbit_paths._orbit_depth (_))))"]
           reject: ["(Offset ... (_))"]
 
   - name: A deep SKIP sizes text excerpts by every row the sort reads
@@ -206,5 +206,5 @@ cases:
       clickhouse:
         emitted:
           expect:
-            - (Limit 3 (Offset 2 (Sort e.traversal_path, e.relationship_kind, e.source_id, e.target_id, e.source_kind, e.target_kind (_))))
-          reject: ["(Sort e.source_id, e.target_id, e.relationship_kind (_))"]
+            - (Limit 3 (Offset 2 (Sort _orbit_neighbor_edge.traversal_path, _orbit_neighbor_edge.relationship_kind, _orbit_neighbor_edge.source_id, _orbit_neighbor_edge.target_id, _orbit_neighbor_edge.source_kind, _orbit_neighbor_edge.target_kind (_))))
+          reject: ["(Sort _orbit_neighbor_edge.source_id, _orbit_neighbor_edge.target_id, _orbit_neighbor_edge.relationship_kind (_))"]

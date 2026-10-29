@@ -2,21 +2,25 @@ use std::io::Write;
 
 use self::error::{EXIT_GENERIC, RemoteError};
 
+pub(crate) mod api;
 pub(crate) mod client;
-pub(crate) mod dsl;
+pub(crate) mod code;
+pub(crate) mod context;
 pub(crate) mod error;
 pub(crate) mod graph_status;
+pub(crate) mod grep;
+mod legacy;
 pub(crate) mod ontology;
+pub(crate) mod origin;
 pub(crate) mod query;
+pub(crate) mod sdlc;
 pub(crate) mod status;
-pub(crate) mod tools;
+pub(crate) mod token;
 
-pub(crate) use dsl::run_dsl;
 pub(crate) use graph_status::run_graph_status;
 pub(crate) use ontology::run_ontology;
 pub(crate) use query::{QueryInput, run_query};
 pub(crate) use status::run_status;
-pub(crate) use tools::run_tools;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum ResponseFormat {
@@ -43,7 +47,7 @@ pub(crate) fn pretty_json(body: &[u8]) -> Vec<u8> {
     }
 }
 
-pub(crate) fn pretty_value(value: &serde_json::Value) -> Vec<u8> {
+pub(crate) fn pretty_value(value: &impl serde::Serialize) -> Vec<u8> {
     serde_json::to_vec_pretty(value).unwrap_or_default()
 }
 

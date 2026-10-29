@@ -261,15 +261,6 @@ impl Input {
     }
 
     pub fn absorb(&mut self, expression: BooleanExpression<Condition>) -> crate::error::Result<()> {
-        if expression.negated_leaves().any(|condition| {
-            std::iter::once(condition.property.as_str())
-                .chain(condition.node_properties().map(|(_, property)| property))
-                .any(|property| property == TRAVERSAL_PATH_COLUMN)
-        }) {
-            return Err(crate::error::QueryError::Validation(
-                "traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths".into(),
-            ));
-        }
         for conjunct in expression.normalize().conjuncts() {
             match conjunct {
                 BooleanExpression::Leaf(condition)

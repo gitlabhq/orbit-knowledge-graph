@@ -98,7 +98,7 @@ Traversal Path Under NOT Rejects Without Echoing The Path
     [Tags]    negation    authz
     ${message}=    Orbit Query Rejected
     ...    MATCH (w:WorkItem {id: ${NEG_ISSUE_OPEN}}) WHERE NOT w.traversal_path STARTS WITH '${NEG_GROUP_ID}/' RETURN w.id
-    Should Contain    ${message}    traversal_path cannot be used under NOT
+    Should Contain    ${message}    field "traversal_path" does not exist on node type "WorkItem"
     Should Not Contain    ${message}    ${NEG_GROUP_ID}/
 
 Administrator Only Fields Under NOT Reject For Users And Work For The Admin
@@ -203,6 +203,7 @@ Seed Negated Predicate Fixture
     ...    label_field=title
     Wait For Node Indexed Within Budget    Vulnerability    ${NEG_VULNERABILITY_ID}
     ...    ${vulnerability["title"]}    label_field=title
+    Wait For Node Indexed Within Budget    User    ${NEG_REPORTER_ID}
     Within Budget    Work Item Is Closed    ${NEG_ISSUE_CLOSED}
 
 Within Budget

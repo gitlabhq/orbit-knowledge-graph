@@ -18,7 +18,7 @@ json_merges:
       - matcher: "Bash|Grep"
         hooks:
           - type: command
-            command: "{{orbit}} hook-guard search"
+            command: "{{orbit}} hook-guard search{{hook_gitlab}}"
 mcp:
   file:
     project: .mcp.json
@@ -39,3 +39,14 @@ skills:
     rules:
       - "Bash({{orbit}} skills get orbit)"
       - "Bash({{orbit}} skills get orbit *)"
+plugin:
+  dir:
+    project: .claude/orbit/claude_plugin
+    global: "~/.claude/orbit/claude_plugin"
+  settings:
+    project: .claude/settings.local.json
+    global: "~/.claude/settings.json"
+  marketplace: gitlab-orbit
+  name: gitlab-orbit
+  min_version: "2.1.287"
+  version_command: [claude, --version]

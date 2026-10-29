@@ -88,4 +88,4 @@ not ignored tests or missing fixture migrations.
 
 Keep a Rust test until a fixture checks every one of its assertions. For the
 plan-shape layer and its limits, see
-[Plan-shape fixtures](../../../../../docs/design-documents/testing.md#plan-shape-fixtures).
+[Plan-shape fixtures](../../../../../docs/pages/engineering/testing/integration/compiler-and-code-graph.md#plan-tests).

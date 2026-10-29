@@ -61,28 +61,34 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
     let path_id = if reverse_output { start_id } else { end_id };
     let from = &pattern.nodes[&relation.from_node];
 
-    let mut first_predicates = vec![live("e1")];
-    first_predicates.extend(pattern.entity_kind("e1", &relation.from_node, start_id));
+    let first_hop = hop_alias(1);
+    let mut first_predicates = vec![live(&first_hop)];
+    first_predicates.extend(pattern.entity_kind(&first_hop, &relation.from_node, start_id));
     if let Some(ids) = source_ids {
-        first_predicates.push(membership(Column::new("e1", start_id), ids));
+        first_predicates.push(membership(Column::new(&first_hop, start_id), ids));
     }
-    first_predicates.extend(from.id_predicates(Column::new("e1", start_id)));
-    first_predicates.extend(
-        from.filters.iter().filter_map(|(_, filter)| {
-            pattern.denorm_tag(relation, &relation.from_node, filter, "e1")
-        }),
-    );
+    first_predicates.extend(from.id_predicates(Column::new(&first_hop, start_id)));
+    first_predicates.extend(from.filters.iter().filter_map(|(_, filter)| {
+        pattern.denorm_tag(relation, &relation.from_node, filter, &first_hop)
+    }));
     first_predicates.extend(
         covered
             .iter()
-            .map(|(property, filter)| property_filter("e1", property, filter)),
+            .map(|(property, filter)| property_filter(&first_hop, property, filter)),
     );
-    let first = hop_rows(graph, pattern, relation, "e1", first_predicates)?;
+    let first = hop_rows(graph, pattern, relation, &first_hop, first_predicates)?;
     let first_path = OutputValue::Path(vec![(
-        Column::new("e1", path_id),
-        Column::new("e1", kind_column(path_id)),
+        Column::new(&first_hop, path_id),
+        Column::new(&first_hop, kind_column(path_id)),
     )]);
-    let mut previous = project_depth(graph, first, 1, ("e1", "e1", "e1"), first_path, &required);
+    let mut previous = project_depth(
+        graph,
+        first,
+        1,
+        (&first_hop, &first_hop, &first_hop),
+        first_path,
+        &required,
+    );
     let mut depths = Vec::new();
     if relation.min_hops <= 1 {
         depths.push(
@@ -98,8 +104,8 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
         );
     }
     for depth in 2..=relation.max_hops {
-        let previous_alias = format!("_depth_{}", depth - 1);
-        let current_alias = format!("e{depth}");
+        let previous_alias = reached_depth_alias(depth - 1);
+        let current_alias = hop_alias(depth);
         let current = hop_rows(
             graph,
             pattern,
@@ -129,7 +135,7 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
             .direction
             .stored_order(&previous_alias, &current_alias);
         let step = (
-            Column::new(&previous_alias, PATH_NODES_COLUMN),
+            Column::new(&previous_alias, path_nodes_column()),
             Column::new(&current_alias, path_id),
             Column::new(&current_alias, kind_column(path_id)),
         );
@@ -224,8 +230,8 @@ fn project_depth(
         Projection::col(target, TARGET_ID_COLUMN),
         Projection::col(target, TARGET_KIND_COLUMN),
         Projection::col(target, TARGET_TAGS_COLUMN),
-        Projection::new(path, PATH_NODES_COLUMN),
-        Projection::new(OutputValue::Depth(depth), DEPTH_COLUMN),
+        Projection::new(path, path_nodes_column()),
+        Projection::new(OutputValue::Depth(depth), depth_column()),
         Projection::col(meta, DELETED_COLUMN),
         Projection::col(meta, TRAVERSAL_PATH_COLUMN),
     ];

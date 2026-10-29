@@ -1,8 +1,25 @@
-description: A supported function with unsupported arguments says so instead of listing it as unknown
+cases:
+  - name: aggregate_star
+    description: An aggregate with an unsupported argument says where it works and in what form
+    query:
+      gql: |
+        MATCH (u:User) RETURN count(*)
+    expect:
+      compile_error: "function count() is not supported: count() takes one variable or property, as in count(mr) or sum(mr.added_lines), and belongs in RETURN with an alias: count(mr) AS n"
+      compile_error_not_contains: ["WHERE cannot filter"]
 
-query:
-  gql: |
-    MATCH (u:User) RETURN count(*)
+  - name: aggregate_in_where
+    description: An aggregate in WHERE says that WHERE cannot filter on an aggregate
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(m:MergeRequest) WHERE count(m) > 1 RETURN u LIMIT 10
+    expect:
+      compile_error: "WHERE cannot filter on an aggregate"
 
-expect:
-  compile_error: "function count() is not supported: this function does not accept these arguments here"
+  - name: token_function_in_return
+    description: A token function outside WHERE says it works only in WHERE
+    query:
+      gql: |
+        MATCH (m:MergeRequest) RETURN token_match(m.title, 'login') LIMIT 10
+    expect:
+      compile_error: "token_match() works only in WHERE, with a property and a string"

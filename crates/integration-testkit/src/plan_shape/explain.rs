@@ -322,7 +322,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             Tree::node(
                 Operator::PathFinding,
                 format!(
-                    "{}->{} depth={} forward={} backward={} scoped={} tables=[{}] relationships=[{}] forward_kinds=[{}] backward_kinds=[{}]",
+                    "{}->{} depth={} forward={} backward={} scoped={} tables=[{}] relationships=[{}]",
                     operation.start,
                     operation.end,
                     operation.max_depth,
@@ -333,16 +333,6 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                     operation
                         .edge
                         .rel_type_filter
-                        .as_deref()
-                        .unwrap_or_default()
-                        .join(", "),
-                    operation
-                        .forward_first_hop_filter
-                        .as_deref()
-                        .unwrap_or_default()
-                        .join(", "),
-                    operation
-                        .backward_first_hop_filter
                         .as_deref()
                         .unwrap_or_default()
                         .join(", ")
@@ -690,7 +680,7 @@ fn boolean_text<T>(
 
 fn planned_value(value: &OutputValue) -> String {
     match value {
-        OutputValue::Column(value) | OutputValue::EpochAsNull(value) => planned_column(value),
+        OutputValue::Column(value) | OutputValue::EpochAsNull(value, _) => planned_column(value),
         OutputValue::Text(value) => text_literal(value),
         OutputValue::Depth(value) => value.to_string(),
         OutputValue::Path(steps) => format!(
@@ -1005,7 +995,7 @@ fn exact_assertions_preserve_nested_filter_order() {
             values: vec![2],
         },
     ];
-    let mut graph = RelationGraph::default();
+    let mut graph = RelationGraph::new(true);
     let read = graph.read("gl_project", "p", false);
     let source = predicates.iter().fold(read, |relation, predicate| {
         graph.filter(relation, vec![predicate.clone()])

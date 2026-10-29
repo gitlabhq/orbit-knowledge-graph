@@ -12,8 +12,8 @@ use std::collections::{HashMap, HashSet};
 
 use query_data_model::OrbitQueryModel;
 
-use super::filters::BoundFilter;
-use super::graph::{ExecutionPlan, ReadOwner, RelationGraph, RelationId};
+use super::filters::{BoundFilter, NullAsEpochColumns};
+use super::graph::{ExecutionPlan, ReadOwner, ReadScope, RelationGraph, RelationId};
 use super::predicates::{Column, Predicate, kind_column};
 use super::{DenormalizedKey, DenormalizedProperty, Plan, sort_key};
 use crate::error::{QueryError, Result};
@@ -30,10 +30,11 @@ pub struct NodePlan {
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub has_traversal_path: bool,
+    pub read_scope: ReadScope,
     pub redaction_id_column: String,
     pub columns: Option<ColumnSelection>,
     pub emit_select: bool,
-    pub null_as_epoch: HashSet<String>,
+    pub null_as_epoch: NullAsEpochColumns,
 }
 
 #[derive(Clone)]
@@ -86,7 +87,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             ReadOwner::Node(node.alias.clone()),
             sort_key(self.model, table)?,
             self.node_conditions(node),
-            self.model.supports_selective_latest_rows(),
+            node.read_scope,
         ))
     }
 

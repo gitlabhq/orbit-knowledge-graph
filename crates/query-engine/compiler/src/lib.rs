@@ -52,10 +52,9 @@ pub mod passes;
 pub use ast::ddl;
 pub use ast::{Expr, Insert, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
-    EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_SRC_SUFFIX,
-    EDGE_SRC_TYPE_SUFFIX, EDGE_TYPE_SUFFIX, HYDRATION_NODE_ALIAS, edge_kinds_column,
-    internal_column_prefix, neighbor_id_column, neighbor_is_outgoing_column, neighbor_type_column,
-    path_column, relationship_type_column,
+    EDGE_DST_KIND_SUFFIX, EDGE_DST_SUFFIX, EDGE_KIND_SUFFIX, EDGE_SRC_KIND_SUFFIX, EDGE_SRC_SUFFIX,
+    edge_kinds_column, hydration_node_alias, internal_column_prefix, neighbor_id_column,
+    neighbor_is_outgoing_column, neighbor_type_column, path_column, relationship_type_column,
 };
 pub use error::{QueryError, RejectionReason, Result};
 pub use input::{
@@ -342,69 +341,6 @@ mod tests {
     }
 
     #[test]
-    fn traversal_path_scope_rejection_is_observable() {
-        use std::sync::atomic::Ordering;
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
-            "limit": 1
-        }"#;
-        let ctx =
-            SecurityContext::new(1, vec!["1/100/".to_string()]).expect("valid scoped context");
-        let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile(query, Frontend::JsonDsl, &ONTOLOGY, &ctx).expect_err("must reject");
-        let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-
-        assert!(
-            matches!(err, crate::error::QueryError::Authorization(_)),
-            "expected Authorization, got: {err:?}"
-        );
-        assert!(
-            err.is_client_safe(),
-            "traversal_path scope rejection should be client safe: {err:?}"
-        );
-        assert_eq!(
-            err.rejection_reason(),
-            crate::error::RejectionReason::Authorization
-        );
-        assert!(
-            after > before,
-            "count_err must run on traversal_path authorization rejections (before={before}, after={after})"
-        );
-    }
-
-    #[test]
-    fn traversal_path_shape_rejection_is_validate_pass_error() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"starts_with": 1}}}],
-            "limit": 1
-        }"#;
-        let err =
-            compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).expect_err("must reject");
-        let msg = err.to_string();
-
-        assert!(
-            matches!(err, crate::error::QueryError::Validation(_)),
-            "expected Validation, got: {err:?}"
-        );
-        assert!(
-            err.is_client_safe(),
-            "traversal_path shape rejection should be client safe: {err:?}"
-        );
-        assert!(
-            msg.contains("schema violation"),
-            "error should come from ValidatePass schema validation, got: {msg}"
-        );
-        assert!(
-            !msg.contains("RestrictPass"),
-            "client-facing shape errors should come from validation, got: {msg}"
-        );
-    }
-
-    #[test]
     fn compile_with_prefixed_ontology_produces_prefixed_sql() {
         let prefixed = Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v1_"));
 
@@ -631,29 +567,27 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("_path_scope_traversal_paths"),
+            sql.contains("_orbit_path_scope"),
             "code path finding should compute candidate traversal paths, got:\n{sql}"
         );
         assert!(
-            sql.contains("e1.traversal_path = e2.traversal_path"),
+            sql.contains("_orbit_e1.traversal_path = _orbit_e2.traversal_path"),
             "code edge self-joins should stay within one traversal_path, got:\n{sql}"
         );
         assert!(
-            sql.contains("f.traversal_path = b.traversal_path"),
+            sql.contains("_orbit_forward.traversal_path = _orbit_backward.traversal_path"),
             "frontier intersection should stay within one traversal_path, got:\n{sql}"
         );
         assert!(
-            sql.contains("forward") && sql.contains("FROM _nf_start"),
-            "forward CTE should seed from _nf_start, got:\n{sql}"
+            sql.contains("_orbit_forward") && sql.contains("FROM _orbit_nf_start"),
+            "forward CTE should seed from _orbit_nf_start, got:\n{sql}"
         );
         assert!(
-            sql.contains(
-                "traversal_path IN (SELECT traversal_path FROM _path_scope_traversal_paths)"
-            ),
+            sql.contains("traversal_path IN (SELECT traversal_path FROM _orbit_path_scope)"),
             "edge scans should use traversal_path scope, got:\n{sql}"
         );
         assert!(
-            sql.contains("e1.source_kind = 'Definition'"),
+            sql.contains("_orbit_e1.source_kind = 'Definition'"),
             "forward edge scans should constrain source_kind = Definition, got:\n{sql}"
         );
     }
@@ -671,11 +605,11 @@ mod tests {
         }"#;
         let sql = compile_sql(query);
         assert!(
-            sql.contains("_path_scope_traversal_paths"),
+            sql.contains("_orbit_path_scope"),
             "cross-level path finding should still compute a scope, got:\n{sql}"
         );
         assert!(
-            sql.contains("UNION ALL SELECT _path_scope_end.traversal_path"),
+            sql.contains("UNION ALL SELECT _orbit_path_scope_end.traversal_path"),
             "scope must UNION both endpoints' traversal paths, got:\n{sql}"
         );
         assert!(
@@ -703,35 +637,6 @@ mod tests {
             !sql.contains("toString(paths._orbit_path)")
                 && !sql.contains("toString(paths._orbit_edge_kinds)"),
             "path array tie-break sorting should only be emitted with SKIP, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn wildcard_path_finding_filters_only_endpoint_hops_by_relationship_kind() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["*"]},
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("gl_ci_edge") && sql.contains("gl_code_edge") && sql.contains("gl_edge"),
-            "wildcard path finding should UNION ALL across all edge tables, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("e1.source_kind = 'User'"),
-            "forward start must constrain source_kind = User, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("e1.target_kind = 'Project'"),
-            "backward end must constrain target_kind = Project, got:\n{sql}"
         );
     }
 
@@ -935,8 +840,8 @@ mod tests {
             "denorm filter must be pushed to edge target_tags, got:\n{sql}"
         );
         assert!(
-            !sql.contains("_nf_mr"),
-            "lowerer should not emit _nf_mr when filter is fully denormalized, got:\n{sql}"
+            !sql.contains("_orbit_nf_mr"),
+            "lowerer should not emit _orbit_nf_mr when filter is fully denormalized, got:\n{sql}"
         );
     }
 
@@ -1412,15 +1317,18 @@ mod tests {
     }
 
     #[test]
-    fn final_prewhere_setting_follows_final_scans() {
+    fn final_settings_follow_final_scans() {
         let sql = compile_sql(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":"active"}}],"limit":10}"#,
         );
         assert!(sql.contains(" FINAL"), "{sql}");
-        assert!(
-            sql.contains("optimize_move_to_prewhere_if_final = 1"),
-            "{sql}"
-        );
+        for setting in [
+            "optimize_move_to_prewhere_if_final = 1",
+            "use_skip_indexes_if_final = 1",
+            "use_skip_indexes_if_final_exact_mode = 1",
+        ] {
+            assert!(sql.contains(setting), "{sql}");
+        }
         assert!(
             !sql.contains("use_index_for_in_with_subqueries_max_values"),
             "no IN (subquery) in this query, got:\n{sql}"
@@ -1525,8 +1433,14 @@ mod tests {
         );
 
         assert!(!sql.contains("_orbit_fused"), "{sql}");
-        assert!(sql.contains("(e.source_id = 7)"), "{sql}");
-        assert!(sql.contains("(e.target_id = 7)"), "{sql}");
+        assert!(
+            sql.contains("(_orbit_neighbor_edge.source_id = 7)"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("(_orbit_neighbor_edge.target_id = 7)"),
+            "{sql}"
+        );
     }
     #[test]
     fn text_indexed_equality_also_matches_the_lowercase_index_expression() {

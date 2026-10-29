@@ -12,7 +12,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Join ON p.id = mr.project_id (_) (Bind p (Filter p.full_path = 'gitlab-org/orbit', p._deleted = false (Deduplicate LimitBy ... (_)))))
+            - (Join ON p.id = mr.project_id (_) (Bind p (Filter p.full_path = 'gitlab-org/orbit', p._deleted = false (Deduplicate Final (Scan Table(gl_project) AS p)))))
 
   - name: Filtered aggregation endpoints use exact reusable keys
     query:
@@ -46,7 +46,7 @@ cases:
         planned:
           expect:
             - (Filter mr.state = 'merged', mr._deleted = false, ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
-            - (Project _id_source.project_id AS id (Bind _id_source (_)))
+            - (Project _orbit_id_source.project_id AS id (Bind _orbit_id_source (_)))
             - (Filter p.id IN ?.id (_))
           reject:
             - (Scan Table(gl_edge) ...)
@@ -65,7 +65,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter p.star_count = 1, p._deleted = false (Deduplicate LimitBy ... (_)))
+            - (Filter p.star_count = 1, p._deleted = false (Deduplicate Final (Scan Table(gl_project) AS p)))
 
   - name: Low-cardinality endpoint filters do not create candidate relations
     query:

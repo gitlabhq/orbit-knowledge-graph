@@ -12,6 +12,7 @@ families:
 languages:
   bash:
     extensions: [sh, bash, zsh]
+    aliases: [bash, shell]
     grammar: tree-sitter-bash
 
   c:
@@ -20,6 +21,7 @@ languages:
 
   cpp:
     extensions: [cpp, cc, cxx, hpp, hh, hxx]
+    aliases: [cpp, c++]
     grammar: tree-sitter-cpp
 
   csharp:
@@ -34,6 +36,7 @@ languages:
 
   go:
     extensions: [go]
+    aliases: [go, golang]
     grammar: tree-sitter-go
     fqn_separator: "."
 

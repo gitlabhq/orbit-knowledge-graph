@@ -19,7 +19,7 @@ query:
     MATCH (p:Project)<-[:CONTAINS]-(g:Group {full_path: 'old'}) RETURN count(p) AS c LIMIT 10
 
 expect:
-  sql_contains: ["gl_group AS _scope FINAL", "_scope.full_path = 'old'", "gl_edge", "LIMIT 1 BY g.traversal_path, g.id"]
+  sql_contains: ["gl_group AS _orbit_scope FINAL", "_orbit_scope.full_path = 'old'", "gl_edge", "AS g FINAL"]
   skip_requirements: ["filter:full_path"]
   row_count: 1
   row_values: [{ c: 0 }]

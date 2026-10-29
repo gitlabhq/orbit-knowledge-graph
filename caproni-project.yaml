@@ -21,7 +21,7 @@
 # the server stats /etc/secrets before walking it, and a pattern that only
 # covers the files makes that stat run locally and silently load no secrets.
 # /etc/tls is only populated when the chart's tls.internal is enabled; the
-# pattern is harmless otherwise. See docs/dev/local-development.md.
+# pattern is harmless otherwise. See docs/pages/engineering/development/local-development.md.
 
 lifecycle_hooks:
   # Runs after clone or update, outside mirrord: tools for the processes below,

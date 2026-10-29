@@ -159,17 +159,17 @@ fn apply_with(
         QueryType::Traversal | QueryType::Aggregation
     ) {
         use crate::constants::{
-            EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_SRC_SUFFIX, EDGE_SRC_TYPE_SUFFIX,
-            EDGE_TYPE_SUFFIX,
+            EDGE_DST_KIND_SUFFIX, EDGE_DST_SUFFIX, EDGE_KIND_SUFFIX, EDGE_SRC_KIND_SUFFIX,
+            EDGE_SRC_SUFFIX,
         };
         for edge in &metadata.edges {
             let prefix = edge.column_prefix.clone();
             ctx.edges.push(EdgeMeta {
-                type_column: format!("{prefix}{EDGE_TYPE_SUFFIX}"),
+                type_column: format!("{prefix}{EDGE_KIND_SUFFIX}"),
                 src_column: format!("{prefix}{EDGE_SRC_SUFFIX}"),
-                src_type_column: format!("{prefix}{EDGE_SRC_TYPE_SUFFIX}"),
+                src_type_column: format!("{prefix}{EDGE_SRC_KIND_SUFFIX}"),
                 dst_column: format!("{prefix}{EDGE_DST_SUFFIX}"),
-                dst_type_column: format!("{prefix}{EDGE_DST_TYPE_SUFFIX}"),
+                dst_type_column: format!("{prefix}{EDGE_DST_KIND_SUFFIX}"),
                 column_prefix: prefix,
                 path_column: edge.path_column.clone(),
                 rel_types: edge.rel_types.clone(),

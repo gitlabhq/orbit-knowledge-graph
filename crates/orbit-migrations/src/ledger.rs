@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use ontology::migrations::EdgeRows;
 use serde::{Deserialize, Serialize};
 
 use crate::scope::{LedgerScope, MigrationScope, sdlc_entity_names};
@@ -42,6 +43,8 @@ pub struct MigrationEntry {
     pub scope: LedgerScope,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub entities: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "EdgeRows::is_changed")]
+    pub edge_rows: EdgeRows,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -52,7 +55,10 @@ impl MigrationEntry {
         match self.scope {
             LedgerScope::All => MigrationScope::Full,
             LedgerScope::Code => MigrationScope::Code,
-            LedgerScope::Sdlc => MigrationScope::Sdlc(self.entities.clone()),
+            LedgerScope::Sdlc => MigrationScope::Sdlc {
+                entities: self.entities.clone(),
+                edge_rows: self.edge_rows,
+            },
             LedgerScope::None => MigrationScope::None,
         }
     }
@@ -170,13 +176,14 @@ impl MigrationLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::entity_set;
+    use crate::test_helpers::{entity_set, sdlc_scope};
 
     fn entry(version: u32, scope: LedgerScope, entity_names: &[&str]) -> MigrationEntry {
         MigrationEntry {
             version,
             scope,
             entities: entity_set(entity_names),
+            edge_rows: EdgeRows::Changed,
             note: None,
         }
     }
@@ -201,13 +208,10 @@ mod tests {
             entry(81, LedgerScope::Sdlc, &["User"]),
         ]);
 
-        assert_eq!(
-            l.resolve_scope_between(80, 81),
-            MigrationScope::Sdlc(entity_set(&["User"])),
-        );
+        assert_eq!(l.resolve_scope_between(80, 81), sdlc_scope(&["User"]),);
         assert_eq!(
             l.resolve_scope_between(81, 83),
-            MigrationScope::Sdlc(entity_set(&["Issue", "Note"])),
+            sdlc_scope(&["Issue", "Note"]),
         );
         assert_eq!(l.resolve_scope_between(83, 82), MigrationScope::Full);
         assert_eq!(l.resolve_scope_between(82, 82), MigrationScope::Full);
@@ -222,16 +226,37 @@ mod tests {
             entry(83, LedgerScope::None, &[]),
             entry(82, LedgerScope::Sdlc, &["Note"]),
         ]);
-        assert_eq!(
-            l.resolve_scope_between(81, 83),
-            MigrationScope::Sdlc(entity_set(&["Note"])),
-        );
+        assert_eq!(l.resolve_scope_between(81, 83), sdlc_scope(&["Note"]),);
 
         let all_none = ledger(vec![
             entry(83, LedgerScope::None, &[]),
             entry(82, LedgerScope::None, &[]),
         ]);
         assert_eq!(all_none.resolve_scope_between(81, 83), MigrationScope::None);
+    }
+
+    #[test]
+    fn scope_resolution_keeps_edge_rows_unchanged_only_when_every_sdlc_entry_does() {
+        let l = MigrationLedger::parse(
+            "migrations:\n\
+             - {version: 84, scope: sdlc, entities: [Issue]}\n\
+             - {version: 83, scope: none, note: output-neutral}\n\
+             - {version: 82, scope: sdlc, entities: [Note], edge_rows: unchanged}\n\
+             - {version: 81, scope: sdlc, entities: [User], edge_rows: unchanged}\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            l.resolve_scope_between(80, 83),
+            MigrationScope::Sdlc {
+                entities: entity_set(&["Note", "User"]),
+                edge_rows: EdgeRows::Unchanged,
+            },
+        );
+        assert_eq!(
+            l.resolve_scope_between(80, 84),
+            sdlc_scope(&["Issue", "Note", "User"]),
+        );
     }
 
     #[test]
@@ -260,6 +285,7 @@ mod tests {
             version: 1,
             scope: LedgerScope::None,
             entities: BTreeSet::new(),
+            edge_rows: EdgeRows::Changed,
             note: None,
         }]);
         assert!(

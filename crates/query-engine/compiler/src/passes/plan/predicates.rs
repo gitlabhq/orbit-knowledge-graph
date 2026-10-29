@@ -1,11 +1,9 @@
 //! Predicates and projections the planner attaches to relations, and the facts about a predicate the
 //! planner asks for: selective, a point lookup, or filtering the sort key.
 
-use std::collections::HashSet;
-
 use ontology::constants::*;
 
-use super::filters::{BoundFilter, NullAsEpoch};
+use super::filters::{BoundFilter, NullAsEpoch, NullAsEpochColumns};
 use super::graph::RelationId;
 use crate::input::{BooleanExpression, FilterOp, InputFilter};
 
@@ -36,6 +34,7 @@ pub enum Predicate {
         text_indexed: bool,
         unique: bool,
         immutable: bool,
+        foreign_key: bool,
         null_as_epoch: NullAsEpoch,
     },
     Ids {
@@ -95,6 +94,23 @@ impl Predicate {
         matches!(self, Self::Property { filter, .. } if filter.op.is_some_and(FilterOp::is_text))
     }
 
+    pub fn narrows_keys(&self) -> bool {
+        match self {
+            Self::Ids { .. } | Self::IdRange { .. } | Self::Membership { .. } => true,
+            Self::Property {
+                in_sort_key,
+                foreign_key,
+                filter,
+                ..
+            } => {
+                (*in_sort_key || *foreign_key)
+                    && filter.rhs_column.is_none()
+                    && matches!(filter.op, None | Some(FilterOp::Eq | FilterOp::In))
+            }
+            _ => false,
+        }
+    }
+
     pub fn is_point_lookup(&self) -> bool {
         match self {
             Self::Ids { values, .. } => values.len() == 1,
@@ -146,7 +162,7 @@ impl Predicate {
 #[derive(Clone, PartialEq)]
 pub enum OutputValue {
     Column(Column),
-    EpochAsNull(Column),
+    EpochAsNull(Column, ontology::DataType),
     Text(String),
     Depth(u32),
     Path(Vec<(Column, Column)>),
@@ -163,17 +179,16 @@ pub enum OutputValue {
 }
 
 impl OutputValue {
-    pub fn property(null_as_epoch: &HashSet<String>, column: Column) -> Self {
-        if null_as_epoch.contains(&column.name) {
-            Self::EpochAsNull(column)
-        } else {
-            Self::Column(column)
+    pub fn property(null_as_epoch: &NullAsEpochColumns, column: Column) -> Self {
+        match null_as_epoch.get(&column.name) {
+            Some(data_type) => Self::EpochAsNull(column, *data_type),
+            None => Self::Column(column),
         }
     }
 
     pub fn column(&self) -> Option<&Column> {
         match self {
-            Self::Column(column) | Self::EpochAsNull(column) => Some(column),
+            Self::Column(column) | Self::EpochAsNull(column, _) => Some(column),
             _ => None,
         }
     }

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
-use crate::database::{GraphReader, schema::graph_lacks_commit};
+use crate::database::{GraphReader, IncompleteRevision, schema::graph_lacks_commit};
 use anyhow::{Context, Result};
 use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
 use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
@@ -49,6 +49,22 @@ impl Workspace {
 
     pub fn var_dir(&self, project_id: i64) -> PathBuf {
         self.root.join("var").join(project_id.to_string())
+    }
+
+    /// Index state comes first so a reset waits for running indexes before it locks the
+    /// manifest. `graph.duckdb` is the single-file graph from releases before the manifest.
+    pub fn graph_paths(&self) -> Vec<PathBuf> {
+        [
+            "var",
+            "local",
+            "graph.duckdb",
+            "graph.duckdb.wal",
+            "graph.duckdb.lock",
+        ]
+        .into_iter()
+        .map(|name| self.root.join(name))
+        .filter(|path| path.exists())
+        .collect()
     }
 
     /// Discover git repos in a directory, including nested repos when
@@ -138,6 +154,48 @@ pub struct IndexedRepo {
     pub client: GraphReader,
 }
 
+pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Option<IndexedRepo> {
+    let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
+    let git = git_info(&git_toplevel(&repo_path).ok()?).ok()?;
+    let db_path = resolve_db_path(db, &git).ok()?;
+    if graph_lacks_commit(&db_path, &git.commit_sha).unwrap_or(true) {
+        return None;
+    }
+    let client = GraphReader::open(Some(db_path)).ok()?;
+    Some(IndexedRepo { git, client })
+}
+
+/// Indexes the current repository first when it was never indexed (even if others are, like
+/// `grep`) or has no complete revision; a stale HEAD is left to refresh.
+pub fn open_graph_reader(db: Option<PathBuf>) -> Result<GraphReader> {
+    let here = git_toplevel(Path::new("."))
+        .ok()
+        .filter(|top_level| git_info(top_level).is_ok());
+    let Some(top_level) = here else {
+        return GraphReader::open(db);
+    };
+    if already_indexed(&db, &top_level)? {
+        match GraphReader::open(db.clone()) {
+            Ok(reader) if reader.has_revisions() => return Ok(reader),
+            Err(error) if !error.is::<IncompleteRevision>() => return Err(error),
+            _ => {}
+        }
+    }
+    crate::commands::index::index_before_first_query(top_level, db.clone())
+        .context("failed to index the repository")?;
+    GraphReader::open(db)
+}
+
+fn already_indexed(db: &Option<PathBuf>, top_level: &Path) -> Result<bool> {
+    match db {
+        Some(path) => Ok(path.try_exists()?),
+        None => {
+            let manifest = Workspace::open_default()?.manifest_path();
+            crate::database::manifest::has_indexed_repo(&manifest, top_level)
+        }
+    }
+}
+
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
     let top_level = git_toplevel(&repo_path)
@@ -170,9 +228,12 @@ pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTre
     }
     let git_list = |args: &[&str]| -> Option<Vec<String>> {
         let output = Command::new("git")
+            .arg("--literal-pathspecs")
             .arg("-C")
             .arg(repo)
             .args(args)
+            .arg("--")
+            .args(files)
             .stderr(Stdio::null())
             .output()
             .ok()
@@ -316,10 +377,10 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
 
 /// Resolve the working-tree root of the repo containing `path`.
 ///
-/// `orbit index` walks and stores file paths relative to this root, so a
-/// `repo-map` invocation pointed at a subdirectory must anchor here too;
-/// otherwise `read_text` globs (resolved against CWD) miss the repo-root-relative
-/// paths the graph holds and `api`/`class` silently degrade. This is the git
+/// Indexing stores file paths relative to this root and keys the manifest by it, so
+/// `grep`, `context`, `sql`, and `setup` run from a subdirectory must resolve here
+/// too: the checkout lookup finds the indexed revision, and `grep` scopes and scans
+/// with paths that match what the graph stored. This is the git
 /// working-tree root (`git rev-parse --show-toplevel`), not
 /// [`GitInfo::parent_repo_path`], which for a worktree points at the origin
 /// repo instead of this checkout's own root.
@@ -481,10 +542,13 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
         );
         return vec![];
     }
-    ws.get_repositories()
+    let mut repos: Vec<PathBuf> = ws
+        .get_repositories()
         .into_iter()
         .map(|r| PathBuf::from(&r.path))
-        .collect()
+        .collect();
+    repos.sort();
+    repos
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use super::super::{EdgeRelation, Pattern};
 use super::{IdSet, RelationBuilder};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
-use crate::passes::plan::graph::{ReadOwner, RelationGraph, RelationId};
+use crate::passes::plan::graph::{ReadOwner, ReadScope, RelationGraph, RelationId};
 use crate::passes::plan::predicates::*;
 use crate::passes::plan::sort_key;
 
@@ -200,8 +200,8 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         );
         if relation.max_hops > 1 && !self.pattern.aggregate() {
             self.outputs.push(Projection::new(
-                column(PATH_NODES_COLUMN),
-                format!("{}{PATH_NODES_COLUMN}", relation.column_prefix()),
+                column(path_nodes_column()),
+                relation.path_nodes_column(),
             ));
         }
     }
@@ -223,7 +223,7 @@ pub(super) fn current_edge_rows<M: OrbitQueryModel + ?Sized>(
             owner,
             sort_key(model, table)?,
             predicates,
-            model.supports_selective_latest_rows(),
+            ReadScope::Edge,
         ));
     }
     edge_union(
@@ -238,7 +238,7 @@ pub(super) fn current_edge_rows<M: OrbitQueryModel + ?Sized>(
                 owner.clone(),
                 sort_key(model, table)?,
                 predicates.clone(),
-                model.supports_selective_latest_rows(),
+                ReadScope::Edge,
             ))
         },
     )
@@ -255,7 +255,7 @@ fn plain_edge_rows(
         let read = graph.read(table, alias, final_);
         return Ok(graph.owned(read, owner, alias));
     }
-    let route_alias = format!("_{alias}");
+    let route_alias = union_arm_alias(alias);
     edge_union(
         graph,
         &relation.edge_tables,

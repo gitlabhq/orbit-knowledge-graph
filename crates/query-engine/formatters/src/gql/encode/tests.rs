@@ -189,21 +189,21 @@ fn returned_relationships_add_columns_in_return_order() {
             column("_orbit_u_type", strings(&["User", "User"])),
             column("_orbit_mr_id", ints(&[7, 8])),
             column("_orbit_mr_type", strings(&["MergeRequest", "MergeRequest"])),
-            column("e0_type", strings(&["APPROVED", "AUTHORED"])),
+            column("_orbit_e0_kind", strings(&["APPROVED", "AUTHORED"])),
         ],
         None,
     );
     output.result_context.add_edge(EdgeMeta {
-        column_prefix: "e0_".into(),
+        column_prefix: "_orbit_e0_".into(),
         path_column: None,
         rel_types: vec!["AUTHORED".into(), "APPROVED".into()],
         from_alias: String::new(),
         to_alias: String::new(),
-        type_column: "e0_type".into(),
-        src_column: "e0_src".into(),
-        src_type_column: "e0_src_type".into(),
-        dst_column: "e0_dst".into(),
-        dst_type_column: "e0_dst_type".into(),
+        type_column: "_orbit_e0_kind".into(),
+        src_column: "_orbit_e0_src".into(),
+        src_type_column: "_orbit_e0_src_kind".into(),
+        dst_column: "_orbit_e0_dst".into(),
+        dst_type_column: "_orbit_e0_dst_kind".into(),
         relationship: 0,
     });
     let relationship_return = &mut Arc::get_mut(&mut output.compiled)

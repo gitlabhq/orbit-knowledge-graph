@@ -1,0 +1,74 @@
+videos:
+  - provider: vimeo
+    id: "1218094760"
+    title: GitLab Orbit explainer
+    description: What Orbit is and how agents use it, in a few minutes.
+    thumbnail: https://i.vimeocdn.com/video/2189929998-46e3c4b40213c14d2124a20732ae73b9f629cbc52b91d304ac9f9cc1b923e16d-d_1280?region=us
+  - provider: youtube
+    id: wddpf0rDGnA
+    title: "How we built Orbit: the AI context graph layer"
+    description: How Orbit builds the graph and answers agent queries.
+  - provider: youtube
+    id: ekcw1yn21jQ
+    start: 1840
+    title: Orbit launch at the GitLab Transcend keynote
+    description: The part of the GitLab Transcend keynote where GitLab announced Orbit.
+  - provider: vimeo
+    id: "1200369898"
+    title: Orbit demo at GitLab Transcend London
+    description: A live demo of agents that use Orbit, from GitLab Transcend London.
+    thumbnail: https://i.vimeocdn.com/video/2167441470-9cf7818a733b3ff632c5f6f54800e05806e7b59901d282d5453f650e78c64f65-d_1280?region=us
+  - provider: vimeo
+    id: "1199521642"
+    title: How Orbit works
+    description: How Orbit builds the graph from your GitLab data, in four minutes.
+    thumbnail: https://i.vimeocdn.com/video/2166895892-9d10bf43d09836de76a4b4c13cb1beb31d1df850ac62e4202ef7850de251226b-d_1280?region=us
+  - provider: youtube
+    id: tvRCt54GuII
+    title: Orbit product design roadshow, March 2026
+    description: How we design Orbit setup and the first query.
+links:
+  - href: https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/
+    title: Orbit click-through demo
+    description: Try Orbit in your browser, with no setup.
+    meta: Interactive demo
+  - href: https://about.gitlab.com/blog/introducing-gitlab-orbit/
+    title: Introducing GitLab Orbit
+    description: The launch post on the GitLab blog.
+    image: https://res.cloudinary.com/about-gitlab-com/image/upload/v1780996524/sd1vpl8empy26wizarqj.png
+    meta: GitLab blog
+  - href: https://about.gitlab.com/blog/gitlab-transcend-announcements/
+    title: "GitLab: Built for the agentic engineering era"
+    description: The GitLab Transcend announcements, with an Orbit demo.
+    image: https://res.cloudinary.com/about-gitlab-com/image/upload/v1781032585/go3d7pb9opmux7rwhpev.png
+    meta: GitLab blog
+  - href: https://about.gitlab.com/blog/gitlab-orbit-and-google-antigravity/
+    title: Google Antigravity agents get full context with GitLab Orbit
+    description: Connect Orbit to Google Antigravity agents from the MCP store.
+    image: https://res.cloudinary.com/about-gitlab-com/image/upload/v1782391928/dkbgxzitp72snzrnzupe.png
+    meta: GitLab blog
+  - href: https://about.gitlab.com/blog/gitlab-transcend-hackathon-orbit/
+    title: "GitLab Transcend Hackathon: What developers built on GitLab Orbit"
+    description: What more than 1,500 developers built on Orbit during the hackathon.
+    meta: GitLab blog
+  - href: https://about.gitlab.com/press/releases/2026-06-10-gitlab-announces-new-capabilities-to-give-enterprises-speed-control-at-agentic-scale/
+    title: GitLab announces new capabilities for agentic scale
+    description: The press release that announced the Orbit public beta.
+    meta: GitLab press release
+  - href: https://itbrief.com.au/story/gitlab-unveils-tools-for-governed-agentic-software-delivery
+    title: GitLab unveils tools for governed agentic software delivery
+    description: Press coverage of the Orbit launch at GitLab Transcend.
+    meta: ITBrief
+  - href: https://about.gitlab.com/gitlab-orbit/
+    title: GitLab Orbit product page
+    description: The context layer for AI agents.
+    image: https://about.gitlab.com/img/og?title=GitLab%20Orbit%3A%20The%20context%20layer%20for%20AI%20agents
+    meta: about.gitlab.com
+  - href: https://docs.gitlab.com/orbit/
+    title: GitLab Orbit documentation
+    description: Turn on Orbit, query the graph, and connect agents.
+    meta: docs.gitlab.com
+  - href: https://gitlab.com/gitlab-org/orbit/knowledge-graph
+    title: Orbit source code
+    description: The Orbit project on GitLab.
+    meta: gitlab.com

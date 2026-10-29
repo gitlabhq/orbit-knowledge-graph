@@ -4,6 +4,7 @@ use super::predicates::{column, predicate, projections};
 use super::sql::latest_row_dedup;
 use super::{EmitOutput, NodeBinding};
 use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
+use crate::constants::internal_column_prefix;
 use crate::passes::plan::graph::{
     ExecutionPlan, ReadOwner, RelationGraph, RelationId, RelationNode, RelationRef,
 };
@@ -70,7 +71,7 @@ pub(super) fn execute(
 }
 
 pub(super) fn relation_name(id: RelationId) -> String {
-    format!("_orbit_relation_{}", id.0)
+    format!("{}relation_{}", internal_column_prefix(), id.0)
 }
 
 fn star() -> Vec<SelectExpr> {

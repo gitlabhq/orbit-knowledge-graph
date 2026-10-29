@@ -1,0 +1,116 @@
+# GitLab Orbit CLI development quickstart
+
+Build and test the `orbit` CLI and related crates without a Caproni cluster, NATS, Siphon,
+ClickHouse, or PostgreSQL. Many contributions only need the tools on this
+page: language parser additions, `orbit-cli` changes, docs, unit
+tests, and the code-graph integration tests.
+
+To run the server pipeline end to end (Siphon, SDLC indexing, the query
+REST API), you need the full setup in
+[Local development](local-development.md). The same applies to most
+ontology YAML changes: `mise run ontology:validate` catches schema problems
+locally, but verifying their end-to-end behavior requires the full stack.
+
+## Prerequisites (5 minutes)
+
+- Git
+- [`mise`](https://mise.jdx.dev/) for tool management:
+
+  ```shell
+  curl "https://mise.jdx.dev/install.sh" | sh
+  ```
+
+## Clone and set up
+
+```shell
+git clone https://gitlab.com/gitlab-org/orbit/knowledge-graph.git
+cd knowledge-graph
+mise trust && mise install
+```
+
+If `mise install` errors on first run (the Rust toolchain post-install step
+can fail before the toolchain is fully linked), re-run it once.
+
+## Build the orbit CLI
+
+```shell
+mise run build:cli
+./target/release/orbit help
+```
+
+The first release build compiles every dependency and takes a few minutes
+(about 5 minutes on an Apple Silicon laptop). Incremental rebuilds are much
+faster.
+
+## Read the agent skill
+
+`orbit skills` (or `orbit skills list`) lists the agent skills deployed by the
+selected GitLab instance.
+`orbit skills get orbit [path]` validates and caches the whole skill tree that the
+instance serves, composes it with local CLI guidance, and prints `SKILL.md` when `path` is
+omitted. `orbit skills get <name> [path]` fetches any other skill the instance
+lists as the server serves it, with no local composition. Only `orbit` has an
+embedded copy, so another skill needs a credential and fails when the fetch
+does. The cache uses the operating system's user cache directory and keeps
+instance origins isolated.
+
+The command finds credentials like the other GitLab Orbit API commands: the
+Orbit API variables from glab, then `GITLAB_TOKEN` with an optional `GITLAB_URL`, then
+`glab auth credential-helper`. Without a credential, it prints a warning on
+stderr and serves the embedded local tree. The local guidance therefore stays
+available in offline development builds:
+
+```shell
+./target/release/orbit skills
+./target/release/orbit skills get orbit references/local/sql.md
+```
+
+## Index a repository and run a query
+
+Index the knowledge-graph repository itself as a test target, then query the
+resulting DuckDB graph with SQL:
+
+```shell
+./target/release/orbit workspace index .
+
+# Count the extracted definitions:
+./target/release/orbit workspace sql 'SELECT count(*) FROM gl_definition'
+
+# Find up to three definitions named "main":
+./target/release/orbit workspace sql "SELECT name, definition_type, file_path
+  FROM gl_definition WHERE name = 'main' LIMIT 3"
+
+# Structured output for scripts:
+./target/release/orbit workspace sql -F json 'SELECT path, language FROM gl_file LIMIT 5'
+```
+
+Revision graphs and a separate manifest are written under `~/.gitlab/orbit/local/`. `orbit workspace schema` lists every
+table and column in it. The local graph is queried with DuckDB SQL only; the
+query language documented under `docs/docs-gitlab-com/queries/` applies to GitLab Orbit.
+
+## Run tests without infrastructure
+
+```shell
+mise run test:fast                    # unit tests, no Docker
+mise run test:local                   # local integration tests, no Docker
+mise run test:integration:codegraph   # code-graph YAML suites, no Docker
+mise run ontology:validate            # validate ontology YAML changes
+mise run lint:code                    # clippy, warnings as errors
+mise run lint:docs                    # markdownlint + Vale + lychee
+```
+
+For every test layer and where to add a test, see
+[Testing](../testing/README.md).
+
+## What needs the full stack
+
+The container tests run without a cluster. They cover SDLC indexing with indexer
+scenarios on a ClickHouse testcontainer. On macOS, start Docker with
+`colima start gkg --memory 12`, then run `mise run test:integration`.
+
+Only these parts need the Caproni cluster or the [e2e harness](e2e-testing.md):
+
+- Live Siphon CDC from PostgreSQL.
+- Rails authorization and the Rails query API.
+
+For the rest, follow [Local development](local-development.md).

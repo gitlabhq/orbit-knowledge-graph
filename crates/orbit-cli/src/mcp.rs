@@ -120,7 +120,7 @@ impl OrbitLocalServer {
         Parameters(args): Parameters<GetGraphSchemaArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         self.timed_tool("get_graph_schema", move || {
-            let reader = crate::database::GraphReader::open(args.db)?;
+            let reader = crate::workspace::open_graph_reader(args.db)?;
             batches_to_json(&sql::query(&reader, &sql::schema_introspection_sql())?)
         })
         .await
@@ -168,7 +168,7 @@ fn run_sql_impl(args: RunSqlArgs) -> Result<String> {
     if args.sql.is_empty() {
         anyhow::bail!("`sql` must contain at least one statement");
     }
-    let client = crate::database::GraphReader::open(args.db)?;
+    let client = crate::workspace::open_graph_reader(args.db)?;
 
     let mut arrow_bytes = 0usize;
     let mut results = Vec::with_capacity(args.sql.len());

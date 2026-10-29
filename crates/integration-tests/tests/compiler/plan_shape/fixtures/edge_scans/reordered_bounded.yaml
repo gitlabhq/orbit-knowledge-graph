@@ -15,8 +15,8 @@ physical:
     planned:
       expect:
         - (Scan Table(gl_code_edge_by_target) ...)
-        - (Filter e1._deleted = false (Deduplicate LimitBy ... (Filter e1.relationship_kind = 'CALLS', e1.target_kind = 'Definition', e1.target_id = 12001 (_))))
-        - (Project prepend((e2.target_id, e2.target_kind), _depth_1.path_nodes) AS path_nodes, ... (_))
+        - (Filter _orbit_e1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e1.relationship_kind = 'CALLS', _orbit_e1.target_kind = 'Definition', _orbit_e1.target_id = 12001 (_))))
+        - (Project prepend((_orbit_e2.target_id, _orbit_e2.target_kind), _orbit_depth_1._orbit_path_nodes) AS _orbit_path_nodes, ... (_))
       reject: ["(Scan Table(gl_code_edge) ...)"]
   duckdb:
     planned:

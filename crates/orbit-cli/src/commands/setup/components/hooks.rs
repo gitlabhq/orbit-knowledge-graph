@@ -9,7 +9,7 @@ use super::{
     write_unless_unchanged,
 };
 use crate::commands::setup::Target;
-use crate::commands::setup::spec::{self, Agent, TemplateFile};
+use crate::commands::setup::spec::{self, Agent, Registration, TemplateFile};
 
 pub(super) struct Hooks;
 
@@ -19,8 +19,8 @@ impl Installer for Hooks {
             .json_merges
             .iter()
             .map(|merge| &merge.file)
-            .chain(agent.template_files.iter().map(|file| &file.path))
-            .chain(agent.registrations.iter().map(|entry| &entry.file))
+            .chain(agent.ui_files(false).map(|file| &file.path))
+            .chain(agent.ui_registrations(false).map(|entry| &entry.file))
             .map(|scoped| target.resolve(scoped).map(|(_, label)| label))
             .collect::<Result<_>>()?;
         Ok(files.into_iter().collect())
@@ -46,7 +46,7 @@ impl Installer for Hooks {
                 .resolve(&merge.file)
                 .is_ok_and(|(path, _)| file_mentions(&path, &merge.marker))
         });
-        let templated = agent.template_files.iter().any(|template_file| {
+        let templated = agent.ui_files(false).any(|template_file| {
             target
                 .resolve(&template_file.path)
                 .is_ok_and(|(path, _)| path.exists())
@@ -73,31 +73,12 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
         write_unless_unchanged(&path, &label, &installed, "orbit entries installed", report)?;
     }
 
-    for template_file in &agent.template_files {
-        let (path, label) = target.resolve(&template_file.path)?;
-        let written_by_orbit = std::fs::read_to_string(&path)
-            .is_ok_and(|current| TemplateFile::is_unmodified(&current));
-        if !written_by_orbit {
-            backup_once(&path, &label, report)?;
-        }
-        write_unless_unchanged(&path, &label, &template_file.render(), "written", report)?;
-    }
-
-    for registration in &agent.registrations {
-        let (path, label) = target.resolve(&registration.file)?;
-        let value = target.registration_value(&registration.value)?;
-        let (_, value_label) = target.resolve(&registration.value)?;
-        let mut root = json::read_object(&path)?;
-        if json::append_unique(&mut root, &registration.path, &value)
-            .with_context(|| format!("failed to update {}", path.display()))?
-        {
-            backup_once(&path, &label, report)?;
-            json::write_object(&path, &root)?;
-            report.note(&label, format!("{value_label} registered"));
-        }
-    }
-
-    Ok(())
+    install_files(
+        agent.ui_files(false),
+        agent.ui_registrations(false),
+        target,
+        report,
+    )
 }
 
 fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Result<()> {
@@ -112,7 +93,52 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
         }
     }
 
-    for template_file in &agent.template_files {
+    remove_files(
+        agent.ui_files(false),
+        agent.ui_registrations(false),
+        target,
+        report,
+    )
+}
+
+pub(super) fn install_files<'a>(
+    files: impl Iterator<Item = &'a TemplateFile>,
+    registrations: impl Iterator<Item = &'a Registration>,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    for template_file in files {
+        let (path, label) = target.resolve(&template_file.path)?;
+        let written_by_orbit = std::fs::read_to_string(&path)
+            .is_ok_and(|current| TemplateFile::is_unmodified(&current));
+        if !written_by_orbit {
+            backup_once(&path, &label, report)?;
+        }
+        write_unless_unchanged(&path, &label, &template_file.render(), "written", report)?;
+    }
+    for registration in registrations {
+        let (path, label) = target.resolve(&registration.file)?;
+        let value = target.registration_value(&registration.value)?;
+        let (_, value_label) = target.resolve(&registration.value)?;
+        let mut root = json::read_object(&path)?;
+        if json::append_unique(&mut root, &registration.path, &value)
+            .with_context(|| format!("failed to update {}", path.display()))?
+        {
+            backup_once(&path, &label, report)?;
+            json::write_object(&path, &root)?;
+            report.note(&label, format!("{value_label} registered"));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn remove_files<'a>(
+    files: impl Iterator<Item = &'a TemplateFile>,
+    registrations: impl Iterator<Item = &'a Registration>,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    for template_file in files {
         let (path, label) = target.resolve(&template_file.path)?;
         if !path.exists() {
             continue;
@@ -126,8 +152,7 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
         remove_file_and_empty_parents(&path, target)?;
         report.note(&label, "removed");
     }
-
-    for registration in &agent.registrations {
+    for registration in registrations {
         let (path, label) = target.resolve(&registration.file)?;
         if !path.exists() {
             continue;
@@ -138,13 +163,19 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
             json::write_or_delete_when_empty(&path, &root, target, &label, report)?;
         }
     }
-
     Ok(())
 }
 
 fn substitute_tokens_in_json(value: &Value) -> Value {
     match value {
-        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher())),
+        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher()).replace(
+            "{{hook_gitlab}}",
+            if spec::reaches_gitlab() {
+                " --gitlab"
+            } else {
+                ""
+            },
+        )),
         Value::Array(items) => Value::Array(items.iter().map(substitute_tokens_in_json).collect()),
         Value::Object(map) => Value::Object(
             map.iter()

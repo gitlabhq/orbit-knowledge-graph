@@ -75,13 +75,16 @@ pub trait OrbitQueryModel {
         self.query_backend().null_as_epoch(property)
     }
 
-    fn null_as_epoch_properties(&self, entity: EntityId) -> HashSet<String> {
+    fn null_as_epoch_properties(&self, entity: EntityId) -> HashMap<String, ontology::DataType> {
         self.graph()
             .entity(entity)
             .properties
             .iter()
             .filter(|property| self.null_as_epoch(**property))
-            .map(|property| self.graph().property(*property).name.clone())
+            .map(|property| {
+                let property = self.graph().property(*property);
+                (property.name.clone(), property.data_type)
+            })
             .collect()
     }
 
@@ -106,6 +109,12 @@ pub trait OrbitQueryModel {
         self.graph()
             .entity_id(entity)
             .is_some_and(|entity| self.query_backend().entity_is_global(entity))
+    }
+
+    fn entity_high_fan_out(&self, entity: &str) -> bool {
+        self.graph()
+            .entity_id(entity)
+            .is_some_and(|entity| self.query_backend().entity_high_fan_out(entity))
     }
 
     fn property_column_named(&self, entity: &str, property: &str) -> Option<&str> {
