@@ -40,6 +40,7 @@ Results include only the data that the token owner can access.
 - For the endpoints, parameters, and examples, see the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
 - For GitLab Orbit data in the GraphQL API, such as the groups where GitLab Orbit is turned on and the schema,
   see [`Query.orbit`](https://docs.gitlab.com/api/graphql/reference/queries/#orbit).
+  `Query.orbit` is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 
 ## Query shapes
 
