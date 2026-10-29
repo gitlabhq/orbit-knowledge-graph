@@ -56,7 +56,14 @@ impl Env {
                 Some(index) => index,
                 None => {
                     let mut config = match yaml {
-                        Some(yaml) => rules::load_lang(yaml, &lang)?,
+                        Some(yaml) => {
+                            let mut config = rules::load_lang(yaml, &lang)?;
+                            let shared = include_str!("../langs/shared.yaml");
+                            config
+                                .display_rules
+                                .extend(rules::load_lang(shared, &lang)?.display_rules);
+                            config
+                        }
                         None => LangConfig::default(),
                     };
                     resolve.config.merge(&config.config.resolve);
