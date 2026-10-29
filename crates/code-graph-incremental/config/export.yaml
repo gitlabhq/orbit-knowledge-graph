@@ -160,6 +160,13 @@ edges:
     - edge: Calls
       to: Definition
       site: [__call]
+      receiver: true
+      target_tag: { kind: [Class, Struct, Interface, Trait, Enum, TypeAlias, Module] }
+      kind: USES_VALUE
+      set: { access: read }
+    - edge: Calls
+      to: Definition
+      site: [__call]
       target_tag: { kind: [Class, Struct, Interface, Trait, Enum, TypeAlias, Module, EnumMember] }
       kind: INSTANTIATES
     - { edge: Calls, to: Definition, kind: CALLS }

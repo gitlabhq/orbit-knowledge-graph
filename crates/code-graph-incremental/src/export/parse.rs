@@ -117,6 +117,8 @@ struct GraphEdgeYaml {
     #[serde(default)]
     site_child: Option<String>,
     #[serde(default)]
+    receiver: bool,
+    #[serde(default)]
     target_tag: indexmap::IndexMap<String, Vec<String>>,
     #[serde(default)]
     reference: bool,
@@ -235,6 +237,7 @@ pub(super) struct GraphEdge {
     pub(super) fallback: bool,
     pub(super) site: Vec<u16>,
     pub(super) site_child: Option<u16>,
+    pub(super) receiver: bool,
     pub(super) target_tag: Vec<(u32, Vec<u32>)>,
     pub(super) reference: bool,
     pub(super) set: Vec<(String, String)>,
@@ -348,6 +351,7 @@ impl ExportPlan {
                     fallback: g.fallback,
                     site: g.site.iter().map(|k| lang.intern_kind(k)).collect(),
                     site_child: g.site_child.as_deref().map(|k| lang.intern_kind(k)),
+                    receiver: g.receiver,
                     target_tag: g
                         .target_tag
                         .iter()
