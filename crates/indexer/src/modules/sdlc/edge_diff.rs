@@ -4,10 +4,9 @@ use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, ArrayRef, AsArray, BooleanArray, DynComparator, Int64Array, ListArray, StringArray,
+    Array, ArrayRef, BooleanArray, DynComparator, Int64Array, StringArray,
     TimestampMicrosecondArray, downcast_array, make_comparator,
 };
-use arrow::buffer::OffsetBuffer;
 use arrow::compute::{
     SortOptions, cast, concat_batches, filter, filter_record_batch, interleave_record_batch,
 };
@@ -68,31 +67,20 @@ struct KeyTransform {
 struct StoredColumn {
     stored: String,
     source: String,
-    shape: Shape,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum Shape {
-    Id,
-    Kind,
-    Elements(String),
 }
 
 pub(in crate::modules::sdlc) struct PageRows(Vec<RecordBatch>);
 
 #[derive(Default)]
 pub(in crate::modules::sdlc) struct PreviousEdges {
-    paths: Vec<String>,
-    candidates: FxHashMap<(usize, i64), Candidate>,
+    candidates: Candidates,
     edges: Vec<(usize, RecordBatch)>,
 }
 
 #[derive(Default)]
 struct Candidates {
-    rows: Vec<RowIndex>,
-    versions: Vec<i64>,
     paths: Vec<String>,
-    candidates: FxHashMap<(usize, i64), Candidate>,
+    rows: FxHashMap<(usize, i64), Candidate>,
 }
 
 #[derive(Clone, Copy)]
@@ -109,20 +97,6 @@ struct KeyColumns {
     ids: Int64Array,
     versions: TimestampMicrosecondArray,
     deleted: BooleanArray,
-}
-
-struct PageRow {
-    row: RowIndex,
-    version: i64,
-    deleted: bool,
-    previous: Option<StoredRow>,
-}
-
-#[derive(Clone, Copy)]
-struct StoredRow {
-    row: RowIndex,
-    version: i64,
-    deleted: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -255,15 +229,11 @@ impl EdgeDiff {
         page: &PageRows,
         key_transform: &dyn BlockTransform,
     ) -> Result<PreviousEdges, HandlerError> {
-        let Candidates {
-            rows,
-            versions,
-            paths,
-            candidates,
-        } = self.candidates(stored, page)?;
-        if rows.is_empty() {
+        let (previous, candidates) = self.candidates(stored, page)?;
+        if previous.is_empty() {
             return Ok(PreviousEdges::default());
         }
+        let (rows, versions): (Vec<_>, Vec<_>) = previous.into_iter().unzip();
         let stored: Vec<&RecordBatch> = stored.iter().collect();
         let previous = interleave_record_batch(&stored, &rows)
             .and_then(|previous| stamped(previous, versions))
@@ -275,18 +245,17 @@ impl EdgeDiff {
             .into_iter()
             .map(|edges| (edges.output_index, edges.batch))
             .collect();
-        Ok(PreviousEdges {
-            paths,
-            candidates,
-            edges,
-        })
+        Ok(PreviousEdges { candidates, edges })
     }
 
     fn candidates(
         &self,
         stored: &[RecordBatch],
         page: &PageRows,
-    ) -> Result<Candidates, HandlerError> {
+    ) -> Result<(Vec<(RowIndex, i64)>, Candidates), HandlerError> {
+        let Some(first) = stored.first() else {
+            return Ok(Default::default());
+        };
         let page_keys = page
             .0
             .iter()
@@ -296,23 +265,21 @@ impl EdgeDiff {
             .iter()
             .map(KeyColumns::read)
             .collect::<Result<Vec<_>, _>>()?;
+        let page_version = |(batch, row): RowIndex| page_keys[batch].versions.value(row);
+        let stored_version = |(batch, row): RowIndex| stored_keys[batch].versions.value(row);
         let page_size = page_keys.iter().map(|keys| keys.ids.len()).sum();
-        let mut latest: FxHashMap<RowKey, PageRow> =
+        let mut latest: FxHashMap<RowKey, (RowIndex, Option<RowIndex>)> =
             FxHashMap::with_capacity_and_hasher(page_size, Default::default());
         for (batch, keys) in page_keys.iter().enumerate() {
             for row in 0..keys.ids.len() {
-                let page_row = PageRow {
-                    row: (batch, row),
-                    version: keys.versions.value(row),
-                    deleted: keys.deleted.value(row),
-                    previous: None,
-                };
                 match latest.entry(keys.key(row)) {
                     Entry::Vacant(entry) => {
-                        entry.insert(page_row);
+                        entry.insert(((batch, row), None));
                     }
-                    Entry::Occupied(mut entry) if entry.get().version < page_row.version => {
-                        entry.insert(page_row);
+                    Entry::Occupied(mut entry)
+                        if page_version(entry.get().0) < keys.versions.value(row) =>
+                    {
+                        entry.insert(((batch, row), None));
                     }
                     Entry::Occupied(_) => {}
                 }
@@ -320,47 +287,67 @@ impl EdgeDiff {
         }
         for (batch, keys) in stored_keys.iter().enumerate() {
             for row in 0..keys.ids.len() {
-                let Some(page_row) = latest.get_mut(&keys.key(row)) else {
+                let Some((page_row, previous)) = latest.get_mut(&keys.key(row)) else {
                     continue;
                 };
                 let version = keys.versions.value(row);
-                if version < page_row.version
-                    && page_row.previous.is_none_or(|kept| kept.version < version)
+                if version < page_version(*page_row)
+                    && previous.is_none_or(|kept| stored_version(kept) < version)
                 {
-                    page_row.previous = Some(StoredRow {
-                        row: (batch, row),
-                        version,
-                        deleted: keys.deleted.value(row),
-                    });
+                    *previous = Some((batch, row));
                 }
             }
         }
 
+        let types = self
+            .columns
+            .iter()
+            .map(|column| {
+                first
+                    .column_by_name(&column.stored)
+                    .map(|array| array.data_type().clone())
+                    .ok_or_else(|| {
+                        HandlerError::Processing(format!(
+                            "edge diff: batch has no column {}",
+                            column.stored
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let key_values = |batch: &RecordBatch, name: fn(&StoredColumn) -> &String| {
+            self.columns
+                .iter()
+                .zip(&types)
+                .map(|(column, data_type)| self::column(batch, name(column), data_type))
+                .collect::<Result<Vec<_>, _>>()
+        };
         let page_values = page
             .0
             .iter()
-            .map(|batch| self.key_values(batch, |column| &column.source))
+            .map(|batch| key_values(batch, |column| &column.source))
             .collect::<Result<Vec<_>, _>>()?;
         let stored_values = stored
             .iter()
-            .map(|batch| self.key_values(batch, |column| &column.stored))
+            .map(|batch| key_values(batch, |column| &column.stored))
             .collect::<Result<Vec<_>, _>>()?;
         let mut comparators: FxHashMap<(usize, usize), Vec<DynComparator>> = FxHashMap::default();
         let mut interned: FxHashMap<&str, usize> = FxHashMap::default();
-        let mut selected = Candidates::default();
-        let mut candidates = Vec::new();
-        for ((path, id), page_row) in &latest {
-            let Some(previous) = page_row.previous.filter(|previous| !previous.deleted) else {
+        let mut previous_rows = Vec::new();
+        let mut candidates = Candidates::default();
+        let mut rows = Vec::new();
+        for ((path, id), (page_row, previous)) in &latest {
+            let Some(previous) =
+                previous.filter(|(batch, row)| !stored_keys[*batch].deleted.value(*row))
+            else {
                 continue;
             };
-            let candidate = if page_row.deleted {
+            let ((page_batch, page_index), (stored_batch, stored_index)) = (*page_row, previous);
+            let candidate = if page_keys[page_batch].deleted.value(page_index) {
                 Candidate {
                     deleted: true,
                     changed: 0,
                 }
             } else {
-                let ((page_batch, page_index), (stored_batch, stored_index)) =
-                    (page_row.row, previous.row);
                 let compare = match comparators.entry((page_batch, stored_batch)) {
                     Entry::Occupied(entry) => entry.into_mut(),
                     Entry::Vacant(entry) => entry.insert(
@@ -390,30 +377,14 @@ impl EdgeDiff {
                 }
             };
             let path = *interned.entry(path).or_insert_with(|| {
-                selected.paths.push((*path).to_owned());
-                selected.paths.len() - 1
+                candidates.paths.push((*path).to_owned());
+                candidates.paths.len() - 1
             });
-            selected.rows.push(previous.row);
-            selected.versions.push(page_row.version);
-            candidates.push(((path, *id), candidate));
+            previous_rows.push((previous, page_version(*page_row)));
+            rows.push(((path, *id), candidate));
         }
-        selected.candidates = candidates.into_iter().collect();
-        Ok(selected)
-    }
-
-    fn key_values(
-        &self,
-        batch: &RecordBatch,
-        name: fn(&StoredColumn) -> &String,
-    ) -> Result<Vec<ArrayRef>, HandlerError> {
-        self.columns
-            .iter()
-            .map(|column| match &column.shape {
-                Shape::Id => self::column(batch, name(column), &DataType::Int64),
-                Shape::Kind => self::column(batch, name(column), &DataType::Utf8),
-                Shape::Elements(field) => element_ids(batch, name(column), field),
-            })
-            .collect()
+        candidates.rows = rows.into_iter().collect();
+        Ok((previous_rows, candidates))
     }
 
     fn source_named(&self, batch: RecordBatch) -> Result<RecordBatch, ArrowError> {
@@ -504,6 +475,7 @@ impl EdgeDiff {
             return Ok(Vec::new());
         }
         let paths: FxHashMap<&str, usize> = previous
+            .candidates
             .paths
             .iter()
             .enumerate()
@@ -529,7 +501,7 @@ impl EdgeDiff {
                 };
                 let candidate = paths
                     .get(edge.traversal_path)
-                    .and_then(|path| previous.candidates.get(&(*path, id)));
+                    .and_then(|path| previous.candidates.rows.get(&(*path, id)));
                 match candidate {
                     Some(candidate) if candidate.deleted => *retire = true,
                     Some(candidate) if candidate.changed & key.columns != 0 => {
@@ -602,26 +574,19 @@ fn stored_columns(node: &NodeEntity, mapping: &EdgeMapping) -> Option<(bool, Vec
     } else {
         return None;
     };
-    let stored = |source: &str, shape: Shape| {
+    let stored = |source: &str| {
         node.fields
             .iter()
             .find(|field| field.column_name() == Some(source))
             .map(|field| StoredColumn {
                 stored: field.name.clone(),
                 source: source.to_owned(),
-                shape,
             })
     };
-    let ids = stored(
-        &parent.field,
-        mapping
-            .array_field
-            .clone()
-            .map_or(Shape::Id, Shape::Elements),
-    )?;
+    let ids = stored(&parent.field)?;
     let kind = match &parent.kind {
         NodeRefKind::Literal(_) => None,
-        NodeRefKind::Derived { column, .. } => Some(stored(column, Shape::Kind)?),
+        NodeRefKind::Derived { column, .. } => Some(stored(column)?),
     };
     Some((node_is_source, kind.into_iter().chain([ids]).collect()))
 }
@@ -652,36 +617,6 @@ fn candidate_edges(batch: &RecordBatch, ids: &FxHashSet<i64>) -> Result<RecordBa
         .collect();
     filter_record_batch(batch, &candidates)
         .map_err(|err| HandlerError::Processing(format!("edge diff page edges: {err}")))
-}
-
-fn element_ids(batch: &RecordBatch, name: &str, field: &str) -> Result<ArrayRef, HandlerError> {
-    let not_a_tuple_list = || {
-        HandlerError::Processing(format!(
-            "edge diff: column {name} is not a tuple list with {field}"
-        ))
-    };
-    let array = batch.column_by_name(name).ok_or_else(not_a_tuple_list)?;
-    let lists = array.as_list_opt::<i32>().ok_or_else(not_a_tuple_list)?;
-    let offsets = lists.offsets();
-    let start = offsets[0];
-    let items = lists.values().slice(
-        start as usize,
-        (offsets[offsets.len() - 1] - start) as usize,
-    );
-    let ids = items
-        .as_struct_opt()
-        .and_then(|items| items.column_by_name(field))
-        .ok_or_else(not_a_tuple_list)?;
-    let ids = cast(ids, &DataType::Int64)
-        .map_err(|err| HandlerError::Processing(format!("edge diff: {field}: {err}")))?;
-    ListArray::try_new(
-        Arc::new(Field::new_list_field(DataType::Int64, true)),
-        OffsetBuffer::new(offsets.iter().map(|offset| offset - start).collect()),
-        ids,
-        lists.nulls().cloned(),
-    )
-    .map(|lists| Arc::new(lists) as ArrayRef)
-    .map_err(|err| HandlerError::Processing(format!("edge diff: {field}: {err}")))
 }
 
 impl KeyColumns {
@@ -757,7 +692,8 @@ fn column(batch: &RecordBatch, name: &str, data_type: &DataType) -> Result<Array
 
 #[cfg(test)]
 mod tests {
-    use arrow::array::StructArray;
+    use arrow::array::{ListArray, StructArray};
+    use arrow::buffer::OffsetBuffer;
     use arrow::datatypes::Fields;
 
     use super::*;
@@ -783,17 +719,16 @@ mod tests {
     }
 
     fn diff() -> EdgeDiff {
-        let column = |stored: &str, source: &str, shape| StoredColumn {
+        let column = |stored: &str, source: &str| StoredColumn {
             stored: stored.to_string(),
             source: source.to_string(),
-            shape,
         };
         EdgeDiff {
             node_table: "v1_gl_node".to_string(),
             columns: IndexSet::from([
-                column("owner_id", "owner", Shape::Id),
-                column("kind", "kind", Shape::Kind),
-                column("members", "members", Shape::Elements("user_id".to_string())),
+                column("owner_id", "owner"),
+                column("kind", "kind"),
+                column("members", "members"),
             ]),
             key_transforms: vec![Transformation {
                 sql: String::new(),
@@ -861,16 +796,16 @@ mod tests {
         .expect("batch builds")
     }
 
-    fn candidates(page: &[Row], stored: &[Row]) -> Candidates {
+    fn candidates(page: &[Row], stored: &[Row]) -> (Vec<(RowIndex, i64)>, Candidates) {
         let diff = diff();
         let page = diff.page_rows(&[batch(page, false)]).expect("page rows");
         diff.candidates(&[batch(stored, true)], &page)
             .expect("candidates")
     }
 
-    fn changes(candidates: &Candidates) -> Vec<(i64, bool, u64)> {
+    fn changes((_, candidates): &(Vec<(RowIndex, i64)>, Candidates)) -> Vec<(i64, bool, u64)> {
         let mut changes: Vec<(i64, bool, u64)> = candidates
-            .candidates
+            .rows
             .iter()
             .map(|((_, id), candidate)| (*id, candidate.deleted, candidate.changed))
             .collect();
@@ -961,10 +896,7 @@ mod tests {
             row(9, 20),
         ];
         let candidates = candidates(&page, &stored);
-        assert_eq!(
-            (candidates.rows.clone(), candidates.versions.clone()),
-            (vec![(0, 1)], vec![20])
-        );
+        assert_eq!(candidates.0, vec![((0, 1), 20)]);
         assert_eq!(changes(&candidates), vec![(7, false, 0b001)]);
     }
 
@@ -974,8 +906,10 @@ mod tests {
         page: RecordBatch,
     ) -> Vec<(String, RecordBatch)> {
         let previous = PreviousEdges {
-            paths: vec!["1/100/".to_string()],
-            candidates: FxHashMap::from_iter([((0, 7), candidate)]),
+            candidates: Candidates {
+                paths: vec!["1/100/".to_string()],
+                rows: FxHashMap::from_iter([((0, 7), candidate)]),
+            },
             edges: previous.into_iter().map(|batch| (0, batch)).collect(),
         };
         diff()
