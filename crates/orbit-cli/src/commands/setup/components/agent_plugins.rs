@@ -329,7 +329,7 @@ fn program(plugin: &PluginSpec) -> &str {
 
 fn scope(target: &Target) -> &'static str {
     match target {
-        Target::Global => "user",
+        Target::Global(_) => "user",
         Target::Project(_) => "local",
     }
 }
@@ -361,7 +361,7 @@ fn run(command: &[String], target: &Target) -> Result<String, String> {
     let scratch = tempfile::tempdir().map_err(|error| error.to_string())?;
     let cwd = match target {
         Target::Project(root) => root.clone(),
-        Target::Global => scratch.path().to_path_buf(),
+        Target::Global(_) => scratch.path().to_path_buf(),
     };
     let mut process = Command::new(program);
     process.current_dir(cwd);
