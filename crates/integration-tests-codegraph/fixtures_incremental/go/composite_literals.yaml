@@ -23,6 +23,7 @@ fixtures:
       }
 
 tests:
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "Composite literals create type references"
     queries:
       - query: |
@@ -31,7 +32,7 @@ tests:
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "main.Listen" } }
+          - { row: { callee: "main.Server.Listen" } }
       # No edges to unrelated definitions
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

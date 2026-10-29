@@ -33,6 +33,7 @@ fixtures:
       }
 
 tests:
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "useBuilder calls NewBuilder, SetName, SetAge"
     queries:
       - query: |
@@ -41,12 +42,12 @@ tests:
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "main.Build" } }
+          - { row: { callee: "main.Builder.Build" } }
           - { row: { callee: "main.NewBuilder" } }
           - { row: { callee: "main.NewBuilder" } }
-          - { row: { callee: "main.SetAge" } }
-          - { row: { callee: "main.SetName" } }
-          - { row: { callee: "main.SetName" } }
+          - { row: { callee: "main.Builder.SetAge" } }
+          - { row: { callee: "main.Builder.SetName" } }
+          - { row: { callee: "main.Builder.SetName" } }
       # Exactly 6 call edges, no false positives
       - query: |
           MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

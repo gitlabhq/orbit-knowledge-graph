@@ -30,32 +30,34 @@ fixtures:
       }
 
 tests:
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "Start calls Info and process, not Error"
     queries:
       - query: |
           MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
-          WHERE caller.fqn = 'main.Start'
+          WHERE caller.fqn = 'main.App.Start'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "main.Info" } }
-          - { row: { callee: "main.process" } }
+          - { row: { callee: "main.Logger.Info" } }
+          - { row: { callee: "main.App.process" } }
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.Start' AND callee.name = 'Error'
+          WHERE caller.fqn = 'main.App.Start' AND callee.name = 'Error'
           RETURN callee.name
         assert:
           - { empty: true }
 
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   - name: "process calls Info and Error"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
-      WHERE caller.fqn = 'main.process'
+      WHERE caller.fqn = 'main.App.process'
       RETURN callee.fqn AS callee
       ORDER BY callee
     assert:
-      - { row: { callee: "main.Error" } }
-      - { row: { callee: "main.Info" } }
+      - { row: { callee: "main.Logger.Error" } }
+      - { row: { callee: "main.Logger.Info" } }
 
   - name: "recursive calls itself"
     query: |

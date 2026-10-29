@@ -24,6 +24,7 @@ fixtures:
       }
 
 tests:
+  # corrected: Go spec, a method belongs to its receiver base type, so its fqn is <package>.<Type>.<Method>
   # Struct embedding resolution uses the ancestor walk added to
   # lookup_nested_cached: when receiver-type lookup fails for the direct
   # type, it retries for each ancestor in the extends chain built by
@@ -34,4 +35,4 @@ tests:
       WHERE caller.name = 'main' AND callee.name = 'Log'
       RETURN callee.fqn AS callee
     assert:
-      - { row: { callee: "main.Log" } }
+      - { row: { callee: "main.Logger.Log" } }
