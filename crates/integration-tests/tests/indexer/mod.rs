@@ -2,6 +2,7 @@ mod clickhouse;
 mod code;
 pub(crate) mod common;
 mod dispatcher;
+mod enabled_namespaces;
 mod engine;
 mod namespace_deletion;
 mod namespace_freshness;
