@@ -1,6 +1,6 @@
 {
   "name": "orbit",
-  "version": "0.164.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.4",

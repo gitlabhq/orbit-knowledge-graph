@@ -1,3 +1,21 @@
+## [1.0.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.164.0...v1.0.0) (2026-10-29)
+
+### ⚠ BREAKING CHANGES
+
+* add version requirements page
+
+### Features
+
+* **cli:** remove the local MCP server ([29a4097](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/29a409762187fac606f1ba3d6332e5608624294c)) by Michael Angelo Rivera
+
+### Fixes
+
+* **agent-plugins:** regenerate the OpenCode plugin bundle ([de4441a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/de4441a36c02d33f9c5ead4697b4cbe0b6bb0f7e)) by Dmitry Gruzd
+
+### Other
+
+* add version requirements page ([f261e23](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f261e2302ceca2ef538f15329ec58c9e750b5202)) by Bohdan Parkhomchuk
+
 ## [0.164.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.163.0...v0.164.0) (2026-10-29)
 
 ### Features
