@@ -411,7 +411,9 @@ impl Tf {
         id: u32,
         edge_ctx: Option<&'t EdgeCtx>,
     ) -> &'t str {
-        let text = edge_ctx.and_then(|ctx| ctx.source).unwrap_or(&t.source);
+        let Some(text) = edge_ctx.and_then(|ctx| ctx.source) else {
+            return "";
+        };
         let node = t.storage.node(id);
         let (start, end) = match self {
             Tf::Source(bytes) => (
