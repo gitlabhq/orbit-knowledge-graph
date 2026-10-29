@@ -131,6 +131,43 @@ impl Page {
     }
 }
 
+#[derive(Debug)]
+struct PageWrite {
+    table: String,
+    batches: Vec<RecordBatch>,
+    durability: Option<WriteDurability>,
+}
+
+fn write_phases(
+    tombstones: Vec<(String, RecordBatch)>,
+    grouped: Vec<Vec<RecordBatch>>,
+    outputs: &[String],
+    data_durability: Option<WriteDurability>,
+) -> Vec<Vec<PageWrite>> {
+    let tombstones: Vec<PageWrite> = tombstones
+        .into_iter()
+        .map(|(table, batch)| PageWrite {
+            table,
+            batches: vec![batch],
+            durability: Some(WriteDurability::Durable),
+        })
+        .collect();
+    let data: Vec<PageWrite> = grouped
+        .into_iter()
+        .enumerate()
+        .filter(|(_, batches)| !batches.is_empty())
+        .map(|(index, batches)| PageWrite {
+            table: outputs[index].clone(),
+            batches,
+            durability: data_durability,
+        })
+        .collect();
+    [tombstones, data]
+        .into_iter()
+        .filter(|phase| !phase.is_empty())
+        .collect()
+}
+
 pub(in crate::modules::sdlc) struct PipelineContext {
     pub writer: Arc<crate::clickhouse::ClickHouseWriter>,
     pub progress: ProgressNotifier,
@@ -287,27 +324,7 @@ impl Pipeline {
                 }
                 _ => Vec::new(),
             };
-            let writes = tombstones
-                .into_iter()
-                .map(|(table, batch)| (table, vec![batch]))
-                .chain(
-                    grouped
-                        .into_iter()
-                        .enumerate()
-                        .filter(|(_, batches)| !batches.is_empty())
-                        .map(|(index, batches)| (outputs[index].clone(), batches)),
-                );
-
-            let mut write_futures = FuturesUnordered::new();
-            for (table, batches) in writes {
-                let w = Arc::clone(&context.writer);
-                let d = durability.data_writes;
-                write_futures.push(async move {
-                    w.write(&table, batches, d)
-                        .await
-                        .map_err(HandlerError::from)
-                });
-            }
+            let phases = write_phases(tombstones, grouped, &outputs, durability.data_writes);
 
             {
                 #[expect(
@@ -320,16 +337,29 @@ impl Pipeline {
 
             let write_start = Instant::now();
             let drain_writes = async {
-                while let Some(report) = write_futures.next().await {
-                    let report = report?;
-                    #[expect(
-                        clippy::unwrap_used,
-                        reason = "mutex poisoning means another thread already panicked; propagating is intended"
-                    )]
-                    let mut observer = context.observer.lock().unwrap();
-                    observer.record_graph_write(&report.table, report.rows, report.bytes);
-                    stats.written_rows += report.rows;
-                    stats.written_bytes += report.bytes;
+                for phase in phases {
+                    let mut write_futures: FuturesUnordered<_> = phase
+                        .into_iter()
+                        .map(|write| {
+                            let w = Arc::clone(&context.writer);
+                            async move {
+                                w.write(&write.table, write.batches, write.durability)
+                                    .await
+                                    .map_err(HandlerError::from)
+                            }
+                        })
+                        .collect();
+                    while let Some(report) = write_futures.next().await {
+                        let report = report?;
+                        #[expect(
+                            clippy::unwrap_used,
+                            reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                        )]
+                        let mut observer = context.observer.lock().unwrap();
+                        observer.record_graph_write(&report.table, report.rows, report.bytes);
+                        stats.written_rows += report.rows;
+                        stats.written_bytes += report.bytes;
+                    }
                 }
                 Ok::<_, HandlerError>(write_start.elapsed())
             };
@@ -774,6 +804,42 @@ mod tests {
         ) -> Result<(), CheckpointError> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn edge_tombstones_are_written_durably_before_the_page_rows() {
+        let batch = test_batch(1);
+        let phases = write_phases(
+            vec![("v1_gl_edge".to_string(), batch.clone())],
+            vec![vec![batch.clone()], vec![], vec![batch]],
+            &[
+                "v1_gl_job".to_string(),
+                "v1_gl_ci_edge".to_string(),
+                "v1_gl_edge".to_string(),
+            ],
+            Some(WriteDurability::FireAndForget),
+        );
+        let tables = |phase: &[PageWrite]| -> Vec<String> {
+            phase.iter().map(|write| write.table.clone()).collect()
+        };
+        assert_eq!(phases.len(), 2);
+        assert_eq!(tables(&phases[0]), vec!["v1_gl_edge"]);
+        assert!(
+            phases[0]
+                .iter()
+                .all(|write| write.durability == Some(WriteDurability::Durable))
+        );
+        assert_eq!(tables(&phases[1]), vec!["v1_gl_job", "v1_gl_edge"]);
+        assert!(
+            write_phases(
+                Vec::new(),
+                vec![vec![test_batch(1)]],
+                &["v1_gl_job".to_string()],
+                None
+            )
+            .len()
+                == 1
+        );
     }
 
     #[tokio::test]
