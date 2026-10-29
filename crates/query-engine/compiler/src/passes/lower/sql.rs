@@ -33,9 +33,16 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
 }
 
 fn epoch(data_type: ontology::DataType) -> Expr {
+    use ontology::DataType;
     let value = match data_type {
-        ontology::DataType::Date => "1970-01-01",
-        _ => "1970-01-01 00:00:00",
+        DataType::Date => "1970-01-01",
+        DataType::DateTime => "1970-01-01 00:00:00",
+        DataType::String
+        | DataType::Enum
+        | DataType::Uuid
+        | DataType::Int
+        | DataType::Float
+        | DataType::Bool => unreachable!("only date and timestamp columns store null as the epoch"),
     };
     Expr::param(parameter_type(Some(&data_type)), value)
 }
