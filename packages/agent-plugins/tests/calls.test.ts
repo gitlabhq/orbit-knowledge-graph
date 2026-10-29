@@ -216,9 +216,14 @@ test('every shape that runs something besides the Orbit call names it or shows a
     ['glab orbit status | grep -r pattern dir', '+ grep'],
     ['glab orbit status | jq . file', '+ jq'],
     ['glab orbit status | grep x < file', '+ grep'],
-    ['glab orbit status; glab orbit workspace reset --all', "+ 'orbit workspace reset'"],
-    ['glab orbit status && orbit config set foo bar', "+ 'orbit config set'"],
-    ['glab orbit status; glab orbit reset', "+ 'orbit reset'"],
+    ['glab orbit status | grep -epat file', '+ grep'],
+    ['glab orbit status | grep --regexp=pat file', '+ grep'],
+    ['glab orbit status | grep -e pat file', '+ grep'],
+    ['glab orbit status | jq "include \\"f\\"; ." ', '+ jq'],
+    ['glab orbit status; if ((x<<2)); then prog; fi', '+ prog'],
+    ['glab orbit status; glab orbit workspace reset --all', '+ orbit workspace reset'],
+    ['glab orbit status && orbit config set foo bar', '+ orbit config set'],
+    ['glab orbit status; glab orbit reset', '+ orbit reset'],
     ["glab orbit status; echo \"unclosed", '+ unparsed'],
     ['glab orbit query <<EOF\nno terminator', '+ unparsed'],
   ]
@@ -230,6 +235,9 @@ test('quiet shell words and filters with only a pattern or count stay out of the
     'glab orbit status | head -n 5',
     'glab orbit status | grep -c ok',
     'glab orbit status | jq .',
+    'glab orbit status | grep -epat',
+    'glab orbit status | grep -e pat',
+    'glab orbit status; if ((x<<2)); then true; fi',
     'glab orbit status; cd repo; true',
     "glab orbit query <<'EOF'\n$(not run)\nEOF",
   ]) {
@@ -242,8 +250,14 @@ test('the list shows programs before redirects, clips each name, and counts what
   expect(rowOf(`glab orbit status > out.txt; ${programs}`)).toBe('Checked Orbit  + p0, p1, p2, p3, p4, p5, … +4 more')
   expect(rowOf(`glab orbit status; ${'a'.repeat(60)}`)).toBe(`Checked Orbit  + ${'a'.repeat(39)}…`)
   expect(rowOf("glab orbit status; 'ls, pwd' x")).toBe("Checked Orbit  + 'ls, pwd'")
+  expect(rowOf('glab orbit status; "it\'s, x"')).toBe("Checked Orbit  + 'it\\'s, x'")
+  expect(rowOf("glab orbit status; '> out.txt' x")).toBe("Checked Orbit  + '> out.txt'")
 })
 
 test('control characters are dropped from the names in the list', () => {
   expect(rowOf('glab orbit status; \u001b[8mprog\u009b')).toBe('Checked Orbit  + [8mprog')
+})
+
+test('bidirectional and zero-width characters are dropped from the names in the list', () => {
+  expect(rowOf('glab orbit status; a\u202eb\u200bc\u2066d')).toBe('Checked Orbit  + abcd')
 })

@@ -34,7 +34,7 @@ function callOf(label: Label, detail: string): OrbitCall {
 }
 
 function clip(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim()
+  const flat = text.replace(/\s+/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '').trim()
   return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
 }
 
@@ -92,14 +92,9 @@ export function describeCommand(command: string, known: ReadonlySet<string> = NO
   return { ...first, detail: clip(detail, MAX_DETAIL), ...(others.length ? { others } : {}) }
 }
 
-function otherLabel(other: string): string {
-  const text = clip(other, MAX_OTHER_LENGTH)
-  return /[,\s]/.test(text) && !text.startsWith('> ') ? `'${text}'` : text
-}
-
 export function othersText(call: OrbitCall): string {
   if (!call.others?.length) return ''
-  const shown = call.others.slice(0, MAX_OTHERS_SHOWN).map(otherLabel)
+  const shown = call.others.slice(0, MAX_OTHERS_SHOWN).map((other) => clip(other, MAX_OTHER_LENGTH))
   const hidden = call.others.length - shown.length
   return '  + ' + shown.join(', ') + (hidden > 0 ? `, … +${hidden} more` : '')
 }

@@ -98,7 +98,7 @@ export function parseCommands(command: string): { commands: string[][]; unparsed
       inWord = true
     } else if (
       (c === '$' && command[i + 1] === '(' && command[i + 2] === '(' && arithmeticEnd(command, i + 1) >= 0) ||
-      (c === '(' && command[i + 1] === '(' && !inWord && (words.length === 0 || words[0] === 'for') && arithmeticEnd(command, i) >= 0)
+      (c === '(' && command[i + 1] === '(' && !inWord && (words.every((word) => PREFIX_WORDS.has(word)) || words[0] === 'for') && arithmeticEnd(command, i) >= 0)
     ) {
       const end = arithmeticEnd(command, c === '$' ? i + 1 : i)
       if (SUBSTITUTION.test(command.slice(i, end))) words.push('$(')
@@ -219,16 +219,32 @@ const FILTER_FILE_OPTIONS: Readonly<Record<string, RegExp>> = {
 }
 const OPTION_TAKING_NUMBER = /^-[A-Za-z]*[nNcmABCfb]$|^--(?:lines|bytes|max-count|after-context|before-context|context)$/
 
+function grepPatternOption(args: readonly string[]): 'attached' | 'separate' | null {
+  for (const arg of args) {
+    if (arg === '--regexp') return 'separate'
+    if (arg.startsWith('--regexp=')) return 'attached'
+    const letters = arg.startsWith('--') ? null : arg.match(/^-[A-Za-z]*?e(.*)$/)
+    if (letters) return letters[1] ? 'attached' : 'separate'
+  }
+  return null
+}
+
 function isQuietFilter(program: string, args: readonly string[], readsInput: boolean): boolean {
   const maxOperands = FILTER_MAX_OPERANDS[program]
   if (maxOperands === undefined || readsInput) return false
+  if (program === 'jq' && args.some((arg) => /\b(?:import|include)\b/.test(arg))) return false
+  const allowed = program === 'grep' && grepPatternOption(args) === 'attached' ? 0 : maxOperands
   let operands = 0
   for (const [i, arg] of args.entries()) {
     if (arg.startsWith('-')) {
       if (FILTER_FILE_OPTIONS[program]?.test(arg)) return false
     } else if (!(/^\d+$/.test(arg) && OPTION_TAKING_NUMBER.test(args[i - 1] ?? ''))) operands++
   }
-  return operands <= maxOperands
+  return operands <= allowed
+}
+
+function quotedName(name: string): string {
+  return /[,\s']/.test(name) ? `'${name.replaceAll("'", "\\'")}'` : name
 }
 
 export function otherCommands(command: string, orbitExtras: readonly string[] = []): string[] {
@@ -244,7 +260,7 @@ export function otherCommands(command: string, orbitExtras: readonly string[] = 
     if (program === undefined || SUBSTITUTION_MARKERS.includes(program)) continue
     const bare = !program.includes('/')
     if (bare && (SHELL_WORDS.has(program) || (run.piped && isQuietFilter(program, run.words.slice(at + 1), run.readsInput)))) continue
-    programs.add(program)
+    programs.add(quotedName(program))
   }
   return [...programs, ...orbitExtras, ...writes]
 }
