@@ -28,7 +28,6 @@ export default {
   "tools": {
     "query_graph": { "done": "Explored Orbit", "running": "Exploring Orbit" },
     "get_graph_schema": { "done": "Read Orbit schema", "running": "Reading Orbit schema" },
-    "get_query_dsl": { "done": "Read query syntax", "running": "Reading query syntax" },
     "get_response_format": { "done": "Read response format", "running": "Reading response format" },
     "list_commands": { "done": "Listed Orbit tools", "running": "Listing Orbit tools" }
   }
