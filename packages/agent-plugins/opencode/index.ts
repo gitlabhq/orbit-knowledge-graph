@@ -1,4 +1,4 @@
-import { MARK, describeOrbitCall, detailText } from '../core/calls.ts'
+import { MARK, describeOrbitCall } from '../core/calls.ts'
 
 type Toast = { body: { message: string; variant: 'info'; duration: number } }
 type Input = { client: { tui: { showToast(toast: Toast): Promise<unknown> } } }
@@ -8,8 +8,7 @@ export const OrbitUiPlugin = async ({ client }: Input) => ({
     try {
       const call = describeOrbitCall(input.tool, output.args)
       if (!call) return
-      const detail = detailText(call)
-      const message = MARK + ' ' + call.active + (detail ? '  ' + detail : '')
+      const message = MARK + ' ' + call.active + (call.detail ? '  ' + call.detail : '')
       client.tui.showToast({ body: { message, variant: 'info', duration: 2000 } }).catch(() => {})
     } catch {}
   },

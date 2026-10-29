@@ -1,6 +1,5 @@
 export type Subcommand = { key: string; args: string[] }
 
-const SHELL_ONLY = new Set(['<', '>', '#', '$(', '`'])
 const HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/
 
 export function simpleCommands(command: string): string[][] {
@@ -75,8 +74,6 @@ function orbitWords(words: readonly string[]): string[] | null {
 }
 
 const PREFIX_WORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', 'time', '{'])
-const STRUCTURE = new Set(['for', 'done', 'fi', 'esac', 'case', '}'])
-const QUIET = new Set(['cd', 'echo', 'true', 'printf', 'head', 'tail', 'date', 'sort', 'uniq', 'wc', 'jq', 'cut', 'tr', 'column', 'cat', 'grep', 'sleep'])
 
 function runnable(command: string): string[][] {
   const out: string[][] = []
@@ -99,13 +96,6 @@ export function orbitInvocations(command: string): string[][] {
   return runnable(command)
     .map(orbitWords)
     .filter((words) => words !== null)
-}
-
-export function otherPrograms(command: string): string[] {
-  const names = runnable(command)
-    .filter((words) => !orbitWords(words) && !STRUCTURE.has(words[0] ?? ''))
-    .map((words) => words.find((word) => !/^\w+=/.test(word))?.split('/').pop() ?? '')
-  return [...new Set(names.filter((name) => name && !QUIET.has(name) && !SHELL_ONLY.has(name)))]
 }
 
 export function runsOrbit(command: string): boolean {

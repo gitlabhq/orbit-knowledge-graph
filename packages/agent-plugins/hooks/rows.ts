@@ -7,19 +7,14 @@ export type Row<P extends { isRunning: boolean }> = GroupCall<P> & { isRunning: 
 
 export type TranscriptMessage = { role: string; text: string; toolUses: readonly { tool: string; input: unknown }[] }
 
-export function mergeRuns<P extends { isRunning: boolean; isErrored?: boolean }>(calls: readonly GroupCall<P>[]): Row<P>[] {
-  const groups: GroupCall<P>[][] = []
-  for (const x of calls) {
-    const last = groups[groups.length - 1]
-    const first = last?.[0]
-    if (last && first?.call.label === x.call.label && first.call.detail === x.call.detail && !first.props.isErrored === !x.props.isErrored) last.push(x)
-    else groups.push([x])
-  }
-  return groups.flatMap((group): Row<P>[] => {
-    const shown = [...group].reverse().find((x) => x.props.isRunning) ?? group[group.length - 1]
+export function mergeRuns<P extends { isRunning: boolean }>(calls: readonly GroupCall<P>[]): Row<P>[] {
+  const groups = new Map<string, GroupCall<P>[]>()
+  for (const x of calls) groups.set(x.call.label, [...(groups.get(x.call.label) ?? []), x])
+  return [...groups.values()].flatMap((group): Row<P>[] => {
+    const shown = group.find((x) => x.props.isRunning) ?? group[group.length - 1]
     if (!shown) return []
-    const also = [...new Set(group.flatMap((x) => x.call.also ?? []))]
-    return [{ ...shown, isRunning: shown.props.isRunning, call: { ...shown.call, ...(also.length ? { also } : {}) } }]
+    const detail = shown.call.detail || ([...group].reverse().find((x) => x.call.detail)?.call.detail ?? '')
+    return [{ ...shown, isRunning: shown.props.isRunning, call: { ...shown.call, detail } }]
   })
 }
 

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { COMMAND_LABELS, describeOrbitCall, detailText } from '../core/calls.ts'
+import { COMMAND_LABELS, describeOrbitCall } from '../core/calls.ts'
 import { entitiesOf, projectsOf } from '../core/cypher.ts'
 
 const query = (cypher: string, known?: ReadonlySet<string>) =>
@@ -175,7 +175,6 @@ test('schema reads chained in one command share a row with every node named', ()
   expect(call).toMatchObject({ label: 'Read Orbit schema', detail: 'Vulnerability, Pipeline' })
 })
 
-test('other programs follow the detail after a comma', () => {
-  const call = describeOrbitCall('Bash', { command: 'glab orbit query "MATCH (f:MergeRequestDiffFile) RETURN f" | python3 -c x' })
-  expect(call && detailText(call)).toBe('Merge request diff files, python3')
+test('a help call is not an Orbit row', () => {
+  expect(describeOrbitCall('Bash', { command: 'glab orbit query --help | head -60' })).toBe(null)
 })

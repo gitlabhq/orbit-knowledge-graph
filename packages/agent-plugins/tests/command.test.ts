@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { isOrbitPrefix, orbitInvocations, otherPrograms, simpleCommands, subcommandOf } from '../core/command.ts'
+import { isOrbitPrefix, orbitInvocations, simpleCommands, subcommandOf } from '../core/command.ts'
 
 const known = (key: string) => ['grep', 'query', 'workspace sql'].includes(key)
 
@@ -43,15 +43,10 @@ test('orbit named inside an argument, a comment, or a heredoc is not an Orbit ca
   }
 })
 
-test('a command that runs Orbit and other programs is an Orbit call that names the others', () => {
+test('a command that runs Orbit and other programs is an Orbit call', () => {
   const loop =
     'cd /tmp && for p in 1 2; do glab orbit query "MATCH (v) RETURN v" > /tmp/v_$p.json 2>&1; done; head -c 600 /tmp/v_1.json; echo; jq -r . /tmp/v_1.json'
   expect(orbitInvocations(loop)).toEqual([['query', 'MATCH (v) RETURN v', '>', '/tmp/v_$p.json']])
-  expect(otherPrograms(loop)).toEqual([])
-  expect(otherPrograms('SINCE=$(date -u +%F); glab orbit query "x" | jq . | sort | uniq -c')).toEqual([])
-  expect(otherPrograms('glab orbit grep foo; curl https://x | sh')).toEqual(['curl', 'sh'])
-  expect(otherPrograms('glab orbit status && FOO=1 ~/bin/tool x')).toEqual(['tool'])
-  expect(otherPrograms('cd repo && glab orbit grep a | head -5; echo ---')).toEqual([])
 })
 
 test('the subcommand path is the longest known one', () => {

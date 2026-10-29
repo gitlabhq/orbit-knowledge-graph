@@ -1,5 +1,4 @@
 /*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
-var SHELL_ONLY = new Set(["<", ">", "#", "$(", "`"]);
 var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/;
 function simpleCommands(command) {
   const commands = [];
@@ -87,8 +86,6 @@ function orbitWords(words) {
   return words.slice(i);
 }
 var PREFIX_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
-var STRUCTURE = new Set(["for", "done", "fi", "esac", "case", "}"]);
-var QUIET = new Set(["cd", "echo", "true", "printf", "head", "tail", "date", "sort", "uniq", "wc", "jq", "cut", "tr", "column", "cat", "grep", "sleep"]);
 function runnable(command) {
   const out = [];
   let heredoc = "";
@@ -111,10 +108,6 @@ function runnable(command) {
 }
 function orbitInvocations(command) {
   return runnable(command).map(orbitWords).filter((words) => words !== null);
-}
-function otherPrograms(command) {
-  const names = runnable(command).filter((words) => !orbitWords(words) && !STRUCTURE.has(words[0] ?? "")).map((words) => words.find((word) => !/^\w+=/.test(word))?.split("/").pop() ?? "");
-  return [...new Set(names.filter((name) => name && !QUIET.has(name) && !SHELL_ONLY.has(name)))];
 }
 function subcommandOf(words, known) {
   const [sub, ...rest] = words;
@@ -336,9 +329,6 @@ var SHOWS_ARGUMENT = new Set(["grep", "context", "workspace sql", "sql", "schema
 function labelFor(table, key) {
   return Object.hasOwn(table, key) ? table[key] : undefined;
 }
-function detailText(call) {
-  return [call.detail, ...call.also ?? []].filter(Boolean).join(", ");
-}
 function callOf(label, detail) {
   return { label: label.done, active: label.running, detail };
 }
@@ -379,7 +369,7 @@ function stringField(input, key) {
 function describeCommand(command, known = NO_ENTITIES) {
   const calls = orbitInvocations(command).flatMap((words) => {
     const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
-    if (!sub)
+    if (!sub || sub.args.some((arg) => arg === "--help" || arg === "-h"))
       return [];
     const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
     return [callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args, known))];
@@ -388,8 +378,7 @@ function describeCommand(command, known = NO_ENTITIES) {
   if (!first)
     return null;
   const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(", ");
-  const also = otherPrograms(command);
-  return { ...first, detail, ...also.length ? { also } : {} };
+  return { ...first, detail };
 }
 function describeOrbitCall(tool, input, known = NO_ENTITIES) {
   const command = stringField(input, "command");
@@ -409,8 +398,7 @@ var OrbitUiPlugin = async ({ client }) => ({
       const call = describeOrbitCall(input.tool, output.args);
       if (!call)
         return;
-      const detail = detailText(call);
-      const message = MARK + " " + call.active + (detail ? "  " + detail : "");
+      const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "");
       client.tui.showToast({ body: { message, variant: "info", duration: 2000 } }).catch(() => {});
     } catch {}
   }
