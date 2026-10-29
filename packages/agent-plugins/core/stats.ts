@@ -25,16 +25,17 @@ export function parseResponse(text: string): ResponseCounts {
     out.kind = 'aggregation'
     out.grouped = /^group_columns\[[1-9]\d*\]/m.test(text)
     const columns = text.split(/^columns\[\d+\](?:\{[^}]*\})?:\s*$/m)[1]?.split(/^\S/m)[0] ?? ''
-    const isDistinct = (name: string, property?: string) => Boolean(property?.trim()) || name.includes('_distinct_')
-    const tabled = [...columns.matchAll(/^\s+(\w+),count,[^,\n]*(?:,(.*))?$/gm)].map((m) => ({ name: m[1] ?? '', distinct: isDistinct(m[1] ?? '', m[2]) }))
-    const listed = [...columns.matchAll(/^\s+- name:\s*(\w+)\s*\n\s+function:\s*count\b(?:\s*\n\s+target:.*)?(?:\s*\n\s+(property):)?/gm)].map((m) => ({ name: m[1] ?? '', distinct: isDistinct(m[1] ?? '', m[2]) }))
-    const counts = [...tabled, ...listed].filter((column) => !column.distinct).map((column) => column.name)
+    const plainCount = (name = '', target = '', property = '') => !property || name === `count_${target}_${property}`
+    const tabled = [...columns.matchAll(/^\s+(\w+),count,([^,\n]*)(?:,(.*))?$/gm)].map((m) => ({ name: m[1], plain: plainCount(m[1], m[2], m[3]?.trim()) }))
+    const listed = [...columns.matchAll(/^\s+- name:\s*(\w+)\s*\n\s+function:\s*count\b\s*\n\s+target:\s*(\w+)(?:\s*\n\s+property:\s*(\w+))?/gm)].map((m) => ({ name: m[1], plain: plainCount(m[1], m[2], m[3]) }))
+    const counts = [...tabled, ...listed].filter((column) => column.plain).map((column) => column.name)
     const header = text.match(/^rows\[\d+\]\{([^}]*)\}:\s*$/m)
     if (!header || header.index === undefined || counts.length === 0) return out
     const names = (header[1] ?? '').split(',')
     const rows = text.slice(header.index + header[0].length).split(/^\S/m)[0] ?? ''
     const lines = rows.split('\n').map((line) => line.trim().split(','))
-    const totals = names.flatMap((name, i) => (counts.includes(name) ? [sumBy(lines, (cells) => (/^\d+$/.test(cells[i] ?? '') ? Number(cells[i]) : 0))] : []))
+    const cellValue = (cells: string[], i: number) => (/^\d+$/.test(cells[i] ?? '') ? Number(cells[i]) : 0)
+    const totals = names.flatMap((name, i) => (counts.includes(name) ? [sumBy(lines, (cells) => cellValue(cells, i))] : []))
     out.aggregated = Math.max(0, ...totals)
     return out
   }
