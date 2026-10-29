@@ -174,7 +174,7 @@ export const register: Register = (on) => {
     const graphTotal = [...projectTotals.values()].reduce<number>((sum, total) => sum + (total ?? 0), 0)
     const words: [string, string][] = [
       [compact(stats.calls), stats.calls === 1 ? ' query' : ' queries'],
-      [compact(stats.apiCalls), stats.apiCalls === 1 ? ' API call replaced' : ' API calls replaced'],
+      ['~' + compact(stats.apiCalls), stats.apiCalls === 1 ? ' API call replaced' : ' API calls replaced'],
       graphTotal
         ? [compact(stats.nodes) + ' / ' + grouped(graphTotal), ' nodes']
         : [compact(stats.nodes), stats.nodes === 1 ? ' node' : ' nodes'],
