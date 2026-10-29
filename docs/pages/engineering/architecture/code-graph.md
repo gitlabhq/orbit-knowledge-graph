@@ -11,9 +11,10 @@ authors:
 ## What's in the code graph
 
 The code graph holds the structure of a repository. That means directories,
-files, definitions like classes and functions, and imported symbols. Its edges
-record what contains what, which code calls which, what each import points to,
-and which class extends which. One engine builds it for GitLab Orbit and for the
+files, definitions like classes and functions, and imports. Its edges
+record what contains what, which code calls, creates, reads, or names which,
+and what each import points to. They also record which type extends,
+implements, or overrides which. One engine builds it for GitLab Orbit and for the
 GitLab Orbit CLI. The engine knows no language on its own. Each language brings a
 spec that rewrites its syntax trees into one shared shape. Here is a
 simplified view of how source files become the graph.
@@ -132,16 +133,18 @@ flowchart LR
     Graph --> Names[Naming rules] --> Rows --> Sink[(Store)]
 ```
 
-The spec's naming rules give each definition its fully qualified name and
-type, and each import its kind. The export then turns the graph into rows for
-four node types: directory, file, definition, and imported symbol. One edge
-table holds the contains, defines, imports, calls, and extends edges.
+The spec's naming rules give each definition its fully qualified name and its
+kind. They also keep the word the language uses, and give each import its kind. The
+export then turns the graph into rows for four node types: directory, file,
+definition, and import. One edge table holds every code edge. A use edge
+carries the lines of each use and how the engine found its target.
 
 The export plan is checked against the ontology before any row is written. A
 column the ontology doesn't know, or a type that doesn't match, fails at load.
 Each row ID is a hash of the project, the branch, and what the row is. For a
-definition, that's its file, its qualified name, and its position. The same
-code gets the same ID on every run.
+definition, that's its file, its qualified name, its kind, and its signature.
+The same code gets the same ID on every run, and an edit above a definition
+keeps its ID.
 
 Rows leave in batches as each family finishes. GitLab Orbit writes them to
 ClickHouse and adds the branch that ties the code graph to its project. The

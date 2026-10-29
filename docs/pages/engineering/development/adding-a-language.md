@@ -19,8 +19,8 @@ against an in-memory graph.
 ## Architecture overview
 
 The code indexer produces **Code Graph** nodes (`Definition`, `File`,
-`Directory`, `ImportedSymbol`) connected by relationships (`Contains`,
-`Defines`, `Imports`, `Calls`, `Extends`):
+`Directory`, `Import`) connected by relationships such as `CONTAINS`,
+`DEFINES`, `RESOLVES_TO`, `CALLS`, and `EXTENDS`:
 
 ```plaintext
 crates/
@@ -94,7 +94,7 @@ pub trait DslLanguage: Send + Sync + Default {
 | `language()` | `Language` variant | always |
 | `scopes()` | Node kinds that produce `Definition` nodes | always |
 | `refs()` | Node kinds that produce call/reference edges | recommended |
-| `imports()` | Node kinds that produce `ImportedSymbol` nodes | recommended |
+| `imports()` | Node kinds that produce `Import` nodes | recommended |
 | `bindings()` | Local-variable bindings for SSA | if calls flow through aliases |
 | `branches()`, `loops()`, `ssa_config()` | Control-flow boundaries for SSA | optional |
 | `hooks()` | Return-statement kinds, module scoping, import-path resolution | optional |
@@ -313,7 +313,7 @@ Write at least three covering these areas (names are suggestions: existing
 languages use varied names like `resolution.yaml`, `simple_call.yaml`):
 
 1. **Definitions**: scope rules produce `Definition` nodes.
-1. **Imports**: import rules produce `ImportedSymbol` nodes.
+1. **Imports**: import rules produce `Import` nodes.
 1. **Cross-file call resolution**: resolver wires calls across files.
 
 #### Example: `definitions.yaml`
@@ -331,7 +331,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name IN ['hello', 'Greeter']
-      RETURN d.name AS name, d.definition_type AS kind
+      RETURN d.name AS name, d.kind AS kind
       ORDER BY name
     assert:
       - { row: { name: "Greeter", kind: "Class" } }

@@ -24,8 +24,8 @@ projects, people, work items, merge requests, CI, security findings, packages,
 container repositories, and agent sessions.
 
 The code graph holds the structure of the source code. That means branches,
-directories, files, definitions, and imported symbols. Edges between them
-record calls, imports, and inheritance.
+directories, files, definitions, and imports. Edges between them
+record calls, uses of values and types, imports, and inheritance.
 
 Each indexed branch belongs to one project. That project links the two graphs.
 A query can follow a merge request to its project and then into the code.

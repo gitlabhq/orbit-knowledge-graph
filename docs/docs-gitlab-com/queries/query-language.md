@@ -271,7 +271,7 @@ These properties have a text index:
   as in `RETURN mr.title, count(p)`. Other properties, such as `mr.iid`, do not count.
   Otherwise, the query fails with `text matching and ordering require grouping by "mr"`.
   `Project`, `Group`, `AgentSession`, `Branch`, `Commit`, and the code nodes
-  `Definition`, `Directory`, `File`, and `ImportedSymbol` are exempt.
+  `Definition`, `Directory`, `File`, and `Import` are exempt.
 - To group by a time period, use `date_trunc('<unit>', <property>)` as a group key on a date or timestamp property.
   The units are `minute`, `hour`, `day`, `week`, `month`, `quarter`, and `year`.
   `minute` and `hour` also need a filter on the same property, or an `id =` or `id IN` filter on the same node.

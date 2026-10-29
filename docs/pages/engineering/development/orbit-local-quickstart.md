@@ -77,7 +77,7 @@ resulting DuckDB graph with SQL:
 ./target/release/orbit workspace sql 'SELECT count(*) FROM gl_definition'
 
 # Find up to three definitions named "main":
-./target/release/orbit workspace sql "SELECT name, definition_type, file_path
+./target/release/orbit workspace sql "SELECT name, kind, file_path
   FROM gl_definition WHERE name = 'main' LIMIT 3"
 
 # Structured output for scripts:
