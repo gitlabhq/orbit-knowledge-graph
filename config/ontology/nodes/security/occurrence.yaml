@@ -80,7 +80,6 @@ properties:
     nullable: false
     description: "Severity level."
     values:
-      0: undefined
       1: info
       2: unknown
       4: low

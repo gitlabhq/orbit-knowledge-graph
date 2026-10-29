@@ -93,7 +93,7 @@ properties:
   when:
     type: enum
     source: when
-    nullable: false
+    nullable: true
     mutable: false
     description: "Run condition."
     enum_type: string
