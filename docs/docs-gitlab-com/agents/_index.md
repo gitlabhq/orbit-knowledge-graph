@@ -115,7 +115,7 @@ Setup follows these rules:
 The GitLab Orbit plugin for Claude Code marks each GitLab Orbit call in the transcript with the GitLab Orbit icon and a short label.
 For example, a code search shows as `◎ Searched code  login`.
 After the first call, a summary of the session's GitLab Orbit calls shows below the prompt.
-After the first successful query, the plugin runs `glab orbit graph-status` once to show the size of the project's graph.
+To show the size of the graph, the plugin runs `glab orbit graph-status` once for each project that a query names.
 
 Prerequisites:
 
@@ -124,15 +124,13 @@ Prerequisites:
 
 Setup installs the plugin by default. To install it:
 
-1. Run `glab orbit setup`, and answer **Yes** when setup asks to show GitLab Orbit calls.
+1. Run `glab orbit setup`, and answer **Yes** when setup asks to install the agent plugins.
 1. Start a new Claude Code session.
 1. To check that the plugin loaded, run `/plugin`.
 
 To set up without the plugin, run `glab orbit setup --skip agent-plugins`.
 To turn off the plugin, in Claude Code, run `/plugin` and disable `gitlab-orbit` on the **Installed** tab.
 To remove the plugin, run `glab orbit uninstall`.
-
-If GitLab Orbit calls don't show, run `claude --debug` and look for `hooks modules are turned off`.
 
 ## Remove the setup
 
