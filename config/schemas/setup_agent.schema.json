@@ -163,8 +163,8 @@
         },
         "global": {
           "type": "string",
-          "pattern": "^~/",
-          "description": "Home-anchored user-config path, used by the default global scope."
+          "pattern": "^(~/|\\$\\{[A-Z_][A-Z0-9_]*:-~[^}]*\\}/)",
+          "description": "Home-anchored user-config path, used by the default global scope. Either ~/path, or ${VAR:-~/default}/path where a non-empty absolute VAR replaces the default prefix."
         }
       }
     },

@@ -24,8 +24,10 @@ export function parseResponse(text: string): ResponseCounts {
   if (/^query_type:\s*aggregation/m.test(text)) {
     out.kind = 'aggregation'
     out.grouped = /^group_columns\[[1-9]\d*\]/m.test(text)
-    const columns = text.split(/^columns\[\d+\]\{[^}]*\}:\s*$/m)[1]?.split(/^\S/m)[0] ?? ''
-    const counts = [...columns.matchAll(/^\s+(\w+),count,/gm)].map((m) => m[1])
+    const columns = text.split(/^columns\[\d+\](?:\{[^}]*\})?:\s*$/m)[1]?.split(/^\S/m)[0] ?? ''
+    const tabled = [...columns.matchAll(/^\s+(\w+),count,/gm)].map((m) => m[1])
+    const listed = [...columns.matchAll(/^\s+- name:\s*(\w+)\s*\n\s+function:\s*count\b/gm)].map((m) => m[1])
+    const counts = [...tabled, ...listed]
     const header = text.match(/^rows\[\d+\]\{([^}]*)\}:\s*$/m)
     if (!header || header.index === undefined || counts.length === 0) return out
     const at = (header[1] ?? '').split(',').map((name) => counts.includes(name))
