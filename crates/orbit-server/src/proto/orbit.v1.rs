@@ -246,7 +246,7 @@ pub mod get_query_dsl_response {
 /// Request for the embedded skill catalog.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListSkillsRequest {
-    /// Selects the query mode the served skills teach
+    /// Query language of the caller; both modes serve the GQL skills
     #[prost(enumeration = "QueryLanguage", tag = "1")]
     pub language: i32,
 }
@@ -278,7 +278,7 @@ pub struct GetSkillRequest {
     /// true omits files for a cheap cache revalidation
     #[prost(bool, tag = "2")]
     pub metadata_only: bool,
-    /// Selects the query mode the served skill teaches
+    /// Query language of the caller; both modes serve the GQL skill
     #[prost(enumeration = "QueryLanguage", tag = "3")]
     pub language: i32,
 }
