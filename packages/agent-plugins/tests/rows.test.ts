@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { QUERY_LABEL, describeOrbitCall } from '../core/calls.ts'
-import { isPendingCall, joinPaths, leadsIntoOrbit, mergeRuns, usesOrbit } from '../hooks/rows.ts'
+import { isPendingCall, leadsIntoOrbit, mergeRuns, usesOrbit } from '../hooks/rows.ts'
 
 function calls(...commands: string[]) {
   return commands.map((command, i) => {
@@ -18,49 +18,27 @@ const PIPELINE_JOB = q('MATCH (pl:Pipeline)-[:HAS_JOB]->(j:Job) RETURN j')
 const JOB_RUNNER = q('MATCH (j:Job)-[:RAN_ON]->(r:Runner) RETURN r')
 const CALLS = q('MATCH (c:Definition)-[:CALLS]->(d:Definition) RETURN c')
 
-test('joined paths extend a chain at either end', () => {
-  expect(joinPaths(['MergeRequest → Project', 'User → MergeRequest'])).toBe('User → MergeRequest → Project')
-  expect(joinPaths(['Pipeline → Job', 'Job → Runner'])).toBe('Pipeline → Job → Runner')
-  expect(joinPaths(['A → B', 'C → D'])).toBe('A → B, C → D')
+test('each different query gets its own row', () => {
+  const rows = mergeRuns(calls(MR_PROJECT, USER_MR, PIPELINE_JOB, JOB_RUNNER))
+  expect(rows.map((row) => row.call.detail)).toEqual(['Merge requests → Projects', 'Users → Merge requests', 'Pipelines → Jobs', 'Jobs → Runners'])
+  expect(rows.every((row) => row.call.label === QUERY_LABEL)).toBe(true)
 })
 
-test('a path the chain already holds is not repeated', () => {
-  expect(joinPaths(['User → MergeRequest → Project', 'MergeRequest → Project'])).toBe('User → MergeRequest → Project')
+test('a query repeated back to back shares one row with a count', () => {
+  const rows = mergeRuns(calls(CALLS, CALLS, CALLS))
+  expect(rows.map((row) => row.call.detail)).toEqual(['Definitions  ×3'])
 })
 
-test('connected queries share one row with the joined path', () => {
-  const rows = mergeRuns(calls(MR_PROJECT, USER_MR))
-  expect(rows.length).toBe(1)
-  expect(rows[0]?.call).toMatchObject({ label: QUERY_LABEL, detail: 'Users → Merge requests → Projects' })
+test('each schema read and each search gets its own row', () => {
+  expect(mergeRuns(calls(q('CALL db.schema()'), q("CALL db.schema('MergeRequest')"))).map((row) => row.call.detail)).toEqual(['', 'MergeRequest'])
+  expect(mergeRuns(calls('glab orbit grep foo', 'glab orbit grep bar')).map((row) => row.call.detail)).toEqual(['foo', 'bar'])
 })
 
-test('back-to-back queries share one row, with disconnected paths listed side by side', () => {
-  const rows = mergeRuns(calls(MR_PROJECT, PIPELINE_JOB, JOB_RUNNER))
-  expect(rows.map((row) => row.call.detail)).toEqual(['Merge requests → Projects, Pipelines → Jobs → Runners'])
-})
-
-test('a repeated call graph query stays on one row', () => {
-  const rows = mergeRuns(calls(CALLS, CALLS))
-  expect(rows.length).toBe(1)
-  expect(rows[0]?.call.detail).toBe('Definitions')
-})
-
-test('a schema read keeps its own line between queries', () => {
-  const rows = mergeRuns(calls(MR_PROJECT, q("CALL db.schema('MergeRequest')"), USER_MR))
-  expect(rows.map((row) => row.call.label)).toEqual([QUERY_LABEL, 'Read Orbit schema', QUERY_LABEL])
-})
-
-test('similar commands in a row share one line with their details', () => {
-  const rows = mergeRuns(calls('glab orbit grep foo', 'glab orbit grep bar'))
-  expect(rows.length).toBe(1)
-  expect(rows[0]?.call.detail).toBe('foo, bar')
-})
-
-test('a running query shows the path walked so far', () => {
+test('a running query shows its own row', () => {
   const [first, second] = calls(MR_PROJECT, USER_MR)
   if (!first || !second) throw new Error('two calls expected')
   const rows = mergeRuns([first, { ...second, props: { isRunning: true } }])
-  expect(rows[0]).toMatchObject({ isRunning: true, call: { active: 'Exploring Orbit', detail: 'Users → Merge requests → Projects' } })
+  expect(rows[1]).toMatchObject({ isRunning: true, call: { active: 'Exploring Orbit', detail: 'Users → Merge requests' } })
 })
 
 test('a shell call still being written does not break an Orbit group', () => {
@@ -69,18 +47,6 @@ test('a shell call still being written does not break an Orbit group', () => {
   expect(isPendingCall({ tool: 'Bash', input: { command: 'orb' } })).toBe(true)
   expect(isPendingCall({ tool: 'Bash', input: { command: 'ls' } })).toBe(false)
   expect(isPendingCall({ tool: 'Bash', input: {}, output: 'done' })).toBe(false)
-})
-
-test('a longer path that walks a whole chain replaces it', () => {
-  expect(joinPaths(['Project → MergeRequest', 'Project → MergeRequest → User'])).toBe('Project → MergeRequest → User')
-  expect(joinPaths(['Project → MergeRequest → User', 'Project → MergeRequest'])).toBe('Project → MergeRequest → User')
-})
-
-test('paths join on the node type whether it reads singular or plural', () => {
-  expect(joinPaths(['Project → Merge requests', 'Merge request → Users'])).toBe('Project → Merge requests → Users')
-  expect(joinPaths(['Project → Merge requests', 'Merge requests → Users'])).toBe('Project → Merge requests → Users')
-  expect(joinPaths(['Pipeline → Jobs', 'Job → Runners'])).toBe('Pipeline → Jobs → Runners')
-  expect(joinPaths(['Merge request → Users', 'Project → Merge requests'])).toBe('Project → Merge requests → Users')
 })
 
 test('Orbit work covers the skill, Orbit rows, and shell calls that run Orbit among other commands', () => {
