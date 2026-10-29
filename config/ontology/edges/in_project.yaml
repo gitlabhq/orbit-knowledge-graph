@@ -172,3 +172,9 @@ variants:
     fk_column: project_id
     scope: namespace_anchor
     description: "SBOM component occurrence belongs to project."
+
+  - from_node: { type: DuoCatalogItem, id: id }
+    to_node: { type: Project, id: id }
+    fk_column: project_id
+    scope: namespace_anchor
+    description: "AI Catalog item is maintained by project."
