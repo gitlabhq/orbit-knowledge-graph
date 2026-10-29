@@ -152,7 +152,11 @@ fn execute_cypher(
         .into_iter()
         .map(
             |(var, prop, alias)| match edges.iter().position(|edge| *edge == var) {
-                Some(index) => (format!("e{index}"), prop, alias),
+                Some(index) => (
+                    format!("{}e{index}", compiler::internal_column_prefix()),
+                    prop,
+                    alias,
+                ),
                 None => (var, prop, alias),
             },
         )
