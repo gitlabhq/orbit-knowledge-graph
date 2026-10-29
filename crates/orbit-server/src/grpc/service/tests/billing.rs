@@ -136,3 +136,89 @@ async fn does_not_bill_a_query_the_client_abandoned() {
     let event = &harness.analytics.drain()[0];
     assert_eq!(event.contexts()[1].data["status"], "streaming_error");
 }
+
+fn self_managed_query(
+    license_checksum: Option<&str>,
+) -> Request<impl tokio_stream::Stream<Item = ExecuteQueryMessage>> {
+    let query = serde_json::json!({
+        "query_type": "traversal",
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+        "limit": 10
+    });
+    let message = ExecuteQueryMessage {
+        content: Some(execute_query_message::Content::Request(
+            ExecuteQueryRequest {
+                query: query.to_string(),
+                ..Default::default()
+            },
+        )),
+    };
+    let claims = Claims {
+        realm: Some("self-managed".into()),
+        root_namespace_id: None,
+        group_traversal_ids: vec![TraversalPathClaim {
+            path: TraversalPath::new_unchecked("1/"),
+            access_levels: vec![20],
+        }],
+        ..test_claims()
+    };
+    // `Claims` never serializes `license_checksum`, so sign the payload as Rails would.
+    let now = chrono::Utc::now().timestamp();
+    let mut payload = serde_json::to_value(Claims {
+        iat: now,
+        exp: now + 3600,
+        ..claims
+    })
+    .unwrap();
+    if let Some(checksum) = license_checksum {
+        payload["license_checksum"] = checksum.into();
+    }
+    let token = encode(
+        &Header::new(Algorithm::HS256),
+        &payload,
+        &EncodingKey::from_secret(b"test-secret-that-is-at-least-32-bytes-long"),
+    )
+    .unwrap();
+    let mut request = Request::new(tokio_stream::iter([message]));
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from(format!("Bearer {token}")).unwrap(),
+    );
+    request
+}
+
+async fn run_to_completion(
+    harness: &mut Harness,
+    request: Request<impl tokio_stream::Stream<Item = ExecuteQueryMessage> + Send + 'static>,
+) {
+    harness.clickhouse.answer.notify_one();
+    let mut responses = harness
+        .client
+        .execute_query(request)
+        .await
+        .unwrap()
+        .into_inner();
+    let message = responses.message().await.unwrap().unwrap();
+    assert!(
+        matches!(
+            message.content,
+            Some(execute_query_message::Content::Result(_))
+        ),
+        "{message:?}"
+    );
+    assert!(responses.message().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn does_not_bill_a_self_managed_query_without_license_checksum() {
+    let mut harness = Harness::start().await;
+    run_to_completion(&mut harness, self_managed_query(None)).await;
+    assert_eq!(harness.billing.count(), 0);
+}
+
+#[tokio::test]
+async fn bills_a_self_managed_query_with_license_checksum() {
+    let mut harness = Harness::start().await;
+    run_to_completion(&mut harness, self_managed_query(Some("abc123"))).await;
+    assert_eq!(harness.billing.count(), 1);
+}

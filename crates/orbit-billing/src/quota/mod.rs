@@ -7,7 +7,7 @@ mod metrics;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orbit_log_fields::{info, warn};
+use orbit_log_fields::{debug, info, warn};
 use orbit_server_config::{BillingConfig, QuotaAuthMode};
 use tonic::{Code, Status};
 use tonic_types::{ErrorDetails, StatusExt};
@@ -113,7 +113,7 @@ impl QuotaService {
         }
 
         if inner.auth_mode == QuotaAuthMode::LicenseChecksum && inputs.license_checksum.is_none() {
-            warn!(
+            debug!(
                 safe(GL_USER_ID) = inputs.user_id,
                 safe(REALM) = realm,
                 safe(INSTANCE_ID) = inputs.instance_id.as_deref(),

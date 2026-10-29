@@ -27,6 +27,7 @@ pub fn billing_inputs(claims: &Claims, coding_agent: Option<String>) -> BillingI
         deployment_type: claims.deployment_type.clone(),
         is_gitlab_team_member: claims.is_gitlab_team_member,
         coding_agent,
+        has_license_checksum: claims.license_checksum.is_some(),
     }
 }
 
