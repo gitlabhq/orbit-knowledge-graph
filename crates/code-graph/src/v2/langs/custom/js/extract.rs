@@ -409,11 +409,15 @@ fn canonical_definition(definition: &JsDef, extends: Option<&String>) -> Canonic
             .as_deref()
             .map(truncate_identifier),
         is_exported: definition.is_exported,
-        signature: display.signature.clone(),
-        parameters: display.parameters.clone(),
-        declared_return_type: display.return_type.clone(),
-        declared_type: display.declared_type.clone(),
-        doc_comment: display.doc_comment.clone(),
+        signature: display.signature.as_deref().map(Into::into),
+        parameters: display
+            .parameters
+            .iter()
+            .map(|p| p.as_str().into())
+            .collect(),
+        declared_return_type: display.return_type.as_deref().map(Into::into),
+        declared_type: display.declared_type.as_deref().map(Into::into),
+        doc_comment: display.doc_comment.as_deref().map(Into::into),
         modifiers: display.modifiers,
         visibility: display.visibility,
         ..DefinitionMetadata::default()

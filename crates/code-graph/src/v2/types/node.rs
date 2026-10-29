@@ -269,14 +269,14 @@ pub struct DefinitionMetadata {
     /// If this is a companion object, the FQN of the owning class.
     pub companion_of: Option<String>,
     pub is_exported: bool,
-    pub signature: Option<String>,
-    pub parameters: Vec<String>,
-    pub declared_return_type: Option<String>,
-    pub declared_type: Option<String>,
-    pub doc_comment: Option<String>,
+    pub signature: Option<Box<str>>,
+    pub parameters: Box<[Box<str>]>,
+    pub declared_return_type: Option<Box<str>>,
+    pub declared_type: Option<Box<str>>,
+    pub doc_comment: Option<Box<str>>,
     pub modifiers: Modifiers,
     pub visibility: Option<Visibility>,
-    pub generated_by: Option<String>,
+    pub generated_by: Option<Box<str>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]

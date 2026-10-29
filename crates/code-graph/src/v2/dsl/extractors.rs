@@ -91,11 +91,15 @@ impl MetadataRule {
         meta.signature = match rules.signature_with {
             Some(f) => f(node),
             None => rules.signature(node, self.signature_until),
-        };
+        }
+        .map(String::into_boxed_str);
         meta.parameters = match self.parameters_with {
             Some(f) => text::parameters(f(node).iter().map(String::as_str)),
             None => rules.parameters(node),
-        };
+        }
+        .into_iter()
+        .map(String::into_boxed_str)
+        .collect();
         let category = kind.category();
         meta.declared_return_type = match category {
             crate::v2::types::Category::Callable => {
@@ -104,6 +108,7 @@ impl MetadataRule {
                     None => rules.written(node, None, rules.return_type),
                 }
                 .and_then(|t| text::type_text(&t, text::RETURN_TYPE_CAP))
+                .map(String::into_boxed_str)
             }
             _ => None,
         };
@@ -112,13 +117,15 @@ impl MetadataRule {
                 Some(f) => f(node),
                 None => rules.written(node, self.declared_type.as_ref(), rules.declared_type),
             }
-            .and_then(|t| text::type_text(&t, text::DECLARED_TYPE_CAP)),
+            .and_then(|t| text::type_text(&t, text::DECLARED_TYPE_CAP))
+            .map(String::into_boxed_str),
             _ => None,
         };
         meta.doc_comment = match self.doc_with {
             Some(f) => f(node),
             None => rules.doc_comment(node),
-        };
+        }
+        .map(String::into_boxed_str);
         let (mut modifiers, visibility) = rules.modifiers(node);
         if let Some(f) = self.modifiers_with {
             modifiers.extend(f(node));

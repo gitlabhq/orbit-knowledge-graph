@@ -1524,23 +1524,36 @@ impl CodeGraph {
     }
 
     fn merge_all_parallel_edges(&mut self) {
-        let mut seen: FxHashSet<(NodeIndex, NodeIndex, EdgeKind)> = FxHashSet::default();
-        let has_parallel = self
-            .graph
-            .edge_references()
-            .any(|e| !seen.insert((e.source(), e.target(), e.weight().relationship.edge_kind)));
-        if !has_parallel {
-            return;
-        }
-        let mut edges: Vec<EdgeTriple> = self
-            .graph
-            .edge_references()
-            .map(|e| (e.source(), e.target(), e.weight().clone()))
-            .collect();
-        self.graph.clear_edges();
-        merge_parallel_edges(&mut edges, &mut self.line_runs);
-        for (source, target, edge) in edges {
-            self.graph.add_edge(source, target, edge);
+        let mut keys: Vec<(NodeIndex, EdgeKind)> = Vec::new();
+        for node in self.graph.node_indices() {
+            keys.clear();
+            keys.extend(
+                self.graph
+                    .edges_directed(node, petgraph::Direction::Outgoing)
+                    .map(|e| (e.target(), e.weight().relationship.edge_kind)),
+            );
+            keys.sort_unstable_by_key(|(t, k)| (t.index(), *k as u8));
+            if !keys.windows(2).any(|w| w[0] == w[1]) {
+                continue;
+            }
+            let mut indices: Vec<petgraph::graph::EdgeIndex> = self
+                .graph
+                .edges_directed(node, petgraph::Direction::Outgoing)
+                .map(|e| e.id())
+                .collect();
+            indices.sort_unstable_by_key(|i| std::cmp::Reverse(i.index()));
+            let mut edges: Vec<EdgeTriple> = Vec::with_capacity(indices.len());
+            for index in indices {
+                if let Some((source, target)) = self.graph.edge_endpoints(index)
+                    && let Some(edge) = self.graph.remove_edge(index)
+                {
+                    edges.push((source, target, edge));
+                }
+            }
+            merge_parallel_edges(&mut edges, &mut self.line_runs);
+            for (source, target, edge) in edges {
+                self.graph.add_edge(source, target, edge);
+            }
         }
     }
 
@@ -2089,7 +2102,7 @@ mod tests {
             range: Range::new(Position::new(0, 0), Position::new(10, 0), (start, end)),
             is_top_level: false,
             metadata: Some(Box::new(DefinitionMetadata {
-                signature: Some(signature.to_string()),
+                signature: Some(signature.into()),
                 ..Default::default()
             })),
         }

@@ -326,8 +326,8 @@ fn ruby_extract_attr_methods(
     let handled = ruby_extract_generated_methods(node, defs, scope_stack, sep);
     if defs.len() > start {
         let generator = match node.kind().as_ref() {
-            "call" => node.field("method").map(|m| m.text().to_string()),
-            kind => Some(kind.to_string()),
+            "call" => node.field("method").map(|m| m.text().as_ref().into()),
+            kind => Some(kind.into()),
         };
         for def in &mut defs[start..] {
             def.metadata

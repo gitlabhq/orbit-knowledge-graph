@@ -152,7 +152,7 @@ fn elixir_defstruct_fields(
             range: crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(&item)),
             is_top_level: false,
             metadata: Some(Box::new(crate::v2::types::DefinitionMetadata {
-                generated_by: Some("defstruct".to_string()),
+                generated_by: Some("defstruct".into()),
                 ..Default::default()
             })),
         });

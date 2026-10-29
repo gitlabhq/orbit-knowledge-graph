@@ -96,8 +96,8 @@ pub(super) fn is_test(node: &SyntaxNode) -> bool {
 
 pub(super) fn metadata(node: &SyntaxNode) -> DefinitionMetadata {
     let mut meta = DefinitionMetadata {
-        signature: signature(node),
-        doc_comment: doc_comment(node),
+        signature: signature(node).map(String::into_boxed_str),
+        doc_comment: doc_comment(node).map(String::into_boxed_str),
         visibility: visibility(node),
         ..DefinitionMetadata::default()
     };
@@ -109,12 +109,16 @@ pub(super) fn metadata(node: &SyntaxNode) -> DefinitionMetadata {
                 .into_iter()
                 .chain(params.params().map(|p| p.syntax().text().to_string()))
                 .collect();
-            meta.parameters = text::parameters(items.iter().map(String::as_str));
+            meta.parameters = text::parameters(items.iter().map(String::as_str))
+                .into_iter()
+                .map(String::into_boxed_str)
+                .collect();
         }
         meta.declared_return_type = function
             .ret_type()
             .and_then(|r| r.ty())
-            .and_then(|t| text::type_text(&t.syntax().text().to_string(), text::RETURN_TYPE_CAP));
+            .and_then(|t| text::type_text(&t.syntax().text().to_string(), text::RETURN_TYPE_CAP))
+            .map(String::into_boxed_str);
         let mut modifiers = Modifiers::empty();
         if function.async_token().is_some() {
             modifiers.insert(Modifier::Async);
@@ -133,7 +137,8 @@ pub(super) fn metadata(node: &SyntaxNode) -> DefinitionMetadata {
         .or_else(|| ast::RecordField::cast(node.clone()).and_then(|f| f.ty()))
         .or_else(|| ast::TupleField::cast(node.clone()).and_then(|f| f.ty()));
     meta.declared_type = declared
-        .and_then(|t| text::type_text(&t.syntax().text().to_string(), text::DECLARED_TYPE_CAP));
+        .and_then(|t| text::type_text(&t.syntax().text().to_string(), text::DECLARED_TYPE_CAP))
+        .map(String::into_boxed_str);
     if let Some(tr) = ast::Trait::cast(node.clone())
         && tr.unsafe_token().is_some()
     {
