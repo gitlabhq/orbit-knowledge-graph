@@ -290,6 +290,13 @@ test('the list shows programs before redirects, clips each name, and counts what
   expect(rowOf("glab orbit status; '> out.txt' x")).toBe("Checked Orbit  + '> out.txt'")
 })
 
+test('a row never names an Orbit read, only programs and Orbit commands that change state', () => {
+  const schemaThenQuery = `git log -1; orbit query "CALL db.schema('Finding')" | head; orbit query "MATCH (p:Project) RETURN p"`
+  expect(rowOf(schemaThenQuery)).toBe('Read Orbit schema  + git')
+  expect(rowOf('glab orbit status; orbit grep login; orbit context src/a.rs')).toBe('Checked Orbit')
+  expect(rowOf('glab orbit grep login; orbit workspace index .')).toBe('Searched code  + orbit workspace index')
+})
+
 test('control characters are dropped from the names in the list', () => {
   expect(rowOf('glab orbit status; \u001b[8mprog\u009b')).toBe('Checked Orbit  + [8mprog')
 })
