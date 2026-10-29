@@ -299,6 +299,10 @@ test('a row never names an Orbit read, only programs and Orbit commands that cha
   expect(rowOf('glab orbit grep login; orbit workspace index .')).toBe('Searched code  + orbit workspace index')
 })
 
+test('a row names an Orbit subcommand it has no label for', () => {
+  expect(rowOf('glab orbit status; orbit frobnicate')).toBe('Checked Orbit  + orbit frobnicate')
+})
+
 test('control characters are dropped from the names in the list', () => {
   expect(rowOf('glab orbit status; \u001b[8mprog\u009b')).toBe('Checked Orbit  + [8mprog')
 })
