@@ -286,26 +286,8 @@ display:
       - match: '(__def)'
         tag:
           preamble: '@$ROOT|source_before("4096")|regex_first("(?s)\A(?:(?:.*?\n)??((?:[ \t]*(?://[^\n]*|/\*(?:[^*]|\*+[^*/])*\*+/[ \t]*)\n)*)[ \t]*|.*)\z", "$1")'
-      - match: '(__def (__function))'
-        tag: { kind: Function }
-      - match: '(__def (__struct))'
-        tag: { kind: Struct }
-      - match: '(__def (__enum))'
-        tag: { kind: Enum }
-      - match: '(__def (__enum_variant))'
-        tag: { kind: EnumMember }
       - match: '(__def (__type_alias))'
         tag: { kind: TypeAlias, language_kind: Typedef }
-      - match: '(__def (__field_def))'
-        tag: { kind: Field }
-      - match: '(__def (__macro))'
-        tag: { kind: Macro }
-      - match: '(__def (__variable))'
-        tag: { kind: Variable }
-      - match: '(__def (__constant))'
-        tag: { kind: Constant }
-      - match: '(__def (__impl))'
-        tag: { kind: Impl }
   - name: content
     rules:
       - match: '(__def !(__impl))'

@@ -258,24 +258,12 @@ display:
         tag: *value_sig
   - name: kind
     rules:
-      - match: '(__def (__class))'
-        tag: { kind: Class }
       - match: '(__def (__class) (__supertype "XCTestCase"))'
         tag: { xctest: "true" }
-      - match: '(__def (__struct))'
-        tag: { kind: Struct }
-      - match: '(__def (__enum))'
-        tag: { kind: Enum }
       - match: '(__def (__interface))'
         tag: { kind: Interface, language_kind: Protocol }
-      - match: '(__def (__impl))'
-        tag: { kind: Impl }
-      - match: '(__def (__type_alias))'
-        tag: { kind: TypeAlias }
       - match: '(__def (__enum_variant))'
         tag: { kind: EnumMember, language_kind: EnumCase }
-      - match: '(__def (__method))'
-        tag: { kind: Method }
       - match: '(__def (__defname "init") (__method))'
         tag: { kind: Constructor }
       - match: '(__def (__function))'

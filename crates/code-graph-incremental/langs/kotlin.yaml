@@ -376,18 +376,10 @@ display:
         tag: { def_type: TypeAlias }
   - name: kind
     rules:
-      - match: '(__def (__class))'
-        tag: { kind: Class }
       - match: '(__def (__impl) !(__class))'
         tag: { kind: Impl }
-      - match: '(__def (__interface))'
-        tag: { kind: Interface }
-      - match: '(__def (__enum))'
-        tag: { kind: Enum }
       - match: '(__def (__enum_variant))'
         tag: { kind: EnumMember, language_kind: EnumEntry }
-      - match: '(__def (__type_alias))'
-        tag: { kind: TypeAlias }
       - match: '(__def (__function))'
         tag:
           kind: '@$ROOT|ancestor_tag("kind")|regex_replace("(?s)^(?:(Class|Interface|Enum|Impl|EnumMember)|.*)$", "$1")|regex_replace("^.+$", "Method")|default("Function")'
@@ -483,7 +475,6 @@ display:
           resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name)'
         tag:
-          import_kind: symbol
           fqn: '@$ROOT|concat(".", "ancestor_tag:source_path", "id")'
       - match: '(__name "*")'
         tag: { import_kind: wildcard, fqn: '' }

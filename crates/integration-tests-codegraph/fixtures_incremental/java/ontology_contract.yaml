@@ -157,6 +157,25 @@ fixtures:
           }
       }
 
+  - path: src/com/acme/ext/Client.java
+    content: |
+      package com.acme.ext;
+
+      import org.vendor.Remote;
+      import org.vendor.Session;
+      import com.acme.billing.util.Nope;
+      import static org.vendor.Limits.MAX;
+
+      public class Client extends Remote {
+          private Session session;
+          void open(Session s) {}
+
+          int limit() {
+              int n = MAX;
+              return n;
+          }
+      }
+
 tests:
   # corrected: convention: a Java enum constant has language_kind EnumConstant
   - name: "every definition in src/com/acme/billing/Order.java carries the contract columns"
@@ -813,5 +832,58 @@ tests:
       MATCH (a:Definition)-[e:CALLS]->(i:Import)
       WHERE a.fqn = 'com.acme.edges.App.run' AND i.name = '*'
       RETURN i.import_path AS path
+    assert:
+      - { empty: true }
+
+  - name: "edges: a parameter typed with an external import is USES_TYPE to the Import with usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(i:Import)
+      WHERE a.fqn = 'com.acme.ext.Client.open' AND i.name = 'Session' AND e.usage = 'parameter'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "com.acme.ext.Client.open", target: "Session" } }
+
+  - name: "edges: a field typed with an external import is USES_TYPE to the Import with usage field"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(i:Import)
+      WHERE a.fqn = 'com.acme.ext.Client.session' AND i.name = 'Session' AND e.usage = 'field'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "com.acme.ext.Client.session", target: "Session" } }
+
+  - name: "edges: a local that reads a static import is USES_VALUE to the Import"
+    query: |
+      MATCH (a:Definition)-[e:USES_VALUE]->(i:Import)
+      WHERE a.fqn = 'com.acme.ext.Client.limit' AND i.name = 'MAX'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "com.acme.ext.Client.limit", target: "MAX" } }
+
+  - name: "edges: a superclass from an external import is EXTENDS to the Import"
+    query: |
+      MATCH (a:Definition)-[e:EXTENDS]->(i:Import)
+      WHERE a.fqn = 'com.acme.ext.Client' AND i.name = 'Remote'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "com.acme.ext.Client", target: "Remote" } }
+
+  - name: "a class that no indexed file defines is external"
+    query: |
+      MATCH (i:Import)
+      WHERE i.file_path = 'src/com/acme/ext/Client.java' AND i.name = 'Nope'
+      RETURN i.name AS name, i.is_external AS is_external
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Nope", is_external: true } }
+
+  - name: "edges: a class that no indexed file defines does not RESOLVES_TO a file"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(f:File)
+      WHERE i.file_path = 'src/com/acme/ext/Client.java' AND i.name = 'Nope'
+      RETURN f.path AS target
     assert:
       - { empty: true }

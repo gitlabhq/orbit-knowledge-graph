@@ -377,3 +377,44 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { source: "main::infer", target: "main::Circle::area" } }
+
+  - name: "a class has no return type, so return_type is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'main::billing::Order' AND d.return_type IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "a function has no declared type, so declared_type is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'main::measure' AND d.declared_type IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "a free function has no visibility, so visibility is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'main::measure' AND d.visibility IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "no C++ definition is generated, so generated_by is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'main::measure' AND d.generated_by IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "an include is a wildcard import, so it has no full name"
+    query: |
+      MATCH (i:Import)
+      WHERE i.file_path = 'main.cpp' AND i.import_path = 'vector' AND i.fqn IS NULL
+      RETURN i.name AS name, i.import_kind AS import_kind
+    assert:
+      - { row_count: 1 }
+      - { row: { import_kind: "wildcard" } }

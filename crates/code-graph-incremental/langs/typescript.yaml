@@ -628,23 +628,11 @@ display:
         tag:
           kind: '@$ROOT|tag("flavor")|map("namespace:Module")|regex_replace("(?s)^(Module)$|.*", "$1")|default("Class")'
           language_kind: '@$ROOT|tag("flavor")|map("namespace:Namespace")|regex_replace("(?s)^(Namespace)$|.*", "$1")'
-      - match: '(__def (__interface))'
-        tag: { kind: Interface }
-      - match: '(__def (__enum))'
-        tag: { kind: Enum }
-      - match: '(__def (__type_alias))'
-        tag: { kind: TypeAlias }
-      - match: '(__def (__enum_variant))'
-        tag: { kind: EnumMember }
-      - match: '(__def (__property))'
-        tag: { kind: Field }
       - match: '(__def (__property))'
         tag: { language_kind: Property }
       - match: '(__def (__variable))'
         tag:
           kind: '@$ROOT|tag("head")|regex_replace("(?s)\A(?:export\s+)?(?:declare\s+)?(const)\b.*|(?s).*", "$1")|map("const:Constant")|default("Variable")'
-      - match: '(__def (__function))'
-        tag: { kind: Function }
       - match: '(__def (__declaration) (__function))'
         tag: { kind: Function, language_kind: ArrowFunction }
       - match: '(__def (__macro))'

@@ -432,20 +432,8 @@ display:
           head: '@$ROOT|tag("signature")|top_until("\(", "()[]{}")'
   - name: kind
     rules:
-      - match: '(__def (__class))'
-        tag: { kind: Class }
-      - match: '(__def (__interface))'
-        tag: { kind: Interface }
-      - match: '(__def (__trait))'
-        tag: { kind: Trait }
-      - match: '(__def (__enum))'
-        tag: { kind: Enum }
       - match: '(__def (__enum_variant))'
         tag: { kind: EnumMember, language_kind: EnumCase }
-      - match: '(__def (__function))'
-        tag: { kind: Function }
-      - match: '(__def (__constant))'
-        tag: { kind: Constant }
       - match: '(__def (__property))'
         tag: { kind: Field, language_kind: Property }
       - match: '(__def (__method))'
@@ -507,7 +495,6 @@ display:
           resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name)'
         tag:
-          import_kind: symbol
           member: '@$ROOT|concat(":", "ancestor_tag:use_group", "id")|regex_first("(?s)\A(?:true:(.*)|.*)\z", "$1")'
       - match: '(__name)'
         tag:

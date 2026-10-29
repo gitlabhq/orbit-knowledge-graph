@@ -807,3 +807,42 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { target: "src/Support/Helper.php" } }
+
+  - name: "a class has no return type, so return_type is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Models\Shape' AND d.return_type IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "a function has no declared type, so declared_type is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Models\add' AND d.declared_type IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "a top-level function has no visibility, so visibility is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Models\add' AND d.visibility IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "no PHP definition is generated, so generated_by is null"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Models\add' AND d.generated_by IS NULL
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "every PHP import names its target, so no import has a null full name"
+    query: |
+      MATCH (i:Import) WHERE i.fqn IS NULL
+      RETURN i.file_path AS file, i.name AS name
+    assert:
+      - { empty: true }

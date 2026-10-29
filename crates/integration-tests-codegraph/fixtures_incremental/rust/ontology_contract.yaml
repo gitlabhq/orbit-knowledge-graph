@@ -90,6 +90,22 @@ fixtures:
           fn it_works() { helper(); outer(); }
       }
 
+  - path: src/remote.rs
+    content: |
+      use std::sync::Arc;
+      use std::f64::consts::PI;
+      use crate::util::Nope;
+      use crate::util;
+
+      pub struct Shared { pub inner: Arc<u8> }
+
+      pub fn wrap(a: Arc<u8>) -> u8 { 0 }
+
+      pub fn turn() -> f64 {
+          let t = PI;
+          t
+      }
+
 tests:
   - name: "every definition has its kind, language kind, category, and scope"
     query: |
@@ -374,3 +390,60 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { source: "src/lib.rs", target: "src/util.rs" } }
+
+  - name: "a parameter typed with an external import is USES_TYPE to the Import with usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(i:Import)
+      WHERE a.fqn = 'remote::wrap' AND i.name = 'Arc' AND e.usage = 'parameter'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "remote::wrap", target: "Arc" } }
+
+  - name: "a field typed with an external import is USES_TYPE to the Import with usage field"
+    # Known gap: a struct field has no type site, so a field type gives no USES_TYPE edge.
+    skip: true
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(i:Import)
+      WHERE a.fqn = 'remote::Shared::inner' AND i.name = 'Arc' AND e.usage = 'field'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "remote::Shared::inner", target: "Arc" } }
+
+  - name: "a binding that reads an external import is USES_VALUE to the Import"
+    query: |
+      MATCH (a:Definition)-[e:USES_VALUE]->(i:Import)
+      WHERE a.fqn = 'remote::turn' AND i.name = 'PI'
+      RETURN a.fqn AS source, i.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "remote::turn", target: "PI" } }
+
+  - name: "a name that no indexed file defines is external"
+    query: |
+      MATCH (i:Import)
+      WHERE i.file_path = 'src/remote.rs' AND i.name = 'Nope'
+      RETURN i.name AS name, i.is_external AS is_external
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Nope", is_external: true } }
+
+  - name: "a name that no indexed file defines does not RESOLVES_TO a file"
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(f:File)
+      WHERE i.file_path = 'src/remote.rs' AND i.name = 'Nope'
+      RETURN f.path AS target
+    assert:
+      - { empty: true }
+
+  - name: "a module use RESOLVES_TO the module file"
+    # Known gap: use crate::util is a symbol import with an empty resolved source, so it does not resolve to src/util.rs.
+    skip: true
+    query: |
+      MATCH (i:Import)-[e:RESOLVES_TO]->(f:File)
+      WHERE i.file_path = 'src/remote.rs' AND i.import_kind = 'module' AND i.name = 'util'
+      RETURN f.path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "src/util.rs" } }

@@ -146,10 +146,6 @@ display:
         tag: { def_type: Property }
       - match: '(__def (__type_alias))'
         tag: { def_type: TypeAlias }
-  - name: kind
-    rules:
-      - match: '(__def (__function))'
-        tag: { kind: Function }
   - name: content
     rules:
       - match: '(__def (__function))'

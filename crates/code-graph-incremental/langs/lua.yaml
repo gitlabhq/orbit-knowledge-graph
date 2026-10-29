@@ -207,14 +207,8 @@ display:
         tag: { def_type: TypeAlias }
   - name: kind
     rules:
-      - match: '(__def (__function))'
-        tag: { kind: Function }
-      - match: '(__def (__method))'
-        tag: { kind: Method }
       - match: '(__def (__class))'
         tag: { kind: Module, language_kind: Table }
-      - match: '(__def (__impl))'
-        tag: { kind: Impl }
   - name: content
     rules:
       - match: '(__def (__function))'

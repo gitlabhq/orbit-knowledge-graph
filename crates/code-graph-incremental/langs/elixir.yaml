@@ -258,8 +258,6 @@ display:
         tag: { kind: Module }
       - match: '(__def (__trait))'
         tag: { kind: Interface, language_kind: Protocol }
-      - match: '(__def (__impl))'
-        tag: { kind: Impl }
       - match: '(__def (__field_def))'
         tag: { kind: Field, generated_by: defstruct }
       - match: '(__def (__function))'

@@ -594,34 +594,16 @@ display:
         tag:
           kind: '@$ROOT|or("tag:test", "tag:kind")'
           language_kind: '@$ROOT|concat(":", "tag:test", "tag:language_kind")|regex_replace("(?s)^Test.*", "")'
-      - match: '(__def (__method))'
-        tag: { kind: Method }
       - match: '(__def (__class))'
         tag: { kind: '@$ROOT|tag("flavor")|map("module:Module")|default("Class")' }
       - match: '(__def (__struct))'
         tag: { kind: Struct, language_kind: '@$ROOT|tag("flavor")|map("union:Union")' }
-      - match: '(__def (__enum))'
-        tag: { kind: Enum }
       - match: '(__def (__enum_variant))'
         tag: { kind: EnumMember, language_kind: Variant }
-      - match: '(__def (__trait))'
-        tag: { kind: Trait }
-      - match: '(__def (__impl))'
-        tag: { kind: Impl }
-      - match: '(__def (__constant))'
-        tag: { kind: Constant }
       - match: '(__def (__static_constant))'
         tag: { kind: Variable, language_kind: Static }
-      - match: '(__def (__variable))'
-        tag: { kind: Variable }
       - match: '(__def (__lambda))'
         tag: { kind: Function, language_kind: Closure }
-      - match: '(__def (__macro))'
-        tag: { kind: Macro }
-      - match: '(__def (__field_def))'
-        tag: { kind: Field }
-      - match: '(__def (__property))'
-        tag: { kind: Field }
       - match: '(__def (__type_alias))'
         tag:
           kind: TypeAlias
@@ -709,7 +691,6 @@ display:
           resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name)'
         tag:
-          import_kind: '@$ROOT|tag("import_kind")|default("symbol")'
           fqn: '@$ROOT|ancestor_tag("source_path")'
       - match: '(__import $S:__source $$$A $N:__name $$$B)'
         where: '$N == $S'

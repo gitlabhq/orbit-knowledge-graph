@@ -236,18 +236,6 @@ display:
         tag: *value_sig
   - name: kind
     rules:
-      - match: '(__def (__struct))'
-        tag: { kind: Struct }
-      - match: '(__def (__enum))'
-        tag: { kind: Enum }
-      - match: '(__def (__enum_variant))'
-        tag: { kind: EnumMember }
-      - match: '(__def (__field_def))'
-        tag: { kind: Field }
-      - match: '(__def (__constant))'
-        tag: { kind: Constant }
-      - match: '(__def (__variable))'
-        tag: { kind: Variable }
       - match: '(__def (__function))'
         tag:
           kind: '@$ROOT|ancestor_tag("kind")|regex_replace("(?s)\A(?:Struct|Enum)\z", "Method")|regex_replace("(?s)^(Method)$|.*", "$1")|default("Function")'
