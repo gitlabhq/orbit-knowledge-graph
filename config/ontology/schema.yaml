@@ -288,10 +288,10 @@ settings:
         - {name: target_id, type: int64}
         - {name: target_kind, type: string}
         - {name: traversal_path, type: string}
-        - {name: lines, type: "int64[]"}
-        - {name: resolution, type: string}
-        - {name: access, type: string}
-        - {name: usage, type: string}
+        - {name: lines, type: "int64[]", default: "[]"}
+        - {name: resolution, type: string, default: "''"}
+        - {name: access, type: string, default: "''"}
+        - {name: usage, type: string, default: "''"}
   auxiliary_tables:
     - name: namespace_storage_snapshot
       versioned: false

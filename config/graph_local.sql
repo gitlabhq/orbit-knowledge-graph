@@ -95,10 +95,10 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     target_id BIGINT NOT NULL,
     target_kind VARCHAR NOT NULL,
     traversal_path VARCHAR NOT NULL,
-    lines BIGINT[] NOT NULL,
-    resolution VARCHAR NOT NULL,
-    access VARCHAR NOT NULL,
-    usage VARCHAR NOT NULL
+    lines BIGINT[] NOT NULL DEFAULT [],
+    resolution VARCHAR NOT NULL DEFAULT '',
+    access VARCHAR NOT NULL DEFAULT '',
+    usage VARCHAR NOT NULL DEFAULT ''
 );
 
 
