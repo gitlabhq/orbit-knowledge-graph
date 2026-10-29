@@ -95,15 +95,20 @@ fn skip_reason(agent: Agent, plugin: &PluginSpec, target: &Target) -> Option<Str
     ))
 }
 
-/// Removes the plugin paths install would skip from `plan`; returns each skip as (label, reason).
+/// Removes the plugin paths install would skip from `plan` and notes each skip in `report`.
 pub(in crate::commands::setup) fn drop_skipped_plugins(
     plan: &mut Plan,
     agents: &[Agent],
     target: &Target,
-) -> Result<Vec<(String, String)>> {
-    let mut skips = Vec::new();
+    report: &mut Report,
+) -> Result<()> {
+    report.start_group(Component::AgentPlugins.label());
     for (planned, agent) in plan.agents.iter_mut().zip(agents) {
-        let Some(plugin) = &agent.plugin else {
+        let selected = planned
+            .components
+            .iter()
+            .any(|(component, _)| *component == Component::AgentPlugins);
+        let Some(plugin) = agent.plugin.as_ref().filter(|_| selected) else {
             continue;
         };
         let Some(reason) = skip_reason(*agent, plugin, target) else {
@@ -117,9 +122,9 @@ pub(in crate::commands::setup) fn drop_skipped_plugins(
             }
         }
         planned.components.retain(|(_, paths)| !paths.is_empty());
-        skips.push((dir_label, reason));
+        report.note_plugin_skipped(&agent.title, &dir_label, reason);
     }
-    Ok(skips)
+    Ok(())
 }
 
 fn install_plugin(

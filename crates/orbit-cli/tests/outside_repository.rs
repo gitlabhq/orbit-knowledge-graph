@@ -254,3 +254,12 @@ fn dry_run_plans_the_agent_plugin_when_claude_is_new_enough() {
     let plan = &printed[printed.find("Plan").expect("Plan card")..];
     assert!(plan.contains("claude_plugin"), "{printed}");
 }
+
+#[cfg(unix)]
+#[test]
+fn dry_run_reports_no_plugin_skip_when_agent_plugins_are_not_selected() {
+    let (_home, printed) =
+        setup_with_claude_version("2.1.286", &["--dry-run", "--skip", "agent-plugins"]);
+
+    assert!(!printed.contains("Orbit UI skipped"), "{printed}");
+}
