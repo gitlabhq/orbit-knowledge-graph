@@ -88,6 +88,7 @@ To set up an agent on your machine:
 To run setup yourself, see [connect your agent](agents/_index.md).
 
 To check indexing progress, run `glab orbit status --full-path <my-group/my-project>` until the summary ends with `Ready.`
+Replace `<my-group/my-project>` with the full path of your group or project.
 
 ## Step 3: Ask your first question
 

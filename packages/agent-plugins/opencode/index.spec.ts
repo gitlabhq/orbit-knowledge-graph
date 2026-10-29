@@ -50,3 +50,7 @@ test('a toast that throws or rejects never fails the call', async () => {
 test('the module exports only the plugin', async () => {
   expect(Object.keys(await import('./index.ts'))).toEqual(['OrbitUiPlugin'])
 })
+
+test('an orbit call that runs other commands names them in its toast', async () => {
+  expect(await toastsFor(['glab orbit grep login && rm -rf build'])).toEqual(['◎ Searching code  login  + rm'])
+})

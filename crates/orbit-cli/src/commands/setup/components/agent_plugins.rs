@@ -9,8 +9,9 @@ use super::{
     Installer, Report, backup_once, file_mentions, remove_file_and_empty_parents, write_file,
 };
 use super::{hooks, json};
-use crate::commands::setup::Target;
+use crate::commands::setup::plan::Plan;
 use crate::commands::setup::spec::{Agent, PluginSpec};
+use crate::commands::setup::{Component, Target};
 
 const MANIFEST: &str = ".orbit-setup.json";
 
@@ -76,6 +77,56 @@ impl Installer for AgentPlugins {
     }
 }
 
+fn skip_reason(agent: Agent, plugin: &PluginSpec, target: &Target) -> Option<String> {
+    let found = run(&plugin.version_command, target)
+        .ok()
+        .and_then(|stdout| stdout.split_whitespace().next().map(str::to_string));
+    if found
+        .as_deref()
+        .is_some_and(|version| at_least(version, &plugin.min_version))
+    {
+        return None;
+    }
+    Some(format!(
+        "Orbit UI skipped: needs {} {}+ (you have {})",
+        agent.title,
+        plugin.min_version,
+        found.as_deref().unwrap_or("none")
+    ))
+}
+
+/// Removes the plugin paths install would skip from `plan` and notes each skip in `report`.
+pub(in crate::commands::setup) fn drop_skipped_plugins(
+    plan: &mut Plan,
+    agents: &[Agent],
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    report.start_group(Component::AgentPlugins.label());
+    for (planned, agent) in plan.agents.iter_mut().zip(agents) {
+        let selected = planned
+            .components
+            .iter()
+            .any(|(component, _)| *component == Component::AgentPlugins);
+        let Some(plugin) = agent.plugin.as_ref().filter(|_| selected) else {
+            continue;
+        };
+        let Some(reason) = skip_reason(*agent, plugin, target) else {
+            continue;
+        };
+        let (_, dir_label) = target.resolve(&plugin.dir)?;
+        let (_, settings_label) = target.resolve(&plugin.settings)?;
+        for (component, paths) in &mut planned.components {
+            if *component == Component::AgentPlugins {
+                paths.retain(|path| *path != dir_label && *path != settings_label);
+            }
+        }
+        planned.components.retain(|(_, paths)| !paths.is_empty());
+        report.note_plugin_skipped(&agent.title, &dir_label, reason);
+    }
+    Ok(())
+}
+
 fn install_plugin(
     agent: Agent,
     plugin: &PluginSpec,
@@ -83,22 +134,8 @@ fn install_plugin(
     report: &mut Report,
 ) -> Result<()> {
     let (dir, dir_label) = target.resolve(&plugin.dir)?;
-    let found = run(&plugin.version_command, target)
-        .ok()
-        .and_then(|stdout| stdout.split_whitespace().next().map(str::to_string));
-    if !found
-        .as_deref()
-        .is_some_and(|version| at_least(version, &plugin.min_version))
-    {
-        report.note(
-            &dir_label,
-            format!(
-                "Orbit UI skipped: needs {} {}+ (you have {})",
-                agent.title,
-                plugin.min_version,
-                found.as_deref().unwrap_or("none")
-            ),
-        );
+    if let Some(reason) = skip_reason(agent, plugin, target) {
+        report.note_plugin_skipped(&agent.title, &dir_label, reason);
         return Ok(());
     }
 
@@ -155,6 +192,7 @@ fn install_plugin(
     let (settings, settings_label) = target.resolve(&plugin.settings)?;
     let mut root = json::read_object(&settings)?;
     let id = plugin.id(&name);
+    let pruned = prune_stale_entries(plugin, &name, &mut root);
     let registered = json::set_key(&mut root, &marketplace_path(&name), marketplace(&dir))
         .with_context(|| format!("failed to update {}", settings.display()))?;
     let enabled = json::set_key(&mut root, &enabled_path(&id), json!(true))
@@ -164,7 +202,7 @@ fn install_plugin(
             .json_merges
             .iter()
             .any(|merge| file_mentions(&settings, &merge.marker));
-    if registered || enabled {
+    if registered || enabled || pruned {
         if !orbit_wrote_it {
             backup_once(&settings, &settings_label, report)?;
         }
@@ -173,6 +211,7 @@ fn install_plugin(
     } else {
         report.note(&settings_label, "unchanged");
     }
+    prune_stale_user_marketplaces(plugin, &name, target);
     let add = [
         program(plugin),
         "plugin",
@@ -220,21 +259,90 @@ fn remove_plugin(plugin: &PluginSpec, target: &Target, report: &mut Report) -> R
         );
     }
 
+    let name = plugin.marketplace_for(target);
     let (settings, settings_label) = target.resolve(&plugin.settings)?;
     if settings.exists() {
-        let name = plugin.marketplace_for(target);
         let mut root = json::read_object(&settings)?;
+        let pruned = prune_stale_entries(plugin, &name, &mut root);
         let unregistered =
             json::remove_key_if(&mut root, &marketplace_path(&name), &marketplace(&dir));
         let disabled =
             json::remove_key_if(&mut root, &enabled_path(&plugin.id(&name)), &json!(true));
-        if unregistered || disabled {
+        if unregistered || disabled || pruned {
             json::write_or_delete_when_empty(&settings, &root, target, &settings_label, report)?;
+        }
+        if unregistered || disabled {
             let remove = [program(plugin), "plugin", "marketplace", "remove", &name];
             let _ = run(&remove.map(str::to_string), target);
         }
     }
+    prune_stale_user_marketplaces(plugin, &name, target);
     Ok(())
+}
+
+fn is_stale_orbit_marketplace(plugin: &PluginSpec, current: &str, name: &str, path: &str) -> bool {
+    name != current
+        && name.starts_with(&format!("{}-", plugin.marketplace))
+        && !Path::new(path).exists()
+}
+
+/// Drops `enabledPlugins` and `extraKnownMarketplaces` entries of Orbit
+/// marketplaces whose directory is gone, such as after a project move.
+fn prune_stale_entries(plugin: &PluginSpec, current: &str, root: &mut Value) -> bool {
+    let stale: Vec<String> = root["extraKnownMarketplaces"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(name, entry)| {
+            let source = &entry["source"];
+            source["source"] == "directory"
+                && source["path"]
+                    .as_str()
+                    .is_some_and(|path| is_stale_orbit_marketplace(plugin, current, name, path))
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in &stale {
+        for (section, key) in [
+            ("extraKnownMarketplaces", name.clone()),
+            ("enabledPlugins", plugin.id(name)),
+        ] {
+            if let Some(map) = root.get_mut(section).and_then(Value::as_object_mut) {
+                map.remove(&key);
+                if map.is_empty()
+                    && let Some(root) = root.as_object_mut()
+                {
+                    root.remove(section);
+                }
+            }
+        }
+    }
+    !stale.is_empty()
+}
+
+/// Unregisters Orbit marketplaces whose directory is gone from Claude's
+/// user-level state, which setup in a since-deleted project left behind.
+fn prune_stale_user_marketplaces(plugin: &PluginSpec, current: &str, target: &Target) {
+    let list = [program(plugin), "plugin", "marketplace", "list", "--json"];
+    let Ok(stdout) = run(&list.map(str::to_string), target) else {
+        return;
+    };
+    let Ok(Value::Array(entries)) = serde_json::from_str::<Value>(&stdout) else {
+        return;
+    };
+    for entry in entries {
+        let (Some(name), Some("directory"), Some(path)) = (
+            entry["name"].as_str(),
+            entry["source"].as_str(),
+            entry["path"].as_str(),
+        ) else {
+            continue;
+        };
+        if is_stale_orbit_marketplace(plugin, current, name, path) {
+            let remove = [program(plugin), "plugin", "marketplace", "remove", name];
+            let _ = run(&remove.map(str::to_string), target);
+        }
+    }
 }
 
 fn marketplace(dir: &Path) -> Value {
@@ -338,6 +446,8 @@ fn scope(target: &Target) -> &'static str {
 thread_local! {
     pub(in crate::commands::setup) static TEST_VERSION: std::cell::RefCell<Option<String>> =
         std::cell::RefCell::new(Some("2.1.308".to_string()));
+    pub(in crate::commands::setup) static TEST_MARKETPLACES: std::cell::RefCell<String> =
+        std::cell::RefCell::new("[]".to_string());
     pub(in crate::commands::setup) static TEST_RUNS: std::cell::RefCell<Vec<Vec<String>>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -348,6 +458,9 @@ fn run(command: &[String], _target: &Target) -> Result<String, String> {
         return TEST_VERSION
             .with(|version| version.borrow().clone())
             .ok_or_else(|| "not found".to_string());
+    }
+    if command.last().is_some_and(|arg| arg == "--json") {
+        return Ok(TEST_MARKETPLACES.with(|list| list.borrow().clone()));
     }
     TEST_RUNS.with(|runs| runs.borrow_mut().push(command.to_vec()));
     Ok(String::new())

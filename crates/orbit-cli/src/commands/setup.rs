@@ -123,8 +123,16 @@ pub(crate) async fn install(
         return Ok(finish(&selection, Outcome::NoAgentSelected, false));
     }
 
-    let plan = plan::for_selection(&selection, &target)?;
+    let mut plan = plan::for_selection(&selection, &target)?;
     if options.dry_run {
+        let mut skips = Report::default();
+        components::agent_plugins::drop_skipped_plugins(
+            &mut plan,
+            &selection.agents,
+            &target,
+            &mut skips,
+        )?;
+        show_outcomes_per_component(&skips)?;
         show_dry_run(&plan, "Dry run: nothing written.")?;
         return Ok(finish(&selection, Outcome::DryRun, false));
     }
@@ -135,10 +143,13 @@ pub(crate) async fn install(
         selection.skill.full_tree = Some(crate::skill::full_tree().await?);
     }
 
-    apply_and_report(&options, |report| {
+    let report = apply_and_report(&options, |report| {
         components::install(&selection, &target, report)
     })?;
-    tui::card("Configured", summary::format_components_per_agent(&plan))?;
+    tui::card(
+        "Configured",
+        summary::format_configured_per_agent(&plan, &report),
+    )?;
     if selection.components.contains(&Component::Instructions) && !spec::reaches_gitlab() {
         tui::card(
             "GitLab",
@@ -237,6 +248,8 @@ fn apply_and_report(
     let outcome = apply(&mut report);
     if options.verbose || outcome.is_err() {
         show_outcomes_per_component(&report)?;
+    } else {
+        show_outcomes_per_component(&report.only_plugin_skips())?;
     }
     outcome?;
     Ok(report)
@@ -1686,6 +1699,179 @@ mod tests {
             runs[1],
             ["claude", "plugin", "marketplace", "remove", name.as_str()]
         );
+    }
+
+    fn stale_orbit_settings(live: &Path) -> Value {
+        json!({
+            "model": "opus",
+            "enabledPlugins": {
+                "gitlab-orbit@gitlab-orbit-deadbeef": true,
+                "gitlab-orbit@gitlab-orbit-livelive": true,
+                "other@other-market": true
+            },
+            "extraKnownMarketplaces": {
+                "gitlab-orbit-deadbeef": {"source": {"source": "directory", "path": "/gone/old-project"}},
+                "gitlab-orbit-livelive": {"source": {"source": "directory", "path": live.display().to_string()}},
+                "other-market": {"source": {"source": "directory", "path": "/gone/other"}}
+            }
+        })
+    }
+
+    fn assert_only_foreign_and_live_entries_left(settings: &Value) {
+        assert_eq!(settings["model"], "opus");
+        assert!(settings["enabledPlugins"]["gitlab-orbit@gitlab-orbit-deadbeef"].is_null());
+        assert!(settings["extraKnownMarketplaces"]["gitlab-orbit-deadbeef"].is_null());
+        assert_eq!(
+            settings["enabledPlugins"]["gitlab-orbit@gitlab-orbit-livelive"],
+            true
+        );
+        assert!(settings["extraKnownMarketplaces"]["gitlab-orbit-livelive"].is_object());
+        assert_eq!(settings["enabledPlugins"]["other@other-market"], true);
+        assert!(settings["extraKnownMarketplaces"]["other-market"].is_object());
+    }
+
+    #[test]
+    fn setup_prunes_orbit_plugin_entries_of_a_moved_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude/settings.local.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, stale_orbit_settings(live.path()).to_string()).unwrap();
+
+        install_default(&["claude"], dir.path());
+
+        let settings = read_json(&path);
+        assert_only_foreign_and_live_entries_left(&settings);
+        let current = dunce::canonicalize(dir.path().join(".claude/orbit/claude_plugin")).unwrap();
+        assert!(
+            settings["extraKnownMarketplaces"]
+                .as_object()
+                .unwrap()
+                .values()
+                .any(|entry| entry["source"]["path"] == current.display().to_string())
+        );
+    }
+
+    #[test]
+    fn uninstall_prunes_orbit_plugin_entries_of_a_moved_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = tempfile::tempdir().unwrap();
+        install_default(&["claude"], dir.path());
+        let path = dir.path().join(".claude/settings.local.json");
+        let mut settings = read_json(&path);
+        settings["model"] = json!("opus");
+        let stale = stale_orbit_settings(live.path());
+        for section in ["enabledPlugins", "extraKnownMarketplaces"] {
+            for (key, value) in stale[section].as_object().unwrap() {
+                settings[section][key] = value.clone();
+            }
+        }
+        std::fs::write(&path, settings.to_string()).unwrap();
+
+        uninstall_named(&["claude"], dir.path());
+
+        assert_only_foreign_and_live_entries_left(&read_json(&path));
+    }
+
+    #[test]
+    fn setup_unregisters_user_level_orbit_marketplaces_of_deleted_projects() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = tempfile::tempdir().unwrap();
+        let listed = json!([
+            {"name": "gitlab-orbit-deadbeef", "source": "directory", "path": "/gone/old-project"},
+            {"name": "gitlab-orbit-livelive", "source": "directory", "path": live.path().display().to_string()},
+            {"name": "other-market", "source": "directory", "path": "/gone/other"}
+        ]);
+        components::agent_plugins::TEST_MARKETPLACES
+            .with(|list| *list.borrow_mut() = listed.to_string());
+        components::agent_plugins::TEST_RUNS.with(|runs| runs.borrow_mut().clear());
+
+        install_default(&["claude"], dir.path());
+
+        components::agent_plugins::TEST_MARKETPLACES
+            .with(|list| *list.borrow_mut() = "[]".to_string());
+        let runs = components::agent_plugins::TEST_RUNS.with(|runs| runs.borrow().clone());
+        let removed: Vec<_> = runs.iter().filter(|run| run[3] == "remove").collect();
+        assert_eq!(
+            removed,
+            [&[
+                "claude",
+                "plugin",
+                "marketplace",
+                "remove",
+                "gitlab-orbit-deadbeef"
+            ]]
+        );
+    }
+
+    fn seed_stale_marketplaces_without_enabled_plugins(dir: &Path, names: &[&str]) -> PathBuf {
+        let path = dir.join(".claude/settings.local.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let marketplaces: serde_json::Map<String, Value> = names
+            .iter()
+            .map(|name| {
+                let entry = json!({"source": {"source": "directory", "path": "/gone/old-project"}});
+                (name.to_string(), entry)
+            })
+            .collect();
+        let settings = json!({"model": "opus", "extraKnownMarketplaces": marketplaces});
+        std::fs::write(&path, settings.to_string()).unwrap();
+        path
+    }
+
+    #[test]
+    fn setup_prunes_stale_marketplaces_that_were_never_enabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = seed_stale_marketplaces_without_enabled_plugins(
+            dir.path(),
+            &["gitlab-orbit-deadbeef", "gitlab-orbit-deadbee2"],
+        );
+
+        install_default(&["claude"], dir.path());
+
+        let settings = read_json(&path);
+        assert!(!settings.to_string().contains("deadbee"));
+        assert!(settings["enabledPlugins"].is_object());
+    }
+
+    #[test]
+    fn uninstall_prunes_stale_marketplaces_without_writing_null_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = seed_stale_marketplaces_without_enabled_plugins(
+            dir.path(),
+            &["gitlab-orbit-deadbeef", "gitlab-orbit-deadbee2"],
+        );
+
+        uninstall_named(&["claude"], dir.path());
+
+        assert_eq!(read_json(&path), json!({"model": "opus"}));
+    }
+
+    #[test]
+    fn uninstall_unregisters_user_level_orbit_marketplaces_of_deleted_projects() {
+        let dir = tempfile::tempdir().unwrap();
+        install_default(&["claude"], dir.path());
+        let listed = json!([
+            {"name": "gitlab-orbit-deadbeef", "source": "directory", "path": "/gone/old-project"}
+        ]);
+        components::agent_plugins::TEST_MARKETPLACES
+            .with(|list| *list.borrow_mut() = listed.to_string());
+        components::agent_plugins::TEST_RUNS.with(|runs| runs.borrow_mut().clear());
+
+        uninstall_named(&["claude"], dir.path());
+
+        components::agent_plugins::TEST_MARKETPLACES
+            .with(|list| *list.borrow_mut() = "[]".to_string());
+        let runs = components::agent_plugins::TEST_RUNS.with(|runs| runs.borrow().clone());
+        assert!(runs.iter().any(|run| {
+            run == &[
+                "claude",
+                "plugin",
+                "marketplace",
+                "remove",
+                "gitlab-orbit-deadbeef",
+            ]
+        }));
     }
 
     #[test]

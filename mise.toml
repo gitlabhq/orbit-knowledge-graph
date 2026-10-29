@@ -159,7 +159,7 @@ description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 
 [tasks."test:agent-plugins"]
 dir = "packages/agent-plugins"
-run = ["bun run typecheck", "bun run test", "bun run test:claude", "bun run build"]
+run = ["bun run typecheck", "bun run test", "bun run test:claude", "bun run test:differential --count 100", "bun run build"]
 description = "Typecheck, test, and build the Claude Code and OpenCode plugins; needs Claude Code 2.1.287+"
 
 [tasks."test:integration"]

@@ -31,7 +31,8 @@ and Common Vulnerabilities and Exposures (CVE) and Common Weakness Enumeration (
 Because GitLab cannot filter aggregate results after a query runs, the response for a user with the Reporter role
 leaves out security entities, even from aggregate counts.
 
-Queries from administrators and auditors return data from each group where GitLab Orbit is on, not only their own groups.
+Queries from administrators and auditors return data from each group where GitLab Orbit is on.
+If Admin Mode is on for the instance, the administrator must be in Admin Mode, and a personal access token needs the `admin_mode` scope.
 
 ## How GitLab Orbit enforces access
 
@@ -59,16 +60,23 @@ Results include only what the token owner can see in GitLab.
 
 | Access method | Authentication |
 |---------------|----------------|
-| [REST API](https://docs.gitlab.com/api/orbit/) | A personal access token with the `read_api` scope, or a fine-grained personal access token, sent as a Bearer token |
+| [REST API](https://docs.gitlab.com/api/orbit/) | A personal access token with the `api` or `read_api` scope, or a fine-grained personal access token, sent as a Bearer token |
+| [GraphQL API](https://docs.gitlab.com/api/graphql/reference/queries/#orbit) | A personal access token with the `api` or `read_api` scope, or a fine-grained personal access token |
 | [GitLab Orbit CLI](cli.md) | Your `glab auth login` credential, or a personal access token with the `read_api` scope in `GITLAB_TOKEN` |
-| [Model Context Protocol (MCP) endpoint](agents/mcp.md) | GitLab OAuth, where the client requests the `mcp_orbit` scope, or a personal access token with the `read_api` scope |
+| [Model Context Protocol (MCP) endpoint](agents/mcp.md) | GitLab OAuth with the `mcp_orbit` scope, or a personal access token with the `api` or `read_api` scope |
 | [GitLab Duo Agent Platform](agents/duo.md) | No token to configure |
 | [Service account](#service-accounts) | A personal access token of a bot user, scoped to the groups where the account is a member |
 
 ### Fine-grained personal access tokens
 
+<!-- vale orbit.StandaloneProductName = NO -->
+
 When you [create a fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/#create-a-fine-grained-personal-access-token),
-add the **GitLab Orbit** resource.
+add the **Read** permission of the **Orbit** resource.
+
+<!-- vale orbit.StandaloneProductName = YES -->
+
+To use the `GET /orbit/grep` REST API endpoint, also add the **Use** permission of the **Global Search** resource.
 
 GitLab Orbit does not support group and project resources.
 A token with only group and project resources gets `403 Forbidden`.
@@ -97,7 +105,8 @@ Prerequisites:
 
 To set up a service account for GitLab Orbit:
 
-1. [Create a service account and a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account) with the `read_api` scope.
+1. [Create a service account](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account).
+1. [Create a personal access token for the service account](https://docs.gitlab.com/user/profile/service_accounts/#create-a-personal-access-token-for-a-service-account) with the `read_api` scope.
    Service accounts cannot use fine-grained personal access tokens.
 1. Add the service account with the Reporter role to the lowest subgroup that has the data.
    To read security data, use the Security Manager role.

@@ -544,6 +544,8 @@ mod tests {
             "core/cypher.ts",
             "core/labels.ts",
             "core/lib.js",
+            "core/quiet-filters.ts",
+            "core/shell-lexer.ts",
             "core/stats.ts",
             "hooks/highlight.ts",
             "hooks/hooks.json",

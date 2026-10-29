@@ -15,8 +15,9 @@ export function mergeRuns<P extends { isRunning: boolean }>(calls: readonly Grou
     const running = group.find((x) => x.props.isRunning)
     const last = done[done.length - 1]
     const detail = [...done].reverse().find((x) => x.call.detail)?.call.detail ?? ''
+    const others = [...new Set(done.flatMap((x) => x.call.others ?? []))]
     return [
-      ...(last ? [{ ...last, isRunning: false, call: { ...last.call, detail } }] : []),
+      ...(last ? [{ ...last, isRunning: false, call: { ...last.call, detail, ...(others.length ? { others } : {}) } }] : []),
       ...(running ? [{ ...running, isRunning: true }] : []),
     ]
   })
