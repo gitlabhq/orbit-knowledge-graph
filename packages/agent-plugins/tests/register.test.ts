@@ -71,7 +71,7 @@ test('the node total is the graph of the project the query asks about', async ($
   on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
   const runs: (readonly string[])[] = []
   on('process.run', (_$, e) => {
-    runs.push(e.argv)
+    if (e.argv.includes('graph-status')) runs.push(e.argv)
     return { value: graphOf(1675400) }
   })
   await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (mr:MergeRequest {project_id: 7}) RETURN mr"' })
@@ -88,7 +88,7 @@ test('queries over several projects add their graphs, each looked up once', asyn
   on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
   const runs: (readonly string[])[] = []
   on('process.run', (_$, e) => {
-    runs.push(e.argv)
+    if (e.argv.includes('graph-status')) runs.push(e.argv)
     return { value: graphOf(e.argv.includes('a/b') ? 1000 : 500) }
   })
   await $.tool.call({ tool: 'Bash', command: "glab orbit query \"MATCH (p:Project {full_path: 'a/b'}) RETURN p\"" })
@@ -150,7 +150,7 @@ async function graphStatusRuns(
   const runs: (readonly string[])[] = []
   on('tool.call', () => answer)
   on('process.run', (_$, e) => {
-    runs.push(e.argv)
+    if (e.argv.includes('graph-status')) runs.push(e.argv)
     return { value: RAN }
   })
   await $.tool.call({ tool: 'Bash', command })
@@ -163,17 +163,66 @@ test('a query scoped to a group asks graph-status for the group by namespace id 
   on('tool.call', () => ({ result: { stdout: 'nodes:\n  Project[1]{id}:\n    1\n' } }))
   const runs: (readonly string[])[] = []
   on('process.run', (_$, e) => {
-    runs.push(e.argv)
+    if (e.argv.includes('graph-status')) runs.push(e.argv)
     return { value: graphOf(500) }
   })
   await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (g:Group) WHERE g.id = 9 RETURN g"' })
   await $.tool.call({ tool: 'Bash', command: `glab orbit query "MATCH (g:Group {full_path: 'a/b'}) RETURN g"` })
-  for (let i = 0; i < 10; i++) await Promise.resolve()
+  for (let i = 0; i < 200; i++) await Promise.resolve()
 
   expect(runs).toEqual([
     ['glab', 'orbit', 'graph-status', '--namespace-id', '9', '--response-format', 'raw'],
     ['glab', 'orbit', 'graph-status', '--full-path', 'a/b', '--response-format', 'raw'],
   ])
+})
+
+const IDENTITIES: Record<string, object> = {
+  'groups/9': { id: 9, full_path: 'a' },
+  'groups/a': { id: 9, full_path: 'a' },
+  'groups/b': { id: 10, full_path: 'b' },
+  'groups/a%2Fsub': { id: 11, full_path: 'a/sub' },
+  'projects/7': { id: 7, path_with_namespace: 'a/p' },
+  'projects/8': { id: 8, path_with_namespace: 'z/p' },
+}
+
+async function totalAfter($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], cyphers: string[], failLookups = false) {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  Project[1]{id}:\n    1\n' } }))
+  on('process.run', (_$, e) => {
+    if (e.argv[1] === 'api') {
+      const body = failLookups ? undefined : IDENTITIES[e.argv[2] ?? '']
+      const result = { exitCode: body ? 0 : 1, stdout: JSON.stringify(body ?? {}), stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+      return { value: result }
+    }
+    return { value: graphOf(e.argv.includes('--project-id') ? 5 : 100) }
+  })
+  for (const cypher of cyphers) await $.tool.call({ tool: 'Bash', command: `glab orbit query "${cypher}"` })
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+  const ui = await statusLine($)
+  return async (text: string) => (await ui.find({ type: 'Text', text })) !== undefined
+}
+
+const GROUP_BY_PATH = "MATCH (g:Group {full_path: 'a'}) RETURN g"
+const GROUP_BY_ID = 'MATCH (g:Group) WHERE g.id = 9 RETURN g'
+
+test('the same group asked by path and by id counts once in the total', async ($, on) => {
+  expect(await (await totalAfter($, on, [GROUP_BY_PATH, GROUP_BY_ID]))('2 / 100')).toBe(true)
+})
+
+test('different groups add up in the total', async ($, on) => {
+  expect(await (await totalAfter($, on, [GROUP_BY_PATH, "MATCH (g:Group {full_path: 'b'}) RETURN g"]))('2 / 200')).toBe(true)
+})
+
+test('a project inside a counted group is not added, one outside it is', async ($, on) => {
+  expect(await (await totalAfter($, on, [GROUP_BY_ID, 'MATCH (mr:MergeRequest {project_id: 7}) RETURN mr']))('2 / 100')).toBe(true)
+})
+
+test('a project outside every counted group is added', async ($, on) => {
+  expect(await (await totalAfter($, on, [GROUP_BY_ID, 'MATCH (mr:MergeRequest {project_id: 8}) RETURN mr']))('2 / 105')).toBe(true)
+})
+
+test('when the identity lookups fail every spelling keeps its own total', async ($, on) => {
+  expect(await (await totalAfter($, on, [GROUP_BY_PATH, GROUP_BY_ID], true))('2 / 200')).toBe(true)
 })
 
 test('graph-status runs through a fixed launcher after a successful query', async ($, on) => {
@@ -208,7 +257,7 @@ test('the status line starts over when the session ends, and counts only what fo
   on('session.end', () => ({ sessionId: 'old' }))
   const runs: (readonly string[])[] = []
   on('process.run', (_$, e) => {
-    runs.push(e.argv)
+    if (e.argv.includes('graph-status')) runs.push(e.argv)
     return { value: graphOf(1000) }
   })
   await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (mr:MergeRequest {project_id: 7}) RETURN mr"' })
