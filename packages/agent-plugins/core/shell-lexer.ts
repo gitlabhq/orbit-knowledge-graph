@@ -52,7 +52,11 @@ function parenEnd(src: string, open: number): number {
   for (let i = open; i < src.length; i++) {
     const c = src[i]
     if (c === '\\') i++
-    else if (c === "'" || c === '"') {
+    else if (c === '#' && COMMENT_PRECEDERS.has(src[i - 1] ?? '')) {
+      const newline = src.indexOf('\n', i)
+      if (newline < 0) return -1
+      i = newline
+    } else if (c === "'" || c === '"') {
       const { end, closed } = scanQuoted(src, i + 1, c === "'" ? QUOTE_FORMS.single : QUOTE_FORMS.double)
       if (!closed) return -1
       i = end - 1

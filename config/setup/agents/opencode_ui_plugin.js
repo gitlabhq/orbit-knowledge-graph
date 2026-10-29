@@ -1,5 +1,4 @@
 /*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
-var NUMBER_OPTION = /^-[A-Za-z]*[nNcmABCfb]$|^--(?:lines|bytes|max-count|after-context|before-context|context)$/;
 function grepPatternOption(arg) {
   if (arg === "--regexp")
     return "separate";
@@ -10,13 +9,15 @@ function grepPatternOption(arg) {
     return null;
   return letters[1] ? "attached" : "separate";
 }
+var LINES_OR_BYTES = /^-[A-Za-z]*[nc]$|^--(?:lines|bytes)$/;
 var FILTERS = {
-  head: { maxOperands: 0 },
-  tail: { maxOperands: 0 },
+  head: { maxOperands: 0, numberOption: LINES_OR_BYTES },
+  tail: { maxOperands: 0, numberOption: LINES_OR_BYTES },
   wc: { maxOperands: 0, fileOptions: /^--files0-from/ },
-  cut: { maxOperands: 0 },
+  cut: { maxOperands: 0, numberOption: /^-[A-Za-z]*[bcf]$|^--(?:bytes|characters|fields)$/ },
   grep: {
     maxOperands: 1,
+    numberOption: /^-[A-Za-z]*[mABC]$|^--(?:max-count|after-context|before-context|context)$/,
     fileOptions: /^-[A-Za-z]*[rRdf]|^--(?:recursive|dereference-recursive|directories|file)/,
     patternOption: grepPatternOption
   },
@@ -32,7 +33,7 @@ function operandCount(spec, args, patternOptions) {
   for (let i = 0;i < args.length; i++) {
     const arg = args[i] ?? "";
     if (optionsEnded || !arg.startsWith("-")) {
-      const isNumberValue = !optionsEnded && /^\d+$/.test(arg) && NUMBER_OPTION.test(args[i - 1] ?? "");
+      const isNumberValue = !optionsEnded && /^\d+$/.test(arg) && spec.numberOption?.test(args[i - 1] ?? "");
       if (!isNumberValue)
         operands++;
     } else if (arg === "--")
@@ -48,7 +49,8 @@ function isQuietFilter(program, args, readsInput) {
   const spec = Object.hasOwn(FILTERS, program) ? FILTERS[program] : undefined;
   if (!spec || readsInput || args.some((arg) => spec.notQuiet?.test(arg)))
     return false;
-  const patternOptions = args.map((arg) => spec.patternOption?.(arg) ?? null);
+  const optionsEnd = args.includes("--") ? args.indexOf("--") : args.length;
+  const patternOptions = args.map((arg, i) => (i < optionsEnd ? spec.patternOption?.(arg) : null) ?? null);
   const maxOperands = patternOptions.some(Boolean) ? 0 : spec.maxOperands;
   return operandCount(spec, args, patternOptions) <= maxOperands;
 }
@@ -101,7 +103,13 @@ function parenEnd(src, open) {
     const c = src[i];
     if (c === "\\")
       i++;
-    else if (c === "'" || c === '"') {
+    else if (c === "#" && COMMENT_PRECEDERS.has(src[i - 1] ?? "")) {
+      const newline = src.indexOf(`
+`, i);
+      if (newline < 0)
+        return -1;
+      i = newline;
+    } else if (c === "'" || c === '"') {
       const { end, closed } = scanQuoted(src, i + 1, c === "'" ? QUOTE_FORMS.single : QUOTE_FORMS.double);
       if (!closed)
         return -1;

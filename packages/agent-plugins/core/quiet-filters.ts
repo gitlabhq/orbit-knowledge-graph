@@ -2,12 +2,11 @@ type PatternOption = 'attached' | 'separate' | null
 
 type FilterSpec = {
   maxOperands: number
+  numberOption?: RegExp
   fileOptions?: RegExp
   patternOption?: (arg: string) => PatternOption
   notQuiet?: RegExp
 }
-
-const NUMBER_OPTION = /^-[A-Za-z]*[nNcmABCfb]$|^--(?:lines|bytes|max-count|after-context|before-context|context)$/
 
 function grepPatternOption(arg: string): PatternOption {
   if (arg === '--regexp') return 'separate'
@@ -17,13 +16,16 @@ function grepPatternOption(arg: string): PatternOption {
   return letters[1] ? 'attached' : 'separate'
 }
 
+const LINES_OR_BYTES = /^-[A-Za-z]*[nc]$|^--(?:lines|bytes)$/
+
 const FILTERS: Readonly<Record<string, FilterSpec>> = {
-  head: { maxOperands: 0 },
-  tail: { maxOperands: 0 },
+  head: { maxOperands: 0, numberOption: LINES_OR_BYTES },
+  tail: { maxOperands: 0, numberOption: LINES_OR_BYTES },
   wc: { maxOperands: 0, fileOptions: /^--files0-from/ },
-  cut: { maxOperands: 0 },
+  cut: { maxOperands: 0, numberOption: /^-[A-Za-z]*[bcf]$|^--(?:bytes|characters|fields)$/ },
   grep: {
     maxOperands: 1,
+    numberOption: /^-[A-Za-z]*[mABC]$|^--(?:max-count|after-context|before-context|context)$/,
     fileOptions: /^-[A-Za-z]*[rRdf]|^--(?:recursive|dereference-recursive|directories|file)/,
     patternOption: grepPatternOption,
   },
@@ -40,7 +42,7 @@ function operandCount(spec: FilterSpec, args: readonly string[], patternOptions:
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] ?? ''
     if (optionsEnded || !arg.startsWith('-')) {
-      const isNumberValue = !optionsEnded && /^\d+$/.test(arg) && NUMBER_OPTION.test(args[i - 1] ?? '')
+      const isNumberValue = !optionsEnded && /^\d+$/.test(arg) && spec.numberOption?.test(args[i - 1] ?? '')
       if (!isNumberValue) operands++
     } else if (arg === '--') optionsEnded = true
     else if (spec.fileOptions?.test(arg)) return Infinity
@@ -52,7 +54,8 @@ function operandCount(spec: FilterSpec, args: readonly string[], patternOptions:
 export function isQuietFilter(program: string, args: readonly string[], readsInput: boolean): boolean {
   const spec = Object.hasOwn(FILTERS, program) ? FILTERS[program] : undefined
   if (!spec || readsInput || args.some((arg) => spec.notQuiet?.test(arg))) return false
-  const patternOptions = args.map((arg) => spec.patternOption?.(arg) ?? null)
+  const optionsEnd = args.includes('--') ? args.indexOf('--') : args.length
+  const patternOptions = args.map((arg, i) => (i < optionsEnd ? spec.patternOption?.(arg) : null) ?? null)
   const maxOperands = patternOptions.some(Boolean) ? 0 : spec.maxOperands
   return operandCount(spec, args, patternOptions) <= maxOperands
 }

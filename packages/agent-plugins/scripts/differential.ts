@@ -19,7 +19,7 @@ const FRAGMENTS = [
   'if ((x<<2)); then prog; fi', 'while ((i<1)); do prog; done', 'for i in 1 2; do prog; done',
   'for ((i=0;i<1;i++)); do prog; done', 'for ((i=0;i<1;i++)) do prog; done', 'for ((i=0;i<1;i++)) { prog; }', 'for i do prog; done',
   'pro\\\ng', ': a\\\n#; prog', '"pro\\\ng"', 'cat <(true)#; prog', ': ${x:- #}; prog', 'FOO+=1 prog', 'time -p prog',
-  ': "${x:-"a #"}"; prog', ': "$(echo "a #")"; prog', 'case x in x) prog;; esac', 'f() { prog; }; f',
+  ': "${x:-"a #"}"; prog', ': "$(echo "a #")"; prog', ': "$(echo # (\n)"; prog; "x)"', 'case x in x) prog;; esac', 'f() { prog; }; f',
   'head -n 1', 'head file.txt', 'head -- -file', 'grep -c ok', 'grep -r pattern .', 'grep -epat file.txt',
   'grep -e pat file.txt', 'grep --regexp=pat file.txt', 'grep -- -x file.txt', 'grep x < file.txt',
   'jq .', 'jq . file.txt', 'jq -n env', 'cd .', 'true', ': noop',
