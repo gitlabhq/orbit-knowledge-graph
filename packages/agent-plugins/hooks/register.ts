@@ -83,8 +83,9 @@ function resetConversation(): void {
 }
 
 export const register: Register = (on) => {
-  on('session.end', (_$, e, next) => {
-    if (e.reason === 'clear' || e.reason === 'resume') resetConversation()
+  on('session.end', ($, e, next) => {
+    resetConversation()
+    $.ui.invalidate('ui.render')
     return next(e)
   }).catch((_$, e, next) => next(e))
 
