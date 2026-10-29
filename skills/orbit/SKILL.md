@@ -36,7 +36,7 @@ Queries use read-only openCypher 9-based syntax (`MATCH ... RETURN`).
 
 Run `CALL db.schema()` once per session, because the schema does not change mid-session. It lists every relationship as `(Source)-[:TYPE]->(Target)` and the properties of the common nodes, such as `User`, `Project`, `Group`, `MergeRequest`, and `WorkItem`. Run `CALL db.schema('Node')` only for a node it does not list properties for. Query syntax and paste-ready queries are in [`references/gql.md`](references/gql.md).
 
-Batch schema reads: make every schema read a question needs in one shell command, not one command per read. Each `CALL db.schema` call takes one node, so chain the overview and the nodes that the question names:
+Batch schema reads: make every schema read a question needs in one shell command, not one command per read. Each `CALL db.schema` call takes one node. On the first read, chain the overview with the nodes that the question names. Later, batch only the new node reads.
 
 ```shell
 glab orbit query 'CALL db.schema()'; echo; glab orbit query "CALL db.schema('Vulnerability')"; echo; glab orbit query "CALL db.schema('Pipeline')"
