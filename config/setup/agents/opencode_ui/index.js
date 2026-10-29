@@ -923,7 +923,8 @@ function activityOf(event, state) {
     state,
     active: call.active,
     done: call.label,
-    detail: call.detail + othersText(call),
+    detail: call.detail,
+    ...call.others?.length ? { others: othersText(call) } : {},
     sessionID: event.sessionID
   };
   if (!("status" in event))

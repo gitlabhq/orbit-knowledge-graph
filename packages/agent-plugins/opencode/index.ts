@@ -25,7 +25,8 @@ function activityOf(event: ToolExecuteBefore | ToolExecuteAfter, state: Activity
     state,
     active: call.active,
     done: call.label,
-    detail: call.detail + othersText(call),
+    detail: call.detail,
+    ...(call.others?.length ? { others: othersText(call) } : {}),
     sessionID: event.sessionID,
   }
   if (!('status' in event)) return activity

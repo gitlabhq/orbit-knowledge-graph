@@ -249,12 +249,12 @@ fn apply_and_report(
     if options.verbose || outcome.is_err() {
         show_outcomes_per_component(&report)?;
     } else {
-        show_outcomes_per_component(&report.only_plugin_skips())?;
         for outcome in &report.outcomes {
             if outcome.action == components::KEPT_RETIRED {
                 tui::warning(format!("{}: {}", outcome.label, outcome.action));
             }
         }
+        show_outcomes_per_component(&report.only_plugin_skips())?;
     }
     outcome?;
     Ok(report)

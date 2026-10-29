@@ -168,8 +168,8 @@ test('an event that throws or rejects never fails the call', async () => {
   await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
-test('an orbit call that runs other commands names them in its detail', async () => {
+test('an orbit call that runs other commands names them in its activity', async () => {
   const { sent, hooks } = await load()
   await hooks.before(call('glab orbit grep login && rm -rf build'))
-  expect(sent[0]?.detail).toBe('login  + rm')
+  expect(sent[0]?.others).toBe('  + rm')
 })
