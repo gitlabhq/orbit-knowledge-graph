@@ -93,3 +93,18 @@ tests:
           - { row: { path: "components/panel.spec.js", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
           - { row: { path: "components/panel.vue", is_test: false, is_vendored: false, is_generated: false } }
           - { row: { path: "vendor/lib/x.vue", is_test: false, is_vendored: true } }
+
+  - name: "No return type and no declared type"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.return_type IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.declared_type IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }

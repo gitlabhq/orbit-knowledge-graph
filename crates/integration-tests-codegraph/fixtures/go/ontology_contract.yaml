@@ -245,3 +245,66 @@ tests:
           RETURN d.language_kind AS lk
         assert:
           - { row: { lk: "Test" } }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 7 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Import)
+          RETURN a.fqn AS src, b.import_path AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+          WHERE a.fqn = 'shop.Order' AND b.fqn = 'base.Entity' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+          WHERE a.fqn = 'shop.Order.Charge' AND b.fqn = 'shop.Order' AND e.resolution = '' AND e.usage = 'parameter' AND 20 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+          WHERE a.fqn = 'shop.Order.describe' AND b.fqn = 'shop.Order' AND e.resolution = '' AND e.usage = 'parameter' AND 27 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+          WHERE a.fqn = 'shop.NewOrder' AND b.fqn = 'shop.Order' AND e.resolution = '' AND 29 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'shop.TestCharge' AND b.fqn = 'shop.NewOrder' AND e.resolution = 'local' AND 6 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'shop.Order.Charge' AND b.fqn = 'shop.Order.describe' AND e.resolution = 'inferred_type' AND 21 IN e.lines AND 22 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'shop.TestCharge' AND b.fqn = 'shop.Order.Charge' AND e.resolution = 'inferred_type' AND 7 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Import)
+          WHERE a.fqn = 'shop.Order.Charge' AND b.import_path = 'fmt' AND b.name = 'fmt' AND e.resolution = 'import' AND 23 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }

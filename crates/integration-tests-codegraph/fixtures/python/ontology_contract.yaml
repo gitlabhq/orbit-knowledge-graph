@@ -311,3 +311,96 @@ tests:
       RETURN t.name AS test, f.name AS callee
     assert:
       - { row: { test: "test_charge", callee: "charge" } }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 12 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Import)
+          RETURN a.fqn AS src, b.import_path AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
+          WHERE a.fqn = 'billing.base.settle' AND b.fqn = 'billing.base.audited' AND e.resolution = '' AND 10 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+          WHERE a.fqn = 'billing.models.Order' AND b.fqn = 'billing.base.Base' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'billing.models.Order.fetch' AND b.fqn = 'billing.models.Order' AND e.resolution = 'local' AND 17 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'billing.models.Order.describe' AND b.fqn = 'billing.models.Order.describe.label' AND e.resolution = 'local' AND 22 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'billing.models.charge' AND b.fqn = 'billing.models.Order' AND e.resolution = 'local' AND 29 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_VALUE]->(b:Definition)
+          WHERE a.fqn = 'billing.models.close' AND b.fqn = 'billing.models.Order.status' AND e.resolution = 'inferred_type' AND e.access = 'write' AND 37 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'tests.test_billing.test_charge' AND b.fqn = 'billing.models.charge' AND e.resolution = 'import' AND 5 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+          WHERE a.fqn = 'billing.models.Order.describe' AND b.fqn = 'billing.base.Base.describe' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_VALUE]->(b:Definition)
+          WHERE a.fqn = 'billing.models.charge' AND b.fqn = 'billing.models.Order.status' AND e.resolution = 'inferred_type' AND e.access = 'read' AND 32 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+          WHERE a.fqn = 'billing.models.close' AND b.fqn = 'billing.models.Order' AND e.resolution = '' AND e.usage = 'parameter' AND 36 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+          WHERE a.fqn = 'billing.models.charge' AND b.fqn = 'billing.models.Order' AND e.resolution = '' AND e.usage = 'parameter' AND 28 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'billing.models.charge' AND b.fqn = 'billing.models.Order.describe' AND e.resolution = 'inferred_type' AND 30 IN e.lines AND 31 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Import)
+          WHERE a.fqn = 'billing.models.charge' AND b.import_path = 'requests' AND e.resolution = 'import' AND 32 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }

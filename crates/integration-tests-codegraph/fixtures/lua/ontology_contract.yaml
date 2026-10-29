@@ -145,3 +145,28 @@ tests:
           RETURN a.id AS id
         assert:
           - { empty: true }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'order.charge' AND b.fqn = 'order.add' AND e.resolution = 'local' AND 9 IN e.lines AND 10 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+
+  - name: "Import rows with kind, construct, path, full name, and external flag"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          RETURN i.name AS name, i.alias AS alias, i.import_kind AS kind, i.language_kind AS lk, i.import_path AS path, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row_count: 1 }
+          - { row: { name: "helper", alias: "", kind: "symbol", lk: "Require", path: "helper", fqn: "helper", external: false } }

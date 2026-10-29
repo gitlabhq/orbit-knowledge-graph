@@ -142,3 +142,18 @@ tests:
           RETURN a.id AS id
         assert:
           - { empty: true }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_VALUE]->(b:Definition)
+          WHERE a.fqn = 'aws_instance' AND b.fqn = 'var.region' AND e.resolution = 'local' AND e.access = 'read' AND 2 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }

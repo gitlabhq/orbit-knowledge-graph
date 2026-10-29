@@ -258,3 +258,62 @@ tests:
           RETURN d.language_kind AS lk
         assert:
           - { row: { lk: "Test" } }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 5 }
+      - query: |
+          MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+          WHERE a.fqn = 'shop::Point' AND b.fqn = 'shop::base::Store' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'shop::Point::new' AND b.fqn = 'shop::Point' AND e.resolution = 'local' AND 24 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'shop::Point::charge' AND b.fqn = 'shop::Point::describe' AND e.resolution = 'local' AND 28 IN e.lines AND 29 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+          WHERE a.fqn = 'shop::Point::get' AND b.fqn = 'shop::base::Store::get' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'shop::builds_a_point' AND b.fqn = 'shop::Point::new' AND e.resolution = 'local' AND 52 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+
+  - name: "The type defines the members of its impl blocks, and impl blocks are not definitions"
+    queries:
+      - query: |
+          MATCH (t:Definition)-[:DEFINES]->(m:Definition)
+          WHERE t.fqn = 'shop::Point' AND m.kind IN ['Function', 'Method']
+          RETURN m.fqn AS member, m.kind AS kind
+          LIMIT 100
+        assert:
+          - { row_count: 4 }
+          - { row: { member: "shop::Point::new", kind: "Function" } }
+          - { row: { member: "shop::Point::charge", kind: "Method" } }
+          - { row: { member: "shop::Point::describe", kind: "Method" } }
+          - { row: { member: "shop::Point::get", kind: "Method" } }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.signature STARTS WITH 'impl'
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }

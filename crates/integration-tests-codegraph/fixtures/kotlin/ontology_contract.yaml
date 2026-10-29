@@ -265,3 +265,78 @@ tests:
           RETURN d.language_kind AS lk
         assert:
           - { row: { lk: "Test" } }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 8 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Import)
+          RETURN a.fqn AS src, b.import_path AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 2 }
+      - query: |
+          MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+          WHERE a.fqn = 'shop.User' AND b.fqn = 'shop.base.Base' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'shop.User.save' AND b.fqn = 'shop.User' AND e.resolution = 'local' AND 13 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+          WHERE a.fqn = 'shop.register' AND b.fqn = 'shop.User' AND e.resolution = '' AND e.usage = 'parameter' AND 23 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'shop.UserTest.savesTheUser' AND b.fqn = 'shop.User.greet' AND e.resolution = 'inferred_type' AND 8 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+          WHERE a.fqn = 'shop.User' AND b.fqn = 'shop.base.Base' AND e.resolution = '' AND 7 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'shop.User.save' AND b.fqn = 'shop.User.greet' AND e.resolution = 'inferred_type' AND 14 IN e.lines AND 15 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'shop.UserTest.savesTheUser' AND b.fqn = 'shop.User' AND e.resolution = 'local' AND 8 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+          WHERE a.fqn = 'shop.User.save' AND b.fqn = 'shop.base.Base.save' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Import)
+          WHERE a.fqn = 'shop.User.save' AND b.import_path = 'kotlinx.coroutines' AND b.name = 'delay' AND e.resolution = 'import' AND 16 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Import)
+          WHERE a.fqn = 'shop.UserTest.savesTheUser' AND b.import_path = 'org.junit' AND b.name = 'Test' AND e.resolution = '' AND 6 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }

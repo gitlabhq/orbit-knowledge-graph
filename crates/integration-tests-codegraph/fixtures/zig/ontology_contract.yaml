@@ -205,3 +205,24 @@ tests:
           RETURN d.language_kind AS lk
         assert:
           - { row: { lk: "Test" } }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 2 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'twice' AND b.fqn = 'add' AND e.resolution = 'local' AND 17 IN e.lines AND 18 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'adds' AND b.fqn = 'add' AND e.resolution = 'local' AND 24 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }

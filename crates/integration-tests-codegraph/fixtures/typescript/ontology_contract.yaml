@@ -276,3 +276,54 @@ tests:
           RETURN d.language_kind AS lk
         assert:
           - { row: { lk: "Describe" } }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 5 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Import)
+          RETURN a.fqn AS src, b.import_path AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+          WHERE a.fqn = 'Order' AND b.fqn = 'Base' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'Order::charge' AND b.fqn = 'Order::describe' AND e.resolution = 'inferred_type' AND 12 IN e.lines AND 13 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+          WHERE a.fqn = 'Order::describe' AND b.fqn = 'Base::describe' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'Order::charges the card' AND b.fqn = 'Order::charge' AND e.resolution = 'import' AND 5 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'Order::charge' AND b.fqn = 'Order' AND e.resolution = 'local' AND 11 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Import)
+          WHERE a.fqn = 'Order::charge' AND b.import_path = 'path' AND e.resolution = 'import' AND 14 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }

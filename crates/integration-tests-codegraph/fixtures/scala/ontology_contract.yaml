@@ -192,3 +192,36 @@ tests:
           RETURN s.id AS source
         assert:
           - { row_count: 1 }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 4 }
+      - query: |
+          MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+          WHERE a.fqn = 'shop.Point' AND b.fqn = 'shop.base.Shape' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+          WHERE a.fqn = 'shop.Point.area' AND b.fqn = 'shop.base.Shape.area' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+          WHERE a.fqn = 'shop.Point' AND b.fqn = 'shop.base.Shape' AND e.resolution = '' AND 6 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'shop.Point.area' AND b.fqn = 'shop.Point.describe' AND e.resolution = 'local' AND 9 IN e.lines AND 10 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }

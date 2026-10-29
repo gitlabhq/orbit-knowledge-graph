@@ -341,3 +341,108 @@ tests:
           RETURN d.language_kind AS lk
         assert:
           - { row: { lk: "Test" } }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 12 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Import)
+          RETURN a.fqn AS src, b.import_path AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 3 }
+      - query: |
+          MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+          WHERE a.fqn = 'com.shop.Order' AND b.fqn = 'com.shop.base.Payable' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'com.shop.Order.pay' AND b.fqn = 'com.shop.Order.describe' AND e.resolution = 'inferred_type' AND 21 IN e.lines AND 22 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'com.shop.Order.describe' AND b.fqn = 'com.shop.Order.describe' AND e.resolution = 'local' AND 31 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'com.shop.OrderTest.paysTheOrder' AND b.fqn = 'com.shop.Order.pay' AND e.resolution = 'inferred_type' AND 8 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+          WHERE a.fqn = 'com.shop.Order' AND b.fqn = 'com.shop.base.Entity' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'com.shop.Order.pay' AND b.fqn = 'com.shop.Order' AND e.resolution = 'local' AND 20 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'com.shop.OrderTest.paysTheOrder' AND b.fqn = 'com.shop.Order' AND e.resolution = 'local' AND 8 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+          WHERE a.fqn = 'com.shop.Order' AND b.fqn = 'com.shop.base.Payable' AND e.resolution = '' AND 9 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+          WHERE a.fqn = 'com.shop.Order.pay' AND b.fqn = 'com.shop.base.Payable.pay' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+          WHERE a.fqn = 'com.shop.Order' AND b.fqn = 'com.shop.base.Entity' AND e.resolution = '' AND 9 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+          WHERE a.fqn = 'com.shop.Order.pay' AND b.fqn = 'com.shop.base.Entity.pay' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'com.shop.Order.pay' AND b.fqn = 'com.shop.Order.note' AND e.resolution = 'local' AND 23 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Import)
+          WHERE a.fqn = 'com.shop.Order' AND b.import_path = 'java.util' AND b.name = 'List' AND e.resolution = '' AND e.usage = 'field' AND 11 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Import)
+          WHERE a.fqn = 'com.shop.Order.note' AND b.import_path = 'java.util' AND b.name = 'List' AND e.resolution = '' AND e.usage = 'parameter' AND 26 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Import)
+          WHERE a.fqn = 'com.shop.OrderTest.paysTheOrder' AND b.import_path = 'org.junit.jupiter.api' AND b.name = 'Test' AND e.resolution = '' AND 6 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }

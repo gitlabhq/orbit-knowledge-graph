@@ -254,3 +254,72 @@ tests:
           RETURN d.language_kind AS lk
         assert:
           - { row: { lk: "ExampleGroup" } }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 10 }
+      - query: |
+          MATCH (a:Definition)-[e:EXTENDS]->(b:Definition)
+          WHERE a.fqn = 'Billing::Order' AND b.fqn = 'Base' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'Billing::Order::initialize' AND b.fqn = 'Billing::Order::total' AND e.resolution = 'local' AND 11 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'Billing::Order::build' AND b.fqn = 'Billing::Order' AND e.resolution = 'inferred_type' AND 15 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_VALUE]->(b:Definition)
+          WHERE a.fqn = 'Billing::Order::describe' AND b.fqn = 'Billing::Order::MAX' AND e.resolution = 'local' AND e.access = 'read' AND 22 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'Billing::Order' AND b.fqn = 'Billing::Order' AND e.resolution = 'local' AND 1 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'Billing::Order::builds an order' AND b.fqn = 'Billing::Order::build' AND e.resolution = 'inferred_type' AND 3 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'Billing::Order::build' AND b.fqn = 'Billing::Order::describe' AND e.resolution = 'inferred_type' AND 16 IN e.lines AND 17 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+          WHERE a.fqn = 'Billing::Order::describe' AND b.fqn = 'Base::describe' AND e.resolution = 'import'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'Billing::Order' AND b.fqn = 'Billing::Order::describe' AND e.resolution = 'local' AND 1 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'Billing::Order::builds an order' AND b.fqn = 'Billing::Order' AND e.resolution = 'local' AND 3 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }

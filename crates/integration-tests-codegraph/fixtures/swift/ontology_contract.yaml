@@ -213,3 +213,42 @@ tests:
           RETURN d.language_kind AS lk
         assert:
           - { row: { lk: "Test" } }
+
+  - name: "Every reference edge with its kind, resolution, access, usage, and lines"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|EXTENDS|IMPLEMENTS|OVERRIDES]->(b:Definition)
+          RETURN a.fqn AS src, b.fqn AS dst
+          LIMIT 100
+        assert:
+          - { row_count: 5 }
+      - query: |
+          MATCH (a:Definition)-[e:IMPLEMENTS]->(b:Definition)
+          WHERE a.fqn = 'Order' AND b.fqn = 'Store' AND e.resolution = 'local'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:CALLS]->(b:Definition)
+          WHERE a.fqn = 'Order.charge' AND b.fqn = 'Order.describe' AND e.resolution = 'local' AND 14 IN e.lines AND 15 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:OVERRIDES]->(b:Definition)
+          WHERE a.fqn = 'Order.get' AND b.fqn = 'Store.get' AND e.resolution = 'local'
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+          WHERE a.fqn = 'Order' AND b.fqn = 'Store' AND e.resolution = '' AND 9 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
+          WHERE a.fqn = 'Order.charge' AND b.fqn = 'Order' AND e.resolution = 'local' AND 13 IN e.lines
+          RETURN a.fqn AS src
+        assert:
+          - { row_count: 1 }
