@@ -254,7 +254,7 @@ To verify the installation:
 
 1. Save the query as `query.gql`:
 
-   ```gql orbit-query
+   ```opencypher
    MATCH (p:Project) WHERE p.full_path STARTS WITH 'your-group/' RETURN p.name, p.full_path LIMIT 10
    ```
 

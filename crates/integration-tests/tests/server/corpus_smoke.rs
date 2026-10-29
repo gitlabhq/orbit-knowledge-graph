@@ -1,20 +1,4 @@
-//! Corpus smoke test.
-//!
-//! Runs every GQL query in `fixtures/queries/corpus/` through the **same pipeline
-//! stages the webserver runs** (`QueryPipelineService::run_query`): Security ->
-//! Compilation -> ClickHouseExecutor -> Extraction ->
-//! Authorization -> Redaction -> Hydration -> Output, against a real ClickHouse
-//! seeded with the data-correctness fixture.
-//!
-//! The only substitution is the Authorization stage: the real one performs the
-//! GitLab-Rails authorization handshake over the gRPC stream, which has no
-//! in-memory equivalent, so it is replaced by an authorize-everything stage
-//! (the same thing every other server integration test mocks). Every other
-//! stage is the production stage, in the production order.
-//!
-//! This asserts the queries run end to end (compiled SQL + hydration plan are
-//! valid against the current schema), not result correctness. `expect: error`
-//! entries are deliberate invalid controls and must fail.
+//! Runs every corpus, named, and Markdown query through the webserver pipeline stages.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -27,8 +11,11 @@ use compiler::{Frontend, parse_input};
 use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use integration_testkit::load_seed;
+use ontology::introspection::SchemaResponse;
 use orbit_server::auth::Claims;
-use orbit_server::pipeline::{ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage};
+use orbit_server::pipeline::{
+    ClickHouseExecutor, HydrationStage, RedactionStage, RoutingOutput, RoutingStage, SecurityStage,
+};
 use orbit_server::redaction::ResourceAuthorization;
 use query_engine::formatters::GraphResponse;
 use query_engine::pipeline::{
@@ -45,15 +32,9 @@ use serde::Deserialize;
 const CORPUS_DIR: &str = concat!(env!("FIXTURES_DIR"), "/queries/corpus");
 const NAMED_QUERIES_DIR: &str = env!("NAMED_QUERIES_DIR");
 const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
-const DOC_MARKDOWN_DIRS: &[&str] = &[
-    "docs/docs-gitlab-com",
-    "docs/pages/engineering/testing",
-    "docs/pages/engineering/architecture",
-    "docs/pages/engineering/adr",
-    "skills/orbit",
-    "crates/integration-testkit",
-];
+const DOC_SKIPPED_PATHS: &[&str] = &["docs-locale", "CHANGELOG.md"];
 const DOC_QUERY_MARKER: &str = "orbit-query";
+const DOC_QUERY_FENCE: &str = "opencypher";
 
 #[derive(Deserialize)]
 struct Entry {
@@ -69,10 +50,17 @@ struct SmokeCase {
     frontend: Frontend,
 }
 
-/// Stand-in for the real `AuthorizationStage`, which authorizes resources via
-/// the GitLab-Rails handshake over the gRPC stream. Authorizes everything so
-/// the rest of the pipeline (redaction, hydration) runs on whatever rows the
-/// query returned.
+impl SmokeCase {
+    fn runs(key: String, query: String, frontend: Frontend) -> Self {
+        Self {
+            key,
+            query,
+            expects_error: false,
+            frontend,
+        }
+    }
+}
+
 struct AuthorizeAllStage;
 
 impl PipelineStage for AuthorizeAllStage {
@@ -108,7 +96,8 @@ impl PipelineStage for AuthorizeAllStage {
     }
 }
 
-const PIPELINE_STAGES: [&str; 8] = [
+const PIPELINE_STAGES: [&str; 9] = [
+    "routing",
     "security",
     "compilation",
     "execution",
@@ -224,13 +213,14 @@ fn load_named_queries() -> Vec<SmokeCase> {
     queries
         .iter()
         .flat_map(|query| {
-            spellings.map(|(language, frontend)| SmokeCase {
-                key: format!("named_query::{}::{language:?}", query.name),
-                query: query
-                    .render_language(language, &values, &query.example_parameters())
-                    .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
-                expects_error: false,
-                frontend,
+            spellings.map(|(language, frontend)| {
+                SmokeCase::runs(
+                    format!("named_query::{}::{language:?}", query.name),
+                    query
+                        .render_language(language, &values, &query.example_parameters())
+                        .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
+                    frontend,
+                )
             })
         })
         .collect()
@@ -252,37 +242,49 @@ fn load_doc_queries() -> (Vec<SmokeCase>, Vec<String>) {
 
 fn markdown_paths() -> Vec<PathBuf> {
     let root = Path::new(REPO_ROOT);
-    let mut paths = Vec::new();
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "*.md",
+        ])
+        .output()
+        .unwrap_or_else(|e| panic!("run git ls-files in {}: {e}", root.display()));
+    assert!(
+        output.status.success(),
+        "git ls-files in {} failed: {}",
+        root.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-    for rel in DOC_MARKDOWN_DIRS {
-        collect_markdown_paths(&root.join(rel), &mut paths);
-    }
+    let mut paths: Vec<PathBuf> = String::from_utf8(output.stdout)
+        .expect("git ls-files prints UTF-8 paths")
+        .split('\0')
+        .filter(|rel| !rel.is_empty())
+        .filter(|rel| {
+            !DOC_SKIPPED_PATHS.iter().any(|skipped| {
+                rel.strip_prefix(skipped)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+            })
+        })
+        .map(|rel| root.join(rel))
+        .filter(|path| path.is_file())
+        .collect();
 
-    let root_entries = std::fs::read_dir(root)
-        .unwrap_or_else(|e| panic!("read repository root {}: {e}", root.display()));
-    for entry in root_entries {
-        let path = entry.expect("read repository root entry").path();
-        if path.extension().is_some_and(|ext| ext == "md") {
-            paths.push(path);
-        }
-    }
-
+    assert!(
+        !paths.is_empty(),
+        "no Markdown files found in {}",
+        root.display()
+    );
     paths.sort();
+    paths.dedup();
     paths
-}
-
-fn collect_markdown_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
-    let entries =
-        std::fs::read_dir(dir).unwrap_or_else(|e| panic!("read docs dir {}: {e}", dir.display()));
-
-    for entry in entries {
-        let path = entry.expect("read docs dir entry").path();
-        if path.is_dir() {
-            collect_markdown_paths(&path, paths);
-        } else if path.extension().is_some_and(|ext| ext == "md") {
-            paths.push(path);
-        }
-    }
 }
 
 fn collect_doc_queries(
@@ -307,6 +309,77 @@ fn collect_doc_queries(
             );
         }
     }
+
+    collect_html_doc_queries(&path_label, text, cases, failures);
+}
+
+fn collect_html_doc_queries(
+    path_label: &str,
+    text: &str,
+    cases: &mut Vec<SmokeCase>,
+    failures: &mut Vec<String>,
+) {
+    static HTML_CODE_START: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r#"<code class="language-([\w-]+)">"#).unwrap());
+    static HTML_CODE_BODY: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"^([^<]*)</code>").unwrap());
+
+    for start in HTML_CODE_START.captures_iter(text) {
+        let tag = start.get(0).unwrap();
+        let line = text[..tag.start()].matches('\n').count() + 1;
+        let language = start[1].to_ascii_lowercase();
+        match HTML_CODE_BODY.captures(&text[tag.end()..]) {
+            Some(body) => push_language_doc_query(
+                path_label,
+                line,
+                &language,
+                &unescape_html(&body[1]),
+                cases,
+                failures,
+            ),
+            None if is_query_language(&language) => failures.push(format!(
+                "{path_label}:{line}: cannot read the HTML query code; write `<` as `&lt;`"
+            )),
+            None => {}
+        }
+    }
+}
+
+fn is_query_language(language: &str) -> bool {
+    matches!(language, DOC_QUERY_FENCE | "gql" | "cypher")
+}
+
+fn unescape_html(text: &str) -> String {
+    text.replace("&#10;", "\n")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+}
+
+fn push_language_doc_query(
+    path_label: &str,
+    line: usize,
+    language: &str,
+    body: &str,
+    cases: &mut Vec<SmokeCase>,
+    failures: &mut Vec<String>,
+) {
+    match (language, body.trim()) {
+        (DOC_QUERY_FENCE, "") => failures.push(format!(
+            "{path_label}:{line}: `{DOC_QUERY_FENCE}` code is empty"
+        )),
+        (DOC_QUERY_FENCE, query) => cases.push(SmokeCase::runs(
+            format!("{path_label}:{line}"),
+            query.to_string(),
+            Frontend::Gql,
+        )),
+        ("gql" | "cypher", _) => failures.push(format!(
+            "{path_label}:{line}: use `{DOC_QUERY_FENCE}`, not `{language}`, for Orbit query code"
+        )),
+        _ => {}
+    }
 }
 
 fn handle_doc_code_block(
@@ -329,29 +402,30 @@ fn handle_doc_code_block(
     let marked = tokens.iter().any(|token| token == DOC_QUERY_MARKER);
 
     if !block.closed
-        && (marked || matches!(first_token, Some("json" | "gql" | "bash" | "sh" | "shell")))
+        && (marked
+            || matches!(first_token, Some("json" | "bash" | "sh" | "shell"))
+            || first_token.is_some_and(is_query_language))
     {
         failures.push(format!("{path_label}:{line}: unclosed Markdown code fence"));
         return;
     }
 
-    if marked {
-        match normalize_marked_doc_query(first_token, &block.literal) {
-            Ok((query, frontend)) => {
-                cases.push(SmokeCase {
-                    key: format!("{path_label}:{line}"),
-                    query,
-                    expects_error: false,
-                    frontend,
-                });
-            }
-            Err(e) => failures.push(format!("{path_label}:{line}: {e}")),
+    match (first_token, marked) {
+        (Some(language), false) if is_query_language(language) => {
+            push_language_doc_query(path_label, line, language, &block.literal, cases, failures)
         }
-        return;
-    }
-
-    match first_token {
-        Some("json") => {
+        (Some("json"), true) => match normalize_doc_query(&block.literal) {
+            Ok(query) => cases.push(SmokeCase::runs(
+                format!("{path_label}:{line}"),
+                query,
+                Frontend::JsonDsl,
+            )),
+            Err(e) => failures.push(format!("{path_label}:{line}: {e}")),
+        },
+        (_, true) => failures.push(format!(
+            "{path_label}:{line}: `{DOC_QUERY_MARKER}` marks only `json` fences; a `{DOC_QUERY_FENCE}` fence always runs"
+        )),
+        (Some("json"), false) => {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&block.literal)
                 && orbit_query_value(&value).is_some()
             {
@@ -360,27 +434,78 @@ fn handle_doc_code_block(
                 ));
             }
         }
-        Some("bash" | "sh" | "shell") if block.literal.contains("\"query_type\"") => {
-            failures.push(format!(
-                "{path_label}:{line}: shell fence contains Orbit query JSON; move the query body to a `json {DOC_QUERY_MARKER}` fence"
-            ));
+        (Some("bash" | "sh" | "shell"), false) => {
+            if block.literal.contains("\"query_type\"") {
+                failures.push(format!(
+                    "{path_label}:{line}: shell fence contains Orbit query JSON; move the query body to a `json {DOC_QUERY_MARKER}` fence"
+                ));
+            }
+            push_shell_doc_queries(path_label, line, &block.literal, cases, failures);
         }
         _ => {}
     }
 }
 
-fn normalize_marked_doc_query(
-    first_token: Option<&str>,
+fn push_shell_doc_queries(
+    path_label: &str,
+    line: usize,
     body: &str,
-) -> Result<(String, Frontend), String> {
-    match first_token {
-        Some("json") => Ok((normalize_doc_query(body)?, Frontend::JsonDsl)),
-        Some("gql") if !body.trim().is_empty() => Ok((body.trim().to_string(), Frontend::Gql)),
-        Some("gql") => Err("marked fence does not contain an Orbit query".to_string()),
-        _ => Err(format!(
-            "`{DOC_QUERY_MARKER}` fences must use `json` or `gql` as the first info token"
-        )),
+    cases: &mut Vec<SmokeCase>,
+    failures: &mut Vec<String>,
+) {
+    const QUERY_KEYWORDS: &str = "MATCH|CALL";
+    static COMMAND: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"\borbit\s+query\b(.*)").unwrap());
+    static QUERY_WORD: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(&format!(r"(?i)\b({QUERY_KEYWORDS})\b")).unwrap());
+    static QUERY_START: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(&format!(r"(?i)^\s*({QUERY_KEYWORDS})\b")).unwrap());
+    static QUOTED: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r#"'([^']*)'|"([^"]*)""#).unwrap());
+    static PLACEHOLDER: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"(?i)<[a-z][\w./-]*>").unwrap());
+
+    for (offset, command_line) in shell_command_lines(body) {
+        let Some(args) = COMMAND
+            .captures(&command_line)
+            .map(|caps| caps.get(1).unwrap())
+        else {
+            continue;
+        };
+        let args = args.as_str();
+        if !QUERY_WORD.is_match(args) || PLACEHOLDER.is_match(args) {
+            continue;
+        }
+        let key = format!("{path_label}:{}", line + 1 + offset);
+        let query = QUOTED
+            .captures_iter(args)
+            .filter_map(|caps| caps.get(1).or_else(|| caps.get(2)))
+            .map(|m| m.as_str())
+            .find(|quoted| QUERY_START.is_match(quoted));
+        match query {
+            Some(query) => cases.push(SmokeCase::runs(key, query.to_string(), Frontend::Gql)),
+            None => failures.push(format!(
+                "{key}: cannot read the query on this `orbit query` line; put the whole query in one pair of quotes"
+            )),
+        }
     }
+}
+
+fn shell_command_lines(body: &str) -> Vec<(usize, String)> {
+    let mut commands: Vec<(usize, String)> = Vec::new();
+    let mut continued = false;
+    for (offset, text) in body.lines().enumerate() {
+        let (text, continues) = match text.strip_suffix('\\') {
+            Some(head) => (head, true),
+            None => (text, false),
+        };
+        match commands.last_mut() {
+            Some((_, command)) if continued => command.push_str(text),
+            _ => commands.push((offset, text.to_string())),
+        }
+        continued = continues;
+    }
+    commands
 }
 
 fn normalize_doc_query(body: &str) -> Result<String, String> {
@@ -434,7 +559,7 @@ async fn run_pipeline(
         &Arc<ontology::Ontology>,
     ),
     claims: &Claims,
-) -> (Vec<&'static str>, Result<PipelineOutput, PipelineError>) {
+) -> (Vec<&'static str>, Result<SmokeOutput, PipelineError>) {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::new(db.create_client()));
     server_extensions.insert(Arc::clone(data_model));
@@ -457,8 +582,21 @@ async fn run_pipeline(
     (stages, output)
 }
 
-async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<PipelineOutput, PipelineError> {
+enum SmokeOutput {
+    Query(Box<PipelineOutput>),
+    Schema(SchemaResponse),
+}
+
+fn expected_stages(output: &SmokeOutput) -> &'static [&'static str] {
+    match output {
+        SmokeOutput::Query(_) => &PIPELINE_STAGES,
+        SmokeOutput::Schema(_) => &PIPELINE_STAGES[..1],
+    }
+}
+
+async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<SmokeOutput, PipelineError> {
     let [
+        routing,
         security,
         compilation,
         execution,
@@ -472,6 +610,15 @@ async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<PipelineOutput, Pi
         migration_version: *orbit_migrations::version::SCHEMA_VERSION,
     };
     let mut obs = NoOpObserver;
+    let route = PipelineRunner::start(ctx, &mut obs)
+        .then(&Traced(routing, &RoutingStage))
+        .await?
+        .finish()
+        .ok_or_else(|| PipelineError::custom("RoutingStage did not produce RoutingOutput"))?;
+    if let RoutingOutput::Schema(response) = route {
+        return Ok(SmokeOutput::Schema(response));
+    }
+
     PipelineRunner::start(ctx, &mut obs)
         .then(&Traced(security, &SecurityStage))
         .await?
@@ -491,6 +638,7 @@ async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<PipelineOutput, Pi
         .await?
         .finish()
         .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
+        .map(|output| SmokeOutput::Query(Box::new(output)))
 }
 
 #[tokio::test]
@@ -529,10 +677,19 @@ async fn corpus_smoke() {
 
         let ran = stages.join(" > ");
         match (case.expects_error, outcome) {
-            (false, Ok(_)) if stages != PIPELINE_STAGES => {
-                failures.push(format!("{}: ran only {ran}", case.key))
-            }
-            (false, Ok(output)) => eprintln!(
+            (false, Ok(SmokeOutput::Schema(response))) => eprintln!(
+                "corpus_smoke: {} ({:?} schema): {ran}; {} domains, {} edges",
+                case.key,
+                case.frontend,
+                response.domains.len(),
+                response.edges.len()
+            ),
+            (false, Ok(ref output)) if stages != expected_stages(output) => failures.push(format!(
+                "{}: ran {ran}; expected {}",
+                case.key,
+                expected_stages(output).join(" > ")
+            )),
+            (false, Ok(SmokeOutput::Query(output))) => eprintln!(
                 "corpus_smoke: {} ({:?} {}): {ran}; {} rows, {} redacted, {} ClickHouse queries",
                 case.key,
                 case.frontend,
@@ -561,6 +718,6 @@ async fn corpus_smoke() {
         failures.join("\n  ")
     );
     eprintln!(
-        "corpus_smoke: {corpus_total} corpus queries, {named_total} named queries, and {doc_total} docs queries ran clean through the full pipeline"
+        "corpus_smoke: {corpus_total} corpus queries, {named_total} named queries, and {doc_total} docs queries ran as expected"
     );
 }

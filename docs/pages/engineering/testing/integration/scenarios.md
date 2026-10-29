@@ -103,7 +103,8 @@ A schema check validates every scenario file in CI, so a typo in a key fails bef
 ## The query corpus and executable docs
 
 The query corpus runs a curated set of real queries and every named query.
-It also runs every marked query example in the user docs, the engineering pages, and the Orbit skill.
+It also runs every query example in the Markdown files of the repository.
+An example is an `opencypher` code block, a `json orbit-query` code block, or an `orbit query` line in a shell code block.
 **A schema change that breaks a published example fails CI.**
 
-The corpus also fails on a query in an unmarked code block, and on a code block that does not close.
+The corpus also fails on a `gql` or `cypher` code block, on Orbit query JSON in an unmarked code block, and on a code block that does not close.

@@ -17,7 +17,7 @@ GQL becomes the Orbit query language on every deployment type with GitLab 19.5.
 
 This query finds merge requests in a project whose latest diff changes a file.
 
-```gql
+```opencypher
 MATCH (mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: 278964, new_path: 'app/models/user.rb'})
 RETURN mr.iid, mr.title, mr.state
 LIMIT 10

@@ -1,7 +1,7 @@
 ---
 name: orbit-gql-migration
 description: Converts and migrates legacy Orbit JSON DSL queries to Orbit GQL, then checks each converted query read-only against the graph. Legacy queries are objects with query_type, nodes, relationships, or aggregations. Use when a repo, runbook, script, doc, or agent skill contains them. Also use when a `glab orbit query --file` envelope or API body has an object `query`. Also use when a legacy JSON query fails with HTTP 400 compile_error. Do not use for writing new GQL queries (use the orbit skill).
-version: 0.1.0
+version: 0.1.1
 license: MIT
 compatibility: Requires glab with the orbit commands and a GitLab instance with Orbit enabled.
 metadata:
@@ -142,7 +142,7 @@ Every step is read-only.
 
 Aggregation. Legacy:
 
-```json
+```json orbit-query
 {"query": {"query_type": "aggregation",
   "nodes": [{"id": "mr", "entity": "MergeRequest"},
             {"id": "p", "entity": "Project", "node_ids": [278964]}],
@@ -154,7 +154,7 @@ Aggregation. Legacy:
 
 GQL:
 
-```gql
+```opencypher
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964})
 RETURN mr.state, count(mr) AS mrs
 ORDER BY mrs DESC
@@ -163,7 +163,7 @@ LIMIT 10
 
 Neighbors with no `direction`, so outgoing. Legacy:
 
-```json
+```json orbit-query
 {"query": {"query_type": "neighbors",
   "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [482908721]}],
   "neighbors": {"rel_types": ["AUTHORED", "IN_PROJECT"]}, "limit": 25}}
@@ -171,7 +171,7 @@ Neighbors with no `direction`, so outgoing. Legacy:
 
 GQL:
 
-```gql
+```opencypher
 MATCH (mr:MergeRequest {id: 482908721})-[:AUTHORED|IN_PROJECT]->(n)
 RETURN mr, n
 LIMIT 25

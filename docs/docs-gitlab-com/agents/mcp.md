@@ -186,7 +186,7 @@ for example `["MergeRequest"]`, or run `CALL db.schema('MergeRequest')` with `qu
 Your agent writes the queries for you. For precise control, give it a complete query to run with
 `{"command_name": "query_graph", "parameters": {"query": "<query>"}}`, for example:
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
 WHERE mr.state = 'opened' AND p.full_path STARTS WITH 'my-group/'
 RETURN p.name, p.full_path, count(mr) AS open_mrs

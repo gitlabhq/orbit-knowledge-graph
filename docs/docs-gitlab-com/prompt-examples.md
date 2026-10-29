@@ -44,7 +44,7 @@ For merge request `!769` in `gitlab-org/labkit`, which changes how the `v2/log` 
 the agent runs four queries: two for the first step, and one for each other step.
 First, it gets the files that the merge request changes, with their diffs:
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest {iid: 769, project_id: 9438583})
   -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
   -[:HAS_FILE]->(f:MergeRequestDiffFile)
@@ -55,7 +55,7 @@ LIMIT 100
 A query cannot join two separate patterns, so the agent reads the changed definitions from the diff,
 then finds their callers outside the files that the merge request changes:
 
-```gql orbit-query
+```opencypher
 MATCH (caller:Definition)
   -[:CALLS]->(d:Definition)
   <-[:DEFINES]-(f:File {project_id: 9438583, branch: 'master'})
@@ -68,7 +68,7 @@ LIMIT 100
 
 Calls are resolved inside one project, so imports show the other projects that depend on the code:
 
-```gql orbit-query
+```opencypher
 MATCH (s:ImportedSymbol {import_path: 'gitlab.com/gitlab-org/labkit/v2/log'})
   <-[:IMPORTS]-(f:File)
   -[:ON_BRANCH]->(b:Branch)
@@ -81,7 +81,7 @@ LIMIT 100
 
 The other open merge requests on the same files:
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest)
   -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
   -[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: 9438583})
@@ -122,7 +122,7 @@ GitLab Orbit is read-only, so your agent creates the issues and starts the sessi
 GitLab Orbit finds the projects and tracks the deployments, with one query for each of the first two steps.
 The first query returns the vulnerabilities in every state, because a fix that reached production usually resolves its vulnerability:
 
-```gql orbit-query
+```opencypher
 MATCH (v:Vulnerability)-[:HAS_FINDING]->(o:VulnerabilityOccurrence)
   -[:HAS_IDENTIFIER]->(i:VulnerabilityIdentifier {external_id: 'CVE-2025-58183'})
 MATCH (v)-[:IN_PROJECT]->(p:Project)
@@ -132,7 +132,7 @@ ORDER BY p.full_path
 LIMIT 50
 ```
 
-```gql orbit-query
+```opencypher
 MATCH (v:Vulnerability)
   <-[:FIXES]-(mr:MergeRequest)
   -[:DEPLOYED_TO]->(d:Deployment)
@@ -168,7 +168,7 @@ Then rank the changes by how likely they are to cause the errors.
 
 For the first step, the agent runs one query:
 
-```gql orbit-query
+```opencypher
 MATCH (f:MergeRequestDiffFile)
   <-[:HAS_FILE]-(md:MergeRequestDiff)
   <-[:HAS_LATEST_DIFF]-(mr:MergeRequest)
@@ -183,7 +183,7 @@ LIMIT 50
 
 For the second step, it finds the code that the file calls:
 
-```gql orbit-query
+```opencypher
 MATCH (f:File {path: 'app/models/ci/build.rb', project_id: 278964, branch: 'master'})
   -[:DEFINES]->(d:Definition)
   -[:CALLS]->(callee:Definition)
@@ -217,7 +217,7 @@ Using GitLab Orbit, before I change <BasePolicy> and <Ability::allowed?> in
 
 For the first step, the agent finds the subclasses:
 
-```gql orbit-query
+```opencypher
 MATCH (child:Definition)
   -[:EXTENDS*1..3]->(parent:Definition {
     fqn: 'BasePolicy', project_id: 278964, branch: 'master'})
@@ -230,7 +230,7 @@ A pattern follows up to three levels of inheritance.
 On `gitlab-org/gitlab`, 366 classes inherit from `BasePolicy` in up to three levels.
 Then it finds the callers:
 
-```gql orbit-query
+```opencypher
 MATCH (caller:Definition)
   -[:CALLS]->(d:Definition {
     fqn: 'Ability::allowed?', project_id: 278964, branch: 'master'})
@@ -241,7 +241,7 @@ LIMIT 1000
 
 The projects that import a library:
 
-```gql orbit-query
+```opencypher
 MATCH (s:ImportedSymbol)
   <-[:IMPORTS]-(f:File)
   -[:ON_BRANCH]->(b:Branch)
@@ -275,7 +275,7 @@ created in <my-group>/<my-project> in the last <30 days>:
 
 For the share that merged, the agent counts the merge requests by flow type and state:
 
-```gql orbit-query
+```opencypher
 MATCH (a:AgentSession)
   -[:CREATED_MR]->(mr:MergeRequest)
 WHERE mr.project_id = 278964 AND mr.created_at >= '2026-09-24T00:00:00Z'
@@ -287,7 +287,7 @@ LIMIT 30
 The query language has no median function, so the agent gets the merged merge requests with their timestamps
 and computes the median time to merge itself:
 
-```gql orbit-query
+```opencypher
 MATCH (a:AgentSession)
   -[:CREATED_MR]->(mr:MergeRequest)
 WHERE mr.project_id = 278964 AND mr.created_at >= '2026-09-24T00:00:00Z'
@@ -298,7 +298,7 @@ LIMIT 1000
 
 For the merge requests that are still open after two weeks, with a failed head pipeline:
 
-```gql orbit-query
+```opencypher
 MATCH (a:AgentSession)
   -[:CREATED_MR]->(mr:MergeRequest)
   -[:HAS_HEAD_PIPELINE]->(pl:Pipeline {status: 'failed'})
@@ -325,7 +325,7 @@ Using GitLab Orbit, which projects in <my-group> ran pipelines in the last
 <30 days> but no <SAST>, <dependency scanning>, or <secret detection> scan?
 ```
 
-```gql orbit-query
+```opencypher
 MATCH (pl:Pipeline)-[:IN_PROJECT]->(p:Project)
 WHERE p.full_path STARTS WITH 'gitlab-org/ci-cd/' AND pl.created_at >= '2026-09-24T00:00:00Z'
 RETURN p.full_path, count(pl) AS pipelines
@@ -334,7 +334,7 @@ LIMIT 1000
 
 The query language has no subqueries, so the agent runs a second query for the scans, and compares the two lists:
 
-```gql orbit-query
+```opencypher
 MATCH (s:SecurityScan)-[:IN_PROJECT]->(p:Project)
 WHERE p.full_path STARTS WITH 'gitlab-org/ci-cd/' AND s.created_at >= '2026-09-24T00:00:00Z'
   AND s.status = 'succeeded'
@@ -363,7 +363,7 @@ job <docs-lint markdown>. Is it my change or a flaky job?
   and how many times each?
 ```
 
-```gql orbit-query
+```opencypher
 MATCH (j:Job {project_id: 278964, name: 'docs-lint markdown', ref: 'master'})
 WHERE j.created_at >= '2026-10-10T00:00:00Z'
 RETURN j.status, j.failure_reason, count(j) AS jobs
@@ -373,7 +373,7 @@ LIMIT 10
 
 The other open merge requests that fail the job in their head pipeline:
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest {project_id: 278964, state: 'opened'})
   -[:HAS_HEAD_PIPELINE]->(pl:Pipeline)
   -[:HAS_JOB]->(j:Job {name: 'docs-lint markdown', status: 'failed'})
@@ -384,7 +384,7 @@ LIMIT 20
 
 To find out if the job fails in other projects too:
 
-```gql orbit-query
+```opencypher
 MATCH (j:Job {status: 'failed', name: 'docs-lint markdown'})
   -[:IN_PROJECT]->(p:Project)
 WHERE p.full_path STARTS WITH 'gitlab-org/'
@@ -413,7 +413,7 @@ Using GitLab Orbit, for the open merge requests in milestone <19.6> of
 For the jobs in common, the agent gets the failed jobs of each head pipeline.
 It leaves out retried jobs and jobs that are allowed to fail:
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest {project_id: 278964, state: 'opened'})
   -[:IN_MILESTONE]->(m:Milestone {title: '19.6'})
 MATCH (mr)-[:HAS_HEAD_PIPELINE]->(pl:Pipeline {status: 'failed'})
@@ -427,7 +427,7 @@ LIMIT 1000
 The agent groups the rows by `j.name`, so a job that fails on many merge requests stands out.
 Then, for each of those jobs, it finds who is assigned to the merge requests that fail it:
 
-```gql orbit-query
+```opencypher
 MATCH (u:User)
   -[:ASSIGNED]->(mr:MergeRequest {project_id: 278964, state: 'opened'})
   -[:IN_MILESTONE]->(m:Milestone {title: '19.6'})
@@ -455,7 +455,7 @@ Using GitLab Orbit, in <my-group>/<my-project>:
 - Who approved those merge requests?
 ```
 
-```gql orbit-query
+```opencypher
 MATCH (n:Note)
   <-[:HAS_NOTE]-(mr:MergeRequest)
   -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
@@ -469,7 +469,7 @@ LIMIT 20
 
 Then it finds who approved the merged merge requests that changed the file:
 
-```gql orbit-query
+```opencypher
 MATCH (u:User)
   -[:APPROVED]->(mr:MergeRequest {state: 'merged'})
   -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)

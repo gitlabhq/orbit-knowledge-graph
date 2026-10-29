@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.11+gql
+version: 0.35.12+gql
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
@@ -46,7 +46,7 @@ The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in yo
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one aggregate query, with `count(...)` in `RETURN`, over N lookups for "how many X grouped by Y", and batch related lookups.
 
-When editing Orbit docs or skills, fence executable GQL queries as `gql orbit-query` so docs smoke tests run them.
+When editing Orbit docs or skills, fence GQL queries as `opencypher` so docs smoke tests run them.
 
 ## Running a query
 

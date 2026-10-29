@@ -88,7 +88,7 @@ token functions.
 - `all_tokens(property, 'first second')` requires every word, in any order.
 - `any_tokens(property, 'first second')` requires at least one word.
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest {project_id: 278964})
 WHERE all_tokens(mr.title, 'database migration')
 RETURN mr.iid, mr.title, mr.state
@@ -122,7 +122,7 @@ one stable order.
 unique property such as `id`, and filter past the last value from the previous
 page. Each page costs the same however deep it is:
 
-```gql orbit-query
+```opencypher
 MATCH (u:User {username: 'root'})-[:AUTHORED]->(mr:MergeRequest)
 WHERE mr.state = 'merged' AND mr.id > 48211
 RETURN mr.id, mr.iid, mr.title
@@ -150,7 +150,7 @@ the function.
 
 ### Look up a project's numeric ID
 
-```gql orbit-query
+```opencypher
 MATCH (p:Project {full_path: 'gitlab-org/gitlab'})
 RETURN p.id, p.full_path
 LIMIT 1
@@ -161,7 +161,7 @@ needs no query.
 
 ### Look up a merge request by IID
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest {iid: 235291})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
 RETURN mr.iid, mr.title, mr.state
 LIMIT 1
@@ -169,7 +169,7 @@ LIMIT 1
 
 ### Count merge requests per state in a project
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 77960826})
 RETURN mr.state, count(mr) AS mrs
 ORDER BY mrs DESC
@@ -187,7 +187,7 @@ traversal. `DISTINCT` works only inside `count()`.
 Use the MR's internal numeric ID, not its project-scoped IID. The `source`
 filter excludes downstream child pipelines, whose source is `parent_pipeline`.
 
-```gql orbit-query
+```opencypher
 MATCH (pl:Pipeline {merge_request_id: 482908721, source: 'merge_request_event'})
 RETURN pl.id, pl.status, pl.ref
 ORDER BY pl.created_at DESC
@@ -196,7 +196,7 @@ LIMIT 10
 
 ### Open work items in a project
 
-```gql orbit-query
+```opencypher
 MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project {id: 77960826})
 WHERE wi.state = 'opened'
 RETURN wi.iid, wi.title, wi.work_item_type
@@ -211,7 +211,7 @@ if it touched the file only in an earlier revision. Anchor on `old_path` and
 `project_id` so the same path in another project does not match.
 Group by MR to avoid returning it once per matching snapshot.
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: 278964, old_path: 'app/services/base_service.rb'})
 RETURN mr.id, mr.iid, mr.title, count(d) AS snapshots
 ORDER BY snapshots DESC
@@ -223,7 +223,7 @@ LIMIT 100
 Use `HAS_LATEST_DIFF` for the current revision. Using `HAS_DIFF` instead also
 includes files removed from the diff in later revisions.
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest {id: 482908721})-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
 RETURN f.old_path, f.new_path
 LIMIT 50
@@ -237,7 +237,7 @@ small results as incomplete coverage, not proof that files or MRs are absent.
 `EXTENDS` points from child to parent. Bound the parent by its fully qualified
 name, project, and branch. This query includes descendants up to three hops away.
 
-```gql orbit-query
+```opencypher
 MATCH (child:Definition)-[:EXTENDS*1..3]->(parent:Definition {fqn: 'ApplicationRecord', project_id: 278964, branch: 'master'})
 RETURN child.name, child.fqn, child.file_path
 LIMIT 1000
@@ -250,7 +250,7 @@ as indexed coverage, not an exhaustive list.
 
 The far endpoint has a variable but no label.
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest {id: 482908721})--(n)
 RETURN n
 LIMIT 20
@@ -258,7 +258,7 @@ LIMIT 20
 
 ### Merged merge requests by one author, a page at a time
 
-```gql orbit-query
+```opencypher
 MATCH (u:User {username: 'root'})-[:AUTHORED]->(mr:MergeRequest)
 WHERE mr.state = 'merged'
 RETURN mr.iid, mr.title
@@ -271,7 +271,7 @@ SKIP 0 LIMIT 20
 Name the relationship type and keep the hop range small. An untyped
 `-[*1..3]->` follows every relationship and can time out.
 
-```gql orbit-query
+```opencypher
 MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {full_path: 'gitlab-org/gitlab'})
 RETURN path
 ```

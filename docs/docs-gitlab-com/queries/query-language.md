@@ -99,7 +99,7 @@ An `id` is unique in the instance.
 An `iid`, such as the number of a merge request, is unique only in its project.
 To find an ID, query by path first:
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest {iid: 235291})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
 RETURN mr.id, p.id
 LIMIT 1
@@ -114,7 +114,7 @@ To run the examples, query with the full path of one of your projects, and use t
 
 To find every node that is connected to one node, write an undirected relationship, `--`, from a [bounded node](#bounded-nodes):
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest {id: 482908721})--(n)
 RETURN n
 LIMIT 20
@@ -130,7 +130,7 @@ A shortest path with no relationship type, such as `-[*1..3]->`, fails.
 The path uses `->`, starts at one hop, and is the only `MATCH` clause. `RETURN` takes only the path variable.
 If the filter on an endpoint matches more than 500 nodes, the search starts from the 500 nodes with the lowest IDs.
 
-```gql orbit-query
+```opencypher
 MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {full_path: 'gitlab-org/gitlab'})
 RETURN path
 ```
@@ -193,7 +193,7 @@ Properties without a text index reject the token functions.
 The value needs at least three characters, and matching ignores ASCII case.
 This query finds merge requests with both words in the title, in any order:
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest {project_id: 278964})
 WHERE all_tokens(mr.title, 'database migration')
 RETURN mr.iid, mr.title, mr.state
@@ -277,7 +277,7 @@ These properties have a text index:
   `minute` and `hour` also need a filter on the same property, or an `id =` or `id IN` filter on the same node.
   Weeks start on Sunday.
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
 WHERE mr.created_at >= '2026-01-01T00:00:00Z'
 RETURN date_trunc('month', mr.created_at) AS month, count(mr) AS mrs
@@ -292,7 +292,7 @@ To get results page by page, use `SKIP` and `LIMIT`, and add the page size to `S
 Write `SKIP` on every page, including `SKIP 0` on the first page, so that all pages use the same sort order.
 Do not change other parts of the query between pages.
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
 WHERE mr.state = 'merged'
 RETURN mr.iid, mr.title
@@ -310,7 +310,7 @@ A page can return fewer rows than `LIMIT`, or no rows, because GitLab removes th
 `SKIP` accepts up to 10,000 rows.
 To go deeper, sort by a unique property, such as `id`, and filter past the last value of the previous page:
 
-```gql orbit-query
+```opencypher
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
 WHERE mr.state = 'merged' AND mr.id > 482908721
 RETURN mr.id, mr.iid, mr.title
