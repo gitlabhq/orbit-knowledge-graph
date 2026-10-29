@@ -130,7 +130,7 @@ fn install_plugin(
 ) -> Result<()> {
     let (dir, dir_label) = target.resolve(&plugin.dir)?;
     if let Some(reason) = skip_reason(agent, plugin, target) {
-        report.note_skipped(&agent.title, &dir_label, reason);
+        report.note_plugin_skipped(&agent.title, &dir_label, reason);
         return Ok(());
     }
 

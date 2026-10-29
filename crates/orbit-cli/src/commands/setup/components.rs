@@ -56,7 +56,7 @@ pub(super) struct Outcome {
     pub(super) group: String,
     pub(super) label: String,
     pub(super) action: String,
-    pub(super) skipped_agent: Option<String>,
+    pub(super) skipped_plugin_agent: Option<String>,
 }
 
 #[derive(Default)]
@@ -75,24 +75,31 @@ impl Report {
             group: self.group.clone(),
             label: label.to_string(),
             action: action.to_string(),
-            skipped_agent: None,
+            skipped_plugin_agent: None,
         });
     }
 
-    pub(super) fn note_skipped(&mut self, agent_title: &str, label: &str, action: impl Display) {
-        self.note(label, action);
-        if let Some(outcome) = self.outcomes.last_mut() {
-            outcome.skipped_agent = Some(agent_title.to_string());
-        }
+    pub(super) fn note_plugin_skipped(
+        &mut self,
+        agent_title: &str,
+        label: &str,
+        action: impl Display,
+    ) {
+        self.outcomes.push(Outcome {
+            group: self.group.clone(),
+            label: label.to_string(),
+            action: action.to_string(),
+            skipped_plugin_agent: Some(agent_title.to_string()),
+        });
     }
 
-    pub(super) fn only_skips(&self) -> Report {
+    pub(super) fn only_plugin_skips(&self) -> Report {
         Report {
             group: self.group.clone(),
             outcomes: self
                 .outcomes
                 .iter()
-                .filter(|outcome| outcome.skipped_agent.is_some())
+                .filter(|outcome| outcome.skipped_plugin_agent.is_some())
                 .cloned()
                 .collect(),
         }
@@ -101,7 +108,7 @@ impl Report {
     pub(super) fn skipped_agent_plugins(&self) -> impl Iterator<Item = &str> {
         self.outcomes
             .iter()
-            .filter_map(|outcome| outcome.skipped_agent.as_deref())
+            .filter_map(|outcome| outcome.skipped_plugin_agent.as_deref())
     }
 }
 

@@ -246,7 +246,7 @@ fn apply_and_report(
     if options.verbose || outcome.is_err() {
         show_outcomes_per_component(&report)?;
     } else {
-        show_outcomes_per_component(&report.only_skips())?;
+        show_outcomes_per_component(&report.only_plugin_skips())?;
     }
     outcome?;
     Ok(report)
