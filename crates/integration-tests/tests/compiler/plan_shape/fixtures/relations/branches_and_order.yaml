@@ -31,7 +31,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Project mr.project_id AS e0_dst, mr.head_pipeline_id AS e1_dst, ... (_))
+            - (Project mr.project_id AS _orbit_e0_dst, mr.head_pipeline_id AS _orbit_e1_dst, ... (_))
           occurrences:
             - pattern: (Scan Table(gl_merge_request) AS mr)
               count: 1

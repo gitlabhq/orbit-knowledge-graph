@@ -13,7 +13,7 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Union ALL AS _orbit_edge_0 (_) (_))", "(Join ON (_depth_1.source_id = e2.target_id) AND ... (_) (_))"]
+      expect: ["(Union ALL AS _orbit_edge_0 (_) (_))", "(Join ON (_orbit_depth_1.source_id = _orbit_e2.target_id) AND ... (_) (_))"]
       reject: ["(SemiJoin ... (_) (_))"]
     emitted:
-      expect: ["(Union ALL AS _orbit_edge_0 (_) (_))", "(Project ArrayConcat(_depth_1.path_nodes, Array(Tuple(e2.source_id, e2.source_kind))) AS path_nodes, ... (_))"]
+      expect: ["(Union ALL AS _orbit_edge_0 (_) (_))", "(Project ArrayConcat(_orbit_depth_1._orbit_path_nodes, Array(Tuple(_orbit_e2.source_id, _orbit_e2.source_kind))) AS _orbit_path_nodes, ... (_))"]

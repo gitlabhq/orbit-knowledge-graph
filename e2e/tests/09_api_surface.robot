@@ -55,7 +55,7 @@ Query Names Cannot Use The Internal Column Prefix
     [Tags]    api
     Orbit Query Is Rejected
     ...    MATCH (g:Group {id: ${SHARED_NAMESPACE_ID}}) RETURN count(g) AS _orbit_total
-    ...    output column "_orbit_total" conflicts with reserved prefix "_orbit_"
+    ...    identifier "_orbit_total" conflicts with reserved prefix "_orbit_"
     Orbit Query Is Rejected
     ...    MATCH (_orbit_g:Group {id: ${SHARED_NAMESPACE_ID}}) RETURN _orbit_g
-    ...    node id "_orbit_g" conflicts with reserved prefix "_orbit_"
+    ...    identifier "_orbit_g" conflicts with reserved prefix "_orbit_"

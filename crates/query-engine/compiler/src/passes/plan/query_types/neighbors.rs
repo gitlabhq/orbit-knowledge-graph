@@ -5,6 +5,7 @@ use ontology::constants::*;
 use query_data_model::{DenormalizedDirection, OrbitQueryModel, RelationshipId};
 
 use super::EdgeTableConfig;
+use crate::constants::neighbor_edge_alias;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::filters::{BoundFilter, denormalized_facts, lowerable_denorm};
@@ -268,7 +269,10 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
     });
     plan.node_edge_mappings.insert(
         center.alias.clone(),
-        ("e".to_string(), SOURCE_ID_COLUMN.to_string()),
+        (
+            neighbor_edge_alias().to_string(),
+            SOURCE_ID_COLUMN.to_string(),
+        ),
     );
     plan.nodes.insert(center.alias.clone(), center);
     plan.denormalized = denormalized;

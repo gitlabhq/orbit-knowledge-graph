@@ -15,6 +15,6 @@ physical:
       expect: ["(Neighbors center=u direction=outgoing directional ... (_))"]
     emitted:
       expect:
-        - (Filter _e.source_kind = 'User', _e.source_id = 1, ... (Scan Table(gl_edge) AS _e))
+        - (Filter _orbit_neighbor_edge_arm.source_kind = 'User', _orbit_neighbor_edge_arm.source_id = 1, ... (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm))
       reject:
-        - (Filter _e.target_kind = 'User', ... (_))
+        - (Filter _orbit_neighbor_edge_arm.target_kind = 'User', ... (_))

@@ -1,0 +1,8 @@
+description: Relationship RETURN aliases cannot use the internal column prefix
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, type(r) AS _orbit_e0_kind, mr LIMIT 10
+
+expect:
+  compile_error: 'identifier "_orbit_e0_kind" conflicts with reserved prefix "_orbit_"'

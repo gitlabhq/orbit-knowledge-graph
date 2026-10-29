@@ -14,7 +14,7 @@ physical:
     planned:
       bind:
         - (CTE $edge (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.source_id = 1, ... (_)))))
-        - (CTE $ids (Project _id_source.target_id AS id (_)))
+        - (CTE $ids (Project _orbit_id_source.target_id AS id (_)))
       expect:
         - (Filter b._deleted = false (Deduplicate LimitBy ... (Filter b.id IN $ids.id (_))))
       reject: ["(Deduplicate Final (Scan Table(gl_definition) AS b))"]
@@ -22,7 +22,7 @@ physical:
       expect:
         - (Join ON b.id = _orbit_edge_0.target_id (_) (_))
         - (Filter _orbit_edge_0.source_id = 1, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))
-        - (Filter StartsWith(b.traversal_path, scalar(gl_definition AS _scope WHERE _scope.id = 1)) OR (scalar(gl_definition AS _scope WHERE _scope.id = 1) = '0/'), b.id IN ?.id (Scan Table(gl_definition) AS b))
+        - (Filter StartsWith(b.traversal_path, scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1)) OR (scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1) = '0/'), b.id IN ?.id (Scan Table(gl_definition) AS b))
       reject: ["(Deduplicate Final (Scan Table(gl_definition) AS b))"]
   duckdb:
     planned:

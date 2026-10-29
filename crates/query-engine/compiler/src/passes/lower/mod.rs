@@ -165,14 +165,11 @@ pub fn emit(plan: &QueryPlan, input: &Input, tp_bounds: Option<&TpBounds>) -> Re
     let edges = plan
         .relations()
         .iter()
-        .map(|hop| {
-            let prefix = hop.column_prefix();
-            LoweredEdge {
-                path_column: (hop.max_hops > 1).then(|| format!("{prefix}path_nodes")),
-                column_prefix: prefix,
-                rel_types: hop.rel_types.clone(),
-                relationship: hop.input_index,
-            }
+        .map(|hop| LoweredEdge {
+            path_column: (hop.max_hops > 1).then(|| hop.path_nodes_column()),
+            column_prefix: hop.column_prefix(),
+            rel_types: hop.rel_types.clone(),
+            relationship: hop.input_index,
         })
         .collect();
     Ok(LoweredQuery {

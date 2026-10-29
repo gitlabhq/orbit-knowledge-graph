@@ -13,4 +13,4 @@ query:
     MATCH (mr:MergeRequest) WHERE mr.id IN [2000, 2001] RETURN mr, mr.iid AS _orbit_mr_id, count(mr) AS n LIMIT 10
 
 expect:
-  compile_error: 'output column "_orbit_mr_id" conflicts with reserved prefix "_orbit_"'
+  compile_error: 'identifier "_orbit_mr_id" conflicts with reserved prefix "_orbit_"'

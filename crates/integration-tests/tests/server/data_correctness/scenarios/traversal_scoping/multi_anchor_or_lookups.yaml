@@ -16,8 +16,8 @@ query:
 
 expect:
   sql_contains:
-    - "(_scope.id = 1000)"
-    - "(_scope.id = 1004)"
+    - "(_orbit_scope.id = 1000)"
+    - "(_orbit_scope.id = 1004)"
     - ") OR startsWith(mr.traversal_path, (SELECT"
     - ") OR startsWith(p.traversal_path, (SELECT"
   node_count: 7

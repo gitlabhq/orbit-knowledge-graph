@@ -1,6 +1,7 @@
 use ontology::constants::*;
 
 use crate::ast::*;
+use crate::constants::union_arm_alias;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::BoundFilter;
@@ -295,7 +296,7 @@ pub fn final_edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     if tables.len() == 1 {
         return TableRef::scan_final(&tables[0], alias);
     }
-    let inner_alias = format!("_{alias}");
+    let inner_alias = union_arm_alias(alias);
     let columns: Vec<_> = EDGE_RESERVED_COLUMNS
         .iter()
         .chain([&DELETED_COLUMN])
@@ -321,7 +322,7 @@ pub fn edge_table_scan_filtered(
     if tables.len() == 1 {
         (TableRef::scan(&tables[0], alias), arm_where(alias))
     } else {
-        let inner_alias = format!("_{alias}");
+        let inner_alias = union_arm_alias(alias);
         let mut common_cols: Vec<SelectExpr> = ontology::constants::EDGE_RESERVED_COLUMNS
             .iter()
             .map(|col| SelectExpr::col(&inner_alias, *col))

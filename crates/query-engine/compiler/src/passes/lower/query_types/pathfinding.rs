@@ -23,7 +23,7 @@ pub(crate) fn emit(plan: &Plan<PathFinding>, input: &Input) -> Result<Emitted> {
     let path_text = |column: &str| {
         OrderExpr::asc(Expr::func(
             Function::ToString,
-            vec![Expr::col("paths", column)],
+            vec![Expr::col(paths_alias(), column)],
         ))
     };
     Ok(Emitted {
@@ -45,20 +45,21 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
         pf.scoped_by_tp,
     );
     let end_anchor = build_anchor(end_np, TARGET_ID_COLUMN, &mut anchor_ctes, pf.scoped_by_tp);
-    let path_scope_cte = build_scope_cte(&start_anchor, &end_anchor);
+    let path_scope = build_scope_cte(&start_anchor, &end_anchor);
 
     let start_entity = start_np.entity.as_deref().unwrap_or("");
     let end_entity = end_np.entity.as_deref().unwrap_or("");
 
+    let first_hop = hop_alias(1);
     let start_denorm = build_denorm_tags(
         query_data_model::DenormalizedDirection::Source,
-        "e1",
+        &first_hop,
         &start_np.filters,
         &plan.denormalized,
     );
     let end_denorm = build_denorm_tags(
         query_data_model::DenormalizedDirection::Target,
-        "e1",
+        &first_hop,
         &end_np.filters,
         &plan.denormalized,
     );
@@ -67,13 +68,13 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
         rel_type_filter: &pf.edge.rel_type_filter,
         anchor_entity: Some(start_entity),
         edge_tables: &pf.edge.tables,
-        scope_cte: path_scope_cte.as_ref().map(|c| c.name.as_str()),
+        scope_cte: path_scope.as_ref().map(|c| c.name.as_str()),
         include_tp: pf.scoped_by_tp,
         anchor_denorm_tags: start_denorm,
     };
 
-    let forward_cte = Cte::new(
-        FORWARD_CTE,
+    let forward_frontier = Cte::new(
+        forward_cte(),
         build_frontier(
             start_anchor.edge_filter,
             pf.forward_depth,
@@ -81,9 +82,9 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
             &frontier_opts,
         ),
     );
-    let backward_cte = if pf.backward_depth > 0 {
+    let backward_frontier = if pf.backward_depth > 0 {
         Some(Cte::new(
-            BACKWARD_CTE,
+            backward_cte(),
             build_frontier(
                 end_anchor.edge_filter.clone(),
                 pf.backward_depth,
@@ -102,51 +103,57 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
     let start_tuple = |t: &str| {
         Expr::func(
             Function::Tuple,
-            vec![Expr::col(t, ANCHOR_ID_COLUMN), Expr::string(start_entity)],
+            vec![
+                Expr::col(t, anchor_node_column()),
+                Expr::string(start_entity),
+            ],
         )
     };
     let end_tuple = |t: &str| {
         Expr::func(
             Function::Tuple,
-            vec![Expr::col(t, ANCHOR_ID_COLUMN), Expr::string(end_entity)],
+            vec![Expr::col(t, anchor_node_column()), Expr::string(end_entity)],
         )
     };
 
     let direct_query = Query {
         select: vec![
             SelectExpr::new(
-                Expr::col(FORWARD_ALIAS, ANCHOR_ID_COLUMN),
-                PATH_START_ID_COLUMN,
+                Expr::col(forward_cte(), anchor_node_column()),
+                path_start_column(),
             ),
-            SelectExpr::new(Expr::col(FORWARD_ALIAS, END_ID_COLUMN), PATH_END_ID_COLUMN),
-            SelectExpr::col(FORWARD_ALIAS, DEPTH_COLUMN),
+            SelectExpr::new(
+                Expr::col(forward_cte(), end_node_column()),
+                path_end_column(),
+            ),
+            SelectExpr::col(forward_cte(), depth_column()),
             SelectExpr::new(
                 Expr::func(
                     Function::ArrayConcat,
                     vec![
-                        Expr::func(Function::Array, vec![start_tuple(FORWARD_ALIAS)]),
-                        Expr::col(FORWARD_ALIAS, PATH_NODES_COLUMN),
+                        Expr::func(Function::Array, vec![start_tuple(forward_cte())]),
+                        Expr::col(forward_cte(), path_nodes_column()),
                     ],
                 ),
                 path_column(),
             ),
             SelectExpr::new(
-                Expr::col(FORWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN),
+                Expr::col(forward_cte(), frontier_edge_kinds_column()),
                 edge_kinds_column(),
             ),
         ],
-        from: TableRef::cte(FORWARD_CTE, FORWARD_ALIAS),
+        from: TableRef::cte(forward_cte(), forward_cte()),
         where_clause: Expr::and_all([
             Some(Expr::binary(
                 Op::Eq,
-                Expr::col(FORWARD_ALIAS, DEPTH_COLUMN),
+                Expr::col(forward_cte(), depth_column()),
                 Expr::int(1),
             )),
             Some(Expr::eq(
-                Expr::col(FORWARD_ALIAS, END_KIND_COLUMN),
+                Expr::col(forward_cte(), end_kind_column()),
                 Expr::string(end_entity),
             )),
-            endpoint_filter(end_np, FORWARD_ALIAS, END_ID_COLUMN),
+            endpoint_filter(end_np, forward_cte(), end_node_column()),
         ]),
         ..Default::default()
     };
@@ -154,32 +161,32 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
     let intersection_query = Query {
         select: vec![
             SelectExpr::new(
-                Expr::col(FORWARD_ALIAS, ANCHOR_ID_COLUMN),
-                PATH_START_ID_COLUMN,
+                Expr::col(forward_cte(), anchor_node_column()),
+                path_start_column(),
             ),
             SelectExpr::new(
-                Expr::col(BACKWARD_ALIAS, ANCHOR_ID_COLUMN),
-                PATH_END_ID_COLUMN,
+                Expr::col(backward_cte(), anchor_node_column()),
+                path_end_column(),
             ),
             SelectExpr::new(
                 Expr::binary(
                     Op::Add,
-                    Expr::col(FORWARD_ALIAS, DEPTH_COLUMN),
-                    Expr::col(BACKWARD_ALIAS, DEPTH_COLUMN),
+                    Expr::col(forward_cte(), depth_column()),
+                    Expr::col(backward_cte(), depth_column()),
                 ),
-                DEPTH_COLUMN,
+                depth_column(),
             ),
             SelectExpr::new(
                 Expr::func(
                     Function::ArrayConcat,
                     vec![
-                        Expr::func(Function::Array, vec![start_tuple(FORWARD_ALIAS)]),
-                        Expr::col(FORWARD_ALIAS, PATH_NODES_COLUMN),
+                        Expr::func(Function::Array, vec![start_tuple(forward_cte())]),
+                        Expr::col(forward_cte(), path_nodes_column()),
                         Expr::func(
                             Function::ArrayReverse,
-                            vec![Expr::col(BACKWARD_ALIAS, PATH_NODES_COLUMN)],
+                            vec![Expr::col(backward_cte(), path_nodes_column())],
                         ),
-                        Expr::func(Function::Array, vec![end_tuple(BACKWARD_ALIAS)]),
+                        Expr::func(Function::Array, vec![end_tuple(backward_cte())]),
                     ],
                 ),
                 path_column(),
@@ -188,10 +195,10 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
                 Expr::func(
                     Function::ArrayConcat,
                     vec![
-                        Expr::col(FORWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN),
+                        Expr::col(forward_cte(), frontier_edge_kinds_column()),
                         Expr::func(
                             Function::ArrayReverse,
-                            vec![Expr::col(BACKWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN)],
+                            vec![Expr::col(backward_cte(), frontier_edge_kinds_column())],
                         ),
                     ],
                 ),
@@ -200,29 +207,29 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
         ],
         from: {
             let mut join_cond = Expr::eq(
-                Expr::col(FORWARD_ALIAS, END_ID_COLUMN),
-                Expr::col(BACKWARD_ALIAS, END_ID_COLUMN),
+                Expr::col(forward_cte(), end_node_column()),
+                Expr::col(backward_cte(), end_node_column()),
             );
             join_cond = Expr::and(
                 join_cond,
                 Expr::eq(
-                    Expr::col(FORWARD_ALIAS, END_KIND_COLUMN),
-                    Expr::col(BACKWARD_ALIAS, END_KIND_COLUMN),
+                    Expr::col(forward_cte(), end_kind_column()),
+                    Expr::col(backward_cte(), end_kind_column()),
                 ),
             );
             if pf.scoped_by_tp {
                 join_cond = Expr::and(
                     join_cond,
                     Expr::eq(
-                        Expr::col(FORWARD_ALIAS, TRAVERSAL_PATH_COLUMN),
-                        Expr::col(BACKWARD_ALIAS, TRAVERSAL_PATH_COLUMN),
+                        Expr::col(forward_cte(), TRAVERSAL_PATH_COLUMN),
+                        Expr::col(backward_cte(), TRAVERSAL_PATH_COLUMN),
                     ),
                 );
             }
             TableRef::join(
                 JoinType::Inner,
-                TableRef::cte(FORWARD_CTE, FORWARD_ALIAS),
-                TableRef::cte(BACKWARD_CTE, BACKWARD_ALIAS),
+                TableRef::cte(forward_cte(), forward_cte()),
+                TableRef::cte(backward_cte(), backward_cte()),
                 join_cond,
             )
         },
@@ -230,8 +237,8 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
             Op::Le,
             Expr::binary(
                 Op::Add,
-                Expr::col(FORWARD_ALIAS, DEPTH_COLUMN),
-                Expr::col(BACKWARD_ALIAS, DEPTH_COLUMN),
+                Expr::col(forward_cte(), depth_column()),
+                Expr::col(backward_cte(), depth_column()),
             ),
             Expr::int(pf.max_depth as i64),
         )),
@@ -239,36 +246,36 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
     };
 
     let paths_union = if pf.backward_depth == 0 {
-        TableRef::subquery(direct_query, PATHS_ALIAS)
+        TableRef::subquery(direct_query, paths_alias())
     } else {
-        TableRef::union_all(vec![direct_query, intersection_query], PATHS_ALIAS)
+        TableRef::union_all(vec![direct_query, intersection_query], paths_alias())
     };
 
-    let order_by = vec![OrderExpr::asc(Expr::col(PATHS_ALIAS, DEPTH_COLUMN))];
+    let order_by = vec![OrderExpr::asc(Expr::col(paths_alias(), depth_column()))];
     Ok(Node::Query(Box::new(Query {
         ctes: {
             let mut ctes = anchor_ctes;
-            if let Some(scope) = path_scope_cte {
+            if let Some(scope) = path_scope {
                 ctes.push(scope);
             }
-            ctes.push(forward_cte);
-            if let Some(bc) = backward_cte {
+            ctes.push(forward_frontier);
+            if let Some(bc) = backward_frontier {
                 ctes.push(bc);
             }
             ctes
         },
         select: vec![
-            SelectExpr::col(PATHS_ALIAS, path_column()),
-            SelectExpr::col(PATHS_ALIAS, edge_kinds_column()),
-            SelectExpr::col(PATHS_ALIAS, DEPTH_COLUMN),
+            SelectExpr::col(paths_alias(), path_column()),
+            SelectExpr::col(paths_alias(), edge_kinds_column()),
+            SelectExpr::col(paths_alias(), depth_column()),
         ],
         from: paths_union,
         order_by,
         limit_by: Some((
             1,
             vec![
-                Expr::col(PATHS_ALIAS, PATH_START_ID_COLUMN),
-                Expr::col(PATHS_ALIAS, PATH_END_ID_COLUMN),
+                Expr::col(paths_alias(), path_start_column()),
+                Expr::col(paths_alias(), path_end_column()),
             ],
         )),
         limit: Some(input.limit),
@@ -291,7 +298,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
     if !force_cte && np.is_id_pinned_only() {
         return Anchor {
             edge_filter: Expr::col_in(
-                "e1",
+                hop_alias(1),
                 edge_col,
                 SqlType::Int64,
                 np.node_ids.iter().map(|id| Value::from(*id)).collect(),
@@ -351,7 +358,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
 
     Anchor {
         edge_filter: Some(Expr::InSubquery {
-            expr: Box::new(Expr::col("e1", edge_col)),
+            expr: Box::new(Expr::col(hop_alias(1), edge_col)),
             cte_name: cte_name.clone(),
             columns: vec![DEFAULT_PRIMARY_KEY.into()],
         }),
@@ -375,17 +382,13 @@ fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
         ..Default::default()
     };
     Some(Cte::new(
-        PATH_SCOPE_CTE,
+        path_scope_cte(),
         Query {
-            union_all: vec![arm(end_cte, PATH_SCOPE_END_ALIAS)],
-            ..arm(start_cte, PATH_SCOPE_START_ALIAS)
+            union_all: vec![arm(end_cte, path_scope_end_alias())],
+            ..arm(start_cte, path_scope_start_alias())
         },
     ))
 }
-
-const PATH_SCOPE_CTE: &str = "_path_scope_traversal_paths";
-const PATH_SCOPE_START_ALIAS: &str = "_path_scope_start";
-const PATH_SCOPE_END_ALIAS: &str = "_path_scope_end";
 
 fn endpoint_filter(np: &NodePlan, alias: &str, col: &str) -> Option<Expr> {
     if np.is_id_pinned_only() {
@@ -463,13 +466,14 @@ fn build_frontier_arm(
         FDir::Backward => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
     };
 
-    let last = format!("e{depth}");
+    let first = hop_alias(1);
+    let last = hop_alias(depth);
 
-    let mut from = final_edge_table_scan(opts.edge_tables, "e1");
-    let mut first_type_cond = type_cond_for("e1", opts.rel_type_filter);
+    let mut from = final_edge_table_scan(opts.edge_tables, &first);
+    let mut first_type_cond = type_cond_for(&first, opts.rel_type_filter);
     for i in 2..=depth {
-        let prev = format!("e{}", i - 1);
-        let curr = format!("e{i}");
+        let prev = hop_alias(i - 1);
+        let curr = hop_alias(i);
         let edge_tbl = final_edge_table_scan(opts.edge_tables, &curr);
         let mut join_cond = Expr::eq(Expr::col(&prev, next_col), Expr::col(&curr, anchor_col));
         join_cond = Expr::and(
@@ -509,7 +513,7 @@ fn build_frontier_arm(
     };
     let tuples: Vec<Expr> = path_range
         .map(|i| {
-            let a = format!("e{i}");
+            let a = hop_alias(i);
             Expr::func(
                 Function::Tuple,
                 vec![Expr::col(&a, next_col), Expr::col(&a, next_kind_col)],
@@ -525,7 +529,7 @@ fn build_frontier_arm(
     let edge_kinds = Expr::func(
         Function::Array,
         (1..=depth)
-            .map(|i| Expr::col(format!("e{i}"), RELATIONSHIP_KIND_COLUMN))
+            .map(|i| Expr::col(hop_alias(i), RELATIONSHIP_KIND_COLUMN))
             .collect(),
     );
 
@@ -535,19 +539,19 @@ fn build_frontier_arm(
     };
     let anchor_kind_cond = opts
         .anchor_entity
-        .map(|e| Expr::eq(Expr::col("e1", anchor_kind_col), Expr::string(e)));
-    let scope_cond = opts.scope_cte.map(|sc| scope_filter("e1", sc));
+        .map(|e| Expr::eq(Expr::col(&first, anchor_kind_col), Expr::string(e)));
+    let scope_cond = opts.scope_cte.map(|sc| scope_filter(&first, sc));
 
     let mut select = vec![
-        SelectExpr::new(Expr::col("e1", anchor_col), ANCHOR_ID_COLUMN),
-        SelectExpr::new(Expr::col(&last, next_col), END_ID_COLUMN),
-        SelectExpr::new(Expr::col(&last, next_kind_col), END_KIND_COLUMN),
-        SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
-        SelectExpr::new(edge_kinds, FRONTIER_EDGE_KINDS_COLUMN),
-        SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
+        SelectExpr::new(Expr::col(&first, anchor_col), anchor_node_column()),
+        SelectExpr::new(Expr::col(&last, next_col), end_node_column()),
+        SelectExpr::new(Expr::col(&last, next_kind_col), end_kind_column()),
+        SelectExpr::new(path_nodes, path_nodes_column()),
+        SelectExpr::new(edge_kinds, frontier_edge_kinds_column()),
+        SelectExpr::new(Expr::int(depth as i64), depth_column()),
     ];
     if opts.include_tp {
-        select.push(SelectExpr::col("e1", TRAVERSAL_PATH_COLUMN));
+        select.push(SelectExpr::col(&first, TRAVERSAL_PATH_COLUMN));
     }
 
     let mut all_conds = vec![

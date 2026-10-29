@@ -2915,16 +2915,16 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     );
 
     assert!(
-        query.base.sql.contains("_orbit_neighbor_id"),
-        "must include _orbit_neighbor_id"
+        query.base.sql.contains("_orbit_neighbor_node"),
+        "must include _orbit_neighbor_node"
     );
     assert!(
-        query.base.sql.contains("_orbit_neighbor_type"),
-        "must include _orbit_neighbor_type"
+        query.base.sql.contains("_orbit_neighbor_kind"),
+        "must include _orbit_neighbor_kind"
     );
     assert!(
-        query.base.sql.contains("_orbit_relationship_type"),
-        "must include _orbit_relationship_type"
+        query.base.sql.contains("_orbit_relationship_kind"),
+        "must include _orbit_relationship_kind"
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
@@ -3469,19 +3469,25 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     .unwrap();
 
     assert!(
-        query.base.sql.contains("e0_type"),
-        "SQL must contain e0_type. SQL: {}",
+        query.base.sql.contains("_orbit_e0_kind"),
+        "SQL must contain _orbit_e0_kind. SQL: {}",
         query.base.sql
     );
-    assert!(query.base.sql.contains("e0_src"), "SQL must contain e0_src");
     assert!(
-        query.base.sql.contains("e0_src_type"),
-        "SQL must contain e0_src_type"
+        query.base.sql.contains("_orbit_e0_src"),
+        "SQL must contain _orbit_e0_src"
     );
-    assert!(query.base.sql.contains("e0_dst"), "SQL must contain e0_dst");
     assert!(
-        query.base.sql.contains("e0_dst_type"),
-        "SQL must contain e0_dst_type"
+        query.base.sql.contains("_orbit_e0_src_kind"),
+        "SQL must contain _orbit_e0_src_kind"
+    );
+    assert!(
+        query.base.sql.contains("_orbit_e0_dst"),
+        "SQL must contain _orbit_e0_dst"
+    );
+    assert!(
+        query.base.sql.contains("_orbit_e0_dst_kind"),
+        "SQL must contain _orbit_e0_dst_kind"
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
@@ -3496,29 +3502,29 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
         let group_id = row.get_id(&g).expect("group id should be present");
 
         assert_eq!(
-            row.get("e0_type")
+            row.get("_orbit_e0_kind")
                 .and_then(|v| v.as_string().map(|s| s.as_str())),
             Some("MEMBER_OF"),
             "edge type should be MEMBER_OF"
         );
         assert_eq!(
-            row.get("e0_src").and_then(|v| v.as_int64().copied()),
+            row.get("_orbit_e0_src").and_then(|v| v.as_int64().copied()),
             Some(user_id),
             "edge source should match user id"
         );
         assert_eq!(
-            row.get("e0_src_type")
+            row.get("_orbit_e0_src_kind")
                 .and_then(|v| v.as_string().map(|s| s.as_str())),
             Some("User"),
             "edge source type should be User"
         );
         assert_eq!(
-            row.get("e0_dst").and_then(|v| v.as_int64().copied()),
+            row.get("_orbit_e0_dst").and_then(|v| v.as_int64().copied()),
             Some(group_id),
             "edge target should match group id"
         );
         assert_eq!(
-            row.get("e0_dst_type")
+            row.get("_orbit_e0_dst_kind")
                 .and_then(|v| v.as_string().map(|s| s.as_str())),
             Some("Group"),
             "edge target type should be Group"
@@ -3564,21 +3570,21 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     assert_eq!(authorized_row.get_id(&g), Some(100));
     assert_eq!(
         authorized_row
-            .get("e0_type")
+            .get("_orbit_e0_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("MEMBER_OF"),
         "edge type should be preserved after redaction"
     );
     assert_eq!(
         authorized_row
-            .get("e0_src")
+            .get("_orbit_e0_src")
             .and_then(|v| v.as_int64().copied()),
         Some(1),
         "edge source should be user 1"
     );
     assert_eq!(
         authorized_row
-            .get("e0_dst")
+            .get("_orbit_e0_dst")
             .and_then(|v| v.as_int64().copied()),
         Some(100),
         "edge target should be group 100"
@@ -3586,11 +3592,11 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
 
     let authorized_edge_sources: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get("e0_src").and_then(|v| v.as_int64().copied()))
+        .filter_map(|r| r.get("_orbit_e0_src").and_then(|v| v.as_int64().copied()))
         .collect();
     let authorized_edge_targets: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get("e0_dst").and_then(|v| v.as_int64().copied()))
+        .filter_map(|r| r.get("_orbit_e0_dst").and_then(|v| v.as_int64().copied()))
         .collect();
 
     assert_eq!(
@@ -3633,15 +3639,21 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
     .unwrap();
 
     assert!(
-        query.base.sql.contains("e0_type"),
-        "SQL must contain e0_type"
+        query.base.sql.contains("_orbit_e0_kind"),
+        "SQL must contain _orbit_e0_kind"
     );
-    assert!(query.base.sql.contains("e0_src"), "SQL must contain e0_src");
     assert!(
-        query.base.sql.contains("e1_type"),
-        "SQL must contain e1_type"
+        query.base.sql.contains("_orbit_e0_src"),
+        "SQL must contain _orbit_e0_src"
     );
-    assert!(query.base.sql.contains("e1_src"), "SQL must contain e1_src");
+    assert!(
+        query.base.sql.contains("_orbit_e1_kind"),
+        "SQL must contain _orbit_e1_kind"
+    );
+    assert!(
+        query.base.sql.contains("_orbit_e1_src"),
+        "SQL must contain _orbit_e1_src"
+    );
 
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
@@ -3672,58 +3684,58 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
     assert_eq!(row.get_id(&p), Some(1000), "project should be 1000");
 
     assert_eq!(
-        row.get("e0_type")
+        row.get("_orbit_e0_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("MEMBER_OF"),
         "first edge type should be MEMBER_OF"
     );
     assert_eq!(
-        row.get("e0_src").and_then(|v| v.as_int64().copied()),
+        row.get("_orbit_e0_src").and_then(|v| v.as_int64().copied()),
         Some(1),
         "e0 source should be user 1"
     );
     assert_eq!(
-        row.get("e0_src_type")
+        row.get("_orbit_e0_src_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("User"),
         "e0 source type should be User"
     );
     assert_eq!(
-        row.get("e0_dst").and_then(|v| v.as_int64().copied()),
+        row.get("_orbit_e0_dst").and_then(|v| v.as_int64().copied()),
         Some(100),
         "e0 target should be group 100"
     );
     assert_eq!(
-        row.get("e0_dst_type")
+        row.get("_orbit_e0_dst_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("Group"),
         "e0 target type should be Group"
     );
 
     assert_eq!(
-        row.get("e1_type")
+        row.get("_orbit_e1_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("CONTAINS"),
         "second edge type should be CONTAINS"
     );
     assert_eq!(
-        row.get("e1_src").and_then(|v| v.as_int64().copied()),
+        row.get("_orbit_e1_src").and_then(|v| v.as_int64().copied()),
         Some(100),
         "e1 source should be group 100"
     );
     assert_eq!(
-        row.get("e1_src_type")
+        row.get("_orbit_e1_src_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("Group"),
         "e1 source type should be Group"
     );
     assert_eq!(
-        row.get("e1_dst").and_then(|v| v.as_int64().copied()),
+        row.get("_orbit_e1_dst").and_then(|v| v.as_int64().copied()),
         Some(1000),
         "e1 target should be project 1000"
     );
     assert_eq!(
-        row.get("e1_dst_type")
+        row.get("_orbit_e1_dst_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("Project"),
         "e1 target type should be Project"
@@ -3778,7 +3790,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
 
     for row in result.iter() {
         let neighbor_type = row
-            .get("_orbit_neighbor_type")
+            .get("_orbit_neighbor_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str()));
         assert_eq!(
             neighbor_type,
@@ -3804,7 +3816,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     let authorized_neighbor_ids: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|row| {
-            row.get("_orbit_neighbor_id")
+            row.get("_orbit_neighbor_node")
                 .and_then(|v| v.as_int64().copied())
         })
         .collect();
