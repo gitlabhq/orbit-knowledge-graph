@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
 use query_data_model::OrbitQueryModel;
-use query_engine::compiler::constants::{HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS};
+use query_engine::compiler::constants::{MAX_DYNAMIC_HYDRATION_RESULTS, hydration_node_alias};
 use query_engine::compiler::{
     ColumnSelection, HydrationCompileOptions, HydrationPlan, InputNode, QueryType,
     compile_input_model,
@@ -65,7 +65,7 @@ impl HydrationStage {
             total_ids += ids.len();
             id_columns.insert(entity_type.clone(), auth.auth_id_column.clone());
             nodes.push(InputNode {
-                id: HYDRATION_NODE_ALIAS.to_string(),
+                id: hydration_node_alias().to_string(),
                 columns: Some(ColumnSelection::List(vec![auth.auth_id_column.clone()])),
                 node_ids: ids,
                 traversal_paths: if data_model.entity_has_traversal_path(&entity_type) {
