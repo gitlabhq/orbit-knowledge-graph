@@ -347,7 +347,9 @@ fn expected_value_matches(array: &dyn Array, row: usize, expected: &serde_json::
             !array.is_null(row) && format_cell(array, row) == *value
         }
         serde_json::Value::Array(_) => {
-            !array.is_null(row) && format_cell(array, row) == expected.to_string()
+            !array.is_null(row)
+                && serde_json::from_str::<serde_json::Value>(&format_cell(array, row))
+                    .is_ok_and(|cell| cell == *expected)
         }
         _ => false,
     }
