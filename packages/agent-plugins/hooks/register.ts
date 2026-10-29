@@ -50,7 +50,7 @@ function finishedRow({ Box, Text }: Ui, call: OrbitCall, state: RowState): Rende
   ]
   if (call.detail) children.push(Text({ dimColor: true, children: ['  ' + call.detail] }))
   const others = othersText(call)
-  if (others) children.push(Text({ color: 'warning', children: [others] }))
+  if (others) children.push(Text({ color: 'warning', dimColor: true, children: [others] }))
   if (state.isInterrupted) children.push(Text({ color: 'error', children: ['  · interrupted'] }))
   return Box({ flexDirection: 'row', children })
 }
