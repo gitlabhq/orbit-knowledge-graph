@@ -15,6 +15,10 @@ cases:
             due_date: { is_null: true }
           prop_present: [title]
           prop_absent: [due_date]
+      sql_contains:
+        - "nullIf(wi.due_date, toDate32('1970-01-01'))"
+        - "wi.due_date = toDate32('1970-01-01')"
+      sql_not_contains: ["toDateTime64('1970-01-01"]
 
   - name: is_not_null_on_date
     description: is_not_null on a Date column keeps only the row with a real date and returns it
@@ -38,3 +42,7 @@ cases:
             due_date: { is_not_null: true }
           rows:
             - { id: 99030, due_date: "2024-05-01" }
+      sql_contains:
+        - "nullIf(wi.due_date, toDate32('1970-01-01'))"
+        - "wi.due_date != toDate32('1970-01-01')"
+      sql_not_contains: ["toDateTime64('1970-01-01"]

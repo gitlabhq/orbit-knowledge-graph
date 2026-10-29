@@ -281,3 +281,5 @@ cases:
             due_date: { is_not_null: true }
           rows:
             - { id: 99031, due_date: "2024-05-01" }
+      sql_contains:
+        - "nullIf(wi.due_date, toDate32('1970-01-01')) >= nullIf(wi.created_at, toDateTime64('1970-01-01 00:00:00', 6, 'UTC'))"

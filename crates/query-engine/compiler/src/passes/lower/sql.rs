@@ -33,26 +33,26 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
     )
 }
 
-fn epoch() -> Expr {
-    Expr::param(
-        parameter_type(Some(&ontology::DataType::DateTime)),
-        "1970-01-01 00:00:00",
-    )
+fn epoch(data_type: ontology::DataType) -> Expr {
+    let value = match data_type {
+        ontology::DataType::Date => "1970-01-01",
+        _ => "1970-01-01 00:00:00",
+    };
+    Expr::param(parameter_type(Some(&data_type)), value)
 }
 
-pub(super) fn null_if_epoch(value: Expr) -> Expr {
-    Expr::func(Function::NullIf, vec![value, epoch()])
+pub(super) fn null_if_epoch(value: Expr, data_type: ontology::DataType) -> Expr {
+    Expr::func(Function::NullIf, vec![value, epoch(data_type)])
 }
 
-fn not_epoch(value: Expr) -> Expr {
-    Expr::binary(Op::Ne, value, epoch())
+fn not_epoch(value: Expr, data_type: ontology::DataType) -> Expr {
+    Expr::binary(Op::Ne, value, epoch(data_type))
 }
 
-fn read(column: Expr, null_as_epoch: bool) -> Expr {
-    if null_as_epoch {
-        null_if_epoch(column)
-    } else {
-        column
+fn read(column: Expr, null_as_epoch: Option<ontology::DataType>) -> Expr {
+    match null_as_epoch {
+        Some(data_type) => null_if_epoch(column, data_type),
+        None => column,
     }
 }
 
@@ -78,15 +78,19 @@ pub(crate) fn filter_expression(
         .expect("validated property comparison");
     }
 
-    let col = read(raw.clone(), null_as_epoch.column && negated);
+    let col = read(raw.clone(), null_as_epoch.column.filter(|_| negated));
 
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
     let typed = |v: serde_json::Value| -> Expr { Expr::param(parameter_type(data_type), v) };
 
     let op = filter.op.unwrap_or(FilterOp::Eq);
     let expression = match op {
-        FilterOp::IsNull if null_as_epoch.column => return Expr::eq(raw, epoch()),
-        FilterOp::IsNotNull if null_as_epoch.column => return not_epoch(raw),
+        FilterOp::IsNull if let Some(epoch_type) = null_as_epoch.column => {
+            return Expr::eq(raw, epoch(epoch_type));
+        }
+        FilterOp::IsNotNull if let Some(epoch_type) = null_as_epoch.column => {
+            return not_epoch(raw, epoch_type);
+        }
         op @ (FilterOp::Eq
         | FilterOp::Ne
         | FilterOp::Gt
@@ -135,10 +139,9 @@ pub(crate) fn filter_expression(
             }
         }
     };
-    let expression = if null_as_epoch.column && !negated {
-        Expr::and(expression, not_epoch(raw))
-    } else {
-        expression
+    let expression = match null_as_epoch.column {
+        Some(epoch_type) if !negated => Expr::and(expression, not_epoch(raw, epoch_type)),
+        _ => expression,
     };
     if text_indexed && matches!(op, FilterOp::Eq | FilterOp::In) {
         let values = match val() {
