@@ -677,6 +677,11 @@ async fn corpus_smoke() {
 
         let ran = stages.join(" > ");
         match (case.expects_error, outcome) {
+            (false, Ok(ref output)) if stages != expected_stages(output) => failures.push(format!(
+                "{}: ran {ran}; expected {}",
+                case.key,
+                expected_stages(output).join(" > ")
+            )),
             (false, Ok(SmokeOutput::Schema(response))) => eprintln!(
                 "corpus_smoke: {} ({:?} schema): {ran}; {} domains, {} edges",
                 case.key,
@@ -684,11 +689,6 @@ async fn corpus_smoke() {
                 response.domains.len(),
                 response.edges.len()
             ),
-            (false, Ok(ref output)) if stages != expected_stages(output) => failures.push(format!(
-                "{}: ran {ran}; expected {}",
-                case.key,
-                expected_stages(output).join(" > ")
-            )),
             (false, Ok(SmokeOutput::Query(output))) => eprintln!(
                 "corpus_smoke: {} ({:?} {}): {ran}; {} rows, {} redacted, {} ClickHouse queries",
                 case.key,

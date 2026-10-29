@@ -41,7 +41,7 @@ from the ontology. Then it compiles and runs three families of queries:
 
 - every entry in this directory, as GQL. An `expect: error` entry must fail.
 - every named query in `config/named_queries`, in JSON and in GQL.
-- every `opencypher` and `json orbit-query` code block in the tracked Markdown files,
+- every `opencypher` and `json orbit-query` code block in the Markdown files of the repository,
   every `language-opencypher` HTML code element, and every query in an `orbit query` line
   of a shell code block. The scan skips `docs-locale` and `CHANGELOG.md`.
 
