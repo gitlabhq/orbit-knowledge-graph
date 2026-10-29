@@ -30,7 +30,7 @@ Start a free trial to try GitLab Orbit in a top-level group.
 Prerequisites:
 
 - The Owner role for the top-level group.
-- A top-level group that is eligible for a trial and does not already have GitLab Orbit.
+- A top-level group that is eligible for a trial.
   If the group is not eligible, see [the option to turn on GitLab Orbit is not available](troubleshooting.md#the-option-to-turn-on-gitlab-orbit-is-not-available).
 
 To start a trial:
