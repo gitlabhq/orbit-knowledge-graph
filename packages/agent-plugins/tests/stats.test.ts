@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { cypherSegments, hopsOf, queryOf } from '../core/cypher.ts'
-import { apiCallsFor, compact, graphStatus, grouped, parseResponse } from '../core/stats.ts'
+import { apiCallsFor, compact, countedTotal, graphStatus, grouped, identityLookups, parseResponse, scopeIdentity, type ScopeTotal } from '../core/stats.ts'
 
 test('the llm format counts nodes by entity and edges', () => {
   const text = [
@@ -185,4 +185,46 @@ test('API calls replaced follow the GraphQL minimum: pages of 100, joins nested'
   expect(apiCallsFor(total)).toBe(1)
   expect(apiCallsFor(parseResponse('domains[1]:\n  - name: code_review'))).toBe(0)
   expect(apiCallsFor(parseResponse(JSON.stringify({ result: { nodes: [{ type: 'User' }], edges: [] } })))).toBe(1)
+})
+
+const group = (key: string, total: number, id: string, path: string): ScopeTotal => ({ key, total, identity: { kind: 'group', id, path } })
+const project = (key: string, total: number, id: string, path: string): ScopeTotal => ({ key, total, identity: { kind: 'project', id, path } })
+
+test('one group named by path and by id counts once', () => {
+  expect(countedTotal([group('full-path:a', 100, '9', 'a'), group('namespace-id:9', 100, '9', 'a')])).toBe(100)
+})
+
+test('different groups add up', () => {
+  expect(countedTotal([group('namespace-id:9', 100, '9', 'a'), group('namespace-id:10', 50, '10', 'b')])).toBe(150)
+})
+
+test('a group or project inside a counted group is not added', () => {
+  const parent = group('namespace-id:9', 100, '9', 'a')
+  expect(countedTotal([parent, group('full-path:a/sub', 40, '11', 'a/sub')])).toBe(100)
+  expect(countedTotal([project('project-id:7', 5, '7', 'a/p'), parent])).toBe(100)
+})
+
+test('a project is skipped inside its group even when both share an id', () => {
+  expect(countedTotal([group('namespace-id:7', 100, '7', 'a'), project('project-id:7', 5, '7', 'a/p')])).toBe(100)
+})
+
+test('a project outside every counted group is added', () => {
+  expect(countedTotal([group('namespace-id:9', 100, '9', 'a'), project('project-id:8', 5, '8', 'ab/p')])).toBe(105)
+})
+
+test('a scope without an identity keeps its own spelling and is never dropped', () => {
+  expect(countedTotal([group('namespace-id:9', 100, '9', 'a'), { key: 'full-path:a', total: 100 }])).toBe(200)
+})
+
+test('scope identities come from the glab api body of a group or a project', () => {
+  expect(scopeIdentity('{"id":9,"full_path":"a/b"}', 'group')).toEqual({ kind: 'group', id: '9', path: 'a/b' })
+  expect(scopeIdentity('{"id":7,"path_with_namespace":"a/b/p"}', 'project')).toEqual({ kind: 'project', id: '7', path: 'a/b/p' })
+  expect(scopeIdentity('{"message":"404 Not Found"}', 'group')).toBeNull()
+  expect(scopeIdentity('nope', 'project')).toBeNull()
+})
+
+test('a full path is looked up as a group, then as a project', () => {
+  expect(identityLookups(['--full-path', 'a/b']).map(({ kind, argv }) => [kind, argv[2]])).toEqual([['group', 'groups/a%2Fb'], ['project', 'projects/a%2Fb']])
+  expect(identityLookups(['--namespace-id', '9']).map(({ argv }) => argv[2])).toEqual(['groups/9'])
+  expect(identityLookups([])).toEqual([])
 })

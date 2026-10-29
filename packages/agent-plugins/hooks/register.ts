@@ -1,8 +1,8 @@
 import type { Elements, Register, RenderElement } from 'claude-code'
 
 import { QUERY_LABEL, describeOrbitCall, othersText, type OrbitCall } from '../core/calls.ts'
-import { cypherSegments, hopsOf, projectsOf, queryOf } from '../core/cypher.ts'
-import { apiCallsFor, compact, graphStatus, grouped, parseResponse } from '../core/stats.ts'
+import { cypherSegments, hopsOf, queryOf, scopesOf } from '../core/cypher.ts'
+import { apiCallsFor, compact, countedTotal, graphStatus, grouped, identityLookups, parseResponse, scopeIdentity, type ScopeIdentity } from '../core/stats.ts'
 import { codeLines, layout, type Token } from './highlight.ts'
 import type { MarkProps } from './orbit-mark.ts'
 import { isPendingCall, leadsIntoOrbit, mergeRuns, usesOrbit } from './rows.ts'
@@ -19,6 +19,7 @@ type RowState = { isErrored?: boolean; isInterrupted?: boolean }
 const MAX_PROJECT_TOTALS = 8
 const stats = { calls: 0, nodes: 0, edges: 0, apiCalls: 0 }
 const projectTotals = new Map<string, number | null>()
+const scopeIdentities = new Map<string, ScopeIdentity>()
 let entitiesAsked = false
 let knownEntities: ReadonlySet<string> = new Set()
 const narration = new Set<string>()
@@ -50,7 +51,7 @@ function finishedRow({ Box, Text }: Ui, call: OrbitCall, state: RowState): Rende
   ]
   if (call.detail) children.push(Text({ dimColor: true, children: ['  ' + call.detail] }))
   const others = othersText(call)
-  if (others) children.push(Text({ color: 'warning', children: [others] }))
+  if (others) children.push(Text({ color: 'warning', dimColor: true, children: [others] }))
   if (state.isInterrupted) children.push(Text({ color: 'error', children: ['  · interrupted'] }))
   return Box({ flexDirection: 'row', children })
 }
@@ -80,6 +81,7 @@ function codeBlock(ui: Ui, code: string): RenderElement {
 function resetConversation(): void {
   Object.assign(stats, { calls: 0, nodes: 0, edges: 0, apiCalls: 0 })
   projectTotals.clear()
+  scopeIdentities.clear()
   entitiesAsked = false
   narration.clear()
 }
@@ -110,7 +112,7 @@ export const register: Register = (on) => {
           stats.nodes += parsed.nodes + parsed.aggregated
           stats.apiCalls += apiCallsFor(parsed)
           stats.edges += parsed.edges + parsed.aggregated * hopsOf(queryOf(command))
-          const lookUps: { key: string; flags: readonly string[] }[] = projectsOf(queryOf(command))
+          const lookUps: { key: string; flags: readonly string[] }[] = scopesOf(queryOf(command))
             .filter((scope) => !projectTotals.has(scope.key))
             .slice(0, MAX_PROJECT_TOTALS)
           if (!entitiesAsked && lookUps.length === 0) lookUps.push({ key: '', flags: [] })
@@ -118,6 +120,15 @@ export const register: Register = (on) => {
           for (const { key } of lookUps) if (key) projectTotals.set(key, null)
           void (async () => {
             for (const { key, flags } of lookUps) {
+              if (key) {
+                for (const { kind, argv } of identityLookups(flags)) {
+                  const run = await $.process.run(argv, { timeoutMs: 30000 }).catch(() => null)
+                  const identity = run?.exitCode === 0 ? scopeIdentity(run.stdout, kind) : null
+                  if (!identity) continue
+                  scopeIdentities.set(key, identity)
+                  break
+                }
+              }
               for (const launcher of [['glab', 'orbit'], ['orbit']]) {
                 const run = await $.process.run([...launcher, 'graph-status', ...flags, '--response-format', 'raw'], { timeoutMs: 30000 }).catch(() => null)
                 const graph = run?.exitCode === 0 ? graphStatus(run.stdout) : null
@@ -185,7 +196,7 @@ export const register: Register = (on) => {
     const { Box, Text } = $.ui.resolve(e)
     const blue = (text: string) => Text({ color: BLUE, children: [text] })
     const dim = (text: string) => Text({ dimColor: true, children: [text] })
-    const graphTotal = [...projectTotals.values()].reduce<number>((sum, total) => sum + (total ?? 0), 0)
+    const graphTotal = countedTotal([...projectTotals].flatMap(([key, total]) => (total ? [{ key, total, identity: scopeIdentities.get(key) }] : [])))
     const words: [string, string][] = [
       [compact(stats.calls), stats.calls === 1 ? ' query' : ' queries'],
       ['~' + compact(stats.apiCalls), stats.apiCalls === 1 ? ' API call replaced' : ' API calls replaced'],
