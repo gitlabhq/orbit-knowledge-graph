@@ -1,0 +1,24 @@
+name: List properties lower element membership to array functions
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "d", "entity": "Definition", "columns": ["name"], "filters": {
+        "modifiers": [{"contains": "async"}, {"in": ["static", "final"]}]
+      }}]
+    }
+  gql: |
+    MATCH (d:Definition)
+    WHERE 'async' IN d.modifiers AND d.modifiers IN ['static', 'final']
+    RETURN d.name
+
+logical:
+  expect:
+    - (Filter contains(d.modifiers, 'async'), d.modifiers IN ['static', 'final'] (_))
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Filter ArrayContains(d.modifiers, 'async'), ArrayContainsAny(d.modifiers, Array('static', 'final')), ... (_))

@@ -147,7 +147,7 @@ tests:
   - name: "Exact function count"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Function'
+      WHERE d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 20 }
@@ -157,7 +157,7 @@ tests:
   - name: "Exact struct count with scoped FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Struct'
+      WHERE d.language_kind = 'Struct'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 6 }
@@ -172,7 +172,7 @@ tests:
   - name: "Exact typedef count"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'TypeAlias'
+      WHERE d.language_kind = 'TypeAlias'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }
@@ -353,7 +353,7 @@ tests:
   - name: "ErrorCode enum constants with full scope"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'EnumVariant'
+      WHERE d.language_kind = 'EnumVariant'
         AND d.fqn STARTS WITH 'error::ErrorCode::'
       RETURN d.fqn AS fqn
     assert:
@@ -370,7 +370,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'io/reader.c'
-        AND d.kind = 'Function'
+        AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }
@@ -385,7 +385,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'unrelated.c'
-        AND d.kind = 'Function'
+        AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -397,7 +397,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'app.c'
-        AND d.kind = 'Function'
+        AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -475,7 +475,7 @@ tests:
   - name: "Generic list API functions exist"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Function'
+      WHERE d.language_kind = 'Function'
         AND d.fqn STARTS WITH 'list::list_'
       RETURN d.fqn AS fqn
     assert:
@@ -490,7 +490,7 @@ tests:
   - name: "Generic list structs exist"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Struct'
+      WHERE d.language_kind = 'Struct'
         AND d.fqn STARTS WITH 'list::'
       RETURN d.fqn AS fqn
     assert:
@@ -502,7 +502,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'generic/list.c'
-        AND d.kind = 'Function'
+        AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }

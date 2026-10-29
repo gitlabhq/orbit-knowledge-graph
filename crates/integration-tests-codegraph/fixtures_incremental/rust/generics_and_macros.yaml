@@ -43,7 +43,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.rs'
-        AND d.kind = 'Function'
+        AND d.language_kind = 'Function'
         AND d.name IN ['largest', 'print_it', 'main']
       RETURN d.name AS name
       ORDER BY name
@@ -54,7 +54,7 @@ tests:
   - name: Generic struct with lifetime extracted
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'Container' AND d.kind = 'Struct'
+      WHERE d.name = 'Container' AND d.language_kind = 'Struct'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

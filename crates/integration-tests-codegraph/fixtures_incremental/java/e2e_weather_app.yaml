@@ -115,7 +115,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.weather.model.Forecast'
-        AND d.kind = 'Class'
+        AND d.language_kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -124,7 +124,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.weather.formatter.Formatter.Format'
-        AND d.kind = 'Enum'
+        AND d.language_kind = 'Enum'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -133,7 +133,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.weather.Main'
-        AND d.kind = 'Class'
+        AND d.language_kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -141,7 +141,7 @@ tests:
   - name: "Method definitions exist"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Method'
+      WHERE d.language_kind = 'Method'
         AND d.fqn IN ['com.example.weather.Main.run',
                        'com.example.weather.cli.Cli.parse',
                        'com.example.weather.service.WeatherService.fetch']
@@ -189,7 +189,7 @@ tests:
   # ── Imports ────────────────────────────────────────────────────
   - name: "Cli imports PrintStream"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(i:Import)
+      MATCH (f:File)-[e:DEFINES]->(i:Import)
       WHERE f.path = 'src/main/java/com/example/weather/cli/Cli.java'
         AND i.import_path = 'java.io'
         AND i.name = 'PrintStream'
@@ -199,7 +199,7 @@ tests:
 
   - name: "Cli imports Arrays"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(i:Import)
+      MATCH (f:File)-[e:DEFINES]->(i:Import)
       WHERE f.path = 'src/main/java/com/example/weather/cli/Cli.java'
         AND i.import_path = 'java.util'
         AND i.name = 'Arrays'
@@ -209,7 +209,7 @@ tests:
 
   - name: "WeatherService imports Collectors"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(i:Import)
+      MATCH (f:File)-[e:DEFINES]->(i:Import)
       WHERE f.path = 'src/main/java/com/example/weather/service/WeatherService.java'
         AND i.import_path = 'java.util.stream'
         AND i.name = 'Collectors'
@@ -219,7 +219,7 @@ tests:
 
   - name: "Main imports Forecast"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(i:Import)
+      MATCH (f:File)-[e:DEFINES]->(i:Import)
       WHERE f.path = 'src/main/java/com/example/weather/Main.java'
         AND i.import_path = 'com.example.weather.model'
         AND i.name = 'Forecast'

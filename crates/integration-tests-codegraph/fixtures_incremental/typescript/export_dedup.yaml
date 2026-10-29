@@ -24,7 +24,7 @@ fixtures:
 tests:
   - name: Re-export barrels connect consumers to original definitions
     query: |
-      MATCH (symbol:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (symbol:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE symbol.file_path = 'consumer.ts'
       RETURN symbol.name AS imported, d.name AS name, d.file_path AS file, d.kind AS type
       ORDER BY name

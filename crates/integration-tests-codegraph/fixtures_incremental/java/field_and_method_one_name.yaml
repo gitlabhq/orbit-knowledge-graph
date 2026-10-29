@@ -115,19 +115,19 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'x' AND t.name IN ['x', 'b']
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Other.b", kind: "Method" } }
+      - { row: { callee: "Other.b", language_kind: "Method" } }
 
   - name: a read of x types the receiver by the field, not by the method of the same name
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'go'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Other.b", kind: "Method" } }
+      - { row: { callee: "Other.b", language_kind: "Method" } }
 
   - name: a call of x() targets the method and types the receiver by its return
     query: |
@@ -143,10 +143,10 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'viaSuper'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Other.b", kind: "Method" } }
+      - { row: { callee: "Other.b", language_kind: "Method" } }
 
   - name: an assignment to x is not a call
     query: |
@@ -160,10 +160,10 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.fqn = 'Set.indexOf' AND t.name = 'first'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Set.first", kind: "Method" } }
+      - { row: { callee: "Set.first", language_kind: "Method" } }
 
   - name: a bare call inside the anonymous class targets the method, not the field of the same name
     # Known gap: inside the anonymous class the bare name resolves through the value of the field of its name, so the call has no edge, on main too.
@@ -171,10 +171,10 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.fqn = 'Set.it.again'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Set.first", kind: "Method" } }
+      - { row: { callee: "Set.first", language_kind: "Method" } }
 
   - name: a chained call on a method of a nested class types by its return
     # Known gap: a return type that names a nested class is not resolved, on main too.

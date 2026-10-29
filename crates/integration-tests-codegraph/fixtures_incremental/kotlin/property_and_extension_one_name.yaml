@@ -22,9 +22,9 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'useLen' AND t.name = 'len'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
-      - { row: { callee: "Box.len", kind: "Property" } }
+      - { row: { callee: "Box.len", language_kind: "Property" } }
 
   - name: a call of a property that is not of function type targets the extension function of its name
     # Known gap: the engine keeps the property for every callable-tagged property, so the call also reaches the property.

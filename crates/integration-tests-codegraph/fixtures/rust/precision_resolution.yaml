@@ -276,7 +276,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'fn_pointer_from_assoc' AND callee.name = 'new'
-      RETURN caller.file_path AS src, callee.fqn AS fqn, callee.kind AS type
+      RETURN caller.file_path AS src, callee.fqn AS fqn, callee.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/lib.rs", fqn: "dep::Service::new", type: "AssociatedFunction" } }

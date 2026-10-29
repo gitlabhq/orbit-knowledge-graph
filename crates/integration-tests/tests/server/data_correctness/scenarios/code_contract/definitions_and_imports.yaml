@@ -1,0 +1,124 @@
+config:
+  extra_seed:
+    gl_definition:
+      - { id: 15000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "app/order.py", fqn: "app.Order.charge", name: charge, signature: "async def charge(self, card: Card) -> Receipt", parameters: ["self", "card: Card"], return_type: Receipt, category: Callable, kind: Method, language_kind: Method, scope: member, modifiers: [async], start_line: 10, end_line: 20, start_byte: 0, end_byte: 0, start_char: 0, end_char: 0 }
+      - { id: 15001, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "app/order.py", fqn: "app.Order.total", name: total, signature: "def total(self)", parameters: ["self"], category: Callable, kind: Method, language_kind: Method, scope: member, modifiers: [static], start_line: 22, end_line: 25, start_byte: 0, end_byte: 0, start_char: 0, end_char: 0 }
+    gl_import:
+      - { id: 15100, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "app/order.py", import_kind: symbol, language_kind: FromImport, import_path: requests, name: get, alias: "", fqn: requests.get, is_external: true, start_line: 1, end_line: 1, start_byte: 0, end_byte: 0, start_char: 0, end_char: 0 }
+
+cases:
+  - name: kind_rejects_a_language_word
+    description: A kind filter with a language word instead of a kind rejects and names the valid kinds
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[15000],"filters":{"kind":"Property"}}],"limit":10}
+      gql: |
+        MATCH (d:Definition {id: 15000, kind: 'Property'}) RETURN d LIMIT 10
+    expect:
+      compile_error_contains: [Property, "Valid values", Field, EnumMember, Constructor]
+
+  - name: modifier_membership
+    description: A literal IN a list property matches the definitions whose list holds the element
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[15000,15001],"filters":{"modifiers":{"contains":"async"}},"columns":["name"]}],"limit":10}
+      gql: |
+        MATCH (d:Definition) WHERE d.id IN [15000, 15001] AND 'async' IN d.modifiers RETURN d.name LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        Definition:
+          ids: [15000]
+          rows:
+            - { id: 15000, name: charge }
+
+  - name: modifier_any_of_a_list
+    description: A list property IN a list literal matches a definition that holds any of the elements
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[15000,15001],"filters":{"modifiers":{"in":["static","final"]}},"columns":["name"]}],"limit":10}
+      gql: |
+        MATCH (d:Definition) WHERE d.id IN [15000, 15001] AND d.modifiers IN ['static', 'final'] RETURN d.name LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        Definition:
+          ids: [15001]
+          rows:
+            - { id: 15001, name: total }
+
+  - name: modifier_rejects_an_unknown_element
+    description: A list property with declared elements rejects an element outside the set and names the valid ones
+    query:
+      gql: |
+        MATCH (d:Definition) WHERE d.id IN [15000, 15001] AND 'Async' IN d.modifiers RETURN d.name LIMIT 10
+    expect:
+      compile_error_contains: [Async, "Valid values", async, static]
+
+  - name: list_rejects_equality
+    description: A list property rejects an equality filter and names the forms it supports
+    query:
+      gql: |
+        MATCH (d:Definition) WHERE d.id IN [15000, 15001] AND d.modifiers = 'async' RETURN d.name LIMIT 10
+    expect:
+      compile_error_contains: ["a list field supports"]
+
+  - name: return_type_is_null
+    description: IS NULL on a nullable content column matches the definitions that declare no return type
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[15000,15001],"filters":{"return_type":{"is_null":true}},"columns":["name"]}],"limit":10}
+      gql: |
+        MATCH (d:Definition) WHERE d.id IN [15000, 15001] AND d.return_type IS NULL RETURN d.name LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        Definition:
+          ids: [15001]
+          rows:
+            - { id: 15001, name: total }
+
+  - name: list_projection
+    description: A projection returns list properties as lists and the declared return type as text
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[15000],"columns":["parameters","modifiers","return_type"]}],"limit":10}
+      gql: |
+        MATCH (d:Definition {id: 15000}) RETURN d.parameters, d.modifiers, d.return_type LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        Definition:
+          ids: [15000]
+          rows:
+            - { id: 15000, parameters: ["self", "card: Card"], modifiers: [async], return_type: Receipt }
+
+  - name: definition_default_columns
+    description: RETURN d gives the contract default columns of Definition
+    query:
+      gql: |
+        MATCH (d:Definition {id: 15000}) RETURN d LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        Definition:
+          ids: [15000]
+          prop_present: [name, fqn, signature, kind, language_kind, category, branch, file_path, start_line, end_line]
+          prop_absent: [modifiers, commit_sha, start_byte]
+          rows:
+            - { id: 15000, signature: "async def charge(self, card: Card) -> Receipt", kind: Method, category: Callable }
+
+  - name: import_default_columns
+    description: RETURN i gives the contract default columns of Import
+    query:
+      gql: |
+        MATCH (i:Import {id: 15100}) RETURN i LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        Import:
+          ids: [15100]
+          prop_present: [name, import_kind, import_path, fqn, is_external, branch, file_path, start_line]
+          prop_absent: [language_kind, commit_sha]
+          rows:
+            - { id: 15100, name: get, import_kind: symbol, fqn: requests.get, is_external: true }

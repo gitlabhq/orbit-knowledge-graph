@@ -51,7 +51,7 @@ fixtures:
 tests:
   - name: "include emits one Import per module"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:Import)
+      MATCH (f:File)-[e:DEFINES]->(s:Import)
       WHERE f.path = 'app/models/report.rb'
         AND s.language_kind = 'Include'
       RETURN s.name AS name, s.import_path AS path
@@ -62,7 +62,7 @@ tests:
 
   - name: "extend emits a module Import"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:Import)
+      MATCH (f:File)-[e:DEFINES]->(s:Import)
       WHERE f.path = 'app/models/report.rb'
         AND s.language_kind = 'Extend'
       RETURN s.name AS name, s.import_path AS path
@@ -72,7 +72,7 @@ tests:
 
   - name: "prepend emits a module Import"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:Import)
+      MATCH (f:File)-[e:DEFINES]->(s:Import)
       WHERE f.path = 'app/models/report.rb'
         AND s.language_kind = 'Prepend'
       RETURN s.name AS name, s.import_path AS path

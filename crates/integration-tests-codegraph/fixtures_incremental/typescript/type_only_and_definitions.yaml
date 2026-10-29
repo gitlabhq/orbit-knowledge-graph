@@ -51,7 +51,7 @@ tests:
 
   - name: Type-only and runtime imports retain definition relationships
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'types/consumer.ts'
       RETURN i.name AS name, d.fqn AS target
       ORDER BY name

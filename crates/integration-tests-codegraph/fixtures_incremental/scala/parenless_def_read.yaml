@@ -23,10 +23,10 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'transform' AND t.name = 'right'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Tree.right", kind: "Function" } }
+      - { row: { callee: "Tree.right", language_kind: "Function" } }
 
   - name: a parenless def read as a chain object links to the def
     query: |

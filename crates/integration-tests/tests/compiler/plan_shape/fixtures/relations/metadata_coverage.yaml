@@ -70,16 +70,16 @@ cases:
   - name: Low-cardinality endpoint filters do not create candidate relations
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","filters":{"kind":"function"}},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","filters":{"kind":"Function"}},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
       gql: |
-        MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition {kind: 'function'})-[:CALLS]->(c:Definition)
+        MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition {kind: 'Function'})-[:CALLS]->(c:Definition)
         RETURN a.id, b.id, c.id
     logical:
-      expect: ["(Filter b.kind = 'function' (_))"]
+      expect: ["(Filter b.kind = 'Function' (_))"]
     physical:
       clickhouse:
         planned:
           expect:
-            - (Filter _orbit_edge_0.target_tags HAS ANY ['kind:function'], ... (_))
+            - (Filter _orbit_edge_0.target_tags HAS ANY ['kind:Function'], ... (_))
           reject:
             - (CTE ? (Project b.id AS id (_)))

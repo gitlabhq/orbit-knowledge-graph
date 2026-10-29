@@ -26,7 +26,7 @@ tests:
   - name: "main() is extracted as Function"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'main' AND d.kind = 'Function'
+      WHERE d.name = 'main' AND d.language_kind = 'Function'
       RETURN d.name AS name
     assert:
       - { row: { name: "main" } }
@@ -34,7 +34,7 @@ tests:
   - name: "Both init() functions are extracted as distinct Definition nodes"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'init' AND d.kind = 'Function'
+      WHERE d.name = 'init' AND d.language_kind = 'Function'
       RETURN d.name AS name
     assert:
       - { row_count: 2 }
@@ -42,7 +42,7 @@ tests:
   - name: "Both init() functions share the package-scoped FQN main.init"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'init' AND d.kind = 'Function'
+      WHERE d.name = 'init' AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { column_values: { field: fqn, values: ["main.init"] } }

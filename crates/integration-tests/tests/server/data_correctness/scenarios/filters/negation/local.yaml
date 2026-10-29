@@ -2,12 +2,12 @@ config:
   duckdb: true
   extra_seed:
     gl_definition:
-      - { id: 9701, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::alice", name: alice, kind: active, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
-      - { id: 9702, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::bob", name: bob, kind: blocked, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
-      - { id: 9703, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::carol", name: carol, kind: active, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
-      - { id: 9704, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::dave", name: dave, kind: blocked, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
-      - { id: 9710, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::first", name: first, kind: target, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
-      - { id: 9720, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::second", name: second, kind: target, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
+      - { id: 9701, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::alice", name: alice, kind: Function, doc_comment: active, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
+      - { id: 9702, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::bob", name: bob, kind: Function, doc_comment: blocked, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
+      - { id: 9703, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::carol", name: carol, kind: Function, doc_comment: active, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
+      - { id: 9704, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::dave", name: dave, kind: Function, doc_comment: blocked, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
+      - { id: 9710, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::first", name: first, kind: Function, doc_comment: target, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
+      - { id: 9720, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::second", name: second, kind: Function, doc_comment: target, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
     gl_code_edge:
       - { traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 9701, source_kind: Definition, relationship_kind: CALLS, target_id: 9710, target_kind: Definition }
       - { traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 9702, source_kind: Definition, relationship_kind: CALLS, target_id: 9720, target_kind: Definition }
@@ -37,15 +37,15 @@ cases:
     query:
       gql: |
         MATCH (u:Definition)
-        WHERE u.id >= 9701 AND u.id <= 9704 AND u.name = 'alice' AND NOT u.kind = 'blocked'
-        RETURN u.name, u.kind LIMIT 10
+        WHERE u.id >= 9701 AND u.id <= 9704 AND u.name = 'alice' AND NOT u.doc_comment = 'blocked'
+        RETURN u.name, u.doc_comment LIMIT 10
     expect:
       node_count: 1
       nodes:
         Definition:
           ids: [9701]
           absent: [9702, 9703, 9704]
-          filters: { name: alice, kind: active }
+          filters: { name: alice, doc_comment: active }
 
   - name: cross_node_group
     description: A NOT group across two nodes removes the alice call to first on ClickHouse and DuckDB
@@ -71,7 +71,7 @@ cases:
       gql: |
         MATCH (u:Definition)
         WHERE u.id >= 9701 AND u.id <= 9704 AND NOT NOT u.name = 'alice'
-        RETURN u.name, u.kind LIMIT 10
+        RETURN u.name, u.doc_comment LIMIT 10
     expect:
       node_count: 1
       nodes:
@@ -85,8 +85,8 @@ cases:
     query:
       gql: |
         MATCH (u:Definition)
-        WHERE u.id >= 9701 AND u.id <= 9704 AND NOT (u.name = 'alice' AND NOT (u.id = 9702 AND u.kind = 'active'))
-        RETURN u.name, u.kind LIMIT 10
+        WHERE u.id >= 9701 AND u.id <= 9704 AND NOT (u.name = 'alice' AND NOT (u.id = 9702 AND u.doc_comment = 'active'))
+        RETURN u.name, u.doc_comment LIMIT 10
     expect:
       node_count: 3
       nodes:
@@ -117,8 +117,8 @@ cases:
     query:
       gql: |
         MATCH (u:Definition)
-        WHERE u.id >= 9701 AND u.id <= 9704 AND NOT (u.name = 'alice' AND u.kind = 'active')
-        RETURN u.name, u.kind LIMIT 10
+        WHERE u.id >= 9701 AND u.id <= 9704 AND NOT (u.name = 'alice' AND u.doc_comment = 'active')
+        RETURN u.name, u.doc_comment LIMIT 10
     expect:
       node_count: 3
       nodes:
@@ -132,7 +132,7 @@ cases:
       gql: |
         MATCH (u:Definition)
         WHERE u.id >= 9701 AND u.id <= 9704 AND NOT u.name IN ['alice', 'bob']
-        RETURN u.name, u.kind LIMIT 10
+        RETURN u.name, u.doc_comment LIMIT 10
     expect:
       node_count: 2
       nodes:
@@ -145,15 +145,15 @@ cases:
     query:
       gql: |
         MATCH (u:Definition)
-        WHERE u.id >= 9701 AND u.id <= 9704 AND NOT u.name = 'alice' AND u.kind = 'active'
-        RETURN u.name, u.kind LIMIT 10
+        WHERE u.id >= 9701 AND u.id <= 9704 AND NOT u.name = 'alice' AND u.doc_comment = 'active'
+        RETURN u.name, u.doc_comment LIMIT 10
     expect:
       node_count: 1
       nodes:
         Definition:
           ids: [9703]
           absent: [9701, 9702, 9704]
-          filters: { name: carol, kind: active }
+          filters: { name: carol, doc_comment: active }
 
   - name: not_range
     description: NOT over a range keeps the smaller IDs on ClickHouse and DuckDB
@@ -161,7 +161,7 @@ cases:
       gql: |
         MATCH (u:Definition)
         WHERE u.id >= 9701 AND u.id <= 9704 AND NOT u.id >= 9703
-        RETURN u.name, u.kind LIMIT 10
+        RETURN u.name, u.doc_comment LIMIT 10
     expect:
       node_count: 2
       nodes:

@@ -80,7 +80,7 @@ tests:
   - name: "Variable definitions are namespaced to var.<name>"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Variable'
+      WHERE d.language_kind = 'Variable'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -94,7 +94,7 @@ tests:
   - name: "var.* references resolve ACROSS files"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
-      WHERE callee.kind = 'Variable'
+      WHERE callee.language_kind = 'Variable'
         AND caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -108,7 +108,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND caller.file_path <> callee.file_path
-      RETURN callee.kind AS type
+      RETURN callee.language_kind AS type
     assert:
       - { row_count: 4 }
       - { unique: type }

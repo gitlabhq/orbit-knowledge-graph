@@ -12,7 +12,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'User.java' AND d.name = 'User'
-        AND d.kind = 'Class'
+        AND d.language_kind = 'Class'
       RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
     assert:
       - { row_count: 1 }

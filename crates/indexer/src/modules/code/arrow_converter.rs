@@ -2,7 +2,7 @@ use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use code_graph::v2::SinkError;
-use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
+use code_graph::v2::linker::graph::{DirectoryRow, FileRow, GraphOutput, ImportRow};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
 use ontology::constants::{RELATIONSHIP_KIND_COLUMN, SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN};
@@ -316,16 +316,7 @@ fn convert_definitions(
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
-    convert_entity(graph, ids, env, specs, |g, ids| {
-        g.definitions()
-            .map(|(idx, file_path, def)| DefinitionRow {
-                file_path,
-                def,
-                pool: &g.strings,
-                id: ids[idx.index()],
-            })
-            .collect()
-    })
+    convert_entity(graph, ids, env, specs, |g, ids| g.definition_rows(ids))
 }
 
 fn convert_imports(

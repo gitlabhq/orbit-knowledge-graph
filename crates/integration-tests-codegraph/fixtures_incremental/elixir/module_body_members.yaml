@@ -31,19 +31,19 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'third' AND t.name = 'helper'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Box.helper", kind: "Function" } }
+      - { row: { callee: "Box.helper", language_kind: "Function" } }
 
   - name: a call through the module name from another module targets the module function
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'run' AND t.name = 'helper'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Box.helper", kind: "Function" } }
+      - { row: { callee: "Box.helper", language_kind: "Function" } }
 
   - name: the local keeps its own read and has no edge to the module function
     query: |

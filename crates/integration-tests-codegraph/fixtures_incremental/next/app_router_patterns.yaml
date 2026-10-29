@@ -149,7 +149,7 @@ tests:
 
   - name: Next app router tsconfig aliases resolve local imports
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path IN [
         'app/layout.tsx',
         'app/page.tsx',
@@ -181,7 +181,7 @@ tests:
 
   - name: Next app router external Next imports have no local targets
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path IN ['app/layout.tsx', 'app/api/health/route.ts']
         AND i.import_path IN ['next', 'next/server']
       RETURN i.import_path AS path, d.fqn AS target

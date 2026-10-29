@@ -120,7 +120,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs' AND d.name = 'Ready'
-      RETURN d.fqn AS fqn, d.kind AS type
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "inner::Status::Ready", type: "Variant" } }
@@ -129,7 +129,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs' AND d.name IN ['Runner', 'Bits']
-      RETURN d.name AS name, d.kind AS type
+      RETURN d.name AS name, d.language_kind AS type
     assert:
       - { row_count: 2 }
       - { row: { name: "Runner", type: "Trait" } }

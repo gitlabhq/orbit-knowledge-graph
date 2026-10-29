@@ -314,7 +314,7 @@ tests:
         'MergeRequest::merge_request_diffs',
         'MergeRequest::merge_request_diff',
         'MergeRequest::metrics'
-      ] AND d.kind = 'Method'
+      ] AND d.language_kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 6 }
@@ -328,7 +328,7 @@ tests:
         'MergeRequest::opened',
         'MergeRequest::drafts',
         'MergeRequest::from_source_branches'
-      ] AND d.kind = 'Method'
+      ] AND d.language_kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }
@@ -338,7 +338,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'MergeRequest::suggested_reviewers'
-        AND d.kind = 'Method'
+        AND d.language_kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -347,7 +347,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Project::max_attachment_size'
-        AND d.kind = 'Property'
+        AND d.language_kind = 'Property'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -356,7 +356,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN ['BaseService::project', 'BaseService::current_user', 'BaseService::params']
-        AND d.kind = 'Property'
+        AND d.language_kind = 'Property'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }

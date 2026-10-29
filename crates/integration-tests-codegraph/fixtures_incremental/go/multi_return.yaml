@@ -59,10 +59,10 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name IN ['SetName', 'SetAge', 'Build', 'NewBuilder']
-      RETURN d.name AS name, d.kind AS kind
+      RETURN d.name AS name, d.language_kind AS language_kind
       ORDER BY name
     assert:
-      - { row: { name: "Build", kind: "Method" } }
-      - { row: { name: "NewBuilder", kind: "Function" } }
-      - { row: { name: "SetAge", kind: "Method" } }
-      - { row: { name: "SetName", kind: "Method" } }
+      - { row: { name: "Build", language_kind: "Method" } }
+      - { row: { name: "NewBuilder", language_kind: "Function" } }
+      - { row: { name: "SetAge", language_kind: "Method" } }
+      - { row: { name: "SetName", language_kind: "Method" } }

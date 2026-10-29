@@ -131,7 +131,7 @@ tests:
   - name: "Enum cases indexed under the enum"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'EnumCase'
+      WHERE d.language_kind = 'EnumCase'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Enums\Status\Active' } }
@@ -140,7 +140,7 @@ tests:
   - name: "Class constant indexed"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Constant'
+      WHERE d.language_kind = 'Constant'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Models\Entity\KIND' } }
@@ -149,7 +149,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Enums\Status\label'
-        AND d.kind = 'Method'
+        AND d.language_kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

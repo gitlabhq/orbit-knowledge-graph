@@ -47,12 +47,12 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name IN ['Repository', 'PostgresRepo', 'MockRepo']
-      RETURN d.name AS name, d.kind AS kind
+      RETURN d.name AS name, d.language_kind AS language_kind
       ORDER BY name
     assert:
-      - { row: { name: "MockRepo", kind: "Struct" } }
-      - { row: { name: "PostgresRepo", kind: "Struct" } }
-      - { row: { name: "Repository", kind: "Interface" } }
+      - { row: { name: "MockRepo", language_kind: "Struct" } }
+      - { row: { name: "PostgresRepo", language_kind: "Struct" } }
+      - { row: { name: "Repository", language_kind: "Interface" } }
 
   - name: "process calls Repository.Get and Repository.Save, not Close"
     queries:

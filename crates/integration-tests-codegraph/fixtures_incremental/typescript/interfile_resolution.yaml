@@ -40,8 +40,8 @@ tests:
   - name: All definitions with correct types and files
     query: |
       MATCH (d:Definition)
-      WHERE d.kind IN ['Class', 'Function', 'Method']
-      RETURN d.name AS name, d.kind AS type, d.file_path AS file
+      WHERE d.language_kind IN ['Class', 'Function', 'Method']
+      RETURN d.name AS name, d.language_kind AS type, d.file_path AS file
       ORDER BY name
     assert:
       - { row_count: 4 }

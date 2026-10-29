@@ -212,7 +212,7 @@ tests:
     skip: true
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Module'
+      WHERE d.language_kind = 'Module'
         AND d.fqn ENDS WITH '.vue'
       RETURN d.fqn AS fqn
     assert:
@@ -225,7 +225,7 @@ tests:
     # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
         AND i.import_path = 'jh_else_ce/gitlab_version_check/components/gitlab_version_check_badge.vue'
       RETURN i.language_kind AS language_kind, i.name AS name, d.fqn AS target
@@ -237,7 +237,7 @@ tests:
     # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
         AND i.import_path = '~/gitlab_version_check/components'
         AND i.name = 'SecurityPatchUpgradeAlertModal'
@@ -250,7 +250,7 @@ tests:
     # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue'
       RETURN i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -273,7 +273,7 @@ tests:
           'SecurityPatchUpgradeAlertModal::dispatchTrackingEvent',
           'SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick'
         ]
-      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type
+      RETURN d.name AS name, d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 4 }
       - { row: { name: "SecurityPatchUpgradeAlertModal", fqn: "SecurityPatchUpgradeAlertModal", type: "Class" } }
@@ -285,7 +285,7 @@ tests:
     # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -351,7 +351,7 @@ tests:
     # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:

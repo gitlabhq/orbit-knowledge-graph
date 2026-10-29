@@ -19,19 +19,19 @@ cases:
   - name: NOT over a non-nullable denormalized property reads the node row and its edge tag together
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000],"not":{"kind":{"in":["function","method"]}}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000],"not":{"kind":{"in":["Function","Method"]}}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
       gql: |
         MATCH (a:Definition)-[:CALLS]->(b:Definition)
-        WHERE a.id IN [12000] AND NOT a.kind IN ['function', 'method']
+        WHERE a.id IN [12000] AND NOT a.kind IN ['Function', 'Method']
         RETURN a, b
     logical:
       expect:
-        - "(Filter NOT (a.kind IN ['function', 'method']) (_))"
+        - "(Filter NOT (a.kind IN ['Function', 'Method']) (_))"
     physical:
       clickhouse:
         planned:
           expect:
-            - "(Filter ..., NOT ((a.kind IN ['function', 'method']) AND (_orbit_edge_0.source_tags HAS ANY ['kind:function', 'kind:method'])) (_))"
+            - "(Filter ..., NOT ((a.kind IN ['Function', 'Method']) AND (_orbit_edge_0.source_tags HAS ANY ['kind:Function', 'kind:Method'])) (_))"
 
   - name: A NOT group over edge columns and non-nullable denormalized properties reads no node table
     query:

@@ -86,7 +86,7 @@ tests:
     query: |
       MATCH (s:Definition)-[e:DEFINES]->(c:Definition)
       WHERE s.fqn = 'Geometry.Point'
-        AND c.kind = 'Method'
+        AND c.language_kind = 'Method'
         AND c.name = 'Point'
       RETURN c.name AS name
     assert:
@@ -97,7 +97,7 @@ tests:
     query: |
       MATCH (s:Definition)-[:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE s.fqn = 'Geometry.Size'
-        AND p.kind = 'Property'
+        AND p.language_kind = 'Property'
       RETURN p.name AS name
       ORDER BY p.name
     assert:

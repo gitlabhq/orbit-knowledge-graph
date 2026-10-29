@@ -1773,7 +1773,7 @@ fn orbit_query_structural_caps_reject_with_the_json_category() {
             "REVIEWER",
             "ASSIGNED",
             "HAS_HEAD_PIPELINE",
-            "ON_BRANCH",
+            "RESOLVES_TO",
             "DEFINES",
             "CALLS",
             "EXTENDS",

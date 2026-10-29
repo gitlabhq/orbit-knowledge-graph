@@ -53,7 +53,7 @@ tests:
           'outer::Choice::Pick::0',
           'Container::method::nested'
         ]
-      RETURN d.fqn AS fqn, d.kind AS type
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 7 }
       - { row: { fqn: "outer::helper", type: "Function" } }
@@ -86,7 +86,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'outer' AND callee.name = 'Pick'
-      RETURN callee.fqn AS fqn, callee.kind AS type
+      RETURN callee.fqn AS fqn, callee.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "outer::Choice::Pick", type: "Variant" } }

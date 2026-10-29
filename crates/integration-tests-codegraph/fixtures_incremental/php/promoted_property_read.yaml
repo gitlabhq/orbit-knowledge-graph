@@ -50,10 +50,10 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'after' AND t.name = 'value'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Probe\\Dependency\\value", kind: "Property" } }
+      - { row: { callee: "Probe\\Dependency\\value", language_kind: "Property" } }
 
   - name: an untyped promoted property read links to the property
     query: |
