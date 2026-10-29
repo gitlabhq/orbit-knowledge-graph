@@ -93,8 +93,8 @@ entities:
       - { name: end_line, type: Int64, position: end_line, span: [tag:definition_span, __defname] }
       - { name: start_byte, type: Int64, position: start_byte, span: [tag:definition_span, __defname] }
       - { name: end_byte, type: Int64, position: end_byte, span: [tag:definition_span, __defname] }
-      - { name: start_char, type: Int64, position: start_col, span: [tag:definition_span, __defname] }
-      - { name: end_char, type: Int64, position: end_col, span: [tag:definition_span, __defname] }
+      - { name: start_column, type: Int64, position: start_col, span: [tag:definition_span, __defname] }
+      - { name: end_column, type: Int64, position: end_col, span: [tag:definition_span, __defname] }
 
   Import:
     source: __import|__import_type
@@ -117,8 +117,8 @@ entities:
       - { name: end_line, type: Int64, position: end_line }
       - { name: start_byte, type: Int64, position: start_byte }
       - { name: end_byte, type: Int64, position: end_byte }
-      - { name: start_char, type: Int64, position: start_col }
-      - { name: end_char, type: Int64, position: end_col }
+      - { name: start_column, type: Int64, position: start_col }
+      - { name: end_column, type: Int64, position: end_col }
 
 # The edge table. `containment` rows link each `to` entity to its nearest
 # enclosing `from` entity. `graph` rows come from the resolver, matched on

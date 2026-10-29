@@ -15,7 +15,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/user.rb' AND d.name = 'User'
         AND d.language_kind = 'Class'
-      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+      RETURN d.start_line AS sl, d.start_column AS sc, d.start_byte AS sb
     assert:
       - { row_count: 1 }
       - { row: { sl: 1, sc: 1, sb: 0 } }
@@ -24,7 +24,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/user.rb' AND d.name = 'name'
-      RETURN d.start_line AS sl, d.end_line AS el, d.start_char AS sc, d.end_char AS ec, d.start_byte AS sb
+      RETURN d.start_line AS sl, d.end_line AS el, d.start_column AS sc, d.end_column AS ec, d.start_byte AS sb
     assert:
       - { row_count: 1 }
       - { row: { sl: 2, el: 4, sc: 3, ec: 6, sb: 13 } }

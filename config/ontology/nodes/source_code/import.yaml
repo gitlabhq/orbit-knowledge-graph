@@ -187,16 +187,16 @@ properties:
     mutable: false
     description: "End byte offset."
 
-  start_char:
+  start_column:
     type: int64
-    source: start_char
+    source: start_column
     nullable: false
     mutable: false
     description: "Start column."
 
-  end_char:
+  end_column:
     type: int64
-    source: end_char
+    source: end_column
     nullable: false
     mutable: false
     description: "End column."
@@ -222,8 +222,8 @@ storage:
     - {name: end_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: start_byte, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: end_byte, type: "Int64", codec: ["T64", "ZSTD(1)"]}
-    - {name: start_char, type: "Int64", codec: ["T64", "ZSTD(1)"]}
-    - {name: end_char, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: start_column, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: end_column, type: "Int64", codec: ["T64", "ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}

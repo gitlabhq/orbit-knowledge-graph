@@ -1,9 +1,9 @@
 config:
   extra_seed:
     gl_definition:
-      - { id: 15200, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "src/a.rs", fqn: "a::callee", name: callee, kind: Function, start_line: 1, end_line: 2, start_byte: 0, end_byte: 0, start_char: 0, end_char: 0 }
-      - { id: 15201, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "src/b.rs", fqn: "b::local_caller", name: local_caller, kind: Function, start_line: 1, end_line: 9, start_byte: 0, end_byte: 0, start_char: 0, end_char: 0 }
-      - { id: 15202, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "src/c.rs", fqn: "c::inferred_caller", name: inferred_caller, kind: Function, start_line: 1, end_line: 9, start_byte: 0, end_byte: 0, start_char: 0, end_char: 0 }
+      - { id: 15200, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "src/a.rs", fqn: "a::callee", name: callee, kind: Function, start_line: 1, end_line: 2, start_byte: 0, end_byte: 0, start_column: 0, end_column: 0 }
+      - { id: 15201, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "src/b.rs", fqn: "b::local_caller", name: local_caller, kind: Function, start_line: 1, end_line: 9, start_byte: 0, end_byte: 0, start_column: 0, end_column: 0 }
+      - { id: 15202, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "src/c.rs", fqn: "c::inferred_caller", name: inferred_caller, kind: Function, start_line: 1, end_line: 9, start_byte: 0, end_byte: 0, start_column: 0, end_column: 0 }
     gl_code_edge:
       - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 15201, source_kind: Definition, relationship_kind: CALLS, target_id: 15200, target_kind: Definition, lines: [3, 7], resolution: local, source_tags: [], target_tags: [] }
       - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 15202, source_kind: Definition, relationship_kind: CALLS, target_id: 15200, target_kind: Definition, lines: [5], resolution: inferred_type, source_tags: [], target_tags: [] }

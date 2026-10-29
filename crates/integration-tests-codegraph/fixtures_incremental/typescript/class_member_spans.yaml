@@ -57,7 +57,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/members.ts' AND d.fqn IN ['Shape', 'Shape::describe']
-      RETURN d.fqn AS fqn, d.end_line AS el, d.end_char AS ec
+      RETURN d.fqn AS fqn, d.end_line AS el, d.end_column AS ec
     assert:
       - { row_count: 2 }
       - { row: { fqn: "Shape", el: 24, ec: 43 } }
