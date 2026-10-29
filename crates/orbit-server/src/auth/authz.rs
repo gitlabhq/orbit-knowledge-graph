@@ -55,6 +55,7 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, Securi
             sc.with_role(claims.admin, claims.min_access_level)
                 .with_realm(realm)
                 .with_team_member(claims.is_gitlab_team_member.unwrap_or(false))
+                .with_user_id(i64::try_from(claims.user_id).ok())
         })
         .map_err(|e| SecurityContextError::Invalid(e.to_string()))
 }

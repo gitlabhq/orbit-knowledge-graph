@@ -120,6 +120,7 @@ pub trait RelationalMapping: Send + Sync {
         &[]
     }
     fn entity_table(&self, entity: EntityId) -> Option<&str>;
+    fn table_entity(&self, table: &str) -> Option<EntityId>;
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: EntityId) -> bool;
     fn entity_high_fan_out(&self, entity: EntityId) -> bool;

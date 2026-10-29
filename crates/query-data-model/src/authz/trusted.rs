@@ -64,4 +64,7 @@ impl GitLabPolicy for TrustedLocalCatalog {
     fn required_access_level(&self, _entity: EntityId) -> Option<u32> {
         None
     }
+    fn owner_column(&self, _entity: EntityId) -> Option<&str> {
+        None
+    }
 }

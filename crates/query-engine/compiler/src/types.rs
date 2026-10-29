@@ -94,6 +94,7 @@ pub struct SecurityContext {
     /// Whether the user is a GitLab team member (from the JWT
     /// `is_gitlab_team_member` claim). Only meaningful on SaaS.
     pub is_gitlab_team_member: bool,
+    pub user_id: Option<i64>,
 }
 
 impl SecurityContext {
@@ -130,7 +131,13 @@ impl SecurityContext {
             access_level: None,
             realm: None,
             is_gitlab_team_member: false,
+            user_id: None,
         })
+    }
+
+    pub fn with_user_id(mut self, user_id: Option<i64>) -> Self {
+        self.user_id = user_id;
+        self
     }
 
     pub fn with_role(mut self, admin: bool, min_access_level: Option<u32>) -> Self {

@@ -1,24 +1,10 @@
 //! Security filter injection for multi-tenant isolation.
 //!
-//! Injects traversal_path filters on all node table scans.
-//! The org_id is encoded as the first segment of each path, validated at construction.
-//!
-//! Path filtering strategy:
-//! - 1 path: `startsWith(path)`
-//! - 2+ paths: `startsWith(p1) OR startsWith(p2) OR ...`
-//!
-//! # Per-entity role scoping
-//!
-//! Each entity's ontology can declare a `required_role`. Before injecting
-//! the `startsWith` predicate for an alias we look up the entity attached
-//! to that alias's physical table and drop any traversal path where the
-//! user's access level is below the entity's `required_access_level`.
-//!
-//! This closes the aggregation-query oracle where a Reporter-only user
-//! could count or binary-search properties on a higher-privilege entity
-//! (e.g. Vulnerability) by pairing a Project `group_by` with a Vulnerability
-//! target. Now the target entity's scan is filtered down to zero paths
-//! (producing a Bool(false) predicate) and the aggregation counts nothing.
+//! Every graph table scan gets a `startsWith(traversal_path, ...)` filter over the
+//! caller's paths that meet the table's role floor (`required_role`), and an
+//! `<owner_column> = <user id>` filter when the table's entity declares
+//! `redaction.owner_column` and the caller has no `admin` claim. No eligible path,
+//! or no user id, emits `false`.
 
 use std::sync::OnceLock;
 
@@ -42,14 +28,6 @@ pub fn apply_security_context(
     ctx: &SecurityContext,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
-    // An entirely empty security context is treated as a fail-closed bug:
-    // the caller forgot to populate traversal paths. Emitting `Bool(false)`
-    // here would silently return empty results, which is indistinguishable
-    // from "user has no namespaces" and obscures the root cause. Note that
-    // this differs from a role-mismatch empty-path set for a specific
-    // alias — in that case the user has paths, just none at the required
-    // role, and returning zero rows for the protected entity is the
-    // intended behavior.
     if ctx.traversal_paths.is_empty() {
         return Err(crate::error::QueryError::Security(
             "security context has no traversal_path entries; refusing to compile \
@@ -61,34 +39,44 @@ pub fn apply_security_context(
     let Node::Query(query) = node else {
         return Ok(());
     };
+    let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
+        Regex::new(&format!(
+            r"^(?:v\d+_)?{}.+$",
+            regex::escape(GL_TABLE_PREFIX)
+        ))
+        .expect("valid regex")
+    });
     visit_queries_mut(query, &mut |query| {
         let mut aliased_tables = Vec::new();
         visit_relations(&query.from, &mut |relation| {
-            if let TableRef::Scan { table, alias, .. } = relation {
-                let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
-                    Regex::new(&format!(
-                        r"^(?:v\d+_)?{}.+$",
-                        regex::escape(GL_TABLE_PREFIX)
-                    ))
-                    .expect("valid regex")
-                });
-                if graph_table_pattern.is_match(table) && model.table_has_path_columns(table) {
-                    aliased_tables.push((alias.clone(), table.clone()));
-                }
+            if let TableRef::Scan { table, alias, .. } = relation
+                && graph_table_pattern.is_match(table)
+            {
+                aliased_tables.push((alias.clone(), table.clone()));
             }
         });
-        let security_conditions = aliased_tables.iter().map(|(alias, table)| {
-            let min_role = model.table_minimum_access_level(table);
-            let eligible = ctx.paths_at_least(min_role);
-            build_path_filter(alias, &eligible)
+        let security_conditions = aliased_tables.iter().flat_map(|(alias, table)| {
+            let path_filter = model.table_has_path_columns(table).then(|| {
+                let eligible = ctx.paths_at_least(model.table_minimum_access_level(table));
+                build_path_filter(alias, &eligible)
+            });
+            let owner_filter = model
+                .table_owner_column(table)
+                .filter(|_| !ctx.admin)
+                .map(|column| build_owner_filter(alias, column, ctx.user_id));
+            [path_filter, owner_filter]
         });
-        query.where_clause = Expr::and_all(
-            security_conditions
-                .map(Some)
-                .chain(std::iter::once(query.where_clause.take())),
-        );
+        query.where_clause =
+            Expr::and_all(security_conditions.chain(std::iter::once(query.where_clause.take())));
         Ok(())
     })
+}
+
+fn build_owner_filter(alias: &str, column: &str, user_id: Option<i64>) -> Expr {
+    match user_id {
+        Some(user_id) => Expr::eq(Expr::col(alias, column), Expr::int(user_id)),
+        None => Expr::Literal(Value::Bool(false)),
+    }
 }
 
 fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
@@ -577,5 +565,83 @@ mod tests {
             vec!["1/6543/".to_string(), "1/9970/".to_string()],
             "multi-path authz must be the OR of real prefixes with no redundant broad LCP, got:\n{got:?}"
         );
+    }
+
+    fn owner_model() -> &'static ClickHouseDataModel {
+        static MODEL: LazyLock<ClickHouseDataModel> = LazyLock::new(|| {
+            ClickHouseDataModel::derive(Arc::new(
+                ontology::Ontology::new()
+                    .with_nodes(["Project", "Todo"])
+                    .with_fields("Todo", [("user_id", ontology::DataType::Int)])
+                    .with_redaction("Todo", "todo", "id")
+                    .with_redaction_owner_column("Todo", "user_id"),
+            ))
+            .unwrap()
+        });
+        &MODEL
+    }
+
+    fn todo_query() -> Node {
+        Node::Query(Box::new(Query {
+            select: vec![SelectExpr::col("t", "id")],
+            from: TableRef::scan("gl_todo", "t"),
+            ..Default::default()
+        }))
+    }
+
+    fn where_clause(node: &Node) -> &Expr {
+        let Node::Query(query) = node else {
+            unreachable!()
+        };
+        query.where_clause.as_ref().unwrap()
+    }
+
+    fn has_expr(expr: &Expr, wanted: &Expr) -> bool {
+        let mut found = false;
+        visit_expressions(expr, &mut |candidate| {
+            found |= candidate == wanted;
+            Ok(())
+        })
+        .unwrap();
+        found
+    }
+
+    #[test]
+    fn owner_column_filters_each_read_to_the_caller() {
+        let owner_filter = Expr::eq(Expr::col("t", "user_id"), Expr::int(7));
+        let ctx = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_user_id(Some(7));
+
+        let mut node = todo_query();
+        apply(&mut node, &ctx, owner_model()).unwrap();
+        assert!(has_expr(where_clause(&node), &owner_filter));
+        assert_eq!(
+            starts_with_paths_for_alias(where_clause(&node), "t"),
+            ["1/"]
+        );
+
+        let mut node = todo_query();
+        apply(&mut node, &ctx.clone().with_role(true, None), owner_model()).unwrap();
+        assert!(!has_expr(where_clause(&node), &owner_filter));
+
+        let mut node = todo_query();
+        apply(&mut node, &ctx.with_user_id(None), owner_model()).unwrap();
+        assert!(has_expr(
+            where_clause(&node),
+            &Expr::Literal(Value::Bool(false))
+        ));
+
+        let mut node = simple_query();
+        apply(
+            &mut node,
+            &SecurityContext::new(1, vec!["1/".into()]).unwrap(),
+            owner_model(),
+        )
+        .unwrap();
+        assert!(!has_expr(
+            where_clause(&node),
+            &Expr::Literal(Value::Bool(false))
+        ));
     }
 }

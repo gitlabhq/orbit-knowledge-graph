@@ -2,7 +2,8 @@
 //!
 //! Runs after security filter injection to verify invariants that must hold
 //! before the AST is handed to codegen. Checks that every namespaced graph
-//! table alias has a role-eligible traversal path predicate or a fail-closed
+//! table alias has a role-eligible traversal path predicate, that every
+//! owner-scoped alias has the caller's owner predicate, or a fail-closed
 //! false predicate.
 
 use query_data_model::GitLabPolicy;
@@ -50,30 +51,32 @@ fn check_query(
                     .and_then(|entity| model.query_authorization().required_access_level(entity))
                     .unwrap_or(ontology::RequiredRole::Reporter.as_access_level());
                 let eligible_paths = ctx.paths_at_least(access_level);
-                if !has_valid_path_filter(
-                    q.where_clause.as_ref(),
-                    alias,
-                    &column.name,
-                    &eligible_paths,
-                ) {
+                if !gates_every_row(q.where_clause.as_ref(), &|expr| {
+                    is_path_filter(expr, alias, &column.name, &eligible_paths)
+                }) {
                     error = Some(QueryError::Security(format!(
                         "post-check failed: column '{alias}.{}' missing valid traversal_path filter at access level {access_level}",
                         column.name
                     )));
-                    break;
+                    return;
                 }
+            }
+            if let Some(column) = model.table_owner_column(table)
+                && !ctx.admin
+                && !gates_every_row(q.where_clause.as_ref(), &|expr| {
+                    is_owner_filter(expr, alias, column, ctx.user_id)
+                })
+            {
+                error = Some(QueryError::Security(format!(
+                    "post-check failed: column '{alias}.{column}' missing owner filter"
+                )));
             }
         }
     });
     error.map_or(Ok(()), Err)
 }
 
-fn has_valid_path_filter(
-    expr: Option<&Expr>,
-    alias: &str,
-    column: &str,
-    eligible_paths: &[&orbit_utils::traversal_path::TraversalPath],
-) -> bool {
+fn gates_every_row(expr: Option<&Expr>, accepts: &impl Fn(&Expr) -> bool) -> bool {
     let Some(expr) = expr else { return false };
     match expr {
         Expr::Literal(Value::Bool(false))
@@ -85,48 +88,77 @@ fn has_valid_path_filter(
             op: Op::And,
             left,
             right,
-        } => {
-            has_valid_path_filter(Some(left), alias, column, eligible_paths)
-                || has_valid_path_filter(Some(right), alias, column, eligible_paths)
-        }
+        } => gates_every_row(Some(left), accepts) || gates_every_row(Some(right), accepts),
         Expr::BinaryOp {
             op: Op::Or,
             left,
             right,
-        } => {
-            has_valid_path_filter(Some(left), alias, column, eligible_paths)
-                && has_valid_path_filter(Some(right), alias, column, eligible_paths)
-        }
-        Expr::FuncCall {
-            name: Function::StartsWith,
-            args,
-        } => {
-            let [
-                Expr::Column {
-                    table,
-                    column: actual,
-                },
-                path,
-            ] = args.as_slice()
-            else {
-                return false;
-            };
-            if table != alias || actual != column {
-                return false;
-            }
-            match path {
-                Expr::Literal(Value::String(path))
-                | Expr::Param {
-                    value: Value::String(path),
-                    ..
-                } => eligible_paths
-                    .iter()
-                    .any(|authorized| path.starts_with(authorized.as_str())),
-                _ => false,
-            }
-        }
+        } => gates_every_row(Some(left), accepts) && gates_every_row(Some(right), accepts),
+        leaf => accepts(leaf),
+    }
+}
+
+fn is_path_filter(
+    expr: &Expr,
+    alias: &str,
+    column: &str,
+    eligible_paths: &[&orbit_utils::traversal_path::TraversalPath],
+) -> bool {
+    let Expr::FuncCall {
+        name: Function::StartsWith,
+        args,
+    } = expr
+    else {
+        return false;
+    };
+    let [
+        Expr::Column {
+            table,
+            column: actual,
+        },
+        path,
+    ] = args.as_slice()
+    else {
+        return false;
+    };
+    if table != alias || actual != column {
+        return false;
+    }
+    match path {
+        Expr::Literal(Value::String(path))
+        | Expr::Param {
+            value: Value::String(path),
+            ..
+        } => eligible_paths
+            .iter()
+            .any(|authorized| path.starts_with(authorized.as_str())),
         _ => false,
     }
+}
+
+fn is_owner_filter(expr: &Expr, alias: &str, column: &str, user_id: Option<i64>) -> bool {
+    let Expr::BinaryOp {
+        op: Op::Eq,
+        left,
+        right,
+    } = expr
+    else {
+        return false;
+    };
+    let Expr::Column {
+        table,
+        column: actual,
+    } = left.as_ref()
+    else {
+        return false;
+    };
+    table == alias
+        && actual == column
+        && matches!(
+            right.as_ref(),
+            Expr::Literal(Value::Number(value)) | Expr::Param { value: Value::Number(value), .. }
+                if value.as_i64() == user_id
+        )
 }
 
 #[cfg(test)]
@@ -903,5 +935,74 @@ mod tests {
             ..Default::default()
         }));
         assert!(check(&node, &ctx, model()).is_ok());
+    }
+
+    #[test]
+    fn owner_scoped_alias_needs_the_caller_filter() {
+        let model = derive_model(
+            ontology::Ontology::new()
+                .with_nodes(["Todo"])
+                .with_fields("Todo", [("user_id", ontology::DataType::Int)])
+                .with_redaction("Todo", "todo", "id")
+                .with_redaction_owner_column("Todo", "user_id"),
+        );
+        let ctx = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_user_id(Some(7));
+        let path_filter = Expr::func(
+            Function::StartsWith,
+            vec![Expr::col("t", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
+        );
+        let owner_filter = |user_id| Expr::eq(Expr::col("t", "user_id"), Expr::int(user_id));
+        let todo_query = |where_clause| {
+            Node::Query(Box::new(Query {
+                select: vec![SelectExpr::col("t", "id")],
+                from: TableRef::scan("gl_todo", "t"),
+                where_clause: Some(where_clause),
+                ..Default::default()
+            }))
+        };
+
+        let error = check(&todo_query(path_filter.clone()), &ctx, &model).unwrap_err();
+        assert!(
+            error.to_string().contains("missing owner filter"),
+            "{error}"
+        );
+        assert!(
+            check(
+                &todo_query(Expr::and(path_filter.clone(), owner_filter(7))),
+                &ctx,
+                &model
+            )
+            .is_ok()
+        );
+        assert!(
+            check(
+                &todo_query(Expr::and(path_filter.clone(), owner_filter(8))),
+                &ctx,
+                &model
+            )
+            .is_err()
+        );
+        assert!(
+            check(
+                &todo_query(Expr::binary(Op::Or, owner_filter(7), Expr::lit(true))),
+                &ctx,
+                &model
+            )
+            .is_err()
+        );
+        assert!(
+            check(
+                &todo_query(path_filter.clone()),
+                &ctx.clone().with_role(true, None),
+                &model
+            )
+            .is_ok()
+        );
+
+        let mut node = todo_query(Expr::lit(true));
+        apply_security(&mut node, &ctx, &model);
+        assert!(check(&node, &ctx, &model).is_ok());
     }
 }

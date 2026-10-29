@@ -88,6 +88,8 @@ pub struct SecurityOverride {
     pub org_id: Option<i64>,
     #[serde(default)]
     pub access_level: Option<u32>,
+    #[serde(default)]
+    pub user_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

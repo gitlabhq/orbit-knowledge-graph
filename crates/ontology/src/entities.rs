@@ -305,6 +305,8 @@ pub struct RedactionConfig {
     /// ability is only granted at that level, e.g. `read_vulnerability`.
     #[serde(default = "RedactionConfig::default_required_role")]
     pub required_role: RequiredRole,
+    #[serde(default)]
+    pub owner_column: Option<String>,
 }
 
 impl RedactionConfig {

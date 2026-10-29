@@ -15,6 +15,7 @@ pub trait GitLabPolicy: Send + Sync {
     fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig>;
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str>;
     fn required_access_level(&self, entity: EntityId) -> Option<u32>;
+    fn owner_column(&self, entity: EntityId) -> Option<&str>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +34,7 @@ pub struct EntityAuthorization {
     pub id_column: String,
     pub owner_entity: Option<EntityId>,
     pub required_access_level: u32,
+    pub owner_column: Option<String>,
 }
 
 #[derive(Debug)]
@@ -113,6 +115,10 @@ impl GitLabPolicy for GitLabAuthzCatalog {
         self.entity(entity)
             .map(|policy| policy.required_access_level)
     }
+
+    fn owner_column(&self, entity: EntityId) -> Option<&str> {
+        self.entity(entity)?.owner_column.as_deref()
+    }
 }
 
 impl GitLabAuthzCatalog {
@@ -154,6 +160,7 @@ impl GitLabAuthzCatalog {
                         .then(|| owners.get(redaction.resource_type.as_str()).copied())
                         .flatten(),
                     required_access_level: redaction.required_role.as_access_level(),
+                    owner_column: redaction.owner_column.clone(),
                 });
                 entity_auth.insert(
                     node.name.clone(),

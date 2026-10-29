@@ -43,6 +43,13 @@ impl RelationalMapping for DuckDbBindings {
         self.entity(entity).map(|layout| layout.table.as_str())
     }
 
+    fn table_entity(&self, table: &str) -> Option<EntityId> {
+        self.entities
+            .iter()
+            .position(|layout| layout.as_ref().is_some_and(|layout| layout.table == table))
+            .map(EntityId)
+    }
+
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool {
         self.entity(entity)
             .is_some_and(|layout| layout.has_traversal_path)

@@ -222,14 +222,15 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         || input
             .aggregation_row_nodes(pattern.model)
             .contains(node.alias.as_str());
-    let role_floor = node.entity.as_deref().is_some_and(|entity| {
-        pattern
-            .model
-            .entity_minimum_access_level(entity)
-            .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
+    let gated_rows = node.entity.as_deref().is_some_and(|entity| {
+        pattern.model.entity_owner_column(entity).is_some()
+            || pattern
+                .model
+                .entity_minimum_access_level(entity)
+                .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
     });
     let authorized_from_table =
-        returned && !node.uses_default_pk() || role_floor && !pattern.holds_fk(&node.alias);
+        returned && !node.uses_default_pk() || gated_rows && !pattern.holds_fk(&node.alias);
     let filter_only = pattern.aggregate()
         && uncovered_filter
         && !group_target

@@ -342,6 +342,7 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `authorized_paths` | [{path, access_level}] | — | Per-path access levels |
 | `org_id` | i64 | — | Organization ID |
 | `access_level` | u32 | 20 (Reporter) | Default access level |
+| `user_id` | i64 | — | Caller user ID; `redaction.owner_column` entities return only this user's rows |
 
 #### `config.redaction` — `RedactionConfig`
 
