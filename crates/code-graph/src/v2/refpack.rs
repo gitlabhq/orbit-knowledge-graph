@@ -243,6 +243,33 @@ impl RefPack {
         }
     }
 
+    pub fn collected(
+        &self,
+        idx: usize,
+        chain_buf: &mut Vec<ExpressionStep>,
+        values_buf: &mut Vec<ParseValue>,
+    ) -> CollectedRef {
+        let d = self.decode(idx, chain_buf, values_buf);
+        CollectedRef {
+            name: SmolStr::from(d.name),
+            chain: d.has_chain.then(|| chain_buf.clone()),
+            reaching: values_buf.clone(),
+            enclosing_def: d.enclosing_def,
+            kind: d.kind,
+            line: d.line,
+        }
+    }
+
+    pub fn subset(&self, indices: impl IntoIterator<Item = usize>) -> Self {
+        let mut chain_buf = Vec::new();
+        let mut values_buf = Vec::new();
+        let refs: Vec<CollectedRef> = indices
+            .into_iter()
+            .map(|i| self.collected(i, &mut chain_buf, &mut values_buf))
+            .collect();
+        Self::from_refs(&refs)
+    }
+
     /// Set ref `idx`'s reaching values to a single `Type(fqn)`; out-of-range `idx` does nothing.
     pub fn set_reaching_type(&mut self, idx: usize, fqn: &str) {
         if idx >= self.refs.len() {
@@ -273,17 +300,7 @@ mod tests {
         let mut chain_buf = Vec::new();
         let mut values_buf = Vec::new();
         (0..pack.len())
-            .map(|i| {
-                let d = pack.decode(i, &mut chain_buf, &mut values_buf);
-                CollectedRef {
-                    name: SmolStr::from(d.name),
-                    chain: d.has_chain.then(|| chain_buf.clone()),
-                    reaching: values_buf.clone(),
-                    enclosing_def: d.enclosing_def,
-                    kind: d.kind,
-                    line: d.line,
-                }
-            })
+            .map(|i| pack.collected(i, &mut chain_buf, &mut values_buf))
             .collect()
     }
 

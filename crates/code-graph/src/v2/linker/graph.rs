@@ -20,7 +20,10 @@ use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use smallvec::SmallVec;
 use std::collections::VecDeque;
 
-use super::state::{DefinitionRangeIndex, GraphDef, GraphImport, GraphIndexes, StrId, StringPool};
+use super::state::{
+    DefDisplay, DefinitionRangeIndex, DisplayTable, GraphDef, GraphImport, GraphIndexes, StrId,
+    StringPool,
+};
 
 #[derive(Debug, Clone)]
 pub enum GraphNode {
@@ -316,6 +319,7 @@ pub struct CodeGraph {
     pub output: GraphOutput,
     pub rules: Option<std::sync::Arc<super::rules::ResolutionRules>>,
     pub line_runs: Vec<Box<[u32]>>,
+    pub display: DisplayTable,
 }
 
 /// Distinct tag sets plus one index per node. The ontology declares a closed set
@@ -344,6 +348,7 @@ impl CodeGraph {
             output: GraphOutput::Complete,
             rules: None,
             line_runs: Vec::new(),
+            display: DisplayTable::default(),
         }
     }
 
@@ -399,6 +404,7 @@ impl CodeGraph {
         self.defs = Vec::new();
         self.imports = Vec::new();
         self.strings = StringPool::new();
+        self.display = DisplayTable::default();
     }
 
     pub fn add_file(
@@ -492,6 +498,9 @@ impl CodeGraph {
             .iter()
             .map(|d| GraphDef::from_canonical(d, &mut self.strings))
             .collect();
+        for d in definitions {
+            self.display.push(d.metadata.as_deref());
+        }
 
         for (i, gdef) in graph_defs.iter().enumerate() {
             let id = DefId(def_base + i as u32);
@@ -1278,6 +1287,9 @@ impl CodeGraph {
                 file_path,
                 language: languages.get(file_path.as_ref()).copied().unwrap_or(""),
                 def,
+                display: self
+                    .display
+                    .get(self.graph[idx].def_id().expect("definition node")),
                 pool: &self.strings,
                 id: ids[idx.index()],
             })
@@ -1632,11 +1644,7 @@ impl CodeGraph {
                 GraphNode::File(f) => compute_id(&[&pid, branch, "file", &f.path]),
                 GraphNode::Definition { file_path, id } => {
                     let def = &self.defs[id.0 as usize];
-                    let signature = def
-                        .metadata
-                        .as_ref()
-                        .and_then(|m| m.signature)
-                        .map_or("", |s| self.strings.get(s));
+                    let signature = self.display.get(*id).signature().unwrap_or("");
                     compute_id(&[
                         &pid,
                         branch,
@@ -1814,6 +1822,7 @@ pub struct DefinitionRow<'a> {
     pub file_path: &'a str,
     pub language: &'a str,
     pub def: &'a GraphDef,
+    pub display: DefDisplay<'a>,
     pub pool: &'a StringPool,
     pub id: i64,
 }
@@ -1821,16 +1830,11 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         use crate::v2::types::text;
         let kind = self.def.kind.kind();
-        let meta = self.def.metadata.as_deref();
-        let text_of = |id: Option<StrId>| id.map(|id| self.pool.get(id));
-        let parameters: Vec<&str> = meta
-            .map(|m| m.parameters.iter().map(|p| self.pool.get(*p)).collect())
-            .unwrap_or_default();
-        let modifiers: Vec<&str> = meta
-            .map(|m| m.modifiers.names().collect())
-            .unwrap_or_default();
-        let visibility = meta
-            .and_then(|m| m.visibility)
+        let display = self.display;
+        let parameters: Vec<&str> = display.parameters().collect();
+        let modifiers: Vec<&str> = display.modifiers().names().collect();
+        let visibility = display
+            .visibility()
             .filter(|_| self.def.scope != DefScope::Local)
             .map(<&'static str>::from);
         ctx.write_header(b, self.id)?;
@@ -1849,14 +1853,13 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
             false,
         ))?;
         b.col("signature")?
-            .push_str(text_of(meta.and_then(|m| m.signature)).unwrap_or(""))?;
+            .push_str(display.signature().unwrap_or(""))?;
         b.col("parameters")?.push_str_list(&parameters)?;
-        b.col("return_type")?
-            .push_opt_str(text_of(meta.and_then(|m| m.declared_return_type)))?;
+        b.col("return_type")?.push_opt_str(display.return_type())?;
         b.col("declared_type")?
-            .push_opt_str(text_of(meta.and_then(|m| m.declared_type)))?;
+            .push_opt_str(display.declared_type())?;
         b.col("doc_comment")?
-            .push_str(text_of(meta.and_then(|m| m.doc_comment)).unwrap_or(""))?;
+            .push_str(display.doc_comment().unwrap_or(""))?;
         b.col("category")?.push_str(kind.category().as_str())?;
         b.col("kind")?.push_str(kind.as_str())?;
         b.col("language_kind")?.push_str(self.def.definition_type)?;
@@ -1865,7 +1868,8 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
         b.col("modifiers")?.push_str_list(&modifiers)?;
         b.col("visibility")?.push_opt_str(visibility)?;
         b.col("generated_by")?.push_opt_str(
-            text_of(meta.and_then(|m| m.generated_by))
+            display
+                .generated_by()
                 .map(|g| truncate_bytes(g, text::GENERATED_BY_CAP, text::CUT, false)),
         )?;
         write_range(b, &self.def.range)?;

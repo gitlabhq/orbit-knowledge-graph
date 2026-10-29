@@ -149,15 +149,12 @@ impl ProgressObserver for SilentProgress {}
 
 use crate::v2::linker::graph::EdgeTriple;
 
-/// A chain reference that failed resolution in Phase 2, stored for
+/// Chain references that failed resolution in Phase 2, stored for
 /// re-resolution in Phase 3 after return types are merged.
-struct FailedChain {
-    name: String,
-    chain: Vec<crate::v2::types::ExpressionStep>,
-    reaching: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]>,
-    enclosing_def: Option<u32>,
-    site: crate::v2::linker::RefSite,
+struct FailedChains {
+    refs: crate::v2::refpack::RefPack,
     pending_import_edges: Vec<EdgeTriple>,
+    pending_ends: Vec<u32>,
 }
 
 struct ResolvedEdges {
@@ -1502,7 +1499,7 @@ impl FamilyPipeline {
             ResolvedEdges,
             Vec<(u32, String)>,
             Option<(FileInfo, Language)>,
-            Vec<FailedChain>,
+            Option<FailedChains>,
             bool,
         );
         let empty_phase2 = || -> Phase2Result {
@@ -1510,7 +1507,7 @@ impl FamilyPipeline {
                 ResolvedEdges::merged(Vec::new()),
                 Vec::new(),
                 None,
-                Vec::new(),
+                None,
                 false,
             )
         };
@@ -1550,7 +1547,9 @@ impl FamilyPipeline {
 
                 let t_resolve = std::time::Instant::now();
                 let mut edges = Vec::new();
-                let mut failed_chains: Vec<FailedChain> = Vec::new();
+                let mut failed_chains: Vec<usize> = Vec::new();
+                let mut pending_import_edges: Vec<EdgeTriple> = Vec::new();
+                let mut pending_ends: Vec<u32> = Vec::new();
                 let mut killed = false;
 
                 let mut chain_buf: Vec<crate::v2::types::ExpressionStep> = Vec::new();
@@ -1578,14 +1577,9 @@ impl FamilyPipeline {
                     }
                     let import_edges = resolver.drain_import_edges();
                     if edges.len() == before && r.has_chain && chain_buf.len() >= 2 {
-                        failed_chains.push(FailedChain {
-                            name: r.name.to_string(),
-                            chain: chain_buf.clone(),
-                            reaching: values_buf.as_slice().into(),
-                            enclosing_def: r.enclosing_def,
-                            site,
-                            pending_import_edges: import_edges,
-                        });
+                        failed_chains.push(i);
+                        pending_import_edges.extend(import_edges);
+                        pending_ends.push(pending_import_edges.len() as u32);
                     } else {
                         edges.extend(import_edges);
                     }
@@ -1605,14 +1599,18 @@ impl FamilyPipeline {
                     edges.extend(resolver.import_resolution_edges());
                 }
                 let edges = ResolvedEdges::merged(edges);
-                failed_chains.shrink_to_fit();
+                let failed = (!failed_chains.is_empty()).then(|| FailedChains {
+                    refs: fwr.refs.subset(failed_chains),
+                    pending_import_edges,
+                    pending_ends,
+                });
                 total_edges.fetch_add(edges.edges.len(), std::sync::atomic::Ordering::Relaxed);
                 progress.files_advanced(ProgressPhase::Resolve, 1);
                 (
                     edges,
                     fwr.inferred_returns,
                     Some((fwr.info, fwr.language)),
-                    failed_chains,
+                    failed,
                     killed,
                 )
             })
@@ -1625,13 +1623,13 @@ impl FamilyPipeline {
         );
 
         let mut all_inferred: Vec<InferredReturns> = Vec::new();
-        let mut all_failed: Vec<(FileInfo, Language, Vec<FailedChain>)> = Vec::new();
+        let mut all_failed: Vec<(FileInfo, Language, FailedChains)> = Vec::new();
 
         graph
             .graph
             .reserve_exact_edges(total_edges.load(std::sync::atomic::Ordering::Relaxed));
 
-        for (edges, inferred, info_opt, failed_chains, killed) in resolve_results {
+        for (edges, inferred, info_opt, failed, killed) in resolve_results {
             if killed && let Some((ref info, _)) = info_opt {
                 let path = match &graph.graph[info.file_node] {
                     crate::v2::linker::graph::GraphNode::File(f) => f.path.as_str(),
@@ -1648,8 +1646,8 @@ impl FamilyPipeline {
                 if !inferred.is_empty() {
                     all_inferred.push((info.def_nodes.clone(), inferred));
                 }
-                if !failed_chains.is_empty() {
-                    all_failed.push((info, lang, failed_chains));
+                if let Some(failed) = failed {
+                    all_failed.push((info, lang, failed));
                 }
             }
         }
@@ -1673,7 +1671,7 @@ impl FamilyPipeline {
         if !all_failed.is_empty() {
             let phase3_results: Vec<_> = all_failed
                 .into_par_iter()
-                .map(|(info, lang, failed_chains)| {
+                .map(|(info, lang, failed)| {
                     let lctx = &member_ctxs[&lang];
                     let guard = sentinel
                         .as_ref()
@@ -1693,15 +1691,25 @@ impl FamilyPipeline {
                         resolver.set_reexport_index(Arc::clone(idx));
                     }
                     let mut edges = Vec::new();
-                    for failed in failed_chains {
+                    let mut chain_buf = Vec::new();
+                    let mut values_buf = Vec::new();
+                    let mut start = 0;
+                    for (index, &end) in failed.pending_ends.iter().enumerate() {
+                        let pending = &failed.pending_import_edges[start as usize..end as usize];
+                        start = end;
                         let before = edges.len();
+                        let r = failed.refs.decode(index, &mut chain_buf, &mut values_buf);
+                        let site = crate::v2::linker::RefSite {
+                            kind: r.kind,
+                            line: r.line,
+                        };
                         if resolver
                             .resolve(
-                                &failed.name,
-                                Some(&failed.chain),
-                                &failed.reaching,
-                                failed.enclosing_def,
-                                failed.site,
+                                r.name,
+                                Some(&chain_buf),
+                                &values_buf,
+                                r.enclosing_def,
+                                site,
                                 &mut edges,
                             )
                             .is_err()
@@ -1711,7 +1719,7 @@ impl FamilyPipeline {
                         let import_edges = resolver.drain_import_edges();
                         if edges.len() == before {
                             if import_edges.is_empty() {
-                                edges.extend(failed.pending_import_edges);
+                                edges.extend(pending.iter().cloned());
                             } else {
                                 edges.extend(import_edges);
                             }
