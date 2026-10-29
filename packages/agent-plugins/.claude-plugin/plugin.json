@@ -1,0 +1,9 @@
+{
+  "name": "gitlab-orbit",
+  "version": "0.0.0",
+  "description": "Shows GitLab Orbit calls in Claude Code with the Orbit mark and short labels",
+  "author": { "name": "GitLab" },
+  "homepage": "https://docs.gitlab.com/orbit/",
+  "repository": "https://gitlab.com/gitlab-org/orbit/knowledge-graph",
+  "license": "MIT"
+}

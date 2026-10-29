@@ -157,6 +157,11 @@ description = "Run code-graph and code-graph-incremental YAML suites with OpenCy
 run = "cargo build -p orbit-cli && cargo nextest run --test cli --test outside_repository --no-fail-fast"
 description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 
+[tasks."test:agent-plugins"]
+dir = "packages/agent-plugins"
+run = ["bun run typecheck", "bun run test", "bun run test:claude", "bun run build"]
+description = "Typecheck, test, and build the Claude Code and OpenCode plugins; needs Claude Code 2.1.287+"
+
 [tasks."test:integration"]
 run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers --test indexer_containers --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }

@@ -1,0 +1,16 @@
+{
+  "name": "@orbit/agent-plugins",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./opencode",
+    "test:claude": "${CLAUDE_BIN:-claude} plugin validate --strict . && ${CLAUDE_BIN:-claude} plugin test .",
+    "build": "bun scripts/build.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "es-toolkit": "catalog:",
+    "typescript": "catalog:"
+  }
+}

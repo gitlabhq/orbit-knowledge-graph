@@ -18,6 +18,7 @@ ignored = ["libduckdb-sys"]
 
 [dependencies]
 mimalloc = { workspace = true }
+tempfile = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
 code-graph-incremental = { path = "../code-graph-incremental" }
 duckdb-client = { path = "../duckdb-client" }
@@ -49,7 +50,7 @@ ignore = { workspace = true }
 globset = { workspace = true }
 reqwest = { workspace = true, features = ["gzip", "brotli", "zstd"] }
 rmcp = { workspace = true }
-rust-embed = { workspace = true }
+rust-embed = { workspace = true, features = ["include-exclude"] }
 rustls = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
@@ -75,4 +76,3 @@ orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 flate2 = { workspace = true }
 jsonschema = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
-tempfile = { workspace = true }
