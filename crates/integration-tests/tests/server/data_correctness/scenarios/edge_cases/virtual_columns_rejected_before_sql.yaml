@@ -1,0 +1,33 @@
+config:
+  duckdb: true
+
+cases:
+  - name: filter
+    description: >
+      Filtering File.content without node_ids rejects before SQL. Local mode has no content column, and
+      remote mode needs node_ids to resolve virtual columns.
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "id_range": {"start": 1, "end": 100000}, "filters": {"content": {"eq": "x"}}}], "limit": 5}
+      gql: |
+        MATCH (f:File) WHERE f.id >= 1 AND f.id <= 100000 AND f.content = 'x' RETURN f LIMIT 5
+    expect:
+      compile_error_contains: [content]
+
+  - name: order_by
+    description: Sorting by File.content rejects before SQL in local and remote mode
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "id_range": {"start": 1, "end": 100000}}], "order_by": "f.content", "limit": 5}
+      gql: |
+        MATCH (f:File) WHERE f.id >= 1 AND f.id <= 100000 RETURN f ORDER BY f.content LIMIT 5
+    expect:
+      compile_error_contains: [content]
+
+  - name: group_by
+    description: Grouping by File.content rejects before SQL in local and remote mode
+    query:
+      gql: |
+        MATCH (f:File) WHERE f.id >= 1 AND f.id <= 100000 RETURN f.content, count(f) AS n
+    expect:
+      compile_error_contains: [content]

@@ -40,3 +40,5 @@
           url: 'orbit/glossary/'
     - title: Troubleshooting
       url: 'orbit/troubleshooting/'
+    - title: Deprecations and removals
+      url: 'orbit/deprecations/'

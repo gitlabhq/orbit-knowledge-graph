@@ -279,7 +279,9 @@ You might get an error that states:
 Error: no local graph found. Run `glab orbit workspace index` first.
 ```
 
-This issue occurs when the repository is not indexed, or when the path you gave with `--db` does not exist.
+This issue occurs when you run the command outside a Git repository and nothing is indexed,
+or when the path you gave with `--db` does not exist.
+Inside a repository, `workspace sql`, `workspace schema`, and `workspace mcp serve` index the repository on first use instead.
 Earlier versions report `Table 'Definition' does not exist`.
 
 To resolve this issue, run `glab orbit workspace index <repository_path>`.
@@ -299,6 +301,19 @@ Earlier versions report `IO Error: Could not set lock on file`.
 
 To resolve this issue, wait for the other process to finish.
 If it does not finish, stop it with the process ID (PID) from the error, for example `kill 4242`.
+
+### Exit code 75 while waiting for an index
+
+A command that reads the local graph, or `glab orbit workspace index`, exits with code `75`.
+
+This issue occurs when a running index did not finish in the wait time, which is 10 minutes by default,
+or when open readers held the locks for too long.
+
+To resolve this issue, run the command again after the index finishes.
+To wait longer, set `ORBIT_WAIT_TIMEOUT_MS`, or pass `--timeout <seconds>` to `workspace index`.
+
+If `workspace index --async` exits with code `75`, the background index keeps waiting for the readers.
+You don't need to run it again. The error message names the log file to follow.
 
 ### `grep` prints nothing
 

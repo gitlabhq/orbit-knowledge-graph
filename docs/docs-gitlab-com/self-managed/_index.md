@@ -85,6 +85,7 @@ GitLab reaches the webserver over gRPC.
 | Page | Description |
 |------|-------------|
 | [Get started](getting-started.md) | Prerequisites, installation order, Kubernetes, NATS, object storage, and shared values |
+| [Sizing](sizing.md) | Pod, node, ClickHouse, NATS, and Siphon sizes for each GitLab reference architecture size |
 | [ClickHouse](clickhouse.md) | Versions, databases, high availability, memory, log retention, and users |
 | [Set up data replication](data-replication.md) | PostgreSQL logical replication and Siphon |
 | [Set up GitLab Orbit](orbit-setup.md) | The GitLab connection, the Secrets, the chart, indexing, verification, and upgrades |

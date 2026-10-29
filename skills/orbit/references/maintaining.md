@@ -6,24 +6,17 @@ queries. See [`SKILL.md`](../SKILL.md) for usage.
 ## Contributing
 
 For inaccurate guidance, follow [Fix inaccurate guidance](../SKILL.md#fix-inaccurate-guidance).
-Keep `SKILL.md`, `references/`, and `scripts/` in sync, and use `opencode run`
+Keep `SKILL.md` and `references/` in sync, and use `opencode run`
 for meaningful behavior changes.
 
-## Query modes
+## Query language
 
-Orbit serves `SKILL.gql.md` as `SKILL.md` to users in GQL mode. Query references
-and the remote repo-map helper are mode-specific; setup and reporting guidance
-are shared. Keep both manifests' name, description, and compatibility equal.
-Set the GQL version to the JSON version plus `+gql` so caches never mix them.
-The server tests check those four fields, each mode's file set, and relative links.
-Both manifests' front matter and local-section placeholders are validated at build time.
-
-## Query-language reference
-
-`references/query_language.md` is the JSON DSL reference for the skill.
-Edit it in place. `mise run docs:query-language` regenerates its
-text-indexed properties table and the same table in
-`docs/docs-gitlab-com/queries/query-language.md`.
+Orbit serves `SKILL.gql.md` as `SKILL.md`. Keep the two files identical except
+for the version. Set the `SKILL.gql.md` version to the `SKILL.md` version plus
+`+gql` so caches never mix them. Keep both manifests' name, description, and
+compatibility equal. The server tests check those four fields, the file set,
+and relative links. Both manifests' front matter and local-section placeholders
+are validated at build time.
 
 ## Version bumps
 

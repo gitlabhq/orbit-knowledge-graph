@@ -141,7 +141,7 @@ incomplete. Do not report the returned rows as a complete list.
 ## Not supported
 
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
-subqueries, `OR`, `XOR`, `DISTINCT`, `count(*)`, and arbitrary expressions
+subqueries, `OR`, `XOR`, `RETURN DISTINCT`, `DISTINCT` inside `sum`, `avg`, `min`, or `max`, `count(*)`, and arbitrary expressions
 all reject. Syntax errors report a line and column.
 Other function calls, such as `collect(x)`, reject with an error that names
 the function.
@@ -175,6 +175,12 @@ RETURN mr.state, count(mr) AS mrs
 ORDER BY mrs DESC
 LIMIT 10
 ```
+
+### Count distinct values
+
+`count(DISTINCT x)` counts each node or property value once, for example
+`count(DISTINCT pl) AS pipelines, count(j) AS jobs` across a Pipeline to Job
+traversal. `DISTINCT` works only inside `count()`.
 
 ### Pipelines that ran for one merge request
 
@@ -270,7 +276,9 @@ MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {ful
 RETURN path
 ```
 
-It returns one outgoing path per endpoint pair.
+It returns one outgoing path per endpoint pair. When an endpoint matches more
+than 500 nodes, the search uses only the 500 with the lowest IDs, and does not
+report the rest. Filter each endpoint to 500 nodes or fewer.
 
 ## Troubleshooting
 
@@ -293,7 +301,7 @@ column. Common causes:
 - `-[AUTHORED]->` instead of `-[:AUTHORED]->`. Without the colon the name is a variable.
 - A relationship type that does not connect the two labels, or points the other way. The error names the valid direction.
 - A node label repeated with a different label, or with inline properties twice.
-- Unsupported syntax: `OR`, `XOR`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, `WITH`, or a second `ORDER BY` key.
+- Unsupported syntax: `OR`, `XOR`, `RETURN DISTINCT`, `DISTINCT` outside `count()`, `count(*)`, `OPTIONAL MATCH`, `WITH`, or a second `ORDER BY` key.
 - `LIMIT` before `SKIP`. Write `SKIP 20 LIMIT 20`, not `LIMIT 20 SKIP 20`.
 
 Fix: check node and relationship names with `CALL db.schema('Node')`.

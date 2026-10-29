@@ -1,4 +1,4 @@
-description: Non-admin explicit admin-only columns are silently stripped from results
+description: Non-admin naming admin-only columns is rejected instead of silently getting fewer columns
 
 query:
   json: |
@@ -14,10 +14,4 @@ query:
     MATCH (u:User {id: 1}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.is_admin, u.is_auditor LIMIT 10
 
 expect:
-  node_count: 1
-  nodes:
-    User:
-      ids: [1]
-      rows:
-        - { id: 1, username: alice }
-      prop_absent: [is_admin, is_auditor]
+  compile_error_contains: [is_admin, administrator]

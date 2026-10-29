@@ -105,8 +105,6 @@ Commands that use only the local graph need no GitLab account and no network.
 | `grep` | Local graph and GitLab Orbit API | Search every line of code, tests, configuration, and documentation, with the enclosing definitions, and the merge requests, issues, and comments of your GitLab group. |
 | `context` | Local graph and GitLab Orbit API | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
 | `workspace index` | Local graph | Index a repository, or a directory of repositories. |
-| `workspace sql` | Local graph | Run read-only SQL. |
-| `workspace schema` | Local graph | List the tables and columns. |
 | `workspace list` | Local graph | List the indexed repositories. |
 | `workspace mcp serve` | Local graph | Serve the local graph to agents over the Model Context Protocol (MCP). |
 | `setup`, `uninstall` | None | Add or remove the agent configuration. |
@@ -198,7 +196,7 @@ For merge requests, pipelines, work items, and vulnerabilities, [query GitLab Or
 | Data | Code only | GitLab data and code |
 | Code version | The checkout on your machine, including commits that you have not pushed | The default branch of each project |
 | Refresh | `grep` and `context` index new commits and edited files, or you run `glab orbit workspace index` | Automatic |
-| Query with | `grep`, `context`, and `workspace sql` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
+| Query with | `grep` and `context` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
 
 Your agent can use the local graph and GitLab Orbit in the same conversation.
 
@@ -217,7 +215,29 @@ The parser and [supported languages](schema.md#supported-languages) are the same
 - When you pass the path of a directory, the CLI indexes each repository in the directory.
 - Each indexed commit keeps its own graph. When you index the same commit again, the CLI reindexes only the files that changed since the last run.
 - After you switch branches or commit, `grep` and `context` index the new commit for you.
-  `workspace sql` reads only commits that are already indexed.
+- To list the indexed repositories, run `glab orbit workspace list`.
+
+`workspace sql`, `workspace schema`, and `workspace mcp serve` index the current repository the first time you use them in it,
+even when you indexed other repositories.
+They don't index a new commit of a repository that is already indexed. `grep`, `context`, or `workspace index` do.
+
+#### Index in the background
+
+By default, `workspace index` runs in the foreground.
+If another index of the same repository is running, it waits for that index first.
+To index without blocking a shell command that has a short timeout, use these options:
+
+| Option | Behavior |
+|--------|----------|
+| `--async` | Start the index in the background and return when it holds its locks. Prints JSON with a `status`, a `pid`, and the `log` file path. `status` is `indexing` while the index runs, `indexed` if it finished before the command returned, or `queued` if another index of the repository is already running. Cannot be combined with `--wait`, `--timeout`, `--stats`, or `--verbose`. |
+| `--wait` | Wait for a running index, then index in the foreground. Waiting is the default. |
+| `--timeout <seconds>` | How long to wait for a running index or open readers before the command exits with code `75`. Default: `ORBIT_WAIT_TIMEOUT_MS` if set, else 600 seconds. |
+
+With `--async`, if open readers still hold the locks after up to 30 seconds, the command exits with code `75` and prints the `log` file path to stderr.
+The background index keeps waiting, so you don't need to run it again.
+
+Commands that read the local graph also wait for a running index, up to 10 minutes, then exit with code `75`.
+To change the wait, set `ORBIT_WAIT_TIMEOUT_MS`.
 
 ### Search and read code
 
@@ -270,21 +290,6 @@ glab orbit context read_file
 It also reads GitLab, in the project of the `origin` remote: `mr:42`, `issue:7`, `branch:<name>`, `pipeline:123`, `job:456`, or a GitLab URL.
 With no target, it reads the merge request and failed CI/CD jobs of the current branch.
 
-### Run SQL on the local graph
-
-To run read-only SQL directly on the graph tables:
-
-```shell
-glab orbit workspace sql -F json "SELECT count(*) AS n FROM gl_definition"
-```
-
-- By default, the query reads every indexed commit of every repository.
-  To query only the indexed commit of a checkout, use `--repo <path>`, for example `--repo .`.
-- To join across repositories, join the node tables to `_orbit_manifest` on `project_id`.
-- `-F` accepts `table` (default), `json`, `ndjson`, and `csv`. `-f <file>` or `-` reads the SQL from a file or stdin.
-
-To list the tables and columns, run `glab orbit workspace schema`. To list the indexed repositories, run `glab orbit workspace list`.
-
 ## Settings, storage, and telemetry
 
 The CLI keeps its settings and the local graph in `~/.gitlab/orbit/`.
@@ -309,6 +314,7 @@ The CLI reads these environment variables:
 |----------|---------|
 | `GITLAB_TOKEN`, `GITLAB_URL` | Token and instance for the GitLab Orbit API when you run the CLI without `glab`. Default URL: `https://gitlab.com`. Without `GITLAB_TOKEN`, the CLI gets the token and instance of your `glab` sign-in from `glab auth credential-helper`. |
 | `ORBIT_DATA_DIR` | A directory for the settings and the local graph, instead of `~/.gitlab/orbit/`. |
+| `ORBIT_WAIT_TIMEOUT_MS` | How long, in milliseconds, a command waits for a running index before it exits with code `75`. Default: `600000` (10 minutes). |
 | `ORBIT_TELEMETRY_ENABLED` | `false` or `true`. Overrides the saved telemetry setting, for example in a CI/CD job. |
 
 ## Exit codes
@@ -321,6 +327,7 @@ The CLI reads these environment variables:
 | `3` | HTTP `401`. The token is missing or expired. |
 | `4` | HTTP `403`. No group with GitLab Orbit turned on is available to you. |
 | `5` | HTTP `429`. Rate limited. Wait for `Retry-After`. |
+| `75` | A running index did not finish in the wait time. Try again later, or raise the wait. |
 | `130` | You canceled a prompt or indexing. |
 
 ## Related topics

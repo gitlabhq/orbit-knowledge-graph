@@ -11,456 +11,199 @@ Accepted
 
 ## Date
 
-2026-04-21 (state semantics updated 2026-08-10 and 2026-09-26, see the updates below)
-
-## Update: cached item counts (2026-10-16)
-
-Item counts use the ClickHouse query cache with the default 10 second TTL. A count can be
-up to 10 seconds old, also after a backfill ends. `GetGraphStatus` counts the same way. The
-checkpoint and coverage reads still skip the cache, so a phase change is visible on the
-next call. The count queries were the largest share of ClickHouse time and bytes read.
-
-## Update: last completed time (2026-10-11)
-
-`GetIndexingStatus` returns `last_completed_at` per path, and `GetGraphStatus` sets it
-again on `indexing`. The value is the oldest `indexed_at` across the
-SDLC plans of the root, because each successful run sets `indexed_at`. A plan that stops
-completing keeps the time from moving. The field is absent until each plan has completed
-once.
-
-## Update: `GetIndexingStatus` and `GetItemCounts` (2026-09-27)
-
-Two RPCs expose the services directly, for the Rails status pages.
-
-- `GetIndexingStatus` takes 1 to 100 traversal paths and `GetItemCounts` takes one: a
-  top-level group, a subgroup or a project. The caller must have access to each path, and
-  an admin can ask for any path.
-- `GetIndexingStatus` returns one phase per path and per domain: unknown, not started,
-  syncing, ready or error. A project path reports the SDLC phases of its root, and the source
-  code domain carries the project coverage under the path.
-- `GetItemCounts` returns entity counts per domain that the caller can see.
-  `GetGraphStatus` counts the same way. Rails rate-limits both
-  callers: the GraphQL `itemCounts` field per user, and the REST graph status endpoint per
-  user and group or project.
-- Rails owns the display text of each domain. The responses send the domain name only.
-- A plan or project that uses all its attempts, or that stops without a retry, is a gap.
-  A path or domain is error when all its parts are settled and at least one is a gap.
-
-## Update: state from checkpoints (2026-09-26)
-
-`GetGraphStatus` no longer reads the NATS KV progress store. It presents the output of two
-server services, which the next RPCs (`GetIndexingStatus`, `GetItemCounts`) will also use.
-Both take many scopes in one call.
-
-- `indexing_status` reads the checkpoint tables of the served schema version. A plan is
-  ready when its `ns.<root>.<plan>` row has `indexed_at`. The read takes the newest
-  `indexed_at` since the last tombstone, not the `FINAL` row. A background merge keeps
-  only the newest row, so a late page write from an overlapping run can hide a completion
-  after a merge. The plan then reads as syncing until that run completes. A row without `indexed_at` is syncing, and no
-  row is not started. A domain folds the plans that feed it (node, edge and derived
-  plans) and, for code entities, the project coverage. The scope folds its domains.
-- `item_counts` counts each entity only under the requested scopes where the caller holds
-  the entity's required role.
-- The checkpoint and coverage reads skip the ClickHouse query cache. A phase change is
-  visible on the next call.
-- `indexing.state` comes from the scope phase, `sdlc_indexing` from the plans, and
-  `code_indexing` from project coverage: ready → `indexed`, syncing → `backfilling`, not
-  started → `not_indexed`. `IndexingStatus` fields 2 and 4 to 7 are no longer set.
-
-## Update: honest indexing state (2026-08-10)
-
-The single `indexing.state` word used to derive purely from run timestamps in NATS KV.
-So a run that completed without writing anything (empty datalake, aborted extract) still
-reported `indexed`. See [#1137](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1137)
-problem 1. The response now separates the two indexing surfaces and makes the combined
-field honest:
-
-- `sdlc_indexing`: the existing worst-of aggregation over per-pipeline KV progress. The
-  read set covers every Namespaced pipeline descriptor (node, composed edge, and derived
-  names). It matches the keys the SDLC indexer writes under `plan.name`, so edge-pipeline
-  failures surface too.
-- `code_indexing`: derived from the existing `projects` coverage ratio. No checkpoint on
-  any known project → `not_indexed`, partial → `backfilling`, full → `indexed`. Omitted
-  when the scope has no known projects (nothing to claim).
-- `indexing` (pre-existing field): now the worst of the two. A namespace whose code was
-  never indexed no longer reports plain `indexed`. Wire shape and enum values are
-  unchanged; Rails needs no update.
-- Each domain item carries an optional per-entity `state` (its own pipeline's state for
-  SDLC entities, the code coverage state for code-graph entities).
-- `IndexingStatus` carries `last_rows_read` / `last_rows_written`, recorded by both
-  indexers at run completion. Rows are evidence for operators (a 0-row full pull next to
-  zero counts explains an empty graph). They never drive the state, because idle
-  incremental ticks legitimately read and write nothing.
+2026-04-21 (state semantics updated 2026-08-10 and 2026-09-26, see the amendments under Decision)
 
 ## Context
 
-`GetGraphStats` returns entity counts grouped by ontology domain, scoped to a namespace via `traversal_path`. Consumers (Rails UI, Duo) use it to see what data exists in the graph for a given group or project.
+The graph stats remote procedure call (RPC) tells the Rails UI and GitLab Duo what data the graph holds for a group or project.
+It returns entity counts per ontology domain for one traversal path, the ID path that names a group or project in the namespace hierarchy.
+But entity counts alone do not answer the questions that users ask:
 
-Entity counts alone don't answer the questions users actually ask:
+- Is my project indexed yet?
+- When did indexing last run?
+- How many projects in my group have code indexing?
 
-- "Is my project indexed yet?"
-- "When was the last time indexing ran?"
-- "How many of my group's projects have been code-indexed?"
+The indexer checkpoint tables hold this information, but no RPC exposed it.
 
-This information lives in the indexer's checkpoint tables but isn't exposed through any RPC. We want to evolve `GetGraphStats` into `GetGraphStatus`, a single RPC that combines entity counts with indexing progress.
+The original RPC worked this way:
 
-The GKG proto is the source of truth for the response schema. The Rails REST endpoint (`GET /api/v4/orbit/graph_status`) is a thin proxy that forwards to GKG. If the GKG response shape changes, Rails adjusts its mapping, not the other way around.
+- It took a raw traversal path and did not know whether the scope was a group or a project.
+- It ran one count query per node table and grouped the results by domain.
+- Its plain counts were too high on tables that keep several row versions until a background merge.
+- It returned no indexing progress.
 
-### Current state
-
-- Accepts a raw `traversal_path` string.
-- Runs a `UNION ALL` of `count()` queries across all node tables with a `traversal_path` column.
-- Returns counts grouped by ontology domain (core, source_code, ci, plan, security, code_review).
-- Does not distinguish between group and project scope.
-- `count()` overcounts on `ReplacingMergeTree` tables between background merges.
+The Orbit gRPC contract defines the response schema, and the Rails REST endpoint only forwards to Orbit.
+When the Orbit response shape changes, Rails adjusts its mapping.
 
 ## Decision
 
-Four phases, each a standalone MR.
-
-### Phase 1: Accurate counts, `source_type`, and project coverage
-
-The request includes a `scope` field so Rails tells GKG whether this is a group or project request. Rails already knows the scope from the request context, so there is no reason for GKG to spend extra ClickHouse queries looking it up:
-
-```protobuf
-message GetGraphStatsRequest {
-  string traversal_path = 1;
-  SourceType source_type = 2;
-}
-
-enum SourceType {
-  SOURCE_TYPE_GROUP = 0;
-  SOURCE_TYPE_PROJECT = 1;
-}
-```
-
-Entity counts are returned for all node types under the traversal path using `startsWith(traversal_path, ...)`. Subgroups roll up: requesting a parent group counts everything under it.
-
-Every type is counted with `uniq(id)`, which routes to the per-table `tp_count` aggregate projection (`SELECT traversal_path, uniq(id) GROUP BY traversal_path`). It reads kilobytes of HyperLogLog state rather than scanning the namespace. It also deduplicates the un-merged `ReplacingMergeTree` versions that a plain `count()` overcounts (observed up to +300% for frequently updated types). It carries ~1-2% HyperLogLog error, acceptable for a status indicator, and every type except Group measured within ~1% of exact on prod.
-
-Group is the one exception, counted with exact `count() FINAL`. Namespace deletion permanently removes groups and leaves tombstoned rows with distinct ids. The projection has no `_deleted` column to exclude them, so `uniq(id)` overcounts Group ~6x (measured +549% on a large namespace). The group table is tiny, so FINAL is cheap. The check lives in `build_node_query` in `crates/orbit-server/src/graph_status/lower.rs`.
-
-#### Per-entity access control
-
-Entity counts must respect the caller's access level. A user who cannot see vulnerabilities in the query pipeline must not see vulnerability counts in the stats response.
-
-[!987](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/987) adds `required_role` to ontology nodes (e.g., `security_manager` for Vulnerability) and tags each traversal path in the JWT with the user's `access_level` on that path. The compiler's security pass calls `SecurityContext::paths_at_least(min_role)` to drop paths where the user's role is below the entity's floor.
-
-The stats endpoint uses the same check. Before including a node type in the `UNION ALL`, skip it if the user has no traversal path that meets the entity's `required_access_level`:
-
-```rust
-.filter(|node| {
-    let min_role = node.required_access_level();
-    !security_context.paths_at_least(min_role).is_empty()
-})
-```
-
-Entities the user cannot access at any path are excluded from the query entirely. A Reporter-only user sees zero Vulnerability rows in query results and zero Vulnerability counts in stats.
-
-#### Project coverage counts
-
-The response includes a `projects` object with `indexed` (how many projects have been code-indexed) and `total_known` (how many projects exist under the traversal path). These counts are pulled forward from Phase 3 into Phase 1. They only require ClickHouse queries and are useful even without the indexing metadata from NATS KV.
-
-- `total_known`: `uniq(id)` on `gl_project`, filtered by `startsWith(traversal_path, ...)` and `_deleted = 0`.
-- `indexed`: `uniq(project_id)` on `code_indexing_checkpoint`, filtered by `startsWith(traversal_path, ...)` and `_deleted = 0`. Namespace deletion soft-deletes checkpoint rows via `INSERT INTO ... SELECT` with `_deleted = true`.
-
-The entity count and project count queries run concurrently.
-
-### Phase 2: Indexing progress via NATS KV
-
-The indexer writes indexing metadata to a NATS KV bucket (`indexing_progress`) after each run completes. Each key maps to a project or namespace:
-
-- SDLC: keyed by top-level namespace ID (e.g., `sdlc.9970`)
-- Code: keyed by project ID (e.g., `code.278964`)
-
-The value is the same shape for both: `last_started_at`, `last_completed_at`, `last_duration_ms`, `last_error`. Overwritten on every run, so it always reflects the most recent attempt. A non-empty `last_error` means the last run failed.
-
-Reads are O(1) lookups, with no extra ClickHouse queries for indexing metadata. The `projects.indexed` / `projects.total_known` counts still come from ClickHouse since they require aggregation.
-
-Schema migrations trigger a full re-index, but the previous progress entry stays valid until the re-index completes. The data is stale but still accurate for the old schema version, so the endpoint keeps serving it rather than showing nothing.
-
-### Phase 3: Rename to GetGraphStatus, wire indexing metadata into the response
-
-Rename the RPC to `GetGraphStatus`.
-
-```protobuf
-message GetGraphStatusRequest {
-  string traversal_path = 1;
-  SourceType source_type = 2;
-}
-```
-
-The response is flat: indexing metadata at the top level, a `projects` object (already shipped in Phase 1), then `stats` (entity counts by ontology domain). Same fields regardless of scope.
-
-### Phase 4: Response caching via NATS KV
-
-Cache the full serialized response in a NATS KV bucket keyed by traversal path with a 60-second TTL. On a hit, return the cached response without touching ClickHouse. On a miss, run the queries, cache, and return.
-
-The indexer invalidates the cached entry for the relevant traversal path after each indexing run. Consumers then see fresh data immediately after indexing completes rather than waiting for the TTL to expire. The 60-second TTL is a fallback for bursts between indexing runs.
-
-## Examples
-
-### Group scope
-
-**Request:**
-
-```json
-{ "traversal_path": "9970/12345/" }
-```
-
-**Flow:**
-
-1. Authorize the caller against the traversal path.
-2. Scope is `GROUP` (provided by Rails).
-3. If not a top-level group, resolve the top-level group from the traversal path. SDLC indexing runs at the top-level namespace, so indexing metadata comes from the top-level group's progress entry.
-4. Read indexing progress from NATS KV (`sdlc.{namespace_id}`).
-5. Count all entities under the traversal path per entity type with `uniq(id)` (Group is counted exactly via `count() FINAL`, see above), grouped by domain.
-6. Count projects known (`uniq(id)` on `gl_project`) vs projects indexed (`uniq(project_id)` on `code_indexing_checkpoint`) under the traversal path.
-
-**Response:**
-
-```json
-{
-  "last_started_at": "2026-04-10T11:50:00Z",
-  "last_completed_at": "2026-04-10T11:55:00Z",
-  "last_duration_ms": 300,
-  "last_error": "",
-  "projects": {
-    "indexed": 45,
-    "total_known": 150
-  },
-  "stats": [
-    {
-      "name": "core",
-      "items": [
-        { "name": "Project", "count": 150 },
-        { "name": "Group", "count": 23 },
-        { "name": "User", "count": 891 }
-      ]
-    },
-    {
-      "name": "code_review",
-      "items": [
-        { "name": "MergeRequest", "count": 8432 }
-      ]
-    },
-    {
-      "name": "ci",
-      "items": [
-        { "name": "Pipeline", "count": 12903 },
-        { "name": "Job", "count": 51204 }
-      ]
-    },
-    {
-      "name": "plan",
-      "items": [
-        { "name": "WorkItem", "count": 3201 },
-        { "name": "Milestone", "count": 87 }
-      ]
-    }
-  ]
-}
-```
-
-For a subgroup, indexing metadata comes from the top-level group. Entity counts and the `projects` ratio are scoped to the subgroup's traversal path.
-
-### Project scope
-
-**Request:**
-
-```json
-{ "traversal_path": "9970/12345/278964/" }
-```
-
-**Flow:**
-
-1. Authorize the caller against the traversal path.
-2. Source type is `PROJECT` (provided by Rails).
-3. Read indexing progress from NATS KV (`code.{project_id}`).
-4. Count all entities under the project using `uniq(id)` per entity type, grouped by domain.
-
-**Response:**
-
-```json
-{
-  "last_started_at": "2026-04-10T11:30:00Z",
-  "last_completed_at": "2026-04-10T11:30:05Z",
-  "last_duration_ms": 5000,
-  "last_error": "",
-  "projects": {
-    "indexed": 1,
-    "total_known": 1
-  },
-  "stats": [
-    {
-      "name": "core",
-      "items": [
-        { "name": "Project", "count": 1 }
-      ]
-    },
-    {
-      "name": "source_code",
-      "items": [
-        { "name": "Branch", "count": 3 },
-        { "name": "File", "count": 500 },
-        { "name": "Directory", "count": 50 },
-        { "name": "Definition", "count": 2000 },
-        { "name": "ImportedSymbol", "count": 1500 }
-      ]
-    },
-    {
-      "name": "code_review",
-      "items": [
-        { "name": "MergeRequest", "count": 47 }
-      ]
-    },
-    {
-      "name": "ci",
-      "items": [
-        { "name": "Pipeline", "count": 312 },
-        { "name": "Job", "count": 1580 }
-      ]
-    },
-    {
-      "name": "plan",
-      "items": [
-        { "name": "WorkItem", "count": 89 }
-      ]
-    }
-  ]
-}
-```
-
-### Data sources
-
-| Response field | Source |
-|---|---|
-| `last_started_at`, `last_completed_at`, `last_duration_ms`, `last_error` | NATS KV `indexing_progress`, key `sdlc.{top_level_namespace_id}` (group) or `code.{project_id}` (project) |
-| `projects.total_known` | `uniq(id)` on `gl_project`, `startsWith(traversal_path, ...)` |
-| `projects.indexed` | `uniq(project_id)` on `code_indexing_checkpoint`, `startsWith(traversal_path, ...)` |
-| `stats[].items[].count` | `uniq(id)` per node table, `startsWith(traversal_path, ...)` |
-
-## Rails endpoint
-
-`GET /api/v4/orbit/graph_status` is the REST surface that consumers (Rails UI, Duo) call. It is a thin proxy: Rails resolves the namespace, builds a JWT with the caller's per-path access levels, and forwards to GKG's `GetGraphStatus` gRPC. GKG owns the response schema.
-
-Based on the initial implementation in [Rails MR !231381](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/231381), adapted to the current design.
-
-### Request
-
-Callers identify the scope with exactly one of three parameters:
-
-| Parameter | Type | Description |
-|---|---|---|
-| `namespace_id` | Integer | Group ID |
-| `project_id` | Integer | Project ID |
-| `full_path` | String | Full path of a group or project (e.g., `gitlab-org/gitlab`) |
-
-The endpoint resolves the parameter to a namespace, checks `read_group` permission, and derives the `traversal_path` and `source_type` for the gRPC call.
-
-### Namespace resolution
-
-```ruby
-def resolve_graph_status_namespace(params)
-  namespace = if params[:namespace_id]
-                Group.find_by_id(params[:namespace_id])
-              elsif params[:project_id]
-                Project.find_by_id(params[:project_id])&.namespace
-              elsif params[:full_path]
-                routable = Routable.find_by_full_path(params[:full_path])
-                routable.is_a?(Project) ? routable.namespace : routable
-              end
-
-  namespace.is_a?(Group) ? namespace : nil
-end
-```
-
-For projects, the namespace is the parent group. The `source_type` sent to GKG is `SOURCE_TYPE_PROJECT` when the caller passed `project_id`, `SOURCE_TYPE_GROUP` otherwise.
-
-### gRPC call
-
-The gRPC client builds the request and forwards it to GKG. The JWT (built by `request_kwargs`) carries the caller's `group_traversal_ids` with per-path `access_level`. GKG uses these for traversal-path scoping and per-entity role filtering.
-
-```ruby
-def get_graph_status(user:, source_type:, traversal_path:, timeout: DEFAULT_TIMEOUT)
-  request = Gkg::V1::GetGraphStatusRequest.new(
-    traversal_path: traversal_path,
-    source_type: source_type
-  )
-  kwargs = request_kwargs(user: user, source_type: source_type, timeout: timeout)
-
-  response = stub.get_graph_status(request, **kwargs)
-  map_graph_status_response(response)
-end
-```
-
-### Response mapping
-
-GKG returns the protobuf response; Rails maps it to JSON for the REST API:
-
-```ruby
-def map_graph_status_response(response)
-  {
-    last_started_at: response.last_started_at,
-    last_completed_at: response.last_completed_at,
-    last_duration_ms: response.last_duration_ms,
-    last_error: response.last_error.presence,
-    projects: {
-      indexed: response.projects.indexed,
-      total_known: response.projects.total_known
-    },
-    stats: response.domains.map do |domain|
-      {
-        name: domain.name,
-        items: domain.items.map { |item| { name: item.name, count: item.count } }
-      }
-    end
-  }
-end
-```
-
-### Authorization
-
-- Route-level: `permissions: :read_knowledge_graph` with `boundary_type: :user`.
-- Namespace-level: `can?(current_user, :read_group, namespace)` before calling GKG.
-- Entity-level: handled by GKG via per-entity role scoping (see Phase 1). The JWT carries per-path access levels; GKG filters entity counts based on the caller's role. Rails does not need to know which entity types require elevated access.
-
-### Error handling
+**We evolve the graph stats RPC into one graph status RPC that returns entity counts and indexing progress together.**
+
+We split the change into four phases, one merge request each.
+
+### Original design
+
+Rails sends the scope type, group or project, with the traversal path.
+Rails already knows the scope from the request, so Orbit does not spend ClickHouse queries to find it.
+
+Orbit counts every node type under the traversal path with a prefix match, so a parent group includes its subgroups.
+Each count is an approximate distinct count of IDs, which reads a small precomputed summary of each table instead of scanning the namespace.
+It also removes the duplicate row versions that a plain count includes.
+At the time of the decision, plain counts were up to 300% too high for types that change often.
+The approximate count has an error of one to two percent, which is acceptable for a status indicator.
+On production, every type except Group measured in about one percent of the exact count.
+
+Group uses an exact deduplicated count, because namespace deletion leaves deleted group rows that the summary cannot exclude.
+On a large namespace, the approximate group count was about six times too high.
+The group table is small, so the exact count is cheap.
+
+Entity counts respect the caller's access level.
+Each ontology node can declare a minimum role, and the JSON Web Token (JWT) tags each traversal path with the caller's access level.
+The query compiler already drops paths where the caller's role is below the minimum.
+The status RPC uses the same check and leaves out any entity type that the caller cannot see at any path.
+A user with only the Reporter role sees zero vulnerabilities in query results and in the status counts.
+
+The response also reports project coverage, the number of projects with code indexing next to the number of known projects.
+Both counts come from ClickHouse and skip deleted rows, because namespace deletion only marks the code checkpoint rows as deleted.
+The entity counts and the project counts run concurrently.
+
+The indexers write indexing progress to a NATS key-value bucket after each run.
+Software development lifecycle (SDLC) progress has one key per top-level namespace, and code progress has one key per project.
+Each value holds the start time, completion time, duration, and error of the last run, and an error means that the run failed.
+These reads are single lookups and need no ClickHouse query.
+After a schema migration, the previous entry stays until the reindex completes, because it is still correct for the old schema.
+
+The response is flat and has the same fields for every scope.
+Indexing metadata comes first, then project coverage, then entity counts by domain.
+A subgroup gets indexing metadata from its top-level group, because SDLC indexing runs at the top-level namespace, but its counts stay scoped to the subgroup.
+A project gets indexing metadata from its own code progress entry.
+
+The last phase caches the full response in a NATS key-value bucket per traversal path with a short time to live (TTL).
+A cache hit needs no ClickHouse query, and the TTL absorbs bursts of calls between runs.
+The indexer clears the entry after each run, so consumers see new data when indexing completes.
+
+### Rails endpoint
+
+Rails exposes the RPC through a REST endpoint that the Rails UI and GitLab Duo call.
+The caller names the scope with exactly one of a group ID, a project ID, or a full path.
+Rails resolves the parameter to a group, checks that the caller can read it, and derives the traversal path and the scope type.
+For a project, the group is the parent namespace, and the scope type is project only when the caller passed a project ID.
+Rails then builds a JWT with the caller's access level on each path, forwards the request, and maps the gRPC response to JSON.
+
+Authorization has three levels:
+
+- The route requires the Orbit read permission at the user boundary.
+- Rails checks group read access before it calls Orbit.
+- Orbit filters entity types by role, so Rails does not need to know which types need a higher role.
 
 | Condition | HTTP status |
 |---|---|
-| No lookup parameter provided | 400 |
+| No lookup parameter | 400 |
 | Namespace not found or not accessible | 404 |
-| GKG unreachable | 503 |
-| GKG authorization error | 403 |
+| Orbit unreachable | 503 |
+| Orbit authorization error | 403 |
 
-## Alternatives considered
+### Amendment: indexing state per surface (2026-08-10)
 
-### Separate `GetIndexingStatus` RPC
+The single indexing state came only from run timestamps in the key-value store.
+A run that completed without writes, for example on an empty data lake or after an aborted extract, still reported indexed.
 
-Two RPCs that consumers must call and correlate. Low entity counts might mean "not indexed yet" rather than "empty namespace." A single RPC avoids that ambiguity.
+The response now reports an SDLC state and a code state, and the combined state is the worse of the two:
 
-### `FINAL` for exact counts
+- The SDLC state is the worst state across the progress of every namespaced pipeline, including node, edge, and derived pipelines.
+- The code state comes from project coverage.
+  With no projects indexed, it is not indexed, with some it is backfilling, and with all it is indexed.
+- The code state is absent when the scope has no known projects.
+- Each domain item has an optional state from its own pipeline or from code coverage.
 
-`FINAL` forces ClickHouse to deduplicate at query time. On staging with 16M edge rows, `FINAL` reads 14.4M rows (620 MB) and takes 579ms vs 71ms without. At production scale this would take minutes. `uniq(id)` gets equivalent deduplication via HyperLogLog without the cost.
+A namespace without code indexing no longer reports plain indexed.
+The wire shape and the state values did not change, so Rails needed no update.
 
-### Pre-compute stats at index time
+The progress entry also records the rows read and written in the last run, which helps operators explain an empty graph.
+These counts never drive the state, because an idle incremental run reads and writes nothing.
 
-The indexer could write pre-aggregated entity counts to NATS KV alongside the indexing progress, making the entire response an O(1) read. Rejected because it adds complexity to the indexer for an endpoint that doesn't get enough traffic to justify it. If that changes, this is a natural next step after Phase 4.
+### Amendment: state from checkpoints (2026-09-26)
+
+The RPC no longer reads the key-value progress store.
+It now shows the output of two services in Orbit, one for indexing status and one for item counts.
+Both services take many scopes in one call.
+
+The indexing status service reads the checkpoint tables of the served schema version:
+
+- A plan is ready when its checkpoint for the root has a completion time.
+- A plan with a checkpoint but no completion time is syncing.
+- A plan with no checkpoint has not started.
+
+The read takes the newest completion time after the last deletion marker, not the deduplicated row.
+A background merge keeps only the newest row, so a late page write from an overlapping run could hide a completion.
+In that case, the plan reads as syncing until the overlapping run completes.
+
+A domain combines the plans that feed it and, for code entities, the project coverage, and a scope combines its domains.
+Ready maps to indexed, syncing maps to backfilling, and not started maps to not indexed.
+Some earlier progress fields are no longer set.
+
+The item counts service counts each entity only under scopes where the caller holds the required role.
+Checkpoint and coverage reads skip the ClickHouse query cache, so a phase change shows on the next call.
+
+### Amendment: indexing status and item count RPCs (2026-09-27)
+
+Two new RPCs expose the two services directly for the Rails status pages.
+The indexing status RPC takes a capped list of traversal paths, and the item counts RPC takes one.
+A path can be a top-level group, a subgroup, or a project.
+The caller must have access to each path, and an administrator can ask for any path.
+
+The indexing status RPC returns one phase per path and per domain: unknown, not started, syncing, ready, or error.
+A project path reports the SDLC phases of its root, and its source code domain reports the project coverage under the path.
+A plan or project that uses all its attempts, or that stops without a retry, is a gap.
+A path or domain is in error when all its parts are settled and at least one is a gap.
+
+The item counts RPC returns the entity counts per domain that the caller can see, and the graph status RPC counts the same way.
+Rails rate-limits both callers, the GraphQL field per user and the REST endpoint per user and per group or project.
+The responses send only the domain name, and Rails owns the display text.
+
+### Amendment: last completed time (2026-10-11)
+
+The indexing status RPC returns a last completed time per path, and the graph status RPC reports it again.
+The value is the oldest completion time across the SDLC plans of the root, because each successful run sets that time.
+A plan that stops completing keeps the value from moving.
+The value is absent until each plan has completed once.
+
+### Amendment: cached item counts (2026-10-16)
+
+Item counts now use the ClickHouse query cache with its default short TTL.
+The count queries were the largest share of ClickHouse time and bytes read.
+A count can be as old as the TTL, even after a backfill ends.
+Checkpoint and coverage reads still skip the cache, so a phase change shows on the next call.
+
+## Benefits of this approach
+
+One RPC answers what data exists and how fresh it is, and operators see how many known projects have code indexing.
+Distinct counts no longer include duplicate row versions, and the response cache protects ClickHouse from repeated calls.
 
 ## Consequences
 
-What improves:
+Each request runs several queries and lookups instead of one, and a subgroup request must also resolve its top-level group for SDLC indexing metadata.
 
-- Single RPC for "what data exists" and "how fresh is it."
-- Indexing coverage ratio (projects indexed vs known) is the metric operators actually want.
-- `uniq(id)` eliminates overcounting from `ReplacingMergeTree` row duplication.
-- Response caching via NATS KV protects ClickHouse from repeated calls.
+## Why not the alternatives
 
-What gets harder:
+### A separate indexing status RPC
 
-- The endpoint runs multiple queries per request (entity counts + NATS lookups) instead of one.
-- Subgroup requests need to resolve the top-level group for SDLC indexing metadata.
+Consumers would have to call two RPCs and match the results.
+A low count could mean that indexing has not run yet or that the namespace is empty, and one RPC removes that doubt.
+The 2026-09-27 amendment later added separate RPCs for the Rails status pages, and the graph status RPC still combines both.
+
+### Exact deduplicated counts for every type
+
+Query-time deduplication is expensive.
+On staging, with 16 million edge rows, it read 14.4 million rows and 620 MB in 579 ms, against 71 ms without it.
+At production scale it would take minutes.
+The approximate distinct count removes duplicates at a fraction of that cost.
+
+### Precomputed counts at index time
+
+The indexer could write entity counts to the key-value store with the progress entry, so the full response is one lookup.
+We rejected this because it adds work to the indexer for an endpoint with low traffic.
+If traffic grows, this is the next step after the response cache.
 
 ## References
 
@@ -468,5 +211,6 @@ What gets harder:
 - [SDLC indexing design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)
 - [ADR 005: PostgreSQL task table for code indexing triggers](005_code_indexing_task_table.md)
 - [Security and authorization design](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md)
-- [MR !987: Per-entity role scoping for aggregation targets](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/987)
-- [Rails MR !231381: Add `GET /api/v4/orbit/graph_status` endpoint](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/231381)
+- [Enforce the per-entity role on aggregation target nodes](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/987)
+- [Add the graph status REST endpoint to Rails](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/231381)
+- [Fix silent wrong answers before we charge per query](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1137)

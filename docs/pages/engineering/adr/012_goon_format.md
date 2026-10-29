@@ -8,7 +8,9 @@ toc_hide: true
 
 ## Status
 
-Superseded. `format=llm` query results use [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md), with one table per node type. The GOON encoder was removed.
+Superseded.
+Query results in the large language model (LLM) format now use Token-Oriented Object Notation (TOON), with one table for each node type.
+We removed the Graph Object Output Notation (GOON) encoder.
 
 ## Date
 
@@ -16,293 +18,191 @@ Superseded. `format=llm` query results use [TOON](https://github.com/toon-format
 
 ## Context
 
-The GKG server returns graph query results through `ResponseFormat`: `RAW` produces structured JSON from `GraphFormatter`; `LLM` produces text from `GoonFormatter`. The `LLM` path existed in proto, gRPC routing, and CLI wiring before any encoding shipped. `GoonFormatter` delegated to `GraphFormatter` and returned the same JSON. No LLM-optimized encoding existed.
+Orbit returns a graph query result in one of two formats.
+The raw format is structured JSON, and the LLM format is text for an agent.
+Orbit, the gRPC contract, and the command-line interface (CLI) accepted the LLM format before it had its own encoding.
+Until then, it returned the same JSON as the raw format, so an agent that ran a graph query received the full JSON response.
+A traversal of 50 users, 200 merge requests, and 200 edges used about 12,000 to 15,000 tokens.
+A columnar text format held the same information in 5,000 to 7,000 tokens, with the graph topology that the agent needs.
+A session with 5 to 10 graph queries spent 50,000 to 80,000 tokens of context on JSON syntax.
 
-When an agent calls `query_graph`, it receives the full `GraphResponse` JSON. A traversal of 50 users and 200 merge requests with 200 edges runs roughly 12,000 to 15,000 tokens. The same information in a columnar text format fits in 5,000 to 7,000 tokens while preserving the graph topology the agent needs. Over a multi-turn session of 5 to 10 graph queries, that is 50,000 to 80,000 tokens of context spent on structural JSON syntax.
-
-Encoding choice also affects correctness. Google's "Talk like a Graph" study (Fatemi et al., ICLR 2024) measured graph reasoning accuracy as a function of encoding alone. It observed swings between 4.8% and 61.8% per task. Incident encoding (grouping edges by source) outperformed flat edge lists and adjacency matrices across most tasks. Dense encodings with many edges acted as distractors. Application-context framing ("who authored which merge requests") outperformed abstract graph framing by up to 18 percentage points.
-
-The encoding choice is a correctness concern as much as a token-budget one.
+The encoding also affects correctness.
+In a Google study, the encoding alone changed graph reasoning accuracy by 4.8% to 61.8%, depending on the task.
+Incident encoding, which groups edges by source node, did better than flat edge lists and adjacency matrices on most tasks.
+Dense encodings with many edges distracted the model.
+Application-context framing, such as "who authored which merge requests", did better than abstract graph framing by up to 18 percentage points.
 
 ## Decision
 
-Adopt GOON, a line-oriented text format for `format=llm` responses. Section-marker grammar with deterministic ordering, type-grouped node bodies, relationship-grouped edges, table-shaped aggregation rows, and chain notation for paths.
+**We adopt GOON, a line-oriented text format, for query results in the LLM format.**
 
-The format spec was validated by:
+The format uses section markers in a fixed order, and groups node bodies by type and edges by relationship.
+Aggregation results are table-shaped rows, and paths use chain notation.
 
-- A **5-variant Pareto benchmark** on Haiku 4.5 against the production GitLab.com graph (`gitlab-org/orbit/gkg-evals-harness`). 430 task-runs over two cohorts measured cost, duration, and tool-call correctness for `kv`, `col`, `hier`, `min`, `incident`, and the raw JSON baseline.
-- A **corpus audit pass** ran the full query corpus (then `fixtures/queries/corpus-input.json`, since reorganized under `fixtures/queries/corpus/`) against production via four parallel sub-agents. It surfaced six production-confirmed encoder gaps (each fixed and regression-tested).
-- A **post-merge data-loss audit** using two parallel sub-agents to walk every field of `GraphResponse` and verify the encoder reads it. Four silent drops found and fixed.
+Three checks validated the format:
 
-The `kv` variant was Pareto-dominant over raw JSON: −11% cost, −15% duration, +4.8pp correctness, p=0.043 on `tool_sequence_length`. The `min` variant matched `kv` on accuracy at lower token cost. This led to the `@hints` block being descoped from the format. Its presence in `kv` did not improve agent behavior over `min`'s absence of it.
+- A benchmark against the production GitLab.com graph, on Claude Haiku 4.5.
+  It had 430 task runs in two cohorts, and it compared cost, duration, and tool-call correctness together.
+  It compared five GOON variants and the raw JSON baseline.
+- An audit that ran the full query corpus against production.
+  It found six encoder gaps, and each got a fix and a regression test.
+- A data-loss audit that checked that the encoder reads every field of the response.
+  It found four silent drops, and each got a fix.
 
-## Format specification
+The key-value variant was better than raw JSON on all three measures at once.
+It had 11% lower cost, 15% lower duration, and 4.8 percentage points higher correctness, with p=0.043 on tool sequence length.
+A minimal variant without the block of navigation hints matched the key-value variant on accuracy at a lower token cost, so we removed the hints.
 
-GOON is line-oriented text. Sections are delimited by `@`-prefixed markers, emitted in a fixed order. The order is `@header`, `@nodes`, then exactly one of `@edges` (for `traversal`, `search`, `neighbors`) or `@paths` (for `path_finding`), and `@rows` for `aggregation`. Empty sections still emit their marker so a parser does not have to special-case absence.
+### Format
 
-### `@header`
+A result has a header section, then a nodes section.
+Traversal, search, neighbors, and aggregation results then have an edges section, and path finding results have a paths section.
+An aggregation result adds a rows section.
+A section with no entries still has its marker, so a parser does not need a special case.
 
-Query metadata. One field per line. Always present.
+This example shows a small traversal:
 
 ```plaintext
 @header
 query_type:traversal
 goon_version:1.0.0
-nodes:10
-edges:5
-```
-
-Fields:
-
-| Field | When | Meaning |
-|---|---|---|
-| `query_type` | always | One of `traversal`, `aggregation`, `path_finding`, `search`, `neighbors`. |
-| `goon_version` | always | This encoder's wire version (semver). Distinct from the upstream `GraphResponse.format_version`, which is the source schema version owned by ADR 004. |
-| `nodes` / `edges` | always | Counts of entries in `@nodes` / `@edges`. For aggregation with node-kind group columns, `nodes` reflects the deduplicated entities lifted from rows. |
-| `rows` | aggregation | Number of rows in `@rows`. |
-| `group_by` | aggregation with `group_by` | Comma-separated descriptors: `name(kind)` or `name(kind:detail)`. Kind is `node` (detail is the entity type, e.g. `severity(node:Vulnerability)`) or `property` (detail is the underlying ontology property when the alias differs, e.g. `severity_bucket(property:severity)`). |
-| `aggregations` | aggregation with metrics | Comma-separated descriptors: `name(function)`, `name(function:target)`, or `name(function:target.property)`. The richest form names both the node alias and the property being aggregated, so `latest_update(max:v.updated_at)` is unambiguous. |
-| `has_more` | when cursor paginated and there are more rows | `true`. |
-
-### `@nodes`
-
-Nodes grouped by entity type. Each type starts with `TypeName(count):` then one entity per line. Each line begins with the integer ID, followed by `key=value` pairs.
-
-```plaintext
+nodes:2
+edges:1
 @nodes
-User(3):
+User(1):
 1 username=alice name="Alice Smith" state=active
-2 username=bob name="Bob Chen" state=active
-3 username=carol name="Carol Davis" state=blocked
 
-MergeRequest(2):
+MergeRequest(1):
 42 iid=101 state=merged title="Fix auth bug"
-43 iid=102 state=merged title="Add caching layer"
-```
-
-Ordering is `(entity_type, id)` for `traversal`, `search`, `neighbors`, and `path_finding`. For `aggregation`, server row order is preserved so the order specified by `aggregation_sort` survives the encode pass.
-
-For aggregation queries with node-kind group columns, the encoder lifts each unique `{type, id, properties}` cell from `@rows` into `@nodes` (deduplicated by `(entity_type, id)`). This keeps row lines one line each and avoids repeating node bodies on every bucket.
-
-#### Value formatting
-
-| Source | Encoded as | Example |
-|---|---|---|
-| `null`, empty string | omitted from the row | (key does not appear) |
-| `null` in a `@rows` cell | bare `null` (literal) | `severity=null count=5` — a real bucket value, distinct from the string `"null"` which is quoted |
-| `true` / `false` (JSON bool) | bare token | `draft=true` |
-| `"true"` / `"false"` / `"null"` (JSON string) | quoted | `state="true"` — distinguishes a string from a native boolean |
-| Integer | bare digits | `iid=18`, `id=12971673076` (precision preserved up to `i64`) |
-| Finite float | bare | `avg_duration=941.131772070606` |
-| `NaN`, `±Inf` | dropped | (key does not appear) |
-| String matching `[A-Za-z0-9_\-:./@+]+`, which includes every ISO 8601 datetime the pipeline emits | bare | `username=stanhu`, `created_at=2026-05-08T22:55:58.467450Z` |
-| Any other string | double-quoted with `\\`, `\"`, `\n`, `\r`, `\t` escapes; other control chars dropped | `title="line one\nline two"` |
-| Long text (`body`, `description`, `name`, `note`, `title`) over 200 chars | truncated with `...` plus a sibling `<key>_len=N` breadcrumb | `description="..." description_len=2308` |
-| Any other string over 1000 chars | same truncation + breadcrumb | |
-
-Property order within a node row is column-priority then alphabetical. Identity fields come first (`iid`, `username`, `name`, `full_path`, `path`, `uuid`). Status enums follow (`state`, `status`, `visibility_level`), then everything else. Timestamps come next (`created_at`, `updated_at`, `merged_at`, `closed_at`). Long text (`title`, `description`, `body`, `note`) comes last. This means a truncated description never hides a shorter identity field.
-
-### `@edges`
-
-Edges grouped by relationship type. Arrow notation matches what models naturally produce when formatting graph data.
-
-```plaintext
 @edges
-AUTHORED(3):
+AUTHORED(1):
 User:1 --> MergeRequest:42
-User:1 --> MergeRequest:43
-User:2 --> MergeRequest:44
-
-IN_PROJECT(2):
-MergeRequest:42 --> Project:100
-MergeRequest:43 --> Project:100
 ```
 
-Ordering is total: `(path_id, step, edge_type, from, from_id, to, to_id, depth)`. Duplicates are removed using the same key. The total ordering means shuffle-invariance under property tests.
+The header has one field on each line, with the query type, the GOON version, and the counts.
+An aggregation header also describes each group column and each metric.
+A paginated result with more rows has a flag for that.
+The GOON version is separate from the version of the raw format, which [ADR 004](004_unified_response_schema.md) owns.
 
-For variable-length traversals, an edge with a depth tag carries it on the row:
+Nodes are grouped by type with a count for each type, and sorted by type and ID.
+Each node line starts with the integer ID, followed by key-value pairs.
+Aggregation results keep the row order from Orbit, so the requested sort order survives.
+When an aggregation groups by a node, the encoder lifts each unique node from the rows into the nodes section.
+A row then refers to the node by type and ID, and does not repeat the node body.
 
-```plaintext
-@edges
-MEMBER_OF(2):
-User:1 --> Group:100 depth=1
-User:1 --> Group:200 depth=2
-```
+Values follow fixed rules:
 
-### `@paths` (path_finding only)
+- A null value or an empty string is omitted from a node line.
+- A null value in an aggregation row is the bare literal null, so a "no value" bucket stays distinct from a missing column.
+- Booleans, integers with full 64-bit precision, finite floats, and strings of safe characters are bare, and that includes ISO 8601 timestamps.
+- A string that looks like a boolean or null is quoted, and so is any other string, with escapes for control characters.
+- A float that is not a number or is infinite is dropped, and so are other control characters.
+- Long text is truncated at a cap, and a sibling key records the full length.
 
-For `path_finding`, `@edges` is replaced by `@paths`. Each path is one line: a chain of `Type:id --REL--> Type:id` segments. The agent gets the path identity without reassembling it from scattered edges.
+Properties on a node line follow a fixed priority, then alphabetical order.
+Identity fields come first, then status values, then other fields, then timestamps.
+Long text comes last, so a truncated description never hides a short identity field.
 
-```plaintext
-@paths
-path=0: User:64248 --AUTHORED--> MergeRequest:482927048 --IN_PROJECT--> Project:278964
-```
+The edges section groups edges by relationship type and uses arrow notation, as models do when they format graph data.
+Edges have a total order and no duplicates.
+An edge from a variable-length traversal carries its depth.
+A path is one line with a chain of typed nodes and relationships, so the agent does not rebuild it from separate edges.
+The nodes section still carries the full properties of each node in a path.
+An aggregation row is one line with the group columns first, then the metrics.
 
-The `@nodes` section still carries full properties for each entity referenced in the chain.
+### Encoder
 
-### `@rows` (aggregation only)
+The encoder builds the raw response, then encodes it as GOON text.
+Orbit selects the encoder for each request, and the gRPC result carries the format name and version.
+The encoder reads every field of the raw response.
+It does not show three kinds of fields:
 
-Table-shaped aggregation rows. One row per line. Group columns come first, then metric columns, in the order declared by `group_by:` and `aggregations:`.
+- The raw format version, because a second version field in the header causes a name conflict.
+- The source node alias of a group column, because it is internal compiler state.
+- The path and step positions of an edge, which set the sort order and the chain order of paths.
 
-Property grouping with a single metric:
+Property tests lock the output.
+A shuffled input encodes to the same bytes, the header is always first, and no unescaped control character gets through.
 
-```plaintext
-@header
-query_type:aggregation
-goon_version:1.0.0
-nodes:0
-edges:0
-rows:5
-group_by:severity(property)
-aggregations:vulnerability_count(count:v)
-@nodes
-@edges
-@rows
-severity=medium vulnerability_count=8421
-severity=high vulnerability_count=2350
-severity=low vulnerability_count=1542
-severity=critical vulnerability_count=120
-severity=info vulnerability_count=42
-```
+GOON has its own semantic version, with the same rules as the raw format in ADR 004.
+A continuous integration (CI) check requires a version bump on any encoder change, unless the change does not affect the wire output.
 
-Node grouping, with the lifted entity in `@nodes`:
+The HTTP response body is out of scope.
+Workhorse owns the HTTP response and puts the GOON text in a field of a JSON envelope.
+A plain text body would show real line breaks, and needs a change in Workhorse only.
 
-```plaintext
-@header
-query_type:aggregation
-goon_version:1.0.0
-nodes:3
-edges:0
-rows:3
-group_by:u(node:User)
-aggregations:merged_count(count:u)
-@nodes
-User(3):
-1243277 username=ghost1
-35702613 username=bot_a
-26832240 username=bot_b
-@edges
-@rows
-u=User:1243277 merged_count=65555
-u=User:35702613 merged_count=21277
-u=User:26832240 merged_count=20289
-```
+## Benefits of this approach
 
-Ungrouped (scalar) aggregation flows through the same `@rows` path with a single row:
-
-```plaintext
-@header
-query_type:aggregation
-goon_version:1.0.0
-nodes:0
-edges:0
-rows:1
-aggregations:total(count:u)
-@nodes
-@edges
-@rows
-total=2347
-```
-
-## Implementation
-
-`GoonFormatter` lives in `crates/query-engine/formatters/src/goon/`. It implements the `ResultFormatter` trait the same way `GraphFormatter` does: `format(&self, output: &PipelineOutput) -> Value`. For LLM responses it composes `GraphFormatter::build_response(output)` with `goon::encode(&response, &GOON_OUTPUT_FORMAT_VERSION)` and wraps the result in `Value::String`.
-
-Wiring at `crates/orbit-server/src/grpc/service.rs` dispatches statically per request: `req.format == ResponseFormat::Llm` calls `GoonFormatter.format_stamped(&output)`; otherwise `GraphFormatter.format_stamped(&output)`. The result rides the gRPC `ExecuteQueryResult.formatted_text` field with format-name and format-version metadata.
-
-The encoder reads every field of `GraphResponse` (audited via parallel sub-agents post-implementation). Fields that travel:
-
-- All node and edge fields, including `GraphEdge.depth` for variable-length traversals.
-- `ColumnDescriptor.target` and `.property` (rendered in the `aggregations:` line as `function:target.property`).
-- `GroupColumnDescriptor.entity` (rendered as `name(node:Entity)`) and `.property` when the alias differs from the underlying property name (rendered as `name(property:underlying)`).
-- `Value::Null` in `@rows` cells renders as bare `null` so a "no severity assigned" bucket stays distinguishable from an absent column.
-
-Fields intentionally not surfaced:
-
-- `GraphResponse.format_version`: the upstream RAW schema version. The encoder emits `goon_version` instead; mixing both in one header creates the same field-name conflict that motivated the rename.
-- `GroupColumnDescriptor.node`: the source node alias is internal compiler state.
-- `GraphEdge.path_id` / `step`: used as sort keys and to drive `@paths` chain order; not surfaced as visible fields.
-
-### Determinism
-
-Locked by property tests with 64 cases each:
-
-- `shuffle_invariant`: a random payload shuffled by a seeded RNG must encode byte-identically.
-- `encoding_is_pure`: same input encodes to same bytes across calls.
-- `output_starts_with_header`: `@header\n` always first.
-- `no_unescaped_control_chars`: no raw `\r` or `\t` reaches the output.
-
-### Versioning
-
-`config/GOON_OUTPUT_FORMAT_VERSION` (semver, `1.0.0` at first release) follows the same discipline as `RAW_OUTPUT_FORMAT_VERSION` from ADR 004:
-
-- `scripts/check-goon-format-version.sh` mirrors `check-response-schema-version.sh`. It watches `crates/query-engine/formatters/src/goon/**.rs`, `graph.rs`, and `lib.rs`, and requires a version bump on any change.
-- Lefthook runs the check pre-commit; GitLab CI runs it on MRs in the `lint` stage.
-- Bypass for wire-neutral edits: `[skip pinned-version-check]` in the MR description or `SKIP_PINNED_VERSION_CHECK=1` locally.
-
-## Test coverage
-
-| Layer | Where | Count | Covers |
-|---|---|---|---|
-| Unit | `crates/query-engine/formatters/src/goon/tests.rs` | 42 | Header structure, sections, quoting, escape rules, truncation, numerics, edges, dedup, path-finding, aggregation shapes (property + node + ungrouped), `Value::Null` row cells, depth on variable-length edges |
-| Property (`proptest`) | `tests/goon_properties.rs` | 4 × 64 | Shuffle invariance, idempotence, header prefix, no unescaped control chars |
-| Snapshot (`insta`) | `tests/goon_snapshots.rs` | 7 | One golden file per query shape + pagination |
-| Integration | `crates/integration-tests/tests/server/goon_formatter.rs` | 8 subtests | Full compile → execute → redact → hydrate → format path against ClickHouse testcontainers; asserts `format_stamped` returns `(Value::String, version, FormatName::Goon)`, headers carry `goon_version`, escape behavior, aggregation shapes, raw/goon count agreement |
-
-## Why not the alternatives
-
-**Return JSON with a token-efficient serialization (MessagePack, CBOR).** Binary formats save bytes, not tokens. LLMs tokenize text; a base64-wrapped MessagePack payload tokenizes about the same as the JSON it encodes.
-
-**Return natural language summaries.** Natural language is the least token-efficient encoding. "User alice authored merge request 42 titled Fix auth bug which is merged" is 15 tokens; `42 iid=101 title="Fix auth bug" state=merged` is 9. It is also unparseable for follow-up queries.
-
-**Pipe-delimited columnar tables (TOON-style headers + values).** Declaring column names once and emitting `1|alice|active` is ~10 to 15% more token-efficient than `key=value` for large result sets. Analysis of 316 AI coding sessions (83 Claude Code, 233 Codex) showed models never produce columnar output when formatting graph data. They consistently use inline `key=value`. The Pareto benchmark confirmed: `col` did not beat `kv` on cost-adjusted correctness.
-
-**Return the same JSON as `format=raw`.** Wastes 40 to 60% of tokens on `{`, `}`, `"key":`, and commas. The starting point that motivated this ADR.
-
-**JSON with abbreviated keys.** Shortening `"username"` to `"u"` saves tokens but forces the model to maintain a key mapping across the response. The `key=value` shape keeps full names inline at comparable token cost.
-
-**Keep the `@hints` navigation block.** The `kv` variant carried a `@hints` block listing available outgoing relationships per entity type. The Pareto benchmark showed `min` (no hints) matched `kv` on accuracy at lower token cost. The hints did not change agent behavior enough to pay for themselves, so the block was descoped.
-
-**Hierarchical / incident-only encoding (one section per source node).** The `hier` and `incident` variants scored higher on isolated graph-reasoning tasks but worse on the cost/duration axes in the benchmark. The Pareto front was won by `kv`'s flat type-grouped shape.
+The LLM path used 40% to 60% fewer tokens, across all five query shapes on production data.
+The format matches what models produce and read for graph data, as 316 session transcripts showed.
+The output is a pure function of the raw response, and only a new field in the wire response can extend the format.
+The CLI shows readable text for the LLM format, in place of dense JSON.
 
 ## Consequences
 
-What improves:
+- GOON is specific to Orbit.
+  A change to the raw response needs a matching change in the encoder, and the version check catches a missed change.
+- Quoting has more rules than a pipe-delimited format.
+  The encoder applies the rules in one pass, and tests cover them.
+- Snapshot tests catch unintended format drift.
+  A deliberate format change is therefore a large snapshot diff.
 
-- 40 to 60% token reduction on the LLM path, validated across all five query shapes against production data.
-- −11% cost, −15% duration, +4.8pp correctness against raw JSON on Haiku 4.5 (p=0.043 on `tool_sequence_length`).
-- Format matches what models naturally produce and consume for graph data (validated against 316 session transcripts).
-- The shape is a pure function of `GraphResponse`. Every visible field is a function of one input field. Adding a new field to the wire response is the only way to extend the format.
-- `orbit query --format=llm` outputs human-scannable text instead of dense JSON.
+A Python prototype encoder exists next to the Rust encoder, and byte-identical output from both is deferred.
 
-What gets harder:
+## Why not the alternatives
 
-- GOON is GKG-specific. Changes to `GraphResponse` need corresponding changes to the encoder (caught by the versioned CI check).
-- String quoting has more rules than pipe-delimited (escapes for `\\`, `\"`, `\n`, `\r`, `\t`; control char drops). The encoder treats this as one pass; the rules are tested.
-- Snapshot tests catch any unintended format drift, which is intentional but means any deliberate format change is a multi-line snapshot diff.
+### Binary JSON encodings
 
-Cross-language parity (Rust encoder vs the Python prototype in `gkg-evals-harness:vendor/skills/orbit-goon-kv/scripts/goon_encode.py`) is locked on the Rust side only. Byte-identical output on identical inputs is a deferred follow-up.
+Binary formats such as MessagePack and CBOR save bytes, but they do not save tokens.
+Models tokenize text, and a base64 payload uses about the same tokens as the JSON in it.
 
-## Out of scope
+### Natural language summaries
 
-**HTTP response body shape.** Workhorse owns the HTTP response. For `format=llm`, the body is currently `{result: "<goon-text>", query_type, raw_query_strings, row_count}`. The goon string lives in the `result` field of a JSON envelope. Returning the goon text as a plain `text/plain` body (so a viewer renders real newlines instead of `\n` escapes) requires a change in `workhorse/internal/orbit/sendquery.go`. It does not change GKG. That change is not part of this ADR.
+Natural language uses the most tokens.
+"User Alice authored merge request 42 titled Fix auth bug which is merged" uses 15 tokens.
+The GOON line for the same merge request uses 9 tokens.
+An agent also cannot parse natural language for a follow-up query.
+
+### Pipe-delimited columnar tables
+
+A table with column names in a header and pipe-delimited values uses 10% to 15% fewer tokens than key-value pairs on large results.
+In 316 AI coding sessions, models never produced columnar output when they formatted graph data.
+They always used inline key-value pairs.
+In the benchmark, the columnar variant did not beat the key-value variant on cost-adjusted correctness.
+
+### The same JSON as the raw format
+
+JSON spends 40% to 60% of its tokens on braces, quoted keys, and commas.
+That cost was the starting point for this decision.
+
+### JSON with short keys
+
+Short keys save tokens, but the model must keep a key map across the response.
+Key-value pairs keep full names at a similar token cost.
+
+### Keep the navigation hints block
+
+The key-value variant had a block that listed the outgoing relationships for each entity type.
+In the benchmark, the minimal variant without hints matched it on accuracy at a lower token cost.
+The hints did not change agent behavior enough to pay for their tokens.
+
+### Hierarchical or incident encoding
+
+These variants put one section for each source node.
+They did better on isolated graph-reasoning tasks, but worse on cost and duration in the benchmark.
+The flat key-value shape, grouped by type, had the best balance of cost, duration, and correctness.
 
 ## References
 
-- Issue: [#271](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/271)
-- Implementation MR: [!1289](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1289) (merged)
-- Audit follow-up MR: [!1291](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1291)
-- Property grouping (changed aggregation wire shape): [!1287](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1287)
-- Benchmark harness: [`gkg-evals-harness!1`](https://gitlab.com/gitlab-org/orbit/gkg-evals-harness/-/merge_requests/1)
-- Benchmark result note: [MR note 3331102607](https://gitlab.com/gitlab-org/orbit/gkg-evals-harness/-/merge_requests/1#note_3331102607)
-- Eval archive: `gitlab-org/orbit/orbit-evals-results-archive`
-- ADR 003 (API Design): [`003_api_design.md`](003_api_design.md)
-- ADR 004 (Unified Query Response Schema): [`004_unified_response_schema.md`](004_unified_response_schema.md)
-- ADR 008 (Workhorse Query Acceleration): [`008_workhorse_query_acceleration.md`](008_workhorse_query_acceleration.md)
-- Fatemi, Halcrow, Perozzi. "Talk like a Graph: Encoding Graphs for Large Language Models." ICLR 2024.
+- [Implement Graph Object Oriented Notation (GOON) encoder](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/271)
+- [Implement the GOON encoder](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1289)
+- [Surface every response field in GOON output](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1291)
+- [Support property grouping aggregations](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1287)
+- [Python GOON encoder prototype and benchmark configuration](https://gitlab.com/gitlab-org/orbit/gkg-evals-harness/-/merge_requests/1)
+- [Benchmark result note](https://gitlab.com/gitlab-org/orbit/gkg-evals-harness/-/merge_requests/1#note_3331102607)
+- [GOON format snippet](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205)
 - [TOON specification](https://github.com/toon-format/spec/blob/main/SPEC.md)
-- [Orbit API Design (snippet)](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205)
-- Encoder source: `crates/query-engine/formatters/src/goon/`
-- Wire version constant: `config/GOON_OUTPUT_FORMAT_VERSION`
-- Response JSON Schema: `config/schemas/query_response.json`
-- Proto: `crates/orbit-server/proto/orbit.proto` (`ResponseFormat::RESPONSE_FORMAT_LLM`)
+- Fatemi, Halcrow, and Perozzi, "Talk like a Graph: Encoding Graphs for Large Language Models", ICLR 2024
+- [ADR 003: Orbit API design (unified REST and GraphQL)](003_api_design.md)
+- [ADR 004: Unified query response schema](004_unified_response_schema.md)
+- [ADR 008: Workhorse query acceleration](008_workhorse_query_acceleration.md)

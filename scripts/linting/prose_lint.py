@@ -42,7 +42,7 @@ SCOPE = (
     "config/prompts/**/*.yml",
     "config/setup/setup.yaml",
 )
-EXCLUDED = ("skills/orbit/references/query_language.md",)
+EXCLUDED = ()
 
 MAX_SENTENCE_WORDS = 25
 MAX_AVERAGE_WORDS = 20.0
