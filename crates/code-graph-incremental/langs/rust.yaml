@@ -570,8 +570,8 @@ display:
           preamble: '@$ROOT|source_before("4096")|regex_first("(?s)\A(?:(?:.*?\n)??((?:[ \t]*(?:#!?\[[^\n]*|//[^\n]*|/\*(?:[^*]|\*+[^*/])*\*+/[ \t]*)\n)*[ \t]*(?:#\[[^\n]*?\][ \t]*)*)|.*)\z", "$1")'
       - match: '(__def (__function))'
         tag:
-          kind: '@$ROOT|ancestor_tag("kind")|map("Impl:Method", "Trait:Method")|regex_replace("^(Method)$|(?s).*", "$1")|default("Function")'
-          language_kind: '@$ROOT|ancestor_tag("kind")|map("Impl:AssociatedFunction", "Trait:AssociatedFunction")|regex_replace("^(AssociatedFunction)$|(?s).*", "$1")'
+          kind: '@$ROOT|ancestor_tag("kind")|regex_replace("^(Impl|Trait)$|(?s).*", "$1")|map("Impl:Method", "Trait:Method")|default("Function")'
+          language_kind: '@$ROOT|ancestor_tag("kind")|regex_replace("^(Impl|Trait)$|(?s).*", "$1")|map("Impl:AssociatedFunction", "Trait:AssociatedFunction")'
           test: '@$ROOT|tag("preamble")|regex_replace("(?s)\A.*#\[(?:\w+::)*(?:test|rstest|test_case)\b.*\z", "Test")|regex_replace("^(Test)$|(?s).*", "$1")'
       - match: '(__def (__function))'
         tag:
