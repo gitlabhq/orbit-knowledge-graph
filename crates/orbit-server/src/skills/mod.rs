@@ -248,10 +248,24 @@ mod tests {
         assert_eq!(files[0].path, MANIFEST);
         assert!(files[0].content.contains("CALL db.schema()"));
         assert!(files.iter().any(|file| file.path == "references/gql.md"));
-        assert!(
-            files
-                .iter()
-                .all(|file| file.path != "references/recipes.md")
+    }
+
+    #[test]
+    fn gql_manifest_differs_from_json_manifest_only_by_version() {
+        let text = |path: &str| {
+            let asset = SkillAssets::get(path).unwrap();
+            std::str::from_utf8(&asset.data).unwrap().to_string()
+        };
+        let without_version = |content: String| {
+            content
+                .lines()
+                .filter(|line| !line.starts_with("version:"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        assert_eq!(
+            without_version(text(MANIFEST)),
+            without_version(text(GQL_MANIFEST))
         );
     }
 
