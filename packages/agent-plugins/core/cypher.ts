@@ -172,30 +172,34 @@ function splitTopLevel(text: string): string[] {
   return parts.map((p) => p.trim()).filter(Boolean)
 }
 
-export type ProjectScope = { key: string; flags: [string, string] }
+export type GraphScope = { key: string; flags: [string, string] }
 
 function listed(text: string): string[] {
   return [...text.matchAll(/'([^']*)'|"([^"]*)"|(\d+)/g)].map((m) => m[1] ?? m[2] ?? m[3] ?? '')
 }
 
-export function projectsOf(query: string): ProjectScope[] {
+export function scopesOf(query: string): GraphScope[] {
   const ids: string[] = []
+  const groupIds: string[] = []
   const paths: string[] = []
   for (const m of query.matchAll(/\bproject_id\s*(?::|=)\s*(\d+)/g)) ids.push(m[1] ?? '')
   for (const m of query.matchAll(/\bproject_id\s+IN\s*\[([^\]]*)\]/gi)) ids.push(...listed(m[1] ?? ''))
-  for (const m of query.matchAll(/\(\s*(\w*)\s*:\s*Project\b\s*(\{[^}]*\})?/g)) {
-    const map = m[2] ?? ''
-    ids.push(...[...map.matchAll(/\bid\s*:\s*(\d+)/g)].map((x) => x[1] ?? ''))
+  for (const m of query.matchAll(/\(\s*(\w*)\s*:\s*(Project|Group)\b\s*(\{[^}]*\})?/g)) {
+    const idsOf = m[2] === 'Group' ? groupIds : ids
+    const map = m[3] ?? ''
+    idsOf.push(...[...map.matchAll(/\bid\s*:\s*(\d+)/g)].map((x) => x[1] ?? ''))
     paths.push(...[...map.matchAll(/\bfull_path\s*:\s*['"]([^'"]+)['"]/g)].map((x) => x[1] ?? ''))
     const name = m[1]
     if (!name) continue
     for (const w of query.matchAll(new RegExp(`\\b${name}\\.(id|full_path)\\s*(=|IN)\\s*(\\[[^\\]]*\\]|'[^']*'|"[^"]*"|\\d+)`, 'gi'))) {
-      ;(w[1]?.toLowerCase() === 'id' ? ids : paths).push(...listed(w[3] ?? ''))
+      ;(w[1]?.toLowerCase() === 'id' ? idsOf : paths).push(...listed(w[3] ?? ''))
     }
   }
-  const scopes: ProjectScope[] = [
-    ...ids.filter((id) => /^\d+$/.test(id)).map((id): ProjectScope => ({ key: 'project-id:' + id, flags: ['--project-id', id] })),
-    ...paths.filter(Boolean).map((path): ProjectScope => ({ key: 'full-path:' + path, flags: ['--full-path', path] })),
+  const numeric = (id: string) => /^\d+$/.test(id)
+  const scopes: GraphScope[] = [
+    ...ids.filter(numeric).map((id): GraphScope => ({ key: 'project-id:' + id, flags: ['--project-id', id] })),
+    ...groupIds.filter(numeric).map((id): GraphScope => ({ key: 'namespace-id:' + id, flags: ['--namespace-id', id] })),
+    ...paths.filter(Boolean).map((path): GraphScope => ({ key: 'full-path:' + path, flags: ['--full-path', path] })),
   ]
   return uniqBy(scopes, (scope) => scope.key)
 }

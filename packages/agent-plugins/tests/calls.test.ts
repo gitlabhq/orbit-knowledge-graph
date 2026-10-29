@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { clip } from '../core/command.ts'
 import { COMMAND_LABELS, describeCommand, describeOrbitCall, othersText } from '../core/calls.ts'
-import { entitiesOf, projectsOf } from '../core/cypher.ts'
+import { entitiesOf, scopesOf } from '../core/cypher.ts'
 
 const query = (cypher: string, known?: ReadonlySet<string>) =>
   describeOrbitCall('Bash', { command: `glab orbit query "${cypher}"` }, known)
@@ -162,12 +162,14 @@ test('a node pinned to one item is singular and everything else plural, in plain
   expect(query('MATCH (b:Branch {project_id: 1}) RETURN b')?.detail).toBe('Branches')
 })
 
-test('the projects a query asks about come from project_id, Project ids, and full paths', () => {
-  const keys = (query: string) => projectsOf(query).map((scope) => scope.key)
+test('the projects and groups a query asks about come from project_id, Project and Group ids, and full paths', () => {
+  const keys = (query: string) => scopesOf(query).map((scope) => scope.key)
   expect(keys('MATCH (mr:MergeRequest {project_id: 7}) RETURN mr')).toEqual(['project-id:7'])
   expect(keys('MATCH (mr:MergeRequest) WHERE mr.project_id IN [7, 8] RETURN mr')).toEqual(['project-id:7', 'project-id:8'])
   expect(keys("MATCH (p:Project {full_path: 'a/b'})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN mr")).toEqual(['full-path:a/b'])
   expect(keys("MATCH (p:Project) WHERE p.id = 3 AND p.full_path IN ['c/d'] RETURN p")).toEqual(['project-id:3', 'full-path:c/d'])
+  expect(keys("MATCH (g:Group {full_path: 'a'})-[:CONTAINS*1..2]->(p:Project) RETURN p")).toEqual(['full-path:a'])
+  expect(keys('MATCH (g:Group) WHERE g.id = 9 RETURN g')).toEqual(['namespace-id:9'])
   expect(keys("MATCH (u:User {username: 'x'})-[:AUTHORED]->(mr:MergeRequest) RETURN mr")).toEqual([])
 })
 

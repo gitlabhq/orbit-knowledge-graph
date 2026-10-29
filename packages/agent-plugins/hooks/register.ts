@@ -1,7 +1,7 @@
 import type { Elements, Register, RenderElement } from 'claude-code'
 
 import { QUERY_LABEL, describeOrbitCall, othersText, type OrbitCall } from '../core/calls.ts'
-import { cypherSegments, hopsOf, projectsOf, queryOf } from '../core/cypher.ts'
+import { cypherSegments, hopsOf, queryOf, scopesOf } from '../core/cypher.ts'
 import { apiCallsFor, compact, graphStatus, grouped, parseResponse } from '../core/stats.ts'
 import { codeLines, layout, type Token } from './highlight.ts'
 import type { MarkProps } from './orbit-mark.ts'
@@ -110,7 +110,7 @@ export const register: Register = (on) => {
           stats.nodes += parsed.nodes + parsed.aggregated
           stats.apiCalls += apiCallsFor(parsed)
           stats.edges += parsed.edges + parsed.aggregated * hopsOf(queryOf(command))
-          const lookUps: { key: string; flags: readonly string[] }[] = projectsOf(queryOf(command))
+          const lookUps: { key: string; flags: readonly string[] }[] = scopesOf(queryOf(command))
             .filter((scope) => !projectTotals.has(scope.key))
             .slice(0, MAX_PROJECT_TOTALS)
           if (!entitiesAsked && lookUps.length === 0) lookUps.push({ key: '', flags: [] })
