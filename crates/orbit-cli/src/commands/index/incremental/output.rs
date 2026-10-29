@@ -82,6 +82,7 @@ impl<'a> Exporter<'a> {
             true,
             &|_| true,
             &code_graph_incremental::Sentinel::disabled(),
+            &mut Vec::new(),
         )?;
         self.insert(tables)?;
         Ok(family_output(family, state.trees.len(), report, stats))
@@ -217,6 +218,7 @@ pub(super) fn replacement(
         &|_| true,
         Some(&only),
         &code_graph_incremental::Sentinel::disabled(),
+        &mut Vec::new(),
     )? {
         if table == edge_table {
             edges.push(batch);

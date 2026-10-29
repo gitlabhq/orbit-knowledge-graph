@@ -542,15 +542,24 @@ impl<'t> Fold<'t> {
         for supertype in c.children_of(C::SuperType) {
             self.handle_inline_imports(supertype);
         }
-        let supers = c
+        let resolved: Vec<Value> = c
             .children()
             .filter(|s| s.is(C::SuperType))
             .flat_map(|s| self.lookup_chain(s))
+            .collect();
+        let supers = resolved
+            .iter()
             .filter_map(|r| match r {
-                Value::LocalDef(d) => Some(d),
+                Value::LocalDef(d) => Some(*d),
                 _ => None,
             })
             .collect::<Vec<_>>();
+        for r in &resolved {
+            if let Value::ImportRef(node) = r {
+                let edge = Edge::local(idx, *node, EdgeKind::Extends);
+                self.edges.push(edge.resolved(Resolution::Import));
+            }
+        }
         self.supertypes.insert(idx, supers.clone());
         self.declare(c, name);
         let parent_block = self.cur;
@@ -559,7 +568,8 @@ impl<'t> Fold<'t> {
             self.edges.push(Edge::local(parent, idx, EdgeKind::Defines));
         }
         for dn in supers {
-            self.edges.push(Edge::local(idx, dn, EdgeKind::Extends));
+            self.edges
+                .push(Edge::local(idx, dn, EdgeKind::Extends).resolved(Resolution::Local));
         }
         if c.has_tag(self.tags.scoped) {
             self.enter_scope(c);
@@ -742,6 +752,7 @@ impl<'t> Fold<'t> {
             self.edges.push(Edge {
                 call_resolution: crate::tree::CallResolution::Reference,
                 ..Edge::local(reference.index(), *target, EdgeKind::Imports)
+                    .resolved(Resolution::Import)
             });
         }
     }
@@ -875,6 +886,7 @@ impl<'t> Fold<'t> {
                                 site: Some(c.index()),
                                 call_resolution: crate::tree::CallResolution::Reference,
                                 ..Edge::local(self.enclosing(), node, EdgeKind::Imports)
+                                    .resolved(Resolution::Import)
                             });
                             self.edges.push(Edge {
                                 site: Some(c.index()),
@@ -892,6 +904,7 @@ impl<'t> Fold<'t> {
                             self.edges.push(Edge {
                                 site: Some(c.index()),
                                 ..Edge::local(self.enclosing(), node, EdgeKind::Calls)
+                                    .resolved(Resolution::Local)
                             });
                         }
                         _ => {}
@@ -1780,11 +1793,11 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
                 match target {
                     Value::LocalDef(target) => f.edges.push(Edge {
                         site: Some(c.index()),
-                        ..Edge::local(dn, target, EdgeKind::Calls)
+                        ..Edge::local(dn, target, EdgeKind::Calls).resolved(Resolution::Local)
                     }),
                     Value::ImportRef(target) => f.edges.push(Edge {
                         site: Some(c.index()),
-                        ..Edge::local(dn, target, EdgeKind::Imports)
+                        ..Edge::local(dn, target, EdgeKind::Imports).resolved(Resolution::Import)
                     }),
                     _ => {}
                 }

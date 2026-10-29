@@ -128,6 +128,7 @@ pub fn repository<E: std::fmt::Display>(
                 true,
                 &|_| true,
                 &run,
+                &mut result.limited,
             )?)
         })?;
         return Ok(result);
@@ -196,6 +197,7 @@ pub fn repository<E: std::fmt::Display>(
                                     family == first,
                                     &|path| owns(family, path),
                                     run,
+                                    &mut report.limited,
                                 )?;
                                 (report, batches)
                             };

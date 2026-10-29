@@ -393,7 +393,9 @@ impl Resolver {
         let mut call_at_site: FxHashMap<(u32, u32), &Edge> = FxHashMap::default();
         for e in edges.iter() {
             match e.kind {
-                EdgeKind::Extends => extends_of.entry(e.from()).or_default().push(e.to()),
+                EdgeKind::Extends if trees[e.to_fi()].cursor(e.to_node).is(C::Def) => {
+                    extends_of.entry(e.from()).or_default().push(e.to())
+                }
                 EdgeKind::Imports => imports_to.entry(e.to()).or_default().push(e),
                 EdgeKind::Calls => {
                     if let Some(site) = e.site {
@@ -559,7 +561,10 @@ impl Resolver {
                 .iter()
                 .filter(|r| r.fi != r.target_fi && dirty_fis.contains(&r.fi))
                 .filter(|r| !named.contains(&(r.fi, r.node)))
-                .map(|r| Edge::new(r.fi, r.node, r.target_fi, r.anchor, EdgeKind::Imports)),
+                .map(|r| {
+                    Edge::new(r.fi, r.node, r.target_fi, r.anchor, EdgeKind::Imports)
+                        .resolved(Resolution::Import)
+                }),
         );
         for edge in edges.iter_mut().chain(&mut cross_edges).filter(|edge| {
             edge.kind == EdgeKind::Imports && edge.call_resolution != CallResolution::Reference
@@ -615,6 +620,13 @@ fn with_dependents(reqs: &[ImportReq], mut files: FxHashSet<u32>) -> FxHashSet<u
     files
 }
 
+fn found_in(from: Cursor, to: Cursor) -> Resolution {
+    match from.fi() == to.fi() {
+        true => Resolution::Local,
+        false => Resolution::Import,
+    }
+}
+
 fn owner_edges(ctx: &ResolveCtx, dirty: &FxHashSet<u32>) -> Vec<Edge> {
     let mut out = Vec::new();
     for (&(ofi, onode), blocks) in &ctx.implementations {
@@ -641,7 +653,11 @@ fn owner_edges(ctx: &ResolveCtx, dirty: &FxHashSet<u32>) -> Vec<Edge> {
                         .map(|&(tf, tn)| ctx.corpus.jump(tf, tn)),
                 )
                 .unique_by(|p| (p.fi(), p.index()));
-            out.extend(parents.map(|p| owner.edge_to(p, EdgeKind::Extends)));
+            out.extend(parents.map(|p| {
+                owner
+                    .edge_to(p, EdgeKind::Extends)
+                    .resolved(found_in(owner, p))
+            }));
         }
     }
     out
@@ -674,7 +690,11 @@ fn override_edges(ctx: &ResolveCtx, dirty: &FxHashSet<u32>) -> Vec<Edge> {
                         method_up(ctx, parent, name, fi as usize, Role::Callable)
                             .into_iter()
                             .filter(|t| (t.fi(), t.index()) != (member.fi(), member.index()))
-                            .map(|t| member.edge_to(t, EdgeKind::Overrides)),
+                            .map(|t| {
+                                member
+                                    .edge_to(t, EdgeKind::Overrides)
+                                    .resolved(found_in(member, t))
+                            }),
                     );
                 }
             }
@@ -1055,7 +1075,10 @@ fn gather_imports_for(
                     };
                     for (loc, path, is_sub) in candidates.filter(|c| c.0.fi != fi) {
                         if is_sub {
-                            edges.push(Edge::new(fi, node_idx, loc.fi, 0, EdgeKind::Imports));
+                            edges.push(
+                                Edge::new(fi, node_idx, loc.fi, 0, EdgeKind::Imports)
+                                    .resolved(Resolution::Import),
+                            );
                         }
                         reqs.push(ImportReq {
                             fi,
@@ -1374,7 +1397,10 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             name_target(ctx, req, c)
                 .into_iter()
                 .filter(move |loc| loc.fi as usize != fi)
-                .map(move |loc| c.edge_to(c.jump(loc.fi, loc.node), EdgeKind::Imports))
+                .map(move |loc| {
+                    c.edge_to(c.jump(loc.fi, loc.node), EdgeKind::Imports)
+                        .resolved(Resolution::Import)
+                })
         })
         .collect();
 
@@ -1409,9 +1435,12 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
         .filter(|tgt| tgt.has_tag(ctx.tags.callable));
         if let Some(target) = target {
             if namespace_alias(ctx.wildcard_sym, name).is_some() {
-                edges.push(name.edge_to(target, EdgeKind::Imports));
+                edges.push(
+                    name.edge_to(target, EdgeKind::Imports)
+                        .resolved(Resolution::Import),
+                );
             }
-            edges.push(call_edge(caller, target, edge.site));
+            edges.push(call_edge(caller, target, edge.site).resolved(Resolution::Import));
         }
     }
 
@@ -1454,7 +1483,7 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             }) {
                 continue;
             }
-            edges.push(call_edge(from, target, intra.site));
+            edges.push(call_edge(from, target, intra.site).resolved(Resolution::Import));
         }
     }
 
@@ -2159,7 +2188,9 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
                 match resolve_chain(ctx, dec) {
                     Some(t) if cross(t) => out.push(Edge {
                         site: Some(dec.index()),
-                        ..node.edge_to(t, EdgeKind::Calls)
+                        ..node
+                            .edge_to(t, EdgeKind::Calls)
+                            .resolved(Resolution::Import)
                     }),
                     Some(_) => {}
                     None => out.extend(unbound(node, dec.sym())),
@@ -2170,7 +2201,10 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
                 .filter_map(|s| resolve_chain(ctx, s))
                 .filter(|p| cross(*p))
                 .collect();
-            out.extend(parents.iter().map(|p| node.edge_to(*p, EdgeKind::Extends)));
+            out.extend(parents.iter().map(|p| {
+                node.edge_to(*p, EdgeKind::Extends)
+                    .resolved(Resolution::Import)
+            }));
             if !parents.is_empty() {
                 out.extend(inherited_calls(ctx, node, &parents, fi));
             }
@@ -2188,16 +2222,22 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
                     if m.child(C::Dispatch)
                         .is_some_and(|dispatch| !dispatch.has(C::Object)) =>
                 {
-                    out.extend(call_edges(
-                        from,
-                        member_targets(ctx, m, target, node.role()),
-                        Some(node.index()),
-                    ));
+                    out.extend(
+                        call_edges(
+                            from,
+                            member_targets(ctx, m, target, node.role()),
+                            Some(node.index()),
+                        )
+                        .map(|e| e.resolved(Resolution::Import)),
+                    );
                 }
                 Some(target) if m.has(C::Dispatch) && target.is_dispatch_contract() => {}
                 Some(target) if cross(target) && target.is_class() => {
                     let members = method_up(ctx, target, m.sym(), fi, node.role());
-                    out.extend(call_edges(from, members, Some(node.index())));
+                    out.extend(
+                        call_edges(from, members, Some(node.index()))
+                            .map(|e| e.resolved(Resolution::Import)),
+                    );
                 }
                 None => {
                     let bound = bound_in.entry(from.index()).or_insert_with(|| {
@@ -2303,6 +2343,7 @@ fn destructure_calls<'a>(
                 method_up(ctx, class, component.sym(), fi, Role::Callable),
                 Some(slot.index()),
             )
+            .map(|e| e.resolved(Resolution::Local))
         })
         .collect()
 }

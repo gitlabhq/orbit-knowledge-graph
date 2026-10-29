@@ -123,7 +123,7 @@ entities:
       - name: is_external
         type: Boolean
         on: expanded
-        from: has_outgoing("Imports", "parent")|map("true:false", "false:true")
+        from: tag("is_external")|default("true")
       - { name: start_line, type: Int64, position: start_line }
       - { name: end_line, type: Int64, position: end_line }
       - { name: start_byte, type: Int64, position: start_byte }
@@ -149,15 +149,22 @@ edges:
     - { from: File, to: Definition, kind: DEFINES }
     - { from: File, to: Import, kind: DEFINES }
   graph:
-    - { edge: Calls, to: Definition, site: [__decorator], kind: ANNOTATED_BY }
-    - { edge: Imports, from: Definition, to: Import, site: [__decorator], kind: ANNOTATED_BY }
-    - { edge: Calls, from: Definition, to: Definition, site_child: __type=parameter, kind: USES_TYPE, set: { usage: parameter } }
-    - { edge: Calls, from: Definition, to: Definition, site_child: __type=return, kind: USES_TYPE, set: { usage: return } }
-    - { edge: Calls, from: Definition, to: Definition, site_child: __type=generic, kind: USES_TYPE, set: { usage: generic } }
-    - { edge: Calls, from: Definition, to: Definition, site_child: __type=cast, kind: USES_TYPE, set: { usage: cast } }
-    - { edge: Calls, from: Definition, to: Definition, site_child: __type, kind: USES_TYPE, set: { usage: field } }
+    - { edge: Calls, to: Definition, site: [__decorator], kind: ANNOTATED_BY, set: { resolution: '' } }
+    - { edge: Imports, from: Definition, to: Import, site: [__decorator], kind: ANNOTATED_BY, set: { resolution: '' } }
+    - { edge: Calls, from: Definition, to: Definition, site_child: __type=parameter, kind: USES_TYPE, set: { usage: parameter, resolution: '' } }
+    - { edge: Calls, from: Definition, to: Definition, site_child: __type=return, kind: USES_TYPE, set: { usage: return, resolution: '' } }
+    - { edge: Calls, from: Definition, to: Definition, site_child: __type=generic, kind: USES_TYPE, set: { usage: generic, resolution: '' } }
+    - { edge: Calls, from: Definition, to: Definition, site_child: __type=cast, kind: USES_TYPE, set: { usage: cast, resolution: '' } }
+    - { edge: Calls, from: Definition, to: Definition, site_child: __type, kind: USES_TYPE, set: { usage: field, resolution: '' } }
     - { edge: Calls, to: Definition, site_child: __type, drop: true, kind: USES_TYPE }
+    - { edge: Imports, from: Definition, to: Import, site_child: __type=parameter, kind: USES_TYPE, set: { usage: parameter, resolution: '' } }
+    - { edge: Imports, from: Definition, to: Import, site_child: __type=return, kind: USES_TYPE, set: { usage: return, resolution: '' } }
+    - { edge: Imports, from: Definition, to: Import, site_child: __type=generic, kind: USES_TYPE, set: { usage: generic, resolution: '' } }
+    - { edge: Imports, from: Definition, to: Import, site_child: __type=cast, kind: USES_TYPE, set: { usage: cast, resolution: '' } }
+    - { edge: Imports, from: Definition, to: Import, site_child: __type, kind: USES_TYPE, set: { usage: field, resolution: '' } }
+    - { edge: Imports, to: Import, site_child: __type, drop: true, kind: USES_TYPE }
     - { edge: Calls, to: Definition, reference: true, kind: USES_VALUE, set: { access: read } }
+    - { edge: Imports, from: Definition, to: Import, reference: true, site: [__binding], kind: USES_VALUE, set: { access: read } }
     - edge: Calls
       to: Definition
       site: [__call]
@@ -171,13 +178,14 @@ edges:
       target_tag: { kind: [Class, Struct, Interface, Trait, Enum, TypeAlias, Module, EnumMember] }
       kind: INSTANTIATES
     - { edge: Calls, to: Definition, kind: CALLS }
-    - { edge: Defines, from: Definition, to: Definition, kind: DEFINES }
+    - { edge: Defines, from: Definition, to: Definition, kind: DEFINES, set: { resolution: '' } }
     - { edge: Extends, from: Definition, to: Definition, target_tag: { kind: [Interface, Trait] }, kind: IMPLEMENTS }
     - { edge: Extends, from: Definition, to: Definition, kind: EXTENDS }
+    - { edge: Extends, from: Definition, to: Import, kind: EXTENDS }
     - { edge: Overrides, from: Definition, to: Definition, kind: OVERRIDES }
-    - { edge: Imports, from: Import, to: Definition, lift: File, kind: DEPENDS_ON }
-    - { edge: Imports, from: Import, to: File, lift: File, kind: DEPENDS_ON }
+    - { edge: Imports, from: Import, to: Definition, lift: File, kind: DEPENDS_ON, set: { resolution: '' } }
+    - { edge: Imports, from: Import, to: File, lift: File, source_tag: { import_kind: [module, wildcard, side_effect] }, kind: DEPENDS_ON, set: { resolution: '' } }
     - { edge: Imports, from: Import, to: Definition, kind: RESOLVES_TO }
-    - { edge: Imports, from: Import, to: File, kind: RESOLVES_TO }
+    - { edge: Imports, from: Import, to: File, source_tag: { import_kind: [module, wildcard, side_effect] }, kind: RESOLVES_TO }
     - { edge: Imports, from: Definition, to: Import, kind: CALLS, fallback: true }
     - { edge: Imports, from: File, to: Import, kind: CALLS, fallback: true }

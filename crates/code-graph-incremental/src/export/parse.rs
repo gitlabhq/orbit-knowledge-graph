@@ -125,6 +125,8 @@ struct GraphEdgeYaml {
     #[serde(default)]
     target_tag: indexmap::IndexMap<String, Vec<String>>,
     #[serde(default)]
+    source_tag: indexmap::IndexMap<String, Vec<String>>,
+    #[serde(default)]
     reference: bool,
     #[serde(default)]
     set: indexmap::IndexMap<String, String>,
@@ -246,6 +248,7 @@ pub(super) struct GraphEdge {
     pub(super) lift: Option<usize>,
     pub(super) drop: bool,
     pub(super) target_tag: Vec<(u32, Vec<u32>)>,
+    pub(super) source_tag: Vec<(u32, Vec<u32>)>,
     pub(super) reference: bool,
     pub(super) set: Vec<(String, String)>,
 }
@@ -368,14 +371,8 @@ impl ExportPlan {
                         receiver: g.receiver,
                         lift: g.lift.as_deref().map(entity_index).transpose()?,
                         drop: g.drop,
-                        target_tag: g
-                            .target_tag
-                            .iter()
-                            .map(|(key, values)| {
-                                let values = values.iter().map(|v| lang.syms.intern(v)).collect();
-                                (lang.syms.intern(key), values)
-                            })
-                            .collect(),
+                        target_tag: tag_matcher(&g.target_tag, lang),
+                        source_tag: tag_matcher(&g.source_tag, lang),
                         reference: g.reference,
                         set: g.set.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
                     })
@@ -396,6 +393,18 @@ impl ExportPlan {
             batch_bytes: orbit_arrow::BATCH_BYTES,
         })
     }
+}
+
+fn tag_matcher(
+    tags: &indexmap::IndexMap<String, Vec<String>>,
+    lang: &Lang,
+) -> Vec<(u32, Vec<u32>)> {
+    tags.iter()
+        .map(|(key, values)| {
+            let values = values.iter().map(|v| lang.syms.intern(v)).collect();
+            (lang.syms.intern(key), values)
+        })
+        .collect()
 }
 
 fn edge_kind(name: &str) -> Result<EdgeKind, LoadError> {

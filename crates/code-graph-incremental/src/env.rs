@@ -59,9 +59,13 @@ impl Env {
                         Some(yaml) => {
                             let mut config = rules::load_lang(yaml, &lang)?;
                             let shared = include_str!("../langs/shared.yaml");
+                            let derived = include_str!("../langs/derived.yaml");
+                            let own = std::mem::take(&mut config.display_rules);
+                            config.display_rules = rules::load_lang(shared, &lang)?.display_rules;
+                            config.display_rules.extend(own);
                             config
                                 .display_rules
-                                .extend(rules::load_lang(shared, &lang)?.display_rules);
+                                .extend(rules::load_lang(derived, &lang)?.display_rules);
                             config
                         }
                         None => LangConfig::default(),

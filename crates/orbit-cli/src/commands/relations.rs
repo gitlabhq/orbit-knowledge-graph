@@ -167,8 +167,22 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
         ),
         &params,
     )?;
-    let edges = rows_from(&edges, true);
-    let via = rows_from(&via, false);
+    let mut edges = rows_from(&edges, true);
+    let mut via = rows_from(&via, false);
+    let same = |a: &Row, b: &Row| {
+        (a.target_id, &a.dir, &a.label, &a.loc) == (b.target_id, &b.dir, &b.label, &b.loc)
+    };
+    for row in &mut via {
+        let kinds: Vec<&str> = edges
+            .iter()
+            .filter(|edge| same(edge, row))
+            .map(|edge| edge.kind.as_str())
+            .collect();
+        for kind in kinds {
+            row.kind = format!("{}, {kind}", row.kind);
+        }
+    }
+    edges.retain(|edge| !via.iter().any(|row| same(edge, row)));
     let mut out = String::new();
     for node in nodes {
         if !out.is_empty() {
