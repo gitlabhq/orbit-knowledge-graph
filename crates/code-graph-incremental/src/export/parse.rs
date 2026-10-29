@@ -238,7 +238,7 @@ pub(super) struct GraphEdge {
     pub(super) kind: String,
     pub(super) fallback: bool,
     pub(super) site: Vec<u16>,
-    pub(super) site_child: Option<u16>,
+    pub(super) site_child: Option<(u16, Option<u32>)>,
     pub(super) receiver: bool,
     pub(super) lift: Option<usize>,
     pub(super) target_tag: Vec<(u32, Vec<u32>)>,
@@ -341,34 +341,41 @@ impl ExportPlan {
                 })
             })
             .collect::<Result<_, LoadError>>()?;
-        let graph = yaml
-            .edges
-            .graph
-            .iter()
-            .map(|g| {
-                Ok(GraphEdge {
-                    edge: edge_kind(&g.edge)?,
-                    from: g.from.as_deref().map(entity_index).transpose()?,
-                    to: entity_index(&g.to)?,
-                    kind: g.kind.clone(),
-                    fallback: g.fallback,
-                    site: g.site.iter().map(|k| lang.intern_kind(k)).collect(),
-                    site_child: g.site_child.as_deref().map(|k| lang.intern_kind(k)),
-                    receiver: g.receiver,
-                    lift: g.lift.as_deref().map(entity_index).transpose()?,
-                    target_tag: g
-                        .target_tag
-                        .iter()
-                        .map(|(key, values)| {
-                            let values = values.iter().map(|v| lang.syms.intern(v)).collect();
-                            (lang.syms.intern(key), values)
-                        })
-                        .collect(),
-                    reference: g.reference,
-                    set: g.set.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        let graph =
+            yaml.edges
+                .graph
+                .iter()
+                .map(|g| {
+                    Ok(GraphEdge {
+                        edge: edge_kind(&g.edge)?,
+                        from: g.from.as_deref().map(entity_index).transpose()?,
+                        to: entity_index(&g.to)?,
+                        kind: g.kind.clone(),
+                        fallback: g.fallback,
+                        site: g.site.iter().map(|k| lang.intern_kind(k)).collect(),
+                        site_child: g.site_child.as_deref().map(|child| {
+                            match child.split_once('=') {
+                                Some((kind, text)) => {
+                                    (lang.intern_kind(kind), Some(lang.syms.intern(text)))
+                                }
+                                None => (lang.intern_kind(child), None),
+                            }
+                        }),
+                        receiver: g.receiver,
+                        lift: g.lift.as_deref().map(entity_index).transpose()?,
+                        target_tag: g
+                            .target_tag
+                            .iter()
+                            .map(|(key, values)| {
+                                let values = values.iter().map(|v| lang.syms.intern(v)).collect();
+                                (lang.syms.intern(key), values)
+                            })
+                            .collect(),
+                        reference: g.reference,
+                        set: g.set.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                    })
                 })
-            })
-            .collect::<Result<_, LoadError>>()?;
+                .collect::<Result<_, LoadError>>()?;
 
         Ok(Self {
             id_prefix: yaml.ids.prefix.clone(),

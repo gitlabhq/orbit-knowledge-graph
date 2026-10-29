@@ -582,8 +582,11 @@ impl GraphEdge {
         let site = e.site.map(|s| forest.cursor(e.from_tree, s));
         let target = forest.cursor(e.to_tree, e.to_node);
         (self.site.is_empty() || site.is_some_and(|c| self.site.contains(&c.kind())))
-            && self.site_child.is_none_or(|kind| {
-                site.is_some_and(|c| c.children().any(|child| child.kind() == kind))
+            && self.site_child.is_none_or(|(kind, text)| {
+                site.is_some_and(|c| {
+                    c.children()
+                        .any(|child| child.kind() == kind && text.is_none_or(|t| child.sym() == t))
+                })
             })
             && (!self.receiver
                 || site
