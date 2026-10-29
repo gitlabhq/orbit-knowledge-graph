@@ -123,8 +123,16 @@ pub(crate) async fn install(
         return Ok(finish(&selection, Outcome::NoAgentSelected, false));
     }
 
-    let plan = plan::for_selection(&selection, &target)?;
+    let mut plan = plan::for_selection(&selection, &target)?;
     if options.dry_run {
+        let mut skips = Report::default();
+        components::agent_plugins::drop_skipped_plugins(
+            &mut plan,
+            &selection.agents,
+            &target,
+            &mut skips,
+        )?;
+        show_outcomes_per_component(&skips)?;
         show_dry_run(&plan, "Dry run: nothing written.")?;
         return Ok(finish(&selection, Outcome::DryRun, false));
     }
@@ -135,13 +143,13 @@ pub(crate) async fn install(
         selection.skill.full_tree = Some(crate::skill::full_tree().await?);
     }
 
-    apply_and_report(&options, |report| {
+    let report = apply_and_report(&options, |report| {
         components::install(&selection, &target, report)
     })?;
     let configured = plan::for_selection(&selection, &target)?;
     tui::card(
         "Configured",
-        summary::format_components_per_agent(&configured),
+        summary::format_configured_per_agent(&configured, &report),
     )?;
     if selection.components.contains(&Component::Instructions) && !spec::reaches_gitlab() {
         tui::card(
@@ -247,6 +255,7 @@ fn apply_and_report(
                 tui::warning(format!("{}: {}", outcome.label, outcome.action));
             }
         }
+        show_outcomes_per_component(&report.only_plugin_skips())?;
     }
     outcome?;
     Ok(report)
@@ -1508,7 +1517,12 @@ mod tests {
         let ui = plugins.join("orbit-ui.js").display().to_string();
         write_old_layout(&plugins, &config, &["other.js", &server, &ui]);
 
-        install(options_for(&["opencode"]), Target::Global, &bare_machine()).unwrap();
+        install(
+            options_for(&["opencode"]),
+            Target::Global(machine.clone()),
+            &machine,
+        )
+        .unwrap();
 
         assert!(!plugins.join("orbit-ui.js").exists());
         assert!(plugins.join("orbit-ui/index.js").is_file());
