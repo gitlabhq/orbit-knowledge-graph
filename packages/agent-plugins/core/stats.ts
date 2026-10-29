@@ -130,7 +130,7 @@ export function countedTotal(scopes: readonly ScopeTotal[]): number {
   for (const scope of scopes) distinct.set(scope.identity ? scope.identity.kind + ':' + scope.identity.id : scope.key, scope)
   const groups = [...distinct.values()].flatMap((scope) => (scope.identity?.kind === 'group' ? [scope.identity] : []))
   const isInsideCountedGroup = ({ identity }: ScopeTotal) =>
-    identity !== undefined && groups.some((group) => group.id !== identity.id && identity.path.startsWith(group.path + '/'))
+    identity !== undefined && groups.some((group) => identity.path.startsWith(group.path + '/'))
   return sumBy([...distinct.values()].filter((scope) => !isInsideCountedGroup(scope)), (scope) => scope.total)
 }
 

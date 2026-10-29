@@ -198,11 +198,18 @@ test('different groups add up', () => {
   expect(countedTotal([group('namespace-id:9', 100, '9', 'a'), group('namespace-id:10', 50, '10', 'b')])).toBe(150)
 })
 
-test('a group or project inside a counted group is not added, one outside is', () => {
+test('a group or project inside a counted group is not added', () => {
   const parent = group('namespace-id:9', 100, '9', 'a')
   expect(countedTotal([parent, group('full-path:a/sub', 40, '11', 'a/sub')])).toBe(100)
   expect(countedTotal([project('project-id:7', 5, '7', 'a/p'), parent])).toBe(100)
-  expect(countedTotal([parent, project('project-id:8', 5, '8', 'ab/p')])).toBe(105)
+})
+
+test('a project is skipped inside its group even when both share an id', () => {
+  expect(countedTotal([group('namespace-id:7', 100, '7', 'a'), project('project-id:7', 5, '7', 'a/p')])).toBe(100)
+})
+
+test('a project outside every counted group is added', () => {
+  expect(countedTotal([group('namespace-id:9', 100, '9', 'a'), project('project-id:8', 5, '8', 'ab/p')])).toBe(105)
 })
 
 test('a scope without an identity keeps its own spelling and is never dropped', () => {
