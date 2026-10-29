@@ -397,6 +397,28 @@ setup-schema-validate:
     - find config/setup/agents -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/setup_agent.schema.json
     - uvx check-jsonschema --verbose --schemafile config/schemas/setup.schema.json config/setup/setup.yaml
 
+agent-plugins:
+  stage: lint
+  image: oven/bun:1.4.4
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  variables:
+    CLAUDE_BIN: bun x @anthropic-ai/claude-code@2.1.308
+    DISABLE_GROWTHBOOK: "1"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git > /dev/null
+    - bun install --frozen-lockfile --ignore-scripts
+  script:
+    - cd packages/agent-plugins
+    - bun run typecheck
+    - bun run test
+    - bun run test:claude
+    - bun run build
+    - git diff --exit-code -- ../../config/setup/agents/opencode_ui_plugin.js core/lib.js
+
 generate-config-schema:
   stage: lint
   extends:

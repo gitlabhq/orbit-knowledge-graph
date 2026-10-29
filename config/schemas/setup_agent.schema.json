@@ -104,9 +104,35 @@
         }
       },
       "description": "Where the embedded skill is installed on disk."
+    },
+    "plugin": {
+      "$ref": "#/definitions/plugin",
+      "description": "The plugin from packages/agent-plugins, written as a local marketplace, registered in the assistant's settings, and enabled. Installed by default; `--skip agent-plugins` opts out."
     }
   },
   "definitions": {
+    "plugin": {
+      "type": "object",
+      "required": ["dir", "settings", "marketplace", "name", "min_version", "version_command"],
+      "additionalProperties": false,
+      "properties": {
+        "dir": { "$ref": "#/definitions/scopedPath", "description": "Where the marketplace folder is written." },
+        "settings": { "$ref": "#/definitions/scopedPath", "description": "Settings file that receives the extraKnownMarketplaces and enabledPlugins entries." },
+        "marketplace": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Marketplace name setup writes to marketplace.json." },
+        "name": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Plugin name, as the marketplace lists it." },
+        "min_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Oldest assistant version that loads the plugin. Setup skips the plugin on an older or unreadable version."
+        },
+        "version_command": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Command whose output starts with the assistant's version, such as `claude --version`."
+        }
+      }
+    },
     "scopedPath": {
       "type": "object",
       "required": ["project", "global"],
@@ -149,6 +175,7 @@
       "required": ["path", "template"],
       "additionalProperties": false,
       "properties": {
+        "ui": { "type": "boolean", "description": "Installed with the agent-plugins component instead of hooks." },
         "path": { "$ref": "#/definitions/scopedPath" },
         "template": {
           "type": "string",
@@ -162,6 +189,7 @@
       "required": ["file", "path", "value"],
       "additionalProperties": false,
       "properties": {
+        "ui": { "type": "boolean", "description": "Installed with the agent-plugins component instead of hooks." },
         "file": { "$ref": "#/definitions/scopedPath" },
         "path": { "$ref": "#/definitions/jsonPath" },
         "value": {

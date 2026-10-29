@@ -28,7 +28,7 @@ pub(crate) fn run(yes: bool, dry_run: bool) -> Result<()> {
     if dry_run {
         return tui::outro("Dry run: nothing removed.");
     }
-    if interactive && !tui::confirm("Remove the local graph?")? {
+    if interactive && !tui::confirm("Remove the local graph?", false)? {
         return tui::outro_cancel("Nothing removed.");
     }
 
