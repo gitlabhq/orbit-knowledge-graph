@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { COMMAND_LABELS, describeOrbitCall } from '../core/calls.ts'
+import { clip } from '../core/command.ts'
+import { COMMAND_LABELS, describeCommand, describeOrbitCall, othersText } from '../core/calls.ts'
 import { entitiesOf, projectsOf } from '../core/cypher.ts'
 
 const query = (cypher: string, known?: ReadonlySet<string>) =>
@@ -182,4 +183,130 @@ test('a help call is not an Orbit row', () => {
 test('a long list of chained details is clipped', () => {
   const command = Array.from({ length: 30 }, (_, i) => `glab orbit grep term${i}`).join('; ')
   expect(describeOrbitCall('Bash', { command })?.detail.length).toBeLessThanOrEqual(96)
+})
+
+test('an Orbit call that runs other commands names them', () => {
+  expect(describeOrbitCall('Bash', { command: 'glab orbit status; rm -rf build' })).toMatchObject({ label: 'Checked Orbit', others: ['rm'] })
+  expect(describeOrbitCall('Bash', { command: 'orbit grep login && ls' })).toMatchObject({ label: 'Searched code', detail: 'login', others: ['ls'] })
+  expect(describeOrbitCall('Bash', { command: 'glab orbit status' })?.others).toBeUndefined()
+  expect(describeOrbitCall('mcp__gitlab-orbit__list_commands', {})?.others).toBeUndefined()
+})
+
+const rowOf = (command: string) => {
+  const call = describeCommand(command)
+  return call ? call.label + othersText(call) : null
+}
+
+test('every shape that runs something besides the Orbit call names it or shows a marker', () => {
+  const shapes: [string, string][] = [
+    ['glab orbit status <<EOF; prog', '+ prog'],
+    ['glab orbit status <<< x; prog', '+ prog'],
+    ['glab orbit status; ((x=1<<2)); prog', '+ prog'],
+    ['glab orbit status; echo $((1<<2)); prog', ', prog'],
+    ['glab orbit query <<EOF\n$(prog)\nEOF', '+ $(...)'],
+    ["glab orbit status # it's done\nprog", '+ prog'],
+    ["glab orbit status $'\\'' ; prog", '+ prog'],
+    ["glab orbit query <<EOF\nit's\nEOF\nprog", '+ prog'],
+    ['glab orbit status; </dev/null prog', '+ prog'],
+    ['glab orbit status; >/tmp/x prog', '+ prog, > /tmp/x'],
+    ['glab orbit status; ./true', '+ ./true'],
+    ['glab orbit status; x/cd', '+ x/cd'],
+    ['glab orbit status | ./grep x', '+ ./grep'],
+    ['glab orbit status | ./x/jq .', '+ ./x/jq'],
+    ['glab orbit status | head file', '+ head'],
+    ['glab orbit status | grep -r pattern dir', '+ grep'],
+    ['glab orbit status | jq . file', '+ jq'],
+    ['glab orbit status | grep x < file', '+ grep'],
+    ['glab orbit status | grep -epat file', '+ grep'],
+    ['glab orbit status | grep --regexp=pat file', '+ grep'],
+    ['glab orbit status | grep -e pat file', '+ grep'],
+    ['glab orbit status | grep -e -x file', '+ grep'],
+    ['glab orbit status | grep --regexp -x file', '+ grep'],
+    ['glab orbit status | grep -- -x file', '+ grep'],
+    ['glab orbit status | head -- -file', '+ head'],
+    ['glab orbit status | jq -n env', '+ jq'],
+    ["glab orbit status | jq -n '$ENV'", '+ jq'],
+    ['glab orbit status | jq "include \\"f\\"; ." ', '+ jq'],
+    ['glab orbit status; if ((x<<2)); then prog; fi', '+ prog'],
+    ['glab orbit status; for i in 1 2; do prog; done', '+ prog'],
+    ['glab orbit status; case x in x) prog;; esac', '+ prog'],
+    ['glab orbit status; function f { prog; }; f', '+ prog'],
+    ['glab orbit status; for ((i=0;i<1;i++)) do prog; done', '+ prog'],
+    ['glab orbit status; for ((i=0;i<1;i++)) { prog; }', '+ prog'],
+    ['glab orbit status; for i do prog; done', '+ prog'],
+    ['glab orbit status; cd\\\nprog', '+ cdprog'],
+    ['glab orbit status; : a\\\n#; prog', '+ prog'],
+    ['glab orbit status; "pro\\\ng"', '+ prog'],
+    ['glab orbit status <(true)#; prog', '+ #, prog'],
+    ['glab orbit status; : ${x:- #}; prog', '+ prog'],
+    ['glab orbit status; : ${x:-$(prog)}', '+ $(...)'],
+    ['glab orbit status; : "${x:-"a #"}"; prog', '+ prog'],
+    ['glab orbit status; : "$(echo "a #")"; prog', '+ $(...), prog'],
+    ['glab orbit status; : "${x:-unclosed', '+ unparsed'],
+    ['glab orbit status "$(echo # (\n)"; prog; "x)"', '+ $(...), prog'],
+    ['glab orbit status | wc -c 5', '+ wc'],
+    ['glab orbit status; FOO+=1 prog', '+ prog'],
+    ['glab orbit status; time -p prog', '+ prog'],
+    ['glab orbit status | wc --files0-from=list', '+ wc'],
+    ['glab orbit status; echo $(( $(prog) + 1 ))', '+ $(...)'],
+    ['glab orbit status; glab orbit workspace reset --all', '+ orbit workspace reset'],
+    ['glab orbit status && orbit config set foo bar', '+ orbit config set'],
+    ['glab orbit status; glab orbit reset', '+ orbit reset'],
+    ["glab orbit status; echo \"unclosed", '+ unparsed'],
+    ['glab orbit query <<EOF\nno terminator', '+ unparsed'],
+  ]
+  for (const [command, expected] of shapes) expect(rowOf(command)).toContain(expected)
+})
+
+test('quiet shell words and filters with only a pattern or count stay out of the list', () => {
+  for (const command of [
+    'glab orbit status | head -n 5',
+    'glab orbit status | grep -c ok',
+    'glab orbit status | jq .',
+    'glab orbit status | grep -epat',
+    'glab orbit status | grep -e pat',
+    'glab orbit status | grep -e p1 -e p2',
+    'glab orbit status | grep -- -e',
+    'glab orbit status; if ((x<<2)); then true; fi',
+    'glab orbit status; i=$((i+1))',
+    'glab orbit status; ((i++))',
+    'glab orbit status; for i in 1 2; do true; done',
+    'glab orbit status; cd repo; true',
+    "glab orbit query <<'EOF'\n$(not run)\nEOF",
+  ]) {
+    expect(rowOf(command)).not.toContain('+')
+  }
+})
+
+test('the list shows programs before redirects, clips each name, and counts what it drops', () => {
+  const programs = Array.from({ length: 9 }, (_, i) => `p${i}`).join('; ')
+  expect(rowOf(`glab orbit status > out.txt; ${programs}`)).toBe('Checked Orbit  + p0, p1, p2, p3, p4, p5, … +4 more')
+  expect(rowOf(`glab orbit status; ${'a'.repeat(60)}`)).toBe(`Checked Orbit  + ${'a'.repeat(39)}…`)
+  expect(rowOf("glab orbit status; 'ls, pwd' x")).toBe("Checked Orbit  + 'ls, pwd'")
+  expect(rowOf(`glab orbit status; '${'a'.repeat(30)} ${'b'.repeat(30)}' x`)).toBe(`Checked Orbit  + '${'a'.repeat(30)} ${'b'.repeat(8)}…'`)
+  expect(rowOf('glab orbit status > "x, prog"')).toBe("Checked Orbit  + > 'x, prog'")
+  expect(rowOf('glab orbit status; glab orbit "a, prog"')).toBe("Checked Orbit  + orbit 'a, prog'")
+  expect(rowOf('glab orbit status; "it\'s, x"')).toBe("Checked Orbit  + 'it\\'s, x'")
+  expect(rowOf("glab orbit status; '> out.txt' x")).toBe("Checked Orbit  + '> out.txt'")
+})
+
+test('control characters are dropped from the names in the list', () => {
+  expect(rowOf('glab orbit status; \u001b[8mprog\u009b')).toBe('Checked Orbit  + [8mprog')
+})
+
+test('bidirectional and zero-width characters are dropped from the names in the list', () => {
+  expect(rowOf('glab orbit status; a\u202eb\u200bc\u2066d')).toBe('Checked Orbit  + abcd')
+})
+
+test('format and variation-selector characters are dropped from the names in the list', () => {
+  expect(rowOf('glab orbit status; pro\u00adg\ufe0f\u061c\u{e0041}')).toBe('Checked Orbit  + prog')
+})
+
+test('names that differ only after the clipped prefix are listed separately', () => {
+  const long = 'a'.repeat(45)
+  expect(rowOf(`glab orbit status; ${long}1; ${long}2`)).toBe(`Checked Orbit  + ${'a'.repeat(39)}…, ${'a'.repeat(39)}…`)
+})
+
+test('clip removes invisible characters before it collapses blanks', () => {
+  expect(clip('a \u200b b', 10)).toBe('a b')
 })

@@ -2,7 +2,7 @@ import type { ClientModule } from 'claude-code'
 
 import { MARK, fade } from './theme.ts'
 
-export type MarkProps = { label: string; detail: string }
+export type MarkProps = { label: string; detail: string; others: string }
 
 const TICK_MS = 50
 const FADE_MS = 2000
@@ -18,6 +18,7 @@ const OrbitMark: ClientModule<MarkProps, number> = (props, surface) => {
 
   const children = [Text({ color, bold: true, children: [MARK + ' ' + (props.label || 'Exploring Orbit')] })]
   if (props.detail) children.push(Text({ dimColor: true, children: ['  ' + props.detail] }))
+  if (props.others) children.push(Text({ color: 'warning', children: [props.others] }))
   return Box({ flexDirection: 'row', children })
 }
 
