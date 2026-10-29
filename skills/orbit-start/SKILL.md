@@ -1,7 +1,7 @@
 ---
 name: orbit-start
 description: Walk a user through their first GitLab Orbit session. Check the setup, then answer a simple first question and a workflow from the prompt examples with Orbit. Offer to run a prompt again without Orbit, and to show how Orbit works. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
-version: 0.2.2
+version: 0.2.3
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance.
 metadata:
@@ -45,7 +45,7 @@ The user sees only your text, not command output, your thinking, or this skill.
 1. Run `date -u +%Y-%m-%dT%H:%M:%SZ` again after the last query, and keep it as the Orbit end time.
 1. Write the answer in your reply, and list each finding with the query result that shows it.
    If a query returns no rows, say so, and say what that means for the scope.
-1. Show the queries that you ran, so the user can run them again.
+1. Don't print the queries that you ran. If the user asks to see them, show them then.
 
 ## Step 1: Check the setup
 
