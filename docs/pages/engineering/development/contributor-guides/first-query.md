@@ -80,7 +80,7 @@ The local graph indexes four code graph node types:
 | `Directory` | `gl_directory` | A directory in the indexed repository. |
 | `File` | `gl_file` | A source file. |
 | `Definition` | `gl_definition` | A function, class, method, module, or other named symbol. |
-| `ImportedSymbol` | `gl_imported_symbol` | An import or cross-file symbol reference. |
+| `Import` | `gl_import` | One imported name in one file. |
 
 Relationships between those nodes are stored in `gl_edge`. Each relationship
 row has a source node, a relationship kind, and a target node:
@@ -120,19 +120,19 @@ table.
 Now filter definitions by name:
 
 ```shell
-orbit workspace sql "SELECT file_path, name, definition_type, start_line FROM gl_definition WHERE lower(name) LIKE '%parse%' ORDER BY file_path, start_line LIMIT 10"
+orbit workspace sql "SELECT file_path, name, kind, start_line FROM gl_definition WHERE lower(name) LIKE '%parse%' ORDER BY file_path, start_line LIMIT 10"
 ```
 
 This looks for definitions whose name contains `parse`, then returns where each
 definition appears. A repository might return rows like:
 
 ```plaintext
-+---------------------------+--------------+-----------------+------------+
-| file_path                 | name         | definition_type | start_line |
-+---------------------------+--------------+-----------------+------------+
-| crates/parser/src/lib.rs  | parse_query  | Function        | 42         |
-| crates/parser/src/mod.rs  | parse_filter | Function        | 118        |
-+---------------------------+--------------+-----------------+------------+
++---------------------------+--------------+----------+------------+
+| file_path                 | name         | kind     | start_line |
++---------------------------+--------------+----------+------------+
+| crates/parser/src/lib.rs  | parse_query  | Function | 42         |
+| crates/parser/src/mod.rs  | parse_filter | Function | 118        |
++---------------------------+--------------+----------+------------+
 ```
 
 If your repository has no matching definitions, the command still succeeds and
@@ -145,18 +145,18 @@ Relationships let you move from one node type to another. This query starts at
 definitions declared in each file:
 
 ```shell
-orbit workspace sql "SELECT f.path, d.name, d.definition_type, d.start_line FROM gl_file f JOIN gl_edge e ON e.source_kind = 'File' AND e.relationship_kind = 'DEFINES' AND e.target_kind = 'Definition' AND e.source_id = f.id JOIN gl_definition d ON d.id = e.target_id ORDER BY f.path, d.start_line LIMIT 5"
+orbit workspace sql "SELECT f.path, d.name, d.kind, d.start_line FROM gl_file f JOIN gl_edge e ON e.source_kind = 'File' AND e.relationship_kind = 'DEFINES' AND e.target_kind = 'Definition' AND e.source_id = f.id JOIN gl_definition d ON d.id = e.target_id ORDER BY f.path, d.start_line LIMIT 5"
 ```
 
 Example output:
 
 ```plaintext
-+--------------------------+-------------+-----------------+------------+
-| path                     | name        | definition_type | start_line |
-+--------------------------+-------------+-----------------+------------+
-| crates/app/src/main.rs   | main        | Function        | 12         |
-| crates/app/src/query.rs  | QueryRunner | Struct          | 8          |
-+--------------------------+-------------+-----------------+------------+
++--------------------------+-------------+----------+------------+
+| path                     | name        | kind     | start_line |
++--------------------------+-------------+----------+------------+
+| crates/app/src/main.rs   | main        | Function | 12         |
+| crates/app/src/query.rs  | QueryRunner | Struct   | 8          |
++--------------------------+-------------+----------+------------+
 ```
 
 The graph part is the join through `gl_edge`:

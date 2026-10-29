@@ -64,7 +64,7 @@ E2E_GKG_TAG=<tag> e2e/scripts/setup.sh
 E2E_GKG_IMAGE=<repository> E2E_GKG_TAG=<tag> e2e/scripts/setup.sh
 ```
 
-To run the incremental code-graph engine, set `E2E_CODE_GRAPH_INCREMENTAL=true` for both `setup.sh` and `test.sh`. Suite 03 then expects the definition types that the incremental engine emits. No CI job sets this flag.
+To run the incremental code-graph engine, set `E2E_CODE_GRAPH_INCREMENTAL=true` for both `setup.sh` and `test.sh`. In CI, set it as a variable on the manual `e2e` job. Suite 03 expects the same kinds from both engines.
 
 ## CI
 

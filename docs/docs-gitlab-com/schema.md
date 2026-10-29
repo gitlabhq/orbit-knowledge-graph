@@ -120,8 +120,8 @@ Use these properties to read code without a separate call to the GitLab API.
 
 - Query responses return all entity IDs as strings, even when the stored value is an integer.
   String IDs prevent precision loss in JavaScript clients for values above `Number.MAX_SAFE_INTEGER`.
-- On the server, a `Definition` ID is a hash of the project, branch, file path, fully qualified name, and position of the definition.
-  The same function in two projects has two different IDs.
+- On the server, a `Definition` ID is a hash of the project, branch, file path, fully qualified name, kind, and signature of the definition.
+  The same function in two projects has two different IDs. An edit above a definition does not change its ID.
 
 ## Related topics
 
