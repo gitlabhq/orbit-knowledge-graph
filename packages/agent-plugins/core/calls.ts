@@ -1,4 +1,4 @@
-import { orbitInvocations, subcommandOf } from './command.ts'
+import { clip, displayName, orbitInvocations, otherCommands, subcommandOf } from './command.ts'
 import { NO_ENTITIES, entitiesOf } from './cypher.ts'
 import labels from './labels.ts'
 
@@ -6,7 +6,7 @@ export const MARK = '◎'
 
 export type Label = { done: string; running: string }
 
-export type OrbitCall = { label: string; active: string; detail: string }
+export type OrbitCall = { label: string; active: string; detail: string; others?: readonly string[] }
 
 export const COMMAND_LABELS: Readonly<Record<string, Label>> = labels.commands
 export const TOOL_LABELS: Readonly<Record<string, Label>> = labels.tools
@@ -31,11 +31,6 @@ function labelFor(table: Readonly<Record<string, Label>>, key: string): Label | 
 
 function callOf(label: Label, detail: string): OrbitCall {
   return { label: label.done, active: label.running, detail }
-}
-
-function clip(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, ' ').trim()
-  return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
 }
 
 function firstArg(args: readonly string[], valueFlags: ReadonlySet<string>): string {
@@ -67,18 +62,35 @@ function stringField(input: unknown, key: string): string | undefined {
 }
 
 const MAX_DETAIL = 96
+const MAX_OTHERS_SHOWN = 6
+
+type Invocation = { call: OrbitCall | null; name: string }
+
+function invocationOf(words: readonly string[], known: ReadonlySet<string>): Invocation | null {
+  if (words.length === 0 || words.some((arg) => arg === '--help' || arg === '-h')) return null
+  const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined)
+  if (!sub) return { call: null, name: 'orbit ' + displayName(words[0] ?? '') }
+  const isSchemaQuery = sub.key === 'query' && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg))
+  const label = isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY)
+  return { call: callOf(label, detailFor(sub.key, sub.args, known)), name: 'orbit ' + sub.key }
+}
 
 export function describeCommand(command: string, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {
-  const calls = orbitInvocations(command).flatMap((words) => {
-    const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined)
-    if (!sub || sub.args.some((arg) => arg === '--help' || arg === '-h')) return []
-    const isSchemaQuery = sub.key === 'query' && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg))
-    return [callOf(isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY), detailFor(sub.key, sub.args, known))]
-  })
+  const invocations = orbitInvocations(command).flatMap((words) => invocationOf(words, known) ?? [])
+  const calls = invocations.flatMap(({ call }) => call ?? [])
   const [first] = calls
   if (!first) return null
   const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(', ')
-  return { ...first, detail: clip(detail, MAX_DETAIL) }
+  const otherOrbit = invocations.filter(({ call }) => call?.label !== first.label).map(({ name }) => name)
+  const others = otherCommands(command, [...new Set(otherOrbit)])
+  return { ...first, detail: clip(detail, MAX_DETAIL), ...(others.length ? { others } : {}) }
+}
+
+export function othersText(call: OrbitCall): string {
+  if (!call.others?.length) return ''
+  const shown = call.others.slice(0, MAX_OTHERS_SHOWN)
+  const hidden = call.others.length - shown.length
+  return '  + ' + shown.join(', ') + (hidden > 0 ? `, … +${hidden} more` : '')
 }
 
 export function describeOrbitCall(tool: string, input: unknown, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {

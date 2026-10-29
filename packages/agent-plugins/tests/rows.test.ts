@@ -74,3 +74,8 @@ test('a progress line is the text right before an Orbit call, and the answer aft
   expect(leadsIntoOrbit(messages, 'Next I will read the README.')).toBe(false)
   expect(leadsIntoOrbit(messages, 'not in the transcript')).toBe(false)
 })
+
+test('a merged line keeps every other command its calls ran', () => {
+  const rows = mergeRuns(calls('glab orbit status; rm -rf build', 'glab orbit status | tee out.txt', 'glab orbit status'))
+  expect(rows.map((row) => row.call.others)).toEqual([['rm', 'tee']])
+})

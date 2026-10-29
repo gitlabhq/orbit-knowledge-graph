@@ -1,66 +1,62 @@
+import { isQuietFilter } from './quiet-filters.ts'
+import { lex, type Token } from './shell-lexer.ts'
+
 export type Subcommand = { key: string; args: string[] }
 
-const HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/
+const MAX_NAME_LENGTH = 40
+const INVISIBLE = /[\p{Cc}\p{Cf}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]/gu
 
-export function simpleCommands(command: string): string[][] {
-  const commands: string[][] = []
-  let words: string[] = []
-  let word = ''
-  let inWord = false
-  let quote = ''
-  let piped = false
-  const endWord = () => {
-    if (inWord) words.push(word)
-    word = ''
-    inWord = false
-  }
-  const endCommand = () => {
-    endWord()
-    if (words.length) commands.push(piped ? ['|', ...words] : words)
-    words = []
-    piped = false
-  }
-  for (let i = 0; i < command.length; i++) {
-    const c = command[i] ?? ''
-    if (quote !== "'" && (c === '`' || (c === '$' && command[i + 1] === '('))) words.push(c === '`' ? '`' : '$(')
-    if (quote) {
-      if (c === quote) quote = ''
-      else if (c === '\\' && quote === '"' && i + 1 < command.length) word += command[++i]
-      else word += c
-    } else if (c === "'" || c === '"') {
-      quote = c
-      inWord = true
-    } else if (c === '\\' && command[i + 1] === '\n') {
-      i++
-      endWord()
-    } else if (c === '\\' && i + 1 < command.length) {
-      word += command[++i]
-      inWord = true
-    } else if ('&>'.includes(c) && HARMLESS_REDIRECT.test(command.slice(i))) {
-      if (/^\d+$/.test(word) && /\d/.test(command[i - 1] ?? '')) {
-        word = ''
-        inWord = false
-      } else endWord()
-      i += (command.slice(i).match(HARMLESS_REDIRECT)?.[0].length ?? 1) - 1
-    } else if (c === '|' && command[i + 1] !== '|') {
-      endCommand()
-      piped = true
-      if (command[i + 1] === '&') i++
-    } else if (c === '\n' || ';&|()'.includes(c)) {
-      endCommand()
-      if ('&|'.includes(c) && command[i + 1] === c) i++
-    } else if ('<>'.includes(c) || (c === '#' && !inWord)) {
-      endWord()
-      words.push(c)
-    } else if (/\s/.test(c)) {
-      endWord()
-    } else {
-      word += c
-      inWord = true
+export function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').replace(INVISIBLE, '').trim()
+  return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
+}
+
+export function displayName(name: string): string {
+  const text = clip(name, MAX_NAME_LENGTH)
+  return /[,\s']/.test(text) ? `'${text.replaceAll("'", "\\'")}'` : text
+}
+
+type SimpleCommand = { piped: boolean; words: string[]; readsInput: boolean; writes: string[]; substitutes: boolean }
+
+function emptyCommand(piped: boolean): SimpleCommand {
+  return { piped, words: [], readsInput: false, writes: [], substitutes: false }
+}
+
+function isEmpty(command: SimpleCommand): boolean {
+  return !command.words.length && !command.writes.length && !command.substitutes
+}
+
+function redirectTarget(tokens: readonly Token[], from: number): { target?: string; end: number } {
+  let at = from
+  while (tokens[at]?.kind === 'substitution') at++
+  const token = tokens[at]
+  return token?.kind === 'word' ? { target: token.text, end: at } : { end: from - 1 }
+}
+
+function groupCommands(tokens: readonly Token[]): SimpleCommand[] {
+  const commands: SimpleCommand[] = []
+  let current = emptyCommand(false)
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (token?.kind === 'word') current.words.push(token.text)
+    else if (token?.kind === 'substitution') current.substitutes = true
+    else if (token?.kind === 'redirect') {
+      const { target, end } = redirectTarget(tokens, i + 1)
+      if (token.operator === '<') current.readsInput = true
+      else if (target !== undefined) current.writes.push(target)
+      current.substitutes ||= tokens.slice(i + 1, end + 1).some((skipped) => skipped.kind === 'substitution')
+      i = end
+    } else if (token?.kind === 'separator') {
+      if (!isEmpty(current)) commands.push(current)
+      current = emptyCommand(token.pipe)
     }
   }
-  endCommand()
+  if (!isEmpty(current)) commands.push(current)
   return commands
+}
+
+export function simpleCommands(command: string): string[][] {
+  return groupCommands(lex(command).tokens).map(({ piped, words }) => (piped ? ['|', ...words] : words))
 }
 
 function orbitWords(words: readonly string[]): string[] | null {
@@ -74,28 +70,56 @@ function orbitWords(words: readonly string[]): string[] | null {
 }
 
 const PREFIX_WORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', 'time', '{'])
+const HEADER_WORDS = new Set(['for', 'select', 'case'])
 
-function runnable(command: string): string[][] {
-  const out: string[][] = []
-  let heredoc = ''
-  for (const words of simpleCommands(command)) {
-    if (heredoc) {
-      if (words.join(' ') === heredoc) heredoc = ''
-      continue
-    }
-    const at = words.findIndex((word, i) => word === '<' && words[i + 1] === '<')
-    if (at >= 0) heredoc = (words[at + 2] ?? '').replace(/^-/, '')
-    let i = words[0] === '|' ? 1 : 0
-    while (PREFIX_WORDS.has(words[i] ?? '')) i++
-    if (i < words.length) out.push(words.slice(i))
+function withoutKeywords(words: readonly string[]): string[] {
+  let i = 0
+  for (; i < words.length; i++) {
+    const word = words[i] ?? ''
+    if (HEADER_WORDS.has(word)) return []
+    if (word === 'function') i++
+    else if (!PREFIX_WORDS.has(word)) break
   }
-  return out
+  return words.slice(i)
+}
+
+function runnable(command: string): { runs: SimpleCommand[]; unparsed: boolean } {
+  const { tokens, unparsed } = lex(command)
+  const runs = groupCommands(tokens)
+    .map((simple) => ({ ...simple, words: withoutKeywords(simple.words) }))
+    .filter((run) => !isEmpty(run))
+  return { runs, unparsed }
 }
 
 export function orbitInvocations(command: string): string[][] {
   return runnable(command)
-    .map(orbitWords)
+    .runs.map(({ words }) => orbitWords(words))
     .filter((words) => words !== null)
+}
+
+const SUBSTITUTION_IN_WORD = /\$\(|`/
+const SHELL_WORDS = new Set(['cd', 'pushd', 'popd', 'true', ':', 'fi', 'done', 'esac', '}'])
+
+function isQuiet(program: string, args: readonly string[], run: SimpleCommand): boolean {
+  if (program.includes('/')) return false
+  return SHELL_WORDS.has(program) || (run.piped && isQuietFilter(program, args, run.readsInput))
+}
+
+export function otherCommands(command: string, orbitExtras: readonly string[] = []): string[] {
+  const { runs, unparsed } = runnable(command)
+  const listed = new Map<string, string>()
+  const writes = new Map<string, string>()
+  if (unparsed) listed.set('unparsed', 'unparsed')
+  for (const run of runs) {
+    if (run.substitutes) listed.set('$(...)', '$(...)')
+    for (const target of run.writes) writes.set(target, '> ' + displayName(target))
+    if (orbitWords(run.words)) continue
+    const at = run.words.findIndex((word) => !/^\w+=/.test(word))
+    const program = run.words[at]
+    if (program === undefined || SUBSTITUTION_IN_WORD.test(program)) continue
+    if (!isQuiet(program, run.words.slice(at + 1), run)) listed.set(program, displayName(program))
+  }
+  return [...listed.values(), ...orbitExtras, ...writes.values()]
 }
 
 export function runsOrbit(command: string): boolean {
