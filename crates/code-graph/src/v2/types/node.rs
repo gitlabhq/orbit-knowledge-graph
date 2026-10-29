@@ -237,10 +237,6 @@ impl Modifiers {
         self.0 & (1 << modifier as u16) != 0
     }
 
-    pub const fn is_empty(self) -> bool {
-        self.0 == 0
-    }
-
     pub fn names(self) -> impl Iterator<Item = &'static str> {
         use strum::IntoEnumIterator;
         Modifier::iter()

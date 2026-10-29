@@ -109,14 +109,27 @@ impl Lines {
         }
     }
 
-    pub fn get<'a>(&self, runs: &'a [Box<[u32]>], single: &'a mut [u32; 1]) -> &'a [u32] {
+    pub fn to_vec(self, runs: &[Box<[u32]>]) -> Vec<u32> {
         match self.0 {
-            0 => &[],
-            v if v & Self::INLINE != 0 => {
-                single[0] = v & !Self::INLINE;
-                &single[..]
+            0 => Vec::new(),
+            v if v & Self::INLINE != 0 => vec![v & !Self::INLINE],
+            v => runs
+                .get((v - 1) as usize)
+                .map_or_else(Vec::new, |r| r.to_vec()),
+        }
+    }
+
+    fn collect(lines: &mut Vec<u32>, runs: &mut Vec<Box<[u32]>>) -> Self {
+        lines.sort_unstable();
+        lines.dedup();
+        lines.truncate(crate::v2::types::text::LINES_MAX);
+        match lines.as_slice() {
+            [] => Self::none(),
+            [one] => Self::one(*one),
+            many => {
+                runs.push(many.into());
+                Self::run(runs.len() as u32 - 1)
             }
-            v => runs.get((v - 1) as usize).map_or(&[], |r| &r[..]),
         }
     }
 }
@@ -146,6 +159,14 @@ impl GraphEdge {
         self.resolution = resolution;
         self
     }
+
+    fn absorb(&mut self, other: &GraphEdge) {
+        self.resolution = self.resolution.max(other.resolution);
+        self.write |= other.write;
+        if self.usage == TypeUsage::Unknown {
+            self.usage = other.usage;
+        }
+    }
 }
 
 pub type EdgeTriple = (NodeIndex, NodeIndex, GraphEdge);
@@ -157,44 +178,29 @@ pub fn merge_parallel_edges(edges: &mut Vec<EdgeTriple>, runs: &mut Vec<Box<[u32
     edges.sort_by_key(|(s, t, e)| (s.index(), t.index(), e.relationship.edge_kind as u8));
     let mut merged: Vec<EdgeTriple> = Vec::with_capacity(edges.len());
     let mut lines: Vec<u32> = Vec::new();
-    let mut single = [0u32; 1];
-    let flush = |merged: &mut Vec<EdgeTriple>, lines: &mut Vec<u32>, runs: &mut Vec<Box<[u32]>>| {
-        if let Some(last) = merged.last_mut() {
-            lines.sort_unstable();
-            lines.dedup();
-            lines.truncate(crate::v2::types::text::LINES_MAX);
-            last.2.lines = match lines.as_slice() {
-                [] => Lines::none(),
-                [one] => Lines::one(*one),
-                many => {
-                    runs.push(many.into());
-                    Lines::run(runs.len() as u32 - 1)
-                }
-            };
-        }
-        lines.clear();
-    };
     for (s, t, e) in edges.drain(..) {
-        let same = merged.last().is_some_and(|(ls, lt, le)| {
-            *ls == s && *lt == t && le.relationship.edge_kind == e.relationship.edge_kind
-        });
-        let edge_lines = e.lines.get(runs, &mut single).to_vec();
-        if same {
-            let last = merged.last_mut().map(|m| &mut m.2);
-            if let Some(last) = last {
-                last.resolution = last.resolution.max(e.resolution);
-                last.write |= e.write;
-                if last.usage == TypeUsage::Unknown {
-                    last.usage = e.usage;
-                }
+        let edge_lines = e.lines.to_vec(runs);
+        match merged.last_mut() {
+            Some((ls, lt, le))
+                if *ls == s
+                    && *lt == t
+                    && le.relationship.edge_kind == e.relationship.edge_kind =>
+            {
+                le.absorb(&e);
             }
-        } else {
-            flush(&mut merged, &mut lines, runs);
-            merged.push((s, t, e));
+            last => {
+                if let Some((_, _, le)) = last {
+                    le.lines = Lines::collect(&mut lines, runs);
+                }
+                lines.clear();
+                merged.push((s, t, e));
+            }
         }
         lines.extend(edge_lines);
     }
-    flush(&mut merged, &mut lines, runs);
+    if let Some((_, _, le)) = merged.last_mut() {
+        le.lines = Lines::collect(&mut lines, runs);
+    }
     *edges = merged;
 }
 
@@ -1293,42 +1299,7 @@ impl CodeGraph {
     }
 
     pub fn edge_lines(&self, edge: &GraphEdge) -> Vec<u32> {
-        let mut single = [0u32; 1];
-        edge.lines.get(&self.line_runs, &mut single).to_vec()
-    }
-
-    pub fn merge_into_existing_edge(
-        &mut self,
-        source: NodeIndex,
-        target: NodeIndex,
-        edge: &GraphEdge,
-    ) -> bool {
-        let Some(existing) = self
-            .graph
-            .edges_connecting(source, target)
-            .find(|e| e.weight().relationship.edge_kind == edge.relationship.edge_kind)
-            .map(|e| e.id())
-        else {
-            return false;
-        };
-        let mut lines = self.edge_lines(&self.graph[existing]);
-        lines.extend(self.edge_lines(edge));
-        lines.sort_unstable();
-        lines.dedup();
-        lines.truncate(crate::v2::types::text::LINES_MAX);
-        let merged = match lines.as_slice() {
-            [] => Lines::none(),
-            [one] => Lines::one(*one),
-            many => {
-                self.line_runs.push(many.into());
-                Lines::run(self.line_runs.len() as u32 - 1)
-            }
-        };
-        let weight = &mut self.graph[existing];
-        weight.lines = merged;
-        weight.resolution = weight.resolution.max(edge.resolution);
-        weight.write |= edge.write;
-        true
+        edge.lines.to_vec(&self.line_runs)
     }
 
     fn file_of(&self, node: NodeIndex) -> Option<NodeIndex> {
@@ -1402,15 +1373,11 @@ impl CodeGraph {
             let import = self.import(node);
             let path = self.str(import.path);
             let importing_path = self.graph[node].path();
-            let targets: Vec<NodeIndex> = match (import.wildcard, import.name.map(|n| self.str(n)))
-            {
-                (false, Some(name)) if path_names(path, name) => self.lookup_fqn(path).to_vec(),
-                (false, Some(name)) if !path.is_empty() => {
-                    self.lookup_fqn(&format!("{path}{sep}{name}")).to_vec()
-                }
-                (false, Some(name)) => self.lookup_fqn(name).to_vec(),
-                (false, None) => self.lookup_fqn(path).to_vec(),
-                (true, _) => Vec::new(),
+            let targets: Vec<NodeIndex> = if import.wildcard {
+                Vec::new()
+            } else {
+                self.lookup_fqn(&import.target_fqn(&self.strings, &sep))
+                    .to_vec()
             }
             .into_iter()
             .filter(|&t| self.graph[t].path() != importing_path)
@@ -1696,12 +1663,6 @@ impl Default for CodeGraph {
     }
 }
 
-fn path_names(path: &str, name: &str) -> bool {
-    path.strip_suffix(name).is_some_and(|head| {
-        head.is_empty() || head.ends_with(|c: char| !c.is_alphanumeric() && c != '_')
-    })
-}
-
 fn normalize_relative(path: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
     for part in path.split('/') {
@@ -1913,13 +1874,7 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
             .filter(|a| a.len() <= text::IMPORT_ALIAS_CAP)
             .unwrap_or("");
         let import_kind = self.import.import_kind(path.is_empty());
-        let fqn = match (import_kind, name) {
-            ("symbol", Some(name)) if !path.is_empty() && !path_names(path, name) => {
-                format!("{path}{}{name}", self.sep)
-            }
-            (_, Some(name)) if path.is_empty() => name.to_string(),
-            _ => path.to_string(),
-        };
+        let fqn = self.import.target_fqn(self.pool, self.sep);
         let fqn = (!fqn.is_empty() && fqn.len() <= text::FQN_CAP).then_some(fqn);
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;

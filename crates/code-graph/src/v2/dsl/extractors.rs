@@ -17,7 +17,6 @@ pub struct MetadataRule {
     pub decorators: Option<fn(&N<'_>) -> Vec<String>>,
     pub companion_of: Option<Extract>,
     pub signature_until: Option<&'static [&'static str]>,
-    pub signature_with: Option<TextFn>,
     pub parameters_with: Option<ListFn>,
     pub declared_type: Option<Extract>,
     pub written_return_type: Option<TextFn>,
@@ -42,7 +41,6 @@ impl MetadataRule {
             decorators: None,
             companion_of: None,
             signature_until: None,
-            signature_with: None,
             parameters_with: None,
             declared_type: None,
             written_return_type: None,
@@ -54,10 +52,6 @@ impl MetadataRule {
 
     pub fn signature_until(mut self, body: &'static [&'static str]) -> Self {
         self.signature_until = Some(body);
-        self
-    }
-    pub fn signature_with(mut self, f: TextFn) -> Self {
-        self.signature_with = Some(f);
         self
     }
     pub fn parameters_with(mut self, f: ListFn) -> Self {
@@ -94,7 +88,7 @@ impl MetadataRule {
         meta: &mut crate::v2::types::DefinitionMetadata,
     ) {
         use crate::v2::types::text;
-        meta.signature = match self.signature_with.or(rules.signature_with) {
+        meta.signature = match rules.signature_with {
             Some(f) => f(node),
             None => rules.signature(node, self.signature_until),
         };

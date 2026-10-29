@@ -878,7 +878,7 @@ impl LanguageSpec {
             state.scope_stack.push(Arc::from(name.as_str()));
         }
 
-        if let Some(m) = self.evaluate_scope(node, nk, |bare, _origin| {
+        let scope_match = self.evaluate_scope(node, nk, |bare, _origin| {
             if let Some(fqn) = state.import_map.get(&bare) {
                 return fqn.clone();
             }
@@ -886,171 +886,170 @@ impl LanguageSpec {
                 return format!("{prefix}{sep}{bare}");
             }
             bare
-        }) {
-            if m.scope_only {
+        });
+        if let Some(m) = scope_match.as_ref().filter(|m| m.scope_only) {
+            state.scope_stack.push(Arc::from(m.name.as_str()));
+            pushed_scope = true;
+            let new_block = state.ssa.add_block();
+            state.ssa.add_predecessor(new_block, state.current_block);
+            state.ssa.seal_block(new_block);
+            state.saved_blocks.push(state.current_block);
+            state.current_block = new_block;
+            if m.def_kind.is_type_container() {
+                let parts: Vec<&str> = state.scope_stack.iter().map(|s| s.as_ref()).collect();
+                let scope_fqn = state.arena.alloc_str(&parts.join(sep));
+                for &self_name in self.ssa_config.self_names {
+                    let name = state.arena.alloc_str(self_name);
+                    state.ssa.write_variable(
+                        name,
+                        state.current_block,
+                        super::ssa::SsaValue::Type(scope_fqn),
+                    );
+                }
+            }
+        }
+        if let Some(m) = scope_match.filter(|m| !m.scope_only) {
+            let is_top_level = state.scope_stack.len() <= state.top_level_depth;
+            let def_index = state.defs.len() as u32;
+
+            if m.creates_scope {
                 state.scope_stack.push(Arc::from(m.name.as_str()));
                 pushed_scope = true;
+
+                // Create new SSA block for this scope (isolates bindings)
                 let new_block = state.ssa.add_block();
                 state.ssa.add_predecessor(new_block, state.current_block);
                 state.ssa.seal_block(new_block);
                 state.saved_blocks.push(state.current_block);
                 state.current_block = new_block;
-                if m.def_kind.is_type_container() {
-                    let parts: Vec<&str> = state.scope_stack.iter().map(|s| s.as_ref()).collect();
-                    let scope_fqn = state.arena.alloc_str(&parts.join(sep));
-                    for &self_name in self.ssa_config.self_names {
-                        let name = state.arena.alloc_str(self_name);
-                        state.ssa.write_variable(
-                            name,
-                            state.current_block,
-                            super::ssa::SsaValue::Type(scope_fqn),
-                        );
-                    }
-                }
+            }
+
+            let fqn = if m.creates_scope {
+                Fqn::from_parts(
+                    &state
+                        .scope_stack
+                        .iter()
+                        .map(|s| s.as_ref())
+                        .collect::<Vec<_>>(),
+                    sep,
+                )
             } else {
-                let is_top_level = state.scope_stack.len() <= state.top_level_depth;
-                let def_index = state.defs.len() as u32;
+                Fqn::from_scope(&state.scope_stack, &m.name, sep)
+            };
 
-                if m.creates_scope {
-                    state.scope_stack.push(Arc::from(m.name.as_str()));
-                    pushed_scope = true;
+            let is_type_scope = m.def_kind.is_type_container();
 
-                    // Create new SSA block for this scope (isolates bindings)
-                    let new_block = state.ssa.add_block();
-                    state.ssa.add_predecessor(new_block, state.current_block);
-                    state.ssa.seal_block(new_block);
-                    state.saved_blocks.push(state.current_block);
-                    state.current_block = new_block;
+            let def_name = m.name.clone();
+            trace_event!(
+                state.tracer,
+                ScopePush {
+                    name: def_name.clone(),
+                    kind: format!("{:?}", m.def_kind),
+                    label: m.label.to_string(),
+                    fqn: fqn.as_str().to_string(),
+                    block_id: state.current_block.0,
                 }
+            );
+            state.defs.push(CanonicalDefinition {
+                definition_type: m.label,
+                kind: m.def_kind,
+                name: m.name,
+                fqn,
+                range: canonical_range(&m.range),
+                is_top_level,
+                metadata: m.metadata,
+            });
+            let last_def = &state.defs[def_index as usize];
+            trace_event!(
+                state.tracer,
+                DefDiscovered {
+                    name: last_def.name.clone(),
+                    fqn: last_def.fqn.as_str().to_string(),
+                    kind: format!("{:?}", last_def.kind),
+                    label: last_def.definition_type.to_string(),
+                    is_top_level: is_top_level,
+                }
+            );
 
-                let fqn = if m.creates_scope {
-                    Fqn::from_parts(
-                        &state
-                            .scope_stack
-                            .iter()
-                            .map(|s| s.as_ref())
-                            .collect::<Vec<_>>(),
-                        sep,
-                    )
-                } else {
-                    Fqn::from_scope(&state.scope_stack, &m.name, sep)
-                };
-
-                let is_type_scope = m.def_kind.is_type_container();
-
-                let def_name = m.name.clone();
-                trace_event!(
-                    state.tracer,
-                    ScopePush {
-                        name: def_name.clone(),
-                        kind: format!("{:?}", m.def_kind),
-                        label: m.label.to_string(),
-                        fqn: fqn.as_str().to_string(),
-                        block_id: state.current_block.0,
-                    }
+            // Write def name to SSA in the parent block so sibling scopes can see it.
+            let parent_block = if pushed_scope {
+                *state.saved_blocks.last().unwrap_or(&state.current_block)
+            } else {
+                state.current_block
+            };
+            if m.def_kind.is_referable() {
+                let ssa_name = state.arena.alloc_str(&def_name);
+                state.ssa.write_variable(
+                    ssa_name,
+                    parent_block,
+                    super::ssa::SsaValue::LocalDef(def_index),
                 );
-                state.defs.push(CanonicalDefinition {
-                    definition_type: m.label,
-                    kind: m.def_kind,
-                    name: m.name,
-                    fqn,
-                    range: canonical_range(&m.range),
-                    is_top_level,
-                    metadata: m.metadata,
-                });
-                let last_def = &state.defs[def_index as usize];
-                trace_event!(
-                    state.tracer,
-                    DefDiscovered {
-                        name: last_def.name.clone(),
-                        fqn: last_def.fqn.as_str().to_string(),
-                        kind: format!("{:?}", last_def.kind),
-                        label: last_def.definition_type.to_string(),
-                        is_top_level: is_top_level,
-                    }
-                );
+            }
 
-                // Write def name to SSA in the parent block so sibling scopes can see it.
-                let parent_block = if pushed_scope {
-                    *state.saved_blocks.last().unwrap_or(&state.current_block)
-                } else {
-                    state.current_block
+            if is_type_scope {
+                let scope_fqn = {
+                    let parts: Vec<&str> = state.scope_stack.iter().map(|s| s.as_ref()).collect();
+                    state.arena.alloc_str(&parts.join(sep))
                 };
-                if m.def_kind.is_referable() {
-                    let ssa_name = state.arena.alloc_str(&def_name);
+                for &self_name in self.ssa_config.self_names {
+                    let name = state.arena.alloc_str(self_name);
                     state.ssa.write_variable(
-                        ssa_name,
-                        parent_block,
-                        super::ssa::SsaValue::LocalDef(def_index),
+                        name,
+                        state.current_block,
+                        super::ssa::SsaValue::Type(scope_fqn),
                     );
                 }
-
-                if is_type_scope {
-                    let scope_fqn = {
-                        let parts: Vec<&str> =
-                            state.scope_stack.iter().map(|s| s.as_ref()).collect();
-                        state.arena.alloc_str(&parts.join(sep))
-                    };
-                    for &self_name in self.ssa_config.self_names {
-                        let name = state.arena.alloc_str(self_name);
-                        state.ssa.write_variable(
-                            name,
-                            state.current_block,
-                            super::ssa::SsaValue::Type(scope_fqn),
-                        );
-                    }
-                    if let Some(super_name) = self.ssa_config.super_name
-                        && let Some(meta) = &state.defs[def_index as usize].metadata
-                        && let Some(super_type) = meta.super_types.first()
-                    {
-                        let resolved =
-                            resolve_type_name(super_type, &state.import_map, module_prefix, sep);
-                        let st = state.arena.alloc_str(&resolved);
-                        let name = state.arena.alloc_str(super_name);
-                        state.ssa.write_variable(
-                            name,
-                            state.current_block,
-                            super::ssa::SsaValue::Type(st),
-                        );
-                    }
+                if let Some(super_name) = self.ssa_config.super_name
+                    && let Some(meta) = &state.defs[def_index as usize].metadata
+                    && let Some(super_type) = meta.super_types.first()
+                {
+                    let resolved =
+                        resolve_type_name(super_type, &state.import_map, module_prefix, sep);
+                    let st = state.arena.alloc_str(&resolved);
+                    let name = state.arena.alloc_str(super_name);
+                    state.ssa.write_variable(
+                        name,
+                        state.current_block,
+                        super::ssa::SsaValue::Type(st),
+                    );
                 }
+            }
 
-                if m.creates_scope {
-                    state.enclosing_def_stack.push(def_index);
-                    pushed_def = true;
+            if m.creates_scope {
+                state.enclosing_def_stack.push(def_index);
+                pushed_def = true;
 
-                    // Adopt sibling references: when decorators/annotations are
-                    // CST siblings of the scope node, emit refs attributed to
-                    // this def rather than the parent scope.
-                    if !self.hooks.adopt_sibling_refs.is_empty()
-                        && let Some(parent) = node.parent()
-                    {
-                        for sibling in parent.children() {
-                            let sk = sibling.kind();
-                            if sibling.range() != node.range()
-                                && self.hooks.adopt_sibling_refs.contains(&sk.as_ref())
-                                && let Some(name) =
-                                    treesitter_visit::extract::default_name().apply(&sibling)
-                            {
-                                trace_event!(
-                                    state.tracer,
-                                    SiblingRefAdopted {
-                                        name: name.clone(),
-                                        def_index: def_index,
-                                    }
-                                );
-                                let ssa_key = state.arena.alloc_str(&name);
-                                state.pending_refs.push(PendingRef {
-                                    name,
-                                    chain: None,
-                                    ssa_key,
-                                    block: state.current_block,
-                                    enclosing_def: Some(def_index),
-                                    is_return: false,
-                                    kind: crate::v2::types::RefKind::Annotation,
-                                    line: sibling.start_pos().line() as u32 + 1,
-                                });
-                            }
+                // Adopt sibling references: when decorators/annotations are
+                // CST siblings of the scope node, emit refs attributed to
+                // this def rather than the parent scope.
+                if !self.hooks.adopt_sibling_refs.is_empty()
+                    && let Some(parent) = node.parent()
+                {
+                    for sibling in parent.children() {
+                        let sk = sibling.kind();
+                        if sibling.range() != node.range()
+                            && self.hooks.adopt_sibling_refs.contains(&sk.as_ref())
+                            && let Some(name) =
+                                treesitter_visit::extract::default_name().apply(&sibling)
+                        {
+                            trace_event!(
+                                state.tracer,
+                                SiblingRefAdopted {
+                                    name: name.clone(),
+                                    def_index: def_index,
+                                }
+                            );
+                            let ssa_key = state.arena.alloc_str(&name);
+                            state.pending_refs.push(PendingRef {
+                                name,
+                                chain: None,
+                                ssa_key,
+                                block: state.current_block,
+                                enclosing_def: Some(def_index),
+                                is_return: false,
+                                kind: crate::v2::types::RefKind::Annotation,
+                                line: sibling.start_pos().line() as u32 + 1,
+                            });
                         }
                     }
                 }

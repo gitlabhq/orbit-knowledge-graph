@@ -368,6 +368,18 @@ impl GraphDef {
 }
 
 impl GraphImport {
+    pub fn target_fqn(&self, pool: &StringPool, sep: &str) -> String {
+        let path = pool.get(self.path);
+        let name = self.name.map(|n| pool.get(n));
+        match (self.import_kind(path.is_empty()), name) {
+            ("symbol", Some(name)) if !path.is_empty() && !path_names(path, name) => {
+                format!("{path}{sep}{name}")
+            }
+            (_, Some(name)) if path.is_empty() => name.to_string(),
+            _ => path.to_string(),
+        }
+    }
+
     pub fn import_kind(&self, path_is_empty: bool) -> &'static str {
         match self.binding_kind {
             _ if self.wildcard => "wildcard",
@@ -393,6 +405,12 @@ impl GraphImport {
             is_external: false,
         }
     }
+}
+
+fn path_names(path: &str, name: &str) -> bool {
+    path.strip_suffix(name).is_some_and(|head| {
+        head.is_empty() || head.ends_with(|c: char| !c.is_alphanumeric() && c != '_')
+    })
 }
 
 /// Per-file arena for walker scratch strings.

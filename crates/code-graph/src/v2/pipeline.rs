@@ -174,14 +174,11 @@ impl ResolvedEdges {
     }
 }
 
-fn add_resolved_edges(graph: &mut CodeGraph, resolved: ResolvedEdges, merge_existing: bool) {
+fn add_resolved_edges(graph: &mut CodeGraph, resolved: ResolvedEdges) {
     let offset = graph.line_runs.len() as u32;
     graph.line_runs.extend(resolved.runs);
     for (source, target, mut edge) in resolved.edges {
         edge.lines = edge.lines.rebased(offset);
-        if merge_existing && graph.merge_into_existing_edge(source, target, &edge) {
-            continue;
-        }
         graph.graph.add_edge(source, target, edge);
     }
 }
@@ -1646,7 +1643,7 @@ impl FamilyPipeline {
                     "per-file watchdog killed analysis",
                 );
             }
-            add_resolved_edges(&mut graph, edges, false);
+            add_resolved_edges(&mut graph, edges);
             if let Some((info, lang)) = info_opt {
                 if !inferred.is_empty() {
                     all_inferred.push((info.def_nodes.clone(), inferred));
@@ -1727,7 +1724,7 @@ impl FamilyPipeline {
             let mut phase3_edges = 0usize;
             for edges in phase3_results {
                 phase3_edges += edges.edges.len();
-                add_resolved_edges(&mut graph, edges, true);
+                add_resolved_edges(&mut graph, edges);
             }
             if phase3_edges > 0 {
                 orbit_log_fields::info!(
