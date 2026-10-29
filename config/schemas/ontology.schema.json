@@ -302,7 +302,7 @@
     },
     "redactionConfig": {
       "type": "object",
-      "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. The query engine includes id/type columns in results, and orbit-server validates these against the user's permissions before returning data.",
+      "description": "Access rules of the entity: the Rails redaction check on returned rows, and the row filters the compiler adds to every read.",
       "properties": {
         "resource_type": {
           "type": "string",
@@ -326,7 +326,11 @@
             "maintainer",
             "owner"
           ],
-          "description": "Minimum GitLab role a user must hold on a traversal path for this entity's rows to be visible. Applied by the compiler security pass: traversal paths where the user holds a lower role are dropped from the startsWith() predicate for this entity's table, closing the aggregation-query bypass where target nodes (e.g. Vulnerability) were never redacted. Defaults to 'reporter' for entities that do not opt in."
+          "description": "Minimum GitLab role on a traversal path for rows of this entity to be visible. The compiler drops paths with a lower role from the entity's path filter. Defaults to 'reporter'."
+        },
+        "owner_column": {
+          "type": "string",
+          "description": "Int column that holds the owning user ID. The compiler adds `<owner_column> = <caller user ID>` to every read of the entity table for a caller without the admin claim."
         }
       },
       "required": [

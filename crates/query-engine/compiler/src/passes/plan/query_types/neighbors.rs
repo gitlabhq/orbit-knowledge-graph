@@ -199,6 +199,7 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
             })
     };
     let has_non_denorm = center.id_range.is_some()
+        || model.entity_owner_column(center_entity).is_some()
         || center.filters.iter().any(|(_, filter)| {
             (direction != Direction::Incoming
                 && !covered(

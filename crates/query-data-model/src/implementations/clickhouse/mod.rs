@@ -150,6 +150,10 @@ impl RelationalMapping for ClickHouseBindings {
         self.entity(entity).map(|layout| layout.table.as_str())
     }
 
+    fn table_entity(&self, table: &str) -> Option<EntityId> {
+        self.table(table)?.entity
+    }
+
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool {
         self.entity(entity)
             .is_some_and(|layout| layout.has_traversal_path)

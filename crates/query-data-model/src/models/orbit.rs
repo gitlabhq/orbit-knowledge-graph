@@ -221,6 +221,16 @@ pub trait OrbitQueryModel {
         self.query_authorization().required_access_level(entity)
     }
 
+    fn entity_owner_column(&self, entity: &str) -> Option<&str> {
+        let entity = self.graph().entity_id(entity)?;
+        self.query_authorization().owner_column(entity)
+    }
+
+    fn table_owner_column(&self, table: &str) -> Option<&str> {
+        let entity = self.query_backend().table_entity(table)?;
+        self.query_authorization().owner_column(entity)
+    }
+
     fn property_is_admin_only(&self, property: PropertyId) -> bool {
         self.query_authorization().is_admin_only(property)
     }

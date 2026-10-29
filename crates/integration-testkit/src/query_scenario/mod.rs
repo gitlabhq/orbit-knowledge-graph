@@ -1184,7 +1184,9 @@ fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
             .collect()
     };
 
-    let mut ctx = SecurityContext::new_with_roles(org, authorized).unwrap();
+    let mut ctx = SecurityContext::new_with_roles(org, authorized)
+        .unwrap()
+        .with_user_id(ov.user_id);
     if let Some(true) = ov.admin {
         ctx = ctx.with_role(true, Some(AccessLevel::Owner as u32));
     }

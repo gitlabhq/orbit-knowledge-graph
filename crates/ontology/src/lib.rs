@@ -546,7 +546,18 @@ impl Ontology {
             id_column: id_column.into(),
             ability: "read".to_string(),
             required_role: RequiredRole::Reporter,
+            owner_column: None,
         });
+        self
+    }
+
+    #[must_use]
+    pub fn with_redaction_owner_column(mut self, node_name: &str, column: &str) -> Self {
+        self.nodes
+            .get_mut(node_name)
+            .and_then(|node| node.redaction.as_mut())
+            .unwrap_or_else(|| panic!("node \"{node_name}\" has no redaction config"))
+            .owner_column = Some(column.to_string());
         self
     }
 

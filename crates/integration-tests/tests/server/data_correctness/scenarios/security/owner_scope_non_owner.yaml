@@ -1,0 +1,98 @@
+description: redaction.owner_column keeps every read of the Note table to rows of the caller; user 1 never sees the notes of user 2 or notes without an author
+
+config:
+  ontology_overlay: owner_scope
+  security: { paths: ["1/"], user_id: 1 }
+  redaction:
+    allow:
+      user: [1, 2]
+      merge_request: [2000, 2001]
+      note: [3000, 3001, 3002, 3003, 3100, 3101, 3102]
+  extra_seed:
+    gl_note:
+      - { id: 3100, note: Alice on feature A, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, author_id: 1, traversal_path: "1/100/1000/" }
+      - { id: 3101, note: Bob on feature A, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, author_id: 2, traversal_path: "1/100/1000/" }
+      - { id: 3102, note: Bob on bug B, noteable_type: MergeRequest, noteable_id: 2001, confidential: false, internal: false, author_id: 2, traversal_path: "1/100/1000/" }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3100, target_kind: Note, source_tags: ["state:opened"], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3101, target_kind: Note, source_tags: ["state:opened"], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 2001, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3102, target_kind: Note, source_tags: ["state:opened"], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 3100, target_kind: Note, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 3101, target_kind: Note, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 3102, target_kind: Note, source_tags: [], target_tags: [] }
+
+steps:
+  - query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 3000, "end": 3999}}], "limit": 20}
+      gql: |
+        MATCH (n:Note) WHERE n.id >= 3000 AND n.id <= 3999 RETURN n LIMIT 20
+    expect:
+      node_count: 2
+      nodes:
+        Note: { ids: [3000, 3100] }
+
+  - query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 3000, "end": 3999}, "filters": {"author_id": 2}}], "limit": 20}
+      gql: |
+        MATCH (n:Note) WHERE n.id >= 3000 AND n.id <= 3999 AND n.author_id = 2 RETURN n LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: ["filter:author_id"]
+
+  - query:
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 3000, "end": 3999}}], "group_by": ["n.author_id"], "aggregations": [{"count": "n", "as": "notes"}], "limit": 10}
+      gql: |
+        MATCH (n:Note) WHERE n.id >= 3000 AND n.id <= 3999 RETURN n.author_id, count(n) AS notes LIMIT 10
+    expect:
+      row_count: 1
+      row_values:
+        - { n_author_id: 1, notes: 2 }
+
+  - query:
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2999}, "columns": ["title"]}, {"id": "n", "entity": "Note"}], "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}], "group_by": ["mr"], "aggregations": [{"count": "n", "as": "notes"}], "limit": 10}
+      gql: |
+        MATCH (mr:MergeRequest)-[:HAS_NOTE]->(n:Note) WHERE mr.id >= 2000 AND mr.id <= 2999 RETURN mr{.id, .title}, count(n) AS notes LIMIT 10
+    expect:
+      groups:
+        mr:
+          count: 1
+          rows:
+            - entity: MergeRequest
+              id: 2000
+              values:
+                notes: 2
+
+  - query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}, {"id": "n", "entity": "Note"}], "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}], "limit": 20}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note) RETURN mr, n LIMIT 20
+    expect:
+      node_count: 3
+      nodes:
+        MergeRequest: { ids: [2000] }
+        Note: { ids: [3000, 3100] }
+      edges:
+        HAS_NOTE: [[2000, 3000], [2000, 3100]]
+
+  - query:
+      json: |
+        {"query_type": "neighbors", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3101]}], "neighbors": {"direction": "incoming", "rel_types": ["HAS_NOTE"]}}
+      gql: |
+        MATCH (n:Note {id: 3101})<-[:HAS_NOTE]-(m) RETURN n, m
+    expect:
+      node_count: 0
+      edge_count: { HAS_NOTE: 0 }
+      skip_requirements: [node_ids]
+
+  - query:
+      json: |
+        {"query_type": "path_finding", "nodes": [{"id": "start", "entity": "MergeRequest", "node_ids": [2000]}, {"id": "end", "entity": "Note", "node_ids": [3101]}], "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["HAS_NOTE"]}}
+      gql: |
+        MATCH p = ANY SHORTEST (start:MergeRequest {id: 2000})-[:HAS_NOTE*1..2]->(`end`:Note {id: 3101}) RETURN p
+    expect:
+      path_count: 0

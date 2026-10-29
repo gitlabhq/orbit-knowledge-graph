@@ -7,7 +7,7 @@ use rust_embed::Embed;
 use serde::Deserialize;
 use std::path::Path;
 
-use crate::entities::{DomainInfo, EdgeColumn, EnumType};
+use crate::entities::{DataType, DomainInfo, EdgeColumn, EnumType};
 use crate::{Ontology, OntologyError};
 
 use derived::DerivedYaml;
@@ -268,9 +268,18 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 reader,
             )?;
 
-            if entity.redaction.is_none() {
+            let Some(redaction) = &entity.redaction else {
                 return Err(OntologyError::Validation(format!(
                     "node '{node_name}' must define redaction"
+                )));
+            };
+            if let Some(owner_column) = redaction.owner_column.as_deref()
+                && !entity.fields.iter().any(|field| {
+                    field.column_name() == Some(owner_column) && field.data_type == DataType::Int
+                })
+            {
+                return Err(OntologyError::Validation(format!(
+                    "node '{node_name}': redaction.owner_column '{owner_column}' must name an int column of the node"
                 )));
             }
 
@@ -1535,6 +1544,22 @@ fn validate_unique_denormalized_joins(ontology: &crate::Ontology) -> Result<(), 
         if !seen.insert(join.name.as_str()) {
             return Err(OntologyError::Validation(format!(
                 "denormalized_joins: duplicate name '{}'",
+                join.name
+            )));
+        }
+        if let Some(node) = join
+            .hops
+            .iter()
+            .flat_map(|hop| [&hop.source_kind, &hop.target_kind])
+            .find(|kind| {
+                ontology
+                    .get_node(kind)
+                    .and_then(|node| node.redaction.as_ref()?.owner_column.as_ref())
+                    .is_some()
+            })
+        {
+            return Err(OntologyError::Validation(format!(
+                "denormalized_joins: '{}' joins '{node}', which has redaction.owner_column; the owner filter reads node tables only",
                 join.name
             )));
         }

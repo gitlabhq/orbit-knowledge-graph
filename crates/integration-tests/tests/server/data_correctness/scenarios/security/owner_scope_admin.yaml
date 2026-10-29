@@ -1,0 +1,49 @@
+description: A caller with the admin claim reads every row of an owner-scoped entity, as with admin_only properties
+
+config:
+  ontology_overlay: owner_scope
+  security: admin
+  redaction:
+    allow:
+      user: [1, 2]
+      merge_request: [2000, 2001]
+      note: [3000, 3001, 3002, 3003, 3100, 3101, 3102]
+  extra_seed:
+    gl_note:
+      - { id: 3100, note: Alice on feature A, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, author_id: 1, traversal_path: "1/100/1000/" }
+      - { id: 3101, note: Bob on feature A, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, author_id: 2, traversal_path: "1/100/1000/" }
+      - { id: 3102, note: Bob on bug B, noteable_type: MergeRequest, noteable_id: 2001, confidential: false, internal: false, author_id: 2, traversal_path: "1/100/1000/" }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3100, target_kind: Note, source_tags: ["state:opened"], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3101, target_kind: Note, source_tags: ["state:opened"], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 2001, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3102, target_kind: Note, source_tags: ["state:opened"], target_tags: [] }
+
+steps:
+  - query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 3000, "end": 3999}}], "limit": 20}
+      gql: |
+        MATCH (n:Note) WHERE n.id >= 3000 AND n.id <= 3999 RETURN n LIMIT 20
+    expect:
+      node_count: 7
+      nodes:
+        Note: { ids: [3000, 3001, 3002, 3003, 3100, 3101, 3102] }
+
+  - query:
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2999}, "columns": ["title"]}, {"id": "n", "entity": "Note"}], "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}], "group_by": ["mr"], "aggregations": [{"count": "n", "as": "notes"}], "limit": 10}
+      gql: |
+        MATCH (mr:MergeRequest)-[:HAS_NOTE]->(n:Note) WHERE mr.id >= 2000 AND mr.id <= 2999 RETURN mr{.id, .title}, count(n) AS notes LIMIT 10
+    expect:
+      groups:
+        mr:
+          count: 2
+          rows:
+            - entity: MergeRequest
+              id: 2000
+              values:
+                notes: 5
+            - entity: MergeRequest
+              id: 2001
+              values:
+                notes: 2
