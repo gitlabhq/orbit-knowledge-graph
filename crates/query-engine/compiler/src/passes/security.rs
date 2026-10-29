@@ -1,10 +1,5 @@
-//! Security filter injection for multi-tenant isolation.
-//!
-//! Every graph table scan gets a `startsWith(traversal_path, ...)` filter over the
-//! caller's paths that meet the table's role floor (`required_role`), and an
-//! `<owner_column> = <user id>` filter when the table's entity declares
-//! `redaction.owner_column` and the caller has no `admin` claim. No eligible path,
-//! or no user id, emits `false`.
+//! Security filter injection for multi-tenant isolation: a `traversal_path` prefix
+//! filter per role floor and, below the `admin` claim, an owner-column equality.
 
 use std::sync::OnceLock;
 

@@ -1806,6 +1806,21 @@ mod tests {
     }
 
     #[test]
+    fn owner_column_names_an_int_column_of_the_node() {
+        let error = load_modified_sources("nodes/core/note.yaml", |node| {
+            node["redaction"]["owner_column"] = serde_json::json!("note");
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("owner_column 'note'"), "{error}");
+        assert!(
+            load_modified_sources("nodes/core/note.yaml", |node| {
+                node["redaction"]["owner_column"] = serde_json::json!("author_id");
+            })
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn nodes_require_redaction() {
         let error = load_modified_sources("nodes/core/project.yaml", |node| {
             node.as_object_mut().unwrap().remove("redaction");

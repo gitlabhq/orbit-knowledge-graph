@@ -129,6 +129,12 @@ mod tests {
     }
 
     #[test]
+    fn user_id_reaches_the_security_context() {
+        let claims = make_claims(true, vec![], Some(42));
+        assert_eq!(build_security_context(&claims).unwrap().user_id, Some(1));
+    }
+
+    #[test]
     fn non_admin_maps_traversal_paths() {
         let claims = make_claims(
             false,

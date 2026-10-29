@@ -2,8 +2,7 @@
 //!
 //! Runs after security filter injection to verify invariants that must hold
 //! before the AST is handed to codegen. Checks that every namespaced graph
-//! table alias has a role-eligible traversal path predicate, that every
-//! owner-scoped alias has the caller's owner predicate, or a fail-closed
+//! table alias has a role-eligible traversal path predicate or a fail-closed
 //! false predicate.
 
 use query_data_model::GitLabPolicy;
@@ -157,7 +156,7 @@ fn is_owner_filter(expr: &Expr, alias: &str, column: &str, user_id: Option<i64>)
         && matches!(
             right.as_ref(),
             Expr::Literal(Value::Number(value)) | Expr::Param { value: Value::Number(value), .. }
-                if value.as_i64() == user_id
+                if user_id.is_some_and(|user_id| value.as_i64() == Some(user_id))
         )
 }
 
