@@ -1,0 +1,32 @@
+name: "Kotlin: a member does not override an extension function"
+
+fixtures:
+  - path: src/demo/Shapes.kt
+    content: |
+      package demo
+
+      open class Base {
+          open fun area(): Int = 0
+      }
+
+      fun Base.describe(): String = "base"
+
+      class Square : Base() {
+          override fun area(): Int = 4
+          fun describe(): String = "square"
+      }
+
+tests:
+  - name: "an override of a member method is OVERRIDES"
+    query: |
+      MATCH (a:Definition {name: 'area'})-[:OVERRIDES]->(b:Definition)
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row: { source: "demo.Square.area", target: "demo.Base.area" } }
+
+  - name: "a member with the name of an extension function overrides nothing"
+    query: |
+      MATCH (a:Definition {name: 'describe'})-[:OVERRIDES]->(b:Definition)
+      RETURN a.fqn
+    assert:
+      - { empty: true }

@@ -1,0 +1,42 @@
+name: "Rust: an unresolved name gives no guessed target, and an external trait impl extends the import"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "demo"
+      version = "0.1.0"
+
+  - path: src/lib.rs
+    content: |
+      pub mod foo {
+          pub mod bar {
+              pub fn real() {}
+          }
+      }
+
+      use std::fmt;
+      use crate::foo::bar::Missing;
+
+      pub struct Shown;
+
+      impl fmt::Display for Shown {
+          fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+              write!(f, "shown")
+          }
+      }
+
+tests:
+  - name: "a name that does not exist resolves to no definition"
+    query: |
+      MATCH (i:Import {name: 'Missing'})-[:RESOLVES_TO]->(d:Definition)
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+
+  - name: "the type of an impl of an external trait extends the imported trait"
+    query: |
+      MATCH (t:Definition {name: 'Shown'})-[:EXTENDS]->(i:Import {name: 'Display', import_path: 'fmt'})
+      RETURN t.fqn AS type
+    assert:
+      - { row: { type: "Shown" } }

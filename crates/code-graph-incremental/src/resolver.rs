@@ -542,7 +542,7 @@ impl Resolver {
             .filter(|edge| edge.kind == EdgeKind::Calls)
             .filter_map(|edge| edge.site.map(|site| (edge.from_tree, site)))
             .collect();
-        cross_edges.extend(owner_edges(&ctx, dirty_fis));
+        cross_edges.extend(owner_edges(&ctx, edges, dirty_fis));
         cross_edges.extend(override_edges(&ctx, dirty_fis));
         drop(ctx);
         let named: FxHashSet<(u32, u32)> = edges
@@ -562,7 +562,7 @@ impl Resolver {
                 .filter(|r| r.fi != r.target_fi && dirty_fis.contains(&r.fi))
                 .filter(|r| !named.contains(&(r.fi, r.node)))
                 .map(|r| {
-                    Edge::new(r.fi, r.node, r.target_fi, r.anchor, EdgeKind::Imports)
+                    Edge::new(r.fi, r.node, r.target_fi, 0, EdgeKind::Imports)
                         .resolved(Resolution::Import)
                 }),
         );
@@ -627,8 +627,15 @@ fn found_in(from: Cursor, to: Cursor) -> Resolution {
     }
 }
 
-fn owner_edges(ctx: &ResolveCtx, dirty: &FxHashSet<u32>) -> Vec<Edge> {
+fn owner_edges(ctx: &ResolveCtx, edges: &[Edge], dirty: &FxHashSet<u32>) -> Vec<Edge> {
     let mut out = Vec::new();
+    let mut unresolved: FxHashMap<(u32, u32), Vec<Cursor>> = FxHashMap::default();
+    for e in edges.iter().filter(|e| e.kind == EdgeKind::Extends) {
+        let target = ctx.corpus.follow(e);
+        if !target.is(C::Def) {
+            unresolved.entry(e.from()).or_default().push(target);
+        }
+    }
     for (&(ofi, onode), blocks) in &ctx.implementations {
         let owner = ctx.corpus.jump(ofi, onode);
         for &(fi, node) in blocks {
@@ -658,6 +665,17 @@ fn owner_edges(ctx: &ResolveCtx, dirty: &FxHashSet<u32>) -> Vec<Edge> {
                     .edge_to(p, EdgeKind::Extends)
                     .resolved(found_in(owner, p))
             }));
+            out.extend(
+                unresolved
+                    .get(&(fi, node))
+                    .into_iter()
+                    .flatten()
+                    .map(|&target| {
+                        owner
+                            .edge_to(target, EdgeKind::Extends)
+                            .resolved(Resolution::Import)
+                    }),
+            );
         }
     }
     out
@@ -687,7 +705,7 @@ fn override_edges(ctx: &ResolveCtx, dirty: &FxHashSet<u32>) -> Vec<Edge> {
                 for &(pf, pn) in &parents {
                     let parent = ctx.corpus.jump(pf, pn);
                     out.extend(
-                        method_up(ctx, parent, name, fi as usize, Role::Callable)
+                        overridden(ctx, parent, name)
                             .into_iter()
                             .filter(|t| (t.fi(), t.index()) != (member.fi(), member.index()))
                             .map(|t| {
@@ -701,6 +719,27 @@ fn override_edges(ctx: &ResolveCtx, dirty: &FxHashSet<u32>) -> Vec<Edge> {
         }
     }
     out
+}
+
+fn overridden<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Vec<Cursor<'a>> {
+    let jump = |(fi, node): (u32, u32)| ctx.corpus.jump(fi, node);
+    members_by_level(
+        vec![(cls.fi(), cls.index())],
+        |id| supertypes(ctx, jump(id)),
+        |id| {
+            jump(id)
+                .children()
+                .find(|m| {
+                    m.is(C::Def)
+                        && m.has_tag(ctx.tags.callable)
+                        && m.child_sym(C::DefName) == Some(name)
+                })
+                .map(|m| (m.fi(), m.index()))
+        },
+    )
+    .into_iter()
+    .map(jump)
+    .collect()
 }
 
 fn call_key(e: &Edge) -> (u32, u32, Option<u32>, u32, u32) {

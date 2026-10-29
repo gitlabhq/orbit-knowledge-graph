@@ -445,9 +445,9 @@ display:
         tag: *cpp_callable
       - match: '(__def (__function))'
         tag: &cpp_parts
-          prefix: '@$ROOT|tag("signature")|top_until("\(", "()[]{}<>")'
-          suffix: '@$ROOT|tag("signature")|top_after("\(", "()[]{}<>")|top_after("\)", "()[]{}<>")|regex_replace("=\s*0\s*$", " abstract ")'
-          parameters: '@$ROOT|tag("signature")|top_after("\(", "()[]{}<>")|top_until("\)", "()[]{}<>")|regex_replace("\s+", " ")|regex_replace("^\s*void\s*$", "")|top_split(",", "()[]{}<>")'
+          prefix: '@$ROOT|tag("signature")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)<", "$1‹")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)>", "$1›")|top_until("\(", "()[]{}<>")|replace("‹", "<")|replace("›", ">")'
+          suffix: '@$ROOT|tag("signature")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)<", "$1‹")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)>", "$1›")|top_after("\(", "()[]{}<>")|top_after("\)", "()[]{}<>")|regex_replace("=\s*0\s*$", " abstract ")|replace("‹", "<")|replace("›", ">")'
+          parameters: '@$ROOT|tag("signature")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)<", "$1‹")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)>", "$1›")|top_after("\(", "()[]{}<>")|top_until("\)", "()[]{}<>")|regex_replace("\s+", " ")|regex_replace("^\s*void\s*$", "")|top_split(",", "()[]{}<>")|replace("‹", "<")|replace("›", ">")'
       - match: '(__def (__method))'
         tag: *cpp_parts
       - match: '(__def (__function))'
