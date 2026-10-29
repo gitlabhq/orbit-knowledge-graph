@@ -34,7 +34,7 @@ if docker inspect "$name" >/dev/null 2>&1 && [[ "$(docker inspect --format '{{.C
   docker rm -f "$name" >/dev/null
 fi
 if ! docker inspect "$name" >/dev/null 2>&1; then
-  docker run --detach --name "$name" --publish "${publish_host}::8123" --env CLICKHOUSE_USER=default --env "CLICKHOUSE_PASSWORD=$password" --env CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 "$image" >/dev/null
+  docker run --detach --name "$name" --log-opt max-size=50m --log-opt max-file=2 --publish "${publish_host}::8123" --env CLICKHOUSE_USER=default --env "CLICKHOUSE_PASSWORD=$password" --env CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 "$image" >/dev/null
 fi
 port="$(docker port "$name" 8123/tcp | sed -n '1{s/.*://;p;}')"
 host="${TESTCONTAINERS_HOST_OVERRIDE:-127.0.0.1}"
