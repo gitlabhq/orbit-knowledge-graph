@@ -183,3 +183,28 @@ test('an Orbit-only call has no other commands on its row', async ($, on) => {
   const ui = await $.ui.mount(toolUse('glab orbit status 2>&1 | head -40'))
   expect(await ui.find({ type: 'Text', text: /^  \+/ })).toBeUndefined()
 })
+
+test('the status line starts over when the session ends, and counts only what follows', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
+  on('session.end', () => ({ sessionId: 'old' }))
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    runs.push(e.argv)
+    return { value: graphOf(1000) }
+  })
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (mr:MergeRequest {project_id: 7}) RETURN mr"' })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+  const ui = await statusLine($)
+  expect(await ui.find({ type: 'Text', text: '3 / 1,000' })).toBeDefined()
+
+  await $.session.end({ reason: 'clear', sessionId: 'old', resume: { id: 'old' } } as never)
+  expect(await ui.find({ type: 'Text', text: /quer/ })).toBeUndefined()
+
+  await $.tool.call({ tool: 'Bash', command: QUERY })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+  expect(await ui.find({ type: 'Text', text: '3' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' query' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\//})).toBeUndefined()
+  expect(runs.length).toBe(2)
+})

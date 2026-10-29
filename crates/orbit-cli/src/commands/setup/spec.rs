@@ -156,7 +156,7 @@ pub(super) struct PluginSpec {
 impl PluginSpec {
     pub(super) fn marketplace_for(&self, target: &super::Target) -> String {
         match target {
-            super::Target::Global => self.marketplace.clone(),
+            super::Target::Global(_) => self.marketplace.clone(),
             super::Target::Project(root) => {
                 format!(
                     "{}-{}",
@@ -360,6 +360,7 @@ fn read_embedded_text(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::commands::setup::components::json;
+    use crate::commands::setup::detect::Machine;
 
     #[test]
     fn all_specs_parse_and_expected_agents_exist() {
@@ -606,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn instruction_files_are_known_names_and_globals_are_home_anchored() {
+    fn instruction_files_are_known_names_and_globals_expand_under_home_or_an_absolute_config_dir() {
         for spec in agents() {
             assert!(
                 ["AGENTS.md", "CLAUDE.md"].contains(&spec.instruction_file.project.as_str()),
@@ -632,7 +633,17 @@ mod tests {
                     std::iter::once(&dirs.dir.global).chain(dirs.link.iter().map(|l| &l.global))
                 }))
             {
-                assert!(global.starts_with("~/"), "{}: {global}", spec.name);
+                let home = Path::new("/home/test");
+                let bare = Machine::new(home.to_path_buf(), BTreeMap::new());
+                let path = bare.expand_global_path(global).unwrap();
+                assert!(path.starts_with(home), "{}: {global}", spec.name);
+                let env = BTreeMap::from([("CLAUDE_CONFIG_DIR".to_string(), "/cfg".to_string())]);
+                let configured = Machine::new(home.to_path_buf(), env);
+                assert!(
+                    configured.expand_global_path(global).is_ok(),
+                    "{}: {global}",
+                    spec.name
+                );
             }
         }
     }

@@ -23,7 +23,7 @@ pub(super) enum IndexOutcome {
 pub(super) fn repository_root(target: &Target) -> Option<PathBuf> {
     let folder = match target {
         Target::Project(root) => root.clone(),
-        Target::Global => std::env::current_dir().ok()?,
+        Target::Global(_) => std::env::current_dir().ok()?,
     };
     git_toplevel(&folder).ok()
 }
