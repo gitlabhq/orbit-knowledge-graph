@@ -1,5 +1,15 @@
 /*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
 var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/;
+var MAX_NAME_LENGTH = 40;
+var INVISIBLE = /[\p{Cc}\p{Cf}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]/gu;
+function clip(text, max) {
+  const flat = text.replace(/\s+/g, " ").replace(INVISIBLE, "").trim();
+  return flat.length > max ? flat.slice(0, max - 1) + "\u2026" : flat;
+}
+function displayName(name) {
+  const text = clip(name, MAX_NAME_LENGTH);
+  return /[,\s']/.test(text) ? `'${text.replaceAll("'", "\\'")}'` : text;
+}
 var SUBSTITUTION = /\$\(|`/;
 function arithmeticEnd(command, open) {
   let depth = 2;
@@ -234,37 +244,40 @@ var FILTER_FILE_OPTIONS = {
   jq: /^-[A-Za-z]*[fL]|^--(?:from-file|slurpfile|rawfile|argfile)/
 };
 var OPTION_TAKING_NUMBER = /^-[A-Za-z]*[nNcmABCfb]$|^--(?:lines|bytes|max-count|after-context|before-context|context)$/;
-function grepPatternOption(args) {
-  for (const arg of args) {
-    if (arg === "--regexp")
-      return "separate";
-    if (arg.startsWith("--regexp="))
-      return "attached";
-    const letters = arg.startsWith("--") ? null : arg.match(/^-[A-Za-z]*?e(.*)$/);
-    if (letters)
-      return letters[1] ? "attached" : "separate";
-  }
-  return null;
+function grepPatternOption(arg) {
+  if (arg === "--regexp")
+    return "separate";
+  if (arg.startsWith("--regexp="))
+    return "attached";
+  const letters = arg.startsWith("--") ? null : arg.match(/^-[A-Za-z]*?e(.*)$/);
+  return letters ? letters[1] ? "attached" : "separate" : null;
 }
+var JQ_NOT_QUIET = /\b(?:import|include|env)\b|\$ENV|^-[A-Za-z]*n|^--null-input$/;
 function isQuietFilter(program, args, readsInput) {
   const maxOperands = FILTER_MAX_OPERANDS[program];
   if (maxOperands === undefined || readsInput)
     return false;
-  if (program === "jq" && args.some((arg) => /\b(?:import|include)\b/.test(arg)))
+  if (program === "jq" && args.some((arg) => JQ_NOT_QUIET.test(arg)))
     return false;
-  const allowed = program === "grep" && grepPatternOption(args) === "attached" ? 0 : maxOperands;
+  const patternOptions = program === "grep" ? args.map(grepPatternOption) : [];
+  const allowed = patternOptions.includes("attached") ? 0 : maxOperands;
   let operands = 0;
-  for (const [i, arg] of args.entries()) {
-    if (arg.startsWith("-")) {
+  let optionsEnded = false;
+  for (let i = 0;i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (!optionsEnded && arg === "--")
+      optionsEnded = true;
+    else if (!optionsEnded && arg.startsWith("-")) {
       if (FILTER_FILE_OPTIONS[program]?.test(arg))
         return false;
-    } else if (!(/^\d+$/.test(arg) && OPTION_TAKING_NUMBER.test(args[i - 1] ?? "")))
+      if (patternOptions[i] === "separate" && i + 1 < args.length) {
+        operands++;
+        i++;
+      }
+    } else if (optionsEnded || !(/^\d+$/.test(arg) && OPTION_TAKING_NUMBER.test(args[i - 1] ?? "")))
       operands++;
   }
   return operands <= allowed;
-}
-function quotedName(name) {
-  return /[,\s']/.test(name) ? `'${name.replaceAll("'", "\\'")}'` : name;
 }
 function otherCommands(command, orbitExtras = []) {
   const { runs, unparsed } = runnable(command);
@@ -274,7 +287,7 @@ function otherCommands(command, orbitExtras = []) {
     if (run.substitutes)
       programs.add("$(...)");
     for (const target of run.writes)
-      writes.add("> " + target);
+      writes.add("> " + displayName(target));
     if (orbitWords(run.words))
       continue;
     const at = run.words.findIndex((word) => !/^\w+=/.test(word));
@@ -284,7 +297,7 @@ function otherCommands(command, orbitExtras = []) {
     const bare = !program.includes("/");
     if (bare && (SHELL_WORDS.has(program) || run.piped && isQuietFilter(program, run.words.slice(at + 1), run.readsInput)))
       continue;
-    programs.add(quotedName(program));
+    programs.add(displayName(program));
   }
   return [...programs, ...orbitExtras, ...writes];
 }
@@ -511,10 +524,6 @@ function labelFor(table, key) {
 function callOf(label, detail) {
   return { label: label.done, active: label.running, detail };
 }
-function clip(text, max) {
-  const flat = text.replace(/\s+/g, " ").replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, "").trim();
-  return flat.length > max ? flat.slice(0, max - 1) + "\u2026" : flat;
-}
 function firstArg(args, valueFlags) {
   for (let i = 0;i < args.length; i++) {
     const arg = args[i] ?? "";
@@ -546,14 +555,13 @@ function stringField(input, key) {
   return typeof value === "string" ? value : undefined;
 }
 var MAX_DETAIL = 96;
-var MAX_OTHER_LENGTH = 40;
 var MAX_OTHERS_SHOWN = 6;
 function invocationOf(words, known) {
   if (words.length === 0 || words.some((arg) => arg === "--help" || arg === "-h"))
     return null;
   const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
   if (!sub)
-    return { call: null, name: "orbit " + words[0] };
+    return { call: null, name: "orbit " + displayName(words[0] ?? "") };
   const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
   const label = isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY;
   return { call: callOf(label, detailFor(sub.key, sub.args, known)), name: "orbit " + sub.key };
@@ -572,7 +580,7 @@ function describeCommand(command, known = NO_ENTITIES) {
 function othersText(call) {
   if (!call.others?.length)
     return "";
-  const shown = call.others.slice(0, MAX_OTHERS_SHOWN).map((other) => clip(other, MAX_OTHER_LENGTH));
+  const shown = call.others.slice(0, MAX_OTHERS_SHOWN);
   const hidden = call.others.length - shown.length;
   return "  + " + shown.join(", ") + (hidden > 0 ? `, \u2026 +${hidden} more` : "");
 }
