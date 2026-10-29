@@ -265,13 +265,15 @@ impl<'r, D: Doc> Node<'r, D> {
     }
 
     fn find_descendant_inner(&self, predicate: &dyn Fn(&Self) -> bool) -> Option<Self> {
-        for child in self.children() {
-            if predicate(&child) {
-                return Some(child);
+        let mut stack: Vec<Self> = self.children().collect();
+        stack.reverse();
+        while let Some(node) = stack.pop() {
+            if predicate(&node) {
+                return Some(node);
             }
-            if let Some(found) = child.find_descendant_inner(predicate) {
-                return Some(found);
-            }
+            let start = stack.len();
+            stack.extend(node.children());
+            stack[start..].reverse();
         }
         None
     }
