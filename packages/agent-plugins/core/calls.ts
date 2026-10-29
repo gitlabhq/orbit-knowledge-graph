@@ -1,4 +1,4 @@
-import { orbitInvocations, otherCommands, subcommandOf } from './command.ts'
+import { clip, displayName, orbitInvocations, otherCommands, subcommandOf } from './command.ts'
 import { NO_ENTITIES, entitiesOf } from './cypher.ts'
 import labels from './labels.ts'
 
@@ -33,11 +33,6 @@ function callOf(label: Label, detail: string): OrbitCall {
   return { label: label.done, active: label.running, detail }
 }
 
-function clip(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '').trim()
-  return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
-}
-
 function firstArg(args: readonly string[], valueFlags: ReadonlySet<string>): string {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] ?? ''
@@ -67,7 +62,6 @@ function stringField(input: unknown, key: string): string | undefined {
 }
 
 const MAX_DETAIL = 96
-const MAX_OTHER_LENGTH = 40
 const MAX_OTHERS_SHOWN = 6
 
 type Invocation = { call: OrbitCall | null; name: string }
@@ -75,7 +69,7 @@ type Invocation = { call: OrbitCall | null; name: string }
 function invocationOf(words: readonly string[], known: ReadonlySet<string>): Invocation | null {
   if (words.length === 0 || words.some((arg) => arg === '--help' || arg === '-h')) return null
   const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined)
-  if (!sub) return { call: null, name: 'orbit ' + words[0] }
+  if (!sub) return { call: null, name: 'orbit ' + displayName(words[0] ?? '') }
   const isSchemaQuery = sub.key === 'query' && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg))
   const label = isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY)
   return { call: callOf(label, detailFor(sub.key, sub.args, known)), name: 'orbit ' + sub.key }
@@ -94,7 +88,7 @@ export function describeCommand(command: string, known: ReadonlySet<string> = NO
 
 export function othersText(call: OrbitCall): string {
   if (!call.others?.length) return ''
-  const shown = call.others.slice(0, MAX_OTHERS_SHOWN).map((other) => clip(other, MAX_OTHER_LENGTH))
+  const shown = call.others.slice(0, MAX_OTHERS_SHOWN)
   const hidden = call.others.length - shown.length
   return '  + ' + shown.join(', ') + (hidden > 0 ? `, … +${hidden} more` : '')
 }

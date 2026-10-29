@@ -219,6 +219,12 @@ test('every shape that runs something besides the Orbit call names it or shows a
     ['glab orbit status | grep -epat file', '+ grep'],
     ['glab orbit status | grep --regexp=pat file', '+ grep'],
     ['glab orbit status | grep -e pat file', '+ grep'],
+    ['glab orbit status | grep -e -x file', '+ grep'],
+    ['glab orbit status | grep --regexp -x file', '+ grep'],
+    ['glab orbit status | grep -- -x file', '+ grep'],
+    ['glab orbit status | head -- -file', '+ head'],
+    ['glab orbit status | jq -n env', '+ jq'],
+    ["glab orbit status | jq -n '$ENV'", '+ jq'],
     ['glab orbit status | jq "include \\"f\\"; ." ', '+ jq'],
     ['glab orbit status; if ((x<<2)); then prog; fi', '+ prog'],
     ['glab orbit status; glab orbit workspace reset --all', '+ orbit workspace reset'],
@@ -250,6 +256,9 @@ test('the list shows programs before redirects, clips each name, and counts what
   expect(rowOf(`glab orbit status > out.txt; ${programs}`)).toBe('Checked Orbit  + p0, p1, p2, p3, p4, p5, … +4 more')
   expect(rowOf(`glab orbit status; ${'a'.repeat(60)}`)).toBe(`Checked Orbit  + ${'a'.repeat(39)}…`)
   expect(rowOf("glab orbit status; 'ls, pwd' x")).toBe("Checked Orbit  + 'ls, pwd'")
+  expect(rowOf(`glab orbit status; '${'a'.repeat(30)} ${'b'.repeat(30)}' x`)).toBe(`Checked Orbit  + '${'a'.repeat(30)} ${'b'.repeat(8)}…'`)
+  expect(rowOf('glab orbit status > "x, prog"')).toBe("Checked Orbit  + > 'x, prog'")
+  expect(rowOf('glab orbit status; glab orbit "a, prog"')).toBe("Checked Orbit  + orbit 'a, prog'")
   expect(rowOf('glab orbit status; "it\'s, x"')).toBe("Checked Orbit  + 'it\\'s, x'")
   expect(rowOf("glab orbit status; '> out.txt' x")).toBe("Checked Orbit  + '> out.txt'")
 })
@@ -260,4 +269,8 @@ test('control characters are dropped from the names in the list', () => {
 
 test('bidirectional and zero-width characters are dropped from the names in the list', () => {
   expect(rowOf('glab orbit status; a\u202eb\u200bc\u2066d')).toBe('Checked Orbit  + abcd')
+})
+
+test('format and variation-selector characters are dropped from the names in the list', () => {
+  expect(rowOf('glab orbit status; pro\u00adg\ufe0f\u061c\u{e0041}')).toBe('Checked Orbit  + prog')
 })

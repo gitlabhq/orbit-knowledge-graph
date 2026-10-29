@@ -1,6 +1,19 @@
 export type Subcommand = { key: string; args: string[] }
 
 const HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/
+const MAX_NAME_LENGTH = 40
+const INVISIBLE = /[\p{Cc}\p{Cf}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]/gu
+
+export function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').replace(INVISIBLE, '').trim()
+  return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
+}
+
+export function displayName(name: string): string {
+  const text = clip(name, MAX_NAME_LENGTH)
+  return /[,\s']/.test(text) ? `'${text.replaceAll("'", "\\'")}'` : text
+}
+
 const SUBSTITUTION = /\$\(|`/
 
 type Heredoc = { delimiter: string; stripTabs: boolean; quoted: boolean }
@@ -219,32 +232,35 @@ const FILTER_FILE_OPTIONS: Readonly<Record<string, RegExp>> = {
 }
 const OPTION_TAKING_NUMBER = /^-[A-Za-z]*[nNcmABCfb]$|^--(?:lines|bytes|max-count|after-context|before-context|context)$/
 
-function grepPatternOption(args: readonly string[]): 'attached' | 'separate' | null {
-  for (const arg of args) {
-    if (arg === '--regexp') return 'separate'
-    if (arg.startsWith('--regexp=')) return 'attached'
-    const letters = arg.startsWith('--') ? null : arg.match(/^-[A-Za-z]*?e(.*)$/)
-    if (letters) return letters[1] ? 'attached' : 'separate'
-  }
-  return null
+function grepPatternOption(arg: string): 'attached' | 'separate' | null {
+  if (arg === '--regexp') return 'separate'
+  if (arg.startsWith('--regexp=')) return 'attached'
+  const letters = arg.startsWith('--') ? null : arg.match(/^-[A-Za-z]*?e(.*)$/)
+  return letters ? (letters[1] ? 'attached' : 'separate') : null
 }
+
+const JQ_NOT_QUIET = /\b(?:import|include|env)\b|\$ENV|^-[A-Za-z]*n|^--null-input$/
 
 function isQuietFilter(program: string, args: readonly string[], readsInput: boolean): boolean {
   const maxOperands = FILTER_MAX_OPERANDS[program]
   if (maxOperands === undefined || readsInput) return false
-  if (program === 'jq' && args.some((arg) => /\b(?:import|include)\b/.test(arg))) return false
-  const allowed = program === 'grep' && grepPatternOption(args) === 'attached' ? 0 : maxOperands
+  if (program === 'jq' && args.some((arg) => JQ_NOT_QUIET.test(arg))) return false
+  const patternOptions = program === 'grep' ? args.map(grepPatternOption) : []
+  const allowed = patternOptions.includes('attached') ? 0 : maxOperands
   let operands = 0
-  for (const [i, arg] of args.entries()) {
-    if (arg.startsWith('-')) {
+  let optionsEnded = false
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? ''
+    if (!optionsEnded && arg === '--') optionsEnded = true
+    else if (!optionsEnded && arg.startsWith('-')) {
       if (FILTER_FILE_OPTIONS[program]?.test(arg)) return false
-    } else if (!(/^\d+$/.test(arg) && OPTION_TAKING_NUMBER.test(args[i - 1] ?? ''))) operands++
+      if (patternOptions[i] === 'separate' && i + 1 < args.length) {
+        operands++
+        i++
+      }
+    } else if (optionsEnded || !(/^\d+$/.test(arg) && OPTION_TAKING_NUMBER.test(args[i - 1] ?? ''))) operands++
   }
   return operands <= allowed
-}
-
-function quotedName(name: string): string {
-  return /[,\s']/.test(name) ? `'${name.replaceAll("'", "\\'")}'` : name
 }
 
 export function otherCommands(command: string, orbitExtras: readonly string[] = []): string[] {
@@ -253,14 +269,14 @@ export function otherCommands(command: string, orbitExtras: readonly string[] = 
   const writes = new Set<string>()
   for (const run of runs) {
     if (run.substitutes) programs.add('$(...)')
-    for (const target of run.writes) writes.add('> ' + target)
+    for (const target of run.writes) writes.add('> ' + displayName(target))
     if (orbitWords(run.words)) continue
     const at = run.words.findIndex((word) => !/^\w+=/.test(word))
     const program = run.words[at]
     if (program === undefined || SUBSTITUTION_MARKERS.includes(program)) continue
     const bare = !program.includes('/')
     if (bare && (SHELL_WORDS.has(program) || (run.piped && isQuietFilter(program, run.words.slice(at + 1), run.readsInput)))) continue
-    programs.add(quotedName(program))
+    programs.add(displayName(program))
   }
   return [...programs, ...orbitExtras, ...writes]
 }
