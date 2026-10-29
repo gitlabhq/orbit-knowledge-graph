@@ -117,11 +117,12 @@ properties:
       31: ReExportGlob
       32: Require
       33: RequireRelative
-      34: Source
-      35: StaticImport
-      36: Use
-      37: UseGroup
-      38: WildcardImport
+      34: SideEffectImport
+      35: Source
+      36: StaticImport
+      37: Use
+      38: UseGroup
+      39: WildcardImport
 
   import_path:
     type: string
