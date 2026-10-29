@@ -1756,7 +1756,7 @@ fn check_filter_entries(property: &str, predicates: &[InputFilter]) -> Result<()
                 "IN requires 1-{MAX_IN_VALUES} values"
             )));
         }
-        if op.is_text() && !value.is_string() {
+        if op.is_text() && !(value.is_string() || op == FilterOp::Contains && value.is_i64()) {
             return Err(QueryError::Validation(
                 "text predicates require a string".into(),
             ));
