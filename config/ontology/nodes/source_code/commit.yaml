@@ -68,7 +68,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [merge_requests]
-      order_by: [traversal_path, project_id, id]
+      order_by: [traversal_path, merge_request_id]
       query: commit.sql.j2
     transform:
       type: datafusion

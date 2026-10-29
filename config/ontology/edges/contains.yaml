@@ -56,7 +56,7 @@ pipelines:
       type: clickhouse
       tables: [siphon_work_item_parent_links]
       fields: [work_item_parent_id, work_item_id]
-      order_by: [traversal_path, work_item_parent_id, id]
+      order_by: [traversal_path, work_item_id, id]
       query: generated
       lookups:
         - { node: WorkItem, id: work_item_parent_id }
