@@ -109,6 +109,22 @@ test('the end counts the nodes and edges the response returned', async () => {
   ])
 })
 
+test('a string content result is counted', async () => {
+  const { sent, hooks } = await load()
+  const query = call('glab orbit query "MATCH (mr:MergeRequest) RETURN mr"')
+  await hooks.after({ ...query, status: 'completed', result: { content: TRAVERSAL } })
+  expect(sent.map(({ nodes, edges }) => ({ nodes, edges }))).toEqual([{ nodes: 21, edges: 20 }])
+})
+
+test('a truncated result is left uncounted instead of counted as zero', async () => {
+  const { sent, hooks } = await load()
+  const query = call('glab orbit query "MATCH (mr:MergeRequest) RETURN mr"')
+  const result = { output: { output: '{"nodes":[', truncated: true }, content: [{ type: 'text', text: '{"nodes":[' }] }
+  await hooks.after({ ...query, status: 'completed', result })
+  expect(sent[0]?.nodes).toBeUndefined()
+  expect(sent[0]?.edges).toBeUndefined()
+})
+
 test('a failed call is marked failed and counts nothing', async () => {
   const { sent, hooks } = await load()
   await hooks.after({ ...call('glab orbit query "MATCH (p:Project) RETURN p"'), status: 'error', error: new Error('boom') })

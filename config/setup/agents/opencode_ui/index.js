@@ -460,6 +460,8 @@ function tryJson(text) {
 
 import { OrbitUi } from "./rpc.ts";
 function resultText(result) {
+  if (typeof result.content === "string" && result.content)
+    return result.content;
   if (Array.isArray(result.content)) {
     const text = result.content.flatMap((part) => part.type === "text" && typeof part.text === "string" ? [part.text] : []);
     if (text.length)
@@ -467,6 +469,9 @@ function resultText(result) {
 `);
   }
   return typeof result.output === "string" ? result.output : "";
+}
+function isTruncated(result) {
+  return typeof result.output === "object" && result.output !== null && result.output.truncated === true;
 }
 function activityOf(event, state) {
   const call = describeOrbitCall(event.tool, event.input);
@@ -484,6 +489,8 @@ function activityOf(event, state) {
     return activity;
   if (event.status === "error")
     return { ...activity, failed: true };
+  if (isTruncated(event.result))
+    return activity;
   const counts = parseResponse(resultText(event.result));
   return { ...activity, nodes: counts.nodes + counts.aggregated, edges: counts.edges };
 }

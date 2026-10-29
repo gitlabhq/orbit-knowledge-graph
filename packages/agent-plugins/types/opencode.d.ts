@@ -1,5 +1,6 @@
-// The parts of the OpenCode 2 plugin API the OpenCode plugin uses. OpenCode resolves these
-// modules at runtime, so they are not dependencies of this package.
+// The parts of the OpenCode 2 plugin API the OpenCode plugin uses, mirroring opencode 2.2.1
+// (`opencode/plugin`, `opencode/schema`). OpenCode resolves these modules at runtime, so they are
+// not dependencies of this package: their peer dependencies are too heavy for a type-only import.
 // See https://opencode.ai/v2/docs/build/plugins.
 
 declare module '@opencode/plugin/rpc' {
@@ -26,9 +27,12 @@ declare module '@opencode/plugin' {
     input: unknown
   }
 
+  /** The tool's structured output. The shell tool returns an object; OpenCode 1 style callers a string. */
+  export type ToolOutput = string | { output?: string; exit?: number; truncated?: boolean; [key: string]: unknown }
+
   export type ToolResult = {
-    output?: string
-    content?: readonly { type: string; text?: string }[]
+    output?: ToolOutput
+    content?: string | ReadonlyArray<{ type: string; text?: string }>
     metadata?: Record<string, unknown>
   }
 
