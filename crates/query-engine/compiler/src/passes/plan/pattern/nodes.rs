@@ -47,7 +47,7 @@ impl NodePlan {
             if let Some((alias, property)) = &bound.filter.rhs_column
                 && *alias == node.id
             {
-                bound.null_as_epoch.rhs = null_as_epoch.contains(property);
+                bound.null_as_epoch.rhs = null_as_epoch.get(property).copied();
             }
         }
         Some(Self {

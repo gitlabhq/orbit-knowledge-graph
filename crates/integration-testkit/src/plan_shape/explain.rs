@@ -680,7 +680,7 @@ fn boolean_text<T>(
 
 fn planned_value(value: &OutputValue) -> String {
     match value {
-        OutputValue::Column(value) | OutputValue::EpochAsNull(value) => planned_column(value),
+        OutputValue::Column(value) | OutputValue::EpochAsNull(value, _) => planned_column(value),
         OutputValue::Text(value) => text_literal(value),
         OutputValue::Depth(value) => value.to_string(),
         OutputValue::Path(steps) => format!(
