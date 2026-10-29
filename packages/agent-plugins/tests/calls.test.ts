@@ -175,6 +175,10 @@ test('schema reads chained in one command share a row with every node named', ()
   expect(call).toMatchObject({ label: 'Read Orbit schema', detail: 'Vulnerability, Pipeline' })
 })
 
+test('a help call is not an Orbit row', () => {
+  expect(describeOrbitCall('Bash', { command: 'glab orbit query --help | head -60' })).toBe(null)
+})
+
 test('a long list of chained details is clipped', () => {
   const reads = Array.from({ length: 12 }, (_, n) => `glab orbit query "CALL db.schema('Entity${n}')"`).join('; ')
   const detail = describeOrbitCall('Bash', { command: reads })?.detail ?? ''

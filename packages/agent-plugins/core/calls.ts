@@ -74,7 +74,7 @@ export function describeCommand(command: string, known: ReadonlySet<string> = NO
   const calls: OrbitCall[] = []
   for (const words of invocations) {
     const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined)
-    if (!sub) return null
+    if (!sub || sub.args.some((arg) => arg === '--help' || arg === '-h')) return null
     const isSchemaQuery = sub.key === 'query' && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg))
     calls.push(callOf(isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY), detailFor(sub.key, sub.args, known)))
   }

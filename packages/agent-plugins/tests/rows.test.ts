@@ -18,30 +18,24 @@ const PIPELINE_JOB = q('MATCH (pl:Pipeline)-[:HAS_JOB]->(j:Job) RETURN j')
 const JOB_RUNNER = q('MATCH (j:Job)-[:RAN_ON]->(r:Runner) RETURN r')
 const CALLS = q('MATCH (c:Definition)-[:CALLS]->(d:Definition) RETURN c')
 
-test('each different query gets its own row', () => {
-  const rows = mergeRuns(calls(MR_PROJECT, USER_MR, PIPELINE_JOB, JOB_RUNNER))
-  expect(rows.map((row) => row.call.detail)).toEqual(['Merge requests → Projects', 'Users → Merge requests', 'Pipelines → Jobs', 'Jobs → Runners'])
-  expect(rows.every((row) => row.call.label === QUERY_LABEL)).toBe(true)
+test('calls of one kind share a line that shows the latest detail', () => {
+  const rows = mergeRuns(calls(MR_PROJECT, q("CALL db.schema('MergeRequest')"), USER_MR, PIPELINE_JOB, JOB_RUNNER))
+  expect(rows.map((row) => [row.call.label, row.call.detail])).toEqual([
+    [QUERY_LABEL, 'Jobs → Runners'],
+    ['Read Orbit schema', 'MergeRequest'],
+  ])
 })
 
-test('a query repeated back to back shares one row', () => {
-  const rows = mergeRuns(calls(CALLS, CALLS, CALLS))
-  expect(rows.map((row) => row.call.detail)).toEqual(['Definitions'])
-  const [ok, failed] = calls(CALLS, CALLS)
-  if (!ok || !failed) throw new Error('two calls expected')
-  expect(mergeRuns<{ isRunning: boolean; isErrored?: boolean }>([ok, { ...failed, props: { isRunning: false, isErrored: true } }]).length).toBe(2)
+test('a call with no detail keeps the last detail on its line', () => {
+  expect(mergeRuns(calls(q("CALL db.schema('Runner')"), q('CALL db.schema()'))).map((row) => row.call.detail)).toEqual(['Runner'])
 })
 
-test('each schema read and each search gets its own row', () => {
-  expect(mergeRuns(calls(q('CALL db.schema()'), q("CALL db.schema('MergeRequest')"))).map((row) => row.call.detail)).toEqual(['', 'MergeRequest'])
-  expect(mergeRuns(calls('glab orbit grep foo', 'glab orbit grep bar')).map((row) => row.call.detail)).toEqual(['foo', 'bar'])
-})
-
-test('a running query shows its own row', () => {
+test('a running call swaps in its own detail', () => {
   const [first, second] = calls(MR_PROJECT, USER_MR)
   if (!first || !second) throw new Error('two calls expected')
   const rows = mergeRuns([first, { ...second, props: { isRunning: true } }])
-  expect(rows[1]).toMatchObject({ isRunning: true, call: { active: 'Exploring Orbit', detail: 'Users → Merge requests' } })
+  expect(rows).toHaveLength(1)
+  expect(rows[0]).toMatchObject({ isRunning: true, call: { active: 'Exploring Orbit', detail: 'Users → Merge requests' } })
 })
 
 test('a shell call still being written does not break an Orbit group', () => {

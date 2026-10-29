@@ -410,7 +410,7 @@ function describeCommand(command, known = NO_ENTITIES) {
   const calls = [];
   for (const words of invocations) {
     const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
-    if (!sub)
+    if (!sub || sub.args.some((arg) => arg === "--help" || arg === "-h"))
       return null;
     const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
     calls.push(callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args, known)));
