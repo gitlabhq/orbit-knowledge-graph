@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_log_fields::warn;
 use query_data_model::OrbitQueryModel;
 use query_engine::compiler::constants::{MAX_DYNAMIC_HYDRATION_RESULTS, hydration_node_alias};
 use query_engine::compiler::{
@@ -61,7 +62,15 @@ impl HydrationStage {
             let Some(auth) = query_result.ctx().get_entity_auth(&entity_type) else {
                 continue;
             };
-            ids.truncate(MAX_DYNAMIC_HYDRATION_RESULTS);
+            if ids.len() > MAX_DYNAMIC_HYDRATION_RESULTS {
+                warn!(
+                    safe(ENTITY) = entity_type.as_str(),
+                    safe(COUNT) = ids.len(),
+                    safe(LIMIT) = MAX_DYNAMIC_HYDRATION_RESULTS,
+                    "owner lookup is capped, so nodes past the limit are redacted"
+                );
+                ids.truncate(MAX_DYNAMIC_HYDRATION_RESULTS);
+            }
             total_ids += ids.len();
             id_columns.insert(entity_type.clone(), auth.auth_id_column.clone());
             nodes.push(InputNode {
