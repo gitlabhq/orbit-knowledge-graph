@@ -872,18 +872,17 @@ function parseResponse(text) {
   if (/^query_type:\s*aggregation/m.test(text)) {
     out.kind = "aggregation";
     out.grouped = /^group_columns\[[1-9]\d*\]/m.test(text);
-    const columns = text.split(/^columns\[\d+\](?:\{[^}]*\})?:\s*$/m)[1]?.split(/^\S/m)[0] ?? "";
-    const tabled = [...columns.matchAll(/^\s+(\w+),count,/gm)].map((m) => m[1]);
-    const listed = [...columns.matchAll(/^\s+- name:\s*(\w+)\s*\n\s+function:\s*count\b/gm)].map((m) => m[1]);
-    const counts = [...tabled, ...listed];
+    const counts = plainCountNames(text);
     const header = text.match(/^rows\[\d+\]\{([^}]*)\}:\s*$/m);
     if (!header || header.index === undefined || counts.length === 0)
       return out;
-    const at = (header[1] ?? "").split(",").map((name) => counts.includes(name));
+    const names = (header[1] ?? "").split(",");
     const rows = text.slice(header.index + header[0].length).split(/^\S/m)[0] ?? "";
-    const cells = rows.split(`
-`).flatMap((line) => line.trim().split(",").filter((cell, i) => at[i] && /^\d+$/.test(cell)));
-    out.aggregated = s(cells, Number);
+    const lines = rows.split(`
+`).map((line) => line.trim().split(","));
+    const cellValue = (cells, i) => /^\d+$/.test(cells[i] ?? "") ? Number(cells[i]) : 0;
+    const totals = names.flatMap((name, i) => counts.includes(name) ? [s(lines, (cells) => cellValue(cells, i))] : []);
+    out.aggregated = Math.max(0, ...totals);
     return out;
   }
   if (/^query_type:\s*traversal/m.test(text))
@@ -897,6 +896,21 @@ function parseResponse(text) {
     out.kind = "traversal";
   out.edges = Number(text.match(/^edges\[(\d+)\]/m)?.[1] ?? 0);
   return out;
+}
+function columnFields(text) {
+  const section = text.match(/^columns\[\d+\](?:\{([^}]*)\})?:\s*$/m);
+  if (!section || section.index === undefined)
+    return [];
+  const body = text.slice(section.index + section[0].length).split(/^\S/m)[0] ?? "";
+  if (section[1] !== undefined) {
+    const fieldNames = section[1].split(",");
+    return body.split(`
+`).filter((line) => line.trim()).map((line) => Object.fromEntries(line.trim().split(",").map((cell, i) => [fieldNames[i] ?? "", cell.trim()])));
+  }
+  return body.split(/^\s+- /m).slice(1).map((item) => Object.fromEntries([...item.matchAll(/^\s*(?:- )?(\w+):\s*(.*)$/gm)].map((m) => [m[1] ?? "", m[2]?.trim()])));
+}
+function plainCountNames(text) {
+  return columnFields(text).filter(({ function: fn, name, target = "", property }) => fn === "count" && name && (!property || name === `count_${target}_${property}`)).map((column) => column["name"] ?? "");
 }
 function tryJson(text) {
   try {
