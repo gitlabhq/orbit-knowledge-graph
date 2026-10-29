@@ -54,7 +54,7 @@ fixtures:
 tests:
   - name: "package imports target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'main.packageImportCall'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.alias AS alias
     assert:
@@ -63,7 +63,7 @@ tests:
 
   - name: "aliased package imports target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'main.aliasedPackageImportCall'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.alias AS alias
     assert:
@@ -72,7 +72,7 @@ tests:
 
   - name: "dot imports target wildcard imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'main.dotImportCall'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.language_kind AS language_kind
     assert:
@@ -81,7 +81,7 @@ tests:
 
   - name: "built-ins do not target dot imports"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn IN ['main.builtinLen', 'main.builtinPrintln']
       RETURN sym.import_path AS path
     assert:
@@ -89,7 +89,7 @@ tests:
 
   - name: "package imports in another Go file target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'main.crossFilePackageImportCall'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path
@@ -101,14 +101,14 @@ tests:
   - name: "resolved same-package calls do not emit imported-symbol fallback"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
           WHERE caller.fqn = 'main.localHelperCall'
             AND callee.fqn = 'main.helper'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
           WHERE caller.fqn = 'main.localHelperCall'
           RETURN sym.import_path AS path
         assert:

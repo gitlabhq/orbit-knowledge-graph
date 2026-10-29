@@ -50,7 +50,7 @@ tests:
   - name: "Module-qualified call resolves across files: Foo.greet -> Baz.hello"
     skip: true
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.greet'
         AND callee.fqn = 'Baz.hello'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -59,7 +59,7 @@ tests:
 
   - name: "Aliased call resolves across files: Foo.shout -> Helpers.Format.upcase"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.shout'
         AND callee.fqn = 'Helpers.Format.upcase'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -68,7 +68,7 @@ tests:
 
   - name: "Bare call through import resolves: Foo.doubled -> Util.dub"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.doubled'
         AND callee.fqn = 'Util.dub'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -77,7 +77,7 @@ tests:
 
   - name: "Local call resolves within the module: Foo.local -> Foo.internal"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.local'
         AND callee.fqn = 'Foo.internal'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -87,7 +87,7 @@ tests:
   - name: "Exactly 4 Calls edges total — no spurious edges"
     skip: true
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(:Definition)
       RETURN count(caller) AS n
     assert:
       - { count_equals: { field: n, value: 4 } }

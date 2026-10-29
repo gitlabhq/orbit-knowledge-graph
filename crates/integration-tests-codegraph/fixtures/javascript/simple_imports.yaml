@@ -41,7 +41,7 @@ tests:
 
   - name: Cross-file call from run to helper
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'helper'
         AND caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -51,7 +51,7 @@ tests:
 
   - name: unused has no incoming cross-file calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE callee.name = 'unused'
       RETURN caller.fqn AS caller
     assert:

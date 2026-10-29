@@ -226,13 +226,26 @@ impl<'a> FileResolver<'a> {
             )
         });
 
+        let creates_instance =
+            chain.is_none_or(|c| matches!(c.first(), Some(ExpressionStep::New(_))));
         for target in targets {
             if receiver_is_other && target == source_node {
                 continue;
             }
-            let target_def_kind = graph.graph[target]
-                .def_id()
-                .map(|did| graph.defs[did.0 as usize].kind);
+            let kind_of = |node: NodeIndex| {
+                graph.graph[node]
+                    .def_id()
+                    .map(|did| graph.defs[did.0 as usize].kind)
+            };
+            let target = match kind_of(target) {
+                Some(DefKind::Constructor)
+                    if matches!(site.kind, RefKind::Call) && creates_instance =>
+                {
+                    graph.owner_of(target).unwrap_or(target)
+                }
+                _ => target,
+            };
+            let target_def_kind = kind_of(target);
             let Some(edge_kind) = target_edge_kind(site.kind, target_def_kind).filter(|k| {
                 source_node_kind == NodeKind::Definition || !k.needs_definition_source()
             }) else {

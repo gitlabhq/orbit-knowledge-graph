@@ -93,7 +93,7 @@ tests:
   # returned 0 rows (flat Variable fqn == name was excluded by GlobalName).
   - name: "var.* references resolve ACROSS files"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE callee.language_kind = 'Variable'
         AND caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -105,7 +105,7 @@ tests:
 
   - name: "aws_instance (main.tf) resolves all four reference kinds cross-file"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND caller.file_path <> callee.file_path
       RETURN callee.language_kind AS type
@@ -119,7 +119,7 @@ tests:
 
   - name: "var.instance_type resolves from main.tf to variables.tf"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND callee.fqn = 'var.instance_type'
       RETURN caller.file_path AS sf, callee.file_path AS tf
@@ -129,7 +129,7 @@ tests:
 
   - name: "locals reference var.region cross-file in one edge"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'locals'
         AND callee.fqn = 'var.region'
         AND caller.file_path <> callee.file_path
@@ -139,7 +139,7 @@ tests:
 
   - name: "Local, DataSource and Resource references also resolve cross-file"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND caller.file_path <> callee.file_path
         AND callee.fqn IN ['locals.common_tags', 'aws_ami.ubuntu', 'aws_subnet.public']

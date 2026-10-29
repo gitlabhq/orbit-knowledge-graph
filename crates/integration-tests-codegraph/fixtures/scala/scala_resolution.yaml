@@ -16,7 +16,7 @@ tests:
 
   - name: Same-class method call resolves
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'process'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

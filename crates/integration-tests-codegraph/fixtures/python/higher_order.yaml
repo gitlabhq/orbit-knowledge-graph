@@ -41,7 +41,7 @@ tests:
 
   - name: caller calls make_adder
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'caller' AND callee.name = 'make_adder'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -50,7 +50,7 @@ tests:
 
   - name: Callable class has __call__
     query: |
-      MATCH (cls:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(m:Definition)
+      MATCH (cls:Definition)-[:DEFINES]->(m:Definition)
       WHERE cls.name = 'Callable' AND m.name = '__call__'
       RETURN m.fqn AS fqn
     assert:
@@ -59,7 +59,7 @@ tests:
 
   - name: Nested function calls as arguments resolve
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES]->(callee:Definition)
       WHERE caller.name = 'nested_args'
       RETURN callee.name AS callee
     assert:

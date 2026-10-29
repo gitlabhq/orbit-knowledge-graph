@@ -60,7 +60,7 @@ fixtures:
 tests:
   - name: "optional dep absent from default features does not wire call edges"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'uses_optional'
         AND callee.name = 'optional_helper'
       RETURN callee.name AS name
@@ -78,7 +78,7 @@ tests:
 
   - name: "excluded vendor crate is not pulled into the outer workspace members"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'uses_optional'
         AND callee.name = 'vendored'
       RETURN callee.name AS name

@@ -36,7 +36,7 @@ tests:
 
   - name: "Class contains its fields"
     query: |
-      MATCH (cls:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(f:Definition)
+      MATCH (cls:Definition)-[:DEFINES]->(f:Definition)
       WHERE cls.name = 'User' AND f.name = 'id'
       RETURN f.fqn AS fqn
     assert:

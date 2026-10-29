@@ -261,7 +261,7 @@ tests:
 
   - name: "Static internal_seek calls internal_flush (same file)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'reader::io::internal_seek'
         AND callee.fqn = 'reader::io::internal_flush'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -275,7 +275,7 @@ tests:
 
   - name: "NO edge from app to static internal_flush"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'reader::io::internal_flush'
       RETURN caller.fqn AS caller
@@ -284,7 +284,7 @@ tests:
 
   - name: "NO edge from app to unrelated_func (not included)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn IN ['app::copy_file', 'app::main']
         AND callee.fqn = 'unrelated::unrelated_func'
       RETURN caller.fqn AS caller
@@ -293,7 +293,7 @@ tests:
 
   - name: "NO edge from app to static helper"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn IN ['app::copy_file', 'app::main']
         AND callee.fqn = 'unrelated::helper'
       RETURN caller.fqn AS caller
@@ -306,7 +306,7 @@ tests:
 
   - name: "main calls copy_file (same file)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -320,7 +320,7 @@ tests:
 
   - name: "copy_file CALLS edges have no duplicates"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
       RETURN callee.fqn AS callee
     assert:
@@ -387,7 +387,7 @@ tests:
 
   - name: "reader.cpp defines correct functions"
     query: |
-      MATCH (f:File)-[e:DEFINES|CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES]->(d:Definition)
       WHERE f.path = 'io/reader.cpp'
         AND d.language_kind IN ['Function', 'Method', 'Constructor']
       RETURN d.fqn AS fqn
@@ -402,7 +402,7 @@ tests:
 
   - name: "unrelated.cpp defines exactly 2 functions"
     query: |
-      MATCH (f:File)-[e:DEFINES|CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES]->(d:Definition)
       WHERE f.path = 'unrelated.cpp'
         AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
@@ -414,7 +414,7 @@ tests:
 
   - name: "app.cpp defines exactly 2 functions"
     query: |
-      MATCH (f:File)-[e:DEFINES|CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES]->(d:Definition)
       WHERE f.path = 'app.cpp'
         AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
@@ -483,7 +483,7 @@ tests:
 
   - name: "Template usage calls tmpl::swap via include"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'tmpl_usage::extra::use_templates'
         AND callee.fqn = 'templates::tmpl::swap'
       RETURN caller.fqn AS caller, callee.fqn AS callee

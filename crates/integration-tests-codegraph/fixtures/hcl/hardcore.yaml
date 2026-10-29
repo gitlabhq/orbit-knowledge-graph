@@ -480,7 +480,7 @@ tests:
 
   - name: "VPC refs resolve: subnet type scope -> aws_vpc.main"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'aws_subnet'
         AND callee.fqn = 'aws_vpc.main'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -489,7 +489,7 @@ tests:
 
   - name: "EKS cluster refs resolve to IAM role"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'aws_eks_cluster'
         AND callee.fqn = 'aws_iam_role.eks_cluster'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -498,7 +498,7 @@ tests:
 
   - name: "EKS node group refs resolve to cluster and IAM role"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'aws_eks_node_group'
       RETURN callee.fqn AS callee
     assert:
@@ -507,7 +507,7 @@ tests:
 
   - name: "IAM role refs resolve to data source"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'aws_iam_role'
         AND callee.language_kind = 'DataSource'
       RETURN callee.fqn AS callee
@@ -517,7 +517,7 @@ tests:
 
   - name: "RDS refs resolve: db_instance -> subnet_group, security_group, password"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'aws_db_instance'
       RETURN callee.fqn AS callee
     assert:
@@ -527,7 +527,7 @@ tests:
 
   - name: "RDS security group refs EKS security group"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'aws_security_group'
         AND callee.fqn = 'aws_security_group.eks_cluster'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -536,7 +536,7 @@ tests:
 
   - name: "Locals resolve variable refs"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'locals'
         AND callee.language_kind = 'Variable'
       RETURN callee.name AS callee
@@ -546,7 +546,7 @@ tests:
 
   - name: "NAT gateway refs resolve to EIP and public subnet"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_VALUE]->(callee:Definition)
       WHERE caller.fqn = 'aws_nat_gateway'
       RETURN callee.fqn AS callee
     assert:
@@ -555,7 +555,7 @@ tests:
 
   - name: "Total Calls edges exist (no resolution lost)"
     query: |
-      MATCH (s:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(t:Definition)
+      MATCH (s:Definition)-[e:USES_VALUE]->(t:Definition)
       RETURN count(s) AS total
     assert:
       - { count_gte: { field: total, value: 20 } }

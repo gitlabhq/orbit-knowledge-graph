@@ -59,7 +59,7 @@ tests:
 
   - name: use_closure calls apply
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'use_closure'
       RETURN callee.name AS callee
       ORDER BY callee
@@ -69,7 +69,7 @@ tests:
 
   - name: process calls double, area, and Circle
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'process'
       RETURN callee.name AS callee
       ORDER BY callee

@@ -16,7 +16,7 @@ tests:
   - name: Nested class produces containment edge
     skip: true
     query: |
-      MATCH (outer:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(inner:Definition)
+      MATCH (outer:Definition)-[:DEFINES]->(inner:Definition)
       WHERE outer.name = 'Outer' AND inner.name = 'Inner'
       RETURN outer.fqn AS parent, inner.fqn AS child
     assert:
@@ -25,7 +25,7 @@ tests:
 
   - name: Method belongs to its class
     query: |
-      MATCH (cls:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(m:Definition)
+      MATCH (cls:Definition)-[:DEFINES]->(m:Definition)
       WHERE cls.name = 'Outer' AND m.name = 'outer_method'
       RETURN cls.fqn AS parent, m.fqn AS child
     assert:
@@ -80,7 +80,7 @@ tests:
 
   - name: File owns all 4 definitions via Defines edges
     query: |
-      MATCH (f:File)-[e:DEFINES|CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES]->(d:Definition)
       RETURN f.path AS file, d.name AS def
     assert:
       - { match: { field: file, pattern: "app.py" } }

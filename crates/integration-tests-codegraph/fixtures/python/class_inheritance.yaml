@@ -26,7 +26,7 @@ tests:
 
   - name: Dog has fetch method
     query: |
-      MATCH (cls:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(m:Definition)
+      MATCH (cls:Definition)-[:DEFINES]->(m:Definition)
       WHERE cls.name = 'Dog' AND m.name = 'fetch'
       RETURN m.fqn AS fqn
     assert:
@@ -35,7 +35,7 @@ tests:
 
   - name: GuideDog has guide method
     query: |
-      MATCH (cls:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(m:Definition)
+      MATCH (cls:Definition)-[:DEFINES]->(m:Definition)
       WHERE cls.name = 'GuideDog' AND m.name = 'guide'
       RETURN m.fqn AS fqn
     assert:

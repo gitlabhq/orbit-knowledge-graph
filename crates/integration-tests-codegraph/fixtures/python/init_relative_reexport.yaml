@@ -79,14 +79,14 @@ tests:
   - name: "named relative re-export through __init__ binds the caller to the definition"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+          MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
           WHERE caller.fqn = 'app.consumer.build'
             AND callee.fqn = 'app.registry.base.BaseRegistry'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
           WHERE caller.fqn = 'app.consumer.build'
             AND sym.name = 'BaseRegistry'
           RETURN caller.fqn AS caller
@@ -95,7 +95,7 @@ tests:
 
   - name: "wildcard relative re-export through __init__ binds the caller to the definition"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app.consumer.build'
         AND callee.fqn = 'app.registry.helpers.make_widget'
       RETURN caller.fqn AS caller
@@ -104,7 +104,7 @@ tests:
 
   - name: "two-dot relative re-export in a nested __init__ climbs to the parent package"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'proj.sub.caller.make_engine'
         AND callee.fqn = 'proj.core.Engine'
       RETURN caller.fqn AS caller
@@ -113,7 +113,7 @@ tests:
 
   - name: "one-dot relative import in a regular module still resolves (no regression)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'reg.pkg.mod.use_thing'
         AND callee.fqn = 'reg.pkg.thing.Thing'
       RETURN caller.fqn AS caller
@@ -122,7 +122,7 @@ tests:
 
   - name: "external re-export from a package __init__ stays an Import"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'ext.caller.build_widget'
         AND sym.name = 'Widget'
       RETURN caller.fqn AS caller

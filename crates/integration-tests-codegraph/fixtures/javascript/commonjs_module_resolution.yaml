@@ -216,7 +216,7 @@ fixtures:
 tests:
   - name: CommonJS captures keep their originating import beside shadowed ESM
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[:CALLS]->(sym:Import)
       WHERE caller.file_path = 'external/scoped.js'
       RETURN caller.name AS caller, sym.import_path AS path, sym.start_line AS import_line
     assert:
@@ -236,7 +236,7 @@ tests:
 
   - name: Destructured require call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'named/main.js'
         AND callee.file_path = 'named/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -255,7 +255,7 @@ tests:
 
   - name: Namespace require call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'namespace/main.js'
         AND callee.file_path = 'namespace/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -274,7 +274,7 @@ tests:
 
   - name: Aliased destructured require call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'alias/main.js'
         AND callee.file_path = 'alias/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -293,7 +293,7 @@ tests:
 
   - name: Default module.exports require call resolves to the exported function
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'default/main.js'
         AND callee.file_path = 'default/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -303,7 +303,7 @@ tests:
 
   - name: Object literal module.exports member call resolves to the named function
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'object/main.js'
         AND callee.file_path = 'object/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -313,7 +313,7 @@ tests:
 
   - name: Bare require alias chains keep callable primary export identity
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'alias_chain/main.js'
         AND callee.file_path = 'alias_chain/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -333,7 +333,7 @@ tests:
 
   - name: Imported CJS constants do not create false call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'no_false_call/main.js'
         AND callee.file_path = 'no_false_call/util.js'
         AND callee.name = 'HTTP_STATUS_OK'
@@ -343,7 +343,7 @@ tests:
 
   - name: Imported CJS functions still resolve while constants stay inert
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'no_false_call/main.js'
         AND callee.file_path = 'no_false_call/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -353,7 +353,7 @@ tests:
 
   - name: Transpiled CJS default interop resolves namespace default member calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'interop/main.js'
         AND callee.file_path = 'interop/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -363,7 +363,7 @@ tests:
 
   - name: External CommonJS calls target imported symbols
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path IN ['external/namespace.js', 'external/destructured.js']
       RETURN caller.file_path AS file, caller.fqn AS caller, sym.name AS name, sym.alias AS alias
       ORDER BY file, name
@@ -374,7 +374,7 @@ tests:
 
   - name: External CommonJS duplicate aliases preserve exact imported symbols
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path = 'external/duplicate_aliases.js'
         AND caller.fqn = 'reportAliases'
       RETURN caller.fqn AS caller, sym.name AS name, sym.alias AS alias
@@ -396,7 +396,7 @@ tests:
 
   - name: Module-level global CommonJS calls do not target unrelated imports
     query: |
-      MATCH (file:File)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (file:File)-[e:CALLS]->(sym:Import)
       WHERE file.path = 'external/module_level_globals.js'
       RETURN file.path AS file, sym.import_path AS path, sym.name AS name
     assert:
@@ -404,7 +404,7 @@ tests:
 
   - name: Resolved CommonJS calls do not emit imported-symbol fallback
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path IN [
         'named/main.js',
         'namespace/main.js',
@@ -421,7 +421,7 @@ tests:
 
   - name: Side-effect shadowed reference-only and global CommonJS calls avoid imported-symbol fallbacks
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path IN [
         'side_effect/main.js',
         'external/shadowed.js',

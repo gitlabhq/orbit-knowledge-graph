@@ -13,7 +13,7 @@ fixtures:
 tests:
   - name: "Call through a function-pointer local resolves to its initializer"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'callbacks::dispatch'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

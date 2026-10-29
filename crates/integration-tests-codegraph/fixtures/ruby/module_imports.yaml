@@ -82,7 +82,7 @@ tests:
 
   - name: "class links to superclass and composed modules"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS|IMPLEMENTS]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'Report'
       RETURN parent.fqn AS parent
     assert:

@@ -44,7 +44,7 @@ fixtures:
 tests:
   - name: "compound assignment resolves to AddAssign::add_assign impl method"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'call_add_assign' AND callee.name = 'add_assign'
       RETURN callee.fqn AS fqn
     assert:
@@ -53,7 +53,7 @@ tests:
 
   - name: "record expression construction creates edge to the struct"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'construct_foo' AND callee.name = 'Foo'
       RETURN callee.fqn AS fqn
     assert:

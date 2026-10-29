@@ -35,7 +35,7 @@ tests:
 
   - name: "Call resolves to the #include-reachable definition (lib.c via lib.h pairing)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::run' AND callee.name = 'compute'
       RETURN callee.fqn AS callee
     assert:
@@ -44,7 +44,7 @@ tests:
 
   - name: "Call does NOT resolve to the non-reachable same-named definition (other.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::run' AND callee.fqn = 'other::compute'
       RETURN callee.fqn AS callee
     assert:

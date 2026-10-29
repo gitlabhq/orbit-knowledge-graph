@@ -24,7 +24,7 @@ fixtures:
 tests:
   - name: Foo.create() resolves to companion method
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'main'
       RETURN callee.fqn AS callee
     assert:

@@ -62,7 +62,7 @@ tests:
 
   - name: No call edges (no function calls in this fixture)
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       RETURN count(caller) AS n
     assert:
       - { row_count: 1 }

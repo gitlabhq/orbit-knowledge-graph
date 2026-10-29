@@ -26,7 +26,7 @@ fixtures:
 tests:
   - name: self.db.execute() resolves to Database.execute not Decoy.execute
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'query' AND callee.name = 'execute'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -35,7 +35,7 @@ tests:
 
   - name: self.db.close() resolves to Database.close
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'cleanup' AND callee.name = 'close'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -44,7 +44,7 @@ tests:
 
   - name: No cross-method leakage
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'query' AND callee.name = 'close'
       RETURN caller.fqn AS caller
     assert:

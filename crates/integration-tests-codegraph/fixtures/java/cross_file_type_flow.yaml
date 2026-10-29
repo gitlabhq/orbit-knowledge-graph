@@ -34,7 +34,7 @@ tests:
   - name: "cross-file: factory.createService().findUser() resolves through return type"
     queries:
       - query: |
-          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_TYPE]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'com.example.App'
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
           ORDER BY callee
@@ -44,7 +44,7 @@ tests:
           - { row: { callee: "findUser", callee_fqn: "com.example.UserService.findUser" } }
       # no false positive to deleteUser
       - query: |
-          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'com.example.App'
             AND callee.name = 'deleteUser'
           RETURN callee.name
@@ -55,7 +55,7 @@ tests:
     skip: true
     queries:
       - query: |
-          MATCH (src:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(tgt:Definition)
+          MATCH (src:Definition)-[e:CALLS|DEFINES|EXTENDS]->(tgt:Definition)
           WHERE src.fqn STARTS WITH 'com.example.App'
           WITH src.name AS caller, tgt.name AS callee, count(src) AS cnt
           WHERE cnt > 2

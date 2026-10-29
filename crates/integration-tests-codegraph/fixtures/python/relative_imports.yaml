@@ -29,7 +29,7 @@ tests:
 
   - name: Call through relative import resolves
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'create_user'
       RETURN callee.fqn AS callee
     assert:

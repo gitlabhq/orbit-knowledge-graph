@@ -184,7 +184,7 @@ tests:
   # ── CALLS edges (cross-file resolution) ────────────────────────
   - name: "Controller.GetUser calls UserService.FindById"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.GetUser'
         AND callee.fqn = 'MyApp.Services.UserService.FindById'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -194,7 +194,7 @@ tests:
 
   - name: "Controller.CreateUser calls UserService.Save"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.CreateUser'
         AND callee.fqn = 'MyApp.Services.UserService.Save'
       RETURN caller.fqn AS caller, callee.fqn AS callee

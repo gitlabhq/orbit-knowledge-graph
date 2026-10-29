@@ -259,14 +259,20 @@ tests:
         assert:
           - { row_count: 1 }
 
-  - name: "CALLS"
+  - name: "INSTANTIATES of the class for a constructor call, with no CALLS to the constructor"
     queries:
       - query: |
-          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
-          WHERE s.fqn = 'Billing.Order.Pay' AND t.fqn = 'Billing.Order.Order' AND t.kind = 'Constructor'
+          MATCH (s:Definition)-[e:INSTANTIATES]->(t:Definition)
+          WHERE s.fqn = 'Billing.Order.Pay' AND t.fqn = 'Billing.Order' AND t.kind = 'Class'
           RETURN s.id AS source
         assert:
           - { row_count: 1 }
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.fqn = 'Billing.Order.Pay' AND t.kind = 'Constructor'
+          RETURN t.fqn AS target
+        assert:
+          - { empty: true }
 
   - name: "CALLS"
     queries:

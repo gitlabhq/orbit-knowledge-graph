@@ -54,7 +54,7 @@ fixtures:
 tests:
   - name: "workspace call graph distinguishes local and dependent helpers"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'crates/app/src/main.rs'
         AND caller.name = 'call_both'
         AND callee.name = 'helper'
@@ -75,7 +75,7 @@ tests:
 
   - name: "workspace member local calls still resolve within their crate"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'call_shared' AND callee.name = 'helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.fqn AS fqn
     assert:

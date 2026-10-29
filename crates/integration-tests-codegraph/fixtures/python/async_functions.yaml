@@ -26,7 +26,7 @@ tests:
 
   - name: Async caller calls async_func
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'async_caller' AND callee.name = 'async_func'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

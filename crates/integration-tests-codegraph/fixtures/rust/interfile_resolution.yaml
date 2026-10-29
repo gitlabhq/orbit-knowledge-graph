@@ -58,7 +58,7 @@ fixtures:
 tests:
   - name: "execute -> helper resolves through use"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -67,7 +67,7 @@ tests:
 
   - name: "execute -> Worker::new resolves across files and macro expansion"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'new'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.language_kind AS type
     assert:
@@ -76,7 +76,7 @@ tests:
 
   - name: "execute -> Worker::run resolves with inferred receiver type"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'run'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
@@ -85,7 +85,7 @@ tests:
 
   - name: "Worker::run -> helper resolves through crate path"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -94,7 +94,7 @@ tests:
 
   - name: "execute -> make_worker macro resolves"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'make_worker'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:

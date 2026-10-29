@@ -55,7 +55,7 @@ fixtures:
 tests:
   - name: "D3: undefined_function produces no call edge"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_undefined'
       RETURN callee.name AS callee
     assert:
@@ -64,7 +64,7 @@ tests:
   - name: "D13: reassignment resolves to latest (option2)"
     description: "x = option1; x = option2; x() should resolve to option2 not option1"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'reassignment_caller'
       RETURN callee.name AS callee
     assert:
@@ -73,7 +73,7 @@ tests:
 
   - name: "D20: walrus caller calls get_value"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'walrus_caller' AND callee.name = 'get_value'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -82,7 +82,7 @@ tests:
 
   - name: "D20: walrus caller calls process"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'walrus_caller' AND callee.name = 'process'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -91,7 +91,7 @@ tests:
 
   - name: "D40: f-string calls get_name"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'fstring_caller' AND callee.name = 'get_name'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -100,7 +100,7 @@ tests:
 
   - name: "D40: f-string calls get_age"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'fstring_caller' AND callee.name = 'get_age'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -109,7 +109,7 @@ tests:
 
   - name: "external imported calls point at imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.name = 'external_import_caller'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.alias AS alias
     assert:

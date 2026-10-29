@@ -174,7 +174,7 @@ tests:
 
   - name: "Three-level Extends chain: Mammal->Animal, Canine->Mammal, Dog->Canine"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS|IMPLEMENTS]->(p:Definition)
+      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
       WHERE c.fqn IN ['App\Zoo\Mammal', 'App\Zoo\Canine', 'App\Zoo\Dog']
       RETURN c.fqn AS child, p.fqn AS parent
     assert:
@@ -187,7 +187,7 @@ tests:
 
   - name: "Grandparent call: Dog.describe -> Animal.kingdom via inherited \\$this"
     query: |
-      MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(b:Definition)
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'App\Zoo\Dog\describe'
         AND b.fqn = 'App\Zoo\Animal\kingdom'
       RETURN a.fqn AS caller, b.fqn AS callee
@@ -196,7 +196,7 @@ tests:
 
   - name: "Parent-level call: Dog.describe -> Canine.pack via inherited \\$this"
     query: |
-      MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(b:Definition)
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'App\Zoo\Dog\describe'
         AND b.fqn = 'App\Zoo\Canine\pack'
       RETURN a.fqn AS caller
@@ -215,7 +215,7 @@ tests:
 
   - name: "Interface-extends-interface chains (multi-iface): ReadWrite extends Readable AND Writable"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS|IMPLEMENTS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Io\ReadWrite'
         AND p.fqn IN ['App\Io\Readable', 'App\Io\Writable']
       RETURN p.fqn AS parent
@@ -225,7 +225,7 @@ tests:
 
   - name: "Interface extends two interfaces (one transitive): Stream -> ReadWrite, Stream -> Closable"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS|IMPLEMENTS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Io\Stream'
         AND p.fqn IN ['App\Io\ReadWrite', 'App\Io\Closable']
       RETURN p.fqn AS parent
@@ -235,7 +235,7 @@ tests:
 
   - name: "Class implements interface chain root: File -> Stream"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS|IMPLEMENTS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Io\File'
         AND p.fqn = 'App\Io\Stream'
       RETURN p.fqn AS parent
@@ -301,7 +301,7 @@ tests:
 
   - name: "self:: static call resolves: Counter.bump -> Counter.increment"
     query: |
-      MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(b:Definition)
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'App\Util\Counter\bump'
         AND b.fqn = 'App\Util\Counter\increment'
       RETURN a.fqn AS caller
@@ -310,7 +310,7 @@ tests:
 
   - name: "static:: late-static call resolves: Counter.bump -> Counter.reset"
     query: |
-      MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(b:Definition)
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'App\Util\Counter\bump'
         AND b.fqn = 'App\Util\Counter\reset'
       RETURN a.fqn AS caller
@@ -319,7 +319,7 @@ tests:
 
   - name: "Final method on Base is callable through subclass \\$this: Sub.open -> Base.locked"
     query: |
-      MATCH (a:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(b:Definition)
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'App\Locks\Sub\open'
         AND b.fqn = 'App\Locks\Base\locked'
       RETURN a.fqn AS caller

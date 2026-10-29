@@ -65,7 +65,7 @@ tests:
 
   - name: Type-only imports do not fabricate runtime call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'types/consumer.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

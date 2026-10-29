@@ -55,7 +55,7 @@ fixtures:
 tests:
   - name: "imported super path resolves"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'via_use_super' AND callee.name = 'parent_helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -64,7 +64,7 @@ tests:
 
   - name: "direct super path resolves"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'via_super_path' AND callee.name = 'parent_helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -73,7 +73,7 @@ tests:
 
   - name: "self path resolves inside module"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'via_self_path' AND callee.name = 'local_helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -82,7 +82,7 @@ tests:
 
   - name: "crate path resolves across modules"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'via_crate_path' AND callee.name = 'root_helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -91,7 +91,7 @@ tests:
 
   - name: "double super path resolves across nested modules"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'via_double_super' AND callee.name = 'parent_helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:

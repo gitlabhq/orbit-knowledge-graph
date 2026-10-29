@@ -407,7 +407,7 @@ tests:
 
   - name: Named import call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'named/main.ts'
         AND callee.file_path = 'named/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -426,7 +426,7 @@ tests:
 
   - name: Default import call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'default/main.ts'
         AND callee.file_path = 'default/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -445,7 +445,7 @@ tests:
 
   - name: Namespace import call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'namespace/main.ts'
         AND callee.file_path = 'namespace/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -464,7 +464,7 @@ tests:
 
   - name: Explicit reexport call resolves to source definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'explicit/main.ts'
         AND callee.file_path = 'explicit/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -483,7 +483,7 @@ tests:
 
   - name: Star reexport call resolves to source definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'star/main.ts'
         AND callee.file_path = 'star/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -502,7 +502,7 @@ tests:
 
   - name: Aliased named import call resolves to local definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'alias/main.ts'
         AND callee.file_path = 'alias/constants.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -523,7 +523,7 @@ tests:
 
   - name: Imported function from mixed import statement still calls concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'identity/consumer.ts'
         AND callee.file_path = 'identity/constants.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -533,7 +533,7 @@ tests:
 
   - name: Imported constants do not create false call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'no_false_call/main.ts'
         AND callee.file_path = 'no_false_call/constants.ts'
         AND callee.name = 'HTTP_STATUS_OK'
@@ -543,7 +543,7 @@ tests:
 
   - name: Imported functions still call through while constants stay inert
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'no_false_call/main.ts'
         AND callee.file_path = 'no_false_call/constants.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -553,7 +553,7 @@ tests:
 
   - name: Constructor, inferred member, and static method calls resolve
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.file_path = 'advanced/consumer.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -566,7 +566,7 @@ tests:
 
   - name: Callback passing does not fabricate direct execution edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'advanced/consumer.ts'
         AND caller.fqn = 'mapItems'
         AND callee.fqn = 'transform'
@@ -576,7 +576,7 @@ tests:
 
   - name: SSA branch merges preserve multiple candidate receiver types
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.file_path = 'ssa/branch.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -588,7 +588,7 @@ tests:
 
   - name: SSA alias propagation preserves receiver type through local rebinding
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.file_path = 'ssa/alias.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -598,7 +598,7 @@ tests:
 
   - name: SSA loop exit preserves initial and loop-carried receiver types
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'ssa/loop.ts'
         AND callee.name = 'parse'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -609,7 +609,7 @@ tests:
 
   - name: Namespace reexport member chains resolve to underlying static method
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'namespace_chain/consumer.ts'
         AND callee.file_path = 'namespace_chain/suggestions.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -619,7 +619,7 @@ tests:
 
   - name: Default and namespace barrel exports both resolve through the barrel
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'combo/consumer.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -642,7 +642,7 @@ tests:
 
   - name: Missing default and named export calls point at imported symbols
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path = 'unresolved/main.ts'
       RETURN caller.fqn AS caller, sym.language_kind AS language_kind, sym.name AS name
       ORDER BY language_kind, name
@@ -653,7 +653,7 @@ tests:
 
   - name: External aliases preserve exact imported symbols
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'inspectExternalAliases'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path, alias
@@ -665,7 +665,7 @@ tests:
 
   - name: Missing members on local namespace imports do not become external calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path = 'namespace_missing/main.ts'
       RETURN sym.import_path AS path, sym.name AS name
     assert:
@@ -673,7 +673,7 @@ tests:
 
   - name: Resolved local ESM imports do not also emit imported-symbol fallbacks
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path IN [
         'named/main.ts',
         'default/main.ts',
@@ -691,7 +691,7 @@ tests:
 
   - name: Type-only side-effect shadowed and global calls avoid imported-symbol fallbacks
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path IN [
         'unresolved/type_only_call.ts',
         'unresolved/side_effect_call.ts',

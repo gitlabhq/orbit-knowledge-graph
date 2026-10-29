@@ -17,7 +17,7 @@ fixtures:
 tests:
   - name: All call edges from use_handler
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'use_handler'
       RETURN callee.fqn AS callee
     assert:

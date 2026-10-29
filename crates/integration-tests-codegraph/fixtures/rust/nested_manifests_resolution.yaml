@@ -33,7 +33,7 @@ fixtures:
 tests:
   - name: "path dependency resolves even without a repo-root manifest"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'services/app/src/main.rs'
         AND caller.name = 'boot'
         AND callee.name = 'helper'

@@ -27,7 +27,7 @@ fixtures:
 tests:
   - name: "mod.rs parent module resolves child module calls"
     query: |
-      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'src/net/mod.rs'
         AND caller.name = 'outer'
         AND callee.name = 'leaf'

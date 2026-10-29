@@ -1366,7 +1366,7 @@ impl CodeGraph {
             .find(|&file| self.graph[file].path() != importing)
     }
 
-    fn owner_of(&self, node: NodeIndex) -> Option<NodeIndex> {
+    pub fn owner_of(&self, node: NodeIndex) -> Option<NodeIndex> {
         self.graph
             .edges_directed(node, petgraph::Direction::Incoming)
             .filter(|e| e.weight().relationship.edge_kind == EdgeKind::Defines)

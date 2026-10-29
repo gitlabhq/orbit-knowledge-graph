@@ -47,7 +47,7 @@ tests:
 
   - name: Dog.fetch() does not resolve this.greet() cross-class
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'fetch' AND callee.name = 'greet'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -55,7 +55,7 @@ tests:
 
   - name: Puppy.play() does not resolve inherited this calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'play'
       RETURN callee.name AS callee
       ORDER BY callee

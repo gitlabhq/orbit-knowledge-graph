@@ -41,7 +41,7 @@ tests:
 
   - name: "resolved same-file calls still target definitions"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::local_call'
         AND callee.fqn = 'app::local_helper'
       RETURN caller.fqn AS caller, callee.fqn AS callee

@@ -40,7 +40,7 @@ fixtures:
 tests:
   - name: make_db().query() resolves to Database.query not Decoy.query
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'use_factory' AND callee.name = 'query'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -49,7 +49,7 @@ tests:
 
   - name: make_logger().log() resolves to Logger.log not Decoy.log
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'use_factory' AND callee.name = 'log'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -58,7 +58,7 @@ tests:
 
   - name: Indirect return (return x where x = Database()) resolves
     query: |
-      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'use_indirect' AND callee.name = 'query'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
