@@ -318,6 +318,7 @@ impl Ontology {
             .map(|(name, data_type)| EdgeColumn {
                 name: name.into(),
                 data_type,
+                default: None,
             })
             .collect();
         if let Some(config) = self.edge_table_configs.get_mut(&self.default_edge_table) {
@@ -2723,9 +2724,12 @@ style:
                 "id",
                 "name",
                 "fqn",
+                "signature",
                 "kind",
+                "language_kind",
+                "category",
+                "branch",
                 "file_path",
-                "commit_sha",
                 "start_line",
                 "end_line"
             ]
@@ -2989,6 +2993,10 @@ properties:
                 "target_id",
                 "target_kind",
                 "traversal_path",
+                "lines",
+                "resolution",
+                "access",
+                "usage",
             ]
         );
     }

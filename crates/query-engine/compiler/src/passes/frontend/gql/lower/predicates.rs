@@ -62,6 +62,7 @@ impl Lowering {
             op,
             value,
             from_temporal_literal,
+            from_membership,
             rhs_property,
         } = *comparison;
         let target = self.predicate_target(&property.node.value, span)?;
@@ -103,6 +104,7 @@ impl Lowering {
                 value,
                 rhs_column,
                 from_temporal_literal,
+                from_membership,
             },
         })
     }

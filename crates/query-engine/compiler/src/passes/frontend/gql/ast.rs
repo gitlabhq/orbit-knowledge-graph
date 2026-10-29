@@ -102,6 +102,7 @@ pub(super) struct Comparison<'i> {
     pub op: FilterOp,
     pub value: Option<Value>,
     pub from_temporal_literal: bool,
+    pub from_membership: bool,
     pub rhs_property: Option<Property<'i>>,
 }
 

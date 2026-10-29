@@ -1114,6 +1114,12 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             return check_list_filter(entity, prop, filter, op, element);
         }
 
+        if filter.from_membership {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: value IN property needs a list property, got {data_type}"
+            )));
+        }
+
         if data_type == DataType::Enum && op.is_ordering() {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: enum values have no order; use = or IN instead of <, >, <=, or >="

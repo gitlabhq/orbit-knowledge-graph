@@ -771,6 +771,10 @@
                           "int64[]"
                         ],
                         "description": "Column data type."
+                      },
+                      "default": {
+                        "type": "string",
+                        "description": "DuckDB default expression for the column, such as [] or ''."
                       }
                     },
                     "additionalProperties": false

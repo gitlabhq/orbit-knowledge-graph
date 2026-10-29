@@ -130,7 +130,11 @@ fn build_local_edge_table(ontology: &Ontology) -> Option<CreateTable> {
         .iter()
         .map(|column| {
             let column_type = local_data_type_to_column_type(&column.data_type);
-            ColumnDef::new(&column.name, column_type)
+            let def = ColumnDef::new(&column.name, column_type);
+            match &column.default {
+                Some(default) => def.with_default(default),
+                None => def,
+            }
         })
         .collect();
 
