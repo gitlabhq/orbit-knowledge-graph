@@ -107,7 +107,7 @@
     },
     "plugin": {
       "$ref": "#/definitions/plugin",
-      "description": "The opt-in plugin from packages/agent-plugins, written as a local marketplace, registered in the assistant's settings, and enabled. Installed only with `--claude-ui`."
+      "description": "The plugin from packages/agent-plugins, written as a local marketplace, registered in the assistant's settings, and enabled. Installed by default; `--skip agent-plugins` opts out."
     }
   },
   "definitions": {
