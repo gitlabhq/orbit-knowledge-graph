@@ -75,7 +75,20 @@ function codeBlock(ui: Ui, code: string): RenderElement {
   return ui.Box({ flexDirection: 'column', children: codeLines(code).map((line) => tokenLine(ui, line)) })
 }
 
+function resetConversation(): void {
+  Object.assign(stats, { calls: 0, nodes: 0, edges: 0, apiCalls: 0 })
+  projectTotals.clear()
+  entitiesAsked = false
+  narration.clear()
+}
+
 export const register: Register = (on) => {
+  on('session.end', ($, e, next) => {
+    resetConversation()
+    $.ui.invalidate('ui.render')
+    return next(e)
+  }).catch((_$, e, next) => next(e))
+
   on('tool.call', async ($, e, next) => {
     if (usesOrbit(e.tool, e)) $.ui.invalidate('ui.render')
     const call = describeOrbitCall(e.tool, e)
