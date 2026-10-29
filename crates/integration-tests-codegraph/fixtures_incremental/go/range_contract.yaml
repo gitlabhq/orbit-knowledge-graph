@@ -15,7 +15,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'user.go' AND d.name = 'User'
         AND d.language_kind = 'Struct'
-      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+      RETURN d.start_line AS sl, d.start_column AS sc, d.start_byte AS sb
     assert:
       - { row_count: 1 }
       - { row: { sl: 3, sc: 6, sb: 19 } }
@@ -24,7 +24,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'user.go' AND d.name = 'Name'
-      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+      RETURN d.start_line AS sl, d.start_column AS sc, d.start_byte AS sb
     assert:
       - { row_count: 1 }
       - { row: { sl: 5, sc: 1, sb: 34 } }

@@ -9,7 +9,7 @@ fn run_suite(query: Value, expect: &str) {
         "id": index + 1, "project_id": 1000, "traversal_path": "1/100/1000/", "branch": "main",
         "commit_sha": "abc123", "file_path": "src/test.rs", "fqn": name, "name": name,
         "kind": "Function", "start_line": 1, "end_line": 2, "start_byte": 0,
-        "end_byte": 10, "start_char": 0, "end_char": 5,
+        "end_byte": 10, "start_column": 0, "end_column": 5,
     })).collect();
     let edges: Vec<_> = [(1, 2), (2, 3), (2, 4)]
         .iter()

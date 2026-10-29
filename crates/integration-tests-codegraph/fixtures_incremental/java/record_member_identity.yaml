@@ -57,7 +57,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.fqn = 'Annotated.value' AND d.language_kind = 'Method'
       RETURN d.start_line AS start_line, d.end_line AS end_line,
-        d.start_char AS start_char, d.end_char AS end_char
+        d.start_column AS start_column, d.end_column AS end_column
     assert:
       - { row_count: 1 }
-      - { row: { start_line: 11, end_line: 14, start_char: 5, end_char: 6 } }
+      - { row: { start_line: 11, end_line: 14, start_column: 5, end_column: 6 } }

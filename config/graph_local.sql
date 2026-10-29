@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     end_line BIGINT NOT NULL,
     start_byte BIGINT NOT NULL,
     end_byte BIGINT NOT NULL,
-    start_char BIGINT NOT NULL,
-    end_char BIGINT NOT NULL
+    start_column BIGINT NOT NULL,
+    end_column BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS gl_directory (
@@ -84,8 +84,8 @@ CREATE TABLE IF NOT EXISTS gl_import (
     end_line BIGINT NOT NULL,
     start_byte BIGINT NOT NULL,
     end_byte BIGINT NOT NULL,
-    start_char BIGINT NOT NULL,
-    end_char BIGINT NOT NULL
+    start_column BIGINT NOT NULL,
+    end_column BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS gl_edge (
