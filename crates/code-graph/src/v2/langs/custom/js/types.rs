@@ -243,6 +243,7 @@ pub struct JsPendingLocalCall {
     pub reaching: Vec<ParseValue>,
     pub enclosing_def: Option<u32>,
     pub invocation_kind: JsInvocationKind,
+    pub line: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

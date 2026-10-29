@@ -13,6 +13,7 @@ use oxc::ast::ast::{
     TaggedTemplateExpression, VariableDeclarator, WhileStatement,
 };
 use oxc::ast_visit::{Visit, walk};
+use oxc::span::GetSpan;
 use oxc::syntax::symbol::SymbolId;
 
 use crate::v2::dsl::ssa::{BlockId, SsaEngine, SsaValue};
@@ -298,6 +299,7 @@ impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
         name: String,
         chain: Option<Vec<ExpressionStep>>,
         invocation_kind: JsInvocationKind,
+        span: oxc::span::Span,
     ) {
         let reaching = chain
             .as_ref()
@@ -310,6 +312,7 @@ impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
             reaching,
             enclosing_def: self.current_enclosing_def(),
             invocation_kind,
+            line: self.ctx.lt.span_to_range(span).start.line as u32 + 1,
         });
     }
 
@@ -383,7 +386,7 @@ impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
         let Some((name, chain)) = invocation_target(callee, invocation_kind) else {
             return;
         };
-        self.append_invocation(name, chain, invocation_kind);
+        self.append_invocation(name, chain, invocation_kind, callee.span());
     }
 
     fn walk_if_statement_manual(&mut self, it: &IfStatement<'a>) {
@@ -537,7 +540,7 @@ impl<'a> Visit<'a> for CallExtractor<'a, '_> {
                 self.record_imported_call(imported_call);
             }
             Some(JsxInvocation::Local { name, chain }) => {
-                self.append_invocation(name, chain, JsInvocationKind::Jsx);
+                self.append_invocation(name, chain, JsInvocationKind::Jsx, it.span);
             }
             None => {}
         }

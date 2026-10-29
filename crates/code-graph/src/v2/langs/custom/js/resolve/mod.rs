@@ -11,6 +11,7 @@ use std::time::Instant;
 use rayon::prelude::*;
 
 use crate::v2::error::{AbortPhase, FileSkip};
+use crate::v2::linker::graph::Lines;
 use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
 use crate::v2::linker::{
     CodeGraph, FileResolver, GraphEdge, GraphImport, ResolutionRules, ResolveSettings,
@@ -209,7 +210,7 @@ fn resolve_local_call_edges(
 
     let mut resolved = Vec::new();
     let mut filtered = Vec::new();
-    let mut semantic_seen: FxHashSet<(usize, String, EdgeKind)> = FxHashSet::default();
+    let mut semantic_seen: FxHashSet<(usize, String, EdgeKind, u32)> = FxHashSet::default();
     for call in &analyzed.local_calls {
         resolved.clear();
         let _ = resolver.resolve(
@@ -217,7 +218,10 @@ fn resolve_local_call_edges(
             call.chain.as_deref(),
             &call.reaching,
             call.enclosing_def,
-            crate::v2::linker::RefSite::default(),
+            crate::v2::linker::RefSite {
+                kind: crate::v2::types::RefKind::Call,
+                line: call.line,
+            },
             &mut resolved,
         );
 
@@ -234,6 +238,7 @@ fn resolve_local_call_edges(
                 source_node.index(),
                 graph.def_fqn(*target_node).to_string(),
                 EdgeKind::Calls,
+                call.line,
             );
             if semantic_seen.insert(semantic_key) {
                 filtered.push((*source_node, *target_node, edge.clone()));
@@ -294,7 +299,7 @@ fn append_direct_class_invocations(
     file_info: &JsPhase1FileInfo,
     call: &super::JsPendingLocalCall,
     edges: &mut Vec<(NodeIndex, NodeIndex, GraphEdge)>,
-    semantic_seen: &mut FxHashSet<(usize, String, EdgeKind)>,
+    semantic_seen: &mut FxHashSet<(usize, String, EdgeKind, u32)>,
 ) {
     if call.chain.is_some()
         || !matches!(
@@ -325,21 +330,21 @@ fn append_direct_class_invocations(
             source_node.index(),
             graph.def_fqn(target_node).to_string(),
             EdgeKind::Calls,
+            call.line,
         );
         if !semantic_seen.insert(semantic_key) {
             continue;
         }
-        edges.push((
-            source_node,
-            target_node,
-            GraphEdge::new(Relationship {
-                edge_kind: EdgeKind::Calls,
-                source_node: source_node_kind,
-                target_node: NodeKind::Definition,
-                source_def_kind,
-                target_def_kind: Some(DefKind::Class),
-            }),
-        ));
+        let mut edge = GraphEdge::new(Relationship {
+            edge_kind: EdgeKind::Instantiates,
+            source_node: source_node_kind,
+            target_node: NodeKind::Definition,
+            source_def_kind,
+            target_def_kind: Some(DefKind::Class),
+        })
+        .with_resolution(crate::v2::types::Resolution::Local);
+        edge.lines = crate::v2::linker::graph::Lines::one(call.line);
+        edges.push((source_node, target_node, edge));
     }
 }
 
@@ -486,7 +491,7 @@ fn add_call_relationship_edge(
     graph: &mut CodeGraph,
     lookup: &GraphLookup,
     relationship: &JsResolvedCallRelationship,
-    seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
+    seen: &mut FxHashSet<(usize, usize, EdgeKind, Lines)>,
 ) {
     let Some(target_node) = lookup
         .def_by_file_and_range
@@ -541,7 +546,7 @@ fn add_unresolved_imported_call_edges(
     lookup: &GraphLookup,
     import_lookup: &ImportedSymbolLookup,
     calls_by_file: &[(String, Vec<JsCallEdge>)],
-    seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
+    seen: &mut FxHashSet<(usize, usize, EdgeKind, Lines)>,
 ) {
     for (source_path, calls) in calls_by_file {
         for call in calls {
@@ -611,12 +616,17 @@ fn source_node_for_call(
 
 fn add_edge(
     graph: &mut CodeGraph,
-    seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
+    seen: &mut FxHashSet<(usize, usize, EdgeKind, Lines)>,
     source: NodeIndex,
     target: NodeIndex,
     edge: GraphEdge,
 ) -> bool {
-    let key = (source.index(), target.index(), edge.relationship.edge_kind);
+    let key = (
+        source.index(),
+        target.index(),
+        edge.relationship.edge_kind,
+        edge.lines,
+    );
     if seen.insert(key) {
         graph.graph.add_edge(source, target, edge);
         true
