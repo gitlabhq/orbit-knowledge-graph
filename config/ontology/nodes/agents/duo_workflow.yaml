@@ -1,6 +1,6 @@
 node_type: DuoWorkflow
 domain: agents
-description: A GitLab Duo Agent Platform workflow in a project and its run status. Namespace-level workflows are not indexed
+description: A GitLab Duo Agent Platform workflow in a project and its run status. Namespace-level workflows are not indexed, and the goal prompt is not stored
 label: status
 destination_table: gl_duo_workflow
 default_columns: [id, status, created_at]
@@ -50,14 +50,6 @@ properties:
       8: tool_call_approval_required
       9: idle
 
-  goal:
-    type: string
-    source: goal
-    nullable: false
-    admin_only: true
-    like_allowed: false
-    description: "Goal or prompt that started the workflow. Admins only."
-
   title:
     type: string
     source: title
@@ -94,7 +86,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_duo_workflows_workflows]
-      order_by: [traversal_path, id]
+      order_by: [traversal_path, created_at, id]
       filter: "project_id != 0 OR {{deleted_column}}"
       query: generated
     transform:
@@ -115,7 +107,6 @@ storage:
     - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: project_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: status, type: "LowCardinality(String)", default: "'created'", codec: ["LZ4"]}
-    - {name: goal, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: title, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}

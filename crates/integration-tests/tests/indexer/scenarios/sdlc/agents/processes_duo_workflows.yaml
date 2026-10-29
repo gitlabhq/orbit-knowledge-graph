@@ -19,7 +19,7 @@ expect:
   nodes:
     gl_duo_workflow:
       rows:
-        - { id: 1, project_id: 1000, status: finished, goal: Fix the failing pipeline, title: Fix pipeline }
+        - { id: 1, project_id: 1000, status: finished, title: Fix pipeline }
         - { id: 2, project_id: 1000, status: input_required, title: null }
   edges:
     - { kind: IN_PROJECT, from: DuoWorkflow, to: Project, traversal_path: "1/100/1000/", count: 2 }
