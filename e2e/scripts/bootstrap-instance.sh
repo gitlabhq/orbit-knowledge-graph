@@ -86,7 +86,6 @@ else
   warn "license activated: plan=#{l.plan} expires=#{l.expires_at} cloud=#{l.cloud_license?}"
 end
 
-# Turned off here, minutes before the tests: each Puma worker caches flag values for about a minute.
 %i[orbit_promo_access_gate orbit_trial].each { |flag| ::Feature.disable(flag) }
 warn 'orbit_promo_access_gate and orbit_trial turned off'
 
@@ -118,6 +117,10 @@ if [[ -z "$PAT" || ${#PAT} -lt 20 ]]; then
   exit 1
 fi
 
+# Each Puma worker caches flag values for 1 minute (Feature L1 cache), so a worker can still
+# answer 403 on /orbit/query with the promo gate on. Hold setup until that cache has expired.
+FLAG_SETTLE_UNTIL=$(( $(date +%s) + 65 ))
+
 # Robot runner runs in NS_GKG; secrets are namespace-scoped so the PAT lives
 # there directly.
 $KC -n "$NS_GKG" create secret generic "$SECRET_NAME" \
@@ -125,3 +128,9 @@ $KC -n "$NS_GKG" create secret generic "$SECRET_NAME" \
   --dry-run=client -o yaml | $KC apply -f -
 
 log "License activated and root PAT stored in $NS_GKG/$SECRET_NAME"
+
+SETTLE=$(( FLAG_SETTLE_UNTIL - $(date +%s) ))
+if [[ "$SETTLE" -gt 0 ]]; then
+  log "Waiting ${SETTLE}s for the Puma flag cache to expire"
+  sleep "$SETTLE"
+fi
