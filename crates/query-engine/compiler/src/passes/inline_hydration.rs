@@ -20,7 +20,7 @@ use query_data_model::OrbitQueryModel;
 use crate::ast::*;
 use crate::constants::*;
 use crate::error::Result;
-use crate::input::{AggFunction, ColumnSelection, Input, InputNode, QueryType};
+use crate::input::{AggFunction, ColumnSelection, Direction, Input, InputNode, QueryType};
 use crate::passes::hydrate::DynamicEntityColumns;
 use crate::passes::lower::query_types::hydration::properties_json;
 use crate::passes::lower::sql::deleted_false;
@@ -206,6 +206,16 @@ fn raw_read(node: &HydrationNodePlan, model: &(impl OrbitQueryModel + ?Sized)) -
             SelectExpr::new(Expr::string(&node.entity), node_kind_column()),
             SelectExpr::new(path, node_path_column()),
             SelectExpr::new(id.clone(), node_ref_column()),
+            SelectExpr::new(
+                Expr::func(
+                    Function::ToString,
+                    vec![Expr::func(
+                        Function::Tuple,
+                        node.sort_key.iter().map(|key| column(key)).collect(),
+                    )],
+                ),
+                node_row_column(),
+            ),
             SelectExpr::new(column(VERSION_COLUMN), VERSION_COLUMN),
             SelectExpr::new(column(DELETED_COLUMN), DELETED_COLUMN),
             SelectExpr::new(node_key(Expr::string(&node.entity), id), node_key_column()),
@@ -221,11 +231,14 @@ fn raw_read(node: &HydrationNodePlan, model: &(impl OrbitQueryModel + ?Sized)) -
 
 fn latest_page_rows(reads: Query) -> Query {
     let read = |name: &str| Expr::col(node_reads_alias(), name);
-    let on_page = |expr: Expr, column: &str, path: Option<Op>| Expr::InSelect {
-        expr: Box::new(expr),
-        query: Box::new(page_nodes_of(column, path)),
+    let on_page = |columns: &[&str], path: Option<Op>| Expr::InSelect {
+        expr: Box::new(match columns {
+            [column] => read(column),
+            _ => Expr::func(Function::Tuple, columns.iter().map(|c| read(c)).collect()),
+        }),
+        query: Box::new(page_nodes_of(columns, path)),
     };
-    let keys = [node_kind_column(), node_path_column(), node_ref_column()];
+    let keys = [node_kind_column(), node_row_column()];
     let latest = Query {
         select: [node_key_column(), node_value_column(), DELETED_COLUMN]
             .into_iter()
@@ -233,15 +246,15 @@ fn latest_page_rows(reads: Query) -> Query {
             .collect(),
         from: TableRef::subquery(reads, node_reads_alias()),
         where_clause: Expr::conjoin(vec![
-            on_page(read(node_ref_column()), node_ref_column(), None),
+            on_page(&[node_ref_column()], None),
             Expr::binary(
                 Op::Or,
                 Expr::binary(
                     Op::Or,
-                    on_page(read(node_path_column()), node_path_column(), Some(Op::Ne)),
+                    on_page(&[node_path_column()], Some(Op::Ne)),
                     Expr::eq(read(node_path_column()), Expr::string("")),
                 ),
-                on_page(read(node_kind_column()), node_kind_column(), Some(Op::Eq)),
+                on_page(&[node_kind_column(), node_ref_column()], Some(Op::Eq)),
             ),
         ]),
         order_by: keys
@@ -263,10 +276,13 @@ fn latest_page_rows(reads: Query) -> Query {
     }
 }
 
-fn page_nodes_of(column: &str, path: Option<Op>) -> Query {
+fn page_nodes_of(columns: &[&str], path: Option<Op>) -> Query {
     let col = |name: &str| Expr::col(page_nodes_cte(), name);
     Query {
-        select: vec![SelectExpr::new(col(column), column)],
+        select: columns
+            .iter()
+            .map(|column| SelectExpr::new(col(column), *column))
+            .collect(),
         from: TableRef::cte(page_nodes_cte(), page_nodes_cte()),
         where_clause: path.map(|op| Expr::binary(op, col(node_path_column()), Expr::string(""))),
         ..Default::default()
@@ -290,12 +306,30 @@ fn reachable_entities(input: &Input, model: &(impl OrbitQueryModel + ?Sized)) ->
     let variants = graph
         .variants()
         .filter(|variant| wanted(variant.relationship));
+    let center = input
+        .nodes
+        .first()
+        .and_then(|node| node.entity.as_deref())
+        .and_then(|name| graph.entity_id(name))
+        .filter(|_| input.query_type == QueryType::Neighbors);
+    let direction = input
+        .neighbors
+        .as_ref()
+        .map(|n| n.direction)
+        .unwrap_or_default();
     input
         .nodes
         .iter()
         .filter_map(|node| node.entity.clone())
         .chain(variants.flat_map(|variant| {
-            [variant.source, variant.target].map(|entity| graph.entity(entity).name.clone())
+            let to_source =
+                center.is_none_or(|c| direction != Direction::Outgoing && variant.target == c);
+            let to_target =
+                center.is_none_or(|c| direction != Direction::Incoming && variant.source == c);
+            [(to_source, variant.source), (to_target, variant.target)]
+                .into_iter()
+                .filter(|(reached, _)| *reached)
+                .map(|(_, entity)| graph.entity(entity).name.clone())
         }))
         .collect()
 }
