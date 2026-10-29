@@ -112,6 +112,7 @@ export default Plugin.define({
           <text fg={props.line.failed ? red() : tone()}>{MARK + ' '}</text>
           <text fg={tone()}>{props.line.state === 'start' ? props.line.active : props.line.done}</text>
           {props.line.detail ? <text fg={t.text.muted}>{'  ' + props.line.detail}</text> : null}
+          {props.line.others ? <text fg={t.text.muted}>{props.line.others}</text> : null}
           {props.line.failed ? <text fg={t.text.muted}>{' · failed'}</text> : null}
         </box>
       )

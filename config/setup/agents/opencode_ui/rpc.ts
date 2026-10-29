@@ -10,6 +10,8 @@ export type Activity = {
   done: string
   /** What the call reads, for example "Merge requests → Project". */
   detail: string
+  /** Other commands the shell call runs, for example "  + rm". */
+  others?: string
   sessionID: string
   failed?: boolean
   /** Nodes the response returned, plus the nodes a count(...) aggregate covered. */
@@ -30,6 +32,7 @@ export const OrbitUi = Rpc.define<{ activity: Activity }>({
           active: { type: 'string' },
           done: { type: 'string' },
           detail: { type: 'string' },
+          others: { type: 'string' },
           sessionID: { type: 'string' },
           failed: { type: 'boolean' },
           nodes: { type: 'integer', minimum: 0 },

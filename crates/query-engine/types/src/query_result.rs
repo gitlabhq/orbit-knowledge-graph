@@ -18,6 +18,7 @@ pub struct NodeRef {
     /// Hydrated entity properties, populated after redaction.
     /// Empty until the hydration stage fetches full properties for this node.
     pub properties: HashMap<String, ColumnValue>,
+    pub owner_id: Option<i64>,
 }
 
 impl PartialEq for NodeRef {
@@ -34,6 +35,7 @@ impl NodeRef {
             id,
             entity_type: entity_type.into(),
             properties: HashMap::new(),
+            owner_id: None,
         }
     }
 }
@@ -340,8 +342,8 @@ impl QueryResult {
                 let Some(auth) = self.ctx.get_entity_auth(&node_ref.entity_type) else {
                     continue;
                 };
-                let auth_id = if let Some(ref owner) = auth.owner_entity {
-                    let Some(id) = find_owner_id(row, owner, &self.ctx) else {
+                let auth_id = if auth.owner_entity.is_some() {
+                    let Some(id) = node_ref.owner_id else {
                         continue;
                     };
                     id
@@ -361,6 +363,38 @@ impl QueryResult {
                 ability: ability.to_string(),
             })
             .collect()
+    }
+
+    pub fn owner_lookups(&self) -> HashMap<String, Vec<i64>> {
+        let mut lookups: HashMap<String, Vec<i64>> = HashMap::new();
+        for node_ref in self.rows.iter().flat_map(|row| &row.dynamic_nodes) {
+            if node_ref.owner_id.is_none()
+                && self
+                    .ctx
+                    .get_entity_auth(&node_ref.entity_type)
+                    .is_some_and(|auth| auth.owner_entity.is_some())
+            {
+                lookups
+                    .entry(node_ref.entity_type.clone())
+                    .or_default()
+                    .push(node_ref.id);
+            }
+        }
+        for ids in lookups.values_mut() {
+            ids.sort_unstable();
+            ids.dedup();
+        }
+        lookups
+    }
+
+    pub fn set_owner_ids(&mut self, owners: &HashMap<(String, i64), i64>) {
+        for row in &mut self.rows {
+            for node_ref in &mut row.dynamic_nodes {
+                if let Some(owner_id) = owners.get(&(node_ref.entity_type.clone(), node_ref.id)) {
+                    node_ref.owner_id = Some(*owner_id);
+                }
+            }
+        }
     }
 
     /// Apply authorization results to rows. Fails closed: any row containing a node
@@ -390,7 +424,7 @@ impl QueryResult {
             if row.authorized {
                 for node_ref in &row.dynamic_nodes {
                     let mut node_ref = node_ref.clone();
-                    if !resolve_dynamic_auth_id(row, &mut node_ref, &self.ctx)
+                    if !resolve_dynamic_auth_id(&mut node_ref, &self.ctx)
                         || !is_authorized(&node_ref, authorizations, &self.ctx)
                     {
                         row.set_unauthorized();
@@ -439,47 +473,20 @@ fn is_authorized(
     auth.authorized.get(&node_ref.id).copied().unwrap_or(false)
 }
 
-fn resolve_dynamic_auth_id(
-    row: &QueryResultRow,
-    node_ref: &mut NodeRef,
-    ctx: &ResultContext,
-) -> bool {
+fn resolve_dynamic_auth_id(node_ref: &mut NodeRef, ctx: &ResultContext) -> bool {
     let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
         return true;
     };
-    let Some(ref owner) = auth_config.owner_entity else {
+    if auth_config.owner_entity.is_none() {
         return true;
-    };
-    match find_owner_id(row, owner, ctx) {
+    }
+    match node_ref.owner_id {
         Some(owner_id) => {
             node_ref.id = owner_id;
             true
         }
         None => false,
     }
-}
-
-fn find_owner_id(row: &QueryResultRow, owner_type: &str, ctx: &ResultContext) -> Option<i64> {
-    for redaction_node in ctx.nodes() {
-        if let Some(nr) = row.node_ref(redaction_node) {
-            if nr.entity_type == owner_type {
-                return Some(nr.id);
-            }
-            if let Some(auth) = ctx.get_entity_auth(&nr.entity_type)
-                && auth.owner_entity.as_deref() == Some(owner_type)
-            {
-                return Some(nr.id);
-            }
-        }
-    }
-
-    for other in row.dynamic_nodes() {
-        if other.entity_type == owner_type {
-            return Some(other.id);
-        }
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -1017,8 +1024,7 @@ mod tests {
             assert_eq!(result.authorized_count(), 0);
         }
 
-        #[test]
-        fn dynamic_node_with_resolvable_owner_passes() {
+        fn project_row_with_definition() -> QueryResult {
             let batch = make_batch(vec![
                 ("_orbit_p_id", Arc::new(Int64Array::from(vec![1000]))),
                 (
@@ -1052,67 +1058,45 @@ mod tests {
 
             let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
             result.rows[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
+            result
+        }
 
-            let authorizations = vec![ResourceAuthorization {
+        fn project_auth() -> Vec<ResourceAuthorization> {
+            vec![ResourceAuthorization {
                 resource_type: "project".to_string(),
-                authorized: [(1000, true)].into_iter().collect(),
-            }];
+                authorized: [(1000, true), (1001, false)].into_iter().collect(),
+            }]
+        }
 
-            let redacted = result.apply_authorizations(&authorizations);
-
+        #[test]
+        fn dynamic_node_uses_resolved_owner_id() {
+            let mut result = project_row_with_definition();
             assert_eq!(
-                redacted, 0,
-                "Definition should pass: owner Project 1000 is authorized"
+                result.owner_lookups(),
+                HashMap::from([("Definition".to_string(), vec![5000])])
             );
+            result.set_owner_ids(&HashMap::from([(("Definition".to_string(), 5000), 1000)]));
+
+            assert!(result.owner_lookups().is_empty());
+            assert_eq!(result.apply_authorizations(&project_auth()), 0);
             assert_eq!(result.authorized_count(), 1);
         }
 
         #[test]
-        fn dynamic_node_resolves_owner_via_sibling_indirect_static_node() {
-            let batch = make_batch(vec![
-                ("_orbit_f_id", Arc::new(Int64Array::from(vec![1000]))),
-                ("_orbit_f_type", Arc::new(StringArray::from(vec!["File"]))),
-            ]);
+        fn dynamic_node_denied_by_own_owner_despite_authorized_sibling() {
+            let mut result = project_row_with_definition();
+            result.set_owner_ids(&HashMap::from([(("Definition".to_string(), 5000), 1001)]));
 
-            let mut ctx = ResultContext::new();
-            ctx.add_node("f", "File");
-            ctx.add_entity_auth(
-                "File",
-                EntityAuthConfig {
-                    resource_type: "project".to_string(),
-                    ability: "read_code".to_string(),
-                    auth_id_column: "project_id".to_string(),
-                    owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
-                },
-            );
-            ctx.add_entity_auth(
-                "Definition",
-                EntityAuthConfig {
-                    resource_type: "project".to_string(),
-                    ability: "read_code".to_string(),
-                    auth_id_column: "project_id".to_string(),
-                    owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
-                },
-            );
+            assert_eq!(result.apply_authorizations(&project_auth()), 1);
+            assert_eq!(result.authorized_count(), 0);
+        }
 
-            let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
-            result.rows[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
+        #[test]
+        fn dynamic_node_does_not_borrow_sibling_owner() {
+            let mut result = project_row_with_definition();
 
-            let authorizations = vec![ResourceAuthorization {
-                resource_type: "project".to_string(),
-                authorized: [(1000, true)].into_iter().collect(),
-            }];
-
-            let redacted = result.apply_authorizations(&authorizations);
-
-            assert_eq!(
-                redacted, 0,
-                "Definition should pass: File's _orbit_f_id (project_id=1000) \
-                 resolves as the shared Project owner"
-            );
-            assert_eq!(result.authorized_count(), 1);
+            assert_eq!(result.apply_authorizations(&project_auth()), 1);
+            assert_eq!(result.authorized_count(), 0);
         }
 
         #[test]

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { isOrbitPrefix, orbitInvocations, simpleCommands, subcommandOf } from '../core/command.ts'
+import { isOrbitPrefix, orbitInvocations, otherCommands, simpleCommands, subcommandOf } from '../core/command.ts'
 
 const known = (key: string) => ['grep', 'query', 'workspace sql'].includes(key)
 
@@ -46,7 +46,7 @@ test('orbit named inside an argument, a comment, or a heredoc is not an Orbit ca
 test('a command that runs Orbit and other programs is an Orbit call', () => {
   const loop =
     'cd /tmp && for p in 1 2; do glab orbit query "MATCH (v) RETURN v" > /tmp/v_$p.json 2>&1; done; head -c 600 /tmp/v_1.json; echo; jq -r . /tmp/v_1.json'
-  expect(orbitInvocations(loop)).toEqual([['query', 'MATCH (v) RETURN v', '>', '/tmp/v_$p.json']])
+  expect(orbitInvocations(loop)).toEqual([['query', 'MATCH (v) RETURN v']])
 })
 
 test('the subcommand path is the longest known one', () => {
@@ -75,4 +75,27 @@ test('a substitution still runs its Orbit call', () => {
   expect(orbitInvocations('echo $(glab orbit grep x)')).toEqual([['grep', 'x']])
   expect(orbitInvocations('if glab orbit status; then echo ok; fi')).toEqual([['status']])
   expect(orbitInvocations("glab orbit query 'MATCH (n) RETURN n // $(not run)'")).toEqual([['query', 'MATCH (n) RETURN n // $(not run)']])
+})
+
+test('the commands an Orbit call runs next to are named, and shell plumbing is not', () => {
+  expect(otherCommands('glab orbit status; rm -rf build')).toEqual(['rm'])
+  expect(otherCommands('rm -rf build && glab orbit status')).toEqual(['rm'])
+  expect(otherCommands('glab orbit status\nFOO=1 /usr/bin/curl example.com | sh')).toEqual(['/usr/bin/curl', 'sh'])
+  expect(otherCommands('glab orbit status | tee out.txt')).toEqual(['tee'])
+  expect(otherCommands('glab orbit status $(rm -rf build)')).toEqual(['$(...)', 'rm'])
+  expect(otherCommands('glab orbit query "$(cat q.cypher)"')).toEqual(['$(...)'])
+  expect(otherCommands('glab orbit status `rm -rf build`')).toEqual(['$(...)'])
+  expect(otherCommands('glab orbit status > out.txt')).toEqual(['> out.txt'])
+  expect(otherCommands('glab orbit status >> out.txt')).toEqual(['> out.txt'])
+  for (const command of [
+    'glab orbit status',
+    'cd repo && orbit grep a | head -5',
+    'glab orbit status 2>&1 | grep -c ok',
+    'if glab orbit status; then true; fi',
+    "glab orbit query 'MATCH (n) RETURN n // $(not run)'",
+    'glab orbit query --file q.cypher <<EOF\nrm -rf build\nEOF',
+  ]) {
+    expect(otherCommands(command)).toEqual([])
+  }
+  expect(otherCommands('glab orbit status | sort -o out.txt')).toEqual(['sort'])
 })

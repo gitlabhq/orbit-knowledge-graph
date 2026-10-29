@@ -1,6 +1,6 @@
 import { Plugin, type ToolExecuteAfter, type ToolExecuteBefore, type ToolResult } from '@opencode/plugin'
 
-import { describeOrbitCall } from '../core/calls.ts'
+import { describeOrbitCall, othersText } from '../core/calls.ts'
 import { parseResponse } from '../core/stats.ts'
 import { type Activity, OrbitUi } from './rpc.ts'
 
@@ -26,6 +26,7 @@ function activityOf(event: ToolExecuteBefore | ToolExecuteAfter, state: Activity
     active: call.active,
     done: call.label,
     detail: call.detail,
+    ...(call.others?.length ? { others: othersText(call) } : {}),
     sessionID: event.sessionID,
   }
   if (!('status' in event)) return activity
