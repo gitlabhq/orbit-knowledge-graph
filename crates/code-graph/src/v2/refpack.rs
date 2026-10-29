@@ -20,8 +20,10 @@ use smol_str::SmolStr;
 
 const NO_CHAIN: u32 = u32::MAX;
 const NO_ENCLOSING: u32 = u32::MAX;
-const KIND_SHIFT: u32 = 24;
-const LEN_MASK: u32 = (1 << KIND_SHIFT) - 1;
+const KIND_SHIFT: u32 = 28;
+const CHAIN_SHIFT: u32 = 16;
+const CHAIN_MAX: u32 = (1 << (KIND_SHIFT - CHAIN_SHIFT)) - 1;
+const VALUES_MAX: u32 = (1 << CHAIN_SHIFT) - 1;
 
 fn encode_kind(kind: RefKind) -> u32 {
     match kind {
@@ -64,9 +66,9 @@ struct PackedRef {
     name: StrId,
     enclosing_def: u32,
     chain_start: u32,
-    kind_and_chain_len: u32,
     values_start: u32,
-    values_len: u32,
+    /// Kind, chain length, and values length, high bits to low.
+    lens: u32,
     line: u32,
 }
 
@@ -170,7 +172,7 @@ impl RefPack {
                     let name = self.strings.alloc(ident);
                     self.steps.push(PackedStep { tag, name });
                 }
-                (start, (chain.len() as u32).min(LEN_MASK))
+                (start, (chain.len() as u32).min(CHAIN_MAX))
             }
         };
         let values_start = self.values.len() as u32;
@@ -196,9 +198,10 @@ impl RefPack {
             name,
             enclosing_def: r.enclosing_def.unwrap_or(NO_ENCLOSING),
             chain_start,
-            kind_and_chain_len: (encode_kind(r.kind) << KIND_SHIFT) | chain_len,
             values_start,
-            values_len: r.reaching.len() as u32,
+            lens: (encode_kind(r.kind) << KIND_SHIFT)
+                | (chain_len << CHAIN_SHIFT)
+                | (r.reaching.len() as u32).min(VALUES_MAX),
             line: r.line,
         });
     }
@@ -256,7 +259,7 @@ impl RefPack {
         let has_chain = r.chain_start != NO_CHAIN;
         if has_chain {
             let start = r.chain_start as usize;
-            for step in &self.steps[start..start + (r.kind_and_chain_len & LEN_MASK) as usize] {
+            for step in &self.steps[start..start + ((r.lens >> CHAIN_SHIFT) & CHAIN_MAX) as usize] {
                 chain_buf.push(match step.tag {
                     StepTag::Ident => ExpressionStep::Ident(self.sym(step.name)),
                     StepTag::Field => ExpressionStep::Field(self.sym(step.name)),
@@ -270,7 +273,7 @@ impl RefPack {
 
         values_buf.clear();
         let start = r.values_start as usize;
-        for v in &self.values[start..start + r.values_len as usize] {
+        for v in &self.values[start..start + (r.lens & VALUES_MAX) as usize] {
             values_buf.push(match v.tag {
                 ValueTag::LocalDef => ParseValue::LocalDef(v.num),
                 ValueTag::ImportRef => ParseValue::ImportRef(v.num),
@@ -283,7 +286,7 @@ impl RefPack {
             name: self.strings.get(r.name),
             has_chain,
             enclosing_def: (r.enclosing_def != NO_ENCLOSING).then_some(r.enclosing_def),
-            kind: decode_kind(r.kind_and_chain_len >> KIND_SHIFT),
+            kind: decode_kind(r.lens >> KIND_SHIFT),
             line: r.line,
         }
     }
@@ -327,8 +330,9 @@ impl RefPack {
         let values_start = self.values.len() as u32;
         let value = self.type_value(fqn);
         self.values.push(value);
-        self.refs[idx].values_start = values_start;
-        self.refs[idx].values_len = 1;
+        let r = &mut self.refs[idx];
+        r.values_start = values_start;
+        r.lens = (r.lens & !VALUES_MAX) | 1;
     }
 
     fn type_value(&mut self, name: &str) -> PackedValue {
