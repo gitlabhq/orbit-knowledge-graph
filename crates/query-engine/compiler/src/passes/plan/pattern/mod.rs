@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use query_data_model::OrbitQueryModel;
 
-use super::filters::BoundFilter;
+use super::filters::{BoundFilter, NullAsEpochColumns};
 use super::graph::{ExecutionPlan, ReadOwner, ReadScope, RelationGraph, RelationId};
 use super::predicates::{Column, Predicate, kind_column};
 use super::{DenormalizedKey, DenormalizedProperty, Plan, sort_key};
@@ -34,7 +34,7 @@ pub struct NodePlan {
     pub redaction_id_column: String,
     pub columns: Option<ColumnSelection>,
     pub emit_select: bool,
-    pub null_as_epoch: HashSet<String>,
+    pub null_as_epoch: NullAsEpochColumns,
 }
 
 #[derive(Clone)]
