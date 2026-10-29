@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 
 use super::spec::{self, Agent};
 
+#[derive(Clone)]
 pub(crate) struct Machine {
     home: PathBuf,
     env: BTreeMap<String, String>,
@@ -18,6 +19,38 @@ impl Machine {
 
     pub(crate) fn new(home: PathBuf, env: BTreeMap<String, String>) -> Machine {
         Machine { home, env }
+    }
+
+    pub(super) fn home(&self) -> &Path {
+        &self.home
+    }
+
+    /// Expands a global path: `~/x`, or `${VAR:-~/default}/x` where a non-empty
+    /// `VAR` replaces the default prefix and must be absolute.
+    pub(super) fn expand_global_path(&self, global: &str) -> Result<PathBuf> {
+        let Some(tail) = global.strip_prefix("${") else {
+            return self.expand_home(global, global);
+        };
+        let (spec, rest) = tail
+            .split_once('}')
+            .with_context(|| format!("unterminated ${{ in global path {global}"))?;
+        let (name, default) = spec
+            .split_once(":-")
+            .with_context(|| format!("global path {global} needs a :- default"))?;
+        match self.env.get(name).filter(|value| !value.is_empty()) {
+            Some(value) if Path::new(value).is_absolute() => {
+                Ok(PathBuf::from(format!("{value}{rest}")))
+            }
+            Some(value) => anyhow::bail!("{name}={value} must be an absolute path"),
+            None => self.expand_home(&format!("{default}{rest}"), global),
+        }
+    }
+
+    fn expand_home(&self, path: &str, global: &str) -> Result<PathBuf> {
+        match path.strip_prefix("~/") {
+            Some(relative) => Ok(self.home.join(relative)),
+            None => anyhow::bail!("global path {global} must start with ~/"),
+        }
     }
 
     pub(super) fn display_with_tilde(&self, path: &Path) -> String {
