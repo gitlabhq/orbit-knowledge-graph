@@ -374,16 +374,19 @@ function stringField(input, key) {
   return typeof value === "string" ? value : undefined;
 }
 function describeCommand(command, known = NO_ENTITIES) {
-  for (const words of orbitInvocations(command)) {
+  const calls = orbitInvocations(command).flatMap((words) => {
     const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
     if (!sub)
-      continue;
+      return [];
     const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
-    const call = callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args, known));
-    const also = otherPrograms(command);
-    return also.length ? { ...call, also } : call;
-  }
-  return null;
+    return [callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args, known))];
+  });
+  const [first] = calls;
+  if (!first)
+    return null;
+  const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(", ");
+  const also = otherPrograms(command);
+  return { ...first, detail, ...also.length ? { also } : {} };
 }
 function describeOrbitCall(tool, input, known = NO_ENTITIES) {
   const command = stringField(input, "command");

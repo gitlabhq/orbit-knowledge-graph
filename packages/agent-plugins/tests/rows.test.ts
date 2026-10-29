@@ -24,9 +24,9 @@ test('each different query gets its own row', () => {
   expect(rows.every((row) => row.call.label === QUERY_LABEL)).toBe(true)
 })
 
-test('a query repeated back to back shares one row with a count', () => {
+test('a query repeated back to back shares one row', () => {
   const rows = mergeRuns(calls(CALLS, CALLS, CALLS))
-  expect(rows.map((row) => row.call.detail)).toEqual(['Definitions  ×3'])
+  expect(rows.map((row) => row.call.detail)).toEqual(['Definitions'])
   const [ok, failed] = calls(CALLS, CALLS)
   if (!ok || !failed) throw new Error('two calls expected')
   expect(mergeRuns<{ isRunning: boolean; isErrored?: boolean }>([ok, { ...failed, props: { isRunning: false, isErrored: true } }]).length).toBe(2)

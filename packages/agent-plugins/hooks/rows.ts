@@ -18,10 +18,8 @@ export function mergeRuns<P extends { isRunning: boolean; isErrored?: boolean }>
   return groups.flatMap((group): Row<P>[] => {
     const shown = [...group].reverse().find((x) => x.props.isRunning) ?? group[group.length - 1]
     if (!shown) return []
-    const count = group.length > 1 ? '×' + group.length : ''
-    const detail = [shown.call.detail, count].filter(Boolean).join('  ')
     const also = [...new Set(group.flatMap((x) => x.call.also ?? []))]
-    return [{ ...shown, isRunning: shown.props.isRunning, call: { ...shown.call, detail, ...(also.length ? { also } : {}) } }]
+    return [{ ...shown, isRunning: shown.props.isRunning, call: { ...shown.call, ...(also.length ? { also } : {}) } }]
   })
 }
 

@@ -169,3 +169,8 @@ test('the projects a query asks about come from project_id, Project ids, and ful
   expect(keys("MATCH (p:Project) WHERE p.id = 3 AND p.full_path IN ['c/d'] RETURN p")).toEqual(['project-id:3', 'full-path:c/d'])
   expect(keys("MATCH (u:User {username: 'x'})-[:AUTHORED]->(mr:MergeRequest) RETURN mr")).toEqual([])
 })
+
+test('schema reads chained in one command share a row with every node named', () => {
+  const call = describeOrbitCall('Bash', { command: `glab orbit query 'CALL db.schema()'; glab orbit query "CALL db.schema('Vulnerability')"; glab orbit query "CALL db.schema('Pipeline')"` })
+  expect(call).toMatchObject({ label: 'Read Orbit schema', detail: 'Vulnerability, Pipeline' })
+})
