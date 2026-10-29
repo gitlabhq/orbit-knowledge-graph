@@ -50,7 +50,7 @@ Read this when a command fails with "command not found", an auth error, or a fea
 | `4`  | 403  | Access denied (no Knowledge Graph enabled namespaces).       |
 | `5`  | 429  | Rate limited.                                                |
 
-`glab orbit query --response-format raw` prints the full error payload when the exit code alone is not enough.
+`glab orbit query --response-format raw` prints the full JSON error payload when the exit code alone is not enough.
 
 ## Exit 2: feature flag off, or old glab
 
