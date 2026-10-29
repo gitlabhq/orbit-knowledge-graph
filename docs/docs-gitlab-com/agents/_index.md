@@ -90,7 +90,7 @@ By default, setup writes to your user configuration, so the changes affect only 
 | Instructions | All | A block between `<!-- orbit:setup:begin -->` and `<!-- orbit:setup:end -->` in the instruction file of the agent. The block tells the agent to search with `orbit grep` and to read code with `orbit context`. |
 | Hooks | Claude Code, OpenCode | A reminder to use `orbit grep`. For Claude Code, the reminder comes when the agent runs `grep`, `rg`, `ack`, or `ag` in an indexed repository, and never blocks the call. For OpenCode, the reminder comes once each session. |
 | Skill | Claude Code, Codex, GitLab Duo, OpenCode | The `orbit` skill, in `~/.agents/skills/orbit`. For GitLab Duo, setup writes the full skill files. For Claude Code, setup also links the skill in `~/.claude/skills/`, and allows the skill command in `settings.json` so that the skill loads without a prompt. |
-| Agent plugins | Claude Code, OpenCode | A plugin that shows each GitLab Orbit call. For Claude Code, setup installs the `gitlab-orbit` plugin in `~/.claude/orbit/claude_plugin` and turns it on in `settings.json`. For OpenCode, setup installs the `orbit-ui.js` plugin. |
+| Agent plugins | Claude Code, OpenCode | A plugin that shows each GitLab Orbit call. For Claude Code, setup installs the `gitlab-orbit` plugin in `~/.claude/orbit/claude_plugin` and turns it on in `settings.json`, or in `.claude/settings.local.json` with `--project`. For OpenCode, setup installs the `orbit-ui.js` plugin. |
 
 Other agents that support the [Agent Skills specification](https://agentskills.io/specification), such as Gemini CLI,
 can also load the skill from `~/.agents/skills/orbit`.
