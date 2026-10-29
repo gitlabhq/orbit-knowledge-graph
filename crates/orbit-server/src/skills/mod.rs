@@ -265,7 +265,8 @@ mod tests {
         };
         assert_eq!(
             without_version(text(MANIFEST)),
-            without_version(text(GQL_MANIFEST))
+            without_version(text(GQL_MANIFEST)),
+            "SKILL.md and SKILL.gql.md drifted: keep them identical except for the version"
         );
     }
 
