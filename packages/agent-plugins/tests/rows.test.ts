@@ -16,7 +16,6 @@ const MR_PROJECT = q('MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project) RETURN 
 const USER_MR = q('MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) RETURN u')
 const PIPELINE_JOB = q('MATCH (pl:Pipeline)-[:HAS_JOB]->(j:Job) RETURN j')
 const JOB_RUNNER = q('MATCH (j:Job)-[:RAN_ON]->(r:Runner) RETURN r')
-const CALLS = q('MATCH (c:Definition)-[:CALLS]->(d:Definition) RETURN c')
 
 test('calls of one kind share a line that shows the latest detail', () => {
   const rows = mergeRuns(calls(MR_PROJECT, q("CALL db.schema('MergeRequest')"), USER_MR, PIPELINE_JOB, JOB_RUNNER))
