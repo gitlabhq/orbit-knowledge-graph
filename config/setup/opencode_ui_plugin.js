@@ -1,5 +1,4 @@
 /*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
-var PIPE_TARGETS = new Set(["head", "tail"]);
 var SHELL_ONLY = new Set(["<", ">", "#", "$(", "`"]);
 var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/;
 function simpleCommands(command) {
@@ -87,13 +86,35 @@ function orbitWords(words) {
     i++;
   return words.slice(i);
 }
+var PREFIX_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
+var STRUCTURE = new Set(["for", "done", "fi", "esac", "case", "}"]);
+var QUIET = new Set(["cd", "echo", "true", "printf", "head", "tail"]);
+function runnable(command) {
+  const out = [];
+  let heredoc = "";
+  for (const words of simpleCommands(command)) {
+    if (heredoc) {
+      if (words.join(" ") === heredoc)
+        heredoc = "";
+      continue;
+    }
+    const at = words.findIndex((word, i) => word === "<" && words[i + 1] === "<");
+    if (at >= 0)
+      heredoc = (words[at + 2] ?? "").replace(/^-/, "");
+    let i = words[0] === "|" ? 1 : 0;
+    while (PREFIX_WORDS.has(words[i] ?? ""))
+      i++;
+    if (i < words.length)
+      out.push(words.slice(i));
+  }
+  return out;
+}
 function orbitInvocations(command) {
-  const commands = simpleCommands(command);
-  const calls = commands.map(orbitWords);
-  const pipeTarget = (words) => words[0] === "|" && PIPE_TARGETS.has(words[1] ?? "") && words.slice(2).every((word) => word.startsWith("-") || /^\d+$/.test(word));
-  const helper = (words) => words[0] === "cd" || words[0] === "echo" || pipeTarget(words) || words.join(" ") === "true";
-  const plain = !command.includes("$'") && commands.every((words, i) => !words.some((w) => SHELL_ONLY.has(w)) && (calls[i] || helper(words)));
-  return plain ? calls.filter((words) => words !== null) : [];
+  return runnable(command).map(orbitWords).filter((words) => words !== null);
+}
+function otherPrograms(command) {
+  const names = runnable(command).filter((words) => !orbitWords(words) && !STRUCTURE.has(words[0] ?? "")).map((words) => words.find((word) => !/^\w+=/.test(word))?.split("/").pop() ?? "");
+  return [...new Set(names.filter((name) => name && !QUIET.has(name) && !SHELL_ONLY.has(name)))];
 }
 function subcommandOf(words, known) {
   const [sub, ...rest] = words;
@@ -358,7 +379,9 @@ function describeCommand(command, known = NO_ENTITIES) {
     if (!sub)
       continue;
     const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
-    return callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args, known));
+    const call = callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args, known));
+    const also = otherPrograms(command);
+    return also.length ? { ...call, also } : call;
   }
   return null;
 }
@@ -380,7 +403,7 @@ var OrbitUiPlugin = async ({ client }) => ({
       const call = describeOrbitCall(input.tool, output.args);
       if (!call)
         return;
-      const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "");
+      const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "") + (call.also ? "  \xB7 also " + call.also.join(", ") : "");
       client.tui.showToast({ body: { message, variant: "info", duration: 2000 } }).catch(() => {});
     } catch {}
   }

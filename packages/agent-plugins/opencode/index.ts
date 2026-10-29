@@ -8,7 +8,7 @@ export const OrbitUiPlugin = async ({ client }: Input) => ({
     try {
       const call = describeOrbitCall(input.tool, output.args)
       if (!call) return
-      const message = MARK + ' ' + call.active + (call.detail ? '  ' + call.detail : '')
+      const message = MARK + ' ' + call.active + (call.detail ? '  ' + call.detail : '') + (call.also ? '  · also ' + call.also.join(', ') : '')
       client.tui.showToast({ body: { message, variant: 'info', duration: 2000 } }).catch(() => {})
     } catch {}
   },

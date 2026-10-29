@@ -1,6 +1,5 @@
 export type Subcommand = { key: string; args: string[] }
 
-const PIPE_TARGETS = new Set(['head', 'tail'])
 const SHELL_ONLY = new Set(['<', '>', '#', '$(', '`'])
 const HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/
 
@@ -75,20 +74,42 @@ function orbitWords(words: readonly string[]): string[] | null {
   return words.slice(i)
 }
 
+const PREFIX_WORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', 'time', '{'])
+const STRUCTURE = new Set(['for', 'done', 'fi', 'esac', 'case', '}'])
+const QUIET = new Set(['cd', 'echo', 'true', 'printf', 'head', 'tail'])
+
+function runnable(command: string): string[][] {
+  const out: string[][] = []
+  let heredoc = ''
+  for (const words of simpleCommands(command)) {
+    if (heredoc) {
+      if (words.join(' ') === heredoc) heredoc = ''
+      continue
+    }
+    const at = words.findIndex((word, i) => word === '<' && words[i + 1] === '<')
+    if (at >= 0) heredoc = (words[at + 2] ?? '').replace(/^-/, '')
+    let i = words[0] === '|' ? 1 : 0
+    while (PREFIX_WORDS.has(words[i] ?? '')) i++
+    if (i < words.length) out.push(words.slice(i))
+  }
+  return out
+}
+
 export function orbitInvocations(command: string): string[][] {
-  const commands = simpleCommands(command)
-  const calls = commands.map(orbitWords)
-  const pipeTarget = (words: string[]) =>
-    words[0] === '|' && PIPE_TARGETS.has(words[1] ?? '') && words.slice(2).every((word) => word.startsWith('-') || /^\d+$/.test(word))
-  const helper = (words: string[]) =>
-    words[0] === 'cd' || words[0] === 'echo' || pipeTarget(words) || words.join(' ') === 'true'
-  const plain =
-    !command.includes("$'") && commands.every((words, i) => !words.some((w) => SHELL_ONLY.has(w)) && (calls[i] || helper(words)))
-  return plain ? calls.filter((words) => words !== null) : []
+  return runnable(command)
+    .map(orbitWords)
+    .filter((words) => words !== null)
+}
+
+export function otherPrograms(command: string): string[] {
+  const names = runnable(command)
+    .filter((words) => !orbitWords(words) && !STRUCTURE.has(words[0] ?? ''))
+    .map((words) => words.find((word) => !/^\w+=/.test(word))?.split('/').pop() ?? '')
+  return [...new Set(names.filter((name) => name && !QUIET.has(name) && !SHELL_ONLY.has(name)))]
 }
 
 export function runsOrbit(command: string): boolean {
-  return simpleCommands(command).some((words) => orbitWords(words[0] === '|' ? words.slice(1) : words) !== null)
+  return orbitInvocations(command).length > 0
 }
 
 export function subcommandOf(words: readonly string[], known: (key: string) => boolean): Subcommand | null {

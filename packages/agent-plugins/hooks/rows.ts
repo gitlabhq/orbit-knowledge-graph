@@ -81,8 +81,10 @@ export function mergeRuns<P extends { isRunning: boolean }>(calls: readonly Grou
     if (!latest) return []
     const running = [...group].reverse().find((x) => x.props.isRunning)
     const detail = detailsOf(group)
-    if (running) return [{ ...running, isRunning: true, call: { ...running.call, detail } }]
-    return [{ ...latest, isRunning: false, call: { ...latest.call, detail } }]
+    const also = [...new Set(group.flatMap((x) => x.call.also ?? []))]
+    const merged = (call: OrbitCall) => ({ ...call, detail, ...(also.length ? { also } : {}) })
+    if (running) return [{ ...running, isRunning: true, call: merged(running.call) }]
+    return [{ ...latest, isRunning: false, call: merged(latest.call) }]
   })
 }
 

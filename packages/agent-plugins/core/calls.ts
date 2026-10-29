@@ -1,4 +1,4 @@
-import { orbitInvocations, subcommandOf } from './command.ts'
+import { orbitInvocations, otherPrograms, subcommandOf } from './command.ts'
 import { NO_ENTITIES, entitiesOf } from './cypher.ts'
 import labels from './labels.ts'
 
@@ -6,7 +6,7 @@ export const MARK = '◎'
 
 export type Label = { done: string; running: string }
 
-export type OrbitCall = { label: string; active: string; detail: string }
+export type OrbitCall = { label: string; active: string; detail: string; also?: string[] }
 
 export const COMMAND_LABELS: Readonly<Record<string, Label>> = labels.commands
 export const TOOL_LABELS: Readonly<Record<string, Label>> = labels.tools
@@ -71,7 +71,9 @@ export function describeCommand(command: string, known: ReadonlySet<string> = NO
     const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined)
     if (!sub) continue
     const isSchemaQuery = sub.key === 'query' && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg))
-    return callOf(isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY), detailFor(sub.key, sub.args, known))
+    const call = callOf(isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY), detailFor(sub.key, sub.args, known))
+    const also = otherPrograms(command)
+    return also.length ? { ...call, also } : call
   }
   return null
 }
