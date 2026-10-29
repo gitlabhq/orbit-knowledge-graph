@@ -3,9 +3,9 @@
 //! ```sql
 //! WITH page AS MATERIALIZED (base),
 //!      page_nodes AS MATERIALIZED (SELECT node_ref, node_kind, node_path FROM page ...),
-//!      node_properties AS MATERIALIZED (latest row of each page node, one arm per entity)
-//! SELECT page columns, owner and properties looked up by kind and id
-//! FROM page ORDER BY the base order, mapped to page columns
+//!      node_properties AS MATERIALIZED (latest row of each page node, one arm per entity),
+//!      lookup AS (SELECT mapFromArrays(groupArray(node_key), groupArray(node_value)) FROM node_properties)
+//! SELECT page columns, owner and properties from lookup FROM page CROSS JOIN lookup
 //! ```
 
 use std::collections::BTreeSet;
@@ -23,6 +23,14 @@ use crate::passes::plan::query_types::hydration::{
     self as hydration_plan, HydrationCompileOptions,
 };
 
+struct PageNode {
+    id: String,
+    kind: String,
+    path: Option<String>,
+    owner_output: Option<String>,
+    properties_output: String,
+}
+
 pub fn inline(
     node: Node,
     input: &Input,
@@ -36,27 +44,7 @@ pub fn inline(
     if arms.is_empty() {
         return Ok(Node::Query(base));
     }
-    let static_nodes: Vec<StaticNode> = input
-        .nodes
-        .iter()
-        .filter_map(|node| {
-            let id = [primary_key_column(&node.id), redaction_id_column(&node.id)]
-                .into_iter()
-                .find(|column| base.selects_alias(column))?;
-            let kind = redaction_type_column(&node.id);
-            let path = traversal_path_column(&node.id);
-            base.selects_alias(&kind).then(|| StaticNode {
-                alias: node.id.clone(),
-                id,
-                kind,
-                path: base.selects_alias(&path).then_some(path),
-            })
-        })
-        .collect();
-    let outputs: Vec<String> = base.select.iter().filter_map(|s| s.alias.clone()).collect();
-    let neighbor_path = base
-        .selects_alias(neighbor_traversal_path_column())
-        .then(|| page_col(neighbor_traversal_path_column()));
+    let nodes = page_node_columns(input, &base);
     let order_by = base
         .order_by
         .iter()
@@ -67,53 +55,75 @@ pub fn inline(
             })
         })
         .collect::<Option<Vec<_>>>();
+    let outputs: Vec<String> = base.select.iter().filter_map(|s| s.alias.clone()).collect();
     let mut ctes = std::mem::take(&mut base.ctes);
     ctes.push(materialized(page_cte(), page(*base, order_by.is_none())));
     ctes.push(materialized(
         page_nodes_cte(),
-        page_nodes(input.query_type, &static_nodes, neighbor_path),
+        page_nodes(input.query_type, &nodes),
     ));
     ctes.push(materialized(node_properties_cte(), union(arms)));
+    ctes.push(Cte::new(lookup_cte(), lookup()));
 
-    let lookup = lookup_map();
     let mut select: Vec<SelectExpr> = outputs
         .iter()
         .map(|name| match input.query_type {
             QueryType::PathFinding if name == path_column() => {
-                SelectExpr::new(enriched_path(&lookup), name.clone())
+                SelectExpr::new(enriched_path(), name.clone())
             }
             _ => SelectExpr::new(page_col(name), name.clone()),
         })
         .collect();
-    if input.query_type == QueryType::Neighbors {
-        let neighbor = node_value(
-            &lookup,
-            page_col(neighbor_type_column()),
-            page_col(neighbor_id_column()),
-        );
-        select.push(SelectExpr::new(
-            tuple_element(neighbor.clone(), 1),
-            neighbor_owner_column(),
-        ));
-        select.push(SelectExpr::new(
-            tuple_element(neighbor, 2),
-            neighbor_properties_column(),
-        ));
-    }
-    for node in &static_nodes {
-        let value = node_value(&lookup, page_col(&node.kind), page_col(&node.id));
+    for node in &nodes {
+        let value = node_value(page_col(&node.kind), page_col(&node.id));
+        if let Some(owner) = &node.owner_output {
+            select.push(SelectExpr::new(tuple_element(value.clone(), 1), owner));
+        }
         select.push(SelectExpr::new(
             tuple_element(value, 2),
-            properties_column(&node.alias),
+            &node.properties_output,
         ));
     }
     Ok(Node::Query(Box::new(Query {
         ctes,
         select,
-        from: TableRef::cte(page_cte(), page_cte()),
+        from: TableRef::Join {
+            join_type: JoinType::Cross,
+            left: Box::new(TableRef::cte(page_cte(), page_cte())),
+            right: Box::new(TableRef::cte(lookup_cte(), lookup_cte())),
+            on: Expr::Literal(serde_json::Value::Bool(true)),
+        },
         order_by: order_by.unwrap_or_else(|| vec![OrderExpr::asc(page_col(row_position_column()))]),
         ..Default::default()
     })))
+}
+
+fn page_node_columns(input: &Input, base: &Query) -> Vec<PageNode> {
+    let selected = |column: String| base.selects_alias(&column).then_some(column);
+    let mut nodes: Vec<PageNode> = input
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            Some(PageNode {
+                id: selected(primary_key_column(&node.id))
+                    .or_else(|| selected(redaction_id_column(&node.id)))?,
+                kind: selected(redaction_type_column(&node.id))?,
+                path: selected(traversal_path_column(&node.id)),
+                owner_output: None,
+                properties_output: properties_column(&node.id),
+            })
+        })
+        .collect();
+    if input.query_type == QueryType::Neighbors {
+        nodes.push(PageNode {
+            id: neighbor_id_column().into(),
+            kind: neighbor_type_column().into(),
+            path: selected(neighbor_traversal_path_column().into()),
+            owner_output: Some(neighbor_owner_column().into()),
+            properties_output: neighbor_properties_column().into(),
+        });
+    }
+    nodes
 }
 
 fn on_page(expr: &Expr, base: &Query) -> Option<Expr> {
@@ -143,18 +153,17 @@ fn property_arms(
     let nodes: Vec<InputNode> = reachable_entities(input, model)
         .into_iter()
         .filter(|entity| model.entity_table(entity).is_some())
-        .map(|entity| {
-            let columns = specs
-                .iter()
-                .find(|spec| spec.entity_type == entity)
-                .map(|spec| spec.columns.clone())
-                .unwrap_or_default();
-            InputNode {
-                id: hydration_node_alias().to_string(),
-                entity: Some(entity),
-                columns: Some(ColumnSelection::List(columns)),
-                ..InputNode::default()
-            }
+        .map(|entity| InputNode {
+            id: hydration_node_alias().to_string(),
+            columns: Some(ColumnSelection::List(
+                specs
+                    .iter()
+                    .find(|spec| spec.entity_type == entity)
+                    .map(|spec| spec.columns.clone())
+                    .unwrap_or_default(),
+            )),
+            entity: Some(entity),
+            ..InputNode::default()
         })
         .collect();
     if nodes.is_empty() {
@@ -175,78 +184,62 @@ fn property_arms(
             let owner = model
                 .redaction_id_column_named(&node.entity)
                 .unwrap_or(DEFAULT_PRIMARY_KEY);
-            let key = node_key(
-                Expr::string(&node.entity),
-                Expr::col(alias, &node.id_property),
-            );
+            let ids = Expr::InSelect {
+                expr: Box::new(Expr::col(alias, &node.id_property)),
+                query: Box::new(page_nodes_of(&node.entity, node_ref_column(), None)),
+            };
+            let paths = model.entity_has_traversal_path(&node.entity).then(|| {
+                let known = Expr::InSelect {
+                    expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
+                    query: Box::new(page_nodes_of(
+                        &node.entity,
+                        node_path_column(),
+                        Some(Op::Ne),
+                    )),
+                };
+                let mut unknown = page_nodes_of(&node.entity, node_ref_column(), Some(Op::Eq));
+                unknown.select = vec![SelectExpr::new(
+                    Expr::aggregate(AggFunction::Count, None),
+                    node_ref_column(),
+                )];
+                let unknown = Expr::binary(Op::Gt, Expr::Scalar(Box::new(unknown)), Expr::int(0));
+                Expr::binary(Op::Or, known, unknown)
+            });
             let value = Expr::func(
                 Function::Tuple,
                 vec![Expr::col(alias, owner), properties_json(node)],
             );
-            let of_kind = |select: SelectExpr, path: Option<Op>| Query {
-                select: vec![select],
-                from: TableRef::cte(page_nodes_cte(), page_nodes_cte()),
-                where_clause: Expr::conjoin(
-                    std::iter::once(Expr::eq(
-                        Expr::col(page_nodes_cte(), node_kind_column()),
-                        Expr::string(&node.entity),
-                    ))
-                    .chain(path.map(|op| {
-                        Expr::binary(
-                            op,
-                            Expr::col(page_nodes_cte(), node_path_column()),
-                            Expr::string(""),
-                        )
-                    }))
-                    .collect(),
-                ),
-                ..Default::default()
-            };
-            let ids = Expr::InSelect {
-                expr: Box::new(Expr::col(alias, &node.id_property)),
-                query: Box::new(of_kind(
-                    SelectExpr::col(page_nodes_cte(), node_ref_column()),
-                    None,
-                )),
-            };
-            let known_paths = Expr::InSelect {
-                expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
-                query: Box::new(of_kind(
-                    SelectExpr::col(page_nodes_cte(), node_path_column()),
-                    Some(Op::Ne),
-                )),
-            };
-            let unknown_path = Expr::binary(
-                Op::Gt,
-                Expr::Scalar(Box::new(of_kind(
-                    SelectExpr::new(
-                        Expr::Aggregate {
-                            function: AggFunction::Count,
-                            argument: None,
-                            distinct: false,
-                            condition: None,
-                        },
-                        node_ref_column(),
-                    ),
-                    Some(Op::Eq),
-                ))),
-                Expr::int(0),
-            );
-            let paths = model
-                .entity_has_traversal_path(&node.entity)
-                .then(|| Expr::or_all([Some(known_paths), Some(unknown_path)]))
-                .flatten();
             latest_row_arm(
                 node,
                 Expr::conjoin(std::iter::once(ids).chain(paths).collect()),
                 &[owner],
                 vec![
-                    SelectExpr::new(key, node_key_column()),
+                    SelectExpr::new(
+                        node_key(
+                            Expr::string(&node.entity),
+                            Expr::col(alias, &node.id_property),
+                        ),
+                        node_key_column(),
+                    ),
                     SelectExpr::new(value, node_value_column()),
                 ],
             )
         })
         .collect())
+}
+
+fn page_nodes_of(entity: &str, column: &str, path: Option<Op>) -> Query {
+    let col = |name: &str| Expr::col(page_nodes_cte(), name);
+    Query {
+        select: vec![SelectExpr::new(col(column), column)],
+        from: TableRef::cte(page_nodes_cte(), page_nodes_cte()),
+        where_clause: Expr::conjoin(
+            std::iter::once(Expr::eq(col(node_kind_column()), Expr::string(entity)))
+                .chain(path.map(|op| Expr::binary(op, col(node_path_column()), Expr::string(""))))
+                .collect(),
+        ),
+        ..Default::default()
+    }
 }
 
 fn reachable_entities(input: &Input, model: &(impl OrbitQueryModel + ?Sized)) -> BTreeSet<String> {
@@ -263,19 +256,17 @@ fn reachable_entities(input: &Input, model: &(impl OrbitQueryModel + ?Sized)) ->
                     .any(|name| graph.relationship_id(name) == Some(relationship))
         })
     };
-    let mut entities: BTreeSet<String> = input
+    let variants = graph
+        .variants()
+        .filter(|variant| wanted(variant.relationship));
+    input
         .nodes
         .iter()
         .filter_map(|node| node.entity.clone())
-        .collect();
-    for variant in graph
-        .variants()
-        .filter(|variant| wanted(variant.relationship))
-    {
-        entities.insert(graph.entity(variant.source).name.clone());
-        entities.insert(graph.entity(variant.target).name.clone());
-    }
-    entities
+        .chain(variants.flat_map(|variant| {
+            [variant.source, variant.target].map(|entity| graph.entity(entity).name.clone())
+        }))
+        .collect()
 }
 
 fn page(base: Query, with_position: bool) -> Query {
@@ -295,97 +286,75 @@ fn page(base: Query, with_position: bool) -> Query {
     }
 }
 
-struct StaticNode {
-    alias: String,
-    id: String,
-    kind: String,
-    path: Option<String>,
-}
-
-fn page_nodes(
-    query_type: QueryType,
-    static_nodes: &[StaticNode],
-    neighbor_path: Option<Expr>,
-) -> Query {
-    let from_page = |node_ref: Expr, node_kind: Expr, node_path: Option<Expr>| Query {
-        select: vec![
-            SelectExpr::new(node_ref, node_ref_column()),
-            SelectExpr::new(node_kind, node_kind_column()),
-            SelectExpr::new(
-                node_path.unwrap_or_else(|| Expr::string("")),
-                node_path_column(),
-            ),
-        ],
+fn page_nodes(query_type: QueryType, nodes: &[PageNode]) -> Query {
+    let row = |id: Expr, kind: Expr, path: Expr| {
+        vec![
+            SelectExpr::new(id, node_ref_column()),
+            SelectExpr::new(kind, node_kind_column()),
+            SelectExpr::new(path, node_path_column()),
+        ]
+    };
+    let from_page = |select| Query {
+        select,
         from: TableRef::cte(page_cte(), page_cte()),
         ..Default::default()
     };
-    let mut arms: Vec<Query> = static_nodes
+    let mut arms: Vec<Query> = nodes
         .iter()
         .map(|node| {
-            from_page(
+            from_page(row(
                 page_col(&node.id),
                 page_col(&node.kind),
-                node.path.as_deref().map(page_col),
-            )
+                node.path
+                    .as_deref()
+                    .map_or_else(|| Expr::string(""), page_col),
+            ))
         })
         .collect();
-    arms.push(match query_type {
-        QueryType::Neighbors => from_page(
-            page_col(neighbor_id_column()),
-            page_col(neighbor_type_column()),
-            neighbor_path,
-        ),
-        _ => {
-            let path_node = Expr::col(page_node_alias(), page_node_alias());
-            Query {
-                select: vec![
-                    SelectExpr::new(tuple_element(path_node.clone(), 1), node_ref_column()),
-                    SelectExpr::new(tuple_element(path_node, 2), node_kind_column()),
-                    SelectExpr::new(Expr::string(""), node_path_column()),
-                ],
-                from: TableRef::subquery(
-                    Query {
-                        select: vec![SelectExpr::new(
-                            Expr::func(Function::Unnest, vec![page_col(path_column())]),
-                            page_node_alias(),
-                        )],
-                        from: TableRef::cte(page_cte(), page_cte()),
-                        ..Default::default()
-                    },
+    if query_type == QueryType::PathFinding {
+        let path_node = Expr::col(page_node_alias(), page_node_alias());
+        arms.push(Query {
+            select: row(
+                tuple_element(path_node.clone(), 1),
+                tuple_element(path_node, 2),
+                Expr::string(""),
+            ),
+            from: TableRef::subquery(
+                from_page(vec![SelectExpr::new(
+                    Expr::func(Function::Unnest, vec![page_col(path_column())]),
                     page_node_alias(),
-                ),
-                ..Default::default()
-            }
-        }
-    });
+                )]),
+                page_node_alias(),
+            ),
+            ..Default::default()
+        });
+    }
     union(arms)
 }
 
-fn lookup_map() -> Expr {
-    let collect = |column: &str| Expr::Aggregate {
-        function: AggFunction::Collect,
-        argument: Some(Box::new(Expr::col(node_properties_cte(), column))),
-        distinct: false,
-        condition: None,
+fn lookup() -> Query {
+    let collect = |column: &str| {
+        Expr::aggregate(
+            AggFunction::Collect,
+            Some(Expr::col(node_properties_cte(), column)),
+        )
     };
-    Expr::Scalar(Box::new(Query {
+    Query {
         select: vec![SelectExpr::new(
             Expr::func(
                 Function::MapFromArrays,
                 vec![collect(node_key_column()), collect(node_value_column())],
             ),
-            node_value_column(),
+            lookup_cte(),
         )],
         from: TableRef::cte(node_properties_cte(), node_properties_cte()),
         ..Default::default()
-    }))
+    }
 }
 
-fn enriched_path(lookup: &Expr) -> Expr {
-    let param = page_node_alias();
-    let path_node = Expr::ident(param);
+fn enriched_path() -> Expr {
+    let path_node = Expr::ident(page_node_alias());
     let value = node_value(
-        lookup,
         tuple_element(path_node.clone(), 2),
         tuple_element(path_node.clone(), 1),
     );
@@ -393,38 +362,24 @@ fn enriched_path(lookup: &Expr) -> Expr {
         Function::ArrayMap,
         vec![
             Expr::lambda(
-                param,
-                Expr::func(
-                    Function::Tuple,
-                    vec![
-                        tuple_element(path_node.clone(), 1),
-                        tuple_element(path_node, 2),
-                        tuple_element(value.clone(), 1),
-                        tuple_element(value, 2),
-                    ],
-                ),
+                page_node_alias(),
+                Expr::func(Function::TupleConcat, vec![path_node, value]),
             ),
             page_col(path_column()),
         ],
     )
 }
 
-fn node_value(lookup: &Expr, kind: Expr, id: Expr) -> Expr {
+fn node_value(kind: Expr, id: Expr) -> Expr {
     Expr::func(
         Function::ArrayElement,
-        vec![lookup.clone(), node_key(kind, id)],
+        vec![Expr::col(lookup_cte(), lookup_cte()), node_key(kind, id)],
     )
 }
 
 fn node_key(kind: Expr, id: Expr) -> Expr {
-    Expr::func(
-        Function::Concat,
-        vec![
-            kind,
-            Expr::string(":"),
-            Expr::func(Function::ToString, vec![id]),
-        ],
-    )
+    let id = Expr::func(Function::ToString, vec![id]);
+    Expr::func(Function::Concat, vec![kind, Expr::string(":"), id])
 }
 
 fn tuple_element(value: Expr, index: i64) -> Expr {

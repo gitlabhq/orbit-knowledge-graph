@@ -100,6 +100,7 @@ internal_name!(pub(crate) node_ref_column, "node_ref");
 internal_name!(pub(crate) node_path_column, "node_path");
 internal_name!(pub(crate) node_key_column, "node_key");
 internal_name!(pub(crate) node_value_column, "node_value");
+internal_name!(pub(crate) lookup_cte, "lookup");
 
 // _orbit_{alias}_pk  — always the entity's primary key (for hydration lookups)
 pub fn primary_key_column(alias: &str) -> String {

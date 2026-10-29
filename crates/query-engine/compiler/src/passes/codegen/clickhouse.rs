@@ -499,6 +499,7 @@ pub(crate) fn function_name(function: Function) -> &'static str {
         Function::ArgMax => "argMax",
         Function::ArgMaxOrNull => "argMaxOrNull",
         Function::MapFromArrays => "mapFromArrays",
+        Function::TupleConcat => "tupleConcat",
         Function::ArrayElement => "arrayElement",
         Function::RowNumberInAllBlocks => "rowNumberInAllBlocks",
     }

@@ -116,6 +116,7 @@ pub enum Function {
     ArgMax,
     ArgMaxOrNull,
     MapFromArrays,
+    TupleConcat,
     ArrayElement,
     RowNumberInAllBlocks,
 }

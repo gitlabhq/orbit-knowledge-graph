@@ -437,6 +437,7 @@ impl Context {
             | Function::ByteLength
             | Function::CountSubstrings
             | Function::MapFromArrays
+            | Function::TupleConcat
             | Function::ArrayElement
             | Function::RowNumberInAllBlocks => {
                 unreachable!("function arity checked before rendering")
