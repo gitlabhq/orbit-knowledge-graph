@@ -11,6 +11,8 @@
     "noUnusedParameters": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
     "types": ["bun"]
   },
   "include": ["core", "hooks", "opencode", "scripts", "tests", "types", "vendor"]

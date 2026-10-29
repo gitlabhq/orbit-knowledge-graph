@@ -1,4 +1,6 @@
 /*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
+import { Plugin } from "@opencode/plugin";
+
 function grepPatternOption(arg) {
   if (arg === "--regexp")
     return "separate";
@@ -548,6 +550,14 @@ function subcommandOf(words, known) {
 }
 
 /*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
+function f(o, t) {
+  let m = {};
+  for (let r = 0;r < o.length; r++) {
+    let p = o[r], i = t(p, r, o);
+    m[i] = (m[i] ?? 0) + 1;
+  }
+  return m;
+}
 function e(o, t) {
   let m = new Map;
   for (let r = 0;r < o.length; r++) {
@@ -556,6 +566,12 @@ function e(o, t) {
       m.set(i, p);
   }
   return Array.from(m.values());
+}
+function s(o, t) {
+  let m = 0;
+  for (let r = 0;r < o.length; r++)
+    m += t(o[r], r);
+  return m;
 }
 
 var NO_ENTITIES = new Set;
@@ -732,7 +748,6 @@ var labels_default = {
   }
 };
 
-var MARK = "\u25CE";
 var COMMAND_LABELS = labels_default.commands;
 var TOOL_LABELS = labels_default.tools;
 var QUERY = labels_default.commands.query;
@@ -820,9 +835,10 @@ function othersText(call) {
   const hidden = call.others.length - shown.length;
   return "  + " + shown.join(", ") + (hidden > 0 ? `, \u2026 +${hidden} more` : "");
 }
+var SHELL_TOOLS = new Set(["bash", "shell"]);
 function describeOrbitCall(tool, input, known = NO_ENTITIES) {
   const command = stringField(input, "command");
-  if (tool.toLowerCase() === "bash")
+  if (SHELL_TOOLS.has(tool.toLowerCase()))
     return command === undefined ? null : describeCommand(command, known);
   const [, server = "", name = tool] = tool.match(/^mcp__(.+?)__(.+)$/) ?? [];
   if (!/orbit|knowledge[-_]?graph|gkg/i.test(server) && !/orbit|query_graph|get_graph_schema/i.test(name))
@@ -832,17 +848,109 @@ function describeOrbitCall(tool, input, known = NO_ENTITIES) {
   return callOf(key && labelFor(TOOL_LABELS, key) || QUERY, input === undefined ? "" : entitiesOf(JSON.stringify(input), known));
 }
 
-var OrbitUiPlugin = async ({ client }) => ({
-  "tool.execute.before": async (input, output) => {
-    try {
-      const call = describeOrbitCall(input.tool, output.args);
-      if (!call)
-        return;
-      const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "") + othersText(call);
-      client.tui.showToast({ body: { message, variant: "info", duration: 2000 } }).catch(() => {});
-    } catch {}
+function parseResponse(text) {
+  const out = { nodes: 0, edges: 0, byEntity: {}, aggregated: 0, kind: "other", grouped: false };
+  const raw = text.trim().startsWith("{") ? tryJson(text) : null;
+  if (raw) {
+    const r = raw["result"] ?? raw;
+    const nodes = Array.isArray(r.nodes) ? r.nodes : [];
+    out.byEntity = f(nodes, (node) => String(node.type));
+    out.nodes = nodes.length;
+    out.edges = Array.isArray(r.edges) ? r.edges.length : 0;
+    if (Array.isArray(r.nodes))
+      out.kind = "traversal";
+    return out;
+  }
+  if (/^query_type:\s*aggregation/m.test(text)) {
+    out.kind = "aggregation";
+    out.grouped = /^group_columns\[[1-9]\d*\]/m.test(text);
+    const columns = text.split(/^columns\[\d+\](?:\{[^}]*\})?:\s*$/m)[1]?.split(/^\S/m)[0] ?? "";
+    const tabled = [...columns.matchAll(/^\s+(\w+),count,/gm)].map((m) => m[1]);
+    const listed = [...columns.matchAll(/^\s+- name:\s*(\w+)\s*\n\s+function:\s*count\b/gm)].map((m) => m[1]);
+    const counts = [...tabled, ...listed];
+    const header = text.match(/^rows\[\d+\]\{([^}]*)\}:\s*$/m);
+    if (!header || header.index === undefined || counts.length === 0)
+      return out;
+    const at = (header[1] ?? "").split(",").map((name) => counts.includes(name));
+    const rows = text.slice(header.index + header[0].length).split(/^\S/m)[0] ?? "";
+    const cells = rows.split(`
+`).flatMap((line) => line.trim().split(",").filter((cell, i) => at[i] && /^\d+$/.test(cell)));
+    out.aggregated = s(cells, Number);
+    return out;
+  }
+  if (/^query_type:\s*traversal/m.test(text))
+    out.kind = "traversal";
+  const nodeBlock = text.split(/^nodes:\s*$/m)[1]?.split(/^\S/m)[0] ?? "";
+  const sets = [...nodeBlock.matchAll(/^\s+(\w+)\[(\d+)\]\{/gm)].map(([, type = "", count = "0"]) => ({ type, count: Number(count) }));
+  for (const { type, count } of sets)
+    out.byEntity[type] = (out.byEntity[type] ?? 0) + count;
+  out.nodes = s(sets, (set) => set.count);
+  if (sets.length)
+    out.kind = "traversal";
+  out.edges = Number(text.match(/^edges\[(\d+)\]/m)?.[1] ?? 0);
+  return out;
+}
+function tryJson(text) {
+  try {
+    const value = JSON.parse(text);
+    return typeof value === "object" && value !== null ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+import { OrbitUi } from "./rpc.ts";
+function resultText(result) {
+  if (typeof result.content === "string" && result.content)
+    return result.content;
+  if (Array.isArray(result.content)) {
+    const text = result.content.flatMap((part) => part.type === "text" && typeof part.text === "string" ? [part.text] : []);
+    if (text.length)
+      return text.join(`
+`);
+  }
+  return typeof result.output === "string" ? result.output : "";
+}
+function isTruncated(result) {
+  return typeof result.output === "object" && result.output !== null && result.output.truncated === true;
+}
+function activityOf(event, state) {
+  const call = describeOrbitCall(event.tool, event.input);
+  if (!call)
+    return null;
+  const activity = {
+    key: event.id,
+    state,
+    active: call.active,
+    done: call.label,
+    detail: call.detail,
+    ...call.others?.length ? { others: othersText(call) } : {},
+    sessionID: event.sessionID
+  };
+  if (!("status" in event))
+    return activity;
+  if (event.status === "error")
+    return { ...activity, failed: true };
+  if (isTruncated(event.result))
+    return activity;
+  const counts = parseResponse(resultText(event.result));
+  return { ...activity, nodes: counts.nodes + counts.aggregated, edges: counts.edges };
+}
+var opencode_default = Plugin.define({
+  id: "orbit-ui",
+  async setup(ctx) {
+    const rpc = await ctx.rpc.register(OrbitUi, {});
+    const send = (event, state) => {
+      try {
+        const activity = activityOf(event, state);
+        if (activity)
+          rpc.events.emit("activity", activity).catch(() => {});
+      } catch {}
+    };
+    await ctx.tool.hook("execute.before", (event) => send(event, "start"));
+    await ctx.tool.hook("execute.after", (event) => send(event, "end"));
   }
 });
 export {
-  OrbitUiPlugin
+  opencode_default as default
 };

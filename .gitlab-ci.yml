@@ -418,7 +418,8 @@ agent-plugins:
     - bun run test:claude
     - bun run test:differential --count 100
     - bun run build
-    - git diff --exit-code -- ../../config/setup/agents/opencode_ui_plugin.js core/lib.js
+    - git add --intent-to-add ../../config/setup/agents/opencode_ui
+    - git diff --exit-code -- ../../config/setup/agents/opencode_ui core/lib.js
 
 generate-config-schema:
   stage: lint
