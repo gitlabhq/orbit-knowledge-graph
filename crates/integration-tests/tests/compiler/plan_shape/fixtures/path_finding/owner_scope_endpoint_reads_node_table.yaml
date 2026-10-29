@@ -13,6 +13,7 @@ logical:
 physical:
   clickhouse:
     emitted:
+      bind:
+        - (CTE $anchor (Limit 500 (Sort n.id (_))))
       expect:
-        - (CTE _nf_n (Limit 500 (_)))
         - (Scan Table(gl_note) AS n)
