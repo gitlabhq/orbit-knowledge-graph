@@ -341,9 +341,10 @@ tests:
       - { unique: fqn }
 
   # ── Cross-arm: ensure intersection class implements both ifaces ──
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "Counter implements Countable and Stringable"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Iface\Counter'
       RETURN p.fqn AS parent
     assert:

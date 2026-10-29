@@ -98,11 +98,12 @@ fixtures:
 
 tests:
   # ── Definition types ──────────────────────────────────────────
+  # corrected: contract: a Ruby module is a Module
   - name: "Module definitions exist (reopened across files)"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp'
-        AND d.language_kind = 'Class'
+        AND d.kind = 'Module'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }
@@ -129,6 +130,7 @@ tests:
       - { row_count: 1 }
 
   # corrected: instance and singleton run share the canonical Method FQN
+  # corrected: contract: Ruby def self.x is a Method with language_kind SingletonMethod
   - name: "Instance method run uses :: separator"
     query: |
       MATCH (d:Definition)
@@ -136,17 +138,18 @@ tests:
         AND d.language_kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   # corrected: instance and singleton run share the canonical Method FQN
+  # corrected: contract: Ruby def self.x is a Method with language_kind SingletonMethod
   - name: "Singleton method uses :: separator"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp::CLI::run'
-        AND d.language_kind = 'Method'
+        AND d.language_kind = 'SingletonMethod'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   # ── Containment edges ─────────────────────────────────────────
   - name: "Module defines Class"
@@ -186,10 +189,11 @@ tests:
       - { row_count: 1 }
 
   # ── attr_reader generates Attribute definitions ────────────────
+  # corrected: contract: a Ruby attribute is a Field
   - name: "attr_reader generates Attribute definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Property'
+      WHERE d.kind = 'Field'
         AND d.fqn IN ['WeatherApp::Forecast::city',
                        'WeatherApp::Forecast::temperature_c',
                        'WeatherApp::Forecast::condition',

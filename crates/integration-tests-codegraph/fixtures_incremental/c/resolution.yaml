@@ -102,10 +102,11 @@ tests:
       - { row_count: 1 }
       - { row: { fqn: "math::Vector", type: Struct } }
 
+  # corrected: contract: an enum constant is kind EnumMember
   - name: "Enum with scoped constants"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'EnumVariant'
+      WHERE d.kind = 'EnumMember'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -113,12 +114,13 @@ tests:
       - { row: { fqn: "shapes::ShapeType::RECTANGLE" } }
       - { row: { fqn: "shapes::ShapeType::TRIANGLE" } }
 
+  # corrected: contract: kind is TypeAlias for a C typedef; its language_kind is Typedef
   - name: "Typedef scoped to header"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'shapes::Shape'
-        AND d.language_kind = 'TypeAlias'
-      RETURN d.fqn AS fqn, d.language_kind AS type
+        AND d.kind = 'TypeAlias'
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "shapes::Shape", type: TypeAlias } }

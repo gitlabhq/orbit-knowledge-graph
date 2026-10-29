@@ -133,11 +133,12 @@ fixtures:
 
 tests:
   # ── Multiple constructors (overloads) ─────────────────────────
+  # corrected: contract: a constructor is kind Constructor, not Method
   - name: "Point has two constructors"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Geo.Models.Point.Point'
-        AND d.language_kind = 'Method'
+        AND d.kind = 'Constructor'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }

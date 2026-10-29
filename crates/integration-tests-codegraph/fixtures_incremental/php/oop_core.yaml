@@ -213,9 +213,10 @@ tests:
       - { row_count: 2 }
       - { unique: fqn }
 
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "Interface-extends-interface chains (multi-iface): ReadWrite extends Readable AND Writable"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Io\ReadWrite'
         AND p.fqn IN ['App\Io\Readable', 'App\Io\Writable']
       RETURN p.fqn AS parent
@@ -223,9 +224,10 @@ tests:
       - { row_count: 2 }
       - { unique: parent }
 
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "Interface extends two interfaces (one transitive): Stream -> ReadWrite, Stream -> Closable"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Io\Stream'
         AND p.fqn IN ['App\Io\ReadWrite', 'App\Io\Closable']
       RETURN p.fqn AS parent
@@ -233,9 +235,10 @@ tests:
       - { row_count: 2 }
       - { unique: parent }
 
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "Class implements interface chain root: File -> Stream"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Io\File'
         AND p.fqn = 'App\Io\Stream'
       RETURN p.fqn AS parent

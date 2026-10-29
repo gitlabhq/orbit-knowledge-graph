@@ -229,6 +229,7 @@ tests:
       - { row: { path: "src/app/default.tsx" } }
       - { row: { path: "src/app/api/items/[id]/route.ts" } }
 
+  # corrected: contract: a name the language declares const is kind Constant
   - name: Route convention exports are indexed as their real definitions
     query: |
       MATCH (file:File)-[:DEFINES]->(d:Definition)
@@ -252,9 +253,9 @@ tests:
       - { row: { fqn: "DELETE", type: "Function" } }
       - { row: { fqn: "HEAD", type: "Function" } }
       - { row: { fqn: "OPTIONS", type: "Function" } }
-      - { row: { fqn: "runtime", type: "Variable" } }
-      - { row: { fqn: "dynamic", type: "Variable" } }
-      - { row: { fqn: "revalidate", type: "Variable" } }
+      - { row: { fqn: "runtime", type: "Constant" } }
+      - { row: { fqn: "dynamic", type: "Constant" } }
+      - { row: { fqn: "revalidate", type: "Constant" } }
 
   - name: Next jsconfig baseUrl paths aliases and barrels resolve imports
     query: |

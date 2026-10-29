@@ -69,10 +69,11 @@ tests:
       - { row: { name: "outer" } }
 
   # corrected: impl wrappers are containers; the nested local inner is a definition
+  # corrected: contract: an impl block is not a definition row
   - name: "Total definitions from defs.lua"
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path ENDS WITH 'defs.lua' AND d.language_kind <> 'Impl'
+      WHERE d.file_path ENDS WITH 'defs.lua'
       RETURN d.name AS name
     assert:
       - { row_count: 7 }

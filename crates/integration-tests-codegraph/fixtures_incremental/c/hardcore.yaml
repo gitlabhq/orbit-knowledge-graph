@@ -169,10 +169,11 @@ tests:
       - { row: { fqn: "list::ListNode" } }
       - { row: { fqn: "list::List" } }
 
+  # corrected: contract: kind is TypeAlias for a C typedef; its language_kind is Typedef
   - name: "Exact typedef count"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'TypeAlias'
+      WHERE d.kind = 'TypeAlias'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }
@@ -350,10 +351,11 @@ tests:
   # ENUM SCOPING
   # ══════════════════════════════════════════════════════════════
 
+  # corrected: contract: an enum constant is kind EnumMember
   - name: "ErrorCode enum constants with full scope"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'EnumVariant'
+      WHERE d.kind = 'EnumMember'
         AND d.fqn STARTS WITH 'error::ErrorCode::'
       RETURN d.fqn AS fqn
     assert:

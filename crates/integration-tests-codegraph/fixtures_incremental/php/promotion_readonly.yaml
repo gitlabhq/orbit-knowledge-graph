@@ -215,10 +215,11 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: __construct is kind Constructor
   - name: "Methods on readonly class Money carry class-scoped FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Method'
+      WHERE d.kind IN ['Method', 'Constructor']
         AND d.fqn IN ['App\Domain\Money\__construct',
                       'App\Domain\Money\add',
                       'App\Domain\Money\scale']
@@ -352,10 +353,11 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: __construct is kind Constructor
   - name: "Point.__construct and methods present on readonly class with promoted floats"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Method'
+      WHERE d.kind IN ['Method', 'Constructor']
         AND d.fqn IN ['App\Geometry\Point\__construct',
                       'App\Geometry\Point\magnitude',
                       'App\Geometry\Vector\__construct',

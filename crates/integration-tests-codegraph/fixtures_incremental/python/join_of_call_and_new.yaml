@@ -43,17 +43,19 @@ fixtures:
           x.bar()
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: a call result joined with a constructor result reaches both bar methods
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|INSTANTIATES]->(t:Definition)
       WHERE c.name = 'call_then_new'
       RETURN t.fqn AS callee
     assert:
       - { column_values: { field: callee, values: ["main.Foo2", "main.Foo2.bar", "main.Foo.bar", "main.make"] } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: the join order does not matter
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|INSTANTIATES]->(t:Definition)
       WHERE c.name = 'new_then_call'
       RETURN t.fqn AS callee
     assert:
@@ -67,9 +69,10 @@ tests:
     assert:
       - { column_values: { field: callee, values: ["main.Foo.bar", "main.make"] } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: two constructor results still reach both bar methods
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|INSTANTIATES]->(t:Definition)
       WHERE c.name = 'new_only'
       RETURN t.fqn AS callee
     assert:

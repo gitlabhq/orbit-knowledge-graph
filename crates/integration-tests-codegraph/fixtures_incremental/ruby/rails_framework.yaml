@@ -99,14 +99,23 @@ tests:
       - { row_count: 1 }
       - { row: { name: ApplicationRecord } }
 
+  # corrected: contract: Post.new creates an instance and is INSTANTIATES; a class method call such as ApplicationRecord.find is not
   - name: Rails method spellings do not block project definitions
-    query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
-      WHERE caller.fqn = 'Loader::run'
-      RETURN target.fqn AS name
-    assert:
-      - { row_count: 5 }
-      - { column_values: { field: name, values: [ApplicationRecord, "ApplicationRecord::find", "ApplicationRecord::create", Post, "Post::run"] } }
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.fqn = 'Loader::run'
+          RETURN target.fqn AS name
+        assert:
+          - { row_count: 3 }
+          - { column_values: { field: name, values: ["ApplicationRecord::find", "ApplicationRecord::create", "Post::run"] } }
+      - query: |
+          MATCH (caller:Definition)-[:INSTANTIATES]->(target:Definition)
+          WHERE caller.fqn = 'Loader::run'
+          RETURN target.fqn AS name
+        assert:
+          - { row_count: 1 }
+          - { column_values: { field: name, values: [Post] } }
 
   - name: Application render method resolves
     query: |

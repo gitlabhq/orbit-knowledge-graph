@@ -72,9 +72,10 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main.builder_caller", callee: "main.Builder.build" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "D26: mixed_caller calls MyClass (instantiation)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'mixed_caller' AND callee.name = 'MyClass'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -99,9 +100,10 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main.mixed_caller", callee: "main.my_function" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "D28: callable_caller calls Callable (instantiation)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'callable_caller' AND callee.name = 'Callable'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

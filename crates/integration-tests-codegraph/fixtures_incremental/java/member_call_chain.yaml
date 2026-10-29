@@ -8,10 +8,11 @@ fixtures:
       - ";\n    }\n}\n"
 
 tests:
+  # corrected: contract: one edge row per source, target, and kind; each use is a line of that row
   - name: "every call of the chain calls B.b"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'f' AND callee.name = 'b'
       RETURN count(callee) AS n
     assert:
-      - { count_equals: { field: n, value: 4000 } }
+      - { count_equals: { field: n, value: 1 } }

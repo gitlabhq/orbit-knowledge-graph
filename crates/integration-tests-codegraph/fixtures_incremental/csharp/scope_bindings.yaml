@@ -69,9 +69,10 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "Sibling blocks and field shadows retain their own targets"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'run'
       RETURN caller.file_path AS file, callee.name AS target
     assert:

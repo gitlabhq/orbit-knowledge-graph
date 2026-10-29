@@ -40,19 +40,21 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a type named in a declaration (parameter, return, field, local, instanceof, permits) is USES_TYPE; contract: a callable that belongs to a type is kind Method
   - name: a call on a receiver with a property and a function of the same name targets the function
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|USES_TYPE]->(t:Definition)
       WHERE c.name = 'use'
       RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 2 }
       - { column_values: { field: callee, values: ["Samples", "Samples.size"] } }
-      - { column_values: { field: kind, values: ["Class", "Function"] } }
+      - { column_values: { field: kind, values: ["Class", "Method"] } }
 
+  # corrected: contract: a type named in a declaration (parameter, return, field, local, instanceof, permits) is USES_TYPE
   - name: a call on a property of function type keeps the property as its target
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|USES_TYPE]->(t:Definition)
       WHERE c.name = 'propertyValue'
       RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
@@ -60,9 +62,10 @@ tests:
       - { column_values: { field: callee, values: ["Handlers", "Handlers.run"] } }
       - { column_values: { field: language_kind, values: ["Class", "Property"] } }
 
+  # corrected: contract: a member read without a call is USES_VALUE
   - name: a property read keeps the property as its target
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:USES_VALUE]->(t:Definition)
       WHERE c.name = 'readProperty' AND t.name = 'size'
       RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:

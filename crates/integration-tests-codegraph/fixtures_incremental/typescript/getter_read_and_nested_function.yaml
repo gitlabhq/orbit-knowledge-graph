@@ -23,14 +23,23 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a member read without a call is USES_VALUE
   - name: the getter read and the hoisted call resolve
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'report'
       RETURN t.name AS callee
     assert:
-      - { row: { callee: "severity" } }
       - { row: { callee: "helper" } }
+
+  # corrected: contract: a member read without a call is USES_VALUE
+  - name: the getter read is a value use
+    query: |
+      MATCH (c:Definition)-[:USES_VALUE]->(t:Definition)
+      WHERE c.name = 'report'
+      RETURN t.name AS callee
+    assert:
+      - { row: { callee: "severity" } }
 
   - name: a call in a function-typed field's arrow initializer links from the property
     query: |
@@ -40,10 +49,11 @@ tests:
     assert:
       - { row: { callee: "notify" } }
 
+  # corrected: contract: a get or set accessor is kind Field with language_kind Property
   - name: a private getter drops the hash like the other methods
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'widget.ts' AND d.language_kind = 'Method'
+      WHERE d.file_path = 'widget.ts' AND d.language_kind = 'Property'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

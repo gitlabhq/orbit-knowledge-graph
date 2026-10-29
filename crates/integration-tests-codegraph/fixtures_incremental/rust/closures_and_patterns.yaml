@@ -67,9 +67,10 @@ tests:
       - { row_count: 1 }
       - { column_values: { field: callee, values: ["apply"] } }
 
+  # corrected: contract: a call that creates an instance of a type or an enum member is INSTANTIATES
   - name: process calls double, area, and Circle
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'process'
       RETURN callee.name AS callee
       ORDER BY callee

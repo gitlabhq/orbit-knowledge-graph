@@ -31,10 +31,11 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "cross-file: factory.createService().findUser() resolves through return type"
     queries:
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'com.example.App'
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
           ORDER BY callee
@@ -44,7 +45,7 @@ tests:
           - { row: { callee: "findUser", callee_fqn: "com.example.UserService.findUser" } }
       # no false positive to deleteUser
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'com.example.App'
             AND callee.name = 'deleteUser'
           RETURN callee.name

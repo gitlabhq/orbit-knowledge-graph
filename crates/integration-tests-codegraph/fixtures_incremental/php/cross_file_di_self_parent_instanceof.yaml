@@ -119,18 +119,20 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a supertype that is an interface is IMPLEMENTS
   - name: "Cross-file interface implementation: FileLogger implements LoggerInterface"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:IMPLEMENTS]->(parent:Definition)
       WHERE child.fqn = 'App\Logging\FileLogger'
         AND parent.fqn = 'App\Logging\LoggerInterface'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a supertype that is a trait is IMPLEMENTS; a PHP trait use is IMPLEMENTS
   - name: "Cross-file trait use: UserController uses Timestamped"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:IMPLEMENTS]->(parent:Definition)
       WHERE child.fqn = 'App\Http\UserController'
         AND parent.fqn = 'App\Support\Timestamped'
       RETURN child.fqn AS child
@@ -173,36 +175,40 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "new static() resolves to the declaring class: DomainException.generic -> DomainException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\DomainException\generic'
         AND callee.fqn = 'App\Domain\DomainException'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "new static() resolves to the declaring class: NotFoundException.forId -> NotFoundException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\forId'
         AND callee.fqn = 'App\Domain\NotFoundException'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "new self() resolves to the declaring class: NotFoundException.rebuild -> NotFoundException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\rebuild'
         AND callee.fqn = 'App\Domain\NotFoundException'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "new parent() resolves to the declared super: NotFoundException.rebuild -> DomainException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\rebuild'
         AND callee.fqn = 'App\Domain\DomainException'
       RETURN caller.fqn AS caller

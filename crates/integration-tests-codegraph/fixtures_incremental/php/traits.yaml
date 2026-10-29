@@ -254,9 +254,10 @@ tests:
       - { row_count: 1 }
 
   # ── Inheritance via `use Trait;` (Extends edges) ──────────────────
+  # corrected: contract: a supertype that is a trait is IMPLEMENTS; a PHP trait use is IMPLEMENTS
   - name: "Multiple traits in one use: Product uses both Loggable and Cacheable"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product'
         AND p.fqn IN ['App\Concerns\Loggable', 'App\Concerns\Cacheable']
       RETURN p.fqn AS parent
@@ -264,18 +265,20 @@ tests:
       - { row_count: 2 }
       - { unique: parent }
 
+  # corrected: contract: a supertype that is a trait is IMPLEMENTS; a PHP trait use is IMPLEMENTS
   - name: "Trait composed of trait: Composer uses Base"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Concerns\Composer'
         AND p.fqn = 'App\Concerns\Base'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a supertype that is a trait is IMPLEMENTS; a PHP trait use is IMPLEMENTS
   - name: "Conflict-resolution use still emits Extends for both traits"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:IMPLEMENTS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Speaker'
         AND p.fqn IN ['App\Speakers\Left', 'App\Speakers\Right']
       RETURN p.fqn AS parent

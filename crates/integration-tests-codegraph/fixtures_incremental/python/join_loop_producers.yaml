@@ -63,49 +63,55 @@ fixtures:
           x.m()
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: a loop variable over three constructors reaches all three methods
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|INSTANTIATES]->(t:Definition)
       WHERE c.name = 'loop_over_constructors'
       RETURN t.fqn AS callee
     assert:
       - { column_values: { field: callee, values: ["main.A", "main.A.m", "main.B", "main.B.m", "main.C", "main.C.m"] } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: a receiver reassigned in a loop body reaches both methods
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|INSTANTIATES]->(t:Definition)
       WHERE c.name = 'loop_reassigned'
       RETURN t.fqn AS callee
     assert:
       - { column_values: { field: callee, values: ["main.A.m", "main.B", "main.B.m", "main.make"] } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: a receiver behind a join in a loop body reaches the loop-carried producers too
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|INSTANTIATES]->(t:Definition)
       WHERE c.name = 'loop_shadow_join'
       RETURN t.fqn AS callee
     assert:
       - { column_values: { field: callee, values: ["main.A.m", "main.B", "main.B.m", "main.C", "main.C.m", "main.make"] } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: a loop target without an element type hides the value assigned before the loop
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|INSTANTIATES]->(t:Definition)
       WHERE c.name = 'loop_target_shadows'
       RETURN t.fqn AS callee
     assert:
       - { column_values: { field: callee, values: ["main.A"] } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: a loop variable over an expression list of constructors reaches both methods
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|INSTANTIATES]->(t:Definition)
       WHERE c.name = 'loop_over_expression_list'
       RETURN t.fqn AS callee
     assert:
       - { column_values: { field: callee, values: ["main.A", "main.A.m", "main.B", "main.B.m"] } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: three producers reach all three methods
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|INSTANTIATES]->(t:Definition)
       WHERE c.name = 'three_producers'
       RETURN t.fqn AS callee
     assert:

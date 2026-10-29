@@ -198,9 +198,10 @@ tests:
       - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Models.Dog.Fetch } }
 
   # ── Constructor CALLS edge ────────────────────────────────────
-  - name: "new Dog() in Program.Run produces CALLS to Dog class"
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
+  - name: "new Dog() in Program.Run produces INSTANTIATES to Dog class"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
         AND callee.fqn = 'Zoo.Models.Dog'
       RETURN caller.fqn AS caller, callee.fqn AS callee

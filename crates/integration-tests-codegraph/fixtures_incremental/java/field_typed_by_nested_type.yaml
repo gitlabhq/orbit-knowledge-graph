@@ -21,9 +21,10 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a type named in a declaration (parameter, return, field, local, instanceof, permits) is USES_TYPE
   - name: the field references the nested enum
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:USES_TYPE]->(t:Definition)
       WHERE c.name = 't' AND t.name = 'ClientType'
       RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:

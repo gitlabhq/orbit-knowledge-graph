@@ -62,9 +62,10 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a call that creates an instance of a type or an enum member is INSTANTIATES
   - name: "calls through a wildcard use in a loop body link"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name IN ['wraps', 'helps']
       RETURN caller.name AS caller, callee.name AS callee
       ORDER BY caller
@@ -73,9 +74,10 @@ tests:
       - { row: { caller: helps, callee: help } }
       - { row: { caller: wraps, callee: Wrap } }
 
+  # corrected: contract: a call that creates an instance of a type or an enum member is INSTANTIATES
   - name: "a wildcard use in a loop does not hide names that it cannot bind"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'keeps_outer_names'
       RETURN callee.name AS callee
       ORDER BY callee
@@ -85,9 +87,10 @@ tests:
       - { row: { callee: local } }
       - { row: { callee: other } }
 
+  # corrected: contract: a call that creates an instance of a type or an enum member is INSTANTIATES
   - name: "a local named like a def in another module keeps its value in the loop"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'shadows_a_module_def'
       RETURN callee.name AS callee
       ORDER BY callee

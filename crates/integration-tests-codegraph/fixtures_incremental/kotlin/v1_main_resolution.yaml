@@ -4,9 +4,10 @@ fixture_tree: kotlin_v1
 tests:
   # ── K1: test_kotlin_reference_resolution_main_function_calls ──
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "main -> Foo (constructor)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.main'
         AND callee.fqn = 'com.example.foo.Foo'
       RETURN caller.fqn AS caller, callee.fqn AS callee

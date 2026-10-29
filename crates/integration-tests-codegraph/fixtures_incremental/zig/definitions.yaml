@@ -96,6 +96,7 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Variable" } }
 
+  # corrected: contract: a function declared in a type is a Method
   - name: Point.init is scoped under Point FQN
     query: |
       MATCH (d:Definition)
@@ -103,7 +104,7 @@ tests:
       RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { name: "init", type: "Function" } }
+      - { row: { name: "init", type: "Method" } }
 
   - name: Point.normSquared is scoped under Point FQN
     query: |
@@ -114,29 +115,31 @@ tests:
       - { row_count: 1 }
       - { row: { name: "normSquared" } }
 
+  # corrected: contract: a Zig test block is a Test
   - name: Named test block is indexed with its string name
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.name = 'point init works'
+      WHERE d.kind = 'Test' AND d.name = 'point init works'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
       - { row: { name: "point init works" } }
 
   # corrected: an anonymous test block is indexed under the name test
+  # corrected: contract: a Zig test block is a Test
   - name: Anonymous test block is indexed with a synthesized name
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.name = 'test'
+      WHERE d.kind = 'Test' AND d.name = 'test'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
 
-  # corrected: tests display as the canonical Function
+  # corrected: contract: a Zig test block is a Test
   - name: Both named and anonymous test blocks are indexed
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.name IN ['point init works', 'test']
+      WHERE d.kind = 'Test' AND d.name IN ['point init works', 'test']
       RETURN d.name AS name
     assert:
       - { row_count: 2 }

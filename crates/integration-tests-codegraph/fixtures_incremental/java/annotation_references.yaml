@@ -34,27 +34,30 @@ fixtures:
       public @interface Traceable {}
 
 tests:
+  # corrected: contract: an annotation use is ANNOTATED_BY
   - name: "Explicit annotation imports retain their declared symbol"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(symbol:Import)
+      MATCH (caller:Definition)-[:ANNOTATED_BY]->(symbol:Import)
       WHERE caller.fqn = 'com.example.Traceable'
       RETURN symbol.import_path AS path, symbol.name AS name
     assert:
       - { row_count: 1 }
       - { row: { path: "java.lang.annotation", name: Target } }
 
+  # corrected: contract: an annotation use is ANNOTATED_BY
   - name: Annotation ref attributed to the annotated method
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:ANNOTATED_BY]->(callee:Definition)
       WHERE caller.name = 'annotatedMethod'
       RETURN callee.name AS callee
     assert:
       - { row: { callee: "MyAnnotation" } }
       - { not: true, row: { callee: "OtherAnnotation" } }
 
+  # corrected: contract: an annotation use is ANNOTATED_BY
   - name: Each method references its own annotation
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:ANNOTATED_BY]->(callee:Definition)
       WHERE caller.name = 'otherMethod'
       RETURN callee.name AS callee
     assert:

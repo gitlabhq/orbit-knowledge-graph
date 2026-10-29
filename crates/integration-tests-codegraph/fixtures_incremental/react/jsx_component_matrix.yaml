@@ -135,6 +135,7 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a name the language declares const is kind Constant
   - name: React component definitions are extracted across TSX files
     query: |
       MATCH (d:Definition)
@@ -175,7 +176,7 @@ tests:
       - { row: { file_path: "src/components/card.tsx", fqn: "CardFooter", type: "Function" } }
       - { row: { file_path: "src/components/icons.tsx", fqn: "StatusIcon", type: "Function" } }
       - { row: { file_path: "src/components/icons.tsx", fqn: "WarningIcon", type: "Function" } }
-      - { row: { file_path: "src/components/icons.tsx", fqn: "Icons", type: "Variable" } }
+      - { row: { file_path: "src/components/icons.tsx", fqn: "Icons", type: "Constant" } }
       - { row: { file_path: "src/Home.tsx", fqn: "Home", type: "Function" } }
       - { row: { file_path: "src/Home.tsx", fqn: "Panel", type: "Function" } }
       - { row: { file_path: "src/Home.tsx", fqn: "FragmentHost", type: "Function" } }
@@ -294,6 +295,7 @@ tests:
     assert:
       - { empty: true }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES; a JSX element of a class component creates an instance
   - name: Cross-file JSX calls resolve from default component internals
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -301,10 +303,19 @@ tests:
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY callee
     assert:
-      - { row_count: 3 }
+      - { row_count: 2 }
       - { row: { caller: "Card", callee_file: "src/components/button.tsx", callee: "Button" } }
-      - { row: { caller: "Card", callee_file: "src/components/button.tsx", callee: "ClassBadge" } }
       - { row: { caller: "Card", callee_file: "src/components/button.tsx", callee: "IconButton" } }
+
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES; a JSX element of a class component creates an instance
+  - name: Cross-file JSX of a class component is an instantiation
+    query: |
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
+      WHERE caller.fqn = 'Card'
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "Card", callee_file: "src/components/button.tsx", callee: "ClassBadge" } }
 
   - name: Local JSX calls inside the same TSX file still resolve
     query: |

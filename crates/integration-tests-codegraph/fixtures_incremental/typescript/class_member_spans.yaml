@@ -31,6 +31,7 @@ fixtures:
         describe(): string { return 'shape'; } }
 
 tests:
+  # corrected: contract: a get or set accessor is kind Field with language_kind Property; static is a modifier, not a kind
   - name: Regular, private, accessor, static, and abstract methods are all extracted
     query: |
       MATCH (d:Definition)
@@ -39,9 +40,9 @@ tests:
     assert:
       - { row_count: 6 }
       - { row: { fqn: "Shape::secret", dt: "Method", sl: 4, el: 6 } }
-      - { row: { fqn: "Shape::area", dt: "Method", sl: 8, el: 10 } }
-      - { row: { fqn: "Shape::area", dt: "Method", sl: 12, el: 14 } }
-      - { row: { fqn: "Shape::origin", dt: "StaticMethod", sl: 16, el: 18 } }
+      - { row: { fqn: "Shape::area", dt: "Property", sl: 8, el: 10 } }
+      - { row: { fqn: "Shape::area", dt: "Property", sl: 12, el: 14 } }
+      - { row: { fqn: "Shape::origin", dt: "Method", sl: 16, el: 18 } }
       - { row: { fqn: "Shape::perimeter", dt: "Method", sl: 22, el: 22 } }
       - { row: { fqn: "Shape::describe", dt: "Method", sl: 24, el: 24 } }
 

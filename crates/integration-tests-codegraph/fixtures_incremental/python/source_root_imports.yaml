@@ -177,27 +177,30 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "Poetry-style package import resolves"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'src.poetry.console.application.build_application'
         AND callee.fqn = 'src.poetry.factory.Factory'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "Prefect-style nested package import resolves"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'src.prefect.task_runners.emit_task_event'
         AND callee.fqn = 'src.prefect.events.schemas.events.Event'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "Prefect-style aliased nested package import resolves"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'src.prefect.task_engine.build_prefect_event'
         AND callee.fqn = 'src.prefect.events.schemas.events.Event'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -213,9 +216,10 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "nested src source root import resolves"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'apps.orion.src.orion.service.boot_worker'
         AND callee.fqn = 'apps.orion.src.orion.worker.Worker'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -272,18 +276,20 @@ tests:
         assert:
           - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "unique cross-root import from a test file binds the vendored definition"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'tests.test_vendor_client.test_client'
         AND callee.fqn = 'vendor.sdk.client.Client'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "unique cross-root import between roots binds the vendored definition"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'src.external_client.build_external_client'
         AND callee.fqn = 'vendor.sdk.client.Client'
       RETURN caller.fqn AS caller, callee.fqn AS callee

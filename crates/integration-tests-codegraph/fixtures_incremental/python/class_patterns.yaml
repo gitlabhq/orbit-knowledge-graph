@@ -32,9 +32,10 @@ fixtures:
               self.parent_method()
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: MyClass instantiation exists
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'test_instantiation' AND callee.name = 'MyClass'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

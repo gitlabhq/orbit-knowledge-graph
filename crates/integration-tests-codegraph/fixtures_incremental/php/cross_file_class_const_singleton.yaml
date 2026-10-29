@@ -68,18 +68,20 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "new self() singleton resolves to declaring class: Container.instance -> Container"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'App\Di\Container\instance'
         AND callee.fqn = 'App\Di\Container'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "new static() late static binding resolves to declaring class: ScopedContainer.build -> ScopedContainer"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'App\Di\ScopedContainer\build'
         AND callee.fqn = 'App\Di\ScopedContainer'
       RETURN caller.fqn AS caller

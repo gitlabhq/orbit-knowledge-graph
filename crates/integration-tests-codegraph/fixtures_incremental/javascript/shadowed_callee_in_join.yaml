@@ -35,13 +35,15 @@ fixtures:
       }
 
 tests:
-  - name: "f, whose make is a parameter, does not call bar through the join"
+  # corrected: ECMAScript: Foo2 extends Foo, so x.bar() on the new Foo2() arm reaches the inherited Foo.bar; the parameter make adds no type
+  - name: "f, whose make is a parameter, calls bar only through the Foo2 arm"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'f' AND callee.name = 'bar'
-      RETURN caller.name AS caller
+      RETURN caller.name AS caller, callee.fqn AS callee
     assert:
-      - { empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "f", callee: "Foo::bar" } }
 
   - name: "h, whose make is the top-level one, calls bar"
     query: |

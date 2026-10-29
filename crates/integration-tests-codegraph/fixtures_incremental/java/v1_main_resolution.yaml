@@ -131,9 +131,10 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: an annotation use is ANNOTATED_BY
   - name: "Main.main -> Traceable annotation"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.app.Traceable'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -141,9 +142,10 @@ tests:
       - { row_count: 1 }
       - { row: { caller: com.example.app.Main.main, callee: com.example.app.Traceable } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "Main constructor -> new Foo()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.Main'
         AND callee.fqn = 'com.example.app.Foo'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -170,9 +172,10 @@ tests:
       - { row_count: 1 }
       - { row: { caller: com.example.app.Main.main, callee: com.example.app.Bar.baz } }
 
+  # corrected: contract: a type named in a declaration (parameter, return, field, local, instanceof, permits) is USES_TYPE
   - name: "Main.main -> Bar (instanceof type ref)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:USES_TYPE]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.app.Bar'
       RETURN callee.fqn AS callee
@@ -228,9 +231,10 @@ tests:
       - { row_count: 1 }
       - { row: { caller: com.example.app.Main.main, callee: com.example.util.Outer.outerMethod } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "Main.main -> Outer.Inner (nested class constructor)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.util.Outer.Inner'
       RETURN caller.fqn AS caller, callee.fqn AS callee

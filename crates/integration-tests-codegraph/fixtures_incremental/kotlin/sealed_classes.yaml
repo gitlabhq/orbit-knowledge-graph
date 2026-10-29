@@ -39,6 +39,7 @@ tests:
       - { row_count: 1 }
       - { row: { name: "Expr", type: "Interface" } }
 
+  # corrected: contract: a callable that belongs to a type is kind Method
   - name: "Sealed-interface method declaration eval() is extracted"
     query: |
       MATCH (d:Definition)
@@ -46,7 +47,7 @@ tests:
       RETURN d.kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Function" } }
+      - { row: { type: "Method" } }
 
   - name: "data-class subclass Const is extracted as a DataClass"
     query: |
@@ -75,7 +76,8 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Class" } }
 
-  - name: "Each subclass overrides eval() as a Function definition"
+  # corrected: contract: a callable that belongs to a type is kind Method
+  - name: "Each subclass overrides eval() as a Method definition"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN [
@@ -83,13 +85,14 @@ tests:
           'com.example.sealed.Add.eval',
           'com.example.sealed.Zero.eval'
         ]
-        AND d.language_kind = 'Function'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:
       - { row_count: 3 }
       - { unique: fqn }
 
+  # corrected: contract: a callable that belongs to a type is kind Method
   - name: "Each subclass defines its overriding eval() via a Defines edge"
     query: |
       MATCH (c:Definition)-[e:DEFINES]->(m:Definition)
@@ -98,7 +101,7 @@ tests:
           'com.example.sealed.Add',
           'com.example.sealed.Zero'
         ]
-        AND m.language_kind = 'Function'
+        AND m.kind = 'Method'
       RETURN m.fqn AS fqn
       ORDER BY m.fqn
     assert:
@@ -121,6 +124,7 @@ tests:
       - { row_count: 4 }
       - { unique: fqn }
 
+  # corrected: contract: a data class and an object are kind Class; their language_kind is DataClass or Object
   - name: "Sealed interface Expr is not misclassified as a DataClass"
     query: |
       MATCH (d:Definition)
@@ -129,7 +133,7 @@ tests:
           'com.example.sealed.Const',
           'com.example.sealed.Add'
         ]
-        AND d.language_kind = 'Class'
+        AND d.kind = 'Class'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:

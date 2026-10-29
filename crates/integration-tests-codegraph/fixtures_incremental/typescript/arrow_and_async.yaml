@@ -23,11 +23,12 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a named arrow function is kind Function with language_kind ArrowFunction
   - name: Arrow functions and async functions extracted
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.ts'
-        AND d.language_kind = 'Function'
+        AND d.kind = 'Function'
       RETURN d.name AS name
       ORDER BY name
     assert:

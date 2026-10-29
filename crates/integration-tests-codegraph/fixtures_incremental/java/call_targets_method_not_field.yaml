@@ -54,9 +54,10 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a type named in a declaration (parameter, return, field, local, instanceof, permits) is USES_TYPE
   - name: a call on a receiver with a field and a method of the same name targets the method
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:CALLS|USES_TYPE]->(t:Definition)
       WHERE c.name = 'use'
       RETURN t.fqn AS callee, t.kind AS kind
     assert:
@@ -64,18 +65,20 @@ tests:
       - { column_values: { field: callee, values: ["Main.Converter", "Main.Converter.reverse", "Main.SampleElements", "Main.SampleElements.e4"] } }
       - { column_values: { field: kind, values: ["Class", "Method"] } }
 
+  # corrected: contract: a member read without a call is USES_VALUE
   - name: a field read keeps the field as its target
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:USES_VALUE]->(t:Definition)
       WHERE c.name = 'readField' AND t.name = 'e4'
       RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Main.SampleElements.e4", language_kind: "Field" } }
 
+  # corrected: contract: a member read without a call is USES_VALUE
   - name: a field read with the method declared first keeps the field as its target
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:USES_VALUE]->(t:Definition)
       WHERE c.name = 'readLate' AND t.name = 'e4'
       RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:

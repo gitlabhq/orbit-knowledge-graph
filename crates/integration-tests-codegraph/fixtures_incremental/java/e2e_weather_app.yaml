@@ -111,11 +111,12 @@ fixtures:
 
 tests:
   # ── Definition types: enum and record ─────────────────────────
+  # corrected: contract: a record is kind Class with language_kind Record
   - name: "Record definition type"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.weather.model.Forecast'
-        AND d.language_kind = 'Class'
+        AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

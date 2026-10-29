@@ -76,10 +76,11 @@ fixtures:
           return Widget()
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "named relative re-export through __init__ binds the caller to the definition"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
           WHERE caller.fqn = 'app.consumer.build'
             AND callee.fqn = 'app.registry.base.BaseRegistry'
           RETURN caller.fqn AS caller
@@ -102,18 +103,20 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "two-dot relative re-export in a nested __init__ climbs to the parent package"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'proj.sub.caller.make_engine'
         AND callee.fqn = 'proj.core.Engine'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: "one-dot relative import in a regular module still resolves (no regression)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:INSTANTIATES]->(callee:Definition)
       WHERE caller.fqn = 'reg.pkg.mod.use_thing'
         AND callee.fqn = 'reg.pkg.thing.Thing'
       RETURN caller.fqn AS caller

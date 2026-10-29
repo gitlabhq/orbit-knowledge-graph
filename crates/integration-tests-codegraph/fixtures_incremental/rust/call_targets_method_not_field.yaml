@@ -117,9 +117,10 @@ tests:
       - { column_values: { field: callee, values: ["buf::Buf::len"] } }
       - { column_values: { field: kind, values: ["Method"] } }
 
+  # corrected: contract: a member read without a call is USES_VALUE
   - name: a same-file field read keeps the field as its target
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:USES_VALUE]->(t:Definition)
       WHERE c.name = 'same_file_read'
       RETURN t.fqn AS callee, t.kind AS kind
     assert:

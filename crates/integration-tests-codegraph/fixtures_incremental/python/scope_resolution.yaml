@@ -55,11 +55,12 @@ tests:
       - { row_count: 1 }
       - { row: { fqn: "main.global_func" } }
 
+  # corrected: contract: one edge row per source, target, and kind; lines holds every use
   - name: Calls in try/except/finally resolve
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'try_caller' AND callee.name = 'global_func'
       RETURN callee.fqn AS fqn
     assert:
-      - { row_count: 3 }
+      - { row_count: 1 }
       - { row: { fqn: "main.global_func" } }

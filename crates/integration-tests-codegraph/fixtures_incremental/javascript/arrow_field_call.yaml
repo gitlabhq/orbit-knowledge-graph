@@ -33,6 +33,7 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a class field is kind Field; language_kind Property only where the language calls it a property
   - name: a call on an arrow field keeps the field as its target
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
@@ -40,8 +41,9 @@ tests:
       RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Widget::handler", language_kind: "Property" } }
+      - { row: { callee: "Widget::handler", language_kind: "Field" } }
 
+  # corrected: contract: a class field is kind Field; language_kind Property only where the language calls it a property
   - name: an arrow field shadows the prototype method of the same name
     # Known gap: the engine prefers the method; in JavaScript the own property set in the constructor wins.
     skip: true
@@ -51,4 +53,4 @@ tests:
       RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Pair::x", language_kind: "Property" } }
+      - { row: { callee: "Pair::x", language_kind: "Field" } }

@@ -65,6 +65,7 @@ tests:
       - { row_count: 1 }
       - { row: { src: "src/api.rs", tgt: "src/util.rs" } }
 
+  # corrected: contract: a Rust function in an impl or trait block is kind Method; without a self parameter its language_kind is AssociatedFunction
   - name: "only the explicit constructor call resolves; the macro adds no constructor edge"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -72,7 +73,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "Function" } }
+      - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "Method" } }
 
   - name: "execute -> Worker::run resolves with inferred receiver type"
     query: |

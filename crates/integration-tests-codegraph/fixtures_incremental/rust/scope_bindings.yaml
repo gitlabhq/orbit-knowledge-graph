@@ -179,9 +179,10 @@ tests:
     assert:
       - { empty: true }
 
+  # corrected: contract: a call that creates an instance of a type or an enum member is INSTANTIATES
   - name: "Each scope retains the correct outer binding"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'run'
       RETURN caller.file_path AS file, callee.name AS target
     assert:

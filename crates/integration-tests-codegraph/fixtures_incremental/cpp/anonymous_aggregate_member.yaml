@@ -22,9 +22,10 @@ fixtures:
       }
 
 tests:
+  # corrected: contract: a member read without a call is USES_VALUE
   - name: a member read through a receiver targets the field, not the local struct of its name declared earlier
     query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      MATCH (c:Definition)-[:USES_VALUE]->(t:Definition)
       WHERE c.name = 'copy' AND t.name = 'u'
       RETURN t.fqn AS callee, t.kind AS kind
     assert:

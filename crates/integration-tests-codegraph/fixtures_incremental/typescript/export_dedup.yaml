@@ -33,15 +33,17 @@ tests:
       - { row: { imported: Widget, name: "Widget", file: "lib/widget.ts", type: Interface } }
       - { row: { imported: WidgetImpl, name: "WidgetImpl", file: "lib/widget.ts", type: Class } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: Barrel consumer calls only the concrete constructor
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      MATCH (caller:Definition)-[:INSTANTIATES]->(target:Definition)
       WHERE caller.file_path = 'consumer.ts'
       RETURN target.name AS name, target.file_path AS file
     assert:
       - { row_count: 1 }
       - { row: { name: WidgetImpl, file: "lib/widget.ts" } }
 
+  # corrected: contract: a name the language declares const is kind Constant
   - name: Each exported local symbol is a single definition row
     query: |
       MATCH (d:Definition)
@@ -51,7 +53,7 @@ tests:
       ORDER BY name
     assert:
       - { row_count: 6 }
-      - { row: { name: "VERSION", fqn: "VERSION", type: "Variable" } }
+      - { row: { name: "VERSION", fqn: "VERSION", type: "Constant" } }
       - { row: { name: "Widget", fqn: "Widget", type: "Interface" } }
       - { row: { name: "WidgetImpl", fqn: "WidgetImpl", type: "Class" } }
       - { row: { name: "bootstrap", fqn: "bootstrap", type: "Function" } }

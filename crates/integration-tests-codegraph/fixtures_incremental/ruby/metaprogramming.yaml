@@ -138,15 +138,16 @@ fixtures:
       end
 
 tests:
+  # corrected: contract: a Ruby attribute is a Field
   - name: "attr_accessor generates synthetic defs"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN ['Model::name', 'Model::email']
-      RETURN d.fqn AS fqn, d.language_kind AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 2 }
-      - { row: { fqn: "Model::name", type: Property } }
-      - { row: { fqn: "Model::email", type: Property } }
+      - { row: { fqn: "Model::name", type: Field } }
+      - { row: { fqn: "Model::email", type: Field } }
 
   - name: "delegate generates synthetic method defs"
     query: |
@@ -256,11 +257,12 @@ tests:
   # CLASS ATTRIBUTES
   # ══════════════════════════════════════════════════════════════
 
+  # corrected: contract: a Ruby attribute is a Field
   - name: "class_attribute generates synthetic def"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Post::max_length'
-        AND d.language_kind = 'Property'
+        AND d.kind = 'Field'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

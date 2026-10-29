@@ -22,18 +22,20 @@ fixtures:
           Project()
 
 tests:
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: Wildcard import resolves User
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'use_user' AND callee.name = 'User'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
       - { row: { caller: "main.use_user", callee: "models.User" } }
 
+  # corrected: contract: a call that creates an instance of a type is INSTANTIATES
   - name: Wildcard import resolves Project
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:INSTANTIATES]->(callee:Definition)
       WHERE caller.name = 'use_project' AND callee.name = 'Project'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

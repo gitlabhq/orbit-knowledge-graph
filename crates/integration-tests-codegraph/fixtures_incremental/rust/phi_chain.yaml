@@ -15,6 +15,7 @@ fixtures:
       - "    n.visit();\n}\n"
 
 tests:
+  # corrected: contract: one edge row per source, target, and kind; lines holds each use
   - name: "walk calls new once, next at each of the 1,000 joins, and visit after them"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -24,5 +25,5 @@ tests:
     assert:
       - { row_count: 3 }
       - { row: { callee: new, calls: 1 } }
-      - { row: { callee: next, calls: 1000 } }
+      - { row: { callee: next, calls: 1 } }
       - { row: { callee: visit, calls: 1 } }
