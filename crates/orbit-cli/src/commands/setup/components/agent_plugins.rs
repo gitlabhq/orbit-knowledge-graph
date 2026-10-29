@@ -90,7 +90,8 @@ fn install_plugin(
         .as_deref()
         .is_some_and(|version| at_least(version, &plugin.min_version))
     {
-        report.note(
+        report.note_skipped(
+            &agent.title,
             &dir_label,
             format!(
                 "Orbit UI skipped: needs {} {}+ (you have {})",

@@ -135,10 +135,13 @@ pub(crate) async fn install(
         selection.skill.full_tree = Some(crate::skill::full_tree().await?);
     }
 
-    apply_and_report(&options, |report| {
+    let report = apply_and_report(&options, |report| {
         components::install(&selection, &target, report)
     })?;
-    tui::card("Configured", summary::format_components_per_agent(&plan))?;
+    tui::card(
+        "Configured",
+        summary::format_configured_per_agent(&plan, &report),
+    )?;
     if selection.components.contains(&Component::Instructions) && !spec::reaches_gitlab() {
         tui::card(
             "GitLab",
@@ -237,6 +240,8 @@ fn apply_and_report(
     let outcome = apply(&mut report);
     if options.verbose || outcome.is_err() {
         show_outcomes_per_component(&report)?;
+    } else {
+        show_outcomes_per_component(&report.only_skips())?;
     }
     outcome?;
     Ok(report)

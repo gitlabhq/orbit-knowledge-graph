@@ -158,3 +158,75 @@ fn setup_with_dir_judges_the_project_root_not_the_working_folder() {
         "{printed}"
     );
 }
+
+#[cfg(unix)]
+fn setup_with_claude_version(version: &str, extra_args: &[&str]) -> (tempfile::TempDir, String) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("shim-bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let shim = bin.join("claude");
+    std::fs::write(
+        &shim,
+        format!("#!/bin/sh\necho '{version} (Claude Code)'\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut args = vec!["setup", "claude", "--yes", "--no-index"];
+    args.extend_from_slice(extra_args);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_orbit"))
+        .args(&args)
+        .current_dir(home.path())
+        .env("HOME", home.path())
+        .env("PATH", path)
+        .env("GIT_CEILING_DIRECTORIES", home.path().parent().unwrap())
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("GITLAB_ORBIT_DISTRIBUTION")
+        .output()
+        .unwrap();
+    let printed = all_output(&output);
+    assert!(output.status.success(), "{printed}");
+    (home, printed)
+}
+
+#[cfg(unix)]
+fn configured_card(printed: &str) -> &str {
+    let start = printed.find("Configured").expect("Configured card");
+    &printed[start..]
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_says_when_the_agent_plugin_is_skipped_and_leaves_it_off_the_configured_card() {
+    let (home, printed) = setup_with_claude_version("2.1.286", &[]);
+
+    assert!(
+        printed.contains("Orbit UI skipped: needs Claude Code"),
+        "{printed}"
+    );
+    assert!(printed.contains("you have 2.1.286"), "{printed}");
+    let card = configured_card(&printed);
+    assert!(card.contains("instructions, hooks, skill"), "{printed}");
+    assert!(!card.contains("agent plugins"), "{printed}");
+    assert!(!home.path().join(".claude/orbit").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_lists_agent_plugins_when_the_plugin_is_installed() {
+    let (home, printed) = setup_with_claude_version("99.0.0", &[]);
+
+    assert!(!printed.contains("Orbit UI skipped"), "{printed}");
+    assert!(
+        configured_card(&printed).contains("skill, agent plugins"),
+        "{printed}"
+    );
+    assert!(home.path().join(".claude/orbit").exists());
+}
