@@ -1357,9 +1357,9 @@ fn context_relationship_order_is_stable_across_overloads() {
     assert!(orbit_index(&repo, dd));
 
     let repo_arg = repo.to_str().unwrap();
-    for (fqn, section) in [
-        ("Target.ping", "Connections (5 indexed):"),
-        ("Target", "Used via members (5 indexed):"),
+    for (fqn, section, uses) in [
+        ("Target.ping", "Connections (5 indexed):", 1),
+        ("Target", "Used via members (5 indexed):", 2),
     ] {
         let args = ["context", fqn, "--repo", repo_arg];
         let (first, stderr, ok) = run_cmd(&args, dd);
@@ -1368,8 +1368,16 @@ fn context_relationship_order_is_stable_across_overloads() {
             first.find("public void ping() {}").unwrap() < first.find(section).unwrap(),
             "{first}"
         );
-        assert_eq!(first.matches("<-- Caller.Caller ").count(), 2, "{first}");
-        assert_eq!(first.matches("<-- Caller.run ").count(), 3, "{first}");
+        assert_eq!(
+            first.matches("<-- Caller.Caller ").count(),
+            2 * uses,
+            "{first}"
+        );
+        assert_eq!(
+            first.matches("<-- Caller.run ").count(),
+            3 * uses,
+            "{first}"
+        );
         for _ in 0..10 {
             assert_eq!(first, run_cmd(&args, dd).0, "{fqn} output changed");
         }
