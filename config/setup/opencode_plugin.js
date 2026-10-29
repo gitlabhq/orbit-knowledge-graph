@@ -16,6 +16,7 @@ function hasGraph() {
 function withReminder(result) {
   const suffix = "\n\n" + REMINDER;
   if (Array.isArray(result.content)) return { ...result, content: [...result.content, { type: "text", text: REMINDER }] };
+  if (typeof result.content === "string") return { ...result, content: result.content + suffix };
   if (typeof result.output === "string") return { ...result, output: result.output + suffix };
   return { ...result, content: [{ type: "text", text: REMINDER }] };
 }
