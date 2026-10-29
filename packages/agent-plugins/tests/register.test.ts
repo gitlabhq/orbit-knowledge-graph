@@ -170,3 +170,20 @@ test('graph-status never runs after a denied call', async ($, on) => {
 test('graph-status never runs after a local call', async ($, on) => {
   expect(await graphStatusRuns($, on, 'orbit grep foo', { result: { stdout: 'x' } })).toEqual([])
 })
+
+test('the status line starts over after /clear and after a resume', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
+  on('session.end', () => ({ sessionId: 'old' }))
+  for (const reason of ['clear', 'resume'] as const) {
+    await $.tool.call({ tool: 'Bash', command: QUERY })
+    const before = await statusLine($)
+    expect(await before.find({ type: 'Text', text: ' query' })).toBeDefined()
+    await before.unmount()
+
+    await $.session.end({ reason, sessionId: 'old', resume: { id: 'old' } } as never)
+    const after = await statusLine($)
+    expect(await after.find({ type: 'Text', text: /quer/ })).toBeUndefined()
+    await after.unmount()
+  }
+})
