@@ -63,9 +63,60 @@ test('an ungrouped aggregation with several aggregates counts too', () => {
   expect(parseResponse(text).aggregated).toBe(3216)
 })
 
-test('two count columns, one of them DISTINCT, still read as counted', () => {
-  const text = 'query_type: aggregation\ncolumns[2]:\n  - name: n\n    function: count\n    target: mr\n  - name: d\n    function: count\n    target: mr\n    property: author_id\nrows[1]{n,d}:\n  3222,111\npagination:\n  has_more: false\n  truncated: false\n'
-  expect(parseResponse(text).aggregated).toBeGreaterThanOrEqual(3222)
+const listedCount = (name: string, target: string, property?: string) =>
+  `  - name: ${name}\n    function: count\n    target: ${target}\n` + (property ? `    property: ${property}\n` : '')
+const aggregation = (columns: string, header: string, row: string) =>
+  `query_type: aggregation\n${columns}rows[1]{${header}}:\n  ${row}\npagination:\n  has_more: false\n  truncated: false\n`
+
+test('a DISTINCT count next to a plain count is left out', () => {
+  const columns = `columns[2]:\n${listedCount('count_mr', 'mr')}${listedCount('count_distinct_mr_author_id', 'mr', 'author_id')}`
+  expect(parseResponse(aggregation(columns, 'count_mr,count_distinct_mr_author_id', '3222,111')).aggregated).toBe(3222)
+})
+
+test('a response whose only count is DISTINCT in the tabled form reads as zero', () => {
+  const columns = 'columns[2]{name,function,target,property}:\n  count_distinct_mr_author_id,count,mr,author_id\n  total,sum,mr,iid\n'
+  expect(parseResponse(aggregation(columns, 'count_distinct_mr_author_id,total', '111,5000')).aggregated).toBe(0)
+})
+
+test('a DISTINCT property count next to a DISTINCT node count reads as the node count', () => {
+  const columns = `columns[2]:\n${listedCount('count_distinct_mr', 'mr')}${listedCount('count_distinct_mr_author_id', 'mr', 'author_id')}`
+  expect(parseResponse(aggregation(columns, 'count_distinct_mr,count_distinct_mr_author_id', '3,111')).aggregated).toBe(3)
+})
+
+test('a plain property count next to a DISTINCT node count reads as the property count', () => {
+  const columns = `columns[2]:\n${listedCount('count_distinct_mr', 'mr')}${listedCount('count_mr_merged_at', 'mr', 'merged_at')}`
+  expect(parseResponse(aggregation(columns, 'count_distinct_mr,count_mr_merged_at', '3,3000')).aggregated).toBe(3000)
+})
+
+test('tabled columns are read by field name in any order', () => {
+  const columns = 'columns[2]{function,name,property,target}:\n  count,count_mr_merged_at,merged_at,mr\n  count,authors,author_id,mr\n'
+  expect(parseResponse(aggregation(columns, 'count_mr_merged_at,authors', '3000,111')).aggregated).toBe(3000)
+})
+
+test('listed columns are read by key in any order', () => {
+  const item = (name: string, property: string) => `  - name: ${name}\n    function: count\n    property: ${property}\n    target: mr\n`
+  const columns = `columns[3]:\n${item('count_mr_merged_at', 'merged_at')}${item('authors', 'author_id')}  - target: u\n    function: count\n    name: count_u\n`
+  expect(parseResponse(aggregation(columns, 'count_mr_merged_at,authors,count_u', '3000,111,5')).aggregated).toBe(3000)
+})
+
+test('a plain count of a property reads as counted', () => {
+  const columns = 'columns[1]{name,function,target,property}:\n  count_mr_merged_at,count,mr,merged_at\n'
+  expect(parseResponse(aggregation(columns, 'count_mr_merged_at', '3000')).aggregated).toBe(3000)
+})
+
+test('a DISTINCT count of a node, with no property, reads as counted', () => {
+  const columns = 'columns[1]{name,function,target}:\n  count_distinct_mr,count,mr\n'
+  expect(parseResponse(aggregation(columns, 'count_distinct_mr', '3222')).aggregated).toBe(3222)
+})
+
+test('an aliased count of a property reads as DISTINCT', () => {
+  const columns = 'columns[1]{name,function,target,property}:\n  authors,count,mr,author_id\n'
+  expect(parseResponse(aggregation(columns, 'authors', '111')).aggregated).toBe(0)
+})
+
+test('two plain counts on different targets read as the larger one', () => {
+  const columns = 'columns[2]{name,function,target}:\n  mrs,count,mr\n  users,count,u\n'
+  expect(parseResponse(aggregation(columns, 'mrs,users', '3222,111')).aggregated).toBe(3222)
 })
 
 test('schema and other output reads as empty', () => {
