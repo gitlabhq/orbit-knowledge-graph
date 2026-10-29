@@ -116,7 +116,7 @@ function otherCommands(command) {
   const others = new Set;
   for (const { piped, words } of runnable(command)) {
     if (words.includes("$(") || words.includes("`"))
-      others.add("$(…)");
+      others.add("$(\\u2026)");
     words.forEach((word, i) => {
       if (word === ">" && words[i + 1] !== ">")
         others.add("> " + (words[i + 1] ?? ""));
