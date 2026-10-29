@@ -22,11 +22,7 @@ GitLab Orbit is the context graph of your software lifecycle.
 It connects your code, merge requests, pipelines, work items, and vulnerabilities in one graph that your AI agents can query.
 Ask what breaks if a service changes, or which CI/CD jobs fail most.
 Each answer shows only the data that your GitLab role lets you see.
-
-> [!note]
-> GitLab Orbit is in beta.
-> The query language and the schema can change.
-> The graph of your group needs GitLab Premium or Ultimate.
+The graph of your group needs GitLab Premium or Ultimate.
 
 ## Quickstart
 
