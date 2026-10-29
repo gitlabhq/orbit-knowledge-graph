@@ -140,9 +140,12 @@ Sign in with `glab auth login`, then run the command again.
 | Exit code | Message | Cause | Resolution |
 |-----------|---------|-------|------------|
 | `2` | `Orbit endpoint not available` | GitLab Orbit is not available on your instance. | Ask your administrator to [set up GitLab Orbit](https://docs.gitlab.com/orbit/self-managed/). |
-| `2` | Ends with `not found`, such as `Project not found` or `Namespace not found` | The path or ID is wrong, or you are not a member. | Check the path or ID. |
+| `2` | Ends with `not found`, such as `Group or project not found`, `Project not found`, or `Namespace not found` | The path or ID is wrong, or you are not a member. | Check the path or ID. |
+| `2` | `Orbit is not available for your user` | `glab orbit status` reports that your user has no access to GitLab Orbit. For example, the instance has no license for GitLab Orbit. | Ask your administrator to [set up GitLab Orbit](https://docs.gitlab.com/orbit/self-managed/). |
 | `3` | `not authenticated` | You are not signed in, or your token expired. | Run `glab auth login`. |
-| `4` | `Orbit access denied` | No top-level group that you belong to has GitLab Orbit turned on. | Ask a user with the Owner role for the group to [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit). |
+| `4` | `Orbit isn't enabled for any of your groups` | No top-level group that you belong to has GitLab Orbit turned on. | Ask a user with the Owner role for the group to [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit). |
+| `4` | `Orbit is not turned on for <scope>, or your role is below Reporter.` | `glab orbit status` found the group or project, but GitLab Orbit is not turned on for it, or you have a role lower than Reporter. | Ask a user with the Owner role for the top-level group to [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit), or ask for the Reporter role. |
+| `4` | `Orbit access denied` | The API rejected the request with HTTP `403` for another reason. For example, the instance has no license for GitLab Orbit, or the token does not have the GitLab Orbit permission. | Check the message after `HTTP 403` in the output. |
 | `5` | `rate limited` | You sent too many requests in a short time. | Wait for the time in the `Retry-After` header. Combine small queries into one aggregation. |
 
 For all exit codes, see [exit codes](cli.md#exit-codes).
@@ -184,7 +187,7 @@ To resolve this issue, check the progress, and send the query again when indexin
 glab orbit status --full-path <my-group>
 ```
 
-Without `--full-path`, `glab orbit status` shows only the health of the service, not indexing progress.
+Without `--full-path`, `--namespace-id`, or `--project-id`, `glab orbit status` shows only the health of the service, not indexing progress.
 
 ## Tokens and service accounts
 

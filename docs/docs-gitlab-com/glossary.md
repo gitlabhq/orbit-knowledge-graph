@@ -37,7 +37,7 @@ GitLab Orbit skill
 : The instructions and query recipes your agent loads to use GitLab Orbit. `glab orbit setup` installs it.
 
 GQL
-: The GitLab Orbit query language, a read-only, openCypher-like language. Agents write GQL for you.
+: The GitLab Orbit query language, a read-only, OpenCypher-like language. Agents write GQL for you.
 
 Indexing
 : The process that reads GitLab data and code and writes the graph. GitLab indexes a group when you turn on GitLab Orbit for it, and keeps the graph current.

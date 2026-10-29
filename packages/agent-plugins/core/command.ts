@@ -1,5 +1,5 @@
 import { isQuietFilter } from './quiet-filters.ts'
-import { lex, type Token } from './shell-lexer.ts'
+import { lex, PREFIX_WORDS, SUBSTITUTION, type Token } from './shell-lexer.ts'
 
 export type Subcommand = { key: string; args: string[] }
 
@@ -7,7 +7,7 @@ const MAX_NAME_LENGTH = 40
 const INVISIBLE = /[\p{Cc}\p{Cf}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]/gu
 
 export function clip(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, ' ').replace(INVISIBLE, '').trim()
+  const flat = text.replace(INVISIBLE, '').replace(/\s+/g, ' ').trim()
   return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
 }
 
@@ -69,16 +69,22 @@ function orbitWords(words: readonly string[]): string[] | null {
   return words.slice(i)
 }
 
-const PREFIX_WORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', 'time', '{'])
-const HEADER_WORDS = new Set(['for', 'select', 'case'])
+const ASSIGNMENT = /^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/
+const LOOP_HEADERS = new Set(['for', 'select'])
 
 function withoutKeywords(words: readonly string[]): string[] {
   let i = 0
   for (; i < words.length; i++) {
     const word = words[i] ?? ''
-    if (HEADER_WORDS.has(word)) return []
+    if (word === 'case') return []
+    if (LOOP_HEADERS.has(word)) {
+      const body = words.findIndex((candidate, at) => at > i && (candidate === 'do' || candidate === '{'))
+      return body < 0 ? [] : withoutKeywords(words.slice(body + 1))
+    }
     if (word === 'function') i++
-    else if (!PREFIX_WORDS.has(word)) break
+    else if (PREFIX_WORDS.has(word)) {
+      if (word === 'time' && words[i + 1] === '-p') i++
+    } else break
   }
   return words.slice(i)
 }
@@ -97,7 +103,6 @@ export function orbitInvocations(command: string): string[][] {
     .filter((words) => words !== null)
 }
 
-const SUBSTITUTION_IN_WORD = /\$\(|`/
 const SHELL_WORDS = new Set(['cd', 'pushd', 'popd', 'true', ':', 'fi', 'done', 'esac', '}'])
 
 function isQuiet(program: string, args: readonly string[], run: SimpleCommand): boolean {
@@ -114,9 +119,9 @@ export function otherCommands(command: string, orbitExtras: readonly string[] = 
     if (run.substitutes) listed.set('$(...)', '$(...)')
     for (const target of run.writes) writes.set(target, '> ' + displayName(target))
     if (orbitWords(run.words)) continue
-    const at = run.words.findIndex((word) => !/^\w+=/.test(word))
+    const at = run.words.findIndex((word) => !ASSIGNMENT.test(word))
     const program = run.words[at]
-    if (program === undefined || SUBSTITUTION_IN_WORD.test(program)) continue
+    if (program === undefined || SUBSTITUTION.test(program)) continue
     if (!isQuiet(program, run.words.slice(at + 1), run)) listed.set(program, displayName(program))
   }
   return [...listed.values(), ...orbitExtras, ...writes.values()]
