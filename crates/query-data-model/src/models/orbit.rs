@@ -266,12 +266,6 @@ pub trait OrbitQueryModel {
         self.query_authorization().redaction_id_column(entity)
     }
 
-    fn table_has_path_columns(&self, table: &str) -> bool {
-        self.query_backend()
-            .table_path_columns(table)
-            .is_none_or(|columns| !columns.is_empty())
-    }
-
     fn table_minimum_access_level(&self, table: &str) -> u32 {
         self.query_backend()
             .table_path_columns(table)

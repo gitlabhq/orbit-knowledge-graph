@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::ast::visit::{visit_queries_mut, visit_relations};
 use crate::ast::{Expr, Function, Node, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 pub use crate::types::SecurityContext;
 use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 
@@ -18,7 +18,7 @@ pub fn apply_security_context(
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     if ctx.traversal_paths.is_empty() {
-        return Err(crate::error::QueryError::Security(
+        return Err(QueryError::Security(
             "security context has no traversal_path entries; refusing to compile \
              because every gl_* alias would fall back to Bool(false) and hide \
              the underlying auth misconfiguration"
@@ -29,27 +29,37 @@ pub fn apply_security_context(
         return Ok(());
     };
     visit_queries_mut(query, &mut |query| {
-        let mut aliased_tables = Vec::new();
+        let mut scans = Vec::new();
         visit_relations(&query.from, &mut |relation| {
             if let TableRef::Scan { table, alias, .. } = relation
-                && ontology::is_graph_table(table)
+                && !table.is_empty()
             {
-                aliased_tables.push((alias.clone(), table.clone()));
+                scans.push((alias.clone(), table.clone()));
             }
         });
-        let security_conditions = aliased_tables.iter().flat_map(|(alias, table)| {
-            let path_filter = model.table_has_path_columns(table).then(|| {
+        let mut conditions = Vec::new();
+        for (alias, table) in &scans {
+            let Some(path_columns) = model.table_path_columns(table) else {
+                return Err(QueryError::Security(format!(
+                    "scan '{alias}' reads '{table}', which is not a table of the query data model"
+                )));
+            };
+            if !path_columns.is_empty() {
                 let eligible = ctx.paths_at_least(model.table_minimum_access_level(table));
-                build_path_filter(alias, &eligible)
-            });
-            let owner_filter = model
-                .table_owner_column(table)
-                .filter(|_| !ctx.admin)
-                .map(|column| build_owner_filter(alias, column, ctx.user_id));
-            [path_filter, owner_filter]
-        });
-        query.where_clause =
-            Expr::and_all(security_conditions.chain(std::iter::once(query.where_clause.take())));
+                conditions.push(Some(build_path_filter(alias, &eligible)));
+            }
+            conditions.push(
+                model
+                    .table_owner_column(table)
+                    .filter(|_| !ctx.admin)
+                    .map(|column| build_owner_filter(alias, column, ctx.user_id)),
+            );
+        }
+        query.where_clause = Expr::and_all(
+            conditions
+                .into_iter()
+                .chain(std::iter::once(query.where_clause.take())),
+        );
         Ok(())
     })
 }
@@ -495,10 +505,13 @@ mod tests {
         assert_eq!(starts_with_paths_for_alias(where_clause, "p"), ["1/"]);
         assert_eq!(starts_with_paths_for_alias(where_clause, "e"), ["1/"]);
 
-        for table in ["gl_user", "path_cte", "some_cte", "nodes"] {
+        for from in [
+            TableRef::scan("gl_user", "x"),
+            TableRef::cte("path_cte", "x"),
+        ] {
             let mut node = Node::Query(Box::new(Query {
                 select: vec![SelectExpr::col("x", "id")],
-                from: TableRef::scan(table, "x"),
+                from,
                 ..Default::default()
             }));
             apply(&mut node, &ctx, model()).unwrap();
@@ -586,6 +599,48 @@ mod tests {
         })
         .unwrap();
         found
+    }
+
+    #[test]
+    fn scans_resolve_through_the_data_model_and_unknown_tables_fail_closed() {
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let versioned = ClickHouseDataModel::derive(Arc::new(
+            ontology::Ontology::load_embedded()
+                .unwrap()
+                .with_schema_version_prefix("v117_"),
+        ))
+        .unwrap();
+        let scan = |table: &str| {
+            Node::Query(Box::new(Query {
+                select: vec![SelectExpr::col("x", "id")],
+                from: TableRef::scan(table, "x"),
+                ..Default::default()
+            }))
+        };
+
+        let mut node = scan("v117_gl_project");
+        apply(&mut node, &ctx, &versioned).unwrap();
+        assert_eq!(
+            starts_with_paths_for_alias(where_clause(&node), "x"),
+            ["1/"]
+        );
+
+        let mut node = scan("gl_project");
+        apply(&mut node, &ctx, model()).unwrap();
+        assert_eq!(
+            starts_with_paths_for_alias(where_clause(&node), "x"),
+            ["1/"]
+        );
+
+        for (table, model) in [
+            ("gl_project", &versioned),
+            ("gl_unknown", model()),
+            ("some_cte", model()),
+            ("nodes", model()),
+        ] {
+            let error = apply(&mut scan(table), &ctx, model).unwrap_err();
+            assert!(matches!(error, QueryError::Security(_)), "{table}: {error}");
+        }
     }
 
     #[test]
