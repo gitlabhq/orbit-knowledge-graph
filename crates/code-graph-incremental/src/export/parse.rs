@@ -39,7 +39,7 @@ struct EntityYaml {
     #[serde(default)]
     exclude_parent: Option<String>,
     #[serde(default)]
-    exclude_child: Option<String>,
+    exclude_tag: indexmap::IndexMap<String, Vec<String>>,
     #[serde(default)]
     expand: Option<String>,
     id: IdYaml,
@@ -103,6 +103,7 @@ struct ContainmentYaml {
 }
 
 #[derive(Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GraphEdgeYaml {
     edge: String,
     #[serde(default)]
@@ -111,6 +112,16 @@ struct GraphEdgeYaml {
     kind: String,
     #[serde(default)]
     fallback: bool,
+    #[serde(default)]
+    site: Vec<String>,
+    #[serde(default)]
+    site_child: Option<String>,
+    #[serde(default)]
+    target_tag: indexmap::IndexMap<String, Vec<String>>,
+    #[serde(default)]
+    reference: bool,
+    #[serde(default)]
+    set: indexmap::IndexMap<String, String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -203,7 +214,7 @@ pub(super) struct EntityPlan {
     pub(super) header: Vec<Column>,
     pub(super) source_kinds: Vec<u16>,
     pub(super) exclude_parent: Option<u16>,
-    pub(super) exclude_child: Option<u16>,
+    pub(super) exclude_tag: Vec<(u32, Vec<u32>)>,
     pub(super) expand: Option<u16>,
     pub(super) id_seed: String,
     pub(super) id_parts: Vec<IdPart>,
@@ -222,6 +233,11 @@ pub(super) struct GraphEdge {
     pub(super) to: usize,
     pub(super) kind: String,
     pub(super) fallback: bool,
+    pub(super) site: Vec<u16>,
+    pub(super) site_child: Option<u16>,
+    pub(super) target_tag: Vec<(u32, Vec<u32>)>,
+    pub(super) reference: bool,
+    pub(super) set: Vec<(String, String)>,
 }
 
 /// `export.yaml` checked against the ontology and interned for one `Lang`.
@@ -330,6 +346,18 @@ impl ExportPlan {
                     to: entity_index(&g.to)?,
                     kind: g.kind.clone(),
                     fallback: g.fallback,
+                    site: g.site.iter().map(|k| lang.intern_kind(k)).collect(),
+                    site_child: g.site_child.as_deref().map(|k| lang.intern_kind(k)),
+                    target_tag: g
+                        .target_tag
+                        .iter()
+                        .map(|(key, values)| {
+                            let values = values.iter().map(|v| lang.syms.intern(v)).collect();
+                            (lang.syms.intern(key), values)
+                        })
+                        .collect(),
+                    reference: g.reference,
+                    set: g.set.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
                 })
             })
             .collect::<Result<_, LoadError>>()?;
@@ -546,7 +574,14 @@ fn compile_entity(
             .map(|k| lang.intern_kind(k))
             .collect(),
         exclude_parent: yaml.exclude_parent.as_deref().map(|k| lang.intern_kind(k)),
-        exclude_child: yaml.exclude_child.as_deref().map(|k| lang.intern_kind(k)),
+        exclude_tag: yaml
+            .exclude_tag
+            .iter()
+            .map(|(key, values)| {
+                let values = values.iter().map(|v| lang.syms.intern(v)).collect();
+                (lang.syms.intern(key), values)
+            })
+            .collect(),
         expand: yaml.expand.as_deref().map(|k| lang.intern_kind(k)),
         id_seed: yaml.id.seed.clone(),
         id_parts,
@@ -588,6 +623,8 @@ impl ExportPlan {
                                     | "kind"
                                     | "target.id"
                                     | "target.entity"
+                                    | "lines"
+                                    | "resolution"
                             ) =>
                         {
                             Some(name.as_str())

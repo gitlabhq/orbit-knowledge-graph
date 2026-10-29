@@ -35,7 +35,7 @@ pub enum Tf {
     Stem,
     CollapseIndex(Vec<Box<str>>),
     Map(Vec<(Box<str>, Box<str>)>),
-    HasEdge(EdgeKind, EdgeDir),
+    HasEdge(EdgeKind, EdgeDir, bool),
     AncestorTag(u32),
     Tag(u32),
     LitSym(u32),
@@ -85,7 +85,7 @@ impl Tf {
                 | Tf::SiblingIndex
                 | Tf::TreeNodeId
                 | Tf::KindName
-                | Tf::HasEdge(_, _)
+                | Tf::HasEdge(..)
                 | Tf::Source(_)
                 | Tf::SourceBefore(_)
         )

@@ -10,19 +10,20 @@ use arrow::record_batch::RecordBatch;
 use orbit_arrow::{BatchBuilder, ColumnType};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
-use crate::dsl::types::Tf;
+use crate::dsl::types::{EdgeCtx, EdgeIndex, Tf};
 use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
 use crate::sentinel::Sentinel;
-use crate::tree::{CallResolution, Compact};
+use crate::tree::{CallResolution, Compact, Resolution};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
 mod parse;
 
 use parse::{
-    EntityColumn, EntityPlan, IdPart, On, Over, Position, RowSource, Source, SpanCandidate,
+    EntityColumn, EntityPlan, GraphEdge, IdPart, On, Over, Position, RowSource, Source,
+    SpanCandidate,
 };
 pub use parse::{ExportConfig, ExportPlan};
 
@@ -34,6 +35,7 @@ pub enum Scalar<'a> {
     Bool(bool),
     Text(Cow<'a, str>),
     List(Vec<Cow<'a, str>>),
+    Ints(Vec<i64>),
     Null,
 }
 
@@ -45,6 +47,7 @@ impl Scalar<'_> {
             Scalar::Bool(value) => Cow::Owned(value.to_string()),
             Scalar::Text(s) => Cow::Borrowed(s),
             Scalar::List(values) => Cow::Owned(values.join("\u{1f}")),
+            Scalar::Ints(values) => Cow::Owned(format!("{values:?}")),
             Scalar::Null => Cow::Borrowed(""),
         }
     }
@@ -79,6 +82,7 @@ impl Scalar<'_> {
                 let values: Vec<&str> = values.iter().map(Cow::as_ref).collect();
                 builder.col(name)?.push_str_list(&values)
             }
+            (Self::Ints(values), ColumnType::IntList) => builder.col(name)?.push_int_list(&values),
             (Self::Null, ColumnType::Str | ColumnType::DictStr) => {
                 builder.col(name)?.push_opt_str(None::<&str>)
             }
@@ -222,6 +226,7 @@ impl<'a> Forest<'a> {
 /// from; without an expansion the node stands in for both.
 struct Row<'a> {
     tree: &'a Tree,
+    edges: Option<&'a EdgeCtx<'a>>,
     node: Cursor<'a>,
     expanded: Cursor<'a>,
 }
@@ -235,7 +240,7 @@ impl<'a> Row<'a> {
         match &column.source {
             Source::Const(value) => Scalar::Str(value),
             Source::Transform(tf) => {
-                let sym = tf.apply_at(self.tree, lang, node.index(), None);
+                let sym = tf.apply_at(self.tree, lang, node.index(), self.edges);
                 Scalar::Str(lang.syms.resolve(sym))
             }
             Source::Position(p, span) => Scalar::Int(position(measured(node, span), *p)),
@@ -415,7 +420,9 @@ pub fn export_trees(
     });
     let wanted = |tree: u32| needed.as_ref().is_none_or(|needed| needed.contains(&tree));
     let mut ids = FxHashMap::default();
+    let mut fanout = Fanout::default();
     let mut tables = Vec::new();
+    let edge_index = EdgeIndex::new(edges);
     for (index, entity) in plan.entities.iter().enumerate() {
         write_entity(
             &mut tables,
@@ -423,9 +430,11 @@ pub fn export_trees(
             entity,
             index,
             &forest,
+            &edge_index,
             lang,
             envelope,
             &mut ids,
+            &mut fanout,
             &wanted,
             &|index, tree| match entity.name.as_str() {
                 "Directory" => include_directories,
@@ -436,7 +445,7 @@ pub fn export_trees(
         )?;
     }
     run.check()?;
-    for batch in write_edges(plan, edges, &forest, &ids, envelope, only)? {
+    for batch in write_edges(plan, edges, &forest, &ids, &fanout, envelope, only)? {
         tables.push((plan.edge_table.clone(), batch));
     }
     Ok(tables)
@@ -449,9 +458,11 @@ fn write_entity(
     entity: &EntityPlan,
     index: usize,
     forest: &Forest,
+    edge_index: &EdgeIndex,
     lang: &Lang,
     envelope: &Envelope,
     ids: &mut FxHashMap<(u32, u32), (i64, usize, bool)>,
+    fanout: &mut Fanout,
     wanted: &dyn Fn(u32) -> bool,
     emit: &dyn Fn(u32, &Tree) -> bool,
     run: &Sentinel,
@@ -460,6 +471,11 @@ fn write_entity(
     let b = &mut builder;
     for (ti, tree) in forest.all().filter(|(ti, _)| wanted(*ti)) {
         run.check()?;
+        let ctx = EdgeCtx {
+            tree_index: ti,
+            edges: edge_index,
+            source: None,
+        };
         let root = tree.root();
         let nodes = std::iter::once(root)
             .chain(root.descendants())
@@ -470,9 +486,10 @@ fn write_entity(
                     .is_none_or(|ep| !c.parent().is_some_and(|p| p.kind() == ep))
             })
             .filter(|c| {
-                entity
-                    .exclude_child
-                    .is_none_or(|ec| !c.children().any(|ch| ch.kind() == ec))
+                !entity
+                    .exclude_tag
+                    .iter()
+                    .any(|(key, values)| c.tag(*key).is_some_and(|v| values.contains(&v)))
             });
         for node in nodes {
             let mut expansions: Vec<Cursor> = match entity.expand {
@@ -488,6 +505,7 @@ fn write_entity(
             for expanded in expansions {
                 let row = Row {
                     tree,
+                    edges: Some(&ctx),
                     node,
                     expanded,
                 };
@@ -513,6 +531,12 @@ fn write_entity(
                 let id = envelope.id(plan, &entity.id_seed, &parts);
                 let emitted = emit(ti, tree);
                 ids.insert((ti, expanded.index()), (id, index, emitted));
+                if expanded.index() != node.index() {
+                    fanout
+                        .entry((ti, node.index()))
+                        .or_default()
+                        .push((id, index));
+                }
                 if !emitted {
                     continue;
                 }
@@ -538,11 +562,33 @@ fn write_entity(
 }
 
 type Enclosing = FxHashMap<(usize, (u32, u32)), Option<(u32, u32)>>;
+type Fanout = FxHashMap<(u32, u32), Vec<(i64, usize)>>;
+
+const MAX_LINES: usize = 64;
 
 struct EdgeRow<'a> {
     source: (i64, &'a str),
     kind: &'a str,
     target: (i64, &'a str),
+    lines: Vec<i64>,
+    resolution: Resolution,
+    set: &'a [(String, String)],
+}
+
+impl GraphEdge {
+    fn admits(&self, e: &crate::tree::Edge, forest: &Forest) -> bool {
+        let site = e.site.map(|s| forest.cursor(e.from_tree, s));
+        let target = forest.cursor(e.to_tree, e.to_node);
+        (self.site.is_empty() || site.is_some_and(|c| self.site.contains(&c.kind())))
+            && self.site_child.is_none_or(|kind| {
+                site.is_some_and(|c| c.children().any(|child| child.kind() == kind))
+            })
+            && self
+                .target_tag
+                .iter()
+                .all(|(key, values)| target.tag(*key).is_some_and(|v| values.contains(&v)))
+            && (!self.reference || e.call_resolution == CallResolution::Reference)
+    }
 }
 
 fn write_edges(
@@ -550,6 +596,7 @@ fn write_edges(
     edges: &[crate::tree::Edge],
     forest: &Forest,
     ids: &FxHashMap<(u32, u32), (i64, usize, bool)>,
+    fanout: &Fanout,
     envelope: &Envelope,
     only: Option<&FxHashSet<u32>>,
 ) -> Result<Vec<RecordBatch>, Error> {
@@ -596,55 +643,89 @@ fn write_edges(
                     source: (from_id, entity_name(rule.from)),
                     kind: &rule.kind,
                     target: (id, entity_name(entity)),
+                    lines: Vec::new(),
+                    resolution: Resolution::None,
+                    set: &[],
                 });
             }
         }
     }
 
-    let mut seen_cross_file = FxHashSet::default();
-
+    let mut merged: FxHashMap<(i64, &str, i64), usize> = FxHashMap::default();
     for e in edges {
         if only.is_some_and(|only| !only.contains(&e.from_tree) && !only.contains(&e.to_tree)) {
             continue;
         }
-        let Some(&(from, from_entity, _)) = ids.get(&(e.from_tree, e.from_node)) else {
-            continue;
-        };
         let Some(&(to, to_entity, _)) = ids.get(&(e.to_tree, e.to_node)) else {
             continue;
         };
-        let rule = plan.graph.iter().find(|g| {
-            g.edge == e.kind && g.to == to_entity && g.from.is_none_or(|f| f == from_entity)
-        });
-        let Some(rule) = rule else {
-            continue;
+        let sources = match ids.get(&(e.from_tree, e.from_node)) {
+            Some(&(from, entity, _)) => vec![(from, entity)],
+            None => fanout
+                .get(&(e.from_tree, e.from_node))
+                .cloned()
+                .unwrap_or_default(),
         };
-        if rule.fallback && e.call_resolution != CallResolution::Unknown {
-            continue;
+        for (from, from_entity) in sources {
+            let rule = plan.graph.iter().find(|g| {
+                g.edge == e.kind
+                    && g.to == to_entity
+                    && g.from.is_none_or(|f| f == from_entity)
+                    && g.admits(e, forest)
+            });
+            let Some(rule) = rule else {
+                continue;
+            };
+            if rule.fallback && e.call_resolution != CallResolution::Unknown {
+                continue;
+            }
+            let kind = rule.kind.as_str();
+            let line = e
+                .site
+                .map(|site| forest.cursor(e.from_tree, site).start_row() as i64 + 1);
+            let at = *merged.entry((from, kind, to)).or_insert_with(|| {
+                rows.push(EdgeRow {
+                    source: (from, entity_name(from_entity)),
+                    kind,
+                    target: (to, entity_name(to_entity)),
+                    lines: Vec::new(),
+                    resolution: e.resolution,
+                    set: &rule.set,
+                });
+                rows.len() - 1
+            });
+            let row = &mut rows[at];
+            row.resolution = row.resolution.min(e.resolution);
+            row.lines.extend(line);
         }
-        let kind = rule.kind.as_str();
-        if e.from_tree != e.to_tree && !seen_cross_file.insert((from, to, kind)) {
-            continue;
-        }
-        rows.push(EdgeRow {
-            source: (from, entity_name(from_entity)),
-            kind,
-            target: (to, entity_name(to_entity)),
-        });
+    }
+    for row in &mut rows {
+        row.lines.sort_unstable();
+        row.lines.dedup();
+        row.lines.truncate(MAX_LINES);
     }
 
     let mut batches = Vec::new();
     let mut b = BatchBuilder::new(&plan.edge_specs, rows.len())?;
     for row in &rows {
         for column in &plan.edge_columns {
+            let set = row
+                .set
+                .iter()
+                .find(|(name, _)| *name == column.name)
+                .map(|(_, value)| Scalar::Str(value));
             let value = match &column.source {
-                RowSource::Const(value) => envelope.get(&column.name).unwrap_or(Scalar::Str(value)),
+                RowSource::Const(value) => set
+                    .or_else(|| envelope.get(&column.name))
+                    .unwrap_or(Scalar::Str(value)),
                 RowSource::Value(name) => match name.as_str() {
                     "source.id" => Scalar::Int(row.source.0),
                     "source.entity" => Scalar::Str(row.source.1),
                     "kind" => Scalar::Str(row.kind),
                     "target.id" => Scalar::Int(row.target.0),
                     "target.entity" => Scalar::Str(row.target.1),
+                    "lines" => Scalar::Ints(row.lines.clone()),
+                    "resolution" => Scalar::Str(row.resolution.into()),
                     name => envelope.get(name).expect("validated envelope"),
                 },
             };

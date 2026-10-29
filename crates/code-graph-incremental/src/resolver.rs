@@ -544,13 +544,30 @@ impl Resolver {
         cross_edges.extend(override_edges(&ctx, dirty_fis));
         drop(ctx);
         let mut depends = FxHashSet::default();
-        cross_edges.extend(
-            self.reqs
-                .iter()
-                .filter(|r| r.fi != r.target_fi && dirty_fis.contains(&r.fi))
-                .filter(|r| depends.insert((r.fi, r.target_fi)))
-                .map(|r| Edge::new(r.fi, 0, r.target_fi, 0, EdgeKind::DependsOn)),
-        );
+        let named: FxHashSet<(u32, u32)> = edges
+            .iter()
+            .chain(&cross_edges)
+            .filter(|e| e.kind == EdgeKind::Imports && e.from_tree != e.to_tree)
+            .flat_map(|e| {
+                let from = trees[e.from_tree as usize].cursor(e.from_node);
+                [(e.from_tree, e.from_node)]
+                    .into_iter()
+                    .chain(from.parent().map(|import| (e.from_tree, import.index())))
+            })
+            .collect();
+        let files = self
+            .reqs
+            .iter()
+            .filter(|r| r.fi != r.target_fi && dirty_fis.contains(&r.fi));
+        for r in files {
+            if r.anchor == 0 && !named.contains(&(r.fi, r.node)) {
+                let edge = Edge::new(r.fi, r.node, r.target_fi, 0, EdgeKind::Imports);
+                cross_edges.push(edge.resolved(Resolution::Import));
+            }
+            if depends.insert((r.fi, r.target_fi)) {
+                cross_edges.push(Edge::new(r.fi, 0, r.target_fi, 0, EdgeKind::DependsOn));
+            }
+        }
         for edge in edges.iter_mut().chain(&mut cross_edges).filter(|edge| {
             edge.kind == EdgeKind::Imports && edge.call_resolution != CallResolution::Reference
         }) {
