@@ -536,7 +536,7 @@ mod tests {
             extract_template: crate::modules::sdlc::plan::ExtractTemplate::new(
                 "SELECT id, name, _siphon_replicated_at AS _version, \
                  _siphon_deleted AS _deleted \
-                 FROM source_table \
+                 FROM source_table {{final}} \
                  WHERE 1=1 {{filters}} \
                  ORDER BY id LIMIT {{batch_size}}"
                     .to_string(),

@@ -10,7 +10,7 @@ WITH
     traversal_path,
     {{version_column}} AS _version,
     {{deleted_column}} AS _deleted
-  FROM siphon_notes
+  FROM siphon_notes {{final}}
   WHERE startsWith(traversal_path, {traversal_path:String}) AND (system = true AND {{deleted_column}} = false) {{filters}}
   ORDER BY traversal_path, id
   LIMIT {{batch_size}}),

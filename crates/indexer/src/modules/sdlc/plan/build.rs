@@ -404,7 +404,7 @@ mod tests {
             target: name.to_string(),
             scope: EtlScope::Namespaced,
             extract_template: crate::modules::sdlc::plan::ExtractTemplate::new(
-                "SELECT x AS _version, y AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}"
+                "SELECT x AS _version, y AS _deleted FROM t {{final}} WHERE 1=1 {{filters}} LIMIT {{batch_size}}"
                     .to_string(),
             )
             .unwrap(),

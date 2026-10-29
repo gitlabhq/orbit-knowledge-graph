@@ -4,6 +4,7 @@ use ontology::sql_template;
 
 use super::{
     BATCH_SIZE_MARKER, ClickHouseExtractDeclaration, ExtractSpec, ExtractTemplate, FILTERS_MARKER,
+    FINAL_MARKER,
 };
 
 pub(in crate::modules::sdlc) fn compile_authored_extract(
@@ -19,6 +20,7 @@ pub(in crate::modules::sdlc) fn compile_authored_extract(
             // Re-emit the per-page markers unchanged so `PreparedQuery::to_sql` renders them at extraction time.
             filters => FILTERS_MARKER,
             batch_size => BATCH_SIZE_MARKER,
+            final => FINAL_MARKER,
         },
     )
     .map_err(|e| {
@@ -94,7 +96,7 @@ mod tests {
     fn markers_are_substituted_and_aliases_recovered() {
         let spec = compile_authored_extract(
             &group_decl(),
-            "SELECT namespace.{{version_column}} AS _version, (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+            "SELECT namespace.{{version_column}} AS _version, (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted FROM t {{final}} WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
         )
         .expect("valid authored SQL");
         assert!(!spec.template.as_str().contains("{{version_column}}"));
@@ -114,7 +116,7 @@ mod tests {
     fn unresolved_marker_is_rejected() {
         let err = compile_authored_extract(
             &group_decl(),
-            "SELECT {{typo_column}} AS _version, x AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+            "SELECT {{typo_column}} AS _version, x AS _deleted FROM t {{final}} WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
         )
         .expect_err("unresolved marker should be rejected");
         assert!(
@@ -127,7 +129,7 @@ mod tests {
     fn complex_version_expression_is_rejected() {
         let err = compile_authored_extract(
             &group_decl(),
-            "SELECT greatest({{version_column}}, now64(6)) AS _version, x AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+            "SELECT greatest({{version_column}}, now64(6)) AS _version, x AS _deleted FROM t {{final}} WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
         )
         .expect_err("complex version expression should be rejected");
         assert!(

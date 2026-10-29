@@ -109,7 +109,7 @@ fn render_single_table_sql(
     }
 
     format!(
-        "SELECT {} FROM {} WHERE {} {{{{filters}}}} ORDER BY {} LIMIT {{{{batch_size}}}}",
+        "SELECT {} FROM {} {{{{final}}}} WHERE {} {{{{filters}}}} ORDER BY {} LIMIT {{{{batch_size}}}}",
         select_columns.join(", "),
         declaration.table,
         where_clause,
@@ -140,7 +140,7 @@ fn render_with_lookups(
     batch_select.push(format!("{deleted} AS _deleted"));
 
     let mut ctes = vec![format!(
-        "_batch AS (SELECT\n    {}\n  FROM {source}\n  WHERE {where_clause} {{{{filters}}}}\n  ORDER BY {}\n  LIMIT {{{{batch_size}}}})",
+        "_batch AS (SELECT\n    {}\n  FROM {source} {{{{final}}}}\n  WHERE {where_clause} {{{{filters}}}}\n  ORDER BY {}\n  LIMIT {{{{batch_size}}}})",
         batch_select.join(",\n    "),
         declaration.order_by.join(", "),
     )];

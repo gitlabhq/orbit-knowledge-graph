@@ -137,6 +137,11 @@
           "description": "Source tables re-created from the schema SQL before this step seeds.",
           "items": { "type": "string" }
         },
+        "stop_merges": {
+          "type": "array",
+          "description": "Source tables whose background merges stop before this step seeds, so rows seeded by separate inserts stay in separate parts.",
+          "items": { "type": "string" }
+        },
         "seed": { "$ref": "#/definitions/seed" },
         "seed_settings": { "$ref": "#/definitions/seedSettings" },
         "run": { "$ref": "#/definitions/run" },

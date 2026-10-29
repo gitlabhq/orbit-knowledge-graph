@@ -22,7 +22,7 @@ FROM (
       )
     ) AS decoded_sha_bytes,
     if(isValidUTF8(decoded_sha_bytes), decoded_sha_bytes, lower(hex(decoded_sha_bytes))) AS decoded_sha
-  FROM merge_requests
+  FROM merge_requests {{final}}
 ) AS m
 WHERE m.state_id = 3
   AND m.decoded_sha IS NOT NULL

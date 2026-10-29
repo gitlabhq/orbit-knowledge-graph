@@ -141,6 +141,9 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, handlers: &dyn
         for table in &step.create_tables {
             ctx.create_table(table).await;
         }
+        for table in &step.stop_merges {
+            ctx.execute(&format!("SYSTEM STOP MERGES {table}")).await;
+        }
         seed::apply_seed(ctx, &step.seed, &step.seed_settings, &columns, &location).await;
         let input = HandlerInput {
             scope,

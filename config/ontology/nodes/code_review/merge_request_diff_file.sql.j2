@@ -16,7 +16,7 @@ WITH
     traversal_path,
     {{version_column}} AS _version,
     {{deleted_column}} AS _deleted
-  FROM siphon_merge_request_diff_files
+  FROM siphon_merge_request_diff_files {{final}}
   WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
   ORDER BY traversal_path, merge_request_diff_id, relative_order
   LIMIT {{batch_size}}),

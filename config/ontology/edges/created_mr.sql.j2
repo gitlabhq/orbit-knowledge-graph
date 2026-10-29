@@ -12,7 +12,7 @@ WITH
     traversal_path,
     {{version_column}} AS _version,
     {{deleted_column}} AS _deleted
-  FROM siphon_duo_workflows_workflow_merge_requests
+  FROM siphon_duo_workflows_workflow_merge_requests {{final}}
   -- Namespace-level sessions have no AgentSession node (project sessions only),
   -- so their links would dangle. Tombstones carry no project_id and pass through.
   WHERE startsWith(traversal_path, {traversal_path:String})

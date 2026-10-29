@@ -18,6 +18,7 @@ use lookup::PointLookupJoin;
 
 pub(super) const FILTERS_MARKER: &str = "{{filters}}";
 pub(super) const BATCH_SIZE_MARKER: &str = "{{batch_size}}";
+pub(super) const FINAL_MARKER: &str = "{{final}}";
 
 #[derive(Debug)]
 pub(in crate::modules::sdlc) struct ExtractSpec {
@@ -64,18 +65,19 @@ impl ExtractTemplate {
     pub fn new(sql: String) -> Result<Self, PlanError> {
         let undeclared = sql_template::undeclared_variables(&sql)
             .map_err(|e| PlanError::MalformedTemplate(format!("template parse failed: {e}")))?;
-        let expected: HashSet<String> = [FILTERS_MARKER, BATCH_SIZE_MARKER]
+        let expected: HashSet<String> = [FILTERS_MARKER, BATCH_SIZE_MARKER, FINAL_MARKER]
             .iter()
             .map(|marker| marker.trim_matches(|c| c == '{' || c == '}').to_string())
             .collect();
         if undeclared != expected {
             return Err(PlanError::MalformedTemplate(format!(
-                "template variables must be exactly {{{{filters}}}} and {{{{batch_size}}}}, found {undeclared:?}"
+                "template variables must be exactly {{{{filters}}}}, {{{{batch_size}}}} and {{{{final}}}}, found {undeclared:?}"
             )));
         }
         for (marker, name) in [
             (FILTERS_MARKER, "filters"),
             (BATCH_SIZE_MARKER, "batch_size"),
+            (FINAL_MARKER, "final"),
         ] {
             if sql.matches(marker).count() != 1 {
                 return Err(PlanError::MalformedTemplate(format!(

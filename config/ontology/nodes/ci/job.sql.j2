@@ -42,7 +42,7 @@ SELECT
   partition_id,
   {{version_column}} AS _version,
   {{deleted_column}} AS _deleted
-FROM siphon_p_ci_builds
+FROM siphon_p_ci_builds {{final}}
 WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
 ORDER BY traversal_path, id, partition_id
 LIMIT {{batch_size}}

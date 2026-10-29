@@ -11,7 +11,7 @@ SELECT
   traversal_paths.current_path AS traversal_path,
   namespace.{{version_column}} AS _version,
   (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted
-FROM siphon_namespaces namespace
+FROM siphon_namespaces namespace {{final}}
 INNER JOIN (
   SELECT
     id,

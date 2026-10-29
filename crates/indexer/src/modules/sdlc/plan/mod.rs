@@ -103,6 +103,9 @@ pub(in crate::modules::sdlc) trait Filter {
     fn params(&self) -> Vec<(String, Value)> {
         Vec::new()
     }
+    fn needs_final(&self) -> bool {
+        false
+    }
 }
 
 // A `None` filter contributes nothing, keeping optional filters chainable at call sites.
@@ -112,6 +115,9 @@ impl<F: Filter> Filter for Option<F> {
     }
     fn params(&self) -> Vec<(String, Value)> {
         self.as_ref().map(|f| f.params()).unwrap_or_default()
+    }
+    fn needs_final(&self) -> bool {
+        self.as_ref().is_some_and(Filter::needs_final)
     }
 }
 
@@ -154,6 +160,9 @@ pub(in crate::modules::sdlc) struct DeletedFilter<'a> {
 impl Filter for DeletedFilter<'_> {
     fn condition(&self) -> String {
         format!("{} = false", self.column)
+    }
+    fn needs_final(&self) -> bool {
+        true
     }
 }
 
@@ -271,6 +280,7 @@ pub(in crate::modules::sdlc) struct PreparedQuery {
     filters: Vec<String>,
     params: serde_json::Map<String, Value>,
     batch_size: u64,
+    needs_final: bool,
 }
 
 impl Plan {
@@ -280,6 +290,7 @@ impl Plan {
             filters: Vec::new(),
             params: serde_json::Map::new(),
             batch_size: self.batch_size,
+            needs_final: false,
         }
     }
 }
@@ -294,6 +305,7 @@ impl PreparedQuery {
         for (key, value) in filter.params() {
             self.params.insert(key, value);
         }
+        self.needs_final |= filter.needs_final();
         self
     }
 
@@ -314,6 +326,7 @@ impl PreparedQuery {
             sql_template::context! {
                 filters => filters_sql,
                 batch_size => self.batch_size,
+                final => if self.needs_final { "FINAL" } else { "" },
             },
         )
         .map_err(|e| HandlerError::Processing(format!("rendering extract SQL: {e}")))
@@ -431,7 +444,7 @@ mod tests {
             extract_template: ExtractTemplate::new(format!(
                 "SELECT id, name, _siphon_replicated_at AS _version, \
                  _siphon_deleted AS _deleted \
-                 FROM source_table \
+                 FROM source_table {{{{final}}}} \
                  WHERE 1=1 {{{{filters}}}} \
                  ORDER BY {sort_key_sql} \
                  LIMIT {{{{batch_size}}}}"
@@ -639,6 +652,8 @@ mod tests {
         assert!(sql.contains("LIMIT 1000"), "sql: {sql}");
         assert!(!sql.contains("{{filters}}"), "sql: {sql}");
         assert!(!sql.contains("{{batch_size}}"), "sql: {sql}");
+        assert!(!sql.contains("{{final}}"), "sql: {sql}");
+        assert!(!sql.contains("FINAL"), "sql: {sql}");
         assert!(!sql.contains("WHERE 1=1 AND"), "sql: {sql}");
     }
 
@@ -666,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn deleted_filter_full_load_drops_soft_deleted_rows() {
+    fn deleted_filter_full_load_reads_the_latest_version_and_drops_soft_deleted_rows() {
         let plan = test_plan(vec!["id"], 1000);
         let sql = plan
             .prepare()
@@ -675,6 +690,7 @@ mod tests {
             }))
             .to_sql()
             .expect("renders extract SQL");
+        assert!(sql.contains("FROM source_table FINAL"), "sql: {sql}");
         assert!(sql.contains("_siphon_deleted = false"), "sql: {sql}");
     }
 
@@ -684,9 +700,15 @@ mod tests {
         let sql = plan
             .prepare()
             .with(None::<DeletedFilter>)
+            .with(WatermarkFilter {
+                column: &plan.watermark_column,
+                last: Utc::now(),
+                current: Utc::now(),
+            })
             .to_sql()
             .expect("renders extract SQL");
         assert!(!sql.contains("_siphon_deleted = false"), "sql: {sql}");
+        assert!(!sql.contains("FINAL"), "sql: {sql}");
     }
 
     #[test]

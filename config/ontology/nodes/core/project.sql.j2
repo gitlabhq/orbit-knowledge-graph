@@ -14,7 +14,7 @@ SELECT
   traversal_paths.current_path AS traversal_path,
   project.{{version_column}} AS _version,
   project.{{deleted_column}} AS _deleted
-FROM siphon_projects project
+FROM siphon_projects project {{final}}
 INNER JOIN (
   SELECT
     id,

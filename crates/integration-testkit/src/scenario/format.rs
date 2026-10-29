@@ -48,6 +48,7 @@ impl Scenario {
             (true, true) => vec![Step {
                 drop_tables: Vec::new(),
                 create_tables: Vec::new(),
+                stop_merges: Vec::new(),
                 seed: self.seed.unwrap_or_default(),
                 seed_settings: self.seed_settings,
                 run: self.run,
@@ -86,6 +87,8 @@ pub struct Step {
     pub drop_tables: Vec<String>,
     #[serde(default)]
     pub create_tables: Vec<String>,
+    #[serde(default)]
+    pub stop_merges: Vec<String>,
     #[serde(default)]
     pub seed: Seed,
     /// ClickHouse INSERT settings applied to every seed insert in this step,

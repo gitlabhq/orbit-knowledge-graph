@@ -26,7 +26,7 @@ SELECT
   traversal_path,
   {{version_column}} AS _version,
   {{deleted_column}} AS _deleted
-FROM siphon_ai_governance_sessions
+FROM siphon_ai_governance_sessions {{final}}
 WHERE startsWith(traversal_path, {traversal_path:String})
   -- Only GitLab Duo sessions for now (source 0). External sessions (glab, MCP,
   -- Claude compliance API) wait for a privacy ruling. Slack and other

@@ -3,7 +3,7 @@ WITH
     traversal_path,
     id,
     {{version_column}}
-  FROM merge_requests AS m
+  FROM merge_requests AS m {{final}}
   WHERE startsWith(m.traversal_path, {traversal_path:String}) {{filters}}
   ORDER BY traversal_path, id
   LIMIT {{batch_size}})
