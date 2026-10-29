@@ -224,6 +224,12 @@ tests:
           RETURN s.id AS source
         assert:
           - { row_count: 1 }
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'save' AND t.fqn = 'shop.User.greet' AND 14 IN e.lines AND 15 IN e.lines
+          RETURN e.lines AS lines
+        assert:
+          - { row_count: 1 }
 
   - name: "CALLS"
     queries:

@@ -220,6 +220,15 @@ tests:
     assert:
       - { row_count: 1 }
 
+  - name: "The CALLS edge holds both call-site lines"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[c:CALLS]->(t:Definition)
+          WHERE s.name = 'charge' AND t.fqn = 'billing.models.Order.describe' AND 30 IN c.lines AND 31 IN c.lines
+          RETURN c.lines AS lines
+        assert:
+          - { row_count: 1 }
+
   - name: "CALLS to an external import"
     query: |
       MATCH (s:Definition)-[c:CALLS]->(i:Import)

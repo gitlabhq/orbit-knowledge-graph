@@ -155,6 +155,12 @@ tests:
           RETURN s.id AS source
         assert:
           - { row_count: 1 }
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.fqn = 'Order::charge' AND t.fqn = 'Order::describe' AND 7 IN e.lines AND 8 IN e.lines
+          RETURN e.lines AS lines
+        assert:
+          - { row_count: 1 }
 
   - name: "Test definition charges"
     queries:

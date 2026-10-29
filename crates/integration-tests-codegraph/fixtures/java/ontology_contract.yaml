@@ -275,6 +275,12 @@ tests:
           RETURN s.id AS source
         assert:
           - { row_count: 1 }
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'pay' AND t.fqn = 'com.shop.Order.describe' AND e.resolution = 'inferred_type' AND 21 IN e.lines AND 22 IN e.lines
+          RETURN e.lines AS lines
+        assert:
+          - { row_count: 1 }
 
   - name: "CALLS"
     queries:

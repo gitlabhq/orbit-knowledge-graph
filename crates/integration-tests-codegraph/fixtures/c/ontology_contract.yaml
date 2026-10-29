@@ -182,6 +182,12 @@ tests:
           RETURN s.id AS source
         assert:
           - { row_count: 1 }
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'area' AND t.name = 'add' AND e.resolution = 'local' AND 22 IN e.lines AND 23 IN e.lines
+          RETURN e.lines AS lines
+        assert:
+          - { row_count: 1 }
 
   - name: "RESOLVES_TO"
     queries:
