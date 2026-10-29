@@ -34,6 +34,35 @@ test('an aggregation counts the nodes its count columns cover', () => {
   expect(parseResponse(text).aggregated).toBe(100)
 })
 
+test('an aggregation with several aggregates lists its columns and still counts', () => {
+  const text = [
+    'query_type: aggregation',
+    'columns[2]:',
+    '  - name: n',
+    '    function: count',
+    '    target: mr',
+    '  - name: s',
+    '    function: sum',
+    '    target: mr',
+    '    property: iid',
+    'group_columns[1]{name,kind,node,property,entity}:',
+    '  mr_state,property,mr,state,MergeRequest',
+    'rows[3]{mr_state,n,s}:',
+    '  merged,2450,3785384',
+    '  closed,690,1161896',
+    '  opened,76,225656',
+    'pagination:',
+    '  has_more: false',
+    '  truncated: false',
+  ].join('\n')
+  expect(parseResponse(text)).toMatchObject({ aggregated: 3216, grouped: true })
+})
+
+test('an ungrouped aggregation with several aggregates counts too', () => {
+  const text = 'query_type: aggregation\ncolumns[2]:\n  - name: n\n    function: count\n    target: mr\n  - name: s\n    function: sum\n    target: mr\n    property: iid\nrows[1]{n,s}:\n  3216,5172936\npagination:\n  has_more: false\n'
+  expect(parseResponse(text).aggregated).toBe(3216)
+})
+
 test('schema and other output reads as empty', () => {
   expect(parseResponse('domains[1]:\n  - name: code_review')).toMatchObject({ nodes: 0, edges: 0, aggregated: 0 })
 })
