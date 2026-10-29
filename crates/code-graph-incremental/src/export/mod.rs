@@ -467,7 +467,7 @@ fn write_entity(
     let b = &mut builder;
     for (ti, tree) in forest.all().filter(|(ti, _)| wanted(*ti)) {
         run.check()?;
-        let mut occurrences: FxHashMap<Vec<String>, usize> = FxHashMap::default();
+        let mut occurrences: FxHashMap<u64, usize> = FxHashMap::default();
         let ctx = EdgeCtx {
             tree_index: ti,
             edges: edge_index,
@@ -517,16 +517,6 @@ fn write_entity(
                         IdPart::Occurrence => String::new(),
                     })
                     .collect();
-                if let Some(at) = entity
-                    .id_parts
-                    .iter()
-                    .position(|part| matches!(part, IdPart::Occurrence))
-                {
-                    let seen = occurrences.entry(parts.clone()).or_insert(0usize);
-                    parts[at] = seen.to_string();
-                    *seen += 1;
-                }
-                let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
                 let values = entity
                     .columns
                     .iter()
@@ -540,6 +530,18 @@ fn write_entity(
                         continue;
                     }
                 };
+                if let Some(at) = entity
+                    .id_parts
+                    .iter()
+                    .position(|part| matches!(part, IdPart::Occurrence))
+                {
+                    let mut hasher = FxHasher::default();
+                    parts.hash(&mut hasher);
+                    let seen = occurrences.entry(hasher.finish()).or_insert(0usize);
+                    parts[at] = seen.to_string();
+                    *seen += 1;
+                }
+                let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
                 let id = envelope.id(plan, &entity.id_seed, &parts);
                 let emitted = emit(ti, tree);
                 ids.insert((ti, expanded.index()), (id, index, emitted));

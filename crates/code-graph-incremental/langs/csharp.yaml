@@ -371,7 +371,7 @@ display:
           doc_comment: '@$ROOT|source_before("4096")|regex_first("(?s)\A(?:(?:.*?\n)??((?:[ \t]*///[^\n]*\n)+)[ \t]*\z)?.*\z", "$1")|regex_replace("(?m)^[ \t]*///[ \t]?", "")|regex_first("(?s)\A.*?<summary>(.*?)</summary>.*\z", "$1")|regex_replace("<\w+\s+(?:cref|name|langword|href)=\x22(?:\w:)?([^\x22]*)\x22\s*/>", "$1")|regex_replace("<[^>]*>", " ")|regex_replace("\A\s+", "")|regex_replace("(?s)\n[ \t]*\n.*", "")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
       - match: '(__def (__class))'
         tag: &type_sig
-          signature: '@$ROOT|source("4096")|top_until("\{|;", "()[]{}<>")|regex_replace("^(?:\[(?:[^\[\]]|\[[^\]]*\])*\]\s*)+", "")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
+          signature: '@$ROOT|source("4096")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)<", "$1‹")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)>", "$1›")|top_until("\{|;", "()[]{}<>")|regex_replace("^(?:\[(?:[^\[\]]|\[[^\]]*\])*\]\s*)+", "")|regex_replace("\s+", " ")|regex_replace("^ | $", "")|replace("‹", "<")|replace("›", ">")'
       - match: '(__def (__struct))'
         tag: *type_sig
       - match: '(__def (__interface))'
@@ -383,12 +383,12 @@ display:
           signature: '@$ROOT|source("1024")|top_until("=|,", "()[]{}<>")|regex_replace("^(?:\[(?:[^\[\]]|\[[^\]]*\])*\]\s*)+", "")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
       - match: '(__def (__method))'
         tag: &callable_sig
-          signature: '@$ROOT|source("4096")|top_until("\{|=>|;", "()[]{}<>")|regex_replace("^(?:\[(?:[^\[\]]|\[[^\]]*\])*\]\s*)+", "")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
+          signature: '@$ROOT|source("4096")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)<", "$1‹")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)>", "$1›")|top_until("\{|=>|;", "()[]{}<>")|regex_replace("^(?:\[(?:[^\[\]]|\[[^\]]*\])*\]\s*)+", "")|regex_replace("\s+", " ")|regex_replace("^ | $", "")|replace("‹", "<")|replace("›", ">")'
       - match: '(__def (__function))'
         tag: *callable_sig
       - match: '(__def (__property))'
         tag:
-          signature: '@$ROOT|source("2048")|top_until("\{|=>|;", "()[]{}<>")|regex_replace("^(?:\[(?:[^\[\]]|\[[^\]]*\])*\]\s*)+", "")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
+          signature: '@$ROOT|source("2048")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)<", "$1‹")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)>", "$1›")|top_until("\{|=>|;", "()[]{}<>")|regex_replace("^(?:\[(?:[^\[\]]|\[[^\]]*\])*\]\s*)+", "")|regex_replace("\s+", " ")|regex_replace("^ | $", "")|replace("‹", "<")|replace("›", ">")'
       - match: '(__def (__field_def))'
         tag:
           signature: '@$ROOT|source("2048")|top_until("=|;", "()[]{}<>")|regex_replace("^(?:\[(?:[^\[\]]|\[[^\]]*\])*\]\s*)+", "")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'

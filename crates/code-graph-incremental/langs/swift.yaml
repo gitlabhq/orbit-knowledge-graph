@@ -248,8 +248,8 @@ display:
     rules:
       - match: '(__def)'
         tag:
-          signature: '@$ROOT|source("4096")|top_until("\{", "()[]{}<>")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
-          head: '@$ROOT|source("1024")|top_until("[(:=<{]", "()[]{}<>")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
+          signature: '@$ROOT|source("4096")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)<", "$1‹")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)>", "$1›")|top_until("\{", "()[]{}<>")|regex_replace("\s+", " ")|regex_replace("^ | $", "")|replace("‹", "<")|replace("›", ">")'
+          head: '@$ROOT|source("1024")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)<", "$1‹")|regex_loop("((?:operator\s*|func\s+)[^\w\s(]*)>", "$1›")|top_until("[(:=<{]", "()[]{}<>")|regex_replace("\s+", " ")|regex_replace("^ | $", "")|replace("‹", "<")|replace("›", ">")'
           doc_comment: '@$ROOT|source_before("4096")|regex_first("(?s)\A(?:(?:.*?\n)??(?:((?:[ \t]*///[^\n]*\n)+)|[ \t]*/\*\*((?:[^*]|\*+[^*/])*)\*+/[ \t]*\n)?(?:[ \t]*@[^\n]*\n)*[ \t]*|.*)\z", "$1$2")|regex_replace("(?m)^[ \t]*(?:///|\*+)[ \t]?", "")|regex_replace("\A\s+", "")|regex_replace("(?s)(?:\n[ \t]*\n|(?:\A|\n)[ \t]*- (?:Parameter|Parameters|Returns|Throws)\b).*", "")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
       - match: '(__def (__property))'
         tag: &value_sig
