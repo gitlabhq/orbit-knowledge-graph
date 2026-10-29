@@ -131,10 +131,6 @@ entities:
       - { name: start_column, type: Int64, position: start_col }
       - { name: end_column, type: Int64, position: end_col }
 
-# The edge table. `containment` rows link each `to` entity to its nearest
-# enclosing `from` entity. `graph` rows come from the resolver, matched on
-# edge kind and the entities at each end; all rows collapse to one
-# row per source, target and kind.
 edges:
   columns:
     - { name: source_id, type: Int64, from: source.id }
