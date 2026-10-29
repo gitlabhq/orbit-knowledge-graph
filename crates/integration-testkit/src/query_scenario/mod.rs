@@ -612,10 +612,6 @@ async fn execute_output(
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
 
-    let checks = result.resource_checks();
-    let authorizations = redaction.check(&checks);
-    let redacted_count = result.apply_authorizations(&authorizations);
-
     let resolver = Arc::new(SeededColumnResolver::from_seed_file());
     let mut resolver_registry = ColumnResolverRegistry::new();
     resolver_registry.register("gitaly", resolver as _);
@@ -635,6 +631,14 @@ async fn execute_output(
         server_extensions,
         phases: TypeMap::default(),
     };
+
+    HydrationStage::resolve_owners(&mut pipeline_ctx, &mut result)
+        .await
+        .expect("owner lookup should succeed");
+    let checks = result.resource_checks();
+    let authorizations = redaction.check(&checks);
+    let redacted_count = result.apply_authorizations(&authorizations);
+
     pipeline_ctx.phases.insert(RedactionOutput {
         query_result: result,
         redacted_count,

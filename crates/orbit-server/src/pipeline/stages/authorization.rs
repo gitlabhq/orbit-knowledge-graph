@@ -4,6 +4,7 @@ use orbit_log_fields::info;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
+use super::HydrationStage;
 use crate::proto::ExecuteQueryMessage;
 use crate::redaction::{RedactionExchangeError, RedactionService};
 
@@ -24,7 +25,7 @@ impl PipelineStage for AuthorizationStage {
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let input = ctx
+        let mut input = ctx
             .phases
             .remove::<ExtractionOutput>()
             .ok_or_else(|| {
@@ -33,6 +34,9 @@ impl PipelineStage for AuthorizationStage {
             .inspect_err(|e| obs.record_error(e))?;
         let t = Instant::now();
 
+        HydrationStage::resolve_owners(ctx, &mut input.query_result)
+            .await
+            .inspect_err(|e| obs.record_error(e))?;
         let resources_to_check = input.query_result.resource_checks();
         let authorizations = if resources_to_check.is_empty() {
             info!("No redaction required, returning result directly");

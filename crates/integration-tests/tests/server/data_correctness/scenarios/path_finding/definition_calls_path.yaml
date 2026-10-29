@@ -1,0 +1,50 @@
+cases:
+  - name: allowed_project
+    description: Path between Definitions authorizes through the owning project
+    config:
+      redaction:
+        allow:
+          project: [1000]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "a", "entity": "Definition", "node_ids": [12000]},
+            {"id": "b", "entity": "Definition", "node_ids": [12001]}
+          ],
+          "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
+                   "rel_types": ["CALLS"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (a:Definition {id: 12000})-[:CALLS*1..2]->(b:Definition {id: 12001}) RETURN p
+    expect:
+      referential_integrity: true
+      path_count: 1
+      nodes:
+        Definition:
+          ids: [12000, 12001]
+      path_edges:
+        - [{ from: Definition, from_id: 12000, type: CALLS, to: Definition, to_id: 12001, step: 0 }]
+
+  - name: denied_project
+    description: Denying the owning project redacts the Definition path
+    config:
+      redaction:
+        deny:
+          project: [1000]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "a", "entity": "Definition", "node_ids": [12000]},
+            {"id": "b", "entity": "Definition", "node_ids": [12001]}
+          ],
+          "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
+                   "rel_types": ["CALLS"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (a:Definition {id: 12000})-[:CALLS*1..2]->(b:Definition {id: 12001}) RETURN p
+    expect:
+      path_count: 0
