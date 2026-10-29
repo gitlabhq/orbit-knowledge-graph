@@ -6,6 +6,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test ./opencode",
     "test:claude": "${CLAUDE_BIN:-claude} plugin validate --strict . && ${CLAUDE_BIN:-claude} plugin test .",
+    "test:differential": "bun scripts/differential.ts",
     "build": "bun scripts/build.ts"
   },
   "devDependencies": {
