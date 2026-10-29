@@ -80,7 +80,8 @@ export function orbitInvocations(command: string): string[][] {
   const calls = commands.map(orbitWords)
   const pipeTarget = (words: string[]) =>
     words[0] === '|' && PIPE_TARGETS.has(words[1] ?? '') && words.slice(2).every((word) => word.startsWith('-') || /^\d+$/.test(word))
-  const helper = (words: string[]) => words[0] === 'cd' || pipeTarget(words) || words.join(' ') === 'true'
+  const helper = (words: string[]) =>
+    words[0] === 'cd' || words[0] === 'echo' || pipeTarget(words) || words.join(' ') === 'true'
   const plain =
     !command.includes("$'") && commands.every((words, i) => !words.some((w) => SHELL_ONLY.has(w)) && (calls[i] || helper(words)))
   return plain ? calls.filter((words) => words !== null) : []

