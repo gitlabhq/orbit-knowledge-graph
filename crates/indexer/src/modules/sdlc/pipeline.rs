@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use arrow::record_batch::RecordBatch;
 use futures::StreamExt;
+use futures::future::OptionFuture;
 use futures::stream::FuturesUnordered;
 use orbit_log_fields::{debug, info, warn};
 use serde_json::Value;
@@ -228,13 +229,14 @@ impl Pipeline {
 
         let transform = self.registry.build(plan)?;
         let outputs = transform.outputs().to_vec();
-        let node_output = plan
+        let edge_diff = plan
             .edge_diff
             .as_ref()
             .map(|diff| {
                 outputs
                     .iter()
                     .position(|table| table == diff.node_table())
+                    .map(|node_output| (diff, node_output))
                     .ok_or_else(|| {
                         HandlerError::Processing(format!(
                             "plan {} writes no {} output to diff edges against",
@@ -294,33 +296,28 @@ impl Pipeline {
                 self.retry_config.halving_min_block_size,
             );
 
-            let diff_page = match &plan.edge_diff {
-                Some(diff) => diff.page(&page.batches)?,
-                None => None,
-            };
-            let read_stored = async {
-                match (&plan.edge_diff, &diff_page) {
-                    (Some(diff), Some(diff_page)) => {
-                        diff.read_stored(&self.edge_diff, diff_page).await.map(Some)
-                    }
-                    _ => Ok(None),
-                }
-            };
+            let read_previous: OptionFuture<_> = edge_diff
+                .map(|(diff, _)| {
+                    diff.page_keys(&page.batches)
+                        .map(|keys| diff.read_previous(&self.edge_diff, keys))
+                })
+                .transpose()?
+                .into();
 
             let transform_start = Instant::now();
-            let (grouped, stored) = tokio::join!(
+            let (grouped, previous) = tokio::join!(
                 self.transform_page(transform.as_ref(), std::mem::take(&mut page.batches)),
-                read_stored,
+                read_previous,
             );
-            let (grouped, stored) = (grouped?, stored?);
+            let (grouped, previous) = (grouped?, previous.transpose()?);
             let transform_elapsed = transform_start.elapsed();
             self.metrics
                 .record_transform_duration(transform_elapsed.as_secs_f64());
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
-            let tombstones = match (&plan.edge_diff, node_output, &stored) {
-                (Some(diff), Some(index), Some(stored)) => {
-                    diff.tombstones(&grouped[index], stored)?
+            let tombstones = match (edge_diff, previous) {
+                (Some((diff, node_output)), Some(previous)) => {
+                    diff.tombstones(&grouped[node_output], &previous)?
                 }
                 _ => Vec::new(),
             };
