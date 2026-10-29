@@ -1,5 +1,342 @@
 /*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
+var NUMBER_OPTION = /^-[A-Za-z]*[nNcmABCfb]$|^--(?:lines|bytes|max-count|after-context|before-context|context)$/;
+function grepPatternOption(arg) {
+  if (arg === "--regexp")
+    return "separate";
+  if (arg.startsWith("--regexp="))
+    return "attached";
+  const letters = arg.startsWith("--") ? null : arg.match(/^-[A-Za-z]*?e(.*)$/);
+  if (!letters)
+    return null;
+  return letters[1] ? "attached" : "separate";
+}
+var FILTERS = {
+  head: { maxOperands: 0 },
+  tail: { maxOperands: 0 },
+  wc: { maxOperands: 0 },
+  cut: { maxOperands: 0 },
+  grep: {
+    maxOperands: 1,
+    fileOptions: /^-[A-Za-z]*[rRdf]|^--(?:recursive|dereference-recursive|directories|file)/,
+    patternOption: grepPatternOption
+  },
+  jq: {
+    maxOperands: 1,
+    fileOptions: /^-[A-Za-z]*[fL]|^--(?:from-file|slurpfile|rawfile|argfile)/,
+    notQuiet: /\b(?:import|include|env)\b|\$ENV|^-[A-Za-z]*n|^--null-input$/
+  }
+};
+function operandCount(spec, args, patternOptions) {
+  let operands = 0;
+  let optionsEnded = false;
+  for (let i = 0;i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (optionsEnded || !arg.startsWith("-")) {
+      const isNumberValue = !optionsEnded && /^\d+$/.test(arg) && NUMBER_OPTION.test(args[i - 1] ?? "");
+      if (!isNumberValue)
+        operands++;
+    } else if (arg === "--")
+      optionsEnded = true;
+    else if (spec.fileOptions?.test(arg))
+      return Infinity;
+    else if (patternOptions[i] === "separate" && i + 1 < args.length) {
+      operands++;
+      i++;
+    }
+  }
+  return operands;
+}
+function isQuietFilter(program, args, readsInput) {
+  const spec = Object.hasOwn(FILTERS, program) ? FILTERS[program] : undefined;
+  if (!spec || readsInput || args.some((arg) => spec.notQuiet?.test(arg)))
+    return false;
+  const patternOptions = args.map((arg) => spec.patternOption?.(arg) ?? null);
+  const maxOperands = patternOptions.includes("attached") ? 0 : spec.maxOperands;
+  return operandCount(spec, args, patternOptions) <= maxOperands;
+}
+
+var QUOTE_FORMS = {
+  single: { close: "'", escapes: false, substitutions: false },
+  ansi: { close: "'", escapes: true, substitutions: false },
+  double: { close: '"', escapes: true, substitutions: true }
+};
 var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/;
+var SUBSTITUTION = /\$\(|`/;
+var KEYWORDS_BEFORE_ARITHMETIC = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
+function arithmeticEnd(src, open) {
+  let depth = 2;
+  for (let i = open + 2;i < src.length; i++) {
+    if (src[i] === "(")
+      depth++;
+    else if (src[i] === ")") {
+      if (depth === 2 && src[i + 1] === ")")
+        return i + 2;
+      if (--depth < 2)
+        return -1;
+    }
+  }
+  return -1;
+}
+function startsArithmetic(src, open) {
+  return src[open] === "(" && src[open + 1] === "(" && arithmeticEnd(src, open) >= 0;
+}
+function startsSubstitution(src, at) {
+  if (src[at] === "`")
+    return true;
+  return src[at] === "$" && src[at + 1] === "(" && !startsArithmetic(src, at + 1);
+}
+function scanQuoted(src, start, form) {
+  let text = "";
+  let substitutes = false;
+  for (let i = start;i < src.length; i++) {
+    const c = src[i] ?? "";
+    if (c === form.close)
+      return { text, end: i + 1, closed: true, substitutes };
+    if (form.escapes && c === "\\" && i + 1 < src.length)
+      text += src[++i];
+    else {
+      if (form.substitutions && startsSubstitution(src, i))
+        substitutes = true;
+      text += c;
+    }
+  }
+  return { text, end: src.length, closed: false, substitutes };
+}
+function scanHeredocOperand(src, start) {
+  let i = start;
+  let delimiter = "";
+  let quoted = false;
+  while (i < src.length && !/[\s;&|<>()]/.test(src[i] ?? "")) {
+    const c = src[i] ?? "";
+    if (c === "'" || c === '"') {
+      const { text, end } = scanQuoted(src, i + 1, c === "'" ? QUOTE_FORMS.single : QUOTE_FORMS.double);
+      quoted = true;
+      delimiter += text;
+      i = end;
+    } else if (c === "\\") {
+      quoted = true;
+      delimiter += src[i + 1] ?? "";
+      i += 2;
+    } else {
+      delimiter += c;
+      i++;
+    }
+  }
+  return { delimiter, quoted, end: i };
+}
+function scanHeredocBody(src, start, heredoc) {
+  let at = start;
+  let substitutes = false;
+  while (at < src.length) {
+    const newline = src.indexOf(`
+`, at);
+    const line = src.slice(at, newline < 0 ? src.length : newline);
+    at = newline < 0 ? src.length : newline + 1;
+    if ((heredoc.stripTabs ? line.replace(/^\t+/, "") : line) === heredoc.delimiter)
+      return { end: at, closed: true, substitutes };
+    if (!heredoc.quoted && SUBSTITUTION.test(line))
+      substitutes = true;
+  }
+  return { end: at, closed: false, substitutes };
+}
+
+class Lexer {
+  src;
+  pos = 0;
+  word = null;
+  unparsed = false;
+  tokens = [];
+  heredocs = [];
+  constructor(src) {
+    this.src = src;
+  }
+  run() {
+    while (this.pos < this.src.length)
+      this.step(this.src[this.pos] ?? "");
+    this.endWord();
+    return { tokens: this.tokens, unparsed: this.unparsed };
+  }
+  step(c) {
+    if (c === "'")
+      this.quoted("single", 1);
+    else if (c === '"')
+      this.quoted("double", 1);
+    else if (c === "\\")
+      this.escape();
+    else if (c === "$")
+      this.dollar();
+    else if (c === "`")
+      this.substitution(1);
+    else if (c === "(" && this.startsArithmeticCommand())
+      this.arithmetic(this.pos, 0);
+    else if (c === "<" || c === ">" || c === "&" && this.src[this.pos + 1] === ">")
+      this.redirect(c);
+    else if (c === "|" && this.src[this.pos + 1] !== "|")
+      this.pipe();
+    else if (c === `
+` || ";&|()".includes(c))
+      this.separator(c);
+    else if (c === "#" && this.word === null)
+      this.comment();
+    else if (/\s/.test(c))
+      this.whitespace();
+    else
+      this.plain(c);
+  }
+  append(text) {
+    this.word = (this.word ?? "") + text;
+  }
+  endWord() {
+    if (this.word !== null)
+      this.tokens.push({ kind: "word", text: this.word });
+    this.word = null;
+  }
+  currentCommandWords() {
+    const words = [];
+    for (const token of this.tokens.toReversed()) {
+      if (token.kind === "separator")
+        break;
+      if (token.kind === "word")
+        words.unshift(token.text);
+    }
+    return words;
+  }
+  startsArithmeticCommand() {
+    if (this.word !== null || !startsArithmetic(this.src, this.pos))
+      return false;
+    const words = this.currentCommandWords();
+    return words.every((word) => KEYWORDS_BEFORE_ARITHMETIC.has(word)) || words[0] === "for";
+  }
+  quoted(form, openingLength) {
+    const { text, end, closed, substitutes } = scanQuoted(this.src, this.pos + openingLength, QUOTE_FORMS[form]);
+    this.append(text);
+    if (substitutes)
+      this.tokens.push({ kind: "substitution" });
+    if (!closed)
+      this.unparsed = true;
+    this.pos = end;
+  }
+  escape() {
+    const next = this.src[this.pos + 1];
+    if (next === `
+`) {
+      this.endWord();
+      this.pos += 2;
+    } else if (next === undefined)
+      this.plain("\\");
+    else {
+      this.append(next);
+      this.pos += 2;
+    }
+  }
+  dollar() {
+    const next = this.src[this.pos + 1];
+    if (next === "'")
+      this.quoted("ansi", 2);
+    else if (startsSubstitution(this.src, this.pos))
+      this.substitution(1);
+    else if (next === "(" && startsArithmetic(this.src, this.pos + 1))
+      this.arithmetic(this.pos + 1, 1);
+    else
+      this.plain("$");
+  }
+  substitution(length) {
+    this.tokens.push({ kind: "substitution" });
+    this.pos += length;
+  }
+  arithmetic(open, dollar) {
+    const end = arithmeticEnd(this.src, open);
+    if (SUBSTITUTION.test(this.src.slice(open + 2, end - 2)))
+      this.tokens.push({ kind: "substitution" });
+    if (dollar)
+      this.append("");
+    this.pos = end;
+  }
+  redirect(c) {
+    const harmless = this.src.slice(this.pos).match(HARMLESS_REDIRECT);
+    this.endWordOrDescriptor();
+    if (harmless) {
+      this.pos += harmless[0].length;
+      return;
+    }
+    if (c === "&")
+      this.pos++;
+    if (this.src[this.pos] === "<" && this.src[this.pos + 1] === "<" && this.src[this.pos + 2] !== "<")
+      this.heredocOperator();
+    else
+      this.redirectOperator();
+  }
+  endWordOrDescriptor() {
+    const isDescriptor = this.word !== null && /^\d+$/.test(this.word) && /\d/.test(this.src[this.pos - 1] ?? "");
+    if (isDescriptor)
+      this.word = null;
+    else
+      this.endWord();
+  }
+  redirectOperator() {
+    const operator = this.src[this.pos] === "<" ? "<" : ">";
+    this.pos += operator === "<" && this.src.startsWith("<<<", this.pos) ? 3 : 1;
+    if (operator === ">") {
+      if (this.src[this.pos] === ">")
+        this.pos++;
+      if (this.src[this.pos] === "|" || this.src[this.pos] === "&")
+        this.pos++;
+    }
+    this.tokens.push({ kind: "redirect", operator });
+  }
+  heredocOperator() {
+    const stripTabs = this.src[this.pos + 2] === "-";
+    const operandStart = this.pos + (stripTabs ? 3 : 2);
+    const { delimiter, quoted, end } = scanHeredocOperand(this.src, operandStart + (this.src.slice(operandStart).match(/^[ \t]*/)?.[0].length ?? 0));
+    if (delimiter)
+      this.heredocs.push({ delimiter, stripTabs, quoted });
+    else
+      this.unparsed = true;
+    this.pos = end;
+  }
+  pipe() {
+    this.endWord();
+    this.tokens.push({ kind: "separator", pipe: true });
+    this.pos += this.src[this.pos + 1] === "&" ? 2 : 1;
+  }
+  separator(c) {
+    if (c === `
+`)
+      this.skipHeredocBodies();
+    this.endWord();
+    this.tokens.push({ kind: "separator", pipe: false });
+    this.pos += (c === "&" || c === "|") && this.src[this.pos + 1] === c ? 2 : 1;
+  }
+  skipHeredocBodies() {
+    let at = this.pos + 1;
+    for (const heredoc of this.heredocs.splice(0)) {
+      const body = scanHeredocBody(this.src, at, heredoc);
+      if (body.substitutes)
+        this.tokens.push({ kind: "substitution" });
+      if (!body.closed)
+        this.unparsed = true;
+      at = body.end;
+    }
+    this.pos = at - 1;
+  }
+  comment() {
+    const newline = this.src.indexOf(`
+`, this.pos);
+    this.pos = newline < 0 ? this.src.length : newline;
+  }
+  whitespace() {
+    this.endWord();
+    this.pos++;
+  }
+  plain(c) {
+    this.append(c);
+    this.pos++;
+  }
+}
+function lex(src) {
+  return new Lexer(src).run();
+}
+
 var MAX_NAME_LENGTH = 40;
 var INVISIBLE = /[\p{Cc}\p{Cf}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]/gu;
 function clip(text, max) {
@@ -10,177 +347,45 @@ function displayName(name) {
   const text = clip(name, MAX_NAME_LENGTH);
   return /[,\s']/.test(text) ? `'${text.replaceAll("'", "\\'")}'` : text;
 }
-var SUBSTITUTION = /\$\(|`/;
-function arithmeticEnd(command, open) {
-  let depth = 2;
-  for (let i = open + 2;i < command.length; i++) {
-    if (command[i] === "(")
-      depth++;
-    else if (command[i] === ")") {
-      if (depth === 2 && command[i + 1] === ")")
-        return i + 2;
-      if (--depth < 2)
-        return -1;
-    }
-  }
-  return -1;
+function emptyCommand(piped) {
+  return { piped, words: [], readsInput: false, writes: [], substitutes: false };
 }
-function heredocOperand(command, from) {
-  let i = from;
-  let delimiter = "";
-  let quoted = false;
-  while (i < command.length && !/[\s;&|<>()]/.test(command[i] ?? "")) {
-    const c = command[i] ?? "";
-    if (c === "'" || c === '"') {
-      const close = command.indexOf(c, i + 1);
-      quoted = true;
-      delimiter += command.slice(i + 1, close < 0 ? command.length : close);
-      i = close < 0 ? command.length : close + 1;
-    } else if (c === "\\") {
-      quoted = true;
-      delimiter += command[i + 1] ?? "";
-      i += 2;
-    } else {
-      delimiter += c;
-      i++;
-    }
-  }
-  return { delimiter, quoted, end: i };
+function isEmpty(command) {
+  return !command.words.length && !command.writes.length && !command.substitutes;
 }
-function parseCommands(command) {
+function redirectTarget(tokens, from) {
+  let at = from;
+  while (tokens[at]?.kind === "substitution")
+    at++;
+  const token = tokens[at];
+  return token?.kind === "word" ? { target: token.text, end: at } : { end: from - 1 };
+}
+function groupCommands(tokens) {
   const commands = [];
-  let words = [];
-  let word = "";
-  let inWord = false;
-  let quote = "";
-  let ansiQuote = false;
-  let dollarAt = -1;
-  let piped = false;
-  let unparsed = false;
-  const heredocs = [];
-  const endWord = () => {
-    if (inWord)
-      words.push(word);
-    word = "";
-    inWord = false;
-  };
-  const endCommand = () => {
-    endWord();
-    if (words.length)
-      commands.push(piped ? ["|", ...words] : words);
-    words = [];
-    piped = false;
-  };
-  const skipHeredocBodies = (newline) => {
-    let at = newline + 1;
-    for (const { delimiter, stripTabs, quoted } of heredocs.splice(0)) {
-      let closed = false;
-      while (at < command.length && !closed) {
-        const end = command.indexOf(`
-`, at);
-        const line = command.slice(at, end < 0 ? command.length : end);
-        at = end < 0 ? command.length : end + 1;
-        closed = (stripTabs ? line.replace(/^\t+/, "") : line) === delimiter;
-        if (!closed && !quoted && SUBSTITUTION.test(line))
-          words.push("$(");
-      }
-      if (!closed)
-        unparsed = true;
-    }
-    return at - 1;
-  };
-  for (let i = 0;i < command.length; i++) {
-    const c = command[i] ?? "";
-    if (quote !== "'" && (c === "`" || c === "$" && command[i + 1] === "("))
-      words.push(c === "`" ? "`" : "$(");
-    if (quote) {
-      if (c === quote) {
-        quote = "";
-        ansiQuote = false;
-      } else if (c === "\\" && (quote === '"' || ansiQuote) && i + 1 < command.length)
-        word += command[++i];
-      else
-        word += c;
-    } else if (c === "'" || c === '"') {
-      ansiQuote = c === "'" && inWord && dollarAt === i - 1;
-      quote = c;
-      inWord = true;
-    } else if (c === "\\" && command[i + 1] === `
-`) {
-      i++;
-      endWord();
-    } else if (c === "\\" && i + 1 < command.length) {
-      word += command[++i];
-      inWord = true;
-    } else if (c === "$" && command[i + 1] === "(" && command[i + 2] === "(" && arithmeticEnd(command, i + 1) >= 0 || c === "(" && command[i + 1] === "(" && !inWord && (words.every((word) => PREFIX_WORDS.has(word)) || words[0] === "for") && arithmeticEnd(command, i) >= 0) {
-      const end = arithmeticEnd(command, c === "$" ? i + 1 : i);
-      if (SUBSTITUTION.test(command.slice(i, end)))
-        words.push("$(");
-      if (c === "$")
-        inWord = true;
-      i = end - 1;
-    } else if ("&>".includes(c) && HARMLESS_REDIRECT.test(command.slice(i))) {
-      if (/^\d+$/.test(word) && /\d/.test(command[i - 1] ?? "")) {
-        word = "";
-        inWord = false;
-      } else
-        endWord();
-      i += (command.slice(i).match(HARMLESS_REDIRECT)?.[0].length ?? 1) - 1;
-    } else if (c === "<" || c === ">" || c === "&" && command[i + 1] === ">") {
-      if (inWord && /^\d+$/.test(word) && /\d/.test(command[i - 1] ?? "")) {
-        word = "";
-        inWord = false;
-      } else
-        endWord();
-      if (c === "&")
-        i++;
-      const operator = command[i] ?? c;
-      if (operator === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
-        i += 2;
-        words.push("<");
-      } else if (operator === "<" && command[i + 1] === "<") {
-        const stripTabs = command[i + 2] === "-";
-        const operand = heredocOperand(command, i + (stripTabs ? 3 : 2) + (command.slice(i + (stripTabs ? 3 : 2)).match(/^[ \t]*/)?.[0].length ?? 0));
-        if (!operand.delimiter)
-          unparsed = true;
-        else
-          heredocs.push({ delimiter: operand.delimiter, stripTabs, quoted: operand.quoted });
-        i = operand.end - 1;
-      } else {
-        if (operator === ">" && command[i + 1] === ">")
-          i++;
-        if (operator === ">" && (command[i + 1] === "|" || command[i + 1] === "&"))
-          i++;
-        words.push(operator);
-      }
-    } else if (c === "|" && command[i + 1] !== "|") {
-      endCommand();
-      piped = true;
-      if (command[i + 1] === "&")
-        i++;
-    } else if (c === `
-` || ";&|()".includes(c)) {
-      if (c === `
-` && heredocs.length)
-        i = skipHeredocBodies(i);
-      endCommand();
-      if ("&|".includes(c) && command[i + 1] === c)
-        i++;
-    } else if (c === "#" && !inWord) {
-      while (i + 1 < command.length && command[i + 1] !== `
-`)
-        i++;
-    } else if (/\s/.test(c)) {
-      endWord();
-    } else {
-      if (c === "$")
-        dollarAt = i;
-      word += c;
-      inWord = true;
+  let current = emptyCommand(false);
+  for (let i = 0;i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token?.kind === "word")
+      current.words.push(token.text);
+    else if (token?.kind === "substitution")
+      current.substitutes = true;
+    else if (token?.kind === "redirect") {
+      const { target, end } = redirectTarget(tokens, i + 1);
+      if (token.operator === "<")
+        current.readsInput = true;
+      else if (target !== undefined)
+        current.writes.push(target);
+      current.substitutes ||= tokens.slice(i + 1, end + 1).some((skipped) => skipped.kind === "substitution");
+      i = end;
+    } else if (token?.kind === "separator") {
+      if (!isEmpty(current))
+        commands.push(current);
+      current = emptyCommand(token.pipe);
     }
   }
-  endCommand();
-  return { commands, unparsed: unparsed || quote !== "" };
+  if (!isEmpty(current))
+    commands.push(current);
+  return commands;
 }
 function orbitWords(words) {
   let i = 0;
@@ -197,109 +402,56 @@ function orbitWords(words) {
   return words.slice(i);
 }
 var PREFIX_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
-var SUBSTITUTION_MARKERS = ["$(", "`"];
-function withoutRedirects(words) {
-  const kept = [];
-  const writes = [];
-  let readsInput = false;
-  for (let i = 0;i < words.length; i++) {
+var HEADER_WORDS = new Set(["for", "select", "case"]);
+function withoutKeywords(words) {
+  let i = 0;
+  for (;i < words.length; i++) {
     const word = words[i] ?? "";
-    if (word !== "<" && word !== ">") {
-      kept.push(word);
-      continue;
-    }
-    const target = words[i + 1];
-    const hasTarget = target !== undefined && !["<", ">", ...SUBSTITUTION_MARKERS].includes(target);
-    if (word === "<")
-      readsInput = true;
-    else if (hasTarget)
-      writes.push(target);
-    if (hasTarget)
+    if (HEADER_WORDS.has(word))
+      return [];
+    if (word === "function")
       i++;
+    else if (!PREFIX_WORDS.has(word))
+      break;
   }
-  return { words: kept, readsInput, writes };
+  return words.slice(i);
 }
 function runnable(command) {
-  const { commands, unparsed } = parseCommands(command);
-  const runs = [];
-  for (const raw of commands) {
-    const piped = raw[0] === "|";
-    const { words, readsInput, writes } = withoutRedirects(piped ? raw.slice(1) : raw);
-    let i = 0;
-    while (PREFIX_WORDS.has(words[i] ?? ""))
-      i++;
-    const substitutes = raw.some((word) => SUBSTITUTION_MARKERS.includes(word));
-    if (i < words.length || writes.length || substitutes)
-      runs.push({ piped, words: words.slice(i), readsInput, writes, substitutes });
-  }
+  const { tokens, unparsed } = lex(command);
+  const runs = groupCommands(tokens).map((simple) => ({ ...simple, words: withoutKeywords(simple.words) })).filter((run) => !isEmpty(run));
   return { runs, unparsed };
 }
 function orbitInvocations(command) {
   return runnable(command).runs.map(({ words }) => orbitWords(words)).filter((words) => words !== null);
 }
+var SUBSTITUTION_IN_WORD = /\$\(|`/;
 var SHELL_WORDS = new Set(["cd", "pushd", "popd", "true", ":", "fi", "done", "esac", "}"]);
-var FILTER_MAX_OPERANDS = { head: 0, tail: 0, wc: 0, cut: 0, grep: 1, jq: 1 };
-var FILTER_FILE_OPTIONS = {
-  grep: /^-[A-Za-z]*[rRdf]|^--(?:recursive|dereference-recursive|directories|file)/,
-  jq: /^-[A-Za-z]*[fL]|^--(?:from-file|slurpfile|rawfile|argfile)/
-};
-var OPTION_TAKING_NUMBER = /^-[A-Za-z]*[nNcmABCfb]$|^--(?:lines|bytes|max-count|after-context|before-context|context)$/;
-function grepPatternOption(arg) {
-  if (arg === "--regexp")
-    return "separate";
-  if (arg.startsWith("--regexp="))
-    return "attached";
-  const letters = arg.startsWith("--") ? null : arg.match(/^-[A-Za-z]*?e(.*)$/);
-  return letters ? letters[1] ? "attached" : "separate" : null;
-}
-var JQ_NOT_QUIET = /\b(?:import|include|env)\b|\$ENV|^-[A-Za-z]*n|^--null-input$/;
-function isQuietFilter(program, args, readsInput) {
-  const maxOperands = FILTER_MAX_OPERANDS[program];
-  if (maxOperands === undefined || readsInput)
+function isQuiet(program, args, run) {
+  if (program.includes("/"))
     return false;
-  if (program === "jq" && args.some((arg) => JQ_NOT_QUIET.test(arg)))
-    return false;
-  const patternOptions = program === "grep" ? args.map(grepPatternOption) : [];
-  const allowed = patternOptions.includes("attached") ? 0 : maxOperands;
-  let operands = 0;
-  let optionsEnded = false;
-  for (let i = 0;i < args.length; i++) {
-    const arg = args[i] ?? "";
-    if (!optionsEnded && arg === "--")
-      optionsEnded = true;
-    else if (!optionsEnded && arg.startsWith("-")) {
-      if (FILTER_FILE_OPTIONS[program]?.test(arg))
-        return false;
-      if (patternOptions[i] === "separate" && i + 1 < args.length) {
-        operands++;
-        i++;
-      }
-    } else if (optionsEnded || !(/^\d+$/.test(arg) && OPTION_TAKING_NUMBER.test(args[i - 1] ?? "")))
-      operands++;
-  }
-  return operands <= allowed;
+  return SHELL_WORDS.has(program) || run.piped && isQuietFilter(program, args, run.readsInput);
 }
 function otherCommands(command, orbitExtras = []) {
   const { runs, unparsed } = runnable(command);
-  const programs = new Set(unparsed ? ["unparsed"] : []);
-  const writes = new Set;
+  const listed = new Map;
+  const writes = new Map;
+  if (unparsed)
+    listed.set("unparsed", "unparsed");
   for (const run of runs) {
     if (run.substitutes)
-      programs.add("$(...)");
+      listed.set("$(...)", "$(...)");
     for (const target of run.writes)
-      writes.add("> " + displayName(target));
+      writes.set(target, "> " + displayName(target));
     if (orbitWords(run.words))
       continue;
     const at = run.words.findIndex((word) => !/^\w+=/.test(word));
     const program = run.words[at];
-    if (program === undefined || SUBSTITUTION_MARKERS.includes(program))
+    if (program === undefined || SUBSTITUTION_IN_WORD.test(program))
       continue;
-    const bare = !program.includes("/");
-    if (bare && (SHELL_WORDS.has(program) || run.piped && isQuietFilter(program, run.words.slice(at + 1), run.readsInput)))
-      continue;
-    programs.add(displayName(program));
+    if (!isQuiet(program, run.words.slice(at + 1), run))
+      listed.set(program, displayName(program));
   }
-  return [...programs, ...orbitExtras, ...writes];
+  return [...listed.values(), ...orbitExtras, ...writes.values()];
 }
 function subcommandOf(words, known) {
   const [sub, ...rest] = words;
