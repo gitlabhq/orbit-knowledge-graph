@@ -1,7 +1,7 @@
 ---
 name: orbit-wrapper
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.2.3
+version: 0.2.4
 license: MIT
 compatibility: Requires glab v1.126.0 or later with the GitLab Orbit CLI v0.163.0 or later, and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
@@ -24,7 +24,7 @@ If the block above is not a skill (it should begin with `---`), run
 `glab orbit skills get orbit` and follow what it prints. For the standalone
 Orbit binary, run `orbit skills get orbit`.
 
-Links such as `references/recipes.md` in the loaded skill are not files next
+Links such as `references/gql.md` in the loaded skill are not files next
 to this wrapper. Print them with `glab orbit skills get orbit <path>`.
 
 If that prints help or an unknown-command error instead of a skill, the
