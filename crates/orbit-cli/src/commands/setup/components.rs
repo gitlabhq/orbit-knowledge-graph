@@ -166,11 +166,7 @@ fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {
             return Err(e).with_context(|| format!("failed to inspect {}", backup.display()));
         }
     }
-    match copy_new(path, &backup) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
-        Err(e) => return Err(e).with_context(|| format!("failed to back up {}", path.display())),
-    }
+    copy_new(path, &backup).with_context(|| format!("failed to back up {}", path.display()))?;
     report.note(label, format!("backup at {label}.orbit-backup"));
     Ok(())
 }
@@ -179,15 +175,18 @@ fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {
 /// following a link at `destination`. A partial copy is removed on failure.
 fn copy_new(source: &Path, destination: &Path) -> std::io::Result<()> {
     let mut input = std::fs::File::open(source)?;
+    let permissions = input.metadata()?.permissions();
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        options.mode(input.metadata()?.permissions().mode());
+        options.mode(permissions.mode());
     }
     let mut output = options.open(destination)?;
-    if let Err(e) = std::io::copy(&mut input, &mut output) {
+    let copied =
+        std::io::copy(&mut input, &mut output).and_then(|_| output.set_permissions(permissions));
+    if let Err(e) = copied {
         drop(output);
         let _ = std::fs::remove_file(destination);
         return Err(e);
@@ -291,6 +290,7 @@ mod tests {
         assert_eq!(mode_of(&destination), 0o750);
     }
 
+    #[cfg(unix)]
     #[test]
     fn copy_new_leaves_no_partial_file_when_the_copy_fails() {
         let dir = tempfile::tempdir().unwrap();
@@ -322,7 +322,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn backup_once_skips_a_link_to_an_existing_file_with_an_error() {
+    fn backup_once_refuses_a_link_to_an_existing_file() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("CLAUDE.md");
         let existing = dir.path().join("existing");
