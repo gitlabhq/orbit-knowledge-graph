@@ -62,6 +62,21 @@ pub fn truncate_chars<'a>(value: &'a str, limit: usize, suffix: &str) -> Cow<'a,
     Cow::Owned(truncated)
 }
 
+pub fn truncate_bytes<'a>(value: &'a str, limit: usize, suffix: &str, words: bool) -> Cow<'a, str> {
+    if value.len() <= limit {
+        return Cow::Borrowed(value);
+    }
+    let mut end = value.floor_char_boundary(limit.saturating_sub(suffix.len()));
+    if words
+        && let Some(space) = value[..end]
+            .rfind(char::is_whitespace)
+            .filter(|&space| space > 0)
+    {
+        end = space;
+    }
+    Cow::Owned(format!("{}{suffix}", value[..end].trim_end()))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StrId(u32);
 
@@ -315,5 +330,15 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn truncate_bytes_keeps_whole_characters_and_words() {
+        assert_eq!(truncate_bytes("short", 8, "…", false), "short");
+        assert_eq!(truncate_bytes("abcdefghij", 8, "…", false), "abcde…");
+        assert_eq!(truncate_bytes("日本語日本語", 8, "…", false), "日…");
+        assert_eq!(truncate_bytes("one two three", 12, "…", true), "one two…");
+        assert_eq!(truncate_bytes(" abcdefghij", 8, "…", true), " abcd…");
+        assert!(truncate_bytes(&"🦀".repeat(300), 512, "…", false).len() <= 512);
     }
 }
