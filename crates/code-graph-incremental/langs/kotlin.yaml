@@ -111,17 +111,17 @@ stages:
       - match: '(class_parameter $N:simple_identifier $T:__member)'
         replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
       - match: '(class_parameter $N:simple_identifier $T:type_identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T))))'
       - match: '(class_parameter $N:simple_identifier)'
         replace: '(__binding @$N)'
       - match: '(parameter $N:simple_identifier $T:__member)'
         replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
       - match: '(parameter $N:simple_identifier $T:type_identifier)'
-        replace: '(__binding @$N $N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        replace: '(__binding @$N $N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T))))'
       - match: '(parameter $N:simple_identifier)'
         replace: '(__binding @$N)'
       - match: '(catch_block $N:simple_identifier $T:type_identifier $$$B)'
-        replace: '(catch_block (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T)))) $$$B)'
+        replace: '(catch_block (__binding @$N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T)))) $$$B)'
 
   - name: retag-expressions
     rules:
@@ -384,7 +384,7 @@ display:
         tag: { kind: TypeAlias }
       - match: '(__def (__function))'
         tag:
-          kind: '@$ROOT|ancestor_tag("kind")|regex_replace("^(?:Class|Interface|Enum|Impl|EnumMember)$", "Method")|regex_replace("^(Method)$|(?s).*", "$1")|default("Function")'
+          kind: '@$ROOT|ancestor_tag("kind")|regex_replace("(?s)^(?:(Class|Interface|Enum|Impl|EnumMember)|.*)$", "$1")|regex_replace("^.+$", "Method")|default("Function")'
           language_kind: '@$ROOT|ancestor_tag("kind")|map("Impl:Extension")|regex_replace("^(Extension)$|(?s).*", "$1")'
       - match: '(__def (__method))'
         tag: { kind: Constructor }

@@ -140,6 +140,14 @@ stages:
       # implements clause → individual __supertype nodes
       - match: '(implements_clause $$$TYPES:type_identifier $$$REST)'
         replace: '(implements_clause $$$REST $$$TYPES=>__supertype)'
+      - match: '(class_heritage $$$E:__supertype (implements_clause $$$I:__supertype))'
+        replace: '(class_heritage $$$E $$$I)'
+      - match: '(class_heritage (implements_clause $$$I:__supertype))'
+        replace: '(class_heritage $$$I)'
+      - match: '(decorator $N:identifier)'
+        replace: '(__decorator @$N)'
+      - match: '(decorator (call_expression function: $N:identifier arguments: $A))'
+        replace: '(__decorator @$N (__args $A))'
 
       # Import alias: capture real name as sym, alias as child
       - match: '(import_specifier (type) name: $N alias: $A)'
@@ -401,10 +409,15 @@ stages:
         tag: { flavor: namespace }
 
       # Classes (last — body contains already-canonical methods)
-      - match: '(class_declaration name: $N body: $B $$$ANN:__supertype)'
-        replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
-      - match: '(abstract_class_declaration name: $N body: $B $$$ANN:__supertype)'
-        replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
+      - match: '(class_declaration $$$DEC:__decorator name: $N (class_heritage $$$ANN:__supertype) body: $B)'
+        replace: '(__def (__defname @$N) (__class) $$$DEC $$$ANN $B)'
+      - match: '(class_declaration $$$DEC:__decorator name: $N body: $B)'
+        replace: '(__def (__defname @$N) (__class) $$$DEC $B)'
+      - match: '(abstract_class_declaration $$$DEC:__decorator name: $N (class_heritage $$$ANN:__supertype) body: $B)'
+        replace: '(__def (__defname @$N) (__class) $$$DEC $$$ANN $B)'
+        tag: { flavor: abstract }
+      - match: '(abstract_class_declaration $$$DEC:__decorator name: $N body: $B)'
+        replace: '(__def (__defname @$N) (__class) $$$DEC $B)'
         tag: { flavor: abstract }
 
   - name: lexical-scopes

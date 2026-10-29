@@ -144,6 +144,8 @@ stages:
         replace: '(__member @$M (__object @$O $O))'
       - match: '(class_constant_access_expression $S:name $C:name)'
         replace: '(__member @$C (__object @$S $S))'
+      - match: '(class_constant_access_expression $S:relative_scope $C:name)'
+        replace: '(__member @$C (__object @$S))'
       - match: '(scoped_property_access_expression scope: $S:name name: $P:variable_name)'
         replace: '(__member @$P (__object @$S $S))'
 
@@ -255,7 +257,7 @@ stages:
 
       # Class-likes (after members)
       - match: '(class_declaration $$$PRE name: $N:name (base_clause $S:__supertype) $$$ANN body: (declaration_list $$$B))'
-        replace: '(__def (__defname @$N) (__class @$N) (__alias "self") (__alias "static") $$$PRE $S $$$ANN (__binding "parent" (__rhs (__call (__callee @$S)))) (__binding (__ivar "parent") (__rhs (__call (__callee @$S)))) $$$B)'
+        replace: '(__def (__defname @$N) (__class @$N) (__alias "self") (__alias "static") $$$PRE $S $$$ANN (__binding "parent" (__ssa_typed @$S)) (__binding (__ivar "parent") (__ssa_typed @$S)) $$$B)'
       - match: '(class_declaration $$$PRE name: $N:name $$$ANN body: (declaration_list $$$B))'
         replace: '(__def (__defname @$N) (__class @$N) (__alias "self") (__alias "static") $$$PRE $$$ANN $$$B)'
       - match: '(interface_declaration $$$PRE name: $N:name $$$ANN body: (declaration_list $$$B))'

@@ -94,11 +94,11 @@ stages:
 
       # Parameters
       - match: '(parameter type: $T:identifier name: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T))))'
       - match: '(parameter name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(catch_declaration type: $T:identifier name: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T))))'
 
   - name: retag-expressions
     rules:
@@ -211,7 +211,7 @@ stages:
 
       # Callables
       - match: '(method_declaration $$$PRE returns: $RT:identifier name: $N:identifier parameters: $P body:? $B)'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $$$PRE $P (__call (__callee @$RT $RT)) $B)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $$$PRE $P (__call (__type) (__callee @$RT $RT)) $B)'
       - match: '(method_declaration $$$PRE name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) $$$PRE $P $B)'
       - match: '(constructor_declaration $$$PRE name: $N:identifier parameters: $P body: $B)'

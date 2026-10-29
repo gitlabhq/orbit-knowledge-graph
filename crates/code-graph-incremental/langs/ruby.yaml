@@ -319,6 +319,8 @@ stages:
         tag: { language_kind: SingletonMethod, modifiers: static }
       - match: '(singleton_class value: (self) body: $B)'
         replace: '(rb_singleton $B)'
+      - match: '(class name: $N:constant superclass: (rb_super $S:__supertype $I:__import) body:? $B)'
+        replace: '(__def (__defname @$N) (__class) $S $I (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
       - match: '(class name: $N superclass: (rb_super $S:__supertype $I:__import) body:? $B)'
         replace: '(__def (__defname @$N|strip=:: $N) (__class) $S $I (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
       - match: '(class name: $N body:? $B)'

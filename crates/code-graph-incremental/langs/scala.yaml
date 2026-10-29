@@ -63,7 +63,7 @@ stages:
       - match: '(class_parameter name: $N:identifier)'
         replace: '(__def (__defname @$N) (__property))'
       - match: '(parameter name: $N:identifier type: $T:type_identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T))))'
       - match: '(parameter name: $N:identifier)'
         replace: '(__binding @$N)'
 
@@ -276,7 +276,7 @@ display:
         tag: { kind: TypeAlias }
       - match: '(__def (__function))'
         tag:
-          kind: '@$ROOT|ancestor_tag("kind")|regex_replace("^(?:Class|Trait|Enum|EnumMember)$", "Method")|regex_replace("^(Method)$|(?s).*", "$1")|default("Function")'
+          kind: '@$ROOT|ancestor_tag("kind")|regex_replace("(?s)^(?:(Class|Trait|Enum|EnumMember)|.*)$", "$1")|regex_replace("^.+$", "Method")|default("Function")'
       - match: '(__def (__defname "this") (__function))'
         tag: { kind: Constructor }
       - match: '(__def (__function))'
@@ -287,7 +287,7 @@ display:
           kind: '@$ROOT|concat(":", "tag:kind", "tag:annotations")|regex_replace("(?s)^(?:Function|Method):.*@(?:org\.junit\.(?:jupiter\.api\.)?)?(?:Test|ParameterizedTest|RepeatedTest)\b.*", "Test")|regex_replace("(?s):.*", "")'
       - match: '(__def (__property))'
         tag: &value_kind
-          kind: '@$ROOT|ancestor_tag("kind")|regex_replace("^(?:Class|Trait|Enum|EnumMember)$", "Field")|regex_replace("^(Field)$|(?s).*", "$1")|default("Variable")'
+          kind: '@$ROOT|ancestor_tag("kind")|regex_replace("(?s)^(?:(Class|Trait|Enum|EnumMember)|.*)$", "$1")|regex_replace("^.+$", "Field")|default("Variable")'
       - match: '(__def (__variable))'
         tag: *value_kind
       - match: '(__def (__variable))'

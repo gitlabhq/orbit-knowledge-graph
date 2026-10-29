@@ -40,7 +40,7 @@ stages:
       - match: '(return_expression $$$V)'
         replace: '(__ssa_return $$$V)'
       - match: '(parameter name: $N:identifier type: $T:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        replace: '(__binding @$N (__ssa_typed @$T))'
       - match: '(parameter name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(zig_enum_member name: $N:identifier)'
@@ -48,8 +48,17 @@ stages:
       - match: '(container_field name: $N:identifier)'
         replace: '(__def (__defname @$N) (__field_def))'
 
+  - name: retag-refs
+    rules:
+      - match: '(field_expression object: $O:__member member: $M:identifier)'
+        replace: '(__member @$M (__object $O))'
+      - match: '(field_expression object: $O member: $M:identifier)'
+        replace: '(__member @$M (__object @$O $O))'
+
   - name: retag-calls
     rules:
+      - match: '(call_expression function: $F:__member $$$A)'
+        replace: '(__call (__callee $F) $$$A)'
       - match: '(call_expression function: (field_expression object: $O:identifier member: $M:identifier) $$$A)'
         replace: '(__call (__callee (__member @$M (__object @$O $O))) $$$A)'
       - match: '(call_expression function: $F:identifier $$$A)'
@@ -119,7 +128,7 @@ stages:
       - match: '(__def (__enum_variant))'
         tag: { callable: "true", value: "true" }
       - match: '(__def (__struct))'
-        tag: { value: "true", declares_type: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'
