@@ -74,6 +74,17 @@ test('setup appends the reminder to a string output when there is no content', a
   expect(event.result?.output).toBe(`out\n\n${REMINDER}`)
 })
 
+test('setup keeps a structured output when there is no content', async () => {
+  withGraph(true)
+  const hook = await hookedSetup()
+  const event = completed('shell', { output: { output: 'out', exit: 0 } })
+  hook(event)
+  expect(event.result?.content).toEqual([
+    { type: 'text', text: '{"output":"out","exit":0}' },
+    { type: 'text', text: REMINDER },
+  ])
+})
+
 test('setup reminds once per session, only for shell tools, only when completed, only with a graph', async () => {
   withGraph(false)
   const noGraph = await hookedSetup()
