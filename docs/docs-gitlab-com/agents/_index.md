@@ -37,6 +37,7 @@ To set up your agent:
 1. Run `glab orbit setup`.
    On first use, `glab` asks to download the GitLab Orbit CLI.
 1. In the list of agents, keep or clear the agents that setup selected, then press <kbd>Enter</kbd>.
+1. If setup asks to install the agent plugins, answer **Yes** to [show GitLab Orbit calls in Claude Code](#show-gitlab-orbit-calls-in-claude-code) and OpenCode.
 
 Setup installs the GitLab Orbit skill for your agents and indexes the repository for code search.
 To check that the repository is indexed, run `glab orbit workspace list`.
@@ -44,13 +45,13 @@ To load the skill, start a new session of your agent.
 To update the setup, run the command again.
 For a guided first session, see [step 3 of the quickstart](../quickstart.md#step-3-ask-your-first-question).
 
-To run setup without a terminal, for example from an agent or a script, confirm both prompts with `--yes`:
+To run setup without a terminal, for example from an agent or a script, confirm the prompts with `--yes`:
 
 ```shell
 glab orbit --yes setup --yes
 ```
 
-The first `--yes` confirms the download. The second skips the list of agents.
+The first `--yes` confirms the download. The second skips the setup prompts and uses the default answers.
 
 To query your GitLab data, also [sign in with `glab`](../cli.md#query-gitlab-orbit).
 
@@ -69,9 +70,9 @@ glab orbit setup [<agent>...] [options]
 |--------|-------------|
 | `<agent>` | Set up only these agents, for example `claude codex`. Setup adds a named agent even when it does not detect it. |
 | `--all` | Set up every supported agent. |
-| `--yes`, `-y` | Skip the list of agents. |
+| `--yes`, `-y` | Skip the prompts and use the default answers. |
 | `--skip <component>` | Leave out `instructions`, `hooks`, `skill`, or `agent-plugins`. You can repeat it. |
-| `--install <component>` | Add a component that is off by default. For example, `--install mcp` also registers the MCP server. You can repeat it. |
+| `--install <component>` | Add a component that is off by default. `--install mcp` registers the MCP server for the [local graph](../cli.md#local-graph). You can repeat it. |
 | `--skill full` | Install the full skill files in place of the wrapper skill. |
 | `--no-index` | Do not index the repository. |
 | `--project` | Write to the current project in place of your user configuration. |
@@ -122,15 +123,16 @@ Prerequisites:
 - Claude Code 2.1.287 or later. To check your version, run `claude --version`.
   On an earlier version, setup skips the plugin and says so.
 
-Setup installs the plugin by default. To install it:
+To install the plugin, which setup includes by default:
 
 1. Run `glab orbit setup`, and answer **Yes** when setup asks to install the agent plugins.
 1. Start a new Claude Code session.
-1. To check that the plugin loaded, run `/plugin`.
+1. To check that the plugin loaded, run `/plugin`. `gitlab-orbit` is listed on the **Installed** tab.
 
 To set up without the plugin, run `glab orbit setup --skip agent-plugins`.
-To turn off the plugin, in Claude Code, run `/plugin` and disable `gitlab-orbit` on the **Installed** tab.
-To remove the plugin, run `glab orbit uninstall`.
+To turn off the plugin, in Claude Code, run `/plugin`, and on the **Installed** tab, turn off `gitlab-orbit`.
+Running setup again turns the plugin back on. To keep it off, add `--skip agent-plugins`.
+To remove the plugin and the rest of the setup, see [remove the setup](#remove-the-setup).
 
 ## Remove the setup
 
