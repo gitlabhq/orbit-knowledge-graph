@@ -165,7 +165,6 @@ settings:
     - {node: Finding, property: deduplicated}
     # --- Group ---
     - {node: Group, property: visibility_level}
-    # --- Import ---
     - {node: Import, property: import_kind}
     # --- Job ---
     - {node: Job, property: status}
