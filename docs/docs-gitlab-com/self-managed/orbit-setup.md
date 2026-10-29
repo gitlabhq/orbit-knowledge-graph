@@ -192,15 +192,6 @@ To install GitLab Orbit:
    tls:
      enabled: true
      existingSecret: orbit-webserver-tls
-
-   billing:
-     enabled: true
-     collector_url: https://billing.prdsub.gitlab.net
-     auth_mode: cloud_connector
-     quota:
-       enabled: true
-       customers_dot_url: https://customers.gitlab.com
-       auth_mode: license_checksum
    ```
 
    Replace `<clickhouse_host>` with the host name of your ClickHouse server.
@@ -232,8 +223,8 @@ For pod sizes, see [Reference architectures](getting-started.md#reference-archit
 
 ### Billing requirements
 
-The `billing` settings report GitLab Orbit usage to GitLab and check that your subscription has GitLab Credits available.
-Use them exactly as shown in the example.
+GitLab Orbit reports usage to GitLab and checks that your subscription has GitLab Credits available.
+The Helm chart configures billing by default.
 
 When your subscription has no GitLab Credits available, queries fail with the error `GitLab credits exhausted`.
 
@@ -312,8 +303,6 @@ Plan ClickHouse disk for a second copy of the graph.
 
 To upgrade GitLab Orbit:
 
-1. Make sure that `orbit-values.yaml` has the `billing` settings from [Install GitLab Orbit](#install-gitlab-orbit).
-   GitLab Orbit requires them.
 1. Run the `helm upgrade` command from [Install GitLab Orbit](#install-gitlab-orbit).
 1. Run the query from [Verify the installation](#verify-the-installation).
 
