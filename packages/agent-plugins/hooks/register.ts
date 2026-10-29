@@ -1,6 +1,6 @@
 import type { Elements, Register, RenderElement } from 'claude-code'
 
-import { QUERY_LABEL, describeOrbitCall, detailText, type OrbitCall } from '../core/calls.ts'
+import { QUERY_LABEL, describeOrbitCall, type OrbitCall } from '../core/calls.ts'
 import { cypherSegments, hopsOf, projectsOf, queryOf } from '../core/cypher.ts'
 import { apiCallsFor, compact, graphStatus, grouped, parseResponse } from '../core/stats.ts'
 import { codeLines, layout, type Token } from './highlight.ts'
@@ -48,15 +48,14 @@ function finishedRow({ Box, Text }: Ui, call: OrbitCall, state: RowState): Rende
     Text({ children: [' '] }),
     Text({ color: BLUE, bold: true, children: [call.label] }),
   ]
-  const detail = detailText(call)
-  if (detail) children.push(Text({ dimColor: true, children: ['  ' + detail] }))
+  if (call.detail) children.push(Text({ dimColor: true, children: ['  ' + call.detail] }))
   if (state.isInterrupted) children.push(Text({ color: 'error', children: ['  · interrupted'] }))
   else if (state.isErrored) children.push(Text({ color: 'error', children: ['  · failed'] }))
   return Box({ flexDirection: 'row', children })
 }
 
 function markProps(call: OrbitCall): MarkProps {
-  return { label: call.active, detail: detailText(call) }
+  return { label: call.active, detail: call.detail }
 }
 
 function highlighted({ Box, Text }: Ui, query: string): RenderElement {

@@ -1,4 +1,4 @@
-import { orbitInvocations, otherPrograms, subcommandOf } from './command.ts'
+import { orbitCalls, subcommandOf } from './command.ts'
 import { NO_ENTITIES, entitiesOf } from './cypher.ts'
 import labels from './labels.ts'
 
@@ -6,7 +6,7 @@ export const MARK = '◎'
 
 export type Label = { done: string; running: string }
 
-export type OrbitCall = { label: string; active: string; detail: string; also?: string[] }
+export type OrbitCall = { label: string; active: string; detail: string }
 
 export const COMMAND_LABELS: Readonly<Record<string, Label>> = labels.commands
 export const TOOL_LABELS: Readonly<Record<string, Label>> = labels.tools
@@ -27,10 +27,6 @@ const SHOWS_ARGUMENT = new Set(['grep', 'context', 'workspace sql', 'sql', 'sche
 
 function labelFor(table: Readonly<Record<string, Label>>, key: string): Label | undefined {
   return Object.hasOwn(table, key) ? table[key] : undefined
-}
-
-export function detailText(call: OrbitCall): string {
-  return [call.detail, ...(call.also ?? [])].filter(Boolean).join(', ')
 }
 
 function callOf(label: Label, detail: string): OrbitCall {
@@ -70,18 +66,22 @@ function stringField(input: unknown, key: string): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
+const MAX_DETAIL = 96
+
 export function describeCommand(command: string, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {
-  const calls = orbitInvocations(command).flatMap((words) => {
+  const invocations = orbitCalls(command)
+  if (!invocations) return null
+  const calls: OrbitCall[] = []
+  for (const words of invocations) {
     const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined)
-    if (!sub) return []
+    if (!sub) return null
     const isSchemaQuery = sub.key === 'query' && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg))
-    return [callOf(isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY), detailFor(sub.key, sub.args, known))]
-  })
+    calls.push(callOf(isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY), detailFor(sub.key, sub.args, known)))
+  }
   const [first] = calls
-  if (!first) return null
-  const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(', ')
-  const also = otherPrograms(command)
-  return { ...first, detail, ...(also.length ? { also } : {}) }
+  if (!first || calls.some((call) => call.label !== first.label)) return null
+  const detail = [...new Set(calls.map((call) => call.detail).filter(Boolean))].join(', ')
+  return { ...first, detail: clip(detail, MAX_DETAIL) }
 }
 
 export function describeOrbitCall(tool: string, input: unknown, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {

@@ -1,5 +1,5 @@
 import { describeOrbitCall, type OrbitCall } from '../core/calls.ts'
-import { isOrbitPrefix, runsOrbit } from '../core/command.ts'
+import { isOrbitPrefix } from '../core/command.ts'
 
 export type GroupCall<P extends { isRunning: boolean }> = { props: P; i: number; call: OrbitCall }
 
@@ -18,8 +18,7 @@ export function mergeRuns<P extends { isRunning: boolean; isErrored?: boolean }>
   return groups.flatMap((group): Row<P>[] => {
     const shown = [...group].reverse().find((x) => x.props.isRunning) ?? group[group.length - 1]
     if (!shown) return []
-    const also = [...new Set(group.flatMap((x) => x.call.also ?? []))]
-    return [{ ...shown, isRunning: shown.props.isRunning, call: { ...shown.call, ...(also.length ? { also } : {}) } }]
+    return [{ ...shown, isRunning: shown.props.isRunning }]
   })
 }
 
@@ -30,10 +29,8 @@ export function isPendingCall(props: { tool: string; input: unknown; output?: un
 }
 
 export function usesOrbit(tool: string, input: unknown): boolean {
-  if (describeOrbitCall(tool, input)) return true
-  const { command, skill } = (input ?? {}) as { command?: unknown; skill?: unknown }
-  if (tool === 'Skill') return skill === 'orbit'
-  return tool === 'Bash' && typeof command === 'string' && runsOrbit(command)
+  if (tool === 'Skill') return (input as { skill?: unknown } | undefined)?.skill === 'orbit'
+  return describeOrbitCall(tool, input) !== null
 }
 
 export function isProgressText(text: string): boolean {

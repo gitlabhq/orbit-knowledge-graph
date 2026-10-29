@@ -1,84 +1,83 @@
 /*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
-var SHELL_ONLY = new Set(["<", ">", "#", "$(", "`"]);
-var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/;
-function simpleCommands(command) {
-  const commands = [];
-  let words = [];
+var UNSAFE_UNQUOTED = new Set(["$", "`", "(", ")", "{", "}", "<", ">", "#", "&", "!"]);
+var HARMLESS_REDIRECT = /^(?:\d?>>?|&>>?)(?:&\d+|\s*\/dev\/null)(?![^\s;&|])/;
+var ENV_ASSIGNMENT = /^(?:ORBIT_[A-Z0-9_]+|GLAB_HOST|GLAB_TOKEN|GLAB_CONFIG_DIR)=/;
+var COUNT_FLAG = /^-[nc]?\d+$/;
+function tokenize(command) {
+  const tokens = [];
   let word = "";
   let inWord = false;
-  let quote = "";
-  let piped = false;
   const endWord = () => {
     if (inWord)
-      words.push(word);
+      tokens.push({ word });
     word = "";
     inWord = false;
   };
-  const endCommand = () => {
+  const operator = (op) => {
     endWord();
-    if (words.length)
-      commands.push(piped ? ["|", ...words] : words);
-    words = [];
-    piped = false;
+    tokens.push({ operator: op });
+    return op.length - 1;
   };
   for (let i = 0;i < command.length; i++) {
     const c = command[i] ?? "";
-    if (quote !== "'" && (c === "`" || c === "$" && command[i + 1] === "("))
-      words.push(c === "`" ? "`" : "$(");
-    if (quote) {
-      if (c === quote)
-        quote = "";
-      else if (c === "\\" && quote === '"' && i + 1 < command.length)
-        word += command[++i];
-      else
-        word += c;
-    } else if (c === "'" || c === '"') {
-      quote = c;
+    if (c === "'") {
+      const end = command.indexOf("'", i + 1);
+      if (end < 0)
+        return null;
+      word += command.slice(i + 1, end);
       inWord = true;
-    } else if (c === "\\" && command[i + 1] === `
+      i = end;
+    } else if (c === '"') {
+      inWord = true;
+      for (i++;command[i] !== '"'; i++) {
+        const inner = command[i];
+        if (inner === undefined || inner === "$" || inner === "`")
+          return null;
+        if (inner === "\\" && '"\\$`\n'.includes(command[i + 1] ?? "x")) {
+          i++;
+          if (command[i] !== `
+`)
+            word += command[i];
+        } else
+          word += inner;
+      }
+    } else if (c === "\\") {
+      const next = command[++i];
+      if (next === undefined)
+        return null;
+      if (next !== `
 `) {
-      i++;
-      endWord();
-    } else if (c === "\\" && i + 1 < command.length) {
-      word += command[++i];
-      inWord = true;
-    } else if ("&>".includes(c) && HARMLESS_REDIRECT.test(command.slice(i))) {
-      if (/^\d+$/.test(word) && /\d/.test(command[i - 1] ?? "")) {
-        word = "";
-        inWord = false;
-      } else
-        endWord();
+        word += next;
+        inWord = true;
+      }
+    } else if (!inWord && HARMLESS_REDIRECT.test(command.slice(i))) {
       i += (command.slice(i).match(HARMLESS_REDIRECT)?.[0].length ?? 1) - 1;
-    } else if (c === "|" && command[i + 1] !== "|") {
-      endCommand();
-      piped = true;
-      if (command[i + 1] === "&")
-        i++;
-    } else if (c === `
-` || ";&|()".includes(c)) {
-      endCommand();
-      if ("&|".includes(c) && command[i + 1] === c)
-        i++;
-    } else if ("<>".includes(c) || c === "#" && !inWord) {
+    } else if (c === " " || c === "\t")
       endWord();
-      words.push(c);
-    } else if (/\s/.test(c)) {
-      endWord();
-    } else {
+    else if (c === `
+` || c === ";")
+      operator(";");
+    else if (c === "&" && command[i + 1] === "&")
+      i += operator("&&");
+    else if (c === "|")
+      i += operator(command[i + 1] === "|" ? "||" : "|");
+    else if (UNSAFE_UNQUOTED.has(c) || c < " " || c === "\x7F")
+      return null;
+    else {
       word += c;
       inWord = true;
     }
   }
-  endCommand();
-  return commands;
+  endWord();
+  return tokens;
 }
 function orbitWords(words) {
   let i = 0;
-  while (/^(?:ORBIT|GLAB)_\w*=/.test(words[i] ?? ""))
+  while (ENV_ASSIGNMENT.test(words[i] ?? ""))
     i++;
   if (words[i] === "glab" && words[i + 1] === "orbit")
     i += 2;
-  else if (words[i]?.split("/").pop() === "orbit")
+  else if (words[i] === "orbit")
     i += 1;
   else
     return null;
@@ -86,35 +85,65 @@ function orbitWords(words) {
     i++;
   return words.slice(i);
 }
-var PREFIX_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
-var STRUCTURE = new Set(["for", "done", "fi", "esac", "case", "}"]);
-var QUIET = new Set(["cd", "echo", "true", "printf", "head", "tail", "date", "sort", "uniq", "wc", "jq", "cut", "tr", "column", "cat", "grep", "sleep"]);
-function runnable(command) {
-  const out = [];
-  let heredoc = "";
-  for (const words of simpleCommands(command)) {
-    if (heredoc) {
-      if (words.join(" ") === heredoc)
-        heredoc = "";
+function isCountFilter(words) {
+  const [program, ...args] = words;
+  if (program === "wc")
+    return args.every((arg) => /^-[lwcm]$/.test(arg));
+  if (program !== "head" && program !== "tail")
+    return false;
+  for (let i = 0;i < args.length; i++) {
+    if (/^-[nc]$/.test(args[i] ?? "") && /^\d+$/.test(args[i + 1] ?? ""))
+      i++;
+    else if (!COUNT_FLAG.test(args[i] ?? ""))
+      return false;
+  }
+  return true;
+}
+function isHarmless(words) {
+  const [program, dir] = words;
+  return program === "cd" && words.length === 2 && !dir?.startsWith("-") || program === "true" && words.length === 1;
+}
+function segmentsOf(tokens) {
+  const segments = [];
+  let words = [];
+  let piped = false;
+  const end = (next) => {
+    if (words.length === 0)
+      return next === ";" && !piped;
+    segments.push({ words, piped });
+    words = [];
+    piped = next === "|";
+    return true;
+  };
+  for (const token of tokens) {
+    if ("word" in token)
+      words.push(token.word);
+    else if (!end(token.operator))
+      return null;
+  }
+  return end(";") ? segments : null;
+}
+function orbitCalls(command) {
+  const tokens = tokenize(command);
+  const segments = tokens && segmentsOf(tokens);
+  if (!segments)
+    return null;
+  const calls = [];
+  let afterOrbit = false;
+  for (const { words, piped } of segments) {
+    if (piped) {
+      if (!afterOrbit || !isCountFilter(words))
+        return null;
       continue;
     }
-    const at = words.findIndex((word, i) => word === "<" && words[i + 1] === "<");
-    if (at >= 0)
-      heredoc = (words[at + 2] ?? "").replace(/^-/, "");
-    let i = words[0] === "|" ? 1 : 0;
-    while (PREFIX_WORDS.has(words[i] ?? ""))
-      i++;
-    if (i < words.length)
-      out.push(words.slice(i));
+    const orbit = orbitWords(words);
+    if (orbit)
+      calls.push(orbit);
+    else if (!isHarmless(words))
+      return null;
+    afterOrbit = orbit !== null;
   }
-  return out;
-}
-function orbitInvocations(command) {
-  return runnable(command).map(orbitWords).filter((words) => words !== null);
-}
-function otherPrograms(command) {
-  const names = runnable(command).filter((words) => !orbitWords(words) && !STRUCTURE.has(words[0] ?? "")).map((words) => words.find((word) => !/^\w+=/.test(word))?.split("/").pop() ?? "");
-  return [...new Set(names.filter((name) => name && !QUIET.has(name) && !SHELL_ONLY.has(name)))];
+  return calls.length > 0 ? calls : null;
 }
 function subcommandOf(words, known) {
   const [sub, ...rest] = words;
@@ -336,9 +365,6 @@ var SHOWS_ARGUMENT = new Set(["grep", "context", "workspace sql", "sql", "schema
 function labelFor(table, key) {
   return Object.hasOwn(table, key) ? table[key] : undefined;
 }
-function detailText(call) {
-  return [call.detail, ...call.also ?? []].filter(Boolean).join(", ");
-}
 function callOf(label, detail) {
   return { label: label.done, active: label.running, detail };
 }
@@ -376,20 +402,24 @@ function stringField(input, key) {
   const value = typeof input === "object" && input !== null ? input[key] : undefined;
   return typeof value === "string" ? value : undefined;
 }
+var MAX_DETAIL = 96;
 function describeCommand(command, known = NO_ENTITIES) {
-  const calls = orbitInvocations(command).flatMap((words) => {
+  const invocations = orbitCalls(command);
+  if (!invocations)
+    return null;
+  const calls = [];
+  for (const words of invocations) {
     const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
     if (!sub)
-      return [];
+      return null;
     const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
-    return [callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args, known))];
-  });
+    calls.push(callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args, known)));
+  }
   const [first] = calls;
-  if (!first)
+  if (!first || calls.some((call) => call.label !== first.label))
     return null;
-  const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(", ");
-  const also = otherPrograms(command);
-  return { ...first, detail, ...also.length ? { also } : {} };
+  const detail = [...new Set(calls.map((call) => call.detail).filter(Boolean))].join(", ");
+  return { ...first, detail: clip(detail, MAX_DETAIL) };
 }
 function describeOrbitCall(tool, input, known = NO_ENTITIES) {
   const command = stringField(input, "command");
@@ -409,8 +439,7 @@ var OrbitUiPlugin = async ({ client }) => ({
       const call = describeOrbitCall(input.tool, output.args);
       if (!call)
         return;
-      const detail = detailText(call);
-      const message = MARK + " " + call.active + (detail ? "  " + detail : "");
+      const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "");
       client.tui.showToast({ body: { message, variant: "info", duration: 2000 } }).catch(() => {});
     } catch {}
   }
