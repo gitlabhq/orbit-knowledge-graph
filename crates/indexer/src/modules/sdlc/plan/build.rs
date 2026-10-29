@@ -12,6 +12,7 @@ pub(in crate::modules::sdlc) struct Sizing<'a> {
     pub global_batch_size: u64,
     pub namespaced_batch_size: u64,
     pub overrides: &'a HashMap<String, u64>,
+    pub final_read_threads: u64,
 }
 
 impl Sizing<'_> {
@@ -184,6 +185,7 @@ fn assemble(
         deleted_column: spec.deleted,
         sort_key: extract.order_by.clone(),
         batch_size: sizing.resolve(&pipeline.name, pipeline.scope),
+        final_read_threads: sizing.final_read_threads,
         transform,
     }
 }
@@ -243,6 +245,7 @@ mod tests {
                 global_batch_size: 100,
                 namespaced_batch_size: 100,
                 overrides: &HashMap::new(),
+                final_read_threads: 4,
             },
         );
         assert!(result.is_ok());
@@ -255,6 +258,7 @@ mod tests {
                 global_batch_size: batch_size,
                 namespaced_batch_size: batch_size,
                 overrides: &HashMap::new(),
+                final_read_threads: 4,
             },
         )
         .expect("plans should build")
@@ -335,6 +339,7 @@ mod tests {
             global_batch_size: 1_000_000,
             namespaced_batch_size: 1_000_000,
             overrides: &overrides,
+            final_read_threads: 4,
         };
         let original_plan = build_edge_plan(relationship_kind, pipeline, &ontology, &sizing)
             .expect("original plan");
@@ -370,6 +375,7 @@ mod tests {
                 global_batch_size: 1_000_000,
                 namespaced_batch_size: 1_000_000,
                 overrides: &overrides,
+                final_read_threads: 4,
             },
         )
         .expect("plans should build");
@@ -412,6 +418,7 @@ mod tests {
             deleted_column: String::new(),
             sort_key: vec![],
             batch_size: 1,
+            final_read_threads: 4,
             transform: TransformSpec::DataFusion(vec![]),
         }
         };

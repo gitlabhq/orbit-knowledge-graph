@@ -17,7 +17,7 @@ use crate::observer::IndexingObserver;
 use crate::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive_with};
 
 use super::datalake::{
-    DatalakeError, DatalakeQuery, FetchedPage, ScanStats, is_arrow_string_overflow,
+    DatalakeError, DatalakeQuery, FetchedPage, QuerySettings, ScanStats, is_arrow_string_overflow,
 };
 use super::metrics::SdlcMetrics;
 use super::paging::{block_size_for, first_page_limit, next_page_limit};
@@ -198,7 +198,7 @@ impl Pipeline {
                 transform.name(),
                 &self.page_sql(&base_query, &plan.sort_key, &cursor)?,
                 params.clone(),
-                block_size,
+                base_query.settings(block_size),
             )
             .await?;
         stats.extract_ms += page.extract_elapsed.as_millis() as u64;
@@ -291,7 +291,12 @@ impl Pipeline {
                 let next_sql = self.page_sql(&base_query, &plan.sort_key, &cursor)?;
                 let (write_result, extract_result) = tokio::join!(
                     drain_writes,
-                    self.extract_batch(transform.name(), &next_sql, params.clone(), block_size),
+                    self.extract_batch(
+                        transform.name(),
+                        &next_sql,
+                        params.clone(),
+                        base_query.settings(block_size)
+                    ),
                 );
                 (write_result?, Some(extract_result?))
             } else {
@@ -404,70 +409,67 @@ impl Pipeline {
         transform_name: &str,
         sql: &str,
         params: Value,
-        block_size: Option<u64>,
+        settings: QuerySettings,
     ) -> Result<Page, PipelineError> {
-        drive_with(
-            &DATALAKE_EXTRACT_RETRY,
-            block_size,
-            |block_size, attempt| {
-                let query_start = Instant::now();
-                let fut = self
-                    .datalake
-                    .query_batches_with_summary(sql, params.clone(), block_size);
-                let metrics = &self.metrics;
-                let retry_config = &self.retry_config;
-                async move {
-                    match fut.await {
-                        Ok(FetchedPage {
+        drive_with(&DATALAKE_EXTRACT_RETRY, settings, |settings, attempt| {
+            let query_start = Instant::now();
+            let fut = self
+                .datalake
+                .query_batches_with_summary(sql, params.clone(), settings);
+            let metrics = &self.metrics;
+            let retry_config = &self.retry_config;
+            async move {
+                match fut.await {
+                    Ok(FetchedPage {
+                        batches,
+                        scan_stats,
+                        truncated,
+                    }) => {
+                        let extract_elapsed = query_start.elapsed();
+                        let bytes: u64 = batches.iter().map(batch_slice_bytes).sum();
+                        metrics.record_datalake_query(
+                            transform_name,
+                            extract_elapsed.as_secs_f64(),
+                            bytes,
+                        );
+                        Step::Done(Page {
                             batches,
                             scan_stats,
+                            extract_elapsed,
                             truncated,
-                        }) => {
-                            let extract_elapsed = query_start.elapsed();
-                            let bytes: u64 = batches.iter().map(batch_slice_bytes).sum();
-                            metrics.record_datalake_query(
-                                transform_name,
-                                extract_elapsed.as_secs_f64(),
-                                bytes,
-                            );
-                            Step::Done(Page {
-                                batches,
-                                scan_stats,
-                                extract_elapsed,
-                                truncated,
-                            })
-                        }
-                        Err(
-                            err @ (DatalakeError::SourceUnavailable(_)
-                            | DatalakeError::Unavailable(_)),
-                        ) => Step::GiveUp(err.into()),
-                        Err(err) => {
-                            warn!(
-                                safe(ATTEMPT) = attempt + 1,
-                                safe(MAX_ATTEMPTS) = DATALAKE_EXTRACT_RETRY.max_attempts,
-                                safe(BATCH_SIZE) = block_size,
-                                safe(ERROR_TYPE) = <&str>::from(&err),
-                                expanded(ERROR_MESSAGE) = %err,
-                                "datalake query failed, retrying with smaller block size"
-                            );
-                            // An overflow only clears once blocks are small, and each halving step
-                            // re-scans the page, so jump straight to the floor.
-                            let next = if is_arrow_string_overflow(&err) {
-                                retry_config.halving_min_block_size
-                            } else {
-                                match block_size {
-                                    Some(size) => {
-                                        (size / 2).max(retry_config.halving_min_block_size)
-                                    }
-                                    None => retry_config.halving_initial_block_size,
-                                }
-                            };
-                            DATALAKE_EXTRACT_RETRY.retry_or_give_up(attempt, Some(next), err.into())
-                        }
+                        })
+                    }
+                    Err(
+                        err @ (DatalakeError::SourceUnavailable(_) | DatalakeError::Unavailable(_)),
+                    ) => Step::GiveUp(err.into()),
+                    Err(err) => {
+                        warn!(
+                            safe(ATTEMPT) = attempt + 1,
+                            safe(MAX_ATTEMPTS) = DATALAKE_EXTRACT_RETRY.max_attempts,
+                            safe(BATCH_SIZE) = settings.max_block_size,
+                            safe(ERROR_TYPE) = <&str>::from(&err),
+                            expanded(ERROR_MESSAGE) = %err,
+                            "datalake query failed, retrying with smaller block size"
+                        );
+                        // An overflow only clears once blocks are small, and each halving step
+                        // re-scans the page, so jump straight to the floor.
+                        let next = if is_arrow_string_overflow(&err) {
+                            retry_config.halving_min_block_size
+                        } else {
+                            match settings.max_block_size {
+                                Some(size) => (size / 2).max(retry_config.halving_min_block_size),
+                                None => retry_config.halving_initial_block_size,
+                            }
+                        };
+                        let next = QuerySettings {
+                            max_block_size: Some(next),
+                            ..settings
+                        };
+                        DATALAKE_EXTRACT_RETRY.retry_or_give_up(attempt, next, err.into())
                     }
                 }
-            },
-        )
+            }
+        })
         .await
     }
 
@@ -546,6 +548,7 @@ mod tests {
             deleted_column: "_siphon_deleted".to_string(),
             sort_key: vec!["id".to_string()],
             batch_size,
+            final_read_threads: 4,
             transform: TransformSpec::DataFusion(vec![Transformation {
                 sql: format!(
                     "SELECT id, name FROM {}",
@@ -633,7 +636,7 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            _max_block_size: Option<u64>,
+            _settings: QuerySettings,
         ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
             Ok(Box::pin(futures::stream::empty()))
         }
@@ -642,7 +645,7 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            _max_block_size: Option<u64>,
+            _settings: QuerySettings,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
@@ -940,7 +943,7 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            _max_block_size: Option<u64>,
+            _settings: QuerySettings,
         ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
             Ok(Box::pin(futures::stream::empty()))
         }
@@ -949,9 +952,9 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            max_block_size: Option<u64>,
+            settings: QuerySettings,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
-            self.calls.lock().unwrap().push(max_block_size);
+            self.calls.lock().unwrap().push(settings.max_block_size);
             let mut responses = self.responses.lock().unwrap();
             if responses.is_empty() {
                 return Ok(vec![]);
@@ -1157,7 +1160,7 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            _max_block_size: Option<u64>,
+            _settings: QuerySettings,
         ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
             Ok(Box::pin(futures::stream::empty()))
         }
@@ -1166,12 +1169,12 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            max_block_size: Option<u64>,
+            settings: QuerySettings,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
-            self.calls.lock().unwrap().push(max_block_size);
+            self.calls.lock().unwrap().push(settings.max_block_size);
 
             let small_enough =
-                matches!(max_block_size, Some(size) if size <= self.recover_at_block_size);
+                matches!(settings.max_block_size, Some(size) if size <= self.recover_at_block_size);
             if small_enough {
                 Ok(vec![test_batch_range(1, 5)])
             } else {
@@ -1264,7 +1267,7 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            _max_block_size: Option<u64>,
+            _settings: QuerySettings,
         ) -> Result<RecordBatchStream<'_>, DatalakeError> {
             Ok(Box::pin(futures::stream::empty()))
         }
@@ -1273,7 +1276,7 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            _max_block_size: Option<u64>,
+            _settings: QuerySettings,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
             Ok(vec![])
         }
@@ -1282,7 +1285,7 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            _max_block_size: Option<u64>,
+            _settings: QuerySettings,
         ) -> Result<FetchedPage, DatalakeError> {
             let mut calls = self.calls.lock().unwrap();
             *calls += 1;

@@ -50,6 +50,12 @@ pub(crate) struct ScanStats {
     pub scanned_bytes: u64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct QuerySettings {
+    pub max_block_size: Option<u64>,
+    pub max_threads: Option<u64>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct FetchedPage {
     pub batches: Vec<RecordBatch>,
@@ -63,14 +69,14 @@ pub(crate) trait DatalakeQuery: Send + Sync {
         &self,
         sql: &str,
         params: Value,
-        max_block_size: Option<u64>,
+        settings: QuerySettings,
     ) -> Result<RecordBatchStream<'_>, DatalakeError>;
 
     async fn query_batches(
         &self,
         sql: &str,
         params: Value,
-        max_block_size: Option<u64>,
+        settings: QuerySettings,
     ) -> Result<Vec<RecordBatch>, DatalakeError>;
 
     /// Buffers a whole page and reports ClickHouse's scan cost from the query
@@ -80,9 +86,9 @@ pub(crate) trait DatalakeQuery: Send + Sync {
         &self,
         sql: &str,
         params: Value,
-        max_block_size: Option<u64>,
+        settings: QuerySettings,
     ) -> Result<FetchedPage, DatalakeError> {
-        let batches = self.query_batches(sql, params, max_block_size).await?;
+        let batches = self.query_batches(sql, params, settings).await?;
         Ok(FetchedPage {
             batches,
             ..FetchedPage::default()
@@ -105,12 +111,15 @@ impl Datalake {
         Self { client }
     }
 
-    fn build_query(&self, sql: &str, params: Value) -> ArrowQuery {
+    fn build_query(&self, sql: &str, params: Value, settings: QuerySettings) -> ArrowQuery {
         let mut query = self.client.query(sql);
         if let Value::Object(map) = params {
             for (key, value) in map {
                 query = query.param(&key, value);
             }
+        }
+        if let Some(threads) = settings.max_threads {
+            query = query.with_setting("max_threads", threads.to_string());
         }
         query
     }
@@ -122,10 +131,10 @@ impl DatalakeQuery for Datalake {
         &self,
         sql: &str,
         params: Value,
-        max_block_size: Option<u64>,
+        settings: QuerySettings,
     ) -> Result<RecordBatchStream<'_>, DatalakeError> {
-        let query = self.build_query(sql, params);
-        let stream = query.fetch_arrow_streamed(max_block_size).await?;
+        let query = self.build_query(sql, params, settings);
+        let stream = query.fetch_arrow_streamed(settings.max_block_size).await?;
 
         Ok(Box::pin(
             stream.map(|result| result.map_err(DatalakeError::from)),
@@ -136,9 +145,9 @@ impl DatalakeQuery for Datalake {
         &self,
         sql: &str,
         params: Value,
-        max_block_size: Option<u64>,
+        settings: QuerySettings,
     ) -> Result<Vec<RecordBatch>, DatalakeError> {
-        let mut stream = self.query_arrow(sql, params, max_block_size).await?;
+        let mut stream = self.query_arrow(sql, params, settings).await?;
         let mut batches = Vec::new();
 
         while let Some(result) = stream.next().await {
@@ -155,10 +164,10 @@ impl DatalakeQuery for Datalake {
         &self,
         sql: &str,
         params: Value,
-        max_block_size: Option<u64>,
+        settings: QuerySettings,
     ) -> Result<FetchedPage, DatalakeError> {
-        let mut query = self.build_query(sql, params);
-        if max_block_size.is_some() {
+        let mut query = self.build_query(sql, params, settings);
+        if settings.max_block_size.is_some() {
             // Retry after a datalake failure (the Arrow 2GB overflow): byte-cap
             // blocks so the retry is safe regardless of row width.
             query = query.with_setting(
@@ -167,7 +176,7 @@ impl DatalakeQuery for Datalake {
             );
         }
         let (mut stream, summary) = query
-            .fetch_arrow_streamed_with_summary(max_block_size)
+            .fetch_arrow_streamed_with_summary(settings.max_block_size)
             .await?;
 
         let mut batches = Vec::new();

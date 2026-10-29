@@ -9,7 +9,7 @@ use ontology::{Extract, Ontology};
 
 use crate::handler::HandlerError;
 
-use super::datalake::DatalakeQuery;
+use super::datalake::{DatalakeQuery, QuerySettings};
 use orbit_utils::traversal_path::TraversalPath;
 
 /// The probe derives its bucket width from the id span to land near this count;
@@ -98,7 +98,7 @@ impl PartitionStrategy {
             .query_batches(
                 &self.probe_sql(traversal_path),
                 probe_params(traversal_path),
-                None,
+                QuerySettings::default(),
             )
             .await
             .map_err(|err| HandlerError::from(err).prefix_message_with("partition probe failed"))?;
@@ -298,7 +298,7 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            _max_block_size: Option<u64>,
+            _settings: QuerySettings,
         ) -> Result<RecordBatchStream<'_>, DatalakeError> {
             Ok(Box::pin(futures::stream::empty()))
         }
@@ -307,7 +307,7 @@ mod tests {
             &self,
             sql: &str,
             params: Value,
-            _max_block_size: Option<u64>,
+            _settings: QuerySettings,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
             *self.captured_sql.lock().unwrap() = sql.to_string();
             *self.captured_params.lock().unwrap() = params;

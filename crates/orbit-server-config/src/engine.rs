@@ -193,9 +193,18 @@ pub struct EntityHandlerConfig {
     #[serde(default)]
     pub batch_size_overrides: HashMap<String, u64>,
 
+    /// ClickHouse `max_threads` for a full-load page, which reads its source table with `FINAL`; each stream merges one key range and reads ahead with full rows, so one stream keeps the page near the plain scan's rows and well under its memory.
+    #[serde(default = "default_final_read_max_threads")]
+    #[schemars(range(min = 1))]
+    pub final_read_max_threads: u64,
+
     /// Maximum number of items bound into each SystemNote resolver lookup.
     #[schemars(range(min = 1))]
     pub system_notes_resolve_lookup_batch_size: usize,
+}
+
+fn default_final_read_max_threads() -> u64 {
+    1
 }
 
 impl EntityHandlerConfig {

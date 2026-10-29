@@ -78,6 +78,7 @@ pub async fn register_handlers(
             global_batch_size: entity_handler_config.datalake_batch_size(),
             namespaced_batch_size: entity_handler_config.datalake_batch_size(),
             overrides: &entity_handler_config.batch_size_overrides,
+            final_read_threads: entity_handler_config.final_read_max_threads,
         },
     )
     .map_err(HandlerInitError::new)?;
@@ -183,6 +184,7 @@ mod tests {
                 global_batch_size: 1000,
                 namespaced_batch_size: 1000,
                 overrides: &Default::default(),
+                final_read_threads: 4,
             },
         )
         .expect("plans should build")

@@ -508,6 +508,13 @@
           },
           "default": {}
         },
+        "final_read_max_threads": {
+          "description": "ClickHouse `max_threads` for a full-load page, which reads its source table with `FINAL`; each stream merges one key range and reads ahead with full rows, so one stream keeps the page near the plain scan's rows and well under its memory.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 1,
+          "default": 1
+        },
         "system_notes_resolve_lookup_batch_size": {
           "description": "Maximum number of items bound into each SystemNote resolver lookup.",
           "type": "integer",

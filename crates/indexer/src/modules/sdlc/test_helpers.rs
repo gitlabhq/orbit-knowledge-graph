@@ -4,7 +4,7 @@ use futures::stream;
 
 use std::sync::Arc;
 
-use super::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
+use super::datalake::{DatalakeError, DatalakeQuery, QuerySettings, RecordBatchStream};
 use super::metrics::SdlcMetrics;
 use super::plan::Transformation;
 use super::transform::{BlockTransform, TableBatch, TransformRegistry};
@@ -59,7 +59,7 @@ impl DatalakeQuery for EmptyDatalake {
         &self,
         _sql: &str,
         _params: serde_json::Value,
-        _max_block_size: Option<u64>,
+        _settings: QuerySettings,
     ) -> Result<RecordBatchStream<'_>, DatalakeError> {
         Ok(Box::pin(stream::empty()))
     }
@@ -68,7 +68,7 @@ impl DatalakeQuery for EmptyDatalake {
         &self,
         _sql: &str,
         _params: serde_json::Value,
-        _max_block_size: Option<u64>,
+        _settings: QuerySettings,
     ) -> Result<Vec<RecordBatch>, DatalakeError> {
         Ok(vec![])
     }
@@ -82,7 +82,7 @@ impl DatalakeQuery for FailingDatalake {
         &self,
         _sql: &str,
         _params: serde_json::Value,
-        _max_block_size: Option<u64>,
+        _settings: QuerySettings,
     ) -> Result<RecordBatchStream<'_>, DatalakeError> {
         Err(DatalakeError::Query("simulated failure".to_string()))
     }
@@ -91,7 +91,7 @@ impl DatalakeQuery for FailingDatalake {
         &self,
         _sql: &str,
         _params: serde_json::Value,
-        _max_block_size: Option<u64>,
+        _settings: QuerySettings,
     ) -> Result<Vec<RecordBatch>, DatalakeError> {
         Err(DatalakeError::Query("simulated failure".to_string()))
     }

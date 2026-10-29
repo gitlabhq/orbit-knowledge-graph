@@ -33,7 +33,7 @@ use serde_json::json;
 use orbit_arrow::ArrowUtils;
 
 use crate::handler::HandlerError;
-use crate::modules::sdlc::datalake::DatalakeQuery;
+use crate::modules::sdlc::datalake::{DatalakeQuery, QuerySettings};
 use crate::modules::sdlc::transform::{
     BlockTransform, TableBatch, TransformFactory, TransformRegistry,
 };
@@ -307,7 +307,7 @@ async fn resolve_default_projects(
     for source_ids in lookup_chunks(&project_ids, resolve_lookup_batch_size) {
         let params = json!({ "root_prefix": root_prefix.as_str(), "source_ids": source_ids });
         let batches = datalake
-            .query_batches(&PROJECT_PATHS_SQL, params, None)
+            .query_batches(&PROJECT_PATHS_SQL, params, QuerySettings::default())
             .await
             .map_err(|e| HandlerError::from(e).prefix_message_with("project paths query failed"))?;
 
@@ -382,7 +382,7 @@ async fn query_routes(
     for paths in lookup_chunks(paths, strings_per_array_param(paths)) {
         let params = json!({ "root_prefix": root_prefix.as_str(), "paths": paths });
         let batches = datalake
-            .query_batches(&ROUTES_SQL, params, None)
+            .query_batches(&ROUTES_SQL, params, QuerySettings::default())
             .await
             .map_err(|e| HandlerError::from(e).prefix_message_with("routes query failed"))?;
 
@@ -422,7 +422,7 @@ async fn query_entities(
             "iids": iids,
         });
         let batches = datalake
-            .query_batches(sql, params, None)
+            .query_batches(sql, params, QuerySettings::default())
             .await
             .map_err(|e| HandlerError::from(e).prefix_message_with("entity query failed"))?;
 
@@ -564,7 +564,7 @@ mod tests {
             &self,
             _sql: &str,
             _params: serde_json::Value,
-            _max_block_size: Option<u64>,
+            _settings: QuerySettings,
         ) -> Result<RecordBatchStream<'_>, DatalakeError> {
             Ok(Box::pin(stream::empty()))
         }
@@ -573,7 +573,7 @@ mod tests {
             &self,
             sql: &str,
             params: serde_json::Value,
-            _max_block_size: Option<u64>,
+            _settings: QuerySettings,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
             self.queries.lock().unwrap().push(params.clone());
             if sql == *ROUTES_SQL {

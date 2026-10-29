@@ -523,6 +523,7 @@ mod tests {
                 global_batch_size: 1000,
                 namespaced_batch_size: 1000,
                 overrides: &Default::default(),
+                final_read_threads: 4,
             },
         )
         .expect("plans should build");

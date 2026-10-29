@@ -21,6 +21,7 @@ use ontology::sql_template;
 use orbit_arrow::ArrowUtils;
 use serde_json::Value;
 
+use super::datalake::QuerySettings;
 use super::partitioning::PartitionAssignment;
 use crate::checkpoint::Checkpoint;
 use crate::clickhouse::TIMESTAMP_FORMAT;
@@ -271,6 +272,7 @@ pub(in crate::modules::sdlc) struct Plan {
     pub deleted_column: String,
     pub sort_key: Vec<String>,
     pub batch_size: u64,
+    pub final_read_threads: u64,
     pub transform: TransformSpec,
 }
 
@@ -281,6 +283,7 @@ pub(in crate::modules::sdlc) struct PreparedQuery {
     params: serde_json::Map<String, Value>,
     batch_size: u64,
     needs_final: bool,
+    final_read_threads: u64,
 }
 
 impl Plan {
@@ -291,6 +294,7 @@ impl Plan {
             params: serde_json::Map::new(),
             batch_size: self.batch_size,
             needs_final: false,
+            final_read_threads: self.final_read_threads,
         }
     }
 }
@@ -338,6 +342,13 @@ impl PreparedQuery {
 
     pub fn batch_size(&self) -> u64 {
         self.batch_size
+    }
+
+    pub fn settings(&self, max_block_size: Option<u64>) -> QuerySettings {
+        QuerySettings {
+            max_block_size,
+            max_threads: self.needs_final.then_some(self.final_read_threads),
+        }
     }
 
     pub fn set_batch_size(&mut self, batch_size: u64) {
@@ -454,6 +465,7 @@ mod tests {
             deleted_column: "_siphon_deleted".to_string(),
             sort_key,
             batch_size,
+            final_read_threads: 4,
             transform: TransformSpec::DataFusion(vec![]),
         }
     }
@@ -683,32 +695,31 @@ mod tests {
     #[test]
     fn deleted_filter_full_load_reads_the_latest_version_and_drops_soft_deleted_rows() {
         let plan = test_plan(vec!["id"], 1000);
-        let sql = plan
-            .prepare()
-            .with(Some(DeletedFilter {
-                column: &plan.deleted_column,
-            }))
-            .to_sql()
-            .expect("renders extract SQL");
+        let prepared = plan.prepare().with(Some(DeletedFilter {
+            column: &plan.deleted_column,
+        }));
+        let sql = prepared.to_sql().expect("renders extract SQL");
         assert!(sql.contains("FROM source_table FINAL"), "sql: {sql}");
         assert!(sql.contains("_siphon_deleted = false"), "sql: {sql}");
+        assert_eq!(prepared.settings(Some(500)).max_threads, Some(4));
+        assert_eq!(prepared.settings(Some(500)).max_block_size, Some(500));
     }
 
     #[test]
     fn deleted_filter_omitted_on_incremental() {
         let plan = test_plan(vec!["id"], 1000);
-        let sql = plan
+        let prepared = plan
             .prepare()
             .with(None::<DeletedFilter>)
             .with(WatermarkFilter {
                 column: &plan.watermark_column,
                 last: Utc::now(),
                 current: Utc::now(),
-            })
-            .to_sql()
-            .expect("renders extract SQL");
+            });
+        let sql = prepared.to_sql().expect("renders extract SQL");
         assert!(!sql.contains("_siphon_deleted = false"), "sql: {sql}");
         assert!(!sql.contains("FINAL"), "sql: {sql}");
+        assert_eq!(prepared.settings(None), QuerySettings::default());
     }
 
     #[test]
