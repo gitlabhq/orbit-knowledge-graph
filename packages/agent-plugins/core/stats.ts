@@ -102,6 +102,38 @@ export function graphStatus(json: string): { total: number; entities: string[] }
   }
 }
 
+export type ScopeIdentity = { kind: 'group' | 'project'; id: string; path: string }
+export type ScopeTotal = { key: string; total: number; identity?: ScopeIdentity }
+
+export function scopeIdentity(json: string, kind: ScopeIdentity['kind']): ScopeIdentity | null {
+  try {
+    const body = JSON.parse(json) as { id?: unknown; full_path?: unknown; path_with_namespace?: unknown }
+    const path = kind === 'group' ? body.full_path : body.path_with_namespace
+    if (typeof path !== 'string' || !path || (typeof body.id !== 'number' && typeof body.id !== 'string')) return null
+    return { kind, id: String(body.id), path }
+  } catch {
+    return null
+  }
+}
+
+export function identityLookups(flags: readonly string[]): { kind: ScopeIdentity['kind']; argv: string[] }[] {
+  const [flag, value] = flags
+  if (!value) return []
+  const lookup = (kind: ScopeIdentity['kind'], collection: string) => ({ kind, argv: ['glab', 'api', collection + '/' + encodeURIComponent(value)] })
+  if (flag === '--namespace-id') return [lookup('group', 'groups')]
+  if (flag === '--project-id') return [lookup('project', 'projects')]
+  return [lookup('group', 'groups'), lookup('project', 'projects')]
+}
+
+export function countedTotal(scopes: readonly ScopeTotal[]): number {
+  const distinct = new Map<string, ScopeTotal>()
+  for (const scope of scopes) distinct.set(scope.identity ? scope.identity.kind + ':' + scope.identity.id : scope.key, scope)
+  const groups = [...distinct.values()].flatMap((scope) => (scope.identity?.kind === 'group' ? [scope.identity] : []))
+  const isInsideCountedGroup = ({ identity }: ScopeTotal) =>
+    identity !== undefined && groups.some((group) => group.id !== identity.id && identity.path.startsWith(group.path + '/'))
+  return sumBy([...distinct.values()].filter((scope) => !isInsideCountedGroup(scope)), (scope) => scope.total)
+}
+
 export function grouped(n: number): string {
   return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
