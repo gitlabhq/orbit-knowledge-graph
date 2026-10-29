@@ -18,17 +18,14 @@ Set up all four before you install GitLab Orbit.
 
 ## Prerequisites
 
-- One of these GitLab versions, which accept GQL queries by default:
-  - 19.4.4
-  - 19.5.2
-  - 19.6.0 or later
+- A GitLab version that your GitLab Orbit version supports. See [Version requirements](version-requirements.md).
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.
 - [ClickHouse](clickhouse.md), set up for GitLab.
 - Kubernetes 1.36 or later. For Kubernetes 1.33 to 1.35, see [Image volumes](#image-volumes).
 - NATS with JetStream turned on.
 - An S3-compatible or Google Cloud Storage bucket for Siphon.
-- The latest [GitLab Orbit release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases) and [Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/releases).
+- A [GitLab Orbit release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases) and a [Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/releases) release that support each other. See [Version requirements](version-requirements.md).
 
 ## Installation order
 

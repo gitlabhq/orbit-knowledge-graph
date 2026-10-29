@@ -24,9 +24,7 @@ Ask what breaks if a service changes, or which CI/CD jobs fail most.
 Each answer shows only the data that your GitLab role lets you see.
 
 > [!note]
-> GitLab Orbit is in beta.
-> The query language and the schema can change.
-> The graph of your group needs GitLab Premium or Ultimate.
+> The graph of your group needs GitLab Premium or Ultimate with GitLab Orbit [purchased](https://about.gitlab.com/gitlab-orbit/).
 
 ## Quickstart
 

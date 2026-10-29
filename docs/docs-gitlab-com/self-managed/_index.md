@@ -84,6 +84,7 @@ GitLab reaches the webserver over gRPC.
 
 | Page | Description |
 |------|-------------|
+| [Version requirements](version-requirements.md) | GitLab, Helm chart, and ClickHouse versions for each GitLab Orbit release |
 | [Get started](getting-started.md) | Prerequisites, installation order, Kubernetes, NATS, object storage, and shared values |
 | [Sizing](sizing.md) | Pod, node, ClickHouse, NATS, and Siphon sizes for each GitLab reference architecture size |
 | [ClickHouse](clickhouse.md) | Versions, databases, high availability, memory, log retention, and users |
