@@ -1,12 +1,11 @@
 use super::{FILES_SIMPLE, run_cmd};
 use integration_testkit::cli::{
-    create_test_repo, git, mcp_roundtrip, mcp_tool_call, mcp_tool_text, orbit_cmd, orbit_index,
-    orbit_sql, rows, rows_where,
+    create_test_repo, git, orbit_cmd, orbit_index, orbit_sql, rows, rows_where,
 };
 use serde_json::{Value, json};
 
 #[test]
-fn checkout_revision_journey_through_cli_and_mcp() {
+fn checkout_revision_journey_through_cli() {
     let data = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
     let first = git(&repo.path, &["rev-parse", "HEAD"]);
@@ -75,22 +74,6 @@ fn checkout_revision_journey_through_cli_and_mcp() {
         assert!(command(&["grep", "hello"]).contains("src/main.py"));
         assert!(command(&["context", "src/main.py"]).contains("hello"));
     }
-    let responses = mcp_roundtrip(
-        data.path(),
-        &[
-            mcp_tool_call(
-                1,
-                "run_sql",
-                json!({"sql": ["SELECT count(*) AS files FROM gl_file"]}),
-            ),
-            mcp_tool_call(2, "get_graph_schema", json!({})),
-        ],
-    );
-    assert_eq!(
-        serde_json::from_str::<Value>(mcp_tool_text(&responses[0])).unwrap(),
-        json!([[{"files": 5}]])
-    );
-    assert!(mcp_tool_text(&responses[1]).contains("gl_file"));
 }
 
 fn seed_revision(data_dir: &std::path::Path, name: &str, ddl: &str) -> std::path::PathBuf {
@@ -192,18 +175,6 @@ fn workspace_queries_skip_abandoned_and_missing_revisions() {
             json!([{"id":42}])
         );
     }
-    let responses = mcp_roundtrip(
-        data.path(),
-        &[
-            mcp_tool_call(1, "run_sql", json!({"sql":["SELECT * FROM gl_probe"]})),
-            mcp_tool_call(2, "get_graph_schema", json!({})),
-        ],
-    );
-    assert_eq!(
-        serde_json::from_str::<Value>(mcp_tool_text(&responses[0])).unwrap(),
-        json!([[{"id":42}]])
-    );
-    assert_ne!(responses[1]["result"]["isError"], true);
     let (_, error, ok) = run_cmd(
         &[
             "workspace",

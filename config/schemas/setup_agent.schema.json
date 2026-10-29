@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "setup_agent.schema.json",
   "title": "Orbit setup assistant spec",
-  "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: detection paths, a managed instruction-file block, marker-owned JSON merges, templated files, string registrations, an MCP server entry, and skill directories. Each file's name field must match its file stem. Applied by crates/orbit-cli/src/commands/setup.",
+  "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: detection paths, a managed instruction-file block, marker-owned JSON merges, templated files, string registrations, and skill directories. Each file's name field must match its file stem. Applied by crates/orbit-cli/src/commands/setup.",
   "type": "object",
   "required": ["name", "title", "detect", "instruction_file"],
   "additionalProperties": false,
@@ -62,27 +62,22 @@
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/definitions/registration" }
+        },
+        "mcp": {
+          "type": "object",
+          "required": ["file", "format"],
+          "additionalProperties": false,
+          "properties": {
+            "file": { "$ref": "#/definitions/scopedPath" },
+            "format": {
+              "type": "string",
+              "enum": ["claude", "codex", "opencode"],
+              "description": "Layout of the MCP config: `claude` = mcpServers JSON, `codex` = [mcp_servers.<name>] TOML, `opencode` = mcp JSON."
+            }
+          },
+          "description": "Config file where an earlier release registered the `orbit` MCP server. Setup and uninstall remove that entry."
         }
       }
-    },
-    "mcp": {
-      "type": "object",
-      "required": ["file", "format", "coding_agent"],
-      "additionalProperties": false,
-      "properties": {
-        "file": { "$ref": "#/definitions/scopedPath" },
-        "format": {
-          "type": "string",
-          "enum": ["claude", "codex", "opencode"],
-          "description": "Serializer for the MCP entry: `claude` = mcpServers JSON, `codex` = [mcp_servers.<name>] TOML, `opencode` = mcp JSON with an array command."
-        },
-        "coding_agent": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9._-]{1,64}$",
-          "description": "Value of the `AI_AGENT` env var in the MCP entry, so telemetry knows which agent called the server. Use the ids that `orbit` already reports, such as `claude-code`."
-        }
-      },
-      "description": "Config file that receives the shared `mcp_server` entry from setup.yaml."
     },
     "skills": {
       "type": "object",

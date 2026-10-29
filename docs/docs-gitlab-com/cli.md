@@ -106,7 +106,6 @@ Commands that use only the local graph need no GitLab account and no network.
 | `context` | Local graph and GitLab Orbit API | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
 | `workspace index` | Local graph | Index a repository, or a directory of repositories. |
 | `workspace list` | Local graph | List the indexed repositories. |
-| `workspace mcp serve` | Local graph | Serve the local graph to agents over the Model Context Protocol (MCP). |
 | `setup`, `uninstall` | None | Add or remove the agent configuration. |
 | `config` | None | Read and write saved settings. |
 | `version` | None | Print the version. |
@@ -219,7 +218,7 @@ The parser and [supported languages](schema.md#supported-languages) are the same
 - After you switch branches or commit, `grep` and `context` index the new commit for you.
 - To list the indexed repositories, run `glab orbit workspace list`.
 
-`workspace sql`, `workspace schema`, and `workspace mcp serve` index the current repository the first time you use them in it,
+`workspace sql` and `workspace schema` index the current repository the first time you use them in it,
 even when you indexed other repositories.
 They don't index a new commit of a repository that is already indexed. `grep`, `context`, or `workspace index` do.
 

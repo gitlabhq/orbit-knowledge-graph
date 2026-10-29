@@ -52,12 +52,11 @@ retired:
         project: .opencode/plugins/orbit-ui.js
         global: "~/.config/opencode/plugins/orbit-ui.js"
       ui: true
-mcp:
-  file:
-    project: opencode.json
-    global: "~/.config/opencode/opencode.json"
-  format: opencode
-  coding_agent: opencode
+  mcp:
+    file:
+      project: opencode.json
+      global: "~/.config/opencode/opencode.json"
+    format: opencode
 skills:
   dir:
     project: .agents/skills

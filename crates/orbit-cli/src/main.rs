@@ -5,7 +5,6 @@ mod commands;
 mod database;
 mod descriptions;
 mod list;
-mod mcp;
 mod remote;
 mod settings;
 mod skill;
@@ -21,7 +20,6 @@ use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use orbit_log_fields::debug;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tracing::Level;
 
 /// Only bounds commands too fast to hide a round trip behind their own work.
 /// Raising it buys no extra delivery and lengthens exit against a dead collector.
@@ -453,13 +451,6 @@ struct ListArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = descriptions::short("mcp_serve"), long_about = descriptions::long("mcp_serve"))]
-struct McpArgs {
-    #[command(subcommand)]
-    command: McpCommands,
-}
-
-#[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("workspace"), long_about = descriptions::long("workspace"))]
 struct WorkspaceArgs {
     #[command(subcommand)]
@@ -473,7 +464,6 @@ enum WorkspaceCommands {
     Sql(SqlArgs),
     Schema(SchemaArgs),
     List(ListArgs),
-    Mcp(McpArgs),
     Reset(ResetArgs),
 }
 
@@ -637,8 +627,6 @@ enum Commands {
     Sql(SqlArgs),
     #[command(hide = true)]
     List(ListArgs),
-    #[command(hide = true)]
-    Mcp(McpArgs),
     #[command(name = "skills", alias = "skill")]
     Skills(SkillsArgs),
     #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
@@ -652,12 +640,9 @@ enum Commands {
         #[arg(long, conflicts_with = "agents")]
         all: bool,
 
-        /// Add a component that is off by default, such as `mcp` (repeatable).
+        /// Add a component without asking, such as `agent-plugins` (repeatable).
         #[arg(long, value_enum, value_name = "COMPONENT")]
         install: Vec<commands::setup::Component>,
-
-        #[arg(long, hide = true)]
-        mcp: bool,
 
         /// Leave a component out (repeatable). By default setup installs instructions, hooks,
         /// skill, and agent-plugins, which shows Orbit calls in Claude Code and OpenCode.
@@ -787,12 +772,6 @@ enum ConfigCommands {
     },
     /// List all known settings and their saved values.
     List,
-}
-
-#[derive(Subcommand, Debug, PartialEq)]
-enum McpCommands {
-    /// Start a stateless MCP server over stdio.
-    Serve,
 }
 
 #[tokio::main]
@@ -939,23 +918,18 @@ async fn dispatch(
         }
         Commands::Grep(args) => run_grep(*args).await,
         Commands::Context(args) => commands::context::run(args).await,
-        Commands::Workspace(WorkspaceArgs { command }) => {
-            run_workspace(command, tracker, coding_agent).await
-        }
+        Commands::Workspace(WorkspaceArgs { command }) => run_workspace(command).await,
         Commands::Index(args) => {
             warn_moved("index", "workspace index");
-            run_workspace(WorkspaceCommands::Index(args), tracker, coding_agent).await
+            run_workspace(WorkspaceCommands::Index(args)).await
         }
         Commands::Sql(args) => {
             warn_moved("sql", "workspace sql");
-            run_workspace(WorkspaceCommands::Sql(args), tracker, coding_agent).await
+            run_workspace(WorkspaceCommands::Sql(args)).await
         }
         Commands::List(args) => {
             warn_moved("list", "workspace list");
-            run_workspace(WorkspaceCommands::List(args), tracker, coding_agent).await
-        }
-        Commands::Mcp(args) => {
-            run_workspace(WorkspaceCommands::Mcp(args), tracker, coding_agent).await
+            run_workspace(WorkspaceCommands::List(args)).await
         }
         Commands::Config { command } => match command {
             ConfigCommands::Get { key } => commands::config::get(&key),
@@ -973,16 +947,12 @@ async fn dispatch(
         Commands::Setup {
             agents,
             all,
-            mut install,
-            mcp,
+            install,
             skip,
             no_index,
             skill,
             flags,
         } => {
-            if mcp {
-                install.push(commands::setup::Component::Mcp);
-            }
             let components = commands::setup::Component::from_flags(&install, &skip)?;
             let agent_plugins = commands::setup::Component::AgentPlugins;
             let ask_agent_plugins =
@@ -1072,11 +1042,7 @@ async fn dispatch(
     }
 }
 
-async fn run_workspace(
-    command: WorkspaceCommands,
-    tracker: Option<orbit_analytics::SnowplowAnalyticsTracker>,
-    coding_agent: Option<String>,
-) -> Result<()> {
+async fn run_workspace(command: WorkspaceCommands) -> Result<()> {
     match command {
         WorkspaceCommands::Index(args) => {
             let (path, options, detach) = args.into_parts();
@@ -1093,21 +1059,6 @@ async fn run_workspace(
         WorkspaceCommands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
         WorkspaceCommands::List(ListArgs { format, db }) => list::run(format, db),
         WorkspaceCommands::Reset(ResetArgs { yes, dry_run }) => commands::reset::run(yes, dry_run),
-        WorkspaceCommands::Mcp(McpArgs {
-            command: McpCommands::Serve,
-        }) => {
-            // Logs must go to stderr only — stdout is the MCP transport.
-            let subscriber = tracing_subscriber::fmt()
-                .with_max_level(Level::INFO)
-                .with_target(false)
-                .with_ansi(false)
-                .without_time()
-                .with_writer(std::io::stderr)
-                .finish();
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("setting default subscriber failed");
-            mcp::serve(tracker, coding_agent).await
-        }
     }
 }
 
@@ -1246,14 +1197,9 @@ mod tests {
         );
         assert_eq!(action_for(&["orbit", "sql", "SELECT 1"]), "sql");
         assert_eq!(action_for(&["orbit", "config", "set", "k", "v"]), "config");
-        assert_eq!(action_for(&["orbit", "mcp", "serve"]), "mcp");
         assert_eq!(
             action_for(&["orbit", "workspace", "sql", "SELECT 1"]),
             "workspace_sql"
-        );
-        assert_eq!(
-            action_for(&["orbit", "workspace", "mcp", "serve"]),
-            "workspace_mcp"
         );
         assert_eq!(action_for(&["orbit", "ontology"]), "schema");
     }
@@ -1297,10 +1243,6 @@ mod tests {
             workspace(&["orbit", "workspace", "list"]),
             WorkspaceCommands::List(_)
         ));
-        assert!(matches!(
-            workspace(&["orbit", "workspace", "mcp", "serve"]),
-            WorkspaceCommands::Mcp(_)
-        ));
         assert_eq!(
             workspace(&["orbit", "workspace", "reset", "-y"]),
             WorkspaceCommands::Reset(ResetArgs {
@@ -1330,6 +1272,8 @@ mod tests {
             ["orbit", "repo-map", "overview"].as_slice(),
             &["orbit", "dsl"],
             &["orbit", "tools"],
+            &["orbit", "mcp", "serve"],
+            &["orbit", "workspace", "mcp", "serve"],
         ] {
             assert!(
                 Cli::try_parse_from(argv).is_err(),
@@ -1341,7 +1285,7 @@ mod tests {
     #[test]
     fn moved_commands_stay_hidden_from_help() {
         let help = Cli::command().render_help().to_string();
-        for hidden in ["index", "sql", "list", "mcp", "graph-status", "ontology"] {
+        for hidden in ["index", "sql", "list", "graph-status", "ontology"] {
             assert!(
                 !help
                     .lines()
@@ -1448,10 +1392,6 @@ mod tests {
         assert!(matches!(
             Cli::parse_from(["orbit", "list"]).command,
             Commands::List(_)
-        ));
-        assert!(matches!(
-            Cli::parse_from(["orbit", "mcp", "serve"]).command,
-            Commands::Mcp(_)
         ));
         assert!(matches!(
             Cli::parse_from(["orbit", "context", "Definition:7"]).command,
