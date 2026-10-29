@@ -10,6 +10,7 @@ use arrow::record_batch::RecordBatch;
 use orbit_arrow::{BatchBuilder, ColumnType};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
+use crate::canonical::Canonical as C;
 use crate::dsl::types::{EdgeCtx, EdgeIndex, Tf};
 use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
@@ -469,6 +470,7 @@ fn write_entity(
 ) -> Result<(), Error> {
     let mut builder = BatchBuilder::new(&entity.specs, 0)?;
     let b = &mut builder;
+    let mut written = FxHashSet::default();
     for (ti, tree) in forest.all().filter(|(ti, _)| wanted(*ti)) {
         run.check()?;
         let ctx = EdgeCtx {
@@ -537,7 +539,7 @@ fn write_entity(
                         .or_default()
                         .push((id, index));
                 }
-                if !emitted {
+                if !emitted || !written.insert(id) {
                     continue;
                 }
                 for column in &entity.header {
@@ -583,6 +585,11 @@ impl GraphEdge {
             && self.site_child.is_none_or(|kind| {
                 site.is_some_and(|c| c.children().any(|child| child.kind() == kind))
             })
+            && (!self.receiver
+                || site
+                    .and_then(|c| c.child(C::Callee))
+                    .and_then(|callee| callee.child_sym(C::Member))
+                    .is_some_and(|member| Some(member) != target.child_sym(C::DefName)))
             && self
                 .target_tag
                 .iter()

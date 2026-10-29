@@ -131,7 +131,10 @@ fn cross_file_timeout_keeps_resolved_edges_and_recovers_on_noop_reindex() {
     assert_eq!(
         kinds.map(|kind| cross_file(&env, &degraded.state, kind)),
         [
-            vec![pair("main.py:", "pkg/mod.py:pkg/mod.py")],
+            vec![
+                pair("main.py:", "pkg/mod.py:pkg/mod.py"),
+                pair("main.py:", "utils.py:utils.py")
+            ],
             vec![],
             vec![]
         ]

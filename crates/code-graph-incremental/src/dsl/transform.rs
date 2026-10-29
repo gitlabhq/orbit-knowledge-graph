@@ -418,10 +418,23 @@ impl Tf {
                 node.start as usize,
                 (node.end as usize).min(node.start as usize + bytes),
             ),
-            Tf::SourceBefore(bytes) => (
-                (node.start as usize).saturating_sub(*bytes),
-                node.start as usize,
-            ),
+            Tf::SourceBefore(bytes) => {
+                let def = u16::from(crate::canonical::Canonical::Def);
+                let floor = std::iter::successors(t.storage.previous_sibling(id), |&s| {
+                    t.storage.previous_sibling(s)
+                })
+                .map(|s| t.storage.node(s))
+                .find(|n| n.kind == def && n.end <= node.start)
+                .map(|n| n.end)
+                .or_else(|| {
+                    std::iter::successors(t.storage.parent(id), |&p| t.storage.parent(p))
+                        .map(|p| t.storage.node(p).start)
+                        .find(|&start| start < node.start)
+                })
+                .unwrap_or(0) as usize;
+                let start = node.start as usize;
+                (start.saturating_sub(*bytes).max(floor), start)
+            }
             _ => return "",
         };
         let end = text.floor_char_boundary(end.min(text.len()));
@@ -443,39 +456,34 @@ impl Pairs {
         }
     }
 
-    fn top(&self, s: &str) -> Vec<bool> {
-        let mut top = vec![false; s.len() + 1];
-        let mut stack = Vec::new();
-        let mut quote: Option<char> = None;
-        let mut escaped = false;
-        for (at, ch) in s.char_indices() {
-            top[at] = stack.is_empty() && quote.is_none();
-            match quote {
-                Some(_) if escaped => escaped = false,
-                Some(_) if ch == '\\' => escaped = true,
-                Some(q) if ch == q => quote = None,
+    fn advance(&self, scan: &mut Scan, s: &str, to: usize) -> bool {
+        for ch in s[scan.pos..to].chars() {
+            match scan.quote {
+                Some(_) if scan.escaped => scan.escaped = false,
+                Some(_) if ch == '\\' => scan.escaped = true,
+                Some(q) if ch == q => scan.quote = None,
                 Some(_) => {}
-                None if self.quotes.contains(&ch) => quote = Some(ch),
+                None if self.quotes.contains(&ch) => scan.quote = Some(ch),
                 None => {
                     if let Some(i) = self.open.iter().position(|&o| o == ch) {
-                        stack.push(i);
+                        scan.stack.push(i);
                     } else if let Some(i) = self.close.iter().position(|&c| c == ch)
-                        && stack.last() == Some(&i)
+                        && scan.stack.last() == Some(&i)
                     {
-                        stack.pop();
+                        scan.stack.pop();
                     }
                 }
             }
         }
-        top[s.len()] = stack.is_empty() && quote.is_none();
-        top
+        scan.pos = to;
+        scan.stack.is_empty() && scan.quote.is_none()
     }
 
     fn find(&self, s: &str, re: &regex::Regex) -> Option<(usize, usize)> {
-        let top = self.top(s);
+        let mut scan = Scan::default();
         let mut at = 0;
         while let Some(found) = re.find_at(s, at) {
-            if top[found.start()] {
+            if self.advance(&mut scan, s, found.start()) {
                 return Some((found.start(), found.end()));
             }
             at = s.ceil_char_boundary(found.start() + 1);
@@ -487,11 +495,11 @@ impl Pairs {
     }
 
     fn split(&self, s: &str, sep: &str) -> String {
-        let top = self.top(s);
+        let mut scan = Scan::default();
         let mut parts = Vec::new();
         let mut start = 0;
         for (at, _) in s.match_indices(sep) {
-            if top[at] && at >= start {
+            if at >= start && self.advance(&mut scan, s, at) {
                 parts.push(s[start..at].trim());
                 start = at + sep.len();
             }
@@ -500,6 +508,14 @@ impl Pairs {
         parts.retain(|part| !part.is_empty());
         parts.join("\u{1f}")
     }
+}
+
+#[derive(Default)]
+struct Scan {
+    pos: usize,
+    stack: Vec<usize>,
+    quote: Option<char>,
+    escaped: bool,
 }
 
 fn keep_last<'a>(s: &'a str, sep: &str, segments: usize, bytes: usize) -> &'a str {

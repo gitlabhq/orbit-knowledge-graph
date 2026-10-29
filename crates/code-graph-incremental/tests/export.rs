@@ -636,9 +636,15 @@ fn definitions_imports_and_edges_export_as_ontology_rows() {
         [
             ("Definition".into(), "CALLS".into(), "Definition".into()),
             ("Definition".into(), "DEFINES".into(), "Definition".into()),
+            (
+                "Definition".into(),
+                "INSTANTIATES".into(),
+                "Definition".into()
+            ),
             ("Directory".into(), "CONTAINS".into(), "File".into()),
             ("File".into(), "DEFINES".into(), "Definition".into()),
             ("File".into(), "DEFINES".into(), "Import".into()),
+            ("File".into(), "DEPENDS_ON".into(), "File".into()),
             ("Import".into(), "RESOLVES_TO".into(), "Definition".into()),
         ]
     );
