@@ -107,6 +107,7 @@ struct Fold<'t> {
     wildcards: WildcardImports,
     tags: ReservedTags,
     resolution: Resolution,
+    type_site: bool,
     config: &'t LinkConfig,
     syms: &'t crate::intern::Interner,
     run: &'t Sentinel,
@@ -287,7 +288,9 @@ impl<'t> Fold<'t> {
             self.handle_def(c, stack);
         } else if k == C::Call {
             self.handle_inline_imports(c);
+            self.type_site = c.has(C::Type);
             self.handle_call(c);
+            self.type_site = false;
         } else if k == C::Member {
             let in_chain = c.parent().is_some_and(|parent| {
                 parent.is(C::Callee)
@@ -1265,6 +1268,7 @@ impl<'t> Fold<'t> {
         for (value, from, site, deferred) in std::mem::take(&mut self.pending_calls) {
             self.check()?;
             let first = self.edges.len();
+            self.type_site = self.tree.cursor(site).has(C::Type);
             let mut targets = self.ssa.resolve_value(&value);
             match deferred {
                 Deferred::Callee(fallback) => {
@@ -1287,6 +1291,7 @@ impl<'t> Fold<'t> {
                     self.resolve_values(self.tree.cursor(object), method, from, role, targets);
                 }
             }
+            self.type_site = false;
             for edge in &mut self.edges[first..] {
                 edge.site = Some(site);
             }
@@ -1321,7 +1326,10 @@ impl<'t> Fold<'t> {
     fn emit(&mut self, r: &Value, from: u32) {
         match r {
             Value::LocalDef(node) => {
-                if self.tree.cursor(*node).has_tag(self.tags.callable) {
+                let target = self.tree.cursor(*node);
+                if target.has_tag(self.tags.callable)
+                    || self.type_site && target.has_tag(self.tags.declares_type)
+                {
                     let edge = Edge::local(from, *node, EdgeKind::Calls).resolved(self.resolution);
                     self.edges.push(edge);
                 }
@@ -1711,6 +1719,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     let mut f = Fold {
         tree,
         resolution: Resolution::Local,
+        type_site: false,
         max_edges: env.limits.max_file_edges,
         ssa,
         cur: entry,

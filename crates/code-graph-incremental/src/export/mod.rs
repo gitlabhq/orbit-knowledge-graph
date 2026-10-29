@@ -704,6 +704,7 @@ fn write_edges(
             };
             let rule = plan.graph.iter().filter(|g| g.lift.is_none()).find(admits);
             if let Some(rule) = rule
+                && !rule.drop
                 && !(rule.fallback && e.call_resolution != CallResolution::Unknown)
             {
                 matched.push((rule, (from, from_entity), (to, to_entity), resolution, line));

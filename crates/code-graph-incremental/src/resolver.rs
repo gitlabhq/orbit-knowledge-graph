@@ -1418,12 +1418,19 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     for ie in &import_edges {
         let target = ctx.corpus.follow(ie);
         let name = ctx.corpus.jump(ie.from_tree, ie.from_node);
+        let callable = target.has_tag(ctx.tags.callable);
         if wildcard_or_name(ctx.wildcard_sym, name) == ctx.wildcard_sym
-            || !target.has_tag(ctx.tags.callable)
+            || !(callable || target.has_tag(ctx.tags.declares_type))
         {
             continue;
         }
         for intra in ctx.imports_to(ie.from_fi(), ie.from_node) {
+            let typed = intra
+                .site
+                .is_some_and(|site| ctx.corpus.jump(intra.from_tree, site).has(C::Type));
+            if !callable && !typed {
+                continue;
+            }
             if intra.call_resolution == CallResolution::Reference
                 && intra.site.is_some_and(|site| {
                     let binding = ctx.corpus.jump(intra.from_tree, site);
@@ -1491,7 +1498,9 @@ fn wildcard_uses<'a>(
                 continue;
             };
             import(target, &mut edges);
-            if target.has_tag(ctx.tags.callable) {
+            if target.has_tag(ctx.tags.callable)
+                || call.has(C::Type) && target.has_tag(ctx.tags.declares_type)
+            {
                 edges.push(
                     call_edge(from, target, Some(call.index()))
                         .resolved(Resolution::WildcardImport),
