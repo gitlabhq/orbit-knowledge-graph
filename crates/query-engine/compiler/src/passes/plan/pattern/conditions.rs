@@ -130,7 +130,7 @@ where
         bound.null_as_epoch.rhs = pattern
             .nodes
             .get(alias)
-            .is_some_and(|node| node.null_as_epoch.contains(property));
+            .and_then(|node| node.null_as_epoch.get(property).copied());
         let rhs = resolve_column(bindings, Column::new(alias, property))?;
         bound.filter.rhs_column = Some((rhs.source, rhs.name));
     }
