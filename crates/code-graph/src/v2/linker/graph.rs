@@ -1626,6 +1626,8 @@ impl CodeGraph {
         let pid = project_id.to_string();
         let mut ids = vec![0i64; self.graph.node_count()];
         let mut range = String::new();
+        let mut occurrences: FxHashMap<(&str, StrId, &str, &str), u32> = FxHashMap::default();
+        let mut occurrence = String::new();
         for idx in self.graph.node_indices() {
             ids[idx.index()] = match &self.graph[idx] {
                 GraphNode::Directory(d) => compute_id(&[&pid, branch, "dir", &d.path]),
@@ -1633,14 +1635,22 @@ impl CodeGraph {
                 GraphNode::Definition { file_path, id } => {
                     let def = &self.defs[id.0 as usize];
                     let signature = def.display.signature().unwrap_or("");
+                    let kind = def.kind.kind().as_str();
+                    let seen = occurrences
+                        .entry((file_path, def.fqn, kind, signature))
+                        .or_default();
+                    occurrence.clear();
+                    let _ = write!(occurrence, "{seen}");
+                    *seen += 1;
                     compute_id(&[
                         &pid,
                         branch,
                         "def",
                         file_path,
                         self.strings.get(def.fqn),
-                        def.kind.kind().as_str(),
+                        kind,
                         signature,
+                        &occurrence,
                     ])
                 }
                 GraphNode::Import { file_path, id } => {
@@ -2127,6 +2137,20 @@ mod tests {
             vec![
                 make_def_at("Dup", &["main", "Dup"], 100, 120, "func (a A) Dup()"),
                 make_def_at("Dup", &["main", "Dup"], 200, 220, "func (b B) Dup()"),
+            ],
+        );
+        let def_ids = definition_ids(&cg);
+        assert_eq!(def_ids.len(), 2);
+        assert_ne!(def_ids[0], def_ids[1]);
+    }
+
+    #[test]
+    fn assign_ids_count_repeated_definitions_in_source_order() {
+        let cg = build_graph(
+            "/repo/main.go",
+            vec![
+                make_def_at("init", &["main", "init"], 100, 120, "func init()"),
+                make_def_at("init", &["main", "init"], 200, 220, "func init()"),
             ],
         );
         let def_ids = definition_ids(&cg);
