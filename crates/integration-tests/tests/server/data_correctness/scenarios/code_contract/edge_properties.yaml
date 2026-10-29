@@ -32,6 +32,23 @@ cases:
     expect:
       compile_error_contains: ['"guess" cannot match this pattern', local, inferred_type, wildcard_import]
 
+  - name: relationship_property_projection
+    description: A RETURN of relationship properties gives the lines and the resolution of each call
+    query:
+      gql: |
+        MATCH (caller:Definition)-[c:CALLS]->(t:Definition {id: 15200}) RETURN caller.name, c.lines, c.resolution ORDER BY caller.name LIMIT 10
+    expect:
+      skip_requirements: ["order_by"]
+      node_count: 3
+      nodes:
+        Definition:
+          ids: [15200, 15201, 15202]
+      edges:
+        CALLS: [[15201, 15200], [15202, 15200]]
+      gql_columns:
+        c.lines: ["[5]", "[3, 7]"]
+        c.resolution: ['"inferred_type"', '"local"']
+
   - name: line_membership
     description: A literal IN the lines of a relationship keeps the calls made on that line
     query:
