@@ -93,7 +93,7 @@ fails, ask `@sre-oncall` to confirm, then add `--ignore-production-check`.
 `global.appConfig.knowledgeGraph.enabled: false` in `releases/gitlab/values/gprd.yaml.gotmpl`.
 An SRE in `gl-infra` approves the MR. Effect after the deploy:
 
-- The Orbit API and MCP return 404. `/api/v4/orbit/status` returns `available: false`.
+- The Orbit API and MCP return 404. The REST `/api/v4/orbit/status` endpoint no longer exists on GitLab.com; check GraphQL `Query.orbit.serviceStatus` instead.
 - The Orbit menu and Code Intelligence go away. No data is deleted.
 - SDLC indexing continues. Code indexing fails with 401 errors.
 - After you turn Orbit on again, the code of each project updates at its next push.
