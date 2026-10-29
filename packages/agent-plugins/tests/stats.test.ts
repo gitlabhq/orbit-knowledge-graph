@@ -88,6 +88,17 @@ test('a plain property count next to a DISTINCT node count reads as the property
   expect(parseResponse(aggregation(columns, 'count_distinct_mr,count_mr_merged_at', '3,3000')).aggregated).toBe(3000)
 })
 
+test('tabled columns are read by field name in any order', () => {
+  const columns = 'columns[2]{function,name,property,target}:\n  count,count_mr_merged_at,merged_at,mr\n  count,authors,author_id,mr\n'
+  expect(parseResponse(aggregation(columns, 'count_mr_merged_at,authors', '3000,111')).aggregated).toBe(3000)
+})
+
+test('listed columns are read by key in any order', () => {
+  const item = (name: string, property: string) => `  - name: ${name}\n    function: count\n    property: ${property}\n    target: mr\n`
+  const columns = `columns[3]:\n${item('count_mr_merged_at', 'merged_at')}${item('authors', 'author_id')}  - target: u\n    function: count\n    name: count_u\n`
+  expect(parseResponse(aggregation(columns, 'count_mr_merged_at,authors,count_u', '3000,111,5')).aggregated).toBe(3000)
+})
+
 test('a plain count of a property reads as counted', () => {
   const columns = 'columns[1]{name,function,target,property}:\n  count_mr_merged_at,count,mr,merged_at\n'
   expect(parseResponse(aggregation(columns, 'count_mr_merged_at', '3000')).aggregated).toBe(3000)
