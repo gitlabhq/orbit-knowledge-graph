@@ -17,9 +17,6 @@
 /Dockerfile
 /scripts/release/docker-build.sh
 /scripts/release/check-billing-enforcement.sh
-/scripts/release/publish-manifest.sh
-/scripts/release/sign-image.sh
-/scripts/release/test-billing-enforcement.sh
 /.gitlab/CODEOWNERS
 
 [Architecture] @gitlab-org/orbit/team
