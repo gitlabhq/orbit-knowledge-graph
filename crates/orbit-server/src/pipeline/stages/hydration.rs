@@ -3,8 +3,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_log_fields::warn;
+use query_data_model::OrbitQueryModel;
+use query_engine::compiler::constants::{MAX_DYNAMIC_HYDRATION_RESULTS, hydration_node_alias};
 use query_engine::compiler::{
-    HydrationCompileOptions, HydrationPlan, InputNode, QueryType, compile_input_model,
+    ColumnSelection, HydrationCompileOptions, HydrationPlan, InputNode, QueryType,
+    compile_input_model,
 };
 
 use query_engine::pipeline::{
@@ -19,6 +23,7 @@ use query_engine::shared::hydration as hydration_helpers;
 use query_engine::shared::{
     DebugQuery, HydrationOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
 };
+use query_engine::types::QueryResult;
 
 use crate::pipeline::correlation;
 
@@ -30,6 +35,73 @@ impl HydrationStage {
         ctx.server_extensions
             .get::<Arc<ArrowClickHouseClient>>()
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
+    }
+
+    pub async fn resolve_owners(
+        ctx: &mut QueryPipelineContext,
+        query_result: &mut QueryResult,
+    ) -> Result<(), PipelineError> {
+        let lookups = query_result.owner_lookups();
+        if lookups.is_empty() {
+            return Ok(());
+        }
+        let data_model = ctx
+            .server_extensions
+            .get::<Arc<query_data_model::ClickHouseDataModel>>()
+            .ok_or_else(|| PipelineError::custom("query data model missing"))?;
+        let scope: Vec<_> = ctx
+            .security_context()?
+            .traversal_paths
+            .iter()
+            .map(|tp| tp.path.clone())
+            .collect();
+        let mut total_ids = 0;
+        let mut id_columns = HashMap::new();
+        let mut nodes = Vec::new();
+        for (entity_type, mut ids) in lookups {
+            let Some(auth) = query_result.ctx().get_entity_auth(&entity_type) else {
+                continue;
+            };
+            if ids.len() > MAX_DYNAMIC_HYDRATION_RESULTS {
+                warn!(
+                    safe(ENTITY) = entity_type.as_str(),
+                    safe(COUNT) = ids.len(),
+                    safe(LIMIT) = MAX_DYNAMIC_HYDRATION_RESULTS,
+                    "owner lookup is capped, so nodes past the limit are redacted"
+                );
+                ids.truncate(MAX_DYNAMIC_HYDRATION_RESULTS);
+            }
+            total_ids += ids.len();
+            id_columns.insert(entity_type.clone(), auth.auth_id_column.clone());
+            nodes.push(InputNode {
+                id: hydration_node_alias().to_string(),
+                columns: Some(ColumnSelection::List(vec![auth.auth_id_column.clone()])),
+                node_ids: ids,
+                traversal_paths: if data_model.entity_has_traversal_path(&entity_type) {
+                    scope.clone()
+                } else {
+                    Vec::new()
+                },
+                entity: Some(entity_type),
+                ..InputNode::default()
+            });
+        }
+
+        let (property_map, _, executions) =
+            Self::execute_hydration(ctx, nodes, total_ids, "owner").await?;
+        ctx.phases
+            .get_or_insert_default::<QueryExecutionLog>()
+            .0
+            .extend(executions);
+        let owners = property_map
+            .iter()
+            .filter_map(|((entity_type, id), props)| {
+                let owner_id = props.get(id_columns.get(entity_type)?)?.as_int64()?;
+                Some(((entity_type.clone(), *id), *owner_id))
+            })
+            .collect();
+        query_result.set_owner_ids(&owners);
+        Ok(())
     }
 
     async fn resolve(
