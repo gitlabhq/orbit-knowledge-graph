@@ -60,6 +60,7 @@ impl NodePlan {
             node_ids: node.node_ids.clone(),
             id_range: node.id_range.clone(),
             has_traversal_path: model.entity_has_traversal_path(entity),
+            owner_scoped: model.entity_owner_column(entity).is_some(),
             read_scope: match (
                 model.entity_has_traversal_path(entity),
                 model.entity_high_fan_out(entity),
@@ -222,13 +223,13 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         || input
             .aggregation_row_nodes(pattern.model)
             .contains(node.alias.as_str());
-    let gated_rows = node.entity.as_deref().is_some_and(|entity| {
-        pattern.model.entity_owner_column(entity).is_some()
-            || pattern
+    let gated_rows = node.owner_scoped
+        || node.entity.as_deref().is_some_and(|entity| {
+            pattern
                 .model
                 .entity_minimum_access_level(entity)
                 .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
-    });
+        });
     let authorized_from_table =
         returned && !node.uses_default_pk() || gated_rows && !pattern.holds_fk(&node.alias);
     let filter_only = pattern.aggregate()

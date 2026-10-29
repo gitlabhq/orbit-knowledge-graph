@@ -30,6 +30,7 @@ pub struct NodePlan {
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub has_traversal_path: bool,
+    pub owner_scoped: bool,
     pub read_scope: ReadScope,
     pub redaction_id_column: String,
     pub columns: Option<ColumnSelection>,

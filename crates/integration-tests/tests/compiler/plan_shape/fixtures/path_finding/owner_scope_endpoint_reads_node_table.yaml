@@ -1,0 +1,18 @@
+name: An id-pinned path endpoint with redaction.owner_column reads its node table
+ontology_overlay: owner_scope
+
+query:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000]},{"id":"n","entity":"Note","node_ids":[3101]}],"path":{"type":"shortest","from":"mr","to":"n","max_depth":2,"rel_types":["HAS_NOTE"]}}
+  gql: |
+    MATCH p = ANY SHORTEST (mr:MergeRequest {id: 2000})-[:HAS_NOTE*1..2]->(n:Note {id: 3101}) RETURN p
+
+logical:
+  expect: ["(Input path_finding (...))"]
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (CTE _nf_n (Limit 500 (_)))
+        - (Scan Table(gl_note) AS n)
