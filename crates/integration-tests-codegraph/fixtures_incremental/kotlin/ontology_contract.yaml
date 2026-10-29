@@ -135,7 +135,19 @@ fixtures:
 
       fun App.extra(): Int = 1
 
+  - path: src/com/acme/edges/Uses.kt
+    content: |
+      package com.acme.edges
+
+      import com.acme.edges.lib.Base
+      import com.acme.edges.util.Tool
+
+      class Uses {
+          fun pick(p: Base): Tool = Tool()
+      }
+
 tests:
+  # corrected: convention: a Kotlin primary constructor has language_kind PrimaryConstructor and an enum entry has language_kind EnumEntry
   - name: "every definition in src/acme/billing/Order.kt carries the contract columns"
     query: |
       MATCH (d:Definition)
@@ -163,7 +175,7 @@ tests:
       - row:
           fqn: "acme.billing.Order.constructor"
           kind: "Constructor"
-          language_kind: "Constructor"
+          language_kind: "PrimaryConstructor"
           category: "Callable"
           scope: "member"
           signature: '(val id: Int, private var label: String = "x")'
@@ -388,7 +400,7 @@ tests:
       - row:
           fqn: "acme.billing.Line.constructor"
           kind: "Constructor"
-          language_kind: "Constructor"
+          language_kind: "PrimaryConstructor"
           category: "Callable"
           scope: "member"
           signature: "(val sku: String, val qty: Int)"
@@ -463,7 +475,7 @@ tests:
       - row:
           fqn: "acme.billing.Status.OPEN"
           kind: "EnumMember"
-          language_kind: "EnumMember"
+          language_kind: "EnumEntry"
           category: "Value"
           scope: "member"
           signature: "OPEN"
@@ -478,7 +490,7 @@ tests:
       - row:
           fqn: "acme.billing.Status.CLOSED"
           kind: "EnumMember"
-          language_kind: "EnumMember"
+          language_kind: "EnumEntry"
           category: "Value"
           scope: "member"
           signature: "CLOSED"
@@ -752,7 +764,7 @@ tests:
   - name: "edges: USES_TYPE links a parameter type"
     query: |
       MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-      WHERE a.fqn = 'com.acme.edges.App.use' AND b.fqn = 'com.acme.edges.lib.Base'
+      WHERE a.fqn = 'com.acme.edges.App.use' AND b.fqn = 'com.acme.edges.lib.Base' AND e.usage = 'parameter'
       RETURN a.fqn AS src, b.fqn AS dst
     assert:
       - { row_count: 1 }
@@ -760,10 +772,28 @@ tests:
   - name: "edges: USES_TYPE links a field type"
     query: |
       MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-      WHERE a.fqn = 'com.acme.edges.App.held' AND b.fqn = 'com.acme.edges.lib.Base'
+      WHERE a.fqn = 'com.acme.edges.App.held' AND b.fqn = 'com.acme.edges.lib.Base' AND e.usage = 'field'
       RETURN a.fqn AS src, b.fqn AS dst
     assert:
       - { row_count: 1 }
+
+  - name: "edges: USES_TYPE from a parameter type has usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.Uses.pick' AND b.fqn = 'com.acme.edges.lib.Base' AND e.usage = 'parameter'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "com.acme.edges.Uses.pick", dst: "com.acme.edges.lib.Base" } }
+
+  - name: "edges: USES_TYPE from a return type has usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.Uses.pick' AND b.fqn = 'com.acme.edges.util.Tool' AND e.usage = 'return'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "com.acme.edges.Uses.pick", dst: "com.acme.edges.util.Tool" } }
 
   - name: "edges: EXTENDS a superclass has resolution import"
     query: |

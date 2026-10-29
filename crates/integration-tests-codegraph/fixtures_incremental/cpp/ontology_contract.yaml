@@ -87,6 +87,16 @@ fixtures:
 
       int main() { billing::Order o(1); return o.total() + helper(); }
 
+  - path: attrs.cpp
+    content: |
+      struct traced {};
+
+      [[traced]] int traced_fn() { return 0; }
+
+      class [[traced]] Marked {};
+
+      static int helper2() { return 0; }
+
 tests:
   - name: "every definition has its kind, language kind, category, and scope"
     query: |
@@ -159,9 +169,31 @@ tests:
       - { row: { fqn: "main::TEST", signature: "TEST(OrderTest, Total)" } }
       - { row: { fqn: "main::main", signature: "int main()", parameters: [], return_type: "int" } }
 
-  - name: "C++ fills no visibility"
+  # corrected: convention: a C++ class member has the visibility of its access specifier (class default private, struct default public); a top-level static function or variable has visibility file; every other C++ definition has none
+  - name: "C++ fills visibility for class members and static functions"
     query: |
       MATCH (d:Definition) WHERE d.visibility IS NOT NULL
+      RETURN d.fqn AS fqn, d.visibility AS visibility
+      ORDER BY fqn
+      LIMIT 100
+    assert:
+      - { row: { fqn: "main::billing::Order::total", visibility: "public" } }
+      - { row: { fqn: "main::billing::Order::count", visibility: "public" } }
+      - { row: { fqn: "main::billing::Order::make", visibility: "public" } }
+      - { row: { fqn: "main::billing::Order::touch", visibility: "public" } }
+      - { row: { fqn: "main::billing::Order::id_", visibility: "private" } }
+      - { row: { fqn: "main::billing::Pt::x", visibility: "public" } }
+      - { row: { fqn: "main::Shape::area", visibility: "public" } }
+      - { row: { fqn: "main::Center::x", visibility: "public" } }
+      - { row: { fqn: "main::Circle::r", visibility: "public" } }
+      - { row: { fqn: "main::Value::i", visibility: "public" } }
+      - { row: { fqn: "main::scoped::Local::a", visibility: "public" } }
+      - { row: { fqn: "attrs::helper2", visibility: "file" } }
+
+  - name: "C++ fills no visibility for a namespace member, an out-of-class definition, or a friend"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['main::billing::Order', 'main::billing::maxv', 'main::Shape', 'main::Shape::operator==', 'main::measure'] AND d.visibility IS NOT NULL
       RETURN d.fqn
     assert:
       - { empty: true }
@@ -183,6 +215,49 @@ tests:
       - { row_count: 2 }
       - { row: { name: "*", import_kind: "wildcard", language_kind: "WildcardImport", import_path: "vector", fqn: null } }
       - { row: { name: "*", import_kind: "wildcard", language_kind: "WildcardImport", import_path: '"util.hpp"', fqn: null, is_external: false } }
+
+  - name: "edges: USES_TYPE from a parameter type has usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'main::measure' AND b.fqn = 'main::Circle' AND e.usage = 'parameter'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "main::measure", dst: "main::Circle" } }
+
+  - name: "edges: USES_TYPE from a return type has usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'main::billing::Order::make' AND b.fqn = 'main::billing::Order' AND e.usage = 'return'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "main::billing::Order::make", dst: "main::billing::Order" } }
+
+  - name: "edges: USES_TYPE from a field type has usage field"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'main::Circle::center' AND b.fqn = 'main::Center' AND e.usage = 'field'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "main::Circle::center", dst: "main::Center" } }
+
+  - name: "edges: ANNOTATED_BY links a function to its attribute"
+    query: |
+      MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
+      WHERE a.fqn = 'attrs::traced_fn' AND b.fqn = 'attrs::traced'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
+  - name: "edges: ANNOTATED_BY links a class to its attribute"
+    query: |
+      MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
+      WHERE a.fqn = 'attrs::Marked' AND b.fqn = 'attrs::traced'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
 
   - name: "every definition kind is in the closed list"
     query: |

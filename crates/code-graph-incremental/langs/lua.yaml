@@ -239,14 +239,8 @@ display:
           entity: Import
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
-      - match: '(__name "*")'
-        tag:
-          import_type: WildcardImport
-          resolved: '@$ROOT|has_incoming("Imports")'
-      - match: '(__name (__alias))'
-        tag:
-          import_type: AliasedImport
-          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name)'
+        tag: { import_type: Require }
       - match: '(__import)'
         tag_on: __name
         tag:

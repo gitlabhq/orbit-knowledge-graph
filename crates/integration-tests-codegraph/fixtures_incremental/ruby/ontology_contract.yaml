@@ -94,6 +94,7 @@ fixtures:
       end
 
 tests:
+  # corrected: convention: a Ruby attr_* member has language_kind Attribute
   - name: "every definition has its kind, language kind, category, and scope"
     query: |
       MATCH (d:Definition)
@@ -105,7 +106,7 @@ tests:
       - { row: { fqn: "WeatherApp", kind: "Module", language_kind: "Module", category: "Module", scope: "top_level" } }
       - { row: { fqn: "WeatherApp::MAX_DAYS", kind: "Constant", language_kind: "Constant", category: "Value", scope: "member" } }
       - { row: { fqn: "WeatherApp::Forecast", kind: "Class", language_kind: "Class", category: "Type", scope: "member" } }
-      - { row: { fqn: "WeatherApp::Forecast::city", kind: "Field", language_kind: "Field", category: "Value", scope: "member" } }
+      - { row: { fqn: "WeatherApp::Forecast::city", kind: "Field", language_kind: "Attribute", category: "Value", scope: "member" } }
       - { row: { fqn: "WeatherApp::Forecast::size", kind: "Method", language_kind: "Method", category: "Callable", scope: "member" } }
       - { row: { fqn: "WeatherApp::Forecast::initialize", kind: "Constructor", language_kind: "Initializer", category: "Callable", scope: "member" } }
       - { row: { fqn: "WeatherApp::Forecast::run", kind: "Method", language_kind: "SingletonMethod", category: "Callable", scope: "member" } }

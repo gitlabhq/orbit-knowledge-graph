@@ -147,6 +147,22 @@ fixtures:
           }
       }
 
+  - path: src/Uses.cs
+    content: |
+      using Acme.Edges.Lib;
+      using Acme.Edges.Util;
+
+      namespace Acme.Edges
+      {
+          public class Uses
+          {
+              Tool Pick(Base p)
+              {
+                  return new Tool();
+              }
+          }
+      }
+
 tests:
   - name: "every definition in src/Money.cs carries the contract columns"
     query: |
@@ -580,7 +596,7 @@ tests:
   - name: "edges: USES_TYPE links a parameter type"
     query: |
       MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-      WHERE a.fqn = 'Acme.Edges.App.Use' AND b.fqn = 'Acme.Edges.Lib.Base'
+      WHERE a.fqn = 'Acme.Edges.App.Use' AND b.fqn = 'Acme.Edges.Lib.Base' AND e.usage = 'parameter'
       RETURN a.fqn AS src, b.fqn AS dst
     assert:
       - { row_count: 1 }
@@ -588,10 +604,28 @@ tests:
   - name: "edges: USES_TYPE links a field type"
     query: |
       MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-      WHERE a.fqn = 'Acme.Edges.App.held' AND b.fqn = 'Acme.Edges.Lib.Base'
+      WHERE a.fqn = 'Acme.Edges.App.held' AND b.fqn = 'Acme.Edges.Lib.Base' AND e.usage = 'field'
       RETURN a.fqn AS src, b.fqn AS dst
     assert:
       - { row_count: 1 }
+
+  - name: "edges: USES_TYPE from a parameter type has usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.Uses.Pick' AND b.fqn = 'Acme.Edges.Lib.Base' AND e.usage = 'parameter'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "Acme.Edges.Uses.Pick", dst: "Acme.Edges.Lib.Base" } }
+
+  - name: "edges: USES_TYPE from a return type has usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'Acme.Edges.Uses.Pick' AND b.fqn = 'Acme.Edges.Util.Tool' AND e.usage = 'return'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "Acme.Edges.Uses.Pick", dst: "Acme.Edges.Util.Tool" } }
 
   - name: "edges: EXTENDS a superclass has resolution import"
     query: |

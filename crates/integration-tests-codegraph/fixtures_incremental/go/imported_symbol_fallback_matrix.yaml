@@ -70,6 +70,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main.aliasedPackageImportCall", path: "github.com/acme/tracker", name: "tracker", alias: "tracker" } }
 
+  # corrected: convention: a Go dot import has language_kind WildcardImport
   - name: "dot imports target wildcard imported symbols"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
@@ -77,7 +78,7 @@ tests:
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { caller: "main.dotImportCall", path: "github.com/acme/dotpkg", name: "dotpkg", language_kind: "Import" } }
+      - { row: { caller: "main.dotImportCall", path: "github.com/acme/dotpkg", name: "dotpkg", language_kind: "WildcardImport" } }
 
   - name: "built-ins do not target dot imports"
     query: |

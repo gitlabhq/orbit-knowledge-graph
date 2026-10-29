@@ -50,11 +50,13 @@ tests:
       - { row: { callee: "notify" } }
 
   # corrected: contract: a get or set accessor is kind Field with language_kind Property
+  # corrected: convention: a TypeScript class field has language_kind Property
   - name: a private getter drops the hash like the other methods
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'widget.ts' AND d.language_kind = 'Property'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
       - { row: { fqn: "Widget::secret" } }
+      - { row: { fqn: "Widget::handler" } }

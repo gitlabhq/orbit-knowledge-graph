@@ -44,6 +44,7 @@ tests:
       - { row: { name: "helper", type: "Function" } }
 
   # corrected: contract: a class field is kind Field; language_kind Property only where the language calls it a property
+  # corrected: convention: a TypeScript class field has language_kind Property
   - name: speak and sound are nested inside Animal via Defines
     query: |
       MATCH (cls:Definition)-[e:DEFINES]->(m:Definition)
@@ -52,7 +53,7 @@ tests:
       ORDER BY method
     assert:
       - { row_count: 2 }
-      - { row: { method: "sound", type: "Field" } }
+      - { row: { method: "sound", type: "Property" } }
       - { row: { method: "speak", type: "Method" } }
 
   - name: All definitions have names

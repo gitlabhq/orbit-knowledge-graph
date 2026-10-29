@@ -77,6 +77,7 @@ tests:
       - { row: { caller: "Car::drive", callee: "Engine::run" } }
 
   # corrected: contract: a class field is kind Field; language_kind Property only where the language calls it a property
+  # corrected: convention: a TypeScript class field has language_kind Property
   - name: "Class field is extracted as a Property definition"
     query: |
       MATCH (d:Definition)
@@ -84,9 +85,10 @@ tests:
       RETURN d.name AS name, d.language_kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { name: "_terminalProcess", type: "Field" } }
+      - { row: { name: "_terminalProcess", type: "Property" } }
 
   # corrected: contract: a class field is kind Field; language_kind Property only where the language calls it a property
+  # corrected: convention: a TypeScript class field has language_kind Property
   - name: "Field without a type annotation is still extracted"
     query: |
       MATCH (d:Definition)
@@ -94,7 +96,7 @@ tests:
       RETURN d.language_kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Field" } }
+      - { row: { type: "Property" } }
 
   - name: "Method call through a constructor parameter property resolves to the callee"
     query: |

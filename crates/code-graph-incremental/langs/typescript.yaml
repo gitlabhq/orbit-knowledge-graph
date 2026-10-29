@@ -118,7 +118,7 @@ stages:
 
       # Regular typed parameter → binding with SSA type hint
       - match: '(required_parameter pattern: $N type: (type_annotation $T:type_identifier))'
-        replace: '(__binding @$N $N (__declaration) (__ssa_typed @$T))'
+        replace: '(__binding @$N $N (__declaration) (__ssa_typed @$T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
       - match: '(required_parameter pattern: $N)'
         replace: '(__binding @$N $N (__declaration))'
 
@@ -184,16 +184,16 @@ stages:
     rules:
       - match: '(call_expression function: (identifier "/^(describe|context|suite)$/") arguments: (arguments (string $S:string_fragment) $F:arrow_function))'
         replace: '(__def (__defname @$S) (__macro) $F)'
-        tag: { test_block: ExampleGroup, unbound: "true" }
+        tag: { test_block: Describe, unbound: "true" }
       - match: '(call_expression function: (identifier "/^(describe|context|suite)$/") arguments: (arguments (string $S:string_fragment) $F:function_expression))'
         replace: '(__def (__defname @$S) (__macro) $F)'
-        tag: { test_block: ExampleGroup, unbound: "true" }
+        tag: { test_block: Describe, unbound: "true" }
       - match: '(call_expression function: (identifier "/^(it|test|specify)$/") arguments: (arguments (string $S:string_fragment) $F:arrow_function))'
         replace: '(__def (__defname @$S) (__macro) $F)'
-        tag: { test_block: Example, unbound: "true" }
+        tag: { test_block: Test, unbound: "true" }
       - match: '(call_expression function: (identifier "/^(it|test|specify)$/") arguments: (arguments (string $S:string_fragment) $F:function_expression))'
         replace: '(__def (__defname @$S) (__macro) $F)'
-        tag: { test_block: Example, unbound: "true" }
+        tag: { test_block: Test, unbound: "true" }
       # <Comp … /> and <Comp>…</Comp> call the component
       - match: '(jsx_self_closing_element name: $N:__member $$$A)'
         replace: '(__call (__callee $N) $$$A)'
@@ -362,6 +362,8 @@ stages:
         replace: '(__def (__defname @$N) (__method))'
         tag: { flavor: abstract }
       # Functions
+      - match: '(function_declaration name: $N parameters: (formal_parameters $$$P:__binding) return_type: (type_annotation $RT:type_identifier) body: $B)'
+        replace: '(__def (__defname @$N) (__function) $$$P (__call (__type "return") (__callee @$RT $RT)) $B)'
       - match: '(function_declaration name: $N parameters: (formal_parameters $$$P:__binding) body: $B)'
         replace: '(__def (__defname @$N) (__function) $$$P $B)'
       - match: '(function_declaration name: $N body: $B)'
@@ -370,6 +372,9 @@ stages:
       # A computed key ([expr]) is not a named member; `#name` drops the hash.
       - match: '(method_definition name: (computed_property_name) body: $B)'
         replace: '(__ssa_hint $B)'
+      - match: '(method_definition **/(static) name: $N parameters: (formal_parameters $$$P:__def|__binding) return_type: (type_annotation $RT:type_identifier) body: $B)'
+        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P (__call (__type "return") (__callee @$RT $RT)) $B)'
+        tag: { flavor: static }
       - match: '(method_definition **/(static) name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
         replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
         tag: { flavor: static }
@@ -379,6 +384,8 @@ stages:
       - match: '(method_definition **/(get) name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
         replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
         tag: { value: "true" }
+      - match: '(method_definition name: $N parameters: (formal_parameters $$$P:__def|__binding) return_type: (type_annotation $RT:type_identifier) body: $B)'
+        replace: '(__def (__defname @$N|regex_replace("^#","") $N) (__method) $$$P (__call (__type "return") (__callee @$RT $RT)) $B)'
       - match: '(method_definition name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
         replace: '(__def (__defname @$N|regex_replace("^#","") $N) (__method) $$$P $B)'
       - match: '(method_definition name: $N body: $B)'
@@ -471,7 +478,7 @@ stages:
       - match: '(__def (__type_alias))'
         tag: { value: "true", declares_type: "true" }
       - match: '(__def (__property))'
-        tag: { value: "true" }
+        tag: { value: "true", scoped: "true" }
       - match: '(__def (__property) (arrow_function))'
         tag: { callable: "true", scoped: "function" }
       - match: '(__def (__property) (function_expression))'
@@ -632,8 +639,7 @@ display:
       - match: '(__def (__property))'
         tag: { kind: Field }
       - match: '(__def (__property))'
-        tag:
-          language_kind: '@$ROOT|ancestor_tag("kind")|map("Constructor:Property")|regex_replace("(?s)^(Property)$|.*", "$1")'
+        tag: { language_kind: Property }
       - match: '(__def (__variable))'
         tag:
           kind: '@$ROOT|tag("head")|regex_replace("(?s)\A(?:export\s+)?(?:declare\s+)?(const)\b.*|(?s).*", "$1")|map("const:Constant")|default("Variable")'
@@ -682,6 +688,22 @@ display:
           visibility: '@$ROOT|tag("head")|regex_first("(?s)\A(?:.*?\b(public|protected|private)\b.*|.*?(?:\A|\s)(#).*|.*)\z", "$1$2")|map("#:private")|default("public")'
       - match: '(__def (__property))'
         tag: *member_visibility
+      - match: '(__def)'
+        tag:
+          top_ctx: '@$ROOT|ancestor_tag("kind")|default("none")'
+          exp_before: '@$ROOT|source_before("512")|regex_match("(?s)(?:\A|[;}\n])[ \t]*export\b[^;{}\n]*\z|\bexports(?:\.[\w$]+)?\s*=\s*\z")'
+          exp_self: '@$ROOT|source("16")|regex_match("\Aexport\b")'
+      - match: '(__def)'
+        tag:
+          exported: '@$ROOT|concat(":", "tag:exp_before", "tag:exp_self")|regex_replace("(?s).*true.*", "true")|regex_replace("^false.*", "false")'
+      - match: '(__def)'
+        tag:
+          mod_vis: '@$ROOT|concat(":", "tag:top_ctx", "tag:exported")|regex_replace("^none:true$", "public")|regex_replace("^none:false$", "file")|regex_replace("^(public|file)$|(?s).*", "$1")'
+      - match: '(__def)'
+        tag:
+          visibility: '@$ROOT|or("tag:mod_vis", "tag:visibility")'
+      - match: '(__def (__macro))'
+        tag: { visibility: '' }
   - name: module_exports
     rules:
       - match: '(__module_export)'

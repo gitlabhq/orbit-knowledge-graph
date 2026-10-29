@@ -127,6 +127,19 @@ fixtures:
         }
       }
 
+  - path: src/com/acme/edges/Uses.scala
+    content: |
+      package com.acme.edges
+
+      import com.acme.edges.lib.Base
+      import com.acme.edges.lib.Marked
+      import com.acme.edges.util.Tool
+
+      @Marked
+      class Uses {
+        def pick(p: Base): Tool = new Tool()
+      }
+
 tests:
   - name: "every definition in src/acme/billing/Order.scala carries the contract columns"
     query: |
@@ -568,6 +581,7 @@ tests:
           generated_by: null
           language: "scala"
 
+  # corrected: convention: a plain import has language_kind NamedImport
   - name: "imports carry import_kind, language_kind, fqn, and is_external"
     query: |
       MATCH (i:Import)
@@ -577,7 +591,7 @@ tests:
     assert:
       - { row_count: 3 }
       - row: { name: "*", alias: "", import_kind: "wildcard", language_kind: "WildcardImport", import_path: "acme.billing.util", fqn: null }
-      - row: { name: "Money", alias: "", import_kind: "symbol", language_kind: "Import", import_path: "acme.billing.util", fqn: "acme.billing.util.Money", is_external: false }
+      - row: { name: "Money", alias: "", import_kind: "symbol", language_kind: "NamedImport", import_path: "acme.billing.util", fqn: "acme.billing.util.Money", is_external: false }
       - row: { name: "StringUtils", alias: "Strings", import_kind: "symbol", language_kind: "AliasedImport", import_path: "org.apache.commons.lang3", fqn: "org.apache.commons.lang3.StringUtils", is_external: true }
 
   - name: "a type has no return type, declared type, or generator"
@@ -671,7 +685,7 @@ tests:
   - name: "edges: USES_TYPE links a parameter type"
     query: |
       MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-      WHERE a.fqn = 'com.acme.edges.App.use' AND b.fqn = 'com.acme.edges.lib.Base'
+      WHERE a.fqn = 'com.acme.edges.App.use' AND b.fqn = 'com.acme.edges.lib.Base' AND e.usage = 'parameter'
       RETURN a.fqn AS src, b.fqn AS dst
     assert:
       - { row_count: 1 }
@@ -681,10 +695,28 @@ tests:
     skip: true
     query: |
       MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-      WHERE a.fqn = 'com.acme.edges.App.held' AND b.fqn = 'com.acme.edges.lib.Base'
+      WHERE a.fqn = 'com.acme.edges.App.held' AND b.fqn = 'com.acme.edges.lib.Base' AND e.usage = 'field'
       RETURN a.fqn AS src, b.fqn AS dst
     assert:
       - { row_count: 1 }
+
+  - name: "edges: USES_TYPE from a parameter type has usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.Uses.pick' AND b.fqn = 'com.acme.edges.lib.Base' AND e.usage = 'parameter'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "com.acme.edges.Uses.pick", dst: "com.acme.edges.lib.Base" } }
+
+  - name: "edges: USES_TYPE from a return type has usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.Uses.pick' AND b.fqn = 'com.acme.edges.util.Tool' AND e.usage = 'return'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "com.acme.edges.Uses.pick", dst: "com.acme.edges.util.Tool" } }
 
   - name: "edges: EXTENDS a superclass has resolution import"
     query: |
@@ -721,9 +753,15 @@ tests:
       - { row: { src: "com.acme.edges.App.go", dst: "com.acme.edges.lib.Runner.go" } }
       - { row: { src: "com.acme.edges.App.run", dst: "com.acme.edges.lib.Base.run" } }
 
+  - name: "edges: ANNOTATED_BY links a class to its annotation"
+    query: |
+      MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
+      WHERE a.fqn = 'com.acme.edges.Uses' AND b.fqn = 'com.acme.edges.lib.Marked'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+
   - name: "edges: ANNOTATED_BY links a method to its annotation"
-    # Known gap: scala.yaml has no annotation rule, so an annotation gives no edge.
-    skip: true
     query: |
       MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
       WHERE a.fqn = 'com.acme.edges.App.go' AND b.fqn = 'com.acme.edges.lib.Marked'

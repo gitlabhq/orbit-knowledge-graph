@@ -50,7 +50,7 @@ fixtures:
       from shop.money import Money
 
 
-      def audit(fn):
+      def audit(fn: Money):
           return fn
 
 
@@ -135,13 +135,14 @@ tests:
     assert:
       - { empty: true }
 
+  # corrected: convention: a plain import has language_kind NamedImport
   - name: "imports carry their kind, construct, path, and full name"
     query: |
       MATCH (i:Import)
       RETURN i.file_path AS file, i.name AS name, i.alias AS alias, i.import_kind AS import_kind, i.language_kind AS language_kind, i.import_path AS import_path, i.fqn AS fqn, i.is_external AS is_external
       ORDER BY file, import_path, name
     assert:
-      - { row: { file: "shop/orders.py", name: "os", alias: "", import_kind: "module", language_kind: "Import", import_path: "os", fqn: "os", is_external: true } }
+      - { row: { file: "shop/orders.py", name: "os", alias: "", import_kind: "module", language_kind: "NamedImport", import_path: "os", fqn: "os", is_external: true } }
       - { row: { file: "shop/orders.py", name: "Final", import_kind: "symbol", language_kind: "NamedImport", import_path: "typing", fqn: "typing.Final", is_external: true } }
       - { row: { file: "shop/orders.py", name: "Money", alias: "Cash", import_kind: "symbol", language_kind: "AliasedImport", import_path: "shop.money", fqn: "shop.money.Money", is_external: false } }
       - { row: { file: "shop/orders.py", name: "*", import_kind: "wildcard", language_kind: "WildcardImport", import_path: "shop.money", fqn: null } }
@@ -235,6 +236,24 @@ tests:
       RETURN a.fqn AS source, b.fqn AS target
     assert:
       - { row: { source: "shop.edges.build", target: "shop.edges.Item.price" } }
+
+  - name: "a parameter type is USES_TYPE with usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE e.usage = 'parameter' AND a.fqn = 'shop.edges.audit'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "shop.edges.audit", target: "shop.money.Money" } }
+
+  - name: "a return type is USES_TYPE with usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE e.usage = 'return' AND a.fqn = 'shop.orders.Order.charge'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "shop.orders.Order.charge", target: "shop.money.Money" } }
 
   - name: "a base class is EXTENDS"
     query: |

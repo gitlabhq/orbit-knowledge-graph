@@ -77,6 +77,8 @@ fixtures:
 
       pub fn read_x(p: &Point) -> i32 { p.x }
 
+      pub fn origin() -> Point { Point::new(0, 0) }
+
       pub fn inferred_sum() -> i32 { let q = Point::new(1, 2); q.sum() }
 
       pub fn external_map() -> Map { Dict::new() }
@@ -263,6 +265,32 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { source: "Point::new", target: "Point" } }
+
+  - name: "a parameter type is USES_TYPE with usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE e.usage = 'parameter' AND a.fqn = 'read_sum'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "read_sum", target: "Point" } }
+
+  - name: "a parameter type use has no other usage"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE e.usage <> 'parameter' AND a.fqn = 'read_sum'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { empty: true }
+
+  - name: "a return type is USES_TYPE with usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE e.usage = 'return' AND a.fqn = 'origin'
+      RETURN a.fqn AS source, b.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "origin", target: "Point" } }
 
   - name: "a field read without a call is USES_VALUE"
     query: |

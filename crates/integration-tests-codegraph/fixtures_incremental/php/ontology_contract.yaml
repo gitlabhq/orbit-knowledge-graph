@@ -147,6 +147,25 @@ fixtures:
           public function setUp(): void {}
       }
 
+  - path: src/Models/Uses.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      use App\Support\Helper;
+      use App\Support\Formatter;
+
+      class Uses
+      {
+          public function pick(Helper $h, $x): Formatter
+          {
+              if ($x instanceof Shape) {
+                  return new Formatter();
+              }
+              return new Formatter();
+          }
+      }
+
 tests:
   - name: "App\\Models\\VERSION is a Constant"
     query: |
@@ -462,6 +481,7 @@ tests:
           generated_by: null
           language: "php"
 
+  # corrected: convention: a PHP enum case has language_kind EnumCase
   - name: "App\\Models\\Suit\\Hearts is a EnumMember"
     query: |
       MATCH (d:Definition) WHERE d.fqn = 'App\Models\Suit\Hearts' AND d.kind = 'EnumMember'
@@ -470,7 +490,7 @@ tests:
       - { row_count: 1 }
       - row:
           kind: "EnumMember"
-          language_kind: "EnumMember"
+          language_kind: "EnumCase"
           category: "Value"
           scope: "member"
           signature: "case Hearts"
@@ -588,6 +608,7 @@ tests:
           generated_by: null
           language: "php"
 
+  # corrected: convention: a plain import has language_kind NamedImport
   - name: "A use of a class in the project is a symbol import"
     query: |
       MATCH (i:Import) WHERE i.import_path = 'App\Support\Helper' AND i.name = 'Helper' AND i.file_path = 'src/Models/Shape.php'
@@ -598,11 +619,12 @@ tests:
           name: "Helper"
           alias: ""
           import_kind: "symbol"
-          language_kind: "Import"
+          language_kind: "NamedImport"
           import_path: "App\\Support\\Helper"
           fqn: "App\\Support\\Helper"
           is_external: false
 
+  # corrected: convention: an aliased import has language_kind AliasedImport
   - name: "An aliased use of a vendor class is an external symbol import"
     query: |
       MATCH (i:Import) WHERE i.import_path = 'Vendor\Lib\Thing' AND i.name = 'Thing'
@@ -613,11 +635,12 @@ tests:
           name: "Thing"
           alias: "VendorThing"
           import_kind: "symbol"
-          language_kind: "Import"
+          language_kind: "AliasedImport"
           import_path: "Vendor\\Lib\\Thing"
           fqn: "Vendor\\Lib\\Thing"
           is_external: true
 
+  # corrected: convention: a plain import has language_kind NamedImport
   - name: "A grouped use names the full class"
     query: |
       MATCH (i:Import) WHERE i.import_path = 'App\Support' AND i.name = 'Formatter'
@@ -628,7 +651,7 @@ tests:
           name: "Formatter"
           alias: ""
           import_kind: "symbol"
-          language_kind: "Import"
+          language_kind: "NamedImport"
           import_path: "App\\Support"
           fqn: "App\\Support\\Formatter"
           is_external: false
@@ -721,6 +744,42 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { target: 'App\Models\Base\area' } }
+
+  - name: "edges: USES_TYPE from a parameter type has usage parameter"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Uses\pick' AND b.fqn = 'App\Support\Helper' AND e.usage = 'parameter'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'App\Models\Uses\pick', dst: 'App\Support\Helper' } }
+
+  - name: "edges: USES_TYPE from a return type has usage return"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Uses\pick' AND b.fqn = 'App\Support\Formatter' AND e.usage = 'return'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'App\Models\Uses\pick', dst: 'App\Support\Formatter' } }
+
+  - name: "edges: USES_TYPE from an instanceof type has usage cast"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Uses\pick' AND b.fqn = 'App\Models\Shape' AND e.usage = 'cast'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'App\Models\Uses\pick', dst: 'App\Models\Shape' } }
+
+  - name: "edges: USES_TYPE from a property type has usage field"
+    query: |
+      MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
+      WHERE a.fqn = 'App\Models\Circle\helper' AND b.fqn = 'App\Support\Helper' AND e.usage = 'field'
+      RETURN a.fqn AS src, b.fqn AS dst
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'App\Models\Circle\helper', dst: 'App\Support\Helper' } }
 
   - name: "A class attribute is ANNOTATED_BY"
     query: |

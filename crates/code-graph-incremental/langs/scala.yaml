@@ -5,6 +5,8 @@
 
 config:
   stdlib: [{ module: java, precedence: runtime }, { module: scala }, { module: javax }, { module: jdk },
+      { availability: implicit, symbols: [Any, AnyRef, AnyVal, Boolean, Byte, Char, Double, Float, Int,
+          Long, Nothing, "Null", Short, String, Unit] },
       { module: scala/Predef, availability: implicit, symbols: [assert, assume, classOf,
           identity, implicitly, locally, print, printf, println, require,
           summon, synchronized, valueOf] },
@@ -35,12 +37,12 @@ stages:
     rules:
       - match: '(import_declaration $$$P:identifier (namespace_wildcard))'
         replace: '(__import (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\._$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\._$", "")|replace(".", "/")) (__name "*"))'
-        tag: { import_type: Import }
+        tag: { import_type: WildcardImport }
   - name: import-simple
     rules:
       - match: '(import_declaration $$$P:identifier)'
         replace: '(__import (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.[^.]+$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|replace(".", "/")) (__name @$ROOT|split_last(".")))'
-        tag: { import_type: Import }
+        tag: { import_type: NamedImport }
 
   - name: normalize
     rules:
@@ -54,6 +56,10 @@ stages:
         replace: '(__ssa_return $$$V)'
       - match: '(generic_type type: $T:type_identifier)'
         replace: '(type_identifier @$T)'
+      - match: '(annotation name: $N:type_identifier arguments: $A)'
+        replace: '(__decorator @$N (__args $A))'
+      - match: '(annotation name: $N:type_identifier)'
+        replace: '(__decorator @$N)'
       - match: '(field_expression value: (this) field: $F:identifier)'
         replace: '(__ivar @$F)'
       - match: '(extends_clause type: $T:type_identifier $$$W:type_identifier)'
@@ -63,7 +69,7 @@ stages:
       - match: '(class_parameter name: $N:identifier)'
         replace: '(__def (__defname @$N) (__property))'
       - match: '(parameter name: $N:identifier type: $T:type_identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
       - match: '(parameter name: $N:identifier)'
         replace: '(__binding @$N)'
 
@@ -124,22 +130,28 @@ stages:
         replace: '(__ssa_loop $B)'
       - match: '(while_expression body: $B)'
         replace: '(__ssa_loop $B)'
-      - match: '(function_definition $M?:modifiers name: $N:identifier $TP?:type_parameters parameters: $P return_type:? $RT:type_identifier body: $B)'
-        replace: '(__def (__defname @$N $N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
-      - match: '(function_definition $M?:modifiers name: $N:identifier $TP?:type_parameters return_type:? $RT:type_identifier body: $B)'
-        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $B)'
-      - match: '(function_declaration $M?:modifiers name: $N:identifier parameters:? $P return_type:? $RT:type_identifier)'
-        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $P)'
-      - match: '(class_definition $M?:modifiers name: $N:identifier $$$PRE (extends_clause $S:__supertype $$$W:__supertype) $B?:template_body)'
-        replace: '(__def (__defname @$N) (__class) $M $$$PRE $S $$$W (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
-      - match: '(class_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)'
-        replace: '(__def (__defname @$N) (__class) $M $$$PRE $B)'
-      - match: '(trait_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)'
-        replace: '(__def (__defname @$N) (__trait) $M $$$PRE $B)'
-      - match: '(object_definition $M?:modifiers name: $N:identifier $$$PRE (extends_clause $S:__supertype $$$W:__supertype) $B?:template_body)'
-        replace: '(__def (__defname @$N) (__class) $M $$$PRE $S $$$W (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
-      - match: '(object_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)'
-        replace: '(__def (__defname @$N) (__class) $M $$$PRE $B)'
+      - match: '(function_definition $$$ANN:__decorator|modifiers name: $N:identifier $TP?:type_parameters parameters: $P return_type: $RT:type_identifier body: $B)'
+        replace: '(__def (__defname @$N $N) (__function) (__ssa_return_type @$RT) $$$ANN $P (__call (__type "return") (__callee @$RT $RT)) $B)'
+      - match: '(function_definition $$$ANN:__decorator|modifiers name: $N:identifier $TP?:type_parameters parameters: $P return_type:? $RT:type_identifier body: $B)'
+        replace: '(__def (__defname @$N $N) (__function) (__ssa_return_type? @$RT) $$$ANN $P $B)'
+      - match: '(function_definition $$$ANN:__decorator|modifiers name: $N:identifier $TP?:type_parameters return_type: $RT:type_identifier body: $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$RT) $$$ANN (__call (__type "return") (__callee @$RT $RT)) $B)'
+      - match: '(function_definition $$$ANN:__decorator|modifiers name: $N:identifier $TP?:type_parameters return_type:? $RT:type_identifier body: $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $$$ANN $B)'
+      - match: '(function_declaration $$$ANN:__decorator|modifiers name: $N:identifier parameters:? $P return_type: $RT:type_identifier)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$RT) $$$ANN $P (__call (__type "return") (__callee @$RT $RT)))'
+      - match: '(function_declaration $$$ANN:__decorator|modifiers name: $N:identifier parameters:? $P return_type:? $RT:type_identifier)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $$$ANN $P)'
+      - match: '(class_definition $$$ANN:__decorator|modifiers name: $N:identifier $$$PRE (extends_clause $S:__supertype $$$W:__supertype) $B?:template_body)'
+        replace: '(__def (__defname @$N) (__class) $$$ANN $$$PRE $S $$$W (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
+      - match: '(class_definition $$$ANN:__decorator|modifiers name: $N:identifier $$$PRE $B?:template_body)'
+        replace: '(__def (__defname @$N) (__class) $$$ANN $$$PRE $B)'
+      - match: '(trait_definition $$$ANN:__decorator|modifiers name: $N:identifier $$$PRE $B?:template_body)'
+        replace: '(__def (__defname @$N) (__trait) $$$ANN $$$PRE $B)'
+      - match: '(object_definition $$$ANN:__decorator|modifiers name: $N:identifier $$$PRE (extends_clause $S:__supertype $$$W:__supertype) $B?:template_body)'
+        replace: '(__def (__defname @$N) (__class) $$$ANN $$$PRE $S $$$W (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
+      - match: '(object_definition $$$ANN:__decorator|modifiers name: $N:identifier $$$PRE $B?:template_body)'
+        replace: '(__def (__defname @$N) (__class) $$$ANN $$$PRE $B)'
       - match: '(enum_definition name: $N:identifier $$$PRE body: $B)'
         replace: '(__def (__defname @$N) (__enum) $$$PRE $B)'
       - match: '(simple_enum_case name: $N:identifier)'

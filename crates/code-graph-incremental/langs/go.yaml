@@ -21,7 +21,7 @@ config:
           append, cap, clear, close, complex, copy, delete, imag, len, make, max, min,
           new, panic, print, println, real, recover, bool, byte, complex64, complex128,
           float32, float64, int, int8, int16, int32, int64, rune, string, uint,
-          uint8, uint16, uint32, uint64, uintptr
+          uint8, uint16, uint32, uint64, uintptr, error, any, comparable
         ]
       - module: fmt/*
         precedence: runtime
@@ -108,9 +108,9 @@ stages:
 
       # Parameters: typed → SSA-typed binding; grouped `a, b T` → two bindings
       - match: '(parameter_declaration name: $A:identifier name: $B:identifier type: $T:type_identifier)'
-        replace: '(parameter_declaration (__binding @$A (__ssa_typed @$T)) (__binding @$B (__ssa_typed @$T)))'
+        replace: '(parameter_declaration (__binding @$A (__ssa_typed @$T)) (__binding @$B (__ssa_typed @$T)) (__call (__type "parameter") (__callee @$T $T)))'
       - match: '(parameter_declaration name: $N:identifier type: $T:type_identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T))'
+        replace: '(go_param (__binding @$N (__ssa_typed @$T)) (__call (__type "parameter") (__callee @$T $T)))'
       - match: '(parameter_declaration name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(variadic_parameter_declaration name: $N:identifier)'
@@ -190,6 +190,8 @@ stages:
         replace: '(__ssa_loop $$$H $B)'
 
       # Interface method signatures
+      - match: '(method_elem name: $N parameters: $P result: $RT:type_identifier)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $P (__call (__type "return") (__callee @$RT $RT)))'
       - match: '(method_elem name: $N parameters: $P result:? $RT:type_identifier)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
 
@@ -205,13 +207,19 @@ stages:
         replace: '(__def (__defname @$N) (__type_alias))'
 
       # Functions
+      - match: '(function_declaration name: $N parameters: $P result: $RT:type_identifier body: $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$RT) $P (__call (__type "return") (__callee @$RT $RT)) $B)'
       - match: '(function_declaration name: $N parameters: $P result:? $RT:type_identifier body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
 
       # Receiver methods: wrapped in an __impl named after the receiver type,
       # so method lookup on the struct reaches them via same-name defs.
-      - match: '(method_declaration receiver: (parameter_list $R:(__binding $T:__ssa_typed)) name: $N parameters: $P result:? $RT:type_identifier body: $B)'
+      - match: '(method_declaration receiver: (parameter_list (go_param $R:(__binding $T:__ssa_typed))) name: $N parameters: $P result: $RT:type_identifier body: $B)'
+        replace: '(__def (__defname @$T) (__impl) (__def (__defname @$N) (__method) (__ssa_return_type @$RT) $R $P (__call (__type "return") (__callee @$RT $RT)) $B))'
+      - match: '(method_declaration receiver: (parameter_list (go_param $R:(__binding $T:__ssa_typed))) name: $N parameters: $P result:? $RT:type_identifier body: $B)'
         replace: '(__def (__defname @$T) (__impl) (__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $R $P $B))'
+      - match: '(method_declaration receiver: (parameter_list (parameter_declaration type: $T:type_identifier)) name: $N parameters: $P result: $RT:type_identifier body: $B)'
+        replace: '(__def (__defname @$T) (__impl) (__def (__defname @$N) (__method) (__ssa_return_type @$RT) $P (__call (__type "return") (__callee @$RT $RT)) $B))'
       - match: '(method_declaration receiver: (parameter_list (parameter_declaration type: $T:type_identifier)) name: $N parameters: $P result:? $RT:type_identifier body: $B)'
         replace: '(__def (__defname @$T) (__impl) (__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P $B))'
 
@@ -245,7 +253,7 @@ stages:
       - match: '(__def (__enum_variant))'
         tag: { callable: "true", value: "true" }
       - match: '(__def (__struct))'
-        tag: { value: "true", declares_type: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'
@@ -253,9 +261,9 @@ stages:
       - match: '(__def (__enum))'
         tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__interface))'
-        tag: { value: "true", declares_type: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true" }
       - match: '(__def (__type_alias))'
-        tag: { value: "true", declares_type: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true" }
       - match: '(__def (__field_def))'
         tag: { value: "true" }
       - match: '(__def (__variable))'
@@ -377,6 +385,12 @@ display:
         tag: { kind: Constant }
       - match: '(__def (__field_def))'
         tag: { kind: Field }
+      - match: '(__def !(__impl))'
+        tag:
+          visibility: '@$ROOT|child_sym("__defname")|regex_first("(?s)\A(?:(\p{Lu}).*|.*)\z", "$1")|regex_replace("^\p{Lu}$", "public")|default("package")'
+      - match: '(__def !(__impl))'
+        tag:
+          visibility: '@$ROOT|concat(":", "ancestor_tag:kind", "tag:visibility")|regex_first("(?s)\A(?:(?:Function|Method|Test):.*|(?:[A-Za-z]+:)?(.*))\z", "$1")'
   - name: content
     rules:
       - match: '(__def !(__impl))'
@@ -422,14 +436,14 @@ display:
           entity: Import
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
-      - match: '(__name (__alias))'
-        tag:
-          import_type: AliasedImport
-          resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name)'
         tag:
-          import_type: Import
+          import_type: NamedImport
           resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name (__alias))'
+        tag: { import_type: AliasedImport }
+      - match: '(__name (__ssa_hint "*"))'
+        tag: { import_type: WildcardImport }
       - match: '(__name)'
         tag:
           import_kind: module

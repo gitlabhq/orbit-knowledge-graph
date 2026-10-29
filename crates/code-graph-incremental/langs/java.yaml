@@ -106,9 +106,9 @@ stages:
 
       # x instanceof T [name] → type reference plus a typed pattern binding
       - match: '(instanceof_expression left: $L right: $T:type_identifier name: $N:identifier)'
-        replace: '(instanceof_expression $L (__call (__type) (__callee @$T $T)) (__binding @$N (__ssa_typed @$T)))'
+        replace: '(instanceof_expression $L (__call (__type "cast") (__callee @$T $T)) (__binding @$N (__ssa_typed @$T)))'
       - match: '(instanceof_expression left: $L right: $T:type_identifier)'
-        replace: '(instanceof_expression $L (__call (__type) (__callee @$T $T)))'
+        replace: '(instanceof_expression $L (__call (__type "cast") (__callee @$T $T)))'
       - match: '(throw_statement $$$V)'
         replace: '(__ssa_branch $$$V)'
       - match: '(record_pattern_component (type_identifier "var") $N:identifier)'
@@ -120,7 +120,7 @@ stages:
       - match: '(record_pattern_component $D:__destructure)'
         replace: '$D'
       - match: '(record_pattern $T:identifier (record_pattern_body $$$S))'
-        replace: '(__destructure (__call (__type) (__callee @$T $T)) $$$S)'
+        replace: '(__destructure (__call (__type "cast") (__callee @$T $T)) $$$S)'
 
       # this.x → __ivar
       - match: '(field_access object: (this) field: $F:identifier)'
@@ -138,17 +138,17 @@ stages:
 
       # Parameters: typed → SSA-typed binding that references its type
       - match: '(formal_parameter type: $T:__member name: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
+        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type "parameter") (__callee $T))))'
       - match: '(formal_parameter type: $T:type_identifier name: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
       - match: '(formal_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(spread_parameter (variable_declarator name: $N:identifier))'
         replace: '(__binding @$N)'
       - match: '(catch_formal_parameter (catch_type $T:__member) name: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
+        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type "parameter") (__callee $T))))'
       - match: '(catch_formal_parameter (catch_type $T:type_identifier) name: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type) (__callee @$T $T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__call (__type "parameter") (__callee @$T $T))))'
       - match: '(catch_formal_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
 
@@ -276,10 +276,10 @@ stages:
         replace: '(__def (__defname @$N) (__enum_variant) $A $B)'
 
       - match: '(method_declaration $M?:modifiers type: $RT:__member name: $N:identifier parameters: $P body:? $B)'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type $RT) $M $P $B)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type $RT) $M $P (__call (__type "return") (__callee $RT)) $B)'
       # Callables
       - match: '(method_declaration $M?:modifiers type: $RT:type_identifier name: $N:identifier parameters: $P body:? $B)'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $M $P (__call (__type) (__callee @$RT $RT)) $B)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $M $P (__call (__type "return") (__callee @$RT $RT)) $B)'
       - match: '(method_declaration $M?:modifiers name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) $M $P $B)'
       - match: '(constructor_declaration $M?:modifiers name: $N:identifier parameters: $P body: $B)'
@@ -445,7 +445,7 @@ display:
       - match: '(__def (__enum))'
         tag: { kind: Enum }
       - match: '(__def (__enum_variant))'
-        tag: { kind: EnumMember }
+        tag: { kind: EnumMember, language_kind: EnumConstant }
       - match: '(__def (__constant))'
         tag: { kind: Constant }
       - match: '(__def (__field_def))'

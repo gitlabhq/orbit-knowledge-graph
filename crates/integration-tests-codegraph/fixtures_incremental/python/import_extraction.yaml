@@ -17,10 +17,11 @@ fixtures:
       from __future__ import print_function, division
 
 tests:
+  # corrected: convention: a plain import has language_kind NamedImport
   - name: "C1: regular imports exist"
     query: |
       MATCH (i:Import)
-      WHERE i.language_kind = 'Import'
+      WHERE i.language_kind = 'NamedImport'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 2 } }

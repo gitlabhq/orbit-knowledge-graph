@@ -99,6 +99,7 @@ tests:
     assert:
       - { empty: true }
 
+  # corrected: convention: a Lua require import has language_kind Require
   - name: "imports carry their kind, construct, path, and full name"
     query: |
       MATCH (i:Import)
@@ -106,9 +107,9 @@ tests:
       ORDER BY import_path, name
       LIMIT 100
     assert:
-      - { row: { name: "json", alias: "json", import_kind: "module", language_kind: "AliasedImport", import_path: "json", fqn: "json", is_external: true } }
-      - { row: { name: "helpers", alias: "helpers", import_kind: "module", language_kind: "AliasedImport", import_path: "helpers", fqn: "helpers", is_external: false } }
-      - { row: { name: "effect", import_kind: "side_effect", import_path: "side.effect", fqn: "side.effect", is_external: true } }
+      - { row: { name: "json", alias: "json", import_kind: "module", language_kind: "Require", import_path: "json", fqn: "json", is_external: true } }
+      - { row: { name: "helpers", alias: "helpers", import_kind: "module", language_kind: "Require", import_path: "helpers", fqn: "helpers", is_external: false } }
+      - { row: { name: "effect", import_kind: "side_effect", language_kind: "Require", import_path: "side.effect", fqn: "side.effect", is_external: true } }
 
   - name: "every kind is in the closed list"
     query: |
