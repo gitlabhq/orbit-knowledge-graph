@@ -205,6 +205,7 @@ fn returned_relationships_add_columns_in_return_order() {
         dst_column: "e0_dst".into(),
         dst_type_column: "e0_dst_type".into(),
         relationship: 0,
+        properties: Vec::new(),
     });
     let relationship_return = &mut Arc::get_mut(&mut output.compiled)
         .unwrap()

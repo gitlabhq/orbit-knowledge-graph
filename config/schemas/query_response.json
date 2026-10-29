@@ -104,6 +104,11 @@
           "type": "integer",
           "description": "For path finding queries, the position of this edge within its path (0-indexed). Absent for non-path queries.",
           "minimum": 0
+        },
+        "properties": {
+          "type": "object",
+          "description": "Relationship properties the query returns, such as lines or resolution. Absent when the query returns none.",
+          "additionalProperties": { "$ref": "#/$defs/property_value" }
         }
       },
       "additionalProperties": false

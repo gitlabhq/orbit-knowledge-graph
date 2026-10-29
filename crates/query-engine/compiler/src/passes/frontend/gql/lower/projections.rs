@@ -143,6 +143,27 @@ impl Lowering {
                 Expression::Property(property) => {
                     let span = property.span;
                     let PropertyRef { node, property } = property.into();
+                    if let Some(&relationship) = self.edges.get(&node) {
+                        if aggregate {
+                            return Err(invalid(
+                                span,
+                                "grouping by a relationship property is not supported yet",
+                            ));
+                        }
+                        let variable = Name {
+                            span,
+                            value: node.clone(),
+                        };
+                        self.one_hop(span, &variable)?;
+                        self.relationship_item(
+                            span,
+                            alias,
+                            format!("{node}.{property}"),
+                            relationship,
+                            RelationshipColumnKind::Property(property),
+                        )?;
+                        continue;
+                    }
                     if aggregate {
                         self.input
                             .aggregation

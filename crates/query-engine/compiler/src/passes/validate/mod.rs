@@ -791,6 +791,9 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             for (prop, filters) in &rel.filters {
                 self.check_relationship_filters(input, i, prop, filters)?;
             }
+            for prop in input.relationship_return.properties(i) {
+                self.check_relationship_filters(input, i, prop, &[])?;
+            }
         }
         for condition in input.conditions().filter(|c| !c.is_relationship_type()) {
             let filters = std::slice::from_ref(&condition.filter);
@@ -1032,7 +1035,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         let model = self.model.get();
         if prop.starts_with('_') || prop == TRAVERSAL_PATH_COLUMN {
             return Err(QueryError::Validation(format!(
-                "relationship[{index}] filter on private edge column \"{prop}\""
+                "relationship[{index}] reads private edge column \"{prop}\""
             )));
         }
         let relationship = &input.relationships[index];
@@ -1072,7 +1075,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             data_type.filter(|first| types.all(|data_type| data_type == Some(*first)))
         else {
             return Err(QueryError::Validation(format!(
-                "relationship[{index}] filter on unknown edge column \"{prop}\" or incompatible column types across tables {edge_tables:?}"
+                "relationship[{index}] reads unknown edge column \"{prop}\" or incompatible column types across tables {edge_tables:?}"
             )));
         };
         for filter in filters {

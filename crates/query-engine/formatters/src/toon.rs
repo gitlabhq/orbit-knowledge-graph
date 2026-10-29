@@ -137,6 +137,12 @@ fn write_node_table(out: &mut String, entity: &str, entries: &IndexMap<i64, &Pro
 fn write_edge_table(out: &mut String, edges: &[GraphEdge]) {
     let has_path = edges.iter().any(|edge| edge.path_id.is_some());
     let has_depth = edges.iter().any(|edge| edge.depth.is_some());
+    let mut properties: Vec<&str> = Vec::new();
+    for key in edges.iter().flat_map(|edge| edge.properties.keys()) {
+        if !properties.contains(&key.as_str()) {
+            properties.push(key);
+        }
+    }
     let mut columns = vec!["from", "from_id", "type", "to", "to_id"];
     if has_path {
         columns.extend(["path_id", "step"]);
@@ -144,6 +150,7 @@ fn write_edge_table(out: &mut String, edges: &[GraphEdge]) {
     if has_depth {
         columns.push("depth");
     }
+    columns.extend(&properties);
     write_header(out, 0, "edges", edges.len(), &columns);
     for edge in edges {
         out.push_str("  ");
@@ -162,6 +169,10 @@ fn write_edge_table(out: &mut String, edges: &[GraphEdge]) {
         if has_depth {
             out.push(',');
             write_optional(out, edge.depth);
+        }
+        for key in &properties {
+            out.push(',');
+            write_value(out, edge.properties.get(*key).unwrap_or(&Value::Null));
         }
         out.push('\n');
     }
@@ -321,6 +332,7 @@ mod tests {
             depth,
             path_id: None,
             step: None,
+            properties: Map::new(),
         }
     }
 

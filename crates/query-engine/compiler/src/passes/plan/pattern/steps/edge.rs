@@ -204,6 +204,14 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
                 format!("{}{PATH_NODES_COLUMN}", relation.column_prefix()),
             ));
         }
+        let prefix = relation.column_prefix();
+        self.outputs.extend(
+            self.pattern
+                .input
+                .relationship_return
+                .properties(relation.input_index)
+                .map(|property| Projection::new(column(property), format!("{prefix}{property}"))),
+        );
     }
 }
 

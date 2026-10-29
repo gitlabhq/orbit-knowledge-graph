@@ -60,10 +60,23 @@ pub struct RelationshipColumn {
     pub kind: RelationshipColumnKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RelationshipColumnKind {
     Type,
     Relationship,
+    Property(String),
+}
+
+impl RelationshipReturn {
+    pub fn properties(&self, relationship: usize) -> impl Iterator<Item = &str> {
+        self.columns
+            .iter()
+            .filter(move |column| column.relationship == relationship)
+            .filter_map(|column| match &column.kind {
+                RelationshipColumnKind::Property(property) => Some(property.as_str()),
+                _ => None,
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
