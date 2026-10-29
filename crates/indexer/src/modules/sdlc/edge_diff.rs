@@ -201,8 +201,10 @@ impl EdgeDiff {
             .await
             .map_err(|err| HandlerError::Processing(format!("edge diff read failed: {err}")))?;
         let mut previous = PreviousRows::default();
-        for (key, row) in self.rows(batches.iter().flatten())? {
-            previous.0.entry(key).or_default().push(row);
+        for batch in batches.iter().flatten() {
+            for (key, row) in self.rows(batch)? {
+                previous.0.entry(key).or_default().push(row);
+            }
         }
         Ok(previous)
     }
@@ -233,9 +235,11 @@ impl EdgeDiff {
         previous: &PreviousRows,
     ) -> Result<Vec<(String, RecordBatch)>, HandlerError> {
         let mut page: BTreeMap<RowKey, NodeRow> = BTreeMap::new();
-        for (key, row) in self.rows(node_rows)? {
-            if page.get(&key).is_none_or(|kept| kept.version < row.version) {
-                page.insert(key, row);
+        for batch in node_rows {
+            for (key, row) in self.rows(batch)? {
+                if page.get(&key).is_none_or(|kept| kept.version < row.version) {
+                    page.insert(key, row);
+                }
             }
         }
 
@@ -276,42 +280,38 @@ impl EdgeDiff {
             .collect()
     }
 
-    fn rows<'a>(
+    fn rows(
         &self,
-        batches: impl IntoIterator<Item = &'a RecordBatch>,
-    ) -> Result<Vec<(RowKey, NodeRow)>, HandlerError> {
-        let mut rows = Vec::new();
-        for batch in batches {
-            let (paths, ids) = key_columns(batch)?;
-            let versions: TimestampMicrosecondArray = typed(
-                batch,
-                "_version",
-                &DataType::Timestamp(TimeUnit::Microsecond, None),
-            )?;
-            let deleted: BooleanArray = typed(batch, "_deleted", &DataType::Boolean)?;
-            let arrays = self
+        batch: &RecordBatch,
+    ) -> Result<impl Iterator<Item = (RowKey, NodeRow)>, HandlerError> {
+        let (paths, ids) = key_columns(batch)?;
+        let versions: TimestampMicrosecondArray = typed(
+            batch,
+            "_version",
+            &DataType::Timestamp(TimeUnit::Microsecond, None),
+        )?;
+        let deleted: BooleanArray = typed(batch, "_deleted", &DataType::Boolean)?;
+        let arrays = self
+            .columns
+            .iter()
+            .map(|column| column.read(batch))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((0..batch.num_rows()).map(move |row| {
+            let values = self
                 .columns
                 .iter()
-                .map(|column| column.read(batch))
-                .collect::<Result<Vec<_>, _>>()?;
-            rows.extend((0..batch.num_rows()).map(|row| {
-                let values = self
-                    .columns
-                    .iter()
-                    .zip(&arrays)
-                    .map(|(column, array)| column.value(array, row))
-                    .collect();
-                (
-                    (paths.value(row).to_owned(), ids.value(row)),
-                    NodeRow {
-                        version: versions.value(row),
-                        deleted: deleted.value(row),
-                        values,
-                    },
-                )
-            }));
-        }
-        Ok(rows)
+                .zip(&arrays)
+                .map(|(column, array)| column.value(array, row))
+                .collect();
+            (
+                (paths.value(row).to_owned(), ids.value(row)),
+                NodeRow {
+                    version: versions.value(row),
+                    deleted: deleted.value(row),
+                    values,
+                },
+            )
+        }))
     }
 }
 
@@ -784,9 +784,10 @@ mod tests {
     fn tombstones_carry_the_page_row_version() {
         let diff = diff_for("Job");
         let (key, stored) = diff
-            .rows([&job_batch(&diff, 1, 1)])
+            .rows(&job_batch(&diff, 1, 1))
             .expect("stored rows decode")
-            .remove(0);
+            .next()
+            .expect("one stored row");
         let previous = PreviousRows(HashMap::from([(key, vec![stored])]));
         let tombstones = diff
             .tombstones(
