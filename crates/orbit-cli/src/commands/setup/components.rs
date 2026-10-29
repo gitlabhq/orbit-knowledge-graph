@@ -282,12 +282,12 @@ mod tests {
         let source = dir.path().join("source");
         let destination = dir.path().join("destination");
         std::fs::write(&source, "data").unwrap();
-        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o750)).unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o777)).unwrap();
 
         copy_new(&source, &destination).unwrap();
 
         assert_eq!(std::fs::read_to_string(&destination).unwrap(), "data");
-        assert_eq!(mode_of(&destination), 0o750);
+        assert_eq!(mode_of(&destination), 0o777);
     }
 
     #[cfg(unix)]
@@ -356,14 +356,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("CLAUDE.md");
         std::fs::write(&file, "data").unwrap();
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o750)).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o777)).unwrap();
         let mut report = Report::default();
 
         backup_once(&file, "CLAUDE.md", &mut report).unwrap();
 
         let backup = backup_path(&file);
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), "data");
-        assert_eq!(mode_of(&backup), 0o750);
+        assert_eq!(mode_of(&backup), 0o777);
         assert_eq!(report.outcomes.len(), 1);
     }
 
