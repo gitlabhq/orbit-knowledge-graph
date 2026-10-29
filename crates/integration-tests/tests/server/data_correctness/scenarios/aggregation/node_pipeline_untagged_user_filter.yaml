@@ -1,0 +1,42 @@
+description: A user filter counts every reviewer and approver, including edges the MergeRequest pipeline writes without user tags
+
+config:
+  extra_seed:
+    gl_user:
+      - { id: 99102, username: tagged_human, state: active, user_type: human }
+      - { id: 99103, username: untagged_human, state: active, user_type: human }
+      - { id: 99104, username: untagged_bot, state: active, user_type: project_bot }
+    gl_merge_request:
+      - { id: 99100, traversal_path: "1/100/1000/", project_id: 1000, state: merged, title: reviewed and approved }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 99102, source_kind: User, relationship_kind: REVIEWER, target_id: 99100, target_kind: MergeRequest, source_tags: ["state:active", "user_type:human"], target_tags: ["state:merged"] }
+      - { traversal_path: "1/100/1000/", source_id: 99103, source_kind: User, relationship_kind: REVIEWER, target_id: 99100, target_kind: MergeRequest, source_tags: [], target_tags: ["state:merged"] }
+      - { traversal_path: "1/100/1000/", source_id: 99104, source_kind: User, relationship_kind: REVIEWER, target_id: 99100, target_kind: MergeRequest, source_tags: [], target_tags: ["state:merged"] }
+      - { traversal_path: "1/100/1000/", source_id: 99102, source_kind: User, relationship_kind: APPROVED, target_id: 99100, target_kind: MergeRequest, source_tags: ["state:active", "user_type:human"], target_tags: ["state:merged"] }
+      - { traversal_path: "1/100/1000/", source_id: 99103, source_kind: User, relationship_kind: APPROVED, target_id: 99100, target_kind: MergeRequest, source_tags: [], target_tags: ["state:merged"] }
+      - { traversal_path: "1/100/1000/", source_id: 99104, source_kind: User, relationship_kind: APPROVED, target_id: 99100, target_kind: MergeRequest, source_tags: [], target_tags: ["state:merged"] }
+
+cases:
+  - name: reviewer_user_type
+    description: Both human reviewers count, not only the one whose edge carries the user tag
+    query:
+      gql: |
+        MATCH (u:User)-[:REVIEWER]->(mr:MergeRequest {id: 99100})
+        WHERE u.user_type = 'human'
+        RETURN count(u) AS n
+    expect:
+      skip_requirements: [node_ids, "filter:user_type"]
+      row_count: 1
+      row_values: [{ n: 2 }]
+
+  - name: approver_user_type
+    description: Both human approvers count, not only the one whose edge carries the user tag
+    query:
+      gql: |
+        MATCH (u:User)-[:APPROVED]->(mr:MergeRequest {id: 99100})
+        WHERE u.user_type = 'human'
+        RETURN count(u) AS n
+    expect:
+      skip_requirements: [node_ids, "filter:user_type"]
+      row_count: 1
+      row_values: [{ n: 2 }]
