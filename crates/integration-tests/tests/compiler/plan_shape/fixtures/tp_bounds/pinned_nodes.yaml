@@ -11,7 +11,7 @@ cases:
       clickhouse:
         emitted:
           expect: ["(Filter mr.id = 7, ... (Scan Table(gl_merge_request) AS mr))"]
-          reject: ["(Filter StartsWith(mr.traversal_path, scalar(gl_merge_request AS _scope WHERE _scope.id = 7)) OR (scalar(gl_merge_request AS _scope WHERE _scope.id = 7) = '0/'), ... (_))"]
+          reject: ["(Filter StartsWith(mr.traversal_path, scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 7)) OR (scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 7) = '0/'), ... (_))"]
 
   - name: A pinned node shares one path lookup with the nodes it reaches
     query:
@@ -25,8 +25,8 @@ cases:
       clickhouse:
         emitted:
           expect:
-            - (Filter StartsWith(d.traversal_path, scalar(gl_merge_request AS _scope WHERE _scope.id = 7)) OR (scalar(gl_merge_request AS _scope WHERE _scope.id = 7) = '0/'), ... (Scan Table(gl_merge_request_diff) AS d))
-            - (Filter StartsWith(mr.traversal_path, scalar(gl_merge_request AS _scope WHERE _scope.id = 7)) OR (scalar(gl_merge_request AS _scope WHERE _scope.id = 7) = '0/'), ... (Scan Table(gl_merge_request) AS mr))
+            - (Filter StartsWith(d.traversal_path, scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 7)) OR (scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 7) = '0/'), ... (Scan Table(gl_merge_request_diff) AS d))
+            - (Filter StartsWith(mr.traversal_path, scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 7)) OR (scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 7) = '0/'), ... (Scan Table(gl_merge_request) AS mr))
 
   - name: A pinned pipeline bounds its jobs by its path
     query:
@@ -39,7 +39,7 @@ cases:
     physical:
       clickhouse:
         emitted:
-          expect: ["(Filter StartsWith(j.traversal_path, scalar(gl_pipeline AS _scope WHERE _scope.id = 7)) OR (scalar(gl_pipeline AS _scope WHERE _scope.id = 7) = '0/'), ... (Scan Table(gl_job) AS j))"]
+          expect: ["(Filter StartsWith(j.traversal_path, scalar(gl_pipeline AS _orbit_scope WHERE _orbit_scope.id = 7)) OR (scalar(gl_pipeline AS _orbit_scope WHERE _orbit_scope.id = 7) = '0/'), ... (Scan Table(gl_job) AS j))"]
 
   - name: A node pinned through a foreign key keeps the anchor's path lookup on its own read
     query:
@@ -52,4 +52,4 @@ cases:
     physical:
       clickhouse:
         emitted:
-          expect: ["(Filter StartsWith(mr.traversal_path, scalar(gl_project AS _scope WHERE _scope.id = 100)) OR (scalar(gl_project AS _scope WHERE _scope.id = 100) = '0/'), mr.project_id = 100, ... (Bind mr (_)))"]
+          expect: ["(Filter StartsWith(mr.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 100)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 100) = '0/'), mr.project_id = 100, ... (Bind mr (_)))"]

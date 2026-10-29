@@ -200,8 +200,8 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         );
         if relation.max_hops > 1 && !self.pattern.aggregate() {
             self.outputs.push(Projection::new(
-                column(PATH_NODES_COLUMN),
-                format!("{}{PATH_NODES_COLUMN}", relation.column_prefix()),
+                column(path_nodes_column()),
+                relation.path_nodes_column(),
             ));
         }
     }
@@ -255,7 +255,7 @@ fn plain_edge_rows(
         let read = graph.read(table, alias, final_);
         return Ok(graph.owned(read, owner, alias));
     }
-    let route_alias = format!("_{alias}");
+    let route_alias = union_arm_alias(alias);
     edge_union(
         graph,
         &relation.edge_tables,

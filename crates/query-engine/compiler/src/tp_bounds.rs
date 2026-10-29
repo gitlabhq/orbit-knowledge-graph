@@ -80,9 +80,9 @@ use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
 use crate::ast::{Expr, Function, Query, SelectExpr, SqlType, TableRef};
+use crate::constants::scope_lookup_alias;
 use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 
-const LOOKUP_ALIAS: &str = "_scope";
 const UNRESOLVED_PATH: &str = "0/";
 const MAX_LOOKUPS_PER_ALIAS: usize = 8;
 
@@ -237,19 +237,19 @@ fn lookup_expr(source_table: &str, key_column: &str, value: &TpLookupValue) -> E
     let (key, from) = match value {
         TpLookupValue::Numeric(id) => (
             Expr::param(SqlType::Int64, *id),
-            TableRef::scan(source_table, LOOKUP_ALIAS),
+            TableRef::scan(source_table, scope_lookup_alias()),
         ),
         TpLookupValue::Text(text) => (
             Expr::param(SqlType::String, text.clone()),
-            TableRef::scan_final(source_table, LOOKUP_ALIAS),
+            TableRef::scan_final(source_table, scope_lookup_alias()),
         ),
     };
     let latest = |column: &str| {
         Expr::func(
             Function::ArgMaxOrNull,
             vec![
-                Expr::col(LOOKUP_ALIAS, column),
-                Expr::col(LOOKUP_ALIAS, VERSION_COLUMN),
+                Expr::col(scope_lookup_alias(), column),
+                Expr::col(scope_lookup_alias(), VERSION_COLUMN),
             ],
         )
     };
@@ -270,7 +270,7 @@ fn lookup_expr(source_table: &str, key_column: &str, value: &TpLookupValue) -> E
     Expr::Scalar(Box::new(Query {
         select: vec![SelectExpr::new(path, TRAVERSAL_PATH_COLUMN)],
         from,
-        where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, key_column), key)),
+        where_clause: Some(Expr::eq(Expr::col(scope_lookup_alias(), key_column), key)),
         ..Default::default()
     }))
 }

@@ -124,18 +124,11 @@ impl QueryResultRow {
         self.authorized = false;
     }
 
-    pub fn entity_properties(
-        &self,
-        alias: &str,
-        skip_prefixes: &[&str],
-    ) -> HashMap<String, ColumnValue> {
+    pub fn entity_properties(&self, alias: &str) -> HashMap<String, ColumnValue> {
         let prefix = format!("{alias}_");
         let mut props = HashMap::new();
         for (name, value) in &self.columns {
             if name.starts_with(internal_column_prefix()) {
-                continue;
-            }
-            if skip_prefixes.iter().any(|sp| name.starts_with(sp)) {
                 continue;
             }
             if let Some(prop_name) = name.strip_prefix(&prefix) {

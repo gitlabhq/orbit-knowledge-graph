@@ -15,4 +15,4 @@ physical:
   clickhouse:
     emitted:
       expect:
-        - (Deduplicate LimitBy 1 BY paths.path_start_id, paths.path_end_id (_))
+        - (Deduplicate LimitBy 1 BY _orbit_paths._orbit_path_start, _orbit_paths._orbit_path_end (_))

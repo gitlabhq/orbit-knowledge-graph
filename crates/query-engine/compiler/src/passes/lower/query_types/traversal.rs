@@ -1,6 +1,6 @@
 use super::Emitted;
 use crate::ast::*;
-use crate::constants::EDGE_TYPE_SUFFIX;
+use crate::constants::EDGE_KIND_SUFFIX;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, OrderDirection};
 use crate::passes::lower::{graph, predicates};
@@ -94,6 +94,6 @@ fn multi_type_edge_types(query: &Query, relations: &[EdgeRelation]) -> Vec<Expr>
 
 fn edge_type(query: &Query, relation: &EdgeRelation) -> Option<Expr> {
     query
-        .selected(&format!("{}{}", relation.column_prefix(), EDGE_TYPE_SUFFIX))
+        .selected(&format!("{}{}", relation.column_prefix(), EDGE_KIND_SUFFIX))
         .cloned()
 }

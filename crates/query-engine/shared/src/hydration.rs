@@ -7,7 +7,7 @@ use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use compiler::constants::{
-    HYDRATION_NODE_ALIAS, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
+    hydration_node_alias, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
     traversal_path_column,
 };
 use compiler::{
@@ -137,7 +137,7 @@ pub fn parse_hydration_batches(
     batches: &[RecordBatch],
     ontology: &Ontology,
 ) -> Result<PropertyMap, PipelineError> {
-    let alias = HYDRATION_NODE_ALIAS;
+    let alias = hydration_node_alias();
     let entity_type_col = format!("{alias}_entity_type");
     let props_col = format!("{alias}_props");
     let id_col = format!("{alias}_id");
@@ -321,7 +321,7 @@ pub fn hydrate_static(
 
         total_ids += ids.len();
         nodes.push(InputNode {
-            id: HYDRATION_NODE_ALIAS.to_string(),
+            id: hydration_node_alias().to_string(),
             entity: Some(template.entity_type.clone()),
             columns: Some(ColumnSelection::List(template.columns.clone())),
             node_ids: ids,
@@ -377,7 +377,7 @@ pub fn hydrate_dynamic(
         };
 
         nodes.push(InputNode {
-            id: HYDRATION_NODE_ALIAS.to_string(),
+            id: hydration_node_alias().to_string(),
             entity: Some(entity_type.clone()),
             columns: Some(ColumnSelection::List(spec.columns.clone())),
             node_ids: capped_ids,

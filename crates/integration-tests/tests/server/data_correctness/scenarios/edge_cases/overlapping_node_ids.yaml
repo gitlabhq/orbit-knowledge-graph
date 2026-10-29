@@ -1,0 +1,18 @@
+description: Node IDs cannot overlap, because one node's columns would read as the other's properties
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "columns": ["title"]},
+        {"id": "mr_diff", "entity": "MergeRequestDiff", "columns": ["state"]}
+      ],
+      "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "mr_diff"}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})-[:HAS_DIFF]->(mr_diff:MergeRequestDiff) RETURN mr.title, mr_diff.state LIMIT 10
+
+expect:
+  compile_error: 'node ids "mr" and "mr_diff" overlap'

@@ -22,28 +22,28 @@ physical:
     planned:
       expect:
         - (Union ALL AS _orbit_edge_0 (_) (_) (_))
-        - (Project 1 AS depth, ... (Filter e1._deleted = false (Deduplicate LimitBy ... (Filter e1.relationship_kind = 'CALLS', e1.source_kind = 'Definition', e1.source_id = 1 (_)))))
-        - (Filter e2._deleted = false (Deduplicate LimitBy ... (Filter e2.relationship_kind = 'CALLS', e2.source_id IN ?.target_id (_))))
-        - (Filter e3._deleted = false (Deduplicate LimitBy ... (Filter e3.relationship_kind = 'CALLS', e3.source_id IN ?.target_id (_))))
-        - (Project 1 AS depth, ... (_))
-        - (Project 2 AS depth, ... (_))
-        - (Project 3 AS depth, ... (_))
-        - (Project _depth_2.source_tags AS source_tags, e3.target_tags AS target_tags, ... (_))
-        - (Project append(_depth_2.path_nodes, (e3.target_id, e3.target_kind)) AS path_nodes, ... (_))
+        - (Project 1 AS _orbit_depth, ... (Filter _orbit_e1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e1.relationship_kind = 'CALLS', _orbit_e1.source_kind = 'Definition', _orbit_e1.source_id = 1 (_)))))
+        - (Filter _orbit_e2._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e2.relationship_kind = 'CALLS', _orbit_e2.source_id IN ?.target_id (_))))
+        - (Filter _orbit_e3._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e3.relationship_kind = 'CALLS', _orbit_e3.source_id IN ?.target_id (_))))
+        - (Project 1 AS _orbit_depth, ... (_))
+        - (Project 2 AS _orbit_depth, ... (_))
+        - (Project 3 AS _orbit_depth, ... (_))
+        - (Project _orbit_depth_2.source_tags AS source_tags, _orbit_e3.target_tags AS target_tags, ... (_))
+        - (Project append(_orbit_depth_2._orbit_path_nodes, (_orbit_e3.target_id, _orbit_e3.target_kind)) AS _orbit_path_nodes, ... (_))
       reject:
         - (CTE ? (Deduplicate Final (Scan Table(gl_code_edge) ...)))
     emitted:
       expect:
         - (Union ALL AS _orbit_edge_0 (_) (_) (_))
-        - (Project 3 AS depth, ... (_))
-        - (Project _orbit_edge_0.relationship_kind AS hop_e0_type, ... (_))
-        - (Project _orbit_edge_0.path_nodes AS hop_e0_path_nodes, ... (_))
-        - (Project ArrayConcat(_depth_2.path_nodes, Array(Tuple(e3.target_id, e3.target_kind))) AS path_nodes, ... (_))
+        - (Project 3 AS _orbit_depth, ... (_))
+        - (Project _orbit_edge_0.relationship_kind AS _orbit_hop_e0_kind, ... (_))
+        - (Project _orbit_edge_0._orbit_path_nodes AS _orbit_hop_e0_path_nodes, ... (_))
+        - (Project ArrayConcat(_orbit_depth_2._orbit_path_nodes, Array(Tuple(_orbit_e3.target_id, _orbit_e3.target_kind))) AS _orbit_path_nodes, ... (_))
   duckdb:
     planned:
       expect:
         - (Union ALL AS _orbit_edge_0 (_) (_) (_))
-        - (Project 3 AS depth, ... (_))
+        - (Project 3 AS _orbit_depth, ... (_))
     emitted:
       expect:
-        - (Project _orbit_edge_0.path_nodes AS hop_e0_path_nodes, ... (_))
+        - (Project _orbit_edge_0._orbit_path_nodes AS _orbit_hop_e0_path_nodes, ... (_))

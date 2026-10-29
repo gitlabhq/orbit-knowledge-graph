@@ -171,15 +171,9 @@ impl GraphFormatter {
         let aggregations = Some(&output.compiled.input.aggregation.metrics);
         let group_by = &output.compiled.input.aggregation.group_by;
 
-        let edge_prefixes: Vec<&str> = result_context
-            .edges()
-            .iter()
-            .map(|e| e.column_prefix.as_str())
-            .collect();
-
         match result_context.query_type {
             Some(QueryType::Traversal) => {
-                self.extract_search_nodes(result, result_context, &edge_prefixes, &mut node_map);
+                self.extract_search_nodes(result, result_context, &mut node_map);
                 self.extract_traversal_edges(
                     result,
                     result_context.edges(),
@@ -197,7 +191,6 @@ impl GraphFormatter {
                     rows = Some(Self::extract_aggregation_rows(
                         result,
                         result_context,
-                        &edge_prefixes,
                         aggs,
                         group_by,
                     ));
@@ -210,7 +203,6 @@ impl GraphFormatter {
                 self.extract_neighbors(
                     result,
                     result_context,
-                    &edge_prefixes,
                     output,
                     &mut node_map,
                     &mut edges,
@@ -241,7 +233,6 @@ impl GraphFormatter {
         &self,
         result: &QueryResult,
         result_context: &ResultContext,
-        edge_prefixes: &[&str],
         node_map: &mut IndexMap<(String, i64), GraphNode>,
     ) {
         for row in result.authorized_rows() {
@@ -254,7 +245,7 @@ impl GraphFormatter {
                 };
                 let key = (entity_type.to_string(), id);
                 node_map.entry(key).or_insert_with(|| {
-                    let properties = Self::extract_node_properties(row, &node.alias, edge_prefixes);
+                    let properties = Self::extract_node_properties(row, &node.alias);
                     GraphNode {
                         entity_type: entity_type.to_string(),
                         id,
@@ -268,9 +259,8 @@ impl GraphFormatter {
     fn extract_node_properties(
         row: &QueryResultRow,
         alias: &str,
-        edge_prefixes: &[&str],
     ) -> serde_json::Map<String, Value> {
-        row.entity_properties(alias, edge_prefixes)
+        row.entity_properties(alias)
             .into_iter()
             .filter(|(k, _)| !is_reserved_node_key(k))
             .map(|(k, v)| (k, column_value_to_json(&v)))
@@ -370,7 +360,6 @@ impl GraphFormatter {
     fn extract_aggregation_rows(
         result: &QueryResult,
         result_context: &ResultContext,
-        edge_prefixes: &[&str],
         aggs: &[compiler::input::InputAggregationMetric],
         groups: &[compiler::input::InputGroupByKey],
     ) -> Vec<Map<String, Value>> {
@@ -394,7 +383,7 @@ impl GraphFormatter {
                     compiler::input::InputGroupByKey::Node { node, .. } => {
                         obj.insert(
                             col_name.clone(),
-                            Self::extract_group_node(row, result_context, node, edge_prefixes),
+                            Self::extract_group_node(row, result_context, node),
                         );
                     }
                 }
@@ -415,7 +404,6 @@ impl GraphFormatter {
         row: &QueryResultRow,
         result_context: &ResultContext,
         alias: &str,
-        edge_prefixes: &[&str],
     ) -> Value {
         let Some(node) = result_context.get(alias) else {
             return Value::Null;
@@ -432,11 +420,7 @@ impl GraphFormatter {
         obj.insert("id".to_string(), Value::String(id.to_string()));
         obj.insert(
             "properties".to_string(),
-            Value::Object(Self::extract_node_properties(
-                row,
-                &node.alias,
-                edge_prefixes,
-            )),
+            Value::Object(Self::extract_node_properties(row, &node.alias)),
         );
         Value::Object(obj)
     }
@@ -510,7 +494,6 @@ impl GraphFormatter {
         &self,
         result: &QueryResult,
         result_context: &ResultContext,
-        edge_prefixes: &[&str],
         output: &PipelineOutput,
         node_map: &mut IndexMap<(String, i64), GraphNode>,
         edges: &mut Vec<GraphEdge>,
@@ -535,7 +518,7 @@ impl GraphFormatter {
                 if center.is_none() {
                     center = Some((entity_type.to_string(), id));
                 }
-                let properties = Self::extract_node_properties(row, &node.alias, edge_prefixes);
+                let properties = Self::extract_node_properties(row, &node.alias);
                 let key = (entity_type.to_string(), id);
                 node_map.entry(key).or_insert_with(|| GraphNode {
                     entity_type: entity_type.to_string(),
