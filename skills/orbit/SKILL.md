@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.8
+version: 0.35.9
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
@@ -74,7 +74,7 @@ Resolve a user question in at most 5 query attempts, validation errors included.
 
 ## Reporting results
 
-Orbit answers come from graph queries, not an authoritative source. Show the query body and its coverage gaps with every result. Full guidance: [`references/reporting.md`](references/reporting.md).
+Orbit answers come from graph queries, not an authoritative source. Flag known coverage gaps inline when they affect the result. Full guidance: [`references/reporting.md`](references/reporting.md).
 
 <!-- orbit:include local:quick-start -->
 
