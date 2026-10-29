@@ -102,6 +102,7 @@ fn install_plugin(
         return Ok(());
     }
 
+    refuse_symlinks(target, &dir)?;
     let previous = read_manifest(&dir)?;
     let mut manifest = BTreeMap::new();
     let mut written = 0;
@@ -192,6 +193,7 @@ fn install_plugin(
 
 fn remove_plugin(plugin: &PluginSpec, target: &Target, report: &mut Report) -> Result<()> {
     let (dir, dir_label) = target.resolve(&plugin.dir)?;
+    refuse_symlinks(target, &dir)?;
     if dir.join(MANIFEST).is_file() {
         let mut kept = 0;
         for (relative, expected) in read_manifest(&dir)? {
@@ -262,6 +264,33 @@ fn read_manifest(dir: &Path) -> Result<BTreeMap<String, String>> {
         );
     }
     Ok(entries)
+}
+
+fn refuse_symlinks(target: &Target, dir: &Path) -> Result<()> {
+    let Target::Project(root) = target else {
+        return Ok(());
+    };
+    let relative = dir.strip_prefix(root).unwrap_or(Path::new(""));
+    let mut path = root.clone();
+    let folders = relative.components().map(|part| {
+        path.push(part);
+        path.clone()
+    });
+    for link in folders.chain([dir.join(MANIFEST)]) {
+        if std::fs::symlink_metadata(&link).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            bail!(
+                "{} is a symbolic link, so the plugin would be written outside {}; replace it with a real {} and re-run",
+                link.display(),
+                root.display(),
+                if link.ends_with(MANIFEST) {
+                    "file"
+                } else {
+                    "folder"
+                },
+            );
+        }
+    }
+    Ok(())
 }
 
 fn inside(dir: &Path, path: &Path) -> bool {

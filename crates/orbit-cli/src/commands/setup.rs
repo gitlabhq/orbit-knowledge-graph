@@ -1661,6 +1661,75 @@ mod tests {
         assert!(victim.is_file());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_plugin_folder_or_manifest_is_refused_and_nothing_leaves_the_project() {
+        use std::os::unix::fs::symlink;
+        type Shape = (&'static str, fn(&Path, &Path));
+        let shapes: [Shape; 4] = [
+            ("the plugin folder", |project, outside| {
+                std::fs::create_dir_all(project.join(".claude/orbit")).unwrap();
+                symlink(outside, project.join(".claude/orbit/claude_plugin")).unwrap();
+            }),
+            ("a .claude folder with no plugin yet", |project, outside| {
+                symlink(outside, project.join(".claude")).unwrap();
+            }),
+            (
+                "a .claude/orbit folder with no plugin yet",
+                |project, outside| {
+                    std::fs::create_dir_all(project.join(".claude")).unwrap();
+                    symlink(outside, project.join(".claude/orbit")).unwrap();
+                },
+            ),
+            ("the manifest", |project, outside| {
+                install_default(&["claude"], project);
+                let manifest = project.join(".claude/orbit/claude_plugin/.orbit-setup.json");
+                std::fs::remove_file(&manifest).unwrap();
+                symlink(outside.join("victim.json"), manifest).unwrap();
+            }),
+        ];
+        for (name, make_link) in shapes {
+            for removing in [false, true] {
+                let repo = tempfile::tempdir().unwrap();
+                let outside = tempfile::tempdir().unwrap();
+                std::fs::write(outside.path().join("victim.json"), "keep\n").unwrap();
+                std::fs::write(outside.path().join(".gitignore"), "keep\n").unwrap();
+                make_link(repo.path(), outside.path());
+                let result = if removing {
+                    uninstall(
+                        options_for(&["claude"]),
+                        project(repo.path()),
+                        &bare_machine(),
+                    )
+                } else {
+                    install(
+                        options_for(&["claude"]),
+                        project(repo.path()),
+                        &bare_machine(),
+                    )
+                };
+                assert!(result.is_err(), "{name}, uninstall: {removing}");
+                for plugin_entry in [
+                    "gitlab-orbit",
+                    ".claude-plugin",
+                    ".orbit-setup.json",
+                    "orbit",
+                    "claude_plugin",
+                ] {
+                    let leaked = outside.path().join(plugin_entry).exists();
+                    assert!(
+                        !leaked,
+                        "{plugin_entry} written by {name}, uninstall: {removing}"
+                    );
+                }
+                for file in ["victim.json", ".gitignore"] {
+                    let kept = std::fs::read_to_string(outside.path().join(file)).unwrap();
+                    assert_eq!(kept, "keep\n", "{name}, uninstall: {removing}");
+                }
+            }
+        }
+    }
+
     fn sha2_hex(bytes: &[u8]) -> String {
         use sha2::{Digest, Sha256};
         Sha256::digest(bytes)
