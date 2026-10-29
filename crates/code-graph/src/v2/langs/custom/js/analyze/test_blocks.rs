@@ -1,3 +1,4 @@
+use orbit_utils::strings::truncate_bytes;
 use oxc::ast::AstKind;
 use oxc::ast::ast::{Argument, CallExpression, Expression};
 use oxc::span::GetSpan;
@@ -39,7 +40,8 @@ fn description(call: &CallExpression<'_>) -> Option<String> {
             Argument::ArrowFunctionExpression(_) | Argument::FunctionExpression(_)
         )
     });
-    (has_callback && !name.is_empty()).then(|| text::cap(name, text::NAME_CAP))
+    (has_callback && !name.is_empty())
+        .then(|| truncate_bytes(&name, text::NAME_CAP, text::CUT, false).into_owned())
 }
 
 fn test_call<'a>(kind: AstKind<'a>) -> Option<(&'a CallExpression<'a>, bool, String)> {

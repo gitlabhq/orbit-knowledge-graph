@@ -1,3 +1,5 @@
+use orbit_utils::strings::truncate_bytes;
+
 pub const NAME_CAP: usize = 512;
 pub const FQN_CAP: usize = 1024;
 pub const SIGNATURE_CAP: usize = 2048;
@@ -10,7 +12,7 @@ pub const GENERATED_BY_CAP: usize = 256;
 pub const IMPORT_ALIAS_CAP: usize = 256;
 pub const LINES_MAX: usize = 64;
 
-const MARKER: char = '…';
+pub const CUT: &str = "…";
 
 pub fn collapse_whitespace(text: &str) -> String {
     let mut out = String::with_capacity(text.len().min(SIGNATURE_CAP + 8));
@@ -23,41 +25,12 @@ pub fn collapse_whitespace(text: &str) -> String {
     out
 }
 
-fn floor_boundary(text: &str, max: usize) -> usize {
-    let mut end = max.min(text.len());
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    end
-}
-
-pub fn cap(mut text: String, max: usize) -> String {
-    if text.len() <= max {
-        return text;
-    }
-    let end = floor_boundary(&text, max - MARKER.len_utf8());
-    text.truncate(end);
-    text.push(MARKER);
-    text
-}
-
-pub fn cap_at_word(mut text: String, max: usize) -> String {
-    if text.len() <= max {
-        return text;
-    }
-    let end = floor_boundary(&text, max - MARKER.len_utf8());
-    let end = text[..end].rfind(' ').filter(|&i| i > 0).unwrap_or(end);
-    text.truncate(end);
-    text.push(MARKER);
-    text
-}
-
 pub fn signature(text: &str) -> Option<String> {
     let text =
         collapse_whitespace(text.trim_end_matches(|c: char| {
             c.is_whitespace() || matches!(c, '{' | ':' | '=' | ';' | ',')
         }));
-    (!text.is_empty()).then(|| cap(text, SIGNATURE_CAP))
+    (!text.is_empty()).then(|| truncate_bytes(&text, SIGNATURE_CAP, CUT, false).into_owned())
 }
 
 pub fn parameters<'a>(items: impl IntoIterator<Item = &'a str>) -> Vec<String> {
@@ -66,14 +39,14 @@ pub fn parameters<'a>(items: impl IntoIterator<Item = &'a str>) -> Vec<String> {
         .map(collapse_whitespace)
         .filter(|p| !p.is_empty())
         .take(PARAMETERS_MAX)
-        .map(|p| cap(p, PARAMETER_CAP))
+        .map(|p| truncate_bytes(&p, PARAMETER_CAP, CUT, false).into_owned())
         .collect()
 }
 
 pub fn type_text(text: &str, max: usize) -> Option<String> {
     let text =
         collapse_whitespace(text.trim_start_matches(|c: char| c == ':' || c.is_whitespace()));
-    (!text.is_empty()).then(|| cap(text, max))
+    (!text.is_empty()).then(|| truncate_bytes(&text, max, CUT, false).into_owned())
 }
 
 pub fn doc_paragraph<'a>(lines: impl IntoIterator<Item = &'a str>) -> Option<String> {
@@ -95,7 +68,7 @@ pub fn doc_paragraph<'a>(lines: impl IntoIterator<Item = &'a str>) -> Option<Str
         }
     }
     let out = collapse_whitespace(&out);
-    (!out.is_empty()).then(|| cap_at_word(out, DOC_COMMENT_CAP))
+    (!out.is_empty()).then(|| truncate_bytes(&out, DOC_COMMENT_CAP, CUT, true).into_owned())
 }
 
 pub fn strip_comment_markers<'a>(
@@ -121,20 +94,6 @@ pub fn strip_comment_markers<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cap_cuts_on_a_char_boundary_with_a_marker() {
-        let text = "é".repeat(20);
-        let capped = cap(text, 9);
-        assert!(capped.len() <= 9);
-        assert!(capped.ends_with('…'));
-    }
-
-    #[test]
-    fn cap_at_word_cuts_after_a_word() {
-        let capped = cap_at_word("alpha beta gamma".to_string(), 12);
-        assert_eq!(capped, "alpha…");
-    }
 
     #[test]
     fn signature_collapses_whitespace() {

@@ -9,6 +9,7 @@ use crate::v2::types::{
     NodeKind, Range, Relationship, Resolution, TypeUsage, containment_relationship,
 };
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
+use orbit_utils::strings::truncate_bytes;
 
 fn common_prefix_len(a: &str, b: &str) -> usize {
     a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
@@ -1835,13 +1836,17 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
         b.col("language")?.push_str(self.language)?;
-        b.col("fqn")?.push_str(text::cap(
-            self.pool.get(self.def.fqn).to_string(),
+        b.col("fqn")?.push_str(truncate_bytes(
+            self.pool.get(self.def.fqn),
             text::FQN_CAP,
+            text::CUT,
+            false,
         ))?;
-        b.col("name")?.push_str(text::cap(
-            self.pool.get(self.def.name).to_string(),
+        b.col("name")?.push_str(truncate_bytes(
+            self.pool.get(self.def.name),
             text::NAME_CAP,
+            text::CUT,
+            false,
         ))?;
         b.col("signature")?
             .push_str(text_of(meta.and_then(|m| m.signature)).unwrap_or(""))?;
@@ -1861,7 +1866,7 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
         b.col("visibility")?.push_opt_str(visibility)?;
         b.col("generated_by")?.push_opt_str(
             text_of(meta.and_then(|m| m.generated_by))
-                .map(|g| text::cap(g.to_string(), text::GENERATED_BY_CAP)),
+                .map(|g| truncate_bytes(g, text::GENERATED_BY_CAP, text::CUT, false)),
         )?;
         write_range(b, &self.def.range)?;
         Ok(())

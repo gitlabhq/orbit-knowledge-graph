@@ -5,9 +5,11 @@ use crate::v2::dsl::types::{
     LanguageHooks, LoopRule, ReferenceRule, ScopeRule, binding, branch, loop_rule, reference,
     scope, scope_fn, scopes,
 };
+use crate::v2::types::text::{CUT, NAME_CAP};
 use crate::v2::types::{
     BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode, Modifier, Modifiers,
 };
+use orbit_utils::strings::truncate_bytes;
 use petgraph::graph::NodeIndex;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
@@ -313,7 +315,7 @@ fn ruby_example_name(node: &N<'_>) -> Option<String> {
             .collect::<String>(),
         _ => first.text().to_string(),
     };
-    (!name.is_empty()).then(|| crate::v2::types::text::cap(name, crate::v2::types::text::NAME_CAP))
+    (!name.is_empty()).then(|| truncate_bytes(&name, NAME_CAP, CUT, false).into_owned())
 }
 
 fn ruby_extract_attr_methods(

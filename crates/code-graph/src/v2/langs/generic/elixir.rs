@@ -4,7 +4,9 @@ use crate::v2::dsl::types::{
     ChainConfig, DslLanguage, FieldAccessEntry, LanguageHooks, ReferenceRule, ScopeRule, reference,
     scope,
 };
+use crate::v2::types::text::{CUT, NAME_CAP};
 use crate::v2::types::{CanonicalImport, DefKind, ImportBindingKind, ImportMode, Visibility};
+use orbit_utils::strings::truncate_bytes;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Extract, child_of_kind, field, text};
@@ -109,7 +111,7 @@ fn elixir_test_name(node: &N<'_>) -> Option<String> {
     if string.kind() != "string" {
         return None;
     }
-    elixir_string(&string).map(|n| crate::v2::types::text::cap(n, crate::v2::types::text::NAME_CAP))
+    elixir_string(&string).map(|n| truncate_bytes(&n, NAME_CAP, CUT, false).into_owned())
 }
 
 fn elixir_defstruct_fields(
