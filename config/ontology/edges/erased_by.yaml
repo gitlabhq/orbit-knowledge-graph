@@ -1,0 +1,9 @@
+description: User who erased a job log and artifacts
+table: gl_ci_edge
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Job, id: id }
+    fk_column: erased_by_id
+    scope: prune_to_target
+    description: "User erased job."

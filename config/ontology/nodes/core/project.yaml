@@ -96,6 +96,132 @@ properties:
     nullable: true
     description: "Last activity timestamp."
 
+  pending_delete:
+    type: boolean
+    source: pending_delete
+    nullable: true
+    description: "Deletion is in progress."
+
+  marked_for_deletion_at:
+    type: date
+    source: marked_for_deletion_at
+    nullable: true
+    description: "Date the project was marked for deletion."
+
+  hidden:
+    type: boolean
+    source: hidden
+    nullable: false
+    admin_only: true
+    description: "Hidden because its creator is banned. Admins only."
+
+  project_namespace_id:
+    type: int64
+    source: project_namespace_id
+    nullable: true
+    description: "ID of the project namespace row."
+
+  last_repository_updated_at:
+    type: timestamp
+    source: last_repository_updated_at
+    nullable: true
+    description: "Last repository push timestamp."
+
+  mirror:
+    type: boolean
+    source: mirror
+    nullable: false
+    description: "Pull mirroring is enabled."
+
+  mirror_user_id:
+    type: int64
+    source: mirror_user_id
+    nullable: true
+    description: "ID of the user the pull mirror runs as. Null when mirroring is off."
+
+  request_access_enabled:
+    type: boolean
+    source: request_access_enabled
+    nullable: false
+    description: "Users can request access to the project."
+
+  shared_runners_enabled:
+    type: boolean
+    source: shared_runners_enabled
+    nullable: false
+    description: "Instance runners are enabled for the project."
+
+  public_builds:
+    type: boolean
+    source: public_builds
+    nullable: false
+    description: "Job logs and artifacts are visible to everyone with project access."
+
+  packages_enabled:
+    type: boolean
+    source: packages_enabled
+    nullable: true
+    description: "Package registry is enabled."
+
+  ci_config_path:
+    type: string
+    source: ci_config_path
+    nullable: true
+    description: "Custom CI configuration file path. Null means .gitlab-ci.yml."
+
+  only_allow_merge_if_pipeline_succeeds:
+    type: boolean
+    source: only_allow_merge_if_pipeline_succeeds
+    nullable: false
+    description: "Merge requests need a successful pipeline to merge."
+
+  only_allow_merge_if_all_discussions_are_resolved:
+    type: boolean
+    source: only_allow_merge_if_all_discussions_are_resolved
+    nullable: true
+    description: "Merge requests need all threads resolved to merge."
+
+  merge_method:
+    type: enum
+    source: merge_method
+    nullable: false
+    description: "Merge method for merge requests."
+    enum_type: string
+    values:
+      0: merge
+      1: rebase_merge
+      2: ff
+
+  remove_source_branch_after_merge:
+    type: boolean
+    source: remove_source_branch_after_merge
+    nullable: true
+    description: "Source branch deletion is selected by default on new merge requests."
+
+  resolve_outdated_diff_discussions:
+    type: boolean
+    source: resolve_outdated_diff_discussions
+    nullable: true
+    description: "Diff threads resolve when a push changes their lines."
+
+  autoclose_referenced_issues:
+    type: boolean
+    source: autoclose_referenced_issues
+    nullable: true
+    description: "Merging to the default branch closes referenced issues."
+
+  suggestion_commit_message:
+    type: string
+    source: suggestion_commit_message
+    nullable: true
+    description: "Commit message template for applied suggestions."
+
+  approvals_before_merge:
+    type: int64
+    source: approvals_before_merge
+    nullable: false
+    description: "Project-level number of approvals a merge request needs."
+
   traversal_path:
     type: string
     source: traversal_path
@@ -140,6 +266,14 @@ pipelines:
             kind: Project
           label: CONTAINS
           mutable: true
+        - from:
+            field: marked_for_deletion_by_user_id
+            kind: User
+          to:
+            field: id
+            kind: Project
+          label: MARKED_FOR_DELETION_BY
+          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:
@@ -155,6 +289,26 @@ storage:
     - {name: archived, type: "Nullable(Bool)"}
     - {name: star_count, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: last_activity_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: pending_delete, type: "Nullable(Bool)"}
+    - {name: marked_for_deletion_at, type: "Date32", default: "'1970-01-01'", codec: ["Delta(4)", "ZSTD(1)"]}
+    - {name: hidden, type: "Bool", default: "false"}
+    - {name: project_namespace_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: last_repository_updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: mirror, type: "Bool", default: "false"}
+    - {name: mirror_user_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: request_access_enabled, type: "Bool", default: "false"}
+    - {name: shared_runners_enabled, type: "Bool", default: "false"}
+    - {name: public_builds, type: "Bool", default: "false"}
+    - {name: packages_enabled, type: "Nullable(Bool)"}
+    - {name: ci_config_path, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: only_allow_merge_if_pipeline_succeeds, type: "Bool", default: "false"}
+    - {name: only_allow_merge_if_all_discussions_are_resolved, type: "Nullable(Bool)"}
+    - {name: merge_method, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: remove_source_branch_after_merge, type: "Nullable(Bool)"}
+    - {name: resolve_outdated_diff_discussions, type: "Nullable(Bool)"}
+    - {name: autoclose_referenced_issues, type: "Nullable(Bool)"}
+    - {name: suggestion_commit_message, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: approvals_before_merge, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}

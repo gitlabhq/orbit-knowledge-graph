@@ -1,0 +1,27 @@
+description: Groups index lifecycle state, reader-visible settings, deletion schedule, and the CREATOR edge from namespace details
+scope: { namespace: 100 }
+
+seed:
+  siphon_namespaces:
+    - { id: 100, name: root, path: root, type: Group, visibility_level: 20, owner_id: 1, traversal_ids: [100], state: 0, avatar: logo.png, request_access_enabled: true, shared_runners_enabled: true, require_two_factor_authentication: true, membership_lock: true, share_with_group_lock: false, mentions_disabled: true, auto_devops_enabled: null, lfs_enabled: false, project_creation_level: 2, subgroup_creation_level: 0, default_branch_protection: 2, created_at: "2023-01-01", updated_at: "2024-01-15" }
+    - { id: 101, name: old, path: old, type: Group, visibility_level: 0, owner_id: 1, parent_id: 100, traversal_ids: [100, 101], state: 2, request_access_enabled: false, shared_runners_enabled: false, project_creation_level: null, subgroup_creation_level: 1, default_branch_protection: null, created_at: "2023-01-01", updated_at: "2024-01-15" }
+  siphon_namespace_details:
+    - { namespace_id: 100, creator_id: 7, traversal_path: "1/100/" }
+    - { namespace_id: 101, creator_id: null, deletion_scheduled_at: "2024-01-10 00:00:00", traversal_path: "1/100/101/" }
+  namespace_traversal_paths:
+    - { id: 100, traversal_path: "1/100/" }
+    - { id: 101, traversal_path: "1/100/101/" }
+
+expect:
+  nodes:
+    gl_group:
+      rows:
+        - { id: 100, state: ancestor_inherited, avatar_url: logo.png, request_access_enabled: true, shared_runners_enabled: true, require_two_factor_authentication: true, membership_lock: true, share_with_group_lock: false, mentions_disabled: true, auto_devops_enabled: null, lfs_enabled: false, project_creation_level: developer, subgroup_creation_level: owner, default_branch_protection: full }
+        - { id: 101, state: deletion_scheduled, request_access_enabled: false, shared_runners_enabled: false, project_creation_level: null, subgroup_creation_level: maintainer, default_branch_protection: null }
+  edges:
+    - kind: CREATOR
+      from: User
+      to: Group
+      count: 1
+      rows:
+        - { source_id: 7, target_id: 100, traversal_path: "1/100/" }

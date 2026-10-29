@@ -1,0 +1,50 @@
+WITH
+  _batch AS (SELECT
+    id,
+    workflow_id,
+    note_id,
+    link_type,
+    traversal_path,
+    {{version_column}} AS _version,
+    {{deleted_column}} AS _deleted
+  FROM siphon_duo_workflows_workflow_notes
+  WHERE startsWith(traversal_path, {traversal_path:String})
+    AND (project_id IS NOT NULL OR {{deleted_column}}) {{filters}}
+  ORDER BY traversal_path, workflow_id, id
+  LIMIT {{batch_size}}),
+  _prev AS (SELECT
+    id,
+    argMax(workflow_id, {{version_column}}) AS prev_workflow_id,
+    argMax(note_id, {{version_column}}) AS prev_note_id,
+    argMax(link_type, {{version_column}}) AS prev_link_type
+  FROM siphon_duo_workflows_workflow_notes
+  WHERE (traversal_path, workflow_id, id) IN (SELECT traversal_path, workflow_id, id FROM _batch WHERE _deleted)
+    AND {{deleted_column}} = false
+  GROUP BY id),
+  _sessions AS (SELECT
+    workflow_id,
+    argMax(id, {{version_column}}) AS session_id
+  FROM siphon_ai_governance_sessions
+  WHERE startsWith(traversal_path, {traversal_path:String})
+    AND source = 0
+    AND project_id IS NOT NULL
+    AND {{deleted_column}} = false
+    AND workflow_id IN (SELECT workflow_id FROM _batch)
+  GROUP BY workflow_id)
+SELECT
+  _batch.traversal_path AS traversal_path,
+  _batch.id AS id,
+  _batch.workflow_id AS workflow_id,
+  nullIf(_sessions.session_id, 0) AS source_id,
+  if(if(_batch._deleted, _prev.prev_link_type, _batch.link_type) = 1,
+     nullIf(if(_batch._deleted, _prev.prev_note_id, _batch.note_id), 0),
+     NULL) AS created_note_id,
+  if(if(_batch._deleted, _prev.prev_link_type, _batch.link_type) = 2,
+     nullIf(if(_batch._deleted, _prev.prev_note_id, _batch.note_id), 0),
+     NULL) AS triggering_note_id,
+  _batch._version AS _version,
+  _batch._deleted AS _deleted
+FROM _batch
+LEFT JOIN _prev ON _prev.id = _batch.id
+LEFT JOIN _sessions ON _sessions.workflow_id = if(_batch._deleted, _prev.prev_workflow_id, _batch.workflow_id)
+ORDER BY traversal_path, workflow_id, id

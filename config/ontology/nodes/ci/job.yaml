@@ -306,6 +306,69 @@ properties:
     nullable: true
     description: "Pipeline ID that auto-canceled this job."
 
+  protected:
+    type: boolean
+    source: protected
+    nullable: true
+    description: "Whether the job runs on a protected ref."
+
+  stage_idx:
+    type: int64
+    source: stage_idx
+    nullable: true
+    mutable: false
+    description: "Stage position in the pipeline."
+
+  scheduled_at:
+    type: timestamp
+    source: scheduled_at
+    nullable: true
+    description: "Start time of a delayed job."
+
+  erased_at:
+    type: timestamp
+    source: erased_at
+    nullable: true
+    description: "Log and artifact erase timestamp."
+
+  artifacts_expire_at:
+    type: timestamp
+    source: artifacts_expire_at
+    nullable: true
+    description: "Artifact expiry timestamp."
+
+  resource_group_id:
+    type: int64
+    source: resource_group_id
+    nullable: true
+    mutable: false
+    description: "Resource group ID that limits concurrency."
+
+  description:
+    type: string
+    source: description
+    nullable: true
+    description: "Description of an external commit status."
+
+  target_url:
+    type: string
+    source: target_url
+    nullable: true
+    description: "Link of an external commit status."
+
+  erased_by_id:
+    type: int64
+    source: erased_by_id
+    nullable: true
+    description: "User ID who erased the job."
+
+  scoped_user_id:
+    type: int64
+    source: scoped_user_id
+    nullable: true
+    mutable: false
+    description: "User ID that a composite identity job acts for."
+
   traversal_path:
     type: string
     source: traversal_path
@@ -383,6 +446,20 @@ pipelines:
             field: auto_canceled_by_id
             kind: Pipeline
           label: AUTO_CANCELED_BY
+        - from:
+            field: erased_by_id
+            kind: User
+          to:
+            field: id
+            kind: Job
+          label: ERASED_BY
+        - from:
+            field: id
+            kind: Job
+          to:
+            field: scoped_user_id
+            kind: User
+          label: SCOPED_TO
 storage:
   primary_key: [traversal_path, id]
   settings:
@@ -417,6 +494,16 @@ storage:
     - {name: stage_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: pipeline_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: protected, type: "Nullable(Bool)"}
+    - {name: stage_idx, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: scheduled_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: erased_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: artifacts_expire_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: resource_group_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: description, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: target_url, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: erased_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: scoped_user_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
@@ -434,3 +521,7 @@ storage:
     - {name: idx_runner_id, column: runner_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_auto_canceled_by_id, column: auto_canceled_by_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_failure_reason, column: failure_reason, type: "set(64)", granularity: 2}
+    - {name: idx_protected, column: protected, type: "minmax", granularity: 1}
+    - {name: idx_resource_group_id, column: resource_group_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_erased_by_id, column: erased_by_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_scoped_user_id, column: scoped_user_id, type: "bloom_filter(0.0001)", granularity: 1}

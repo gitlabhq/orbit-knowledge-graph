@@ -1,0 +1,14 @@
+description: Labels carry their scope, archived, lock-on-merge flags
+scope: { namespace: 100 }
+
+seed:
+  siphon_labels:
+    - { id: 1, title: bug, color: "#ff0000", description: "", type: ProjectLabel, project_id: 1000, archived: true, lock_on_merge: false, traversal_path: "1/100/" }
+    - { id: 2, title: workflow, color: "#00ff00", description: "", type: GroupLabel, group_id: 100, archived: false, lock_on_merge: true, traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_label:
+      rows:
+        - { id: 1, scope: ProjectLabel, archived: true, lock_on_merge: false }
+        - { id: 2, scope: GroupLabel, archived: false, lock_on_merge: true }

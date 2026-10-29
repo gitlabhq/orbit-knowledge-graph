@@ -1,0 +1,29 @@
+description: Notes carry a type, the diff file and lines from YAML or JSON positions, and RESOLVED_BY and UPDATED_BY edges
+scope: { namespace: 100 }
+
+seed:
+  siphon_notes:
+    - { id: 1, note: Plain comment, noteable_type: MergeRequest, noteable_id: 100, author_id: 1, system: false, internal: false, type: "", imported_from: 4, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+    - { id: 2, note: Diff comment, noteable_type: MergeRequest, noteable_id: 100, author_id: 1, system: false, internal: false, type: DiffNote, position: "--- !ruby/object:Gitlab::Diff::Position\nattributes:\n  :old_path: app/models/user.rb\n  :new_path: app/models/user.rb\n  :old_line: \n  :new_line: 17\n  :base_sha: aaa\n", resolved_by_id: 7, resolved_by_push: false, resolved_at: "2024-01-16 10:00:00", review_id: 55, updated_by_id: 8, last_edited_at: "2024-01-16 09:00:00", traversal_path: "1/100/", created_at: "2024-01-16", updated_at: "2024-01-16" }
+    - { id: 3, note: Quoted path comment, noteable_type: MergeRequest, noteable_id: 100, author_id: 1, system: false, internal: false, type: DiffNote, position: "--- !ruby/object:Gitlab::Diff::Position\nattributes:\n  :old_path: \".gitlab-ci.yml\"\n  :new_path: \".gitlab-ci.yml\"\n  :old_line: 4\n  :new_line: \n", traversal_path: "1/100/", created_at: "2024-01-17", updated_at: "2024-01-17" }
+    - { id: 4, note: Legacy diff comment, noteable_type: MergeRequest, noteable_id: 100, author_id: 1, system: false, internal: false, type: LegacyDiffNote, position: '{"old_path":"CHANGELOG","new_path":"CHANGELOG","old_line":153,"new_line":154}', traversal_path: "1/100/", created_at: "2024-01-18", updated_at: "2024-01-18" }
+    - { id: 5, note: Thread reply, noteable_type: Issue, noteable_id: 200, author_id: 1, system: false, internal: false, type: DiscussionNote, position: "{}", traversal_path: "1/100/", created_at: "2024-01-19", updated_at: "2024-01-19" }
+
+expect:
+  nodes:
+    gl_note:
+      rows:
+        - { id: 1, type: Note, file_path: null, imported_from: github }
+        - { id: 2, type: DiffNote, file_path: app/models/user.rb, new_line: 17, old_line: null, resolved_by_id: 7, resolved_by_push: false, review_id: 55, updated_by_id: 8, imported_from: none }
+        - { id: 3, type: DiffNote, file_path: .gitlab-ci.yml, new_line: null, old_line: 4 }
+        - { id: 4, type: LegacyDiffNote, file_path: CHANGELOG, new_line: 154, old_line: 153 }
+        - { id: 5, type: DiscussionNote, file_path: null, new_line: null }
+  edges:
+    - kind: RESOLVED_BY
+      count: 1
+      rows:
+        - { source_id: 7, source_kind: User, target_id: 2, target_kind: Note }
+    - kind: UPDATED_BY
+      count: 1
+      rows:
+        - { source_id: 8, source_kind: User, target_id: 2, target_kind: Note }

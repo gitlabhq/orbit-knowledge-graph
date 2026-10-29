@@ -1,0 +1,7 @@
+description: User who marked an entity for deletion
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Project, id: id }
+    scope: prune_to_target
+    description: "User marked project for deletion."

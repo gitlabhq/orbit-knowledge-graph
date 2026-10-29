@@ -1,0 +1,8 @@
+description: Work item was moved to another work item
+
+variants:
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: WorkItem, id: id }
+    fk_column: moved_to_id
+    scope: prune_to_source
+    description: "Work item was moved to another work item."

@@ -1,0 +1,9 @@
+description: Job that a composite identity runs for a user
+table: gl_ci_edge
+
+variants:
+  - from_node: { type: Job, id: id }
+    to_node: { type: User, id: id }
+    fk_column: scoped_user_id
+    scope: prune_to_source
+    description: "Job is scoped to user."

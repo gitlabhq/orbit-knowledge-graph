@@ -1,6 +1,6 @@
 # config/ontology/edges/child_of.yaml
 
-description: Pipeline was triggered as a child of another pipeline (downstream pipeline relationship)
+description: Pipeline or Duo workflow was started as a child of another of the same type
 table: gl_ci_edge
 
 variants:
@@ -8,6 +8,13 @@ variants:
     to_node: { type: Pipeline, id: id }
     scope: prune_to_source
     description: "Pipeline is a downstream child of the source pipeline."
+
+  - from_node: { type: DuoWorkflow, id: id }
+    to_node: { type: DuoWorkflow, id: id }
+    table: gl_edge
+    fk_column: parent_workflow_id
+    scope: prune_to_source
+    description: "Duo workflow was started by the parent workflow."
 
 indexer:
   reindex: [siphon_ci_sources_pipelines]

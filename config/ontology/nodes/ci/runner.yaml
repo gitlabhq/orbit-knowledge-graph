@@ -59,18 +59,21 @@ properties:
     type: boolean
     source: locked
     nullable: false
+    admin_only: true
     description: "Whether locked to its assignment."
 
   run_untagged:
     type: boolean
     source: run_untagged
     nullable: false
+    admin_only: true
     description: "Whether it picks up untagged jobs."
 
   access_level:
     type: enum
     source: access_level
     nullable: false
+    admin_only: true
     description: "Whether restricted to protected refs."
     values:
       0: not_protected
@@ -80,6 +83,7 @@ properties:
     type: int64
     source: maximum_timeout
     nullable: true
+    admin_only: true
     description: "Max job timeout in seconds."
 
   organization_id:
@@ -87,6 +91,42 @@ properties:
     source: organization_id
     nullable: true
     description: "Cell organization ID."
+
+  registration_type:
+    type: enum
+    source: registration_type
+    nullable: false
+    mutable: false
+    admin_only: true
+    description: "Registration method."
+    values:
+      0: registration_token
+      1: authenticated_user
+
+  creation_state:
+    type: enum
+    source: creation_state
+    nullable: false
+    admin_only: true
+    description: "Whether runner creation finished."
+    values:
+      0: started
+      100: finished
+
+  maintainer_note:
+    type: string
+    source: maintainer_note
+    nullable: false
+    admin_only: true
+    description: "Maintenance note."
+
+  creator_id:
+    type: int64
+    source: creator_id
+    nullable: true
+    mutable: false
+    admin_only: true
+    description: "User ID who created the runner."
 
   created_at:
     type: timestamp
@@ -99,7 +139,15 @@ properties:
     type: timestamp
     source: contacted_at
     nullable: true
+    admin_only: true
     description: "Last contact timestamp."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    admin_only: true
+    description: "Last update timestamp."
 
 pipelines:
   - name: Runner
@@ -127,6 +175,11 @@ storage:
     - {name: organization_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: contacted_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: registration_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: creation_state, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: maintainer_note, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: creator_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_runner_type, column: runner_type, type: "set(4)", granularity: 2}

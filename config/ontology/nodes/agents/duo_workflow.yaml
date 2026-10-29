@@ -50,6 +50,92 @@ properties:
       8: tool_call_approval_required
       9: idle
 
+  user_id:
+    type: int64
+    source: user_id
+    nullable: false
+    mutable: false
+    admin_only: true
+    description: "ID of the user who started the workflow. Admins only."
+
+  parent_workflow_id:
+    type: int64
+    source: parent_workflow_id
+    nullable: true
+    mutable: false
+    description: "ID of the workflow that started this workflow, if any."
+
+  environment:
+    type: enum
+    source: environment
+    nullable: true
+    description: "Client environment the workflow runs in."
+    values:
+      1: ide
+      2: web
+      3: chat_partial
+      4: chat
+      5: ambient
+      6: external
+
+  source_type:
+    type: enum
+    source: source_type
+    nullable: true
+    description: "Entry point that created the workflow."
+    values:
+      1: slack
+      2: mcp
+      3: merge_request_code_conflict
+      4: merge_request_dependency_bump
+      5: merge_request_fix_pipeline
+      6: merge_request_resolve_discussion
+      7: work_item_to_merge_request
+      8: fix_pipeline
+      9: convert_platform_ci_pipeline
+      10: duo_cli_interactive
+      11: duo_cli_run
+      12: duo_cli_acp
+      13: ide_extension
+      14: flow_trigger
+      15: work_item_plan_to_merge_request
+      16: web_chat
+      17: work_item_workplan
+
+  trigger_event_type:
+    type: enum
+    source: trigger_event_type
+    nullable: true
+    description: "Event that started the workflow from a flow trigger."
+    values:
+      0: mention
+      1: assign
+      2: assign_reviewer
+      3: pipeline_hooks
+      4: merge_request_ready
+      5: merge_request_code_conflict
+      6: merge_request
+      7: work_item
+      8: commit_to_default_branch
+      9: scheduled
+
+  drop_reason:
+    type: enum
+    source: drop_reason
+    nullable: true
+    description: "Reason the workflow was force-failed. Null when it was not."
+    enum_type: string
+    values:
+      0: job_failed
+      1: no_status_reported
+      2: no_activity
+      3: workload_not_created
+      4: api_reported
+      5: preconditions_not_met
+      6: start_failed
+      7: token_rejected
+
+
   title:
     type: string
     source: title
@@ -99,6 +185,20 @@ pipelines:
             field: project_id
             kind: Project
           label: IN_PROJECT
+        - from:
+            field: user_id
+            kind: User
+          to:
+            field: id
+            kind: DuoWorkflow
+          label: STARTED_BY
+        - from:
+            field: id
+            kind: DuoWorkflow
+          to:
+            field: parent_workflow_id
+            kind: DuoWorkflow
+          label: CHILD_OF
 storage:
   primary_key: [traversal_path, id]
   settings:
@@ -107,6 +207,12 @@ storage:
     - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: project_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: status, type: "LowCardinality(String)", default: "'created'", codec: ["LZ4"]}
+    - {name: user_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: parent_workflow_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: environment, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: source_type, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: trigger_event_type, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: drop_reason, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
     - {name: title, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -116,3 +222,9 @@ storage:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_status, column: status, type: "set(16)", granularity: 2}
+    - {name: idx_user_id, column: user_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_parent_workflow_id, column: parent_workflow_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_environment, column: environment, type: "set(8)", granularity: 2}
+    - {name: idx_source_type, column: source_type, type: "set(32)", granularity: 2}
+    - {name: idx_trigger_event_type, column: trigger_event_type, type: "set(16)", granularity: 2}
+    - {name: idx_drop_reason, column: drop_reason, type: "set(16)", granularity: 2}

@@ -6,6 +6,7 @@ SELECT
   nullIf(JSONExtractString(finding_data, 'description'), '') AS description,
   nullIf(JSONExtractString(finding_data, 'solution'), '') AS solution,
   severity,
+  nullIf(scanner_reported_severity, 0) AS scanner_reported_severity,
   deduplicated,
   toString(overridden_uuid) AS overridden_uuid,
   project_id,

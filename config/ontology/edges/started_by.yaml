@@ -1,0 +1,8 @@
+description: User started a Duo workflow
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: DuoWorkflow, id: id }
+    fk_column: user_id
+    scope: prune_to_target
+    description: "User started the Duo workflow."

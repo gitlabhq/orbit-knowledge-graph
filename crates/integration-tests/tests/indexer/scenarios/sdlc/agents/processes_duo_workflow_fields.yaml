@@ -1,0 +1,27 @@
+description: Duo workflows index environment, source_type, trigger_event_type, and drop_reason as mapped enums, STARTED_BY edges from user_id, and CHILD_OF edges from parent_workflow_id
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_duo_workflows_workflows:
+    - { id: 1, user_id: 7, project_id: 1000, status: 3, goal: Parent flow, environment: 5, source_type: 14, trigger_event_type: 0, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 11:00:00", traversal_path: "1/100/1000/" }
+    - { id: 2, user_id: 8, project_id: 1000, status: 4, goal: Child flow, parent_workflow_id: 1, drop_reason: job_failed, created_at: "2024-01-15 12:00:00", updated_at: "2024-01-15 12:00:00", traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_duo_workflow:
+      rows:
+        - { id: 1, user_id: 7, parent_workflow_id: null, environment: ambient, source_type: flow_trigger, trigger_event_type: mention, drop_reason: null }
+        - { id: 2, user_id: 8, parent_workflow_id: 1, environment: null, source_type: null, trigger_event_type: null, status: failed, drop_reason: job_failed }
+  edges:
+    - kind: STARTED_BY
+      from: User
+      to: DuoWorkflow
+      count: 2
+      rows:
+        - { source_id: 7, target_id: 1, traversal_path: "1/100/1000/" }
+        - { source_id: 8, target_id: 2, traversal_path: "1/100/1000/" }
+    - { kind: CHILD_OF, from: DuoWorkflow, to: DuoWorkflow, count: 1, rows: [{ source_id: 2, target_id: 1, traversal_path: "1/100/1000/" }] }

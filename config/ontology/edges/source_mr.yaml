@@ -1,0 +1,23 @@
+description: Agent session was started against a merge request
+
+variants:
+  - from_node: { type: AgentSession, id: id }
+    to_node: { type: MergeRequest, id: id }
+    scope: prune_to_source
+    description: "Agent session was started against the merge request."
+
+indexer:
+  reindex: [siphon_duo_workflows_workflow_merge_requests, siphon_ai_governance_sessions]
+pipelines:
+  - name: SOURCE_MR_siphon_duo_workflows_workflow_merge_requests
+    extract:
+      type: clickhouse
+      tables: [siphon_duo_workflows_workflow_merge_requests, siphon_ai_governance_sessions]
+      order_by: [traversal_path, workflow_id, id]
+      query: created_mr.sql.j2
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: source_id, kind: AgentSession }
+          to: { field: source_merge_request_id, kind: MergeRequest }
+          label: SOURCE_MR

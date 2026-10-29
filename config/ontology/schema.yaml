@@ -421,6 +421,8 @@ edges:
   MEMBER_OF: edges/member_of.yaml
   CREATOR: edges/creator.yaml
   OWNER: edges/owner.yaml
+  MARKED_FOR_DELETION_BY: edges/marked_for_deletion_by.yaml
+  BANNED_FROM: edges/banned_from.yaml
   AUTHORED: edges/authored.yaml
   IN_PROJECT: edges/in_project.yaml
   HAS_PACKAGE_FILE: edges/has_package_file.yaml
@@ -465,9 +467,15 @@ edges:
   HAS_LATEST_DIFF: edges/has_latest_diff.yaml
   UPDATED_BY: edges/updated_by.yaml
   LAST_EDITED_BY: edges/last_edited_by.yaml
+  MOVED_TO: edges/moved_to.yaml
+  DUPLICATE_OF: edges/duplicate_of.yaml
+  AWARDED: edges/awarded.yaml
   AUTO_CANCELED_BY: edges/auto_canceled_by.yaml
   TRIGGERED_BY_PIPELINE: edges/triggered_by_pipeline.yaml
   RUNS_ON: edges/runs_on.yaml
+  ERASED_BY: edges/erased_by.yaml
+  SCOPED_TO: edges/scoped_to.yaml
+  OWNED_BY: edges/owned_by.yaml
   CHILD_OF: edges/child_of.yaml
   TRIGGERS_PIPELINE: edges/triggers_pipeline.yaml
   BUILT_BY: edges/built_by.yaml
@@ -476,5 +484,13 @@ edges:
   MERGED_AT_COMMIT: edges/merged_at_commit.yaml
   DECLARES_DEPENDENCY: edges/declares_dependency.yaml
   HAS_VULNERABILITY: edges/has_vulnerability.yaml
+  FIRST_DETECTED_IN: edges/first_detected_in.yaml
+  LAST_DETECTED_IN: edges/last_detected_in.yaml
   HAS_WORKFLOW: edges/has_workflow.yaml
+  WORKED_ON: edges/worked_on.yaml
+  CREATED_WORK_ITEM: edges/created_work_item.yaml
+  TRIGGERED_BY_NOTE: edges/triggered_by_note.yaml
+  CREATED_NOTE: edges/created_note.yaml
+  SOURCE_MR: edges/source_mr.yaml
+  STARTED_BY: edges/started_by.yaml
   HAS_ROLE: edges/has_role.yaml

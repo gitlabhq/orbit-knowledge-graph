@@ -1,0 +1,52 @@
+SELECT
+  id,
+  note,
+  noteable_type,
+  noteable_id,
+  line_code,
+  created_at,
+  updated_at,
+  discussion_id,
+  resolved_at,
+  internal,
+  confidential,
+  commit_id,
+  st_diff,
+  project_id,
+  author_id,
+  if(type = '', 'Note', type) AS note_type,
+  resolved_by_id,
+  resolved_by_push,
+  review_id,
+  updated_by_id,
+  last_edited_at,
+  imported_from,
+  multiIf(
+    startsWith(position, '---'),
+    nullIf(replaceRegexpOne(extract(position, '\n  :new_path: ([^\n]*)'), '^"(.*)"$|^\'(.*)\'$', '\\1\\2'), ''),
+    startsWith(position, '{"'),
+    JSONExtract(position, 'new_path', 'Nullable(String)'),
+    NULL
+  ) AS file_path,
+  multiIf(
+    startsWith(position, '---'),
+    toInt64OrNull(extract(position, '\n  :new_line: ([0-9]+)')),
+    startsWith(position, '{"'),
+    JSONExtract(position, 'new_line', 'Nullable(Int64)'),
+    NULL
+  ) AS new_line,
+  multiIf(
+    startsWith(position, '---'),
+    toInt64OrNull(extract(position, '\n  :old_line: ([0-9]+)')),
+    startsWith(position, '{"'),
+    JSONExtract(position, 'old_line', 'Nullable(Int64)'),
+    NULL
+  ) AS old_line,
+  traversal_path,
+  {{version_column}} AS _version,
+  {{deleted_column}} AS _deleted
+FROM siphon_notes
+WHERE startsWith(traversal_path, {traversal_path:String})
+  AND (system = false OR {{deleted_column}}) {{filters}}
+ORDER BY traversal_path, noteable_type, noteable_id, id
+LIMIT {{batch_size}}

@@ -237,6 +237,7 @@ cases:
         APPROVED:
           - [1, 2002]
         ASSIGNED: []
+        AWARDED: []
         CLOSED: []
         LAST_EDITED_BY: []
         MERGED: []
@@ -263,6 +264,7 @@ cases:
         APPROVED:
           - [1, 2002]
         ASSIGNED: []
+        AWARDED: []
         CLOSED: []
         LAST_EDITED_BY: []
         MERGED: []
@@ -309,6 +311,7 @@ cases:
         AUTHORED:
           - [1, 2000]
         ASSIGNED: []
+        AWARDED: []
         CLOSED: []
         LAST_EDITED_BY: []
         MERGED: []

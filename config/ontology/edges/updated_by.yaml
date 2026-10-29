@@ -8,3 +8,15 @@ variants:
     fk_column: updated_by_id
     scope: prune_to_target
     description: "User last updated merge request."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: WorkItem, id: id }
+    fk_column: updated_by_id
+    scope: prune_to_target
+    description: "User last updated work item."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: Note, id: id }
+    fk_column: updated_by_id
+    scope: prune_to_target
+    description: "User last updated note."

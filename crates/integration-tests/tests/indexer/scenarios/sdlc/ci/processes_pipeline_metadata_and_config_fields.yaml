@@ -1,0 +1,25 @@
+description: Pipelines index config_source, locked, and SHA columns, and read name and auto-cancel settings from pipeline metadata on the same partition
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_p_ci_pipelines:
+    - { id: 5001, partition_id: 102, project_id: 1000, iid: 1, sha: abc, ref: main, status: success, source: 10, tag: false, config_source: 10, locked: 0, source_sha: src1, target_sha: tgt1, pipeline_schedule_id: 11, trigger_id: 12, external_pull_request_id: 13, created_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 5002, partition_id: 102, project_id: 1000, iid: 2, sha: def, ref: main, status: success, source: 1, tag: false, config_source: null, locked: 1, created_at: "2024-01-15 11:00:00", traversal_path: "1/100/1000/" }
+    - { id: 5003, partition_id: 102, project_id: 1000, iid: 3, sha: ghi, ref: main, status: success, source: 1, tag: false, config_source: 1, locked: 1, created_at: "2024-01-15 12:00:00", traversal_path: "1/100/1000/" }
+  siphon_ci_pipeline_metadata:
+    - { project_id: 1000, pipeline_id: 5001, partition_id: 102, name: nightly, auto_cancel_on_new_commit: 1, auto_cancel_on_job_failure: 1, security_policy_protected_branch_bypassed: true, traversal_path: "1/100/1000/" }
+    - { project_id: 1000, pipeline_id: 5003, partition_id: 101, name: other partition, auto_cancel_on_new_commit: 2, auto_cancel_on_job_failure: 1, traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_pipeline:
+      rows:
+        - { id: 5001, config_source: pipeline_execution_policy_forced, locked: unlocked, source_sha: src1, target_sha: tgt1, pipeline_schedule_id: 11, trigger_id: 12, external_pull_request_id: 13, name: nightly, auto_cancel_on_new_commit: interruptible, auto_cancel_on_job_failure: all, security_policy_protected_branch_bypassed: true }
+        - { id: 5002, config_source: null, locked: artifacts_locked, name: null, auto_cancel_on_new_commit: conservative, auto_cancel_on_job_failure: none, security_policy_protected_branch_bypassed: false }
+        - { id: 5003, config_source: repository_source, name: null, auto_cancel_on_new_commit: conservative, auto_cancel_on_job_failure: none }
+  edges:
+    - { kind: IN_PROJECT, from: Pipeline, to: Project, traversal_path: "1/100/1000/", count: 3 }

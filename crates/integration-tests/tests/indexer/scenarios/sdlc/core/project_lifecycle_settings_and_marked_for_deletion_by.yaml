@@ -1,0 +1,26 @@
+description: Projects index lifecycle flags, mirror flags, reader-visible merge and CI settings, the derived merge method, and the MARKED_FOR_DELETION_BY edge
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  siphon_projects:
+    - { id: 1000, name: kept, path: kept, namespace_id: 100, creator_id: 1, project_namespace_id: 2000, visibility_level: 20, archived: false, star_count: 0, mirror: true, mirror_user_id: 9, shared_runners_enabled: false, public_builds: false, packages_enabled: true, ci_config_path: ci/main.yml, only_allow_merge_if_pipeline_succeeds: true, only_allow_merge_if_all_discussions_are_resolved: true, merge_requests_ff_only_enabled: true, merge_requests_rebase_enabled: true, remove_source_branch_after_merge: true, resolve_outdated_diff_discussions: false, autoclose_referenced_issues: true, suggestion_commit_message: apply, approvals_before_merge: 2, request_access_enabled: false, hidden: false, pending_delete: false, created_at: "2023-01-01", updated_at: "2024-01-15", last_activity_at: "2024-01-15" }
+    - { id: 1001, name: doomed, path: doomed, namespace_id: 100, creator_id: 1, project_namespace_id: 2001, visibility_level: 0, archived: true, star_count: 0, mirror: false, mirror_user_id: 9, merge_requests_ff_only_enabled: false, merge_requests_rebase_enabled: true, marked_for_deletion_at: "2024-01-10", marked_for_deletion_by_user_id: 5, pending_delete: true, hidden: true, created_at: "2023-01-01", updated_at: "2024-01-15", last_activity_at: "2024-01-15" }
+  project_namespace_traversal_paths:
+    - { id: 1000, traversal_path: "1/100/2000/" }
+    - { id: 1001, traversal_path: "1/100/2001/" }
+
+expect:
+  nodes:
+    gl_project:
+      rows:
+        - { id: 1000, project_namespace_id: 2000, mirror: true, mirror_user_id: 9, shared_runners_enabled: false, public_builds: false, packages_enabled: true, ci_config_path: ci/main.yml, only_allow_merge_if_pipeline_succeeds: true, only_allow_merge_if_all_discussions_are_resolved: true, merge_method: ff, remove_source_branch_after_merge: true, resolve_outdated_diff_discussions: false, autoclose_referenced_issues: true, suggestion_commit_message: apply, approvals_before_merge: 2, request_access_enabled: false, hidden: false, pending_delete: false }
+        - { id: 1001, mirror: false, mirror_user_id: null, merge_method: rebase_merge, pending_delete: true, hidden: true }
+  edges:
+    - kind: MARKED_FOR_DELETION_BY
+      from: User
+      to: Project
+      count: 1
+      rows:
+        - { source_id: 5, target_id: 1001, traversal_path: "1/100/2001/" }

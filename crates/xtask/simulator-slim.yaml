@@ -103,7 +103,7 @@ generation:
       "Vulnerability -> VulnerabilityOccurrence": 1
 
     HAS_IDENTIFIER:
-      "Finding -> VulnerabilityIdentifier": 1
+      "VulnerabilityOccurrence -> VulnerabilityIdentifier": 1
 
   associations:
     AUTHORED:

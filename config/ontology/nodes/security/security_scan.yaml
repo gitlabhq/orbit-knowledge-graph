@@ -67,6 +67,19 @@ properties:
     nullable: false
     description: "Whether this is the latest scan of its type for the project."
 
+  info:
+    type: string
+    source: info
+    nullable: false
+    description: "Scan errors and warnings, as a JSON object."
+
+  scanner_external_id:
+    type: string
+    source: scanner_external_id
+    nullable: true
+    mutable: false
+    description: "Scanner ID that selects one run of a multi-run SARIF report."
+
   created_at:
     type: timestamp
     source: created_at
@@ -151,6 +164,8 @@ storage:
     - {name: scan_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: latest, type: "Bool", default: "true"}
+    - {name: info, type: "String", default: "'{}'", codec: ["ZSTD(3)"]}
+    - {name: scanner_external_id, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}

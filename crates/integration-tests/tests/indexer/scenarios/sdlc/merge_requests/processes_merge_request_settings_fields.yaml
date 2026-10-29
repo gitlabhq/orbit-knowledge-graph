@@ -1,0 +1,18 @@
+description: Merge requests index Duo attribution, auto-merge and approval settings, import source, merge error, and the latest pipeline from metrics
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  merge_requests:
+    - { id: 10, iid: 101, title: Duo fix, description: Fix, source_branch: duo-fix, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, created_by_duo: true, merge_when_pipeline_succeeds: true, approvals_before_merge: 2, allow_maintainer_to_push: true, override_requested_changes: true, retargeted: true, time_estimate: 3600, last_edited_at: "2024-01-15 12:00:00", imported_from: 4, merge_error: "Rebase failed", traversal_path: "1/100/" }
+    - { id: 11, iid: 102, title: Plain, description: Plain, source_branch: plain, target_branch: main, state_id: 1, merge_status: unchecked, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/" }
+  siphon_merge_request_metrics:
+    - { id: 1, merge_request_id: 10, target_project_id: 1000, pipeline_id: 5001, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_merge_request:
+      rows:
+        - { id: 10, created_by_duo: true, merge_when_pipeline_succeeds: true, approvals_before_merge: 2, allow_maintainer_to_push: true, override_requested_changes: true, retargeted: true, time_estimate: 3600, imported_from: github, merge_error: "Rebase failed", latest_pipeline_id: 5001 }
+        - { id: 11, created_by_duo: false, merge_when_pipeline_succeeds: false, imported_from: none, merge_error: null, latest_pipeline_id: null }

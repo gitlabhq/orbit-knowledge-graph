@@ -1,0 +1,40 @@
+description: User added an emoji reaction to an entity
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Note, id: id }
+    scope: prune_to_target
+    description: "User reacted to a note."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: WorkItem, id: id }
+    scope: prune_to_target
+    description: "User reacted to a work item."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: MergeRequest, id: id }
+    scope: prune_to_target
+    description: "User reacted to a merge request."
+
+indexer:
+  reindex: [siphon_award_emoji]
+pipelines:
+  - name: AWARDED_siphon_award_emoji
+    extract:
+      type: clickhouse
+      tables: [siphon_award_emoji]
+      order_by: [traversal_path, awardable_type, awardable_id, id]
+      query: awarded.sql.j2
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: user_id
+            kind: User
+          to:
+            field: awardable_id
+            kind:
+              derive: awardable_type
+              mapping:
+                Issue: WorkItem
+          label: AWARDED

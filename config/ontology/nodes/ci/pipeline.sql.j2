@@ -1,0 +1,94 @@
+WITH
+  _batch AS MATERIALIZED (SELECT
+    id,
+    iid,
+    sha,
+    ref,
+    status,
+    source,
+    tag,
+    duration,
+    failure_reason,
+    created_at,
+    started_at,
+    finished_at,
+    committed_at,
+    updated_at,
+    before_sha,
+    yaml_errors,
+    protected,
+    project_id,
+    user_id,
+    merge_request_id,
+    auto_canceled_by_id,
+    config_source,
+    locked,
+    pipeline_schedule_id,
+    trigger_id,
+    source_sha,
+    target_sha,
+    external_pull_request_id,
+    traversal_path,
+    partition_id,
+    {{version_column}} AS _version,
+    {{deleted_column}} AS _deleted
+  FROM siphon_p_ci_pipelines
+  WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
+  ORDER BY traversal_path, id, partition_id
+  LIMIT {{batch_size}}),
+  _metadata AS (SELECT
+    traversal_path,
+    pipeline_id,
+    argMax(partition_id, {{version_column}}) AS partition_id,
+    argMax(name, {{version_column}}) AS name,
+    argMax(auto_cancel_on_new_commit, {{version_column}}) AS auto_cancel_on_new_commit,
+    argMax(auto_cancel_on_job_failure, {{version_column}}) AS auto_cancel_on_job_failure,
+    argMax(security_policy_protected_branch_bypassed, {{version_column}}) AS security_policy_protected_branch_bypassed
+  FROM siphon_ci_pipeline_metadata
+  WHERE startsWith(traversal_path, {traversal_path:String})
+    AND (traversal_path, pipeline_id) IN (SELECT traversal_path, id FROM _batch)
+  GROUP BY traversal_path, pipeline_id
+  HAVING argMax({{deleted_column}}, {{version_column}}) = false)
+SELECT
+  _batch.id AS id,
+  _batch.iid AS iid,
+  _batch.sha AS sha,
+  _batch.ref AS ref,
+  _batch.status AS status,
+  _batch.source AS source,
+  _batch.tag AS tag,
+  _batch.duration AS duration,
+  _batch.failure_reason AS failure_reason,
+  _batch.created_at AS created_at,
+  _batch.started_at AS started_at,
+  _batch.finished_at AS finished_at,
+  _batch.committed_at AS committed_at,
+  _batch.updated_at AS updated_at,
+  _batch.before_sha AS before_sha,
+  _batch.yaml_errors AS yaml_errors,
+  _batch.protected AS protected,
+  _batch.project_id AS project_id,
+  _batch.user_id AS user_id,
+  _batch.merge_request_id AS merge_request_id,
+  _batch.auto_canceled_by_id AS auto_canceled_by_id,
+  _batch.config_source AS config_source,
+  _batch.locked AS locked,
+  _batch.pipeline_schedule_id AS pipeline_schedule_id,
+  _batch.trigger_id AS trigger_id,
+  _batch.source_sha AS source_sha,
+  _batch.target_sha AS target_sha,
+  _batch.external_pull_request_id AS external_pull_request_id,
+  _metadata.name AS name,
+  _metadata.auto_cancel_on_new_commit AS auto_cancel_on_new_commit,
+  _metadata.auto_cancel_on_job_failure AS auto_cancel_on_job_failure,
+  _metadata.security_policy_protected_branch_bypassed AS security_policy_protected_branch_bypassed,
+  _batch.traversal_path AS traversal_path,
+  _batch.partition_id AS partition_id,
+  _batch._version AS _version,
+  _batch._deleted AS _deleted
+FROM _batch
+LEFT JOIN _metadata ON _batch.traversal_path = _metadata.traversal_path
+  AND _batch.id = _metadata.pipeline_id
+  AND _batch.partition_id = _metadata.partition_id
+ORDER BY traversal_path, id, partition_id
+SETTINGS enable_materialized_cte = 1

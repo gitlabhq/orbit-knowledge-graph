@@ -1,0 +1,23 @@
+description: Agent session was started against a work item
+
+variants:
+  - from_node: { type: AgentSession, id: id }
+    to_node: { type: WorkItem, id: id }
+    scope: prune_to_source
+    description: "Agent session was started against the work item."
+
+indexer:
+  reindex: [siphon_duo_workflows_workflow_work_items, siphon_ai_governance_sessions]
+pipelines:
+  - name: WORKED_ON_siphon_duo_workflows_workflow_work_items
+    extract:
+      type: clickhouse
+      tables: [siphon_duo_workflows_workflow_work_items, siphon_ai_governance_sessions]
+      order_by: [traversal_path, workflow_id, id]
+      query: duo_workflow_work_items.sql.j2
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: source_id, kind: AgentSession }
+          to: { field: source_work_item_id, kind: WorkItem }
+          label: WORKED_ON

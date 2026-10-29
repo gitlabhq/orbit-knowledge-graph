@@ -178,7 +178,7 @@ generation:
       "Vulnerability -> VulnerabilityOccurrence": 2
 
     HAS_IDENTIFIER:
-      "Finding -> VulnerabilityIdentifier": 1
+      "VulnerabilityOccurrence -> VulnerabilityIdentifier": 1
 
   # High-volume associations to reach ~90M edges
   # Using high counts per target to create dense connectivity

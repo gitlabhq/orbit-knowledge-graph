@@ -1,0 +1,27 @@
+description: A user is banned from a top-level group
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Group, id: id }
+    scope: prune_to_target
+    description: "User is banned from top-level group."
+
+indexer:
+  reindex: [siphon_namespace_bans]
+pipelines:
+  - name: BANNED_FROM_siphon_namespace_bans
+    extract:
+      type: clickhouse
+      tables: [siphon_namespace_bans]
+      fields: [user_id, namespace_id]
+      order_by: [traversal_path, id]
+      filter: "length(traversal_path) - length(replaceAll(traversal_path, '/', '')) = 2 OR {{deleted_column}}"
+      query: generated
+      lookups:
+        - { node: User, id: user_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: user_id, kind: User, enrich: true }
+          to: { field: namespace_id, kind: Group }
+          label: BANNED_FROM

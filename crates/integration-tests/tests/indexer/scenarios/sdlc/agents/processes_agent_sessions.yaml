@@ -1,4 +1,4 @@
-description: Only project-scoped gitlab_duo governance sessions index as minimal AgentSession nodes with a normalized flow type and an IN_PROJECT edge; detail columns, namespace-level sessions and external sources stay out
+description: Only project-scoped gitlab_duo governance sessions index as AgentSession nodes with a normalized flow type, a mapped status, and an IN_PROJECT edge; other detail columns, namespace-level sessions and external sources stay out
 scope: { namespace: 100 }
 
 seed:
@@ -25,8 +25,8 @@ expect:
     gl_agent_session:
       count: 9
       rows:
-        - { id: 11, flow_type: developer, source: gitlab_duo, project_id: 1000 }
-        - { id: 12, flow_type: chat, source: gitlab_duo, project_id: 1000 }
+        - { id: 11, flow_type: developer, source: gitlab_duo, status: finished, project_id: 1000 }
+        - { id: 12, flow_type: chat, source: gitlab_duo, status: created, project_id: 1000 }
         - { id: 13, flow_type: other, source: gitlab_duo, project_id: 1000 }
         - { id: 14, flow_type: developer, source: gitlab_duo, project_id: 1000 }
         - { id: 15, flow_type: other, source: gitlab_duo, project_id: 1000 }

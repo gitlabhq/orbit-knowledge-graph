@@ -1,0 +1,9 @@
+description: Vulnerability occurrence was last detected in a pipeline
+table: gl_sec_edge
+
+variants:
+  - from_node: { type: VulnerabilityOccurrence, id: id }
+    to_node: { type: Pipeline, id: id }
+    fk_column: latest_pipeline_id
+    scope: same_namespace
+    description: "Vulnerability occurrence last detected in pipeline."

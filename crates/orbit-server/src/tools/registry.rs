@@ -467,7 +467,7 @@ mod tests {
             );
             let full = inline_description(frontend).len();
             assert!(
-                full < 8192,
+                full < 9216,
                 "{frontend:?} inlined catalog with relationships is {full} B"
             );
         }

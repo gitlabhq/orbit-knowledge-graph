@@ -47,12 +47,13 @@ SELECT
   _batch.traversal_path AS traversal_path,
   _batch.id AS id,
   _batch.workflow_id AS workflow_id,
-  if(if(_batch._deleted, _prev.prev_link_type, _batch.link_type) = 1,
-     nullIf(_sessions.session_id, 0),
-     NULL) AS source_id,
+  nullIf(_sessions.session_id, 0) AS source_id,
   if(if(_batch._deleted, _prev.prev_link_type, _batch.link_type) = 1,
      nullIf(if(_batch._deleted, _prev.prev_merge_request_id, _batch.merge_request_id), 0),
      NULL) AS target_id,
+  if(if(_batch._deleted, _prev.prev_link_type, _batch.link_type) = 0,
+     nullIf(if(_batch._deleted, _prev.prev_merge_request_id, _batch.merge_request_id), 0),
+     NULL) AS source_merge_request_id,
   _batch._version AS _version,
   _batch._deleted AS _deleted
 FROM _batch

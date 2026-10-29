@@ -1,0 +1,8 @@
+description: Work item was closed as a duplicate of another work item
+
+variants:
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: WorkItem, id: id }
+    fk_column: duplicated_to_id
+    scope: prune_to_source
+    description: "Work item duplicates another work item."

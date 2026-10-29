@@ -13,11 +13,6 @@ variants:
     scope: same_namespace
     description: "Group contains project."
 
-  - from_node: { type: User, id: id }
-    to_node: { type: Project, id: id }
-    scope: prune_to_target
-    description: "User namespace contains project."
-
   - from_node: { type: Project, id: id }
     to_node: { type: Branch, id: id }
     table: gl_code_edge

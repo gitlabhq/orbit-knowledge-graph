@@ -1,0 +1,18 @@
+description: Security scans index info and scanner_external_id
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_security_scans:
+    - { id: 1, build_id: 600, scan_type: 9, status: 3, latest: true, info: '{"errors": [{"type": "ParsingError", "message": "Invalid report"}]}', scanner_external_id: semgrep, project_id: 1000, pipeline_id: 500, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+    - { id: 2, build_id: 600, scan_type: 1, status: 1, latest: true, info: "{}", scanner_external_id: null, project_id: 1000, pipeline_id: 500, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+
+expect:
+  nodes:
+    gl_security_scan:
+      rows:
+        - { id: 1, status: report_error, info: '{"errors": [{"type": "ParsingError", "message": "Invalid report"}]}', scanner_external_id: semgrep }
+        - { id: 2, status: succeeded, info: "{}", scanner_external_id: null }

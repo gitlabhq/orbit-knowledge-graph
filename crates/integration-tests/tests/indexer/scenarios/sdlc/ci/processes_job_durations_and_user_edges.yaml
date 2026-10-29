@@ -1,0 +1,38 @@
+description: Jobs compute duration and queued_duration like Rails, index erase and external status columns, and emit ERASED_BY and SCOPED_TO edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_users:
+    - { id: 1, email: user1@example.com, username: user1, name: User 1, state: active, organization_id: 1 }
+    - { id: 2, email: user2@example.com, username: user2, name: User 2, state: active, organization_id: 1 }
+  siphon_p_ci_builds:
+    - { id: 7001, partition_id: 1, project_id: 1000, name: compile, status: success, ref: main, type: "Ci::Build", queued_at: "2024-01-15 10:00:00", started_at: "2024-01-15 10:00:30", finished_at: "2024-01-15 10:02:00", protected: true, stage_idx: 2, erased_at: "2024-01-16 00:00:00", erased_by_id: 1, scoped_user_id: 2, resource_group_id: 40, artifacts_expire_at: "2024-02-15 00:00:00", traversal_path: "1/100/1000/" }
+    - { id: 7002, partition_id: 1, project_id: 1000, name: canceled, status: canceled, ref: main, type: "Ci::Build", queued_at: "2024-01-15 10:00:00", finished_at: "2024-01-15 10:00:45", traversal_path: "1/100/1000/" }
+    - { id: 7003, partition_id: 1, project_id: 1000, name: waiting, status: pending, ref: main, type: "Ci::Build", queued_at: "2024-01-15 10:00:00", scheduled_at: "2024-01-15 11:00:00", traversal_path: "1/100/1000/" }
+    - { id: 7004, partition_id: 1, project_id: 1000, name: external, status: success, ref: main, type: GenericCommitStatus, description: Security scan, target_url: "https://ci.example.com/1", traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_job:
+      rows:
+        - { id: 7001, duration: 90, queued_duration: 30, protected: true, stage_idx: 2, erased_by_id: 1, scoped_user_id: 2, resource_group_id: 40 }
+        - { id: 7002, duration: null, queued_duration: 45 }
+        - { id: 7003, duration: null, queued_duration: null }
+        - { id: 7004, description: Security scan, target_url: "https://ci.example.com/1", duration: null }
+  edges:
+    - kind: ERASED_BY
+      from: User
+      to: Job
+      count: 1
+      rows:
+        - { source_id: 1, target_id: 7001, traversal_path: "1/100/1000/" }
+    - kind: SCOPED_TO
+      from: Job
+      to: User
+      count: 1
+      rows:
+        - { source_id: 7001, target_id: 2, traversal_path: "1/100/1000/" }

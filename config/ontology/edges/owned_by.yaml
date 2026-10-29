@@ -1,0 +1,25 @@
+description: Runner assigned to a group
+table: gl_ci_edge
+
+variants:
+  - from_node: { type: Runner, id: id }
+    to_node: { type: Group, id: id }
+    scope: prune_to_target
+    description: "Group runner is owned by group."
+
+indexer:
+  reindex: [siphon_ci_runner_namespaces]
+pipelines:
+  - name: OWNED_BY_siphon_ci_runner_namespaces_Group
+    extract:
+      type: clickhouse
+      tables: [siphon_ci_runner_namespaces]
+      fields: [runner_id, namespace_id]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: runner_id, kind: Runner }
+          to: { field: namespace_id, kind: Group }
+          label: OWNED_BY

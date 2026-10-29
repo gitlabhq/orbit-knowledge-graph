@@ -1,0 +1,18 @@
+description: Security findings index scanner_reported_severity with the severity value map
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_security_findings:
+    - { id: 1, uuid: 00000000-0000-0000-0000-000000000e01, scan_id: 100, scanner_id: 1, severity: 4, scanner_reported_severity: 7, deduplicated: true, finding_data: '{"name": "SQL Injection"}', project_id: 1000, traversal_path: "1/100/" }
+    - { id: 2, uuid: 00000000-0000-0000-0000-000000000e02, scan_id: 100, scanner_id: 1, severity: 5, scanner_reported_severity: 5, deduplicated: false, finding_data: '{"name": "XSS"}', project_id: 1000, traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_finding:
+      rows:
+        - { id: 1, severity: low, scanner_reported_severity: critical }
+        - { id: 2, severity: medium, scanner_reported_severity: medium }

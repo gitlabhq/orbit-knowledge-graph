@@ -1,9 +1,19 @@
 # config/ontology/edges/creator.yaml
 
-description: User created project
+description: User created a project, group, or package
 
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: Project, id: id }
     scope: prune_to_target
     description: "User created project."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: Group, id: id }
+    scope: prune_to_target
+    description: "User created group."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: Package, id: id }
+    scope: prune_to_target
+    description: "User published package."

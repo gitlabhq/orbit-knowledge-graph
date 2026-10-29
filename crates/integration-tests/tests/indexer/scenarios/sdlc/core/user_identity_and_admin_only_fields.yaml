@@ -1,0 +1,17 @@
+description: Users index composite identity, the creator and managing group ids, and admin-only sign-in fields
+
+seed:
+  siphon_users:
+    - { id: 1, username: admin, email: admin@test.com, name: Admin, state: active, admin: true, user_type: 0, projects_limit: 10, organization_id: 1, sign_in_count: 4, created_at: "2023-01-01", updated_at: "2024-01-15" }
+    - { id: 2, username: sa, email: sa@test.com, name: Service Account, state: active, user_type: 13, projects_limit: 0, organization_id: 1, created_by_id: 1, composite_identity_enforced: true, created_at: "2023-01-01", updated_at: "2024-01-15" }
+    - { id: 3, username: enterprise, email: enterprise@test.com, name: Enterprise, state: active, user_type: 0, projects_limit: 10, organization_id: 1, managing_group_id: 100, locked_at: "2024-01-10 00:00:00", created_at: "2023-01-01", updated_at: "2024-01-15" }
+
+run: global
+
+expect:
+  nodes:
+    gl_user:
+      rows:
+        - { id: 1, composite_identity_enforced: false, sign_in_count: 4, created_by_id: null }
+        - { id: 2, composite_identity_enforced: true, created_by_id: 1 }
+        - { id: 3, managing_group_id: 100 }

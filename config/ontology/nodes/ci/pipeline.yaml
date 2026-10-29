@@ -213,6 +213,100 @@ properties:
     nullable: true
     description: "Pipeline ID that auto-canceled this one."
 
+  config_source:
+    type: enum
+    source: config_source
+    nullable: true
+    mutable: false
+    description: "CI configuration origin. Null when unknown."
+    values:
+      1: repository_source
+      2: auto_devops_source
+      3: webide_source
+      4: remote_source
+      5: external_project_source
+      6: bridge_source
+      7: parameter_source
+      8: compliance_source
+      9: security_policies_default_source
+      10: pipeline_execution_policy_forced
+      11: security_scan_profiles_source
+
+  locked:
+    type: enum
+    source: locked
+    nullable: false
+    description: "Artifact lock state."
+    values:
+      0: unlocked
+      1: artifacts_locked
+
+  pipeline_schedule_id:
+    type: int64
+    source: pipeline_schedule_id
+    nullable: true
+    mutable: false
+    description: "Pipeline schedule ID that started the pipeline."
+
+  trigger_id:
+    type: int64
+    source: trigger_id
+    nullable: true
+    mutable: false
+    description: "Pipeline trigger token ID that started the pipeline."
+
+  source_sha:
+    type: string
+    source: source_sha
+    nullable: true
+    mutable: false
+    description: "Source branch SHA of a merged results pipeline."
+
+  target_sha:
+    type: string
+    source: target_sha
+    nullable: true
+    mutable: false
+    description: "Target branch SHA of a merged results pipeline."
+
+  external_pull_request_id:
+    type: int64
+    source: external_pull_request_id
+    nullable: true
+    mutable: false
+    description: "External pull request ID that started the pipeline."
+
+  name:
+    type: string
+    source: name
+    nullable: true
+    description: "Pipeline name from workflow:name."
+
+  auto_cancel_on_new_commit:
+    type: enum
+    source: auto_cancel_on_new_commit
+    nullable: false
+    description: "Auto-cancel policy when a newer pipeline runs on the same ref."
+    values:
+      0: conservative
+      1: interruptible
+      2: none
+
+  auto_cancel_on_job_failure:
+    type: enum
+    source: auto_cancel_on_job_failure
+    nullable: false
+    description: "Auto-cancel policy when a job fails."
+    values:
+      0: none
+      1: all
+
+  security_policy_protected_branch_bypassed:
+    type: boolean
+    source: security_policy_protected_branch_bypassed
+    nullable: false
+    description: "Whether a security policy bypassed branch protection for the pipeline."
+
   traversal_path:
     type: string
     source: traversal_path
@@ -222,14 +316,14 @@ properties:
     description: "Namespace path for authz."
 
 indexer:
-  reindex: [siphon_p_ci_pipelines]
+  reindex: [siphon_p_ci_pipelines, siphon_ci_pipeline_metadata]
 pipelines:
   - name: Pipeline
     extract:
       type: clickhouse
-      tables: [siphon_p_ci_pipelines]
+      tables: [siphon_p_ci_pipelines, siphon_ci_pipeline_metadata]
       order_by: [traversal_path, id, partition_id]
-      query: generated
+      query: pipeline.sql.j2
     transform:
       type: datafusion
       edges:
@@ -288,6 +382,17 @@ storage:
     - {name: user_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: merge_request_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: config_source, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: locked, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: pipeline_schedule_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: trigger_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: source_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: target_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: external_pull_request_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: auto_cancel_on_new_commit, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: auto_cancel_on_job_failure, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: security_policy_protected_branch_bypassed, type: "Bool", default: "false"}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
@@ -300,3 +405,7 @@ storage:
     - {name: idx_user_id, column: user_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_auto_canceled_by_id, column: auto_canceled_by_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_config_source, column: config_source, type: "set(12)", granularity: 2}
+    - {name: idx_pipeline_schedule_id, column: pipeline_schedule_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_trigger_id, column: trigger_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_external_pull_request_id, column: external_pull_request_id, type: "bloom_filter(0.0001)", granularity: 1}

@@ -168,6 +168,54 @@ properties:
       16: duo_code_review_bot
       17: import_user
 
+  created_by_id:
+    type: int64
+    source: created_by_id
+    nullable: true
+    admin_only: true
+    description: "ID of the user who created this account. Admins only."
+
+  managing_group_id:
+    type: int64
+    source: managing_group_id
+    nullable: true
+    admin_only: true
+    description: "ID of the group that manages this enterprise account. Admins only."
+
+  composite_identity_enforced:
+    type: boolean
+    source: composite_identity_enforced
+    nullable: false
+    description: "Service account acts with the identity of the user who started it."
+
+  last_sign_in_at:
+    type: timestamp
+    source: last_sign_in_at
+    nullable: true
+    admin_only: true
+    description: "Previous sign-in timestamp. Admins only."
+
+  current_sign_in_at:
+    type: timestamp
+    source: current_sign_in_at
+    nullable: true
+    admin_only: true
+    description: "Current sign-in timestamp. Admins only."
+
+  sign_in_count:
+    type: int64
+    source: sign_in_count
+    nullable: false
+    admin_only: true
+    description: "Number of sign-ins. Admins only."
+
+  locked_at:
+    type: timestamp
+    source: locked_at
+    nullable: true
+    admin_only: true
+    description: "Time the account was locked after failed sign-ins. Admins only."
+
 pipelines:
   - name: User
     extract:
@@ -200,6 +248,13 @@ storage:
     - {name: user_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: managing_group_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: composite_identity_enforced, type: "Bool", default: "false"}
+    - {name: last_sign_in_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: current_sign_in_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: sign_in_count, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
+    - {name: locked_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_state, column: state, type: "set(10)", granularity: 2}

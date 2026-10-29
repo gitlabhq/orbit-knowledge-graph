@@ -148,6 +148,134 @@ properties:
     nullable: true
     description: "User ID who closed this."
 
+  status:
+    type: enum
+    source: system_defined_status_id
+    nullable: true
+    description: "System-defined status. Null when no status is set or a custom status is in use."
+    values:
+      1: to_do
+      2: in_progress
+      3: done
+      4: wont_do
+      5: duplicate
+
+  custom_status_id:
+    type: int64
+    source: custom_status_id
+    nullable: true
+    description: "Custom status ID. Null when the system-defined status is in use."
+
+  health_status:
+    type: enum
+    source: health_status
+    nullable: true
+    description: "Health status."
+    values:
+      1: on_track
+      2: needs_attention
+      3: at_risk
+
+  iteration_id:
+    type: int64
+    source: sprint_id
+    nullable: true
+    description: "Iteration ID."
+
+  time_estimate:
+    type: int64
+    source: time_estimate
+    nullable: true
+    description: "Time estimate in seconds."
+
+  upvotes_count:
+    type: int64
+    source: upvotes_count
+    nullable: false
+    description: "Number of thumbs-up reactions."
+
+  blocking_issues_count:
+    type: int64
+    source: blocking_issues_count
+    nullable: false
+    description: "Number of open work items that this work item blocks."
+
+  discussion_locked:
+    type: boolean
+    source: discussion_locked
+    nullable: true
+    description: "Whether discussions are locked."
+
+  last_edited_at:
+    type: timestamp
+    source: last_edited_at
+    nullable: true
+    description: "Last title or description edit timestamp."
+
+  imported_from:
+    type: enum
+    source: imported_from
+    nullable: false
+    mutable: false
+    description: "Import source. none when not imported."
+    values:
+      0: none
+      1: gitlab_migration
+      2: gitlab_project
+      3: gitlab_group
+      4: github
+      5: bitbucket
+      6: bitbucket_server
+      7: fogbugz
+      8: gitea
+      9: git
+      10: manifest
+      11: custom_template
+      12: jira
+      13: offline_transfer
+
+  first_mentioned_in_commit_at:
+    type: timestamp
+    source: metric_first_mentioned_in_commit_at
+    nullable: true
+    description: "First time a commit mentioned this work item."
+
+  first_associated_with_milestone_at:
+    type: timestamp
+    source: metric_first_associated_with_milestone_at
+    nullable: true
+    description: "First time this work item was added to a milestone."
+
+  first_added_to_board_at:
+    type: timestamp
+    source: metric_first_added_to_board_at
+    nullable: true
+    description: "First time this work item was added to a board list."
+
+  moved_to_id:
+    type: int64
+    source: moved_to_id
+    nullable: true
+    description: "ID of the work item that this work item was moved to."
+
+  duplicated_to_id:
+    type: int64
+    source: duplicated_to_id
+    nullable: true
+    description: "ID of the work item that this work item duplicates."
+
+  updated_by_id:
+    type: int64
+    source: updated_by_id
+    nullable: true
+    description: "User ID who last updated."
+
+  last_edited_by_id:
+    type: int64
+    source: last_edited_by_id
+    nullable: true
+    description: "User ID who last edited the title or description."
+
   traversal_path:
     type: string
     source: traversal_path
@@ -206,6 +334,38 @@ pipelines:
             kind: WorkItem
           label: CLOSED
           mutable: true
+        - from:
+            field: id
+            kind: WorkItem
+          to:
+            field: moved_to_id
+            kind: WorkItem
+          label: MOVED_TO
+          mutable: true
+        - from:
+            field: id
+            kind: WorkItem
+          to:
+            field: duplicated_to_id
+            kind: WorkItem
+          label: DUPLICATE_OF
+          mutable: true
+        - from:
+            field: updated_by_id
+            kind: User
+          to:
+            field: id
+            kind: WorkItem
+          label: UPDATED_BY
+          mutable: true
+        - from:
+            field: last_edited_by_id
+            kind: User
+          to:
+            field: id
+            kind: WorkItem
+          label: LAST_EDITED_BY
+          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:
@@ -229,6 +389,23 @@ storage:
     - {name: milestone_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: namespace_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: closed_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: status, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: custom_status_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: health_status, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: iteration_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: time_estimate, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: upvotes_count, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: blocking_issues_count, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: discussion_locked, type: "Nullable(Bool)"}
+    - {name: last_edited_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: imported_from, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: first_mentioned_in_commit_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_associated_with_milestone_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_added_to_board_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: moved_to_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: duplicated_to_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: updated_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: last_edited_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
@@ -244,3 +421,12 @@ storage:
     - {name: idx_namespace_id, column: namespace_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_closed_by_id, column: closed_by_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_iid, column: iid, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_status, column: status, type: "set(10)", granularity: 2}
+    - {name: idx_health_status, column: health_status, type: "set(10)", granularity: 2}
+    - {name: idx_imported_from, column: imported_from, type: "set(16)", granularity: 2}
+    - {name: idx_custom_status_id, column: custom_status_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_iteration_id, column: iteration_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_moved_to_id, column: moved_to_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_duplicated_to_id, column: duplicated_to_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_updated_by_id, column: updated_by_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_last_edited_by_id, column: last_edited_by_id, type: "bloom_filter(0.0001)", granularity: 1}

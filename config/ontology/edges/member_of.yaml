@@ -43,7 +43,7 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: Project, id: id }
     scope: prune_to_target
-    description: "User has access to project (via direct membership or group inheritance)."
+    description: "User is a direct member of project."
 
 indexer:
   reindex: [siphon_members]
@@ -54,6 +54,7 @@ pipelines:
       tables: [siphon_members]
       fields: [user_id, source_id, source_type]
       order_by: [traversal_path, id]
+      filter: "(isNull(requested_at) AND isNotNull(user_id) AND state = 0) OR {{deleted_column}}"
       query: generated
       lookups:
         - { node: User, id: user_id }

@@ -1,0 +1,35 @@
+description: Work item status, planning and import fields index, and the moved, duplicate, updated and edited FKs produce edges
+scope: { namespace: 100 }
+
+seed:
+  namespace_traversal_paths:
+    - { id: 100, traversal_path: "1/100/", version: "2024-01-20 12:00:00" }
+  work_items:
+    - { id: 1, iid: 1, title: Moved issue, description: "", author_id: 1, state_id: 2, work_item_type_id: 1, namespace_id: 100, project_id: 1000, system_defined_status_id: 2, health_status: 3, sprint_id: 77, time_estimate: 3600, upvotes_count: 4, blocking_issues_count: 2, discussion_locked: true, imported_from: 4, moved_to_id: 2, updated_by_id: 5, last_edited_by_id: 6, last_edited_at: "2024-01-16 10:00:00", metric_first_mentioned_in_commit_at: "2024-01-17 10:00:00", traversal_path: "1/100/" }
+    - { id: 2, iid: 2, title: Target issue, description: "", author_id: 1, state_id: 1, work_item_type_id: 1, namespace_id: 100, project_id: 1000, custom_status_id: 900, traversal_path: "1/100/" }
+    - { id: 3, iid: 3, title: Duplicate issue, description: "", author_id: 1, state_id: 2, work_item_type_id: 1, namespace_id: 100, project_id: 1000, system_defined_status_id: 5, duplicated_to_id: 2, traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_work_item:
+      rows:
+        - { id: 1, status: in_progress, health_status: at_risk, iteration_id: 77, time_estimate: 3600, upvotes_count: 4, blocking_issues_count: 2, discussion_locked: true, imported_from: github, moved_to_id: 2 }
+        - { id: 2, custom_status_id: 900, imported_from: none, upvotes_count: 0 }
+        - { id: 3, status: duplicate, duplicated_to_id: 2 }
+  edges:
+    - kind: MOVED_TO
+      count: 1
+      rows:
+        - { source_id: 1, source_kind: WorkItem, target_id: 2, target_kind: WorkItem }
+    - kind: DUPLICATE_OF
+      count: 1
+      rows:
+        - { source_id: 3, source_kind: WorkItem, target_id: 2, target_kind: WorkItem }
+    - kind: UPDATED_BY
+      count: 1
+      rows:
+        - { source_id: 5, source_kind: User, target_id: 1, target_kind: WorkItem }
+    - kind: LAST_EDITED_BY
+      count: 1
+      rows:
+        - { source_id: 6, source_kind: User, target_id: 1, target_kind: WorkItem }

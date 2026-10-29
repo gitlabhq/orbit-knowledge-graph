@@ -104,6 +104,7 @@ cases:
           - [1, 2000]
           - [1, 2001]
         ASSIGNED: []
+        AWARDED: []
         CLOSED: []
         LAST_EDITED_BY: []
         MERGED: []
@@ -133,6 +134,7 @@ cases:
         AUTHORED:
           - [1, 2000]
         ASSIGNED: []
+        AWARDED: []
         CLOSED: []
         LAST_EDITED_BY: []
         MERGED: []

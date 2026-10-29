@@ -1,0 +1,23 @@
+description: Agent session created a note
+
+variants:
+  - from_node: { type: AgentSession, id: id }
+    to_node: { type: Note, id: id }
+    scope: prune_to_source
+    description: "Agent session created the note."
+
+indexer:
+  reindex: [siphon_duo_workflows_workflow_notes, siphon_ai_governance_sessions]
+pipelines:
+  - name: CREATED_NOTE_siphon_duo_workflows_workflow_notes
+    extract:
+      type: clickhouse
+      tables: [siphon_duo_workflows_workflow_notes, siphon_ai_governance_sessions]
+      order_by: [traversal_path, workflow_id, id]
+      query: duo_workflow_notes.sql.j2
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: source_id, kind: AgentSession }
+          to: { field: created_note_id, kind: Note }
+          label: CREATED_NOTE

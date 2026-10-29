@@ -30,6 +30,7 @@ expect:
       - [1, 2002]
   edge_count:
     ASSIGNED: 0
+    AWARDED: 0
     CLOSED: 0
     LAST_EDITED_BY: 0
     MERGED: 0

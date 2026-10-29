@@ -1,6 +1,6 @@
 # config/ontology/edges/resolved_by.yaml
 
-description: User who resolved a vulnerability
+description: User who resolved a vulnerability or a discussion thread
 table: gl_sec_edge
 
 variants:
@@ -9,3 +9,10 @@ variants:
     fk_column: resolved_by_id
     scope: prune_to_target
     description: "User resolved vulnerability."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: Note, id: id }
+    table: gl_edge
+    fk_column: resolved_by_id
+    scope: prune_to_target
+    description: "User resolved the discussion thread of the note."

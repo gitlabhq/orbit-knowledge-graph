@@ -17,6 +17,21 @@ SELECT
   namespace.owner_id AS owner_id,
   namespace.created_at AS created_at,
   namespace.updated_at AS updated_at,
+  namespace.state AS state,
+  namespace.avatar AS avatar,
+  details.deletion_scheduled_at AS deletion_scheduled_at,
+  details.creator_id AS creator_id,
+  namespace.request_access_enabled AS request_access_enabled,
+  namespace.shared_runners_enabled AS shared_runners_enabled,
+  namespace.require_two_factor_authentication AS require_two_factor_authentication,
+  namespace.membership_lock AS membership_lock,
+  namespace.share_with_group_lock AS share_with_group_lock,
+  namespace.mentions_disabled AS mentions_disabled,
+  namespace.auto_devops_enabled AS auto_devops_enabled,
+  namespace.lfs_enabled AS lfs_enabled,
+  namespace.project_creation_level AS project_creation_level,
+  namespace.subgroup_creation_level AS subgroup_creation_level,
+  namespace.default_branch_protection AS default_branch_protection,
   traversal_paths.current_path AS traversal_path,
   namespace.{{version_column}} AS _version,
   (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted
@@ -31,7 +46,9 @@ INNER JOIN (
 LEFT JOIN (
   SELECT
     namespace_id,
-    argMax(description, {{version_column}}) AS description
+    argMax(description, {{version_column}}) AS description,
+    argMax(deletion_scheduled_at, {{version_column}}) AS deletion_scheduled_at,
+    argMax(creator_id, {{version_column}}) AS creator_id
   FROM siphon_namespace_details
   WHERE startsWith(traversal_path, {traversal_path:String})
   GROUP BY namespace_id

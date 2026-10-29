@@ -48,6 +48,29 @@ properties:
       1: delete_failed
       2: delete_ongoing
 
+  expiration_policy_cleanup_status:
+    type: enum
+    source: expiration_policy_cleanup_status
+    nullable: false
+    description: "Cleanup policy run status."
+    values:
+      0: cleanup_unscheduled
+      1: cleanup_scheduled
+      2: cleanup_unfinished
+      3: cleanup_ongoing
+
+  expiration_policy_started_at:
+    type: timestamp
+    source: expiration_policy_started_at
+    nullable: true
+    description: "Start of the last cleanup policy run."
+
+  last_cleanup_deleted_tags_count:
+    type: int64
+    source: last_cleanup_deleted_tags_count
+    nullable: true
+    description: "Tags deleted by the last cleanup policy run."
+
   created_at:
     type: timestamp
     source: created_at
@@ -101,6 +124,9 @@ storage:
     - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: expiration_policy_cleanup_status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: expiration_policy_started_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: last_cleanup_deleted_tags_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
@@ -110,4 +136,5 @@ storage:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_name, column: name, type: text, granularity: 1}
     - {name: idx_status, column: status, type: "set(4)", granularity: 2}
+    - {name: idx_expiration_policy_cleanup_status, column: expiration_policy_cleanup_status, type: "set(4)", granularity: 2}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}

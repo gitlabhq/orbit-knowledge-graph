@@ -67,6 +67,19 @@ properties:
       6: high
       7: critical
 
+  scanner_reported_severity:
+    type: enum
+    source: scanner_reported_severity
+    nullable: true
+    description: "Severity reported by the scanner."
+    values:
+      1: info
+      2: unknown
+      4: low
+      5: medium
+      6: high
+      7: critical
+
   deduplicated:
     type: boolean
     source: deduplicated
@@ -151,6 +164,7 @@ storage:
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: solution, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: severity, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: scanner_reported_severity, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
     - {name: deduplicated, type: "Bool", default: "false"}
     - {name: overridden_uuid, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}

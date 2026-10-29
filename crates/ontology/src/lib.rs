@@ -1936,20 +1936,23 @@ mod tests {
 
         let mut sql_files = std::collections::HashMap::new();
         collect_sql_contents(&fixtures_dir(), &mut sql_files);
+        let mut loaded = std::collections::HashSet::new();
 
         for pipeline in all_pipelines(&ontology) {
             let Extract::ClickHouse(extract) = &pipeline.extract;
             match &extract.query {
                 ExtractQuery::Sql(sql) => {
                     assert!(
-                        sql_files.remove(sql).is_some(),
+                        sql_files.contains_key(sql),
                         "{} authored SQL does not match any committed .sql.j2 file",
                         pipeline.name
                     );
+                    loaded.insert(sql.clone());
                 }
                 ExtractQuery::Generated { .. } => {}
             }
         }
+        sql_files.retain(|sql, _| !loaded.contains(sql));
 
         assert!(
             sql_files.is_empty(),
@@ -2514,6 +2517,7 @@ mod tests {
                 "project_id",
                 "session_started_at",
                 "source",
+                "status",
                 "traversal_path",
             ],
             "session detail columns must never become properties"
@@ -3518,17 +3522,9 @@ properties:
     }
 
     #[test]
-    fn contains_user_project_and_workitem_workitem_not_scope_preserving() {
+    fn contains_workitem_workitem_not_scope_preserving() {
         let o = Ontology::load_embedded().unwrap();
         let contains = o.edges.get("CONTAINS").expect("CONTAINS");
-        let user_project = contains
-            .iter()
-            .find(|v| v.source_kind == "User" && v.target_kind == "Project");
-        assert_eq!(
-            user_project.and_then(|v| v.scope),
-            Some(EdgeVariantScope::PruneToTarget),
-            "User→Project: the member edge lives in the project, the user is global"
-        );
         let wi_wi = contains
             .iter()
             .find(|v| v.source_kind == "WorkItem" && v.target_kind == "WorkItem");

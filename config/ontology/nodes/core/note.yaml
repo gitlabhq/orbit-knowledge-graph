@@ -133,6 +133,91 @@ properties:
     mutable: false
     description: "Author user ID."
 
+  type:
+    type: enum
+    source: note_type
+    nullable: false
+    mutable: false
+    description: "Note class. Note for a plain comment."
+    enum_type: string
+    selectivity: low
+    values:
+      0: Note
+      1: DiffNote
+      2: DiscussionNote
+      3: LegacyDiffNote
+
+  file_path:
+    type: string
+    source: file_path
+    nullable: true
+    description: "Path of the file in the new version of the diff. Null when the note has no diff position."
+
+  new_line:
+    type: int64
+    source: new_line
+    nullable: true
+    description: "Line number in the new version of the file. Null for a removed line."
+
+  old_line:
+    type: int64
+    source: old_line
+    nullable: true
+    description: "Line number in the old version of the file. Null for an added line."
+
+  resolved_by_id:
+    type: int64
+    source: resolved_by_id
+    nullable: true
+    description: "User ID who resolved the discussion thread."
+
+  resolved_by_push:
+    type: boolean
+    source: resolved_by_push
+    nullable: true
+    description: "Whether a push resolved the discussion thread."
+
+  review_id:
+    type: int64
+    source: review_id
+    nullable: true
+    mutable: false
+    description: "ID of the merge request review that published the note."
+
+  updated_by_id:
+    type: int64
+    source: updated_by_id
+    nullable: true
+    description: "User ID who last updated."
+
+  last_edited_at:
+    type: timestamp
+    source: last_edited_at
+    nullable: true
+    description: "Last text edit timestamp."
+
+  imported_from:
+    type: enum
+    source: imported_from
+    nullable: false
+    mutable: false
+    description: "Import source. none when not imported."
+    values:
+      0: none
+      1: gitlab_migration
+      2: gitlab_project
+      3: gitlab_group
+      4: github
+      5: bitbucket
+      6: bitbucket_server
+      7: fogbugz
+      8: gitea
+      9: git
+      10: manifest
+      11: custom_template
+      12: jira
+      13: offline_transfer
+
   traversal_path:
     type: string
     source: traversal_path
@@ -149,8 +234,7 @@ pipelines:
       type: clickhouse
       tables: [siphon_notes]
       order_by: [traversal_path, noteable_type, noteable_id, id]
-      filter: "system = false"
-      query: generated
+      query: note.sql.j2
     transform:
       type: datafusion
       edges:
@@ -180,6 +264,22 @@ pipelines:
             kind: Note
           label: HAS_NOTE
           mutable: true
+        - from:
+            field: resolved_by_id
+            kind: User
+          to:
+            field: id
+            kind: Note
+          label: RESOLVED_BY
+          mutable: true
+        - from:
+            field: updated_by_id
+            kind: User
+          to:
+            field: id
+            kind: Note
+          label: UPDATED_BY
+          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:
@@ -200,6 +300,16 @@ storage:
     - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: author_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: file_path, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: new_line, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: old_line, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: resolved_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: resolved_by_push, type: "Nullable(Bool)"}
+    - {name: review_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: updated_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: last_edited_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: imported_from, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
@@ -213,3 +323,8 @@ storage:
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_author_id, column: author_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
+    - {name: idx_type, column: type, type: "set(8)", granularity: 2}
+    - {name: idx_file_path, column: file_path, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_resolved_by_id, column: resolved_by_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_review_id, column: review_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_updated_by_id, column: updated_by_id, type: "bloom_filter(0.0001)", granularity: 1}
