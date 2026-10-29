@@ -180,6 +180,7 @@ fn edge_transform(
         scope == EtlScope::Namespaced,
         filters,
         denormalized,
+        true,
         ontology,
     )?))
 }
@@ -197,6 +198,7 @@ fn fk_edge_transform(
         namespaced,
         fk_edge_filters(mapping),
         denormalized,
+        true,
         ontology,
     )
 }
@@ -212,6 +214,7 @@ pub(in crate::modules::sdlc) fn fk_edge_key_transform(
         namespaced,
         fk_edge_filters(mapping),
         Vec::new(),
+        false,
         ontology,
     )
 }
@@ -233,6 +236,7 @@ fn edge_transformations(
     namespaced: bool,
     mut filters: Vec<EdgeFilter>,
     denormalized: Vec<DenormalizedColumnProjection>,
+    sorted: bool,
     ontology: &Ontology,
 ) -> Result<Vec<Transformation>, ontology::OntologyError> {
     let (source_kind, source_filter) = resolve_node_ref_kind(&mapping.source, || {
@@ -290,7 +294,7 @@ fn edge_transformations(
                     namespaced,
                     &denormalized,
                     &filters,
-                    &meta.sort_key,
+                    if sorted { &meta.sort_key } else { &[] },
                 ),
                 destination_table: prefixed_table_name(table, *SCHEMA_VERSION),
                 dict_encode_columns: meta.dict_columns,
