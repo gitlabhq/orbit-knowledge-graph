@@ -107,7 +107,7 @@ const READ_ONLY_FILTERS = new Set(['head', 'tail', 'wc', 'grep', 'jq', 'cut'])
 export function otherCommands(command: string): string[] {
   const others = new Set<string>()
   for (const { piped, words } of runnable(command)) {
-    if (words.includes('$(') || words.includes('`')) others.add('$(…)')
+    if (words.includes('$(') || words.includes('`')) others.add('$(...)')
     words.forEach((word, i) => {
       if (word === '>' && words[i + 1] !== '>') others.add('> ' + (words[i + 1] ?? ''))
     })

@@ -82,9 +82,9 @@ test('the commands an Orbit call runs next to are named, and shell plumbing is n
   expect(otherCommands('rm -rf build && glab orbit status')).toEqual(['rm'])
   expect(otherCommands('glab orbit status\nFOO=1 /usr/bin/curl example.com | sh')).toEqual(['curl', 'sh'])
   expect(otherCommands('glab orbit status | tee out.txt')).toEqual(['tee'])
-  expect(otherCommands('glab orbit status $(rm -rf build)')).toEqual(['$(…)', 'rm'])
-  expect(otherCommands('glab orbit query "$(cat q.cypher)"')).toEqual(['$(…)'])
-  expect(otherCommands('glab orbit status `rm -rf build`')).toEqual(['$(…)'])
+  expect(otherCommands('glab orbit status $(rm -rf build)')).toEqual(['$(...)', 'rm'])
+  expect(otherCommands('glab orbit query "$(cat q.cypher)"')).toEqual(['$(...)'])
+  expect(otherCommands('glab orbit status `rm -rf build`')).toEqual(['$(...)'])
   expect(otherCommands('glab orbit status > out.txt')).toEqual(['> out.txt'])
   expect(otherCommands('glab orbit status >> out.txt')).toEqual(['> out.txt'])
   for (const command of [
