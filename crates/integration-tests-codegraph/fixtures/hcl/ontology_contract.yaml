@@ -47,7 +47,7 @@ tests:
           - { row: { name: "region", kind: "Variable", category: "Value", lk: "Variable", scope: "top_level" } }
           - { row: { name: "ip", kind: "Variable", category: "Value", lk: "Output", scope: "top_level" } }
           - { row: { name: "vpc", kind: "Module", category: "Module", lk: "Module", scope: "top_level" } }
-          - { row: { name: "tags", kind: "Variable", category: "Value", lk: "Local", scope: "member" } }
+          - { row: { name: "tags", kind: "Variable", category: "Value", lk: "Local", scope: "top_level" } }
 
   - name: "Closed lists for kind, category, and scope"
     queries:

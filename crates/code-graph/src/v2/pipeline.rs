@@ -1461,10 +1461,13 @@ impl FamilyPipeline {
                 continue;
             }
             for (ref_idx, alias_target) in &fwr.unresolved_aliases {
-                let nodes = graph.resolve_scope_nodes(alias_target);
-                if let Some(&n) = nodes.first()
-                    && graph.def_kind(n).is_type_container()
-                {
+                let target = graph
+                    .resolve_scope_nodes(alias_target)
+                    .first()
+                    .copied()
+                    .filter(|&n| graph.def_kind(n).is_type_container())
+                    .or_else(|| graph.returned_type(alias_target));
+                if let Some(n) = target {
                     fwr.refs.set_reaching_type(*ref_idx, graph.def_fqn(n));
                 }
             }

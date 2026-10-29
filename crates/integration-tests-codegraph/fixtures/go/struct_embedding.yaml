@@ -34,4 +34,4 @@ tests:
       WHERE caller.name = 'main' AND callee.name = 'Log'
       RETURN callee.fqn AS callee
     assert:
-      - { row: { callee: "main.Log" } }
+      - { row: { callee: "main.Logger.Log" } }

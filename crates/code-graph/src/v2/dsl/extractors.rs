@@ -87,15 +87,20 @@ impl MetadataRule {
         kind: crate::v2::types::DefKind,
     ) -> crate::v2::types::DefDisplay {
         use crate::v2::types::text;
+        let category = kind.category();
         let signature = match rules.signature_with {
             Some(f) => f(node),
+            None if category == crate::v2::types::Category::Value => {
+                let mut body = self.signature_until.unwrap_or(rules.body).to_vec();
+                body.push("=");
+                rules.signature(node, Some(&body))
+            }
             None => rules.signature(node, self.signature_until),
         };
         let parameters = match self.parameters_with {
             Some(f) => text::parameters(f(node).iter().map(String::as_str)),
             None => rules.parameters(node),
         };
-        let category = kind.category();
         let return_type = match category {
             crate::v2::types::Category::Callable => {
                 match self.written_return_type.or(rules.return_type_with) {

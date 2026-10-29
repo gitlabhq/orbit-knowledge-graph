@@ -175,12 +175,10 @@ impl DefScope {
     }
 
     pub const fn inside(parent: DefKind) -> Self {
-        match parent {
-            DefKind::Test => Self::Member,
-            _ => match parent.category() {
-                Category::Callable | Category::Macro => Self::Local,
-                Category::Type | Category::Module | Category::Value => Self::Member,
-            },
+        match parent.category() {
+            Category::Module => Self::TopLevel,
+            Category::Callable | Category::Macro => Self::Local,
+            Category::Type | Category::Value => Self::Member,
         }
     }
 }

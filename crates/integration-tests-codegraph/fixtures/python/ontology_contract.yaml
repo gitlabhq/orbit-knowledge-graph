@@ -176,8 +176,8 @@ tests:
       RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
     assert:
       - { row_count: 2 }
-      - { row: { name: "", path: "requests", kind: "module", lk: "Import", fqn: "requests", external: true } }
-      - { row: { name: "Base", path: "billing.base", kind: "symbol", lk: "FromImport", fqn: "billing.base.Base", external: false } }
+      - { row: { name: "", path: "requests", kind: "module", lk: "NamedImport", fqn: "requests", external: true } }
+      - { row: { name: "Base", path: "billing.base", kind: "symbol", lk: "NamedImport", fqn: "billing.base.Base", external: false } }
 
   - name: "File flags"
     query: |

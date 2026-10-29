@@ -20,7 +20,7 @@ tests:
   - name: "C1: regular imports exist"
     query: |
       MATCH (i:Import)
-      WHERE i.language_kind = 'Import'
+      WHERE i.import_kind = 'module' AND i.language_kind = 'NamedImport'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 2 } }
@@ -36,7 +36,7 @@ tests:
   - name: "C3: from imports exist"
     query: |
       MATCH (i:Import)
-      WHERE i.language_kind = 'FromImport'
+      WHERE i.import_kind = 'symbol' AND i.language_kind = 'NamedImport'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 3 } }

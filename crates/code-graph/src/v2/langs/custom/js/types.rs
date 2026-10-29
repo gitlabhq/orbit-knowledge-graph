@@ -289,8 +289,8 @@ impl JsDefKind {
                 is_static: false, ..
             } => "Method",
             Self::Constructor { .. } => "Constructor",
-            Self::Test { group: true } => "TestSuite",
-            Self::Test { group: false } => "TestCase",
+            Self::Test { group: true } => "Describe",
+            Self::Test { group: false } => "Test",
             Self::Property { .. } => "Property",
             Self::ComputedProperty { .. } => "ComputedProperty",
             Self::Watcher { .. } => "Watcher",

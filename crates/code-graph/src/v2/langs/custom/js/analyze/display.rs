@@ -260,7 +260,7 @@ fn declarator(
                 ..JsDisplay::default()
             };
             if keyword == "const" {
-                display.language_kind = Some("Const");
+                display.language_kind = Some("Constant");
                 display.kind = Some(DefKind::Constant);
             }
             display

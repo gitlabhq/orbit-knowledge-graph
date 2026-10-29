@@ -85,7 +85,7 @@ tests:
       RETURN d.name AS name, d.language_kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Const" } }
+      - { row: { type: "Constant" } }
 
   - name: Plain var is indexed with Var type
     query: |
@@ -94,7 +94,7 @@ tests:
       RETURN d.name AS name, d.language_kind AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Var" } }
+      - { row: { type: "Variable" } }
 
   - name: Point.init is scoped under Point FQN
     query: |

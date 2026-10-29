@@ -777,7 +777,7 @@ mod tests {
 
         let mut pool = StringPool::new();
         let cimp = CanonicalImport {
-            import_type: "FromImport",
+            import_type: "NamedImport",
             binding_kind: ImportBindingKind::Named,
             mode: ImportMode::Declarative,
             path: "app.services".to_string(),

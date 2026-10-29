@@ -122,7 +122,7 @@ tests:
           LIMIT 100
         assert:
           - { row: { name: "add", visibility: "file" } }
-          - { row: { name: "area", visibility: "public" } }
+          - { row: { name: "area", visibility: null } }
 
   - name: "Local definitions have no visibility"
     queries:
@@ -150,8 +150,8 @@ tests:
           RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
           LIMIT 100
         assert:
-          - { row: { name: "", path: '"shape.h"', kind: "side_effect", lk: "Import", external: false } }
-          - { row: { name: "", path: "<stdio.h>", kind: "side_effect", lk: "Import", external: true } }
+          - { row: { name: "*", path: '"shape.h"', kind: "wildcard", lk: "WildcardImport", external: false } }
+          - { row: { name: "*", path: "<stdio.h>", kind: "wildcard", lk: "WildcardImport", external: true } }
 
   - name: "DEFINES from the file to its imports"
     queries:

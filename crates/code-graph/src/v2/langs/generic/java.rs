@@ -119,13 +119,19 @@ fn java_record_accessors(
             fqn,
             range: crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(&param)),
             is_top_level: false,
-            display: crate::v2::types::DefDisplay::new(
-                written_type.as_ref().map(|t| format!("{t} {accessor}()")),
-                written_type,
-                None,
-                None,
-                Vec::new(),
-            ),
+            display: {
+                let mut display = crate::v2::types::DefDisplay::new(
+                    written_type
+                        .as_ref()
+                        .map(|t| format!("public {t} {accessor}()")),
+                    written_type,
+                    None,
+                    None,
+                    Vec::new(),
+                );
+                display.visibility = Some(Visibility::Public);
+                display
+            },
             metadata: Some(Box::new(crate::v2::types::DefinitionMetadata {
                 return_type,
                 generated_by: Some("record".into()),
@@ -141,9 +147,10 @@ fn java_record_modifiers(_node: &N<'_>) -> Modifiers {
 }
 
 fn java_visibility(node: &N<'_>, _name: &str) -> Option<Visibility> {
-    let in_interface = node
-        .parent()
-        .is_some_and(|p| matches!(p.kind().as_ref(), "interface_body" | "annotation_type_body"));
+    let in_interface = node.kind() == "enum_constant"
+        || node.parent().is_some_and(|p| {
+            matches!(p.kind().as_ref(), "interface_body" | "annotation_type_body")
+        });
     Some(if in_interface {
         Visibility::Public
     } else {
@@ -298,7 +305,7 @@ impl DslLanguage for JavaDsl {
             match (is_static, is_wildcard) {
                 (true, _) => "StaticImport",
                 (false, true) => "WildcardImport",
-                (false, false) => "Import",
+                (false, false) => "NamedImport",
             }
         }
 

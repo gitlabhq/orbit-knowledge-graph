@@ -46,10 +46,10 @@ tests:
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "main.Close" } }
-          - { row: { callee: "main.Handle" } }
-          - { row: { callee: "main.Handle" } }
-          - { row: { callee: "main.Retry" } }
+          - { row: { callee: "main.Handler.Close" } }
+          - { row: { callee: "main.Fallback.Handle" } }
+          - { row: { callee: "main.Handler.Handle" } }
+          - { row: { callee: "main.Fallback.Retry" } }
 
   - name: "withSwitch calls Handle and Retry from separate branches"
     queries:
@@ -59,8 +59,8 @@ tests:
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "main.Handle" } }
-          - { row: { callee: "main.Retry" } }
+          - { row: { callee: "main.Handler.Handle" } }
+          - { row: { callee: "main.Fallback.Retry" } }
       - query: |
           MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.fqn = 'main.withSwitch' AND callee.name = 'Close'

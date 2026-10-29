@@ -65,9 +65,9 @@ fn zig_visibility(node: &N<'_>, _name: &str) -> Option<Visibility> {
 
 fn classify_zig_binding(node: &N<'_>) -> &'static str {
     if node.children().any(|c| c.kind().as_ref() == "var") {
-        return "Var";
+        return "Variable";
     }
-    "Const"
+    "Constant"
 }
 
 // Zig imports are essentially variable declarations, so extra work is needed to identify which
@@ -106,7 +106,7 @@ fn zig_extract_imports(node: &N<'_>, imports: &mut Vec<crate::v2::types::Canonic
         .map(|c| c.text().to_string());
 
     imports.push(CanonicalImport {
-        import_type: "Import",
+        import_type: "AliasedImport",
         binding_kind: ImportBindingKind::Namespace,
         mode: ImportMode::Declarative,
         path,
@@ -185,7 +185,7 @@ impl DslLanguage for ZigDsl {
         vec![
             scope_fn("variable_declaration", classify_zig_binding)
                 .def_kind(DefKind::Variable)
-                .kinds_by_label(&[("Const", DefKind::Constant)])
+                .kinds_by_label(&[("Constant", DefKind::Constant)])
                 .no_scope()
                 .when(has_child(&["const", "var"]))
                 .name_from(child_of_kind("identifier")),
@@ -443,10 +443,10 @@ mod tests {
         let result = parse("const MAX: u32 = 100;\nvar counter: u32 = 0;\n").unwrap();
         assert!(result.definitions.iter().any(|d| d.name == "MAX"
             && d.kind == DefKind::Constant
-            && d.definition_type == "Const"));
+            && d.definition_type == "Constant"));
         assert!(result.definitions.iter().any(|d| d.name == "counter"
             && d.kind == DefKind::Variable
-            && d.definition_type == "Var"));
+            && d.definition_type == "Variable"));
     }
 
     #[test]
@@ -479,7 +479,7 @@ mod tests {
                 .map(|d| &d.definition_type)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(persist_defs[0].definition_type, "Var");
+        assert_eq!(persist_defs[0].definition_type, "Variable");
     }
 
     #[test]
@@ -502,7 +502,7 @@ mod tests {
                 .map(|d| &d.definition_type)
                 .collect::<Vec<_>>()
         );
-        assert_eq!(shape_defs[0].definition_type, "Var");
+        assert_eq!(shape_defs[0].definition_type, "Variable");
     }
 
     #[test]

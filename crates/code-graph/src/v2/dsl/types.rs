@@ -55,6 +55,7 @@ pub struct ScopeRule {
     pub(crate) metadata_rule: Option<MetadataRule>,
     pub(crate) test_if: Option<TestFn>,
     kind_if: Option<(TestFn, DefKind, &'static str)>,
+    pub(crate) owner: Option<Extract>,
 }
 
 impl Rule for ScopeRule {
@@ -141,6 +142,13 @@ impl ScopeRule {
             .or(self.def_kind)
     }
 
+    /// Qualify the fqn with the owner type named by `extract`, for members
+    /// declared outside their type.
+    pub fn owner_from(mut self, extract: Extract) -> Self {
+        self.owner = Some(extract);
+        self
+    }
+
     pub fn test_if(mut self, f: TestFn) -> Self {
         self.test_if = Some(f);
         self
@@ -196,6 +204,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         metadata_rule: None,
         test_if: None,
         kind_if: None,
+        owner: None,
     }
 }
 
@@ -214,6 +223,7 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         metadata_rule: None,
         test_if: None,
         kind_if: None,
+        owner: None,
     }
 }
 
@@ -236,6 +246,7 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         metadata_rule: None,
         test_if: None,
         kind_if: None,
+        owner: None,
     }
 }
 

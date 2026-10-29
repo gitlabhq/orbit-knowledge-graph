@@ -165,8 +165,8 @@ tests:
           RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
           LIMIT 100
         assert:
-          - { row: { name: "Base", path: "shop.base", kind: "symbol", lk: "Import", fqn: "shop.base.Base", external: false } }
-          - { row: { name: "delay", path: "kotlinx.coroutines", kind: "symbol", lk: "Import", fqn: "kotlinx.coroutines.delay", external: true } }
+          - { row: { name: "Base", path: "shop.base", kind: "symbol", lk: "NamedImport", fqn: "shop.base.Base", external: false } }
+          - { row: { name: "delay", path: "kotlinx.coroutines", kind: "symbol", lk: "NamedImport", fqn: "kotlinx.coroutines.delay", external: true } }
 
   - name: "DEFINES from the file to its imports"
     queries:

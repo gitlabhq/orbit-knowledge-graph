@@ -152,7 +152,7 @@ fn scala_extract_imports(
             .unwrap_or((base_path, None));
 
         imports.push(CanonicalImport {
-            import_type: "Import",
+            import_type: "NamedImport",
             binding_kind: ImportBindingKind::Named,
             mode: ImportMode::Declarative,
             path,
@@ -212,28 +212,28 @@ impl DslLanguage for ScalaDsl {
                 .when(parent_is("class_definition"))
                 .name_from(constant("this"))
                 .no_scope(),
-            scope("val_definition", "Val")
+            scope("val_definition", "Variable")
                 .def_kind(DefKind::Variable)
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
-            scope("val_declaration", "Val")
+            scope("val_declaration", "Variable")
                 .def_kind(DefKind::Variable)
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
-            scope("var_definition", "Var")
+            scope("var_definition", "Variable")
                 .def_kind(DefKind::Variable)
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
-            scope("var_declaration", "Var")
+            scope("var_declaration", "Variable")
                 .def_kind(DefKind::Variable)
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
-            scopes(&["val_definition", "val_declaration"], "Val")
+            scopes(&["val_definition", "val_declaration"], "Field")
                 .def_kind(DefKind::Field)
                 .when(parent_is("template_body"))
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
-            scopes(&["var_definition", "var_declaration"], "Var")
+            scopes(&["var_definition", "var_declaration"], "Field")
                 .def_kind(DefKind::Field)
                 .when(parent_is("template_body"))
                 .no_scope()

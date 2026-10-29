@@ -21,4 +21,4 @@ tests:
       WHERE caller.name = 'main' AND callee.name = 'Run'
       RETURN callee.fqn AS callee
     assert:
-      - { row: { callee: "main.Run" } }
+      - { row: { callee: "main.Service.Run" } }

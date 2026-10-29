@@ -272,14 +272,17 @@ impl DslLanguage for PythonDsl {
             if node.has(Child, Kind("aliased_import")) {
                 return "AliasedImport";
             }
-            "Import"
+            "NamedImport"
         }
 
         fn python_from_classify(node: &N<'_>) -> &'static str {
             if node.has(Child, Kind("wildcard_import")) {
                 return "WildcardImport";
             }
-            "FromImport"
+            if node.has(Child, Kind("aliased_import")) {
+                return "AliasedImport";
+            }
+            "NamedImport"
         }
 
         vec![
@@ -561,17 +564,16 @@ impl PythonImportRewriter {
         if let Some(path) = self.resolve_source_root(&import.path, module_scope, sep) {
             // The local binding keeps the originally-written first segment, so
             // capture it before the path gains the source-root prefix.
-            let scope_name =
-                if import.import_type == "Import" || import.import_type == "AliasedImport" {
-                    import
-                        .path
-                        .split(sep)
-                        .next()
-                        .filter(|segment| !segment.is_empty())
-                        .map(ToString::to_string)
-                } else {
-                    None
-                };
+            let scope_name = if import.name.is_none() {
+                import
+                    .path
+                    .split(sep)
+                    .next()
+                    .filter(|segment| !segment.is_empty())
+                    .map(ToString::to_string)
+            } else {
+                None
+            };
             import.path = path;
             return scope_name;
         }
@@ -717,7 +719,7 @@ fn python_import_scope_name(imp: &CanonicalImport, sep: &str) -> Option<String> 
         return Some(alias.clone());
     }
 
-    if imp.import_type == "Import" || imp.import_type == "AliasedImport" {
+    if imp.name.is_none() {
         return imp
             .path
             .split(sep)
@@ -915,7 +917,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "myapp.worker",
                 Some("Worker"),
                 "lib.myapp.service"
@@ -923,11 +925,17 @@ mod tests {
             ("lib.myapp.worker".to_string(), None)
         );
         assert_eq!(
-            transform_import(&transformer, "Import", "scoring", None, "src.pipeline"),
+            transform_import(&transformer, "NamedImport", "scoring", None, "src.pipeline"),
             ("src.scoring".to_string(), Some("scoring".to_string()))
         );
         assert_eq!(
-            transform_import(&transformer, "Import", "requests", None, "src.pipeline"),
+            transform_import(
+                &transformer,
+                "NamedImport",
+                "requests",
+                None,
+                "src.pipeline"
+            ),
             ("requests".to_string(), None)
         );
     }
@@ -954,7 +962,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "package",
                 Some("module"),
                 "src.test_package_import"
@@ -977,7 +985,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "common.scoring",
                 Some("score_review"),
                 "src.alpha.other.reporting"
@@ -1000,7 +1008,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "scoring",
                 Some("score_review"),
                 "tests.test_scoring"
@@ -1010,7 +1018,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "Import",
+                "NamedImport",
                 "scoring",
                 None,
                 "tests.test_scoring"
@@ -1020,7 +1028,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "package",
                 Some("module"),
                 "tests.test_scoring"
@@ -1030,7 +1038,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "scoring",
                 Some("score_review"),
                 "conftest"
@@ -1049,7 +1057,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "util",
                 Some("helper"),
                 "tests.test_util"
@@ -1068,7 +1076,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "scoring",
                 Some("score_review"),
                 "tests.test_scoring"
@@ -1089,7 +1097,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "json",
                 Some("dumps"),
                 "tests.test_json"
@@ -1097,7 +1105,7 @@ mod tests {
             ("json".to_string(), None)
         );
         assert_eq!(
-            transform_import(&transformer, "Import", "json", None, "tests.test_json"),
+            transform_import(&transformer, "NamedImport", "json", None, "tests.test_json"),
             ("json".to_string(), None)
         );
     }
@@ -1114,7 +1122,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "json",
                 Some("dumps"),
                 "pkg.service"
@@ -1140,7 +1148,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "common.scoring",
                 Some("score_review"),
                 "alpha.beta.reporting"
@@ -1157,7 +1165,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 "sdk.client",
                 Some("Client"),
                 "tests.test_client"
@@ -1173,7 +1181,7 @@ mod tests {
         assert_eq!(
             transform_import(
                 &transformer,
-                "FromImport",
+                "NamedImport",
                 ".models",
                 Some("User"),
                 "src.package.views"
@@ -1187,7 +1195,7 @@ mod tests {
         let transformer = PythonImportRewriter::from_paths(std::iter::empty(), ".");
         let resolve = |path: &str| {
             let mut import = CanonicalImport {
-                import_type: "FromImport",
+                import_type: "NamedImport",
                 binding_kind: ImportBindingKind::Named,
                 mode: ImportMode::Declarative,
                 path: path.to_string(),

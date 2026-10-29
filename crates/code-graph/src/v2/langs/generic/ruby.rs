@@ -51,6 +51,9 @@ impl DslLanguage for RubyDsl {
                 .def_kind(DefKind::Module)
                 .metadata(metadata().super_types(ruby_super_types)),
             scope("method", "Method").def_kind(DefKind::Method),
+            scope("method", "Function")
+                .def_kind(DefKind::Function)
+                .when(!ancestor_is(&["class", "module", "singleton_class"])),
             scope("method", "Initializer")
                 .def_kind(DefKind::Constructor)
                 .when(has_child_text("initialize")),

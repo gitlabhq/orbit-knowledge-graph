@@ -48,7 +48,7 @@ tests:
           - { row: { name: "constructor", kind: "Constructor", category: "Callable", lk: "Constructor", scope: "member" } }
           - { row: { name: "charge", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
           - { row: { name: "build", kind: "Method", category: "Callable", lk: "StaticMethod", scope: "member" } }
-          - { row: { name: "MAX", kind: "Constant", category: "Value", lk: "Const", scope: "top_level" } }
+          - { row: { name: "MAX", kind: "Constant", category: "Value", lk: "Constant", scope: "top_level" } }
           - { row: { name: "make", kind: "Function", category: "Callable", lk: "Function", scope: "top_level" } }
 
   - name: "Closed lists for kind, category, and scope"
@@ -169,4 +169,4 @@ tests:
           WHERE d.kind = 'Test' AND d.name = 'charges'
           RETURN d.language_kind AS lk
         assert:
-          - { row: { lk: "TestCase" } }
+          - { row: { lk: "Test" } }

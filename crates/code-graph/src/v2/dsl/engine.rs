@@ -147,6 +147,7 @@ struct ScopeMatch {
     def_kind: DefKind,
     range: crate::utils::Range,
     creates_scope: bool,
+    owner: Option<String>,
     display: crate::v2::types::DefDisplay,
     metadata: Option<Box<DefinitionMetadata>>,
 }
@@ -190,6 +191,7 @@ impl LanguageSpec {
             def_kind,
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
+            owner: rule.owner.as_ref().and_then(|e| e.apply(node)),
             display,
             metadata: rule.extract_metadata(node, &resolve),
         })
@@ -912,8 +914,12 @@ impl LanguageSpec {
             let is_top_level = state.scope_stack.len() <= state.top_level_depth;
             let def_index = state.defs.len() as u32;
 
+            let scoped = m
+                .owner
+                .as_ref()
+                .map_or_else(|| m.name.clone(), |owner| format!("{owner}{sep}{}", m.name));
             if m.creates_scope {
-                state.scope_stack.push(Arc::from(m.name.as_str()));
+                state.scope_stack.push(Arc::from(scoped.as_str()));
                 pushed_scope = true;
 
                 // Create new SSA block for this scope (isolates bindings)
@@ -934,7 +940,7 @@ impl LanguageSpec {
                     sep,
                 )
             } else {
-                Fqn::from_scope(&state.scope_stack, &m.name, sep)
+                Fqn::from_scope(&state.scope_stack, &scoped, sep)
             };
 
             let is_type_scope = m.def_kind.is_type_container();

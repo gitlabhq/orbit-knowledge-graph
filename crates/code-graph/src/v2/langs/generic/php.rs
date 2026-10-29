@@ -503,7 +503,7 @@ fn push_use_clause(clause: &N<'_>, group_prefix: Option<&str>, imports: &mut Vec
         import_type: if alias.is_some() {
             "AliasedImport"
         } else {
-            "Import"
+            "NamedImport"
         },
         binding_kind: ImportBindingKind::Named,
         mode: ImportMode::Declarative,

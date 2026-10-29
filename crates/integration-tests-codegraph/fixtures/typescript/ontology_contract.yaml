@@ -67,7 +67,7 @@ tests:
           - { row: { name: "total", kind: "Field", category: "Value", lk: "Property", scope: "member" } }
           - { row: { name: "constructor", kind: "Constructor", category: "Callable", lk: "Constructor", scope: "member" } }
           - { row: { name: "charge", kind: "Method", category: "Callable", lk: "StaticMethod", scope: "member" } }
-          - { row: { name: "MAX", kind: "Constant", category: "Value", lk: "Const", scope: "top_level" } }
+          - { row: { name: "MAX", kind: "Constant", category: "Value", lk: "Constant", scope: "top_level" } }
           - { row: { name: "counter", kind: "Variable", category: "Value", lk: "Variable", scope: "top_level" } }
           - { row: { name: "twice", kind: "Function", category: "Callable", lk: "ArrowFunction", scope: "top_level" } }
           - { row: { name: "Store", kind: "Interface", category: "Type", lk: "Interface", scope: "top_level" } }
@@ -266,7 +266,7 @@ tests:
           WHERE d.kind = 'Test' AND d.name = 'charges the card'
           RETURN d.language_kind AS lk
         assert:
-          - { row: { lk: "TestCase" } }
+          - { row: { lk: "Test" } }
 
   - name: "Test definition Order"
     queries:
@@ -275,4 +275,4 @@ tests:
           WHERE d.kind = 'Test' AND d.name = 'Order'
           RETURN d.language_kind AS lk
         assert:
-          - { row: { lk: "TestSuite" } }
+          - { row: { lk: "Describe" } }

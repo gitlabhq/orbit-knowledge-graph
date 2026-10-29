@@ -49,7 +49,7 @@ tests:
         assert:
           - { row: { name: "Point", kind: "Class", category: "Type", lk: "CaseClass", scope: "top_level" } }
           - { row: { name: "this", kind: "Constructor", category: "Callable", lk: "PrimaryConstructor", scope: "member" } }
-          - { row: { name: "z", kind: "Field", category: "Value", lk: "Val", scope: "member" } }
+          - { row: { name: "z", kind: "Field", category: "Value", lk: "Field", scope: "member" } }
           - { row: { name: "area", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
           - { row: { name: "Store", kind: "Trait", category: "Type", lk: "Trait", scope: "top_level" } }
           - { row: { name: "get", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }

@@ -78,8 +78,8 @@ tests:
           - { row: { name: "Order", kind: "Struct", category: "Type", lk: "Struct", scope: "top_level" } }
           - { row: { name: "Charge", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
           - { row: { name: "NewOrder", kind: "Function", category: "Callable", lk: "Function", scope: "top_level" } }
-          - { row: { name: "MaxSize", kind: "Constant", category: "Value", lk: "Const", scope: "top_level" } }
-          - { row: { name: "counter", kind: "Variable", category: "Value", lk: "Var", scope: "top_level" } }
+          - { row: { name: "MaxSize", kind: "Constant", category: "Value", lk: "Constant", scope: "top_level" } }
+          - { row: { name: "counter", kind: "Variable", category: "Value", lk: "Variable", scope: "top_level" } }
 
   - name: "Closed lists for kind, category, and scope"
     queries:

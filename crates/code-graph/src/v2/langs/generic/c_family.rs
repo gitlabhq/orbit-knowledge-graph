@@ -129,17 +129,9 @@ pub fn c_parameters(def: &N<'_>) -> Vec<String> {
 }
 
 pub fn c_linkage(def: &N<'_>) -> Option<crate::v2::types::Visibility> {
-    if def.kind().as_ref() != "function_definition" {
-        return None;
-    }
-    let is_static = def
-        .children()
-        .any(|c| c.kind().as_ref() == "storage_class_specifier" && c.text() == "static");
-    Some(if is_static {
-        crate::v2::types::Visibility::File
-    } else {
-        crate::v2::types::Visibility::Public
-    })
+    def.children()
+        .any(|c| c.kind().as_ref() == "storage_class_specifier" && c.text() == "static")
+        .then_some(crate::v2::types::Visibility::File)
 }
 
 pub fn cpp_access(def: &N<'_>, _name: &str) -> Option<crate::v2::types::Visibility> {

@@ -1302,7 +1302,27 @@ impl CodeGraph {
                 import,
                 pool: &self.strings,
                 sep,
+                module: self.relative_import_module(idx, import),
                 id: ids[idx.index()],
+            })
+    }
+
+    fn relative_import_module(&self, idx: NodeIndex, import: &GraphImport) -> Option<String> {
+        let path = self.strings.get(import.path);
+        if !(path.starts_with("./") || path.starts_with("../")) {
+            return None;
+        }
+        self.graph
+            .edges_directed(idx, petgraph::Direction::Outgoing)
+            .filter(|e| e.weight().relationship.edge_kind == EdgeKind::ResolvesTo)
+            .find_map(|e| match &self.graph[e.target()] {
+                GraphNode::File(f) => Some(
+                    Path::new(&f.path)
+                        .with_extension("")
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                _ => None,
             })
     }
 
@@ -1563,6 +1583,28 @@ impl CodeGraph {
                 self.graph.add_edge(source, target, edge);
             }
         }
+    }
+
+    /// The type that the callable named `callable` declares as its return type.
+    pub fn returned_type(&self, callable: &str) -> Option<NodeIndex> {
+        let id = self.strings.find(callable)?;
+        let by_fqn = self.indexes.by_fqn.lookup(id);
+        let candidates = if by_fqn.is_empty() {
+            self.indexes.by_name.lookup(id)
+        } else {
+            by_fqn
+        };
+        candidates.iter().find_map(|&idx| {
+            let def = &self.defs[self.graph[idx].def_id()?.0 as usize];
+            if def.kind.category() != crate::v2::types::Category::Callable {
+                return None;
+            }
+            let return_type = self.str(def.metadata.as_ref()?.return_type?);
+            self.resolve_scope_nodes(return_type)
+                .first()
+                .copied()
+                .filter(|&n| self.def_kind(n).is_type_container())
+        })
     }
 
     pub fn resolve_scope_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 8]> {
@@ -1890,6 +1932,7 @@ pub struct ImportRow<'a> {
     pub import: &'a GraphImport,
     pub pool: &'a StringPool,
     pub sep: &'a str,
+    pub module: Option<String>,
     pub id: i64,
 }
 impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
@@ -1904,14 +1947,23 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
             .filter(|a| a.len() <= text::IMPORT_ALIAS_CAP)
             .unwrap_or("");
         let import_kind = self.import.import_kind(path.is_empty());
-        let fqn = self.import.target_fqn(self.pool, self.sep);
-        let fqn = (!fqn.is_empty() && fqn.len() <= text::FQN_CAP).then_some(fqn);
+        let fqn = match (&self.module, import_kind, name) {
+            (Some(module), "symbol", Some(name)) => format!("{module}{}{name}", self.sep),
+            (Some(module), _, _) => module.clone(),
+            (None, _, _) => self.import.target_fqn(self.pool, self.sep),
+        };
+        let fqn =
+            (!self.import.wildcard && !fqn.is_empty() && fqn.len() <= text::FQN_CAP).then_some(fqn);
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
         b.col("import_kind")?.push_str(import_kind)?;
         b.col("language_kind")?.push_str(self.import.import_type)?;
         b.col("import_path")?.push_str(path)?;
-        b.col("name")?.push_str(name.unwrap_or(""))?;
+        b.col("name")?.push_str(if self.import.wildcard {
+            "*"
+        } else {
+            name.unwrap_or("")
+        })?;
         b.col("alias")?.push_str(alias)?;
         b.col("fqn")?.push_opt_str(fqn)?;
         b.col("is_external")?.push_bool(self.import.is_external)?;

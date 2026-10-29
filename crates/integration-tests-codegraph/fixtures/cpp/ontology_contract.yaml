@@ -47,7 +47,7 @@ tests:
           LIMIT 100
         assert:
           - { row: { name: "billing", kind: "Module", category: "Module", lk: "Namespace", scope: "top_level" } }
-          - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "member" } }
+          - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "top_level" } }
           - { row: { name: "Order", kind: "Constructor", category: "Callable", lk: "Constructor", scope: "member" } }
           - { row: { name: "charge", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
 
@@ -138,7 +138,7 @@ tests:
           RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
           LIMIT 100
         assert:
-          - { row: { name: "", path: '"base.hpp"', kind: "side_effect", external: false } }
+          - { row: { name: "*", path: '"base.hpp"', kind: "wildcard", external: false } }
 
   - name: "DEFINES from the file to its imports"
     queries:

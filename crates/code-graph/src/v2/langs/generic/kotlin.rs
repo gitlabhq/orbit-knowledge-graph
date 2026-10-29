@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::{DisplayRules, Token, metadata};
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{DefKind, Modifier, Visibility};
+use crate::v2::types::{DefKind, Modifier, Modifiers, Visibility};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::Extract;
@@ -127,6 +127,21 @@ fn kotlin_const() -> Pred {
     ))
 }
 
+fn kotlin_implicit_final(node: &N<'_>) -> Modifiers {
+    let open = node.children().any(|c| {
+        c.kind() == "interface"
+            || (c.kind() == "modifiers"
+                && c.text()
+                    .split_whitespace()
+                    .any(|w| matches!(w, "open" | "abstract" | "sealed")))
+    });
+    if open {
+        Modifiers::empty()
+    } else {
+        Modifiers::empty().with(Modifier::Final)
+    }
+}
+
 impl DslLanguage for KotlinDsl {
     fn name() -> &'static str {
         "kotlin"
@@ -142,7 +157,11 @@ impl DslLanguage for KotlinDsl {
                 .def_kind(DefKind::Class)
                 .kinds_by_label(&[("Interface", DefKind::Interface), ("Enum", DefKind::Enum)])
                 .name_from(child_of_kind("type_identifier"))
-                .metadata(metadata().super_types(kotlin_super_types)),
+                .metadata(
+                    metadata()
+                        .super_types(kotlin_super_types)
+                        .modifiers_with(kotlin_implicit_final),
+                ),
             scope("object_declaration", "Object")
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier")),
@@ -321,7 +340,7 @@ impl DslLanguage for KotlinDsl {
             if node.has(Child, Kind("import_alias")) {
                 return "AliasedImport";
             }
-            "Import"
+            "NamedImport"
         }
 
         vec![

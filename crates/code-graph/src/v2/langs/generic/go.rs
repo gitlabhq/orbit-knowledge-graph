@@ -50,6 +50,13 @@ fn go_visibility(_node: &N<'_>, name: &str) -> Option<Visibility> {
     })
 }
 
+fn go_receiver() -> Extract {
+    field("receiver").then(
+        child_of_kind("parameter_declaration")
+            .then(field("type").inner("pointer_type", "type_identifier")),
+    )
+}
+
 fn go_test(_node: &N<'_>, name: &str) -> bool {
     ["Test", "Benchmark", "Example", "Fuzz"]
         .iter()
@@ -75,17 +82,18 @@ impl DslLanguage for GoDsl {
         vec![
             scope("function_declaration", "Function")
                 .def_kind(DefKind::Function)
-                .metadata(metadata().return_type(field("result")))
+                .metadata(
+                    metadata()
+                        .return_type(field("result").inner("pointer_type", "type_identifier")),
+                )
                 .test_if(go_test),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
+                .owner_from(go_receiver())
                 .metadata(
-                    metadata().return_type(field("result")).receiver_type(
-                        field("receiver").then(
-                            child_of_kind("parameter_declaration")
-                                .then(field("type").inner("pointer_type", "type_identifier")),
-                        ),
-                    ),
+                    metadata()
+                        .return_type(field("result").inner("pointer_type", "type_identifier"))
+                        .receiver_type(go_receiver()),
                 ),
             // Interface method specs — nested inside the interface scope,
             // so they get FQNs like Repository.Get.
@@ -106,7 +114,7 @@ impl DslLanguage for GoDsl {
             scope("type_spec", "Interface")
                 .def_kind(DefKind::Interface)
                 .when(field_kind("type", &["interface_type"])),
-            scope("var_spec", "Var")
+            scope("var_spec", "Variable")
                 .def_kind(DefKind::Variable)
                 .no_scope()
                 .when(!ancestor_is(&[
@@ -114,7 +122,7 @@ impl DslLanguage for GoDsl {
                     "method_declaration",
                     "func_literal",
                 ])),
-            scope("const_spec", "Const")
+            scope("const_spec", "Constant")
                 .def_kind(DefKind::Constant)
                 .no_scope()
                 .when(!ancestor_is(&[
@@ -173,7 +181,7 @@ impl DslLanguage for GoDsl {
         vec![
             binding("short_var_declaration", BindingKind::Assignment)
                 .name_from(&["left"])
-                .value_from("right")
+                .value_from_extract(field("right").then(child_of_kind("call_expression")))
                 .typed(
                     vec![
                         field("right")
@@ -322,7 +330,11 @@ fn extract_single_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) {
     };
 
     imports.push(CanonicalImport {
-        import_type: "Import",
+        import_type: if alias.is_some() && !is_blank && !is_dot {
+            "AliasedImport"
+        } else {
+            "NamedImport"
+        },
         binding_kind,
         mode: ImportMode::Declarative,
         path: import_path,

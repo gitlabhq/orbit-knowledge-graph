@@ -87,7 +87,12 @@ impl DslLanguage for CDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        vec![import("preproc_include").path_from(field("path"))]
+        vec![
+            import("preproc_include")
+                .label("WildcardImport")
+                .always_wildcard()
+                .path_from(field("path")),
+        ]
     }
 
     fn chain_config() -> Option<ChainConfig> {

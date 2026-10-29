@@ -98,7 +98,7 @@ fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bo
     };
 
     imports.push(CanonicalImport {
-        import_type: "Import",
+        import_type: "NamedImport",
         binding_kind,
         mode: ImportMode::Declarative,
         path,
@@ -191,7 +191,7 @@ impl DslLanguage for SwiftDsl {
                 .def_kind(DefKind::Method)
                 .no_scope()
                 .name_from(child_of_kind("simple_identifier")),
-            scope("enum_entry", "EnumEntry")
+            scope("enum_entry", "EnumCase")
                 .def_kind(DefKind::EnumEntry)
                 .no_scope()
                 .name_from(child_of_kind("simple_identifier")),

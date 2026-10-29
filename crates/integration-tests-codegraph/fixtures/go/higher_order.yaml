@@ -34,7 +34,7 @@ tests:
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "main.Process" } }
+          - { row: { callee: "main.Processor.Process" } }
           - { row: { callee: "main.apply" } }
           - { row: { callee: "main.makeProcessor" } }
 

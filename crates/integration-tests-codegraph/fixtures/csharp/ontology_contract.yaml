@@ -81,15 +81,15 @@ tests:
           LIMIT 100
         assert:
           - { row: { name: "Billing", kind: "Module", category: "Module", lk: "Namespace", scope: "top_level" } }
-          - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "member" } }
+          - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "top_level" } }
           - { row: { name: "max", kind: "Field", category: "Value", lk: "Field", scope: "member" } }
           - { row: { name: "Limit", kind: "Constant", category: "Value", lk: "Constant", scope: "member" } }
           - { row: { name: "Total", kind: "Field", category: "Value", lk: "Property", scope: "member" } }
           - { row: { name: "Order", kind: "Constructor", category: "Callable", lk: "Constructor", scope: "member" } }
           - { row: { name: "Pay", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
-          - { row: { name: "Color", kind: "Enum", category: "Type", lk: "Enum", scope: "member" } }
+          - { row: { name: "Color", kind: "Enum", category: "Type", lk: "Enum", scope: "top_level" } }
           - { row: { name: "Red", kind: "EnumMember", category: "Value", lk: "EnumMember", scope: "member" } }
-          - { row: { name: "Point", kind: "Struct", category: "Type", lk: "Struct", scope: "member" } }
+          - { row: { name: "Point", kind: "Struct", category: "Type", lk: "Struct", scope: "top_level" } }
 
   - name: "Closed lists for kind, category, and scope"
     queries:
@@ -199,8 +199,8 @@ tests:
           RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
           LIMIT 100
         assert:
-          - { row: { name: "", path: "System", kind: "wildcard", lk: "WildcardImport", fqn: "System", external: true } }
-          - { row: { name: "", path: "Billing.Core", kind: "wildcard", lk: "WildcardImport", fqn: "Billing.Core", external: false } }
+          - { row: { name: "*", path: "System", kind: "wildcard", lk: "WildcardImport", fqn: null, external: true } }
+          - { row: { name: "*", path: "Billing.Core", kind: "wildcard", lk: "WildcardImport", fqn: null, external: false } }
 
   - name: "DEFINES from the file to its imports"
     queries:

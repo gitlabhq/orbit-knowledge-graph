@@ -58,7 +58,7 @@ tests:
           - { row: { name: "shout", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
           - { row: { name: "Point", kind: "Struct", category: "Type", lk: "Struct", scope: "top_level" } }
           - { row: { name: "Color", kind: "Enum", category: "Type", lk: "Enum", scope: "top_level" } }
-          - { row: { name: "red", kind: "EnumMember", category: "Value", lk: "EnumEntry", scope: "member" } }
+          - { row: { name: "red", kind: "EnumMember", category: "Value", lk: "EnumCase", scope: "member" } }
 
   - name: "Closed lists for kind, category, and scope"
     queries:

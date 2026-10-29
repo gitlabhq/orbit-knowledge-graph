@@ -38,7 +38,7 @@ tests:
       RETURN s.language_kind AS language_kind, s.import_path AS path, s.name AS name
     assert:
       - { row_count: 3 }
-      - { row: { language_kind: "Import", path: "Enum", name: "Enum" } }
+      - { row: { language_kind: "Import", path: "Enum", name: "*" } }
       - { row: { language_kind: "Use", path: "", name: "GenServer" } }
       - { row: { language_kind: "Require", path: "", name: "Logger" } }
 

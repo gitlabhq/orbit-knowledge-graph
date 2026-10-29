@@ -49,10 +49,10 @@ tests:
           LIMIT 100
         assert:
           - { row: { name: "Billing.Order", kind: "Module", category: "Module", lk: "Module", scope: "top_level" } }
-          - { row: { name: "total", kind: "Field", category: "Value", lk: "StructField", scope: "member" } }
-          - { row: { name: "charge", kind: "Function", category: "Callable", lk: "Function", scope: "member" } }
-          - { row: { name: "describe", kind: "Function", category: "Callable", lk: "Function", scope: "member" } }
-          - { row: { name: "trace", kind: "Macro", category: "Macro", lk: "Macro", scope: "member" } }
+          - { row: { name: "total", kind: "Field", category: "Value", lk: "Field", scope: "top_level" } }
+          - { row: { name: "charge", kind: "Function", category: "Callable", lk: "Function", scope: "top_level" } }
+          - { row: { name: "describe", kind: "Function", category: "Callable", lk: "Function", scope: "top_level" } }
+          - { row: { name: "trace", kind: "Macro", category: "Macro", lk: "Macro", scope: "top_level" } }
 
   - name: "Closed lists for kind, category, and scope"
     queries:

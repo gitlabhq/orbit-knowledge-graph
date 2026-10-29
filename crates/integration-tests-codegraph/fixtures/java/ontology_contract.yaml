@@ -197,9 +197,9 @@ tests:
           RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
           LIMIT 100
         assert:
-          - { row: { name: "List", path: "java.util", kind: "symbol", lk: "Import", fqn: "java.util.List", external: true } }
-          - { row: { name: "Entity", path: "com.shop.base", kind: "symbol", lk: "Import", fqn: "com.shop.base.Entity", external: false } }
-          - { row: { name: "Payable", path: "com.shop.base", kind: "symbol", lk: "Import", fqn: "com.shop.base.Payable", external: false } }
+          - { row: { name: "List", path: "java.util", kind: "symbol", lk: "NamedImport", fqn: "java.util.List", external: true } }
+          - { row: { name: "Entity", path: "com.shop.base", kind: "symbol", lk: "NamedImport", fqn: "com.shop.base.Entity", external: false } }
+          - { row: { name: "Payable", path: "com.shop.base", kind: "symbol", lk: "NamedImport", fqn: "com.shop.base.Payable", external: false } }
 
   - name: "DEFINES from the file to its imports"
     queries:

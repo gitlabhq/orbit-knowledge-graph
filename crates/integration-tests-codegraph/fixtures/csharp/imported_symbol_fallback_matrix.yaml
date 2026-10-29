@@ -69,7 +69,7 @@ tests:
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { caller: "App.JsonRunner.Serialize", path: "Newtonsoft.Json", name: null, language_kind: "WildcardImport" } }
+      - { row: { caller: "App.JsonRunner.Serialize", path: "Newtonsoft.Json", name: "*", language_kind: "WildcardImport" } }
 
   - name: "static using directives target wildcard imported symbols"
     query: |
@@ -78,7 +78,7 @@ tests:
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { caller: "App.StaticRunner.Track", path: "External.Tools.Helpers", name: null, language_kind: "StaticImport" } }
+      - { row: { caller: "App.StaticRunner.Track", path: "External.Tools.Helpers", name: "*", language_kind: "StaticImport" } }
 
   - name: "alias using directives target aliased imported symbols"
     query: |

@@ -43,7 +43,7 @@ tests:
       RETURN i.name AS name
     assert:
       - { row_count: 1 }
-      - { row: { name: null } }
+      - { row: { name: "*" } }
 
   - name: Generic-typed alias strips the generic parameter from `name`
     query: |
