@@ -1268,7 +1268,7 @@ e2e-robot-image:
 
 check-go-proto:
   needs: []
-  image: golang:1.24
+  image: golang:1.26
   tags:
     - saas-linux-medium-amd64
   stage: lint

@@ -5,7 +5,8 @@ use rmcp::{
     ErrorData, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
-        CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
+        CallToolResult, ContentBlock, Implementation, ProtocolVersion, ServerCapabilities,
+        ServerInfo,
     },
     schemars, tool, tool_handler, tool_router,
     transport::stdio,
@@ -62,8 +63,8 @@ where
         .await
         .map_err(|e| ErrorData::internal_error(format!("join error: {e}"), None))?;
     Ok(match res {
-        Ok(json) => CallToolResult::success(vec![Content::text(json)]),
-        Err(e) => CallToolResult::error(vec![Content::text(format!("{e:#}"))]),
+        Ok(json) => CallToolResult::success(vec![ContentBlock::text(json)]),
+        Err(e) => CallToolResult::error(vec![ContentBlock::text(format!("{e:#}"))]),
     })
 }
 
