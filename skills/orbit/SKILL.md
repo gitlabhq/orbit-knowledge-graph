@@ -74,7 +74,7 @@ Resolve a user question in at most 5 query attempts, validation errors included.
 
 ## Reporting results
 
-Orbit answers come from graph queries, not an authoritative source. Flag known coverage gaps inline when they affect the result. Never print the query or its GQL text unless the user asks to see it. Full guidance: [`references/reporting.md`](references/reporting.md).
+Orbit answers come from graph queries, not an authoritative source. Flag known coverage gaps inline when they affect the result. Never print the query or its GQL text unless the user asks to see it. Fence a query you show as `cypher`. Full guidance: [`references/reporting.md`](references/reporting.md).
 
 <!-- orbit:include local:quick-start -->
 
