@@ -27,10 +27,20 @@ test('a finished Orbit call draws the mark, the label, and the path', async ($, 
   expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeUndefined()
 })
 
-test('a failed Orbit call shows its mark in the error color and no extra text', async ($, on) => {
+test('a failed Orbit call says so in text as well as in the error color', async ($, on) => {
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
   const ui = await $.ui.mount(toolUse(QUERY, { isErrored: true }))
   expect((await ui.find({ type: 'Text', text: '◎' }))?.props.color).toBe('error')
+  expect((await ui.find({ type: 'Text', text: '  · failed' }))?.props.color).toBe('error')
+  const fine = await $.ui.mount({ ...toolUse(QUERY), requestId: 'orbit-test-fine' })
+  expect(await fine.find({ type: 'Text', text: /failed|interrupted/ })).toBeUndefined()
+})
+
+test('an interrupted Orbit call says interrupted, not failed', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  const base = toolUse(QUERY, { isErrored: true })
+  const ui = await $.ui.mount({ ...base, props: { ...base.props, isInterrupted: true } })
+  expect(await ui.find({ type: 'Text', text: '  · interrupted' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /failed/ })).toBeUndefined()
 })
 
