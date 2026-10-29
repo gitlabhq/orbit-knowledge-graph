@@ -2,18 +2,18 @@ name: A shared denormalized node filter is emitted only once
 
 query:
   json: |
-    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","filters":{"kind":"function"}},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","filters":{"kind":"Function"}},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
   gql: |
-    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition {kind: 'function'})-[:CALLS]->(c:Definition) RETURN a, b, c
+    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition {kind: 'Function'})-[:CALLS]->(c:Definition) RETURN a, b, c
 
 logical:
-  expect: ["(Filter b.kind = 'function' (_))"]
+  expect: ["(Filter b.kind = 'Function' (_))"]
 
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['kind:function'], ... (_))"]
+      expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['kind:Function'], ... (_))"]
       reject: ["(Filter _orbit_edge_1.source_tags HAS ANY ?, ... (_))"]
     emitted:
-      expect: ["(Filter ArrayContains(_orbit_edge_0.target_tags, 'kind:function'), ... (_))"]
+      expect: ["(Filter ArrayContains(_orbit_edge_0.target_tags, 'kind:Function'), ... (_))"]
       reject: ["(Filter ArrayContains(_orbit_edge_1.source_tags, ?), ... (_))"]

@@ -80,7 +80,7 @@ tests:
   - name: "Function definitions with file-scoped FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Function'
+      WHERE d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 6 }
@@ -96,8 +96,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'math::Vector'
-        AND d.kind = 'Struct'
-      RETURN d.fqn AS fqn, d.kind AS type
+        AND d.language_kind = 'Struct'
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "math::Vector", type: Struct } }
@@ -105,7 +105,7 @@ tests:
   - name: "Enum with scoped constants"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'EnumConstant'
+      WHERE d.language_kind = 'EnumConstant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -117,8 +117,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'shapes::Shape'
-        AND d.kind = 'Typedef'
-      RETURN d.fqn AS fqn, d.kind AS type
+        AND d.language_kind = 'Typedef'
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "shapes::Shape", type: Typedef } }

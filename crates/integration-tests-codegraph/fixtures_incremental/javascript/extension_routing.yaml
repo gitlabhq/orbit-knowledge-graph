@@ -125,7 +125,7 @@ tests:
 
   - name: Generic pipeline resolves imports across JS-family extensions
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path IN [
         'jsx/consumer.js',
         'tsx/consumer.ts',

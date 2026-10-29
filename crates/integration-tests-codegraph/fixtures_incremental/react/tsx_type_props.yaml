@@ -53,7 +53,7 @@ tests:
 
   - name: TSX type-only and runtime imports retain definition relationships
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path IN ['src/Button.tsx', 'src/Toolbar.tsx']
       RETURN i.file_path AS file_path, i.name AS name, d.fqn AS target
       ORDER BY file_path, name

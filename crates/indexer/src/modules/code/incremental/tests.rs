@@ -525,15 +525,6 @@ async fn archive_indexes_multiple_families_into_server_batches() {
             .iter()
             .any(|row| row["relationship_kind"].coerce::<String>().as_deref() == Some("CALLS"))
     );
-    assert_eq!(
-        edges
-            .iter()
-            .filter(
-                |row| row["relationship_kind"].coerce::<String>().as_deref() == Some("ON_BRANCH")
-            )
-            .count(),
-        files.len() + directories.len()
-    );
 }
 
 #[tokio::test]

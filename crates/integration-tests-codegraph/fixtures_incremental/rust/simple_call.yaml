@@ -17,7 +17,7 @@ tests:
   - name: Exactly 3 definitions with correct types
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'main.rs' AND d.kind = 'Function'
+      WHERE d.file_path = 'main.rs' AND d.language_kind = 'Function'
       RETURN d.name AS name, d.fqn AS fqn
       ORDER BY name
     assert:

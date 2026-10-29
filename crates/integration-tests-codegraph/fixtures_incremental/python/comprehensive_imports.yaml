@@ -15,7 +15,7 @@ fixtures:
 tests:
   - name: Has multiple imports
     query: |
-      MATCH (f:File)-[:IMPORTS]->(i:Import)
+      MATCH (f:File)-[:DEFINES]->(i:Import)
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 10 } }

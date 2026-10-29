@@ -107,7 +107,7 @@ tests:
     # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND i.import_path = './child_badge.vue'
       RETURN i.language_kind AS language_kind, d.fqn AS target
@@ -131,7 +131,7 @@ tests:
     # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND i.import_path = '../graphql/get_items.query.graphql'
       RETURN i.language_kind AS language_kind, d.fqn AS target

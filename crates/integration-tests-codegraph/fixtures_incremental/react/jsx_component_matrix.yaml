@@ -186,7 +186,7 @@ tests:
 
   - name: React barrel imports resolve to concrete definitions
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'src/Home.tsx'
         AND i.language_kind <> 'NamespaceImport'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
@@ -203,7 +203,7 @@ tests:
 
   - name: Namespace imports resolve only the definitions accessed through their binding
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'src/Home.tsx' AND i.language_kind = 'NamespaceImport'
       RETURN i.alias AS alias, d.name AS name, d.file_path AS file
     assert:
@@ -244,7 +244,7 @@ tests:
 
   - name: External React and package imports have no local targets
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'src/Home.tsx'
         AND i.import_path IN ['react', '@external/ui']
       RETURN i.import_path AS path, d.fqn AS target
@@ -342,7 +342,7 @@ tests:
 
   - name: Plain JSX imports target TSX component definitions
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'src/Plain.jsx'
       RETURN i.import_path AS path, i.name AS name, d.fqn AS target
     assert:

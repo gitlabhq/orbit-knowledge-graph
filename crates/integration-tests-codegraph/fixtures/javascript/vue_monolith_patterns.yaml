@@ -210,7 +210,7 @@ tests:
   - name: Synthesizes module definitions for Vue SFC files
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Module'
+      WHERE d.language_kind = 'Module'
         AND d.fqn ENDS WITH '.vue'
       RETURN d.fqn AS fqn
     assert:
@@ -221,7 +221,7 @@ tests:
 
   - name: jh_else_ce Vue default import targets the primary export proxy
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
         AND i.import_path = 'jh_else_ce/gitlab_version_check/components/gitlab_version_check_badge.vue'
       RETURN i.language_kind AS language_kind, i.name AS name, d.fqn AS target
@@ -231,7 +231,7 @@ tests:
 
   - name: Barrel named import for Vue component targets the barrel proxy
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
         AND i.import_path = '~/gitlab_version_check/components'
         AND i.name = 'SecurityPatchUpgradeAlertModal'
@@ -242,7 +242,7 @@ tests:
 
   - name: Vue SFC imports preserve local monolith alias and relative targets
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue'
       RETURN i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -263,7 +263,7 @@ tests:
           'SecurityPatchUpgradeAlertModal::dispatchTrackingEvent',
           'SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick'
         ]
-      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type
+      RETURN d.name AS name, d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 4 }
       - { row: { name: "SecurityPatchUpgradeAlertModal", fqn: "SecurityPatchUpgradeAlertModal", type: "Class" } }
@@ -273,7 +273,7 @@ tests:
 
   - name: Namespace imports in Vue SFC target synthesized modules
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -331,7 +331,7 @@ tests:
 
   - name: Script lang ts Vue imports preserve namespace and ee alias targets
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:

@@ -267,7 +267,7 @@ tests:
     query: |
       MATCH (r:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
-        AND c.kind = 'Method'
+        AND c.language_kind = 'Method'
         AND c.name = 'Range'
       RETURN c.name AS name
     assert:
@@ -278,7 +278,7 @@ tests:
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Bounds' AND m.name = 'Bounds'
-        AND m.kind = 'Method'
+        AND m.language_kind = 'Method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -308,7 +308,7 @@ tests:
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Point'
-        AND m.kind = 'Method'
+        AND m.language_kind = 'Method'
       RETURN m.name AS name, m.start_line AS line
       ORDER BY name
     assert:
@@ -322,7 +322,7 @@ tests:
     query: |
       MATCH (r:Definition)-[e:DEFINES]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
-        AND c.kind = 'Method'
+        AND c.language_kind = 'Method'
         AND c.name = 'Range'
       RETURN c.fqn AS fqn
     assert:
@@ -471,7 +471,7 @@ tests:
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Wrapped' AND m.name = 'raw'
-        AND m.kind = 'Method'
+        AND m.language_kind = 'Method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -481,7 +481,7 @@ tests:
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Wrapped'
         AND m.name IN ['toString', 'equals']
-        AND m.kind = 'Method'
+        AND m.language_kind = 'Method'
       RETURN m.name AS name
       ORDER BY name
     assert:

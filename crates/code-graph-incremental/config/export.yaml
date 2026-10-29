@@ -70,7 +70,7 @@ entities:
     id: { seed: def, columns: [file_path, fqn, span] }
     columns:
       - { name: file_path, type: Utf8, from: ancestor_tag("file_path") }
-      - { name: language, type: Utf8, from: ancestor_tag("language") }
+      - { name: language, type: Utf8, const: "" }
       - { name: fqn, type: Utf8, from: tag("fqn") }
       - { name: name, type: Utf8, from: child_sym("__defname") }
       - { name: signature, type: Utf8, const: "" }
@@ -80,7 +80,7 @@ entities:
       - { name: doc_comment, type: Utf8, const: "" }
       - name: category
         type: Utf8
-        from: tag("def_type")|map("Property:Field", "EnumVariant:EnumMember", "Variant:EnumMember", "Lambda:Function", "Static:Variable", "Union:Struct")|map("Class:Type", "Struct:Type", "Interface:Type", "Trait:Type", "Enum:Type", "TypeAlias:Type", "Function:Callable", "Method:Callable", "Field:Value", "Constant:Value", "Variable:Value", "EnumMember:Value")
+        from: tag("def_type")|map("Property:Field", "EnumVariant:EnumMember", "Variant:EnumMember", "Lambda:Function", "Static:Variable", "Union:Struct")|map("Class:Type", "Struct:Type", "Interface:Type", "Trait:Type", "Enum:Type", "TypeAlias:Type", "Function:Callable", "Method:Callable", "Constructor:Callable", "Test:Callable", "Field:Value", "Constant:Value", "Variable:Value", "EnumMember:Value")
       - name: kind
         type: Utf8
         from: tag("def_type")|map("Property:Field", "EnumVariant:EnumMember", "Variant:EnumMember", "Lambda:Function", "Static:Variable", "Union:Struct")

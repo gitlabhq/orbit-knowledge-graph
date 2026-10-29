@@ -60,18 +60,18 @@ cases:
   - name: Repeated low-cardinality row filters stay inline
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"kind":"function"}},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"a","to":"c"}]}
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"kind":"Function"}},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"a","to":"c"}]}
       gql: |
-        MATCH (a:Definition {kind: 'function'})-[:CALLS]->(b:Definition),
+        MATCH (a:Definition {kind: 'Function'})-[:CALLS]->(b:Definition),
           (a)-[:CALLS]->(c:Definition)
         RETURN a.id, b.id, c.id
     logical:
-      expect: ["(Filter a.kind = 'function' (_))"]
+      expect: ["(Filter a.kind = 'Function' (_))"]
     physical:
       clickhouse:
         planned:
           expect:
-            - (Filter _orbit_edge_0.source_tags HAS ANY ['kind:function'], ... (_))
+            - (Filter _orbit_edge_0.source_tags HAS ANY ['kind:Function'], ... (_))
             - (Filter _orbit_edge_1.relationship_kind = 'CALLS', ... (_))
           reject:
-            - (CTE ? (Filter ?.source_tags HAS ANY ['kind:function'], ... (_)))
+            - (CTE ? (Filter ?.source_tags HAS ANY ['kind:Function'], ... (_)))

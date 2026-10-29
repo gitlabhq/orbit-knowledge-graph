@@ -2,18 +2,18 @@ name: Covered node filters use edge tags without node scans
 
 query:
   json: |
-    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"kind":"function"}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"kind":"Function"}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
   gql: |
-    MATCH (a:Definition {kind: 'function'})-[:CALLS]->(b:Definition) RETURN a, b
+    MATCH (a:Definition {kind: 'Function'})-[:CALLS]->(b:Definition) RETURN a, b
 
 logical:
-  expect: ["(Filter a.kind = 'function' (_))"]
+  expect: ["(Filter a.kind = 'Function' (_))"]
 
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter _orbit_edge_0._deleted = false, _orbit_edge_0.source_tags HAS ANY ['kind:function'] (Bind _orbit_edge_0 (Filter ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))))"]
+      expect: ["(Filter _orbit_edge_0._deleted = false, _orbit_edge_0.source_tags HAS ANY ['kind:Function'] (Bind _orbit_edge_0 (Filter ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))))"]
     emitted:
-      expect: ["(Filter ArrayContains(_orbit_edge_0.source_tags, 'kind:function'), ... (_))"]
+      expect: ["(Filter ArrayContains(_orbit_edge_0.source_tags, 'kind:Function'), ... (_))"]
       ctes:
         absent: true

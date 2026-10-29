@@ -42,6 +42,6 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'main.apply'
-      RETURN d.kind AS kind
+      RETURN d.language_kind AS language_kind
     assert:
-      - { row: { kind: "Function" } }
+      - { row: { language_kind: "Function" } }

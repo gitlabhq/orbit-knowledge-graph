@@ -51,7 +51,6 @@ async fn incremental_flag_indexes_archives_and_replaces_stale_definitions() {
         ("CONTAINS", "Project", "Branch", 1),
         ("CONTAINS", "Branch", "Directory", 2),
         ("CONTAINS", "Branch", "File", 2),
-        ("ON_BRANCH", "File", "Branch", 6),
     ] {
         assert_edge_count_for_traversal_path(
             &clickhouse,
@@ -2748,16 +2747,6 @@ async fn assert_branch_indexed(
         "CONTAINS",
         "Branch",
         "Directory",
-        &TraversalPath::new_unchecked(expected_traversal_path),
-        1,
-    )
-    .await;
-
-    assert_edge_count_for_traversal_path(
-        clickhouse,
-        "ON_BRANCH",
-        "File",
-        "Branch",
         &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )

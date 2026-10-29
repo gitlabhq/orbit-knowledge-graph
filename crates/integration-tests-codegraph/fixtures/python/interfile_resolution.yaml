@@ -114,7 +114,7 @@ tests:
   - name: "User class is defined in models/user.py only"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'User' AND d.kind = 'Class'
+      WHERE d.name = 'User' AND d.language_kind = 'Class'
       RETURN d.file_path AS file
     assert:
       - { row_count: 1 }

@@ -51,7 +51,7 @@ tests:
 
   - name: "type-only imports use the same parent-path rules"
     query: |
-      MATCH (symbol:Import)-[:IMPORTS]->(target:Definition)
+      MATCH (symbol:Import)-[:RESOLVES_TO]->(target:Definition)
       WHERE symbol.name = 'Client'
       RETURN target.file_path AS file, target.name AS name, target.kind AS type
     assert:

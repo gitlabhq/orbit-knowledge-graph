@@ -57,10 +57,10 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
         .iter()
         .map(|field| ColumnSpec {
             name: field.name.clone(),
-            col_type: if field.data_type == ontology::DataType::Int {
-                ColumnType::Int
-            } else {
-                ColumnType::DictStr
+            col_type: match field.data_type {
+                ontology::DataType::Int => ColumnType::Int,
+                ontology::DataType::Bool => ColumnType::Bool,
+                _ => ColumnType::DictStr,
             },
             nullable: field.nullable,
         })
@@ -619,7 +619,7 @@ fn definitions_imports_and_edges_export_as_ontology_rows() {
     let edges = table(&exported, "gl_edge");
     let import_to_def = rows(edges, &["source_kind", "relationship_kind", "target_kind"])
         .iter()
-        .filter(|r| r == &&strs(&["Import", "IMPORTS", "Definition"]))
+        .filter(|r| r == &&strs(&["Import", "RESOLVES_TO", "Definition"]))
         .count();
     assert_eq!(
         import_to_def, 2,
@@ -638,8 +638,8 @@ fn definitions_imports_and_edges_export_as_ontology_rows() {
             ("Definition".into(), "DEFINES".into(), "Definition".into()),
             ("Directory".into(), "CONTAINS".into(), "File".into()),
             ("File".into(), "DEFINES".into(), "Definition".into()),
-            ("File".into(), "IMPORTS".into(), "Import".into()),
-            ("Import".into(), "IMPORTS".into(), "Definition".into()),
+            ("File".into(), "DEFINES".into(), "Import".into()),
+            ("Import".into(), "RESOLVES_TO".into(), "Definition".into()),
         ]
     );
 }

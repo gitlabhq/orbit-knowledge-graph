@@ -64,7 +64,7 @@ tests:
   - name: "Modules are not callable values"
     query: |
       MATCH (s:Definition)-[e:CALLS]->(t:Definition)
-      WHERE t.kind = 'Class'
+      WHERE t.language_kind = 'Class'
       RETURN t.fqn AS callee
     assert:
       - { empty: true }

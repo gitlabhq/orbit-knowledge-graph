@@ -43,7 +43,7 @@ tests:
   - name: a private getter drops the hash like the other methods
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'widget.ts' AND d.kind = 'Method'
+      WHERE d.file_path = 'widget.ts' AND d.language_kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

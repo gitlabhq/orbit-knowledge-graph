@@ -34,8 +34,8 @@ tests:
   - name: Regular, private, accessor, static, and abstract methods are all extracted
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'lib/members.ts' AND d.fqn STARTS WITH 'Shape::' AND d.kind <> 'Variable'
-      RETURN d.fqn AS fqn, d.kind AS dt, d.start_line AS sl, d.end_line AS el
+      WHERE d.file_path = 'lib/members.ts' AND d.fqn STARTS WITH 'Shape::' AND d.language_kind <> 'Variable'
+      RETURN d.fqn AS fqn, d.language_kind AS dt, d.start_line AS sl, d.end_line AS el
     assert:
       - { row_count: 6 }
       - { row: { fqn: "Shape::secret", dt: "Method", sl: 4, el: 6 } }
@@ -48,7 +48,7 @@ tests:
   - name: Computed keys are not extracted as members
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'lib/members.ts' AND d.name = 'dynamicKey' AND d.kind = 'Method'
+      WHERE d.file_path = 'lib/members.ts' AND d.name = 'dynamicKey' AND d.language_kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 0 }

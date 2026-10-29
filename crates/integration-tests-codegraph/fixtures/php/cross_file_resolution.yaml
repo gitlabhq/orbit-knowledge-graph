@@ -252,7 +252,7 @@ tests:
 
   - name: "Bootstrap function FQN under namespace"
     query: |
-      MATCH (d:Definition) WHERE d.kind = 'Function' RETURN d.fqn AS fqn
+      MATCH (d:Definition) WHERE d.language_kind = 'Function' RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Service\bootstrap' } }
 
@@ -267,13 +267,13 @@ tests:
 
   - name: "Classes and interfaces across namespaces"
     query: |
-      MATCH (d:Definition) WHERE d.kind = 'Interface' RETURN d.fqn AS fqn
+      MATCH (d:Definition) WHERE d.language_kind = 'Interface' RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Contract\Identifiable' } }
       - { row: { fqn: 'App\Contract\Persistable' } }
 
   - name: "Trait indexed as a class-kind container with correct FQN"
     query: |
-      MATCH (d:Definition) WHERE d.kind = 'Trait' RETURN d.fqn AS fqn
+      MATCH (d:Definition) WHERE d.language_kind = 'Trait' RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Mixin\Loggable' } }

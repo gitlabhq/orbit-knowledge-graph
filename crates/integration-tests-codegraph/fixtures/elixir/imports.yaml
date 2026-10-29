@@ -19,7 +19,7 @@ fixtures:
 tests:
   - name: "alias emits one Import with the last segment as the name"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:Import)
+      MATCH (f:File)-[e:DEFINES]->(s:Import)
       WHERE f.path = 'lib/consumer.ex'
         AND s.language_kind = 'Alias'
       RETURN s.import_path AS path, s.name AS name, s.alias AS alias
@@ -32,7 +32,7 @@ tests:
 
   - name: "import, use, and require each emit their own Import"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:Import)
+      MATCH (f:File)-[e:DEFINES]->(s:Import)
       WHERE f.path = 'lib/consumer.ex'
         AND s.language_kind IN ['Import', 'Use', 'Require']
       RETURN s.language_kind AS language_kind, s.import_path AS path, s.name AS name
@@ -44,7 +44,7 @@ tests:
 
   - name: "Ordinary function definitions do not produce imports"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:Import)
+      MATCH (f:File)-[e:DEFINES]->(s:Import)
       WHERE f.path = 'lib/consumer.ex'
       RETURN count(s) AS n
     assert:

@@ -34,7 +34,7 @@ tests:
   - name: "the function is defined in the first module"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'helper' AND d.kind = 'Function'
+      WHERE d.name = 'helper' AND d.language_kind = 'Function'
       RETURN d.file_path AS file
     assert:
       - { row_count: 1 }
@@ -51,7 +51,7 @@ tests:
 
   - name: "the use declaration resolves to the definition"
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'src/c.rs' AND i.name = 'helper'
       RETURN d.file_path AS target
     assert:

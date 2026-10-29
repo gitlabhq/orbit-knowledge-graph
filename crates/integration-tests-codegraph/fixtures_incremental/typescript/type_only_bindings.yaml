@@ -39,7 +39,7 @@ tests:
 
   - name: "type-only names still resolve to their definitions"
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'main.ts' AND i.name IN ['Client', 'default']
       RETURN i.alias AS alias, d.name AS target
     assert:

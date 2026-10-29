@@ -42,7 +42,7 @@ fixtures:
 tests:
   - name: the fields of named struct types are the only Field definitions, with comments between them
     query: |
-      MATCH (d:Definition) WHERE d.kind = 'Field'
+      MATCH (d:Definition) WHERE d.language_kind = 'Field'
       RETURN d.name AS name
       ORDER BY name
     assert:

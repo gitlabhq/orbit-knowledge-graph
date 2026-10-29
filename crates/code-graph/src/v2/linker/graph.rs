@@ -977,6 +977,25 @@ impl CodeGraph {
         })
     }
 
+    pub fn definition_rows(&self, ids: &[i64]) -> Vec<DefinitionRow<'_>> {
+        let languages: rustc_hash::FxHashMap<&str, &'static str> = self
+            .files()
+            .map(|(_, file)| (file.path.as_str(), file.language_name()))
+            .collect();
+        self.definitions()
+            .map(|(idx, file_path, def)| DefinitionRow {
+                file_path,
+                language: languages
+                    .get(file_path.as_ref())
+                    .copied()
+                    .unwrap_or_default(),
+                def,
+                pool: &self.strings,
+                id: ids[idx.index()],
+            })
+            .collect()
+    }
+
     pub fn imports_iter(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphImport)> {
         self.graph.node_indices().filter_map(|idx| {
             if let GraphNode::Import { file_path, id } = &self.graph[idx] {
@@ -1306,6 +1325,7 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
 
 pub struct DefinitionRow<'a> {
     pub file_path: &'a str,
+    pub language: &'a str,
     pub def: &'a GraphDef,
     pub pool: &'a StringPool,
     pub id: i64,
@@ -1315,7 +1335,7 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
         let kind = self.def.ontology_kind();
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
-        b.col("language")?.push_str("")?;
+        b.col("language")?.push_str(self.language)?;
         b.col("fqn")?.push_str(self.pool.get(self.def.fqn))?;
         b.col("name")?.push_str(self.pool.get(self.def.name))?;
         b.col("signature")?.push_str("")?;

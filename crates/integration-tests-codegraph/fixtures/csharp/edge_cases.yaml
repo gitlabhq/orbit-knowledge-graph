@@ -137,7 +137,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Geo.Models.Point.Point'
-        AND d.kind = 'Constructor'
+        AND d.language_kind = 'Constructor'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -147,8 +147,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Geo.Models.Line'
-        AND d.kind = 'Class'
-      RETURN d.fqn AS fqn, d.kind AS type
+        AND d.language_kind = 'Class'
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: Geo.Models.Line, type: Class } }
@@ -192,8 +192,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Geo.Services.PointService.Create'
-        AND d.kind = 'Method'
-      RETURN d.fqn AS fqn, d.kind AS type
+        AND d.language_kind = 'Method'
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: Geo.Services.PointService.Create, type: Method } }
@@ -202,8 +202,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Geo.Services.PointService.IsValid'
-        AND d.kind = 'Method'
-      RETURN d.fqn AS fqn, d.kind AS type
+        AND d.language_kind = 'Method'
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: Geo.Services.PointService.IsValid, type: Method } }
@@ -235,8 +235,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Geo.Services.PointService.CreateAsync'
-        AND d.kind = 'Method'
-      RETURN d.fqn AS fqn, d.kind AS type
+        AND d.language_kind = 'Method'
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: Geo.Services.PointService.CreateAsync, type: Method } }

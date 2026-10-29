@@ -83,7 +83,7 @@ tests:
           'com.example.sealed.Add.eval',
           'com.example.sealed.Zero.eval'
         ]
-        AND d.kind = 'Function'
+        AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:
@@ -98,7 +98,7 @@ tests:
           'com.example.sealed.Add',
           'com.example.sealed.Zero'
         ]
-        AND m.kind = 'Function'
+        AND m.language_kind = 'Function'
       RETURN m.fqn AS fqn
       ORDER BY m.fqn
     assert:
@@ -129,7 +129,7 @@ tests:
           'com.example.sealed.Const',
           'com.example.sealed.Add'
         ]
-        AND d.kind = 'Class'
+        AND d.language_kind = 'Class'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:

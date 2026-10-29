@@ -75,7 +75,7 @@ fixtures:
 tests:
   - name: Framework imports do not bind repository lookalikes
     query: |
-      MATCH (source:Import)-[:IMPORTS]->(target:Definition)
+      MATCH (source:Import)-[:RESOLVES_TO]->(target:Definition)
       WHERE source.file_path <> 'relative.rb'
         AND target.file_path IN ['active_record/base.rb', 'active_support/concern.rb']
       RETURN target.fqn
@@ -149,7 +149,7 @@ steps:
     tests:
       - name: Framework remains external after reindex
         query: |
-          MATCH (source:Import)-[:IMPORTS]->(target:Definition)
+          MATCH (source:Import)-[:RESOLVES_TO]->(target:Definition)
           WHERE source.file_path <> 'relative.rb' AND target.file_path = 'active_record/base.rb'
           RETURN target.fqn
         assert:

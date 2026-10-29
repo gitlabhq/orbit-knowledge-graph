@@ -19,7 +19,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.ts'
-        AND d.kind = 'Function'
+        AND d.language_kind = 'Function'
       RETURN d.name AS name, d.fqn AS fqn
       ORDER BY name
     assert:

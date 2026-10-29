@@ -63,7 +63,7 @@ tests:
   - name: "Terraform block is extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Terraform'
+      WHERE d.language_kind = 'Terraform'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
@@ -72,7 +72,7 @@ tests:
   - name: "Provider definition is extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Provider'
+      WHERE d.language_kind = 'Provider'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
@@ -82,7 +82,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn STARTS WITH 'aws_subnet.'
-        AND d.kind = 'Resource'
+        AND d.language_kind = 'Resource'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }

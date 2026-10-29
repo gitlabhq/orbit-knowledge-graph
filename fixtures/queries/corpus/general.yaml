@@ -225,11 +225,11 @@ q21_calls_aggregation:
     LIMIT 10
 
 q22_imports_traversal:
-  desc: "IMPORTS traversal"
+  desc: "RESOLVES_TO traversal"
   category: code_graph
   suite: general
   query: |
-    MATCH (f:File)-[:IMPORTS]->(imp:Import)
+    MATCH (f:File)-[:DEFINES]->(imp:Import)
     WHERE f.path ENDS WITH 'controller.rb'
     RETURN *
     LIMIT 15
@@ -306,12 +306,12 @@ q30_pipeline_job_ci_chain:
     ORDER BY pipe.created_at DESC
     LIMIT 10
 
-q31_on_branch_code_edge:
-  desc: "ON_BRANCH code edge"
+q31_branch_contains_file:
+  desc: "Branch CONTAINS root file"
   category: code_graph
   suite: general
   query: |
-    MATCH (f:File)-[:ON_BRANCH]->(b:Branch {name: 'main'})
+    MATCH (b:Branch {name: 'main'})-[:CONTAINS]->(f:File)
     WHERE f.path ENDS WITH '.rb'
     RETURN *
     LIMIT 10
@@ -555,7 +555,7 @@ g3_importedsymbol_resolve:
   category: code_graph
   suite: general
   query: |
-    MATCH (imp:Import {name: 'ApplicationController'})-[:IMPORTS]->(def:Definition)
+    MATCH (imp:Import {name: 'ApplicationController'})-[:RESOLVES_TO]->(def:Definition)
     RETURN *
     LIMIT 10
 

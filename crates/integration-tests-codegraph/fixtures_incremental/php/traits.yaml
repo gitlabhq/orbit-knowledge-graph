@@ -229,7 +229,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Concerns\Greeter\name'
-        AND d.kind = 'Method'
+        AND d.language_kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -237,7 +237,7 @@ tests:
   - name: "Static trait methods are indexed under their trait"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Method'
+      WHERE d.language_kind = 'Method'
         AND d.fqn IN ['App\Concerns\Counter\tick', 'App\Concerns\Counter\reset']
       RETURN d.fqn AS fqn
     assert:
@@ -248,7 +248,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Concerns\HasVersion\VERSION'
-        AND d.kind = 'Constant'
+        AND d.language_kind = 'Constant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

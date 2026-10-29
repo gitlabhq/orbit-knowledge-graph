@@ -94,7 +94,7 @@ nb_file_outgoing_defines:
     LIMIT 200
 
 nb_definition_both:
-  desc: "Definition center, both directions (CALLS, DEFINES, IMPORTS)."
+  desc: "Definition center, both directions (CALLS, DEFINES, RESOLVES_TO)."
   category: neighbors
   suite: code_graph
   query: |

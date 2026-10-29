@@ -2,9 +2,9 @@ cases:
   - name: A project filter on one endpoint pins every endpoint scan of a code edge
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"i","entity":"Import","filters":{"project_id":42}},{"id":"d","entity":"Definition"}],"relationships":[{"type":"IMPORTS","from":"i","to":"d"}]}
+        {"query_type":"traversal","nodes":[{"id":"i","entity":"Import","filters":{"project_id":42}},{"id":"d","entity":"Definition"}],"relationships":[{"type":"RESOLVES_TO","from":"i","to":"d"}]}
       gql: |
-        MATCH (i:Import)-[:IMPORTS]->(d:Definition) WHERE i.project_id = 42 RETURN i, d
+        MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition) WHERE i.project_id = 42 RETURN i, d
     logical:
       expect: ["(Filter i.project_id = 42 (_))"]
     physical:
@@ -77,7 +77,7 @@ cases:
       json: The JSON frontend does not expose property-to-property comparisons.
     query:
       gql: |
-        MATCH (i:Import {id: 7})-[:IMPORTS]->(d:Definition) WHERE i.project_id = i.start_line RETURN i, d
+        MATCH (i:Import {id: 7})-[:RESOLVES_TO]->(d:Definition) WHERE i.project_id = i.start_line RETURN i, d
     logical:
       expect: ["(Filter i.project_id = i.start_line, ... (_))"]
     physical:

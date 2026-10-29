@@ -51,7 +51,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/barrel.ts'
-        AND d.kind = 'ModuleExport'
+        AND d.language_kind = 'ModuleExport'
       RETURN d.name AS name
       ORDER BY name
     assert:

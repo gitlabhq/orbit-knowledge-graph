@@ -143,8 +143,8 @@ tests:
   - name: "CI root keys become CiJob (hidden, quoted, flow, multi-document); stages and variables are namespaced; keywords are skipped"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind IN ['CiJob', 'CiStage', 'CiVariable']
-      RETURN d.kind AS type, d.fqn AS fqn, d.file_path AS file
+      WHERE d.language_kind IN ['CiJob', 'CiStage', 'CiVariable']
+      RETURN d.language_kind AS type, d.fqn AS fqn, d.file_path AS file
     assert:
       - { row_count: 12 }
       - { unique: fqn }
@@ -181,9 +181,9 @@ tests:
   - name: "ArgoCD, Helm chart, Helm values (every key once, sequence items collapsed), and Compose definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind IN ['ArgoCdApplication', 'HelmChart', 'HelmValue', 'ComposeService', 'ComposeVolume', 'ComposeNetwork']
+      WHERE d.language_kind IN ['ArgoCdApplication', 'HelmChart', 'HelmValue', 'ComposeService', 'ComposeVolume', 'ComposeNetwork']
         AND d.file_path <> 'chart/values-deep.yaml'
-      RETURN d.kind AS type, d.fqn AS fqn, d.file_path AS file
+      RETURN d.language_kind AS type, d.fqn AS fqn, d.file_path AS file
     assert:
       - { row_count: 10 }
       - { row: { type: ArgoCdApplication, fqn: gkg, file: "apps/gkg.yaml" } }
@@ -201,7 +201,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path IN ['config/default.yaml', 'config/MyChart.yaml', 'apps/plain.yaml']
-      RETURN d.kind AS type, d.fqn AS fqn, d.file_path AS file
+      RETURN d.language_kind AS type, d.fqn AS fqn, d.file_path AS file
     assert:
       - { row_count: 1 }
       - { row: { type: Anchor, fqn: base, file: "config/default.yaml" } }

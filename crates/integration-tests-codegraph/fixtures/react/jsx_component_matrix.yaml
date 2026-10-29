@@ -186,7 +186,7 @@ tests:
 
   - name: React barrel imports resolve default named namespace and member targets
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'src/Home.tsx'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
       ORDER BY language_kind, name, target
@@ -216,7 +216,7 @@ tests:
 
   - name: External React and package imports have no local targets
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'src/Home.tsx'
         AND i.import_path IN ['react', '@external/ui']
       RETURN i.import_path AS path, d.fqn AS target
@@ -315,7 +315,7 @@ tests:
 
   - name: Plain JSX imports target TSX component definitions
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'src/Plain.jsx'
       RETURN i.import_path AS path, i.name AS name, d.fqn AS target
     assert:

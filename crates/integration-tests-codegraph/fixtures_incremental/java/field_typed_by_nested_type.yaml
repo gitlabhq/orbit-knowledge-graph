@@ -25,6 +25,6 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 't' AND t.name = 'ClientType'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
-      - { row: { callee: "a.G.ClientType", kind: "Enum" } }
+      - { row: { callee: "a.G.ClientType", language_kind: "Enum" } }

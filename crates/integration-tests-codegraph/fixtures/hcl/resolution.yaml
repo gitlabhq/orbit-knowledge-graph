@@ -59,7 +59,7 @@ tests:
   - name: "Variable definitions are extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Variable'
+      WHERE d.language_kind = 'Variable'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -69,7 +69,7 @@ tests:
   - name: "Resource type scopes produce definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Resource'
+      WHERE d.language_kind = 'Resource'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row: { name: "aws_vpc" } }
@@ -88,7 +88,7 @@ tests:
   - name: "Data source type scope and named def"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'DataSource'
+      WHERE d.language_kind = 'DataSource'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row: { name: "aws_ami" } }
@@ -97,7 +97,7 @@ tests:
   - name: "Output definition is extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Output'
+      WHERE d.language_kind = 'Output'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
@@ -106,7 +106,7 @@ tests:
   - name: "Module definition is extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Module'
+      WHERE d.language_kind = 'Module'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
@@ -115,7 +115,7 @@ tests:
   - name: "Local attribute definitions are extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Local'
+      WHERE d.language_kind = 'Local'
       RETURN d.name AS name
     assert:
       - { row_count: 2 }

@@ -32,7 +32,7 @@ tests:
   - name: All 4 functions extracted
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'main.ts' AND d.kind = 'Function'
+      WHERE d.file_path = 'main.ts' AND d.language_kind = 'Function'
       RETURN d.name AS name
       ORDER BY name
     assert:

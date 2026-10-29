@@ -210,7 +210,7 @@ tests:
                       'App\Service\TypedProps\name',
                       'App\Service\TypedProps\repo',
                       'App\Service\TypedProps\rate']
-        AND d.kind = 'Property'
+        AND d.language_kind = 'Property'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }
@@ -272,7 +272,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Service\UnionTypes\primary'
-        AND d.kind = 'Property'
+        AND d.language_kind = 'Property'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -334,7 +334,7 @@ tests:
                       'App\Service\TypedConstants\VERSION',
                       'App\Service\TypedConstants\OPTIONAL',
                       'App\Service\TypedConstants\TAGS']
-        AND d.kind = 'Constant'
+        AND d.language_kind = 'Constant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }

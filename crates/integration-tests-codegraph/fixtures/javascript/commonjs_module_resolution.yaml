@@ -227,7 +227,7 @@ tests:
 
   - name: Destructured require targets named export proxy
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'named/main.js'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -246,7 +246,7 @@ tests:
 
   - name: Namespace require targets synthesized module
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'namespace/main.js'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -265,7 +265,7 @@ tests:
 
   - name: Aliased destructured require preserves source and alias names
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'alias/main.js'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -284,7 +284,7 @@ tests:
 
   - name: Default module.exports require targets the primary export proxy
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'default/main.js'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -323,7 +323,7 @@ tests:
 
   - name: Mixed CJS imports preserve distinct symbol identities
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'no_false_call/main.js'
       RETURN i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -386,7 +386,7 @@ tests:
 
   - name: Module-level external CommonJS calls target imported symbols from the file
     query: |
-      MATCH (file:File)-[e:IMPORTS]->(sym:Import)
+      MATCH (file:File)-[e:DEFINES]->(sym:Import)
       WHERE file.path = 'external/module_level.js'
         AND sym.import_path = 'external-sdk'
       RETURN file.path AS file, sym.import_path AS path, sym.name AS name

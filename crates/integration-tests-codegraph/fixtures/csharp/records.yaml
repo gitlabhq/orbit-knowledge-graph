@@ -62,7 +62,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Point'
-      RETURN d.name AS name, d.kind AS type
+      RETURN d.name AS name, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { name: "Point", type: "Record" } }
@@ -71,7 +71,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Circle'
-      RETURN d.kind AS type
+      RETURN d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Record" } }
@@ -80,7 +80,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Range'
-      RETURN d.kind AS type
+      RETURN d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Record" } }
@@ -116,7 +116,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Outer'
-      RETURN d.kind AS type
+      RETURN d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Record" } }
@@ -125,7 +125,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Outer.Inner'
-      RETURN d.kind AS type
+      RETURN d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Record" } }

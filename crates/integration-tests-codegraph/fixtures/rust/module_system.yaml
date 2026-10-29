@@ -28,7 +28,7 @@ tests:
   - name: All definitions across modules
     query: |
       MATCH (d:Definition)
-      WHERE d.kind IN ['Struct', 'Function']
+      WHERE d.language_kind IN ['Struct', 'Function']
       RETURN d.name AS name, d.file_path AS file
       ORDER BY name
     assert:

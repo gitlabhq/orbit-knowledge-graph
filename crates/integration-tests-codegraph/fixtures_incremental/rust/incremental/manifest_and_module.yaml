@@ -54,7 +54,7 @@ steps:
     tests:
       - name: the untouched module and its import are still there
         query: |
-          MATCH (f:File)-[:IMPORTS]->(i:Import)
+          MATCH (f:File)-[:DEFINES]->(i:Import)
           WHERE f.path = 'src/main.rs'
           RETURN i.name AS name
         assert:

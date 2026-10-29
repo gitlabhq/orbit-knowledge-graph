@@ -102,7 +102,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp'
-        AND d.kind = 'Module'
+        AND d.language_kind = 'Module'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }
@@ -110,7 +110,7 @@ tests:
   - name: "Class definitions exist"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Class'
+      WHERE d.language_kind = 'Class'
         AND d.fqn IN ['WeatherApp::Forecast', 'WeatherApp::CLI',
                        'WeatherApp::Formatter', 'WeatherApp::WeatherService',
                        'WeatherApp::UnknownCityError']
@@ -123,7 +123,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp::Forecast::temperature_f'
-        AND d.kind = 'Method'
+        AND d.language_kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -132,7 +132,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp::CLI::run'
-        AND d.kind = 'Method'
+        AND d.language_kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -141,7 +141,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp::CLI::run'
-        AND d.kind = 'SingletonMethod'
+        AND d.language_kind = 'SingletonMethod'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -187,7 +187,7 @@ tests:
   - name: "attr_reader generates Attribute definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Attribute'
+      WHERE d.language_kind = 'Attribute'
         AND d.fqn IN ['WeatherApp::Forecast::city',
                        'WeatherApp::Forecast::temperature_c',
                        'WeatherApp::Forecast::condition',

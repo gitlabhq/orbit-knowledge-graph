@@ -49,13 +49,13 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name IN ['uses_closures', 'with_callback', 'named_function']
-      RETURN d.name AS name, d.kind AS kind
+      RETURN d.name AS name, d.language_kind AS language_kind
       ORDER BY name
     assert:
       - { row_count: 3 }
-      - { row: { name: "named_function", kind: "Function" } }
-      - { row: { name: "uses_closures", kind: "Function" } }
-      - { row: { name: "with_callback", kind: "Function" } }
+      - { row: { name: "named_function", language_kind: "Function" } }
+      - { row: { name: "uses_closures", language_kind: "Function" } }
+      - { row: { name: "with_callback", language_kind: "Function" } }
 
   # An anonymously extracted closure would carry a synthetic name (not
   # 'double'/'add'/'f'), which the name-filtered test above cannot catch.

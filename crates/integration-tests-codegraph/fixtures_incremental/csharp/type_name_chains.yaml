@@ -56,7 +56,7 @@ tests:
   - name: "each property named like its type is a definition"
     query: |
       MATCH (d:Definition)
-      WHERE d.name IN ['ErrorContext', 'Color'] AND d.kind = 'Property'
+      WHERE d.name IN ['ErrorContext', 'Color'] AND d.language_kind = 'Property'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }

@@ -19,7 +19,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name IN ['id', 'name', 'roles']
-        AND d.kind = 'Field'
+        AND d.language_kind = 'Field'
       RETURN d.fqn AS fqn ORDER BY fqn
     assert:
       - { row_count: 3 }
@@ -30,9 +30,9 @@ tests:
   - name: "Regular method still extracted and is not a Field"
     query: |
       MATCH (d:Definition) WHERE d.name = 'greet'
-      RETURN d.fqn AS fqn, d.kind AS kind
+      RETURN d.fqn AS fqn, d.language_kind AS language_kind
     assert:
-      - { row: { fqn: "main.User.greet", kind: "Method" } }
+      - { row: { fqn: "main.User.greet", language_kind: "Method" } }
 
   - name: "Class contains its fields"
     query: |

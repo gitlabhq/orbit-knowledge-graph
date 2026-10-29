@@ -96,7 +96,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'read' AND t.name = 'Item'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "a.Box.Companion.Item", kind: "Property" } }
+      - { row: { callee: "a.Box.Companion.Item", language_kind: "Property" } }

@@ -52,7 +52,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.sealed.Const'
-      RETURN d.kind AS type
+      RETURN d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "DataClass" } }
@@ -61,7 +61,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.sealed.Add'
-      RETURN d.kind AS type
+      RETURN d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "DataClass" } }
@@ -70,7 +70,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.sealed.Zero'
-      RETURN d.kind AS type
+      RETURN d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Object" } }
@@ -83,7 +83,7 @@ tests:
           'com.example.sealed.Add.eval',
           'com.example.sealed.Zero.eval'
         ]
-        AND d.kind = 'Function'
+        AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:
@@ -98,7 +98,7 @@ tests:
           'com.example.sealed.Add',
           'com.example.sealed.Zero'
         ]
-        AND m.kind = 'Function'
+        AND m.language_kind = 'Function'
       RETURN m.fqn AS fqn
       ORDER BY m.fqn
     assert:
@@ -129,7 +129,7 @@ tests:
           'com.example.sealed.Const',
           'com.example.sealed.Add'
         ]
-        AND d.kind = 'DataClass'
+        AND d.language_kind = 'DataClass'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:

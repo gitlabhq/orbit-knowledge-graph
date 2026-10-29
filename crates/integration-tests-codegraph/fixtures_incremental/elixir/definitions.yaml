@@ -47,7 +47,7 @@ tests:
   - name: "Modules are indexed as Module definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Class'
+      WHERE d.language_kind = 'Class'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 4 }
@@ -59,7 +59,7 @@ tests:
   - name: "def and defp produce Function definitions with dotted FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Function'
+      WHERE d.language_kind = 'Function'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 8 }

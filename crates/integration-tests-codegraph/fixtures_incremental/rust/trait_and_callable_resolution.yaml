@@ -148,7 +148,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_enum_variant' AND callee.name = 'Start'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Variant" } }

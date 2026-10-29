@@ -212,7 +212,7 @@ tests:
   - name: "Class definitions — exact count"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Class'
+      WHERE d.language_kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { unique: fqn }
@@ -224,7 +224,7 @@ tests:
   - name: "Namespace definitions found"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Namespace'
+      WHERE d.language_kind = 'Namespace'
       RETURN d.fqn AS fqn
     assert:
       - { no_nulls: fqn }
@@ -238,7 +238,7 @@ tests:
   - name: "Enum constants scoped"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'EnumConstant'
+      WHERE d.language_kind = 'EnumConstant'
         AND d.fqn STARTS WITH 'types::core::ErrorCode::'
       RETURN d.fqn AS fqn
     assert:
@@ -389,7 +389,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'io/reader.cpp'
-        AND d.kind = 'Function'
+        AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }
@@ -404,7 +404,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'unrelated.cpp'
-        AND d.kind = 'Function'
+        AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -416,7 +416,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'app.cpp'
-        AND d.kind = 'Function'
+        AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -432,7 +432,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'unions::extra::Variant'
-      RETURN d.fqn AS fqn, d.kind AS type
+      RETURN d.fqn AS fqn, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "unions::extra::Variant", type: Union } }

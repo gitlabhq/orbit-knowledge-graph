@@ -227,7 +227,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.records.Point'
-      RETURN d.name AS name, d.kind AS type
+      RETURN d.name AS name, d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { name: "Point", type: "Record" } }
@@ -236,7 +236,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.records.Range'
-      RETURN d.kind AS type
+      RETURN d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Record" } }
@@ -245,7 +245,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.records.Vector'
-      RETURN d.kind AS type
+      RETURN d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Record" } }
@@ -253,7 +253,7 @@ tests:
   - name: "All ten records (eight top-level plus nested Swap and Inner) are indexed"
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Record'
+      WHERE d.language_kind = 'Record'
         AND d.fqn STARTS WITH 'com.example.records.'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
@@ -267,7 +267,7 @@ tests:
     query: |
       MATCH (r:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
-        AND c.kind = 'Constructor'
+        AND c.language_kind = 'Constructor'
       RETURN c.name AS name
     assert:
       - { row_count: 1 }
@@ -277,7 +277,7 @@ tests:
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Bounds' AND m.name = 'Bounds'
-        AND m.kind = 'Constructor'
+        AND m.language_kind = 'Constructor'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -306,7 +306,7 @@ tests:
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Point'
-        AND m.kind = 'Method'
+        AND m.language_kind = 'Method'
       RETURN m.name AS name, m.start_line AS line
       ORDER BY name
     assert:
@@ -322,7 +322,7 @@ tests:
     query: |
       MATCH (r:Definition)-[e:DEFINES]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
-        AND c.kind = 'Constructor'
+        AND c.language_kind = 'Constructor'
       RETURN c.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -342,7 +342,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.records.Pair.Swap'
-      RETURN d.kind AS type
+      RETURN d.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Record" } }
@@ -469,7 +469,7 @@ tests:
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Wrapped' AND m.name = 'raw'
-        AND m.kind = 'Method'
+        AND m.language_kind = 'Method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -479,7 +479,7 @@ tests:
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Wrapped'
         AND m.name IN ['toString', 'equals']
-        AND m.kind = 'Method'
+        AND m.language_kind = 'Method'
       RETURN m.name AS name
       ORDER BY name
     assert:

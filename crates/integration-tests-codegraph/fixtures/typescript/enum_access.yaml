@@ -27,7 +27,7 @@ tests:
   - name: Both enums extracted
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Enum'
+      WHERE d.language_kind = 'Enum'
       RETURN d.name AS name
       ORDER BY name
     assert:
@@ -37,7 +37,7 @@ tests:
   - name: Functions extracted
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Function'
+      WHERE d.language_kind = 'Function'
       RETURN d.name AS name
       ORDER BY name
     assert:

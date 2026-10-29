@@ -43,7 +43,7 @@ tests:
   - name: data class Pair is extracted as a DataClass definition
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'com.example.Pair' AND d.kind = 'DataClass'
+      WHERE d.fqn = 'com.example.Pair' AND d.language_kind = 'DataClass'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: "com.example.Pair" } }
@@ -51,7 +51,7 @@ tests:
   - name: data class User is extracted as a DataClass definition
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'com.example.User' AND d.kind = 'DataClass'
+      WHERE d.fqn = 'com.example.User' AND d.language_kind = 'DataClass'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: "com.example.User" } }
@@ -77,7 +77,7 @@ tests:
   - name: cross-file consumePair is extracted as Function
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'com.example.consumePair' AND d.kind = 'Function'
+      WHERE d.fqn = 'com.example.consumePair' AND d.language_kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: "com.example.consumePair" } }

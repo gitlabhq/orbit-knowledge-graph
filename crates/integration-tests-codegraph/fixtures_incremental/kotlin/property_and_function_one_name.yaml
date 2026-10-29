@@ -70,19 +70,19 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'x' AND t.name IN ['x', 'b']
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Other.b", kind: "Function" } }
+      - { row: { callee: "Other.b", language_kind: "Function" } }
 
   - name: a read of x types the receiver by the property, not by the function of the same name
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'go'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Other.b", kind: "Function" } }
+      - { row: { callee: "Other.b", language_kind: "Function" } }
 
   - name: a call of x() targets the function and types the receiver by its return
     query: |
@@ -114,19 +114,19 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'other'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Box.cb", kind: "Property" } }
+      - { row: { callee: "Box.cb", language_kind: "Property" } }
 
   - name: a local function with a property's name stays the call target
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'local' AND t.name = 'cb'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Box.local.cb", kind: "Function" } }
+      - { row: { callee: "Box.local.cb", language_kind: "Function" } }
 
   - name: a local val with a property's name reaches neither the property nor another local
     query: |
@@ -140,19 +140,19 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'zip'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Box.numbers", kind: "Function" } }
+      - { row: { callee: "Box.numbers", language_kind: "Function" } }
 
   - name: a bare read of a companion constant types by the constant, not by the function of the same name
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'viaCompanion' AND t.name = 'size'
-      RETURN t.fqn AS callee, t.kind AS kind
+      RETURN t.fqn AS callee, t.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Box.Companion.size", kind: "Property" } }
+      - { row: { callee: "Box.Companion.size", language_kind: "Property" } }
 
   - name: a bare read next to an init-block local of the same name types by the property
     query: |

@@ -22,20 +22,20 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Size'
-      RETURN d.fqn AS fqn, d.kind AS kind
+      RETURN d.fqn AS fqn, d.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { fqn: "Size", kind: "Trait" } }
+      - { row: { fqn: "Size", language_kind: "Trait" } }
 
   - name: the defimpl is a part of the target module
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Box'
-      RETURN d.kind AS kind
+      RETURN d.language_kind AS language_kind
     assert:
       - { row_count: 2 }
-      - { row: { kind: "Class" } }
-      - { row: { kind: "Impl" } }
+      - { row: { language_kind: "Class" } }
+      - { row: { language_kind: "Impl" } }
 
   - name: the defimpl function calls the module function
     query: |

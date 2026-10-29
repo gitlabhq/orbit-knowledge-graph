@@ -90,7 +90,7 @@ fn summary(
         processing: ProcessingStats {
             skipped_files: families.iter().map(|family| family.skipped_files).sum(),
             errored_files: writer
-                .count("SELECT count(*) FROM gl_file WHERE reason LIKE 'fault_%'")?,
+                .count("SELECT count(*) FROM gl_file WHERE skip_reason LIKE 'fault_%'")?,
         },
         database_path: db_path.display().to_string(),
         detailed: if stats { families } else { Vec::new() },

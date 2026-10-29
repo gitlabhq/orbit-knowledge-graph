@@ -393,14 +393,14 @@ tests:
   - name: Files are not definitions
     query: |
       MATCH (d:Definition)
-      WHERE d.kind = 'Module'
+      WHERE d.language_kind = 'Module'
       RETURN d.fqn AS fqn
     assert:
       - { empty: true }
 
   - name: Named import targets the exported definition
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'named/main.ts'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -419,7 +419,7 @@ tests:
 
   - name: Default import targets the default export
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'default/main.ts'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -457,7 +457,7 @@ tests:
 
   - name: Explicit reexport resolves through the barrel to the definition
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'explicit/main.ts'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -476,7 +476,7 @@ tests:
 
   - name: Star reexport resolves back to source export
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'star/main.ts'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -495,7 +495,7 @@ tests:
 
   - name: Aliased named imports keep source identity
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'alias/main.ts'
       RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -514,7 +514,7 @@ tests:
 
   - name: Multiple imports from one statement keep distinct symbol identities
     query: |
-      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:RESOLVES_TO]->(d:Definition)
       WHERE i.file_path = 'identity/consumer.ts'
       RETURN i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -641,7 +641,7 @@ tests:
           - { row: { language_kind: "DefaultImport", name: "default" } }
           - { row: { language_kind: "NamedImport", name: "missingNamed" } }
       - query: |
-          MATCH (i:Import)-[:IMPORTS]->(target:Definition)
+          MATCH (i:Import)-[:RESOLVES_TO]->(target:Definition)
           WHERE i.file_path = 'unresolved/main.ts'
           RETURN target.fqn
         assert:
@@ -741,7 +741,7 @@ tests:
           - { row_count: 1 }
           - { row: { name: "shared" } }
       - query: |
-          MATCH (i:Import)-[:IMPORTS]->(target:Definition)
+          MATCH (i:Import)-[:RESOLVES_TO]->(target:Definition)
           WHERE i.file_path = 'ambiguous/main.ts' AND i.name = 'shared'
           RETURN target.fqn
         assert:
