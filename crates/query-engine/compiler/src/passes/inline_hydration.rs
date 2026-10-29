@@ -3,14 +3,18 @@
 //! ```sql
 //! WITH page AS MATERIALIZED (base),
 //!      page_nodes AS MATERIALIZED (SELECT node_ref, node_kind, node_path FROM page ...),
-//!      node_properties AS MATERIALIZED (latest row of each page node, one arm per entity),
+//!      node_properties AS MATERIALIZED (
+//!        SELECT latest row FROM (UNION ALL of one raw read per entity)
+//!        WHERE id IN (page refs) AND traversal_path IN (page paths)),
 //!      lookup AS (SELECT mapFromArrays(groupArray(node_key), groupArray(node_value)) FROM node_properties)
 //! SELECT page columns, owner and properties from lookup FROM page CROSS JOIN lookup
 //! ```
 
 use std::collections::BTreeSet;
 
-use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+use ontology::constants::{
+    DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
+};
 use query_data_model::OrbitQueryModel;
 
 use crate::ast::*;
@@ -18,9 +22,10 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::{AggFunction, ColumnSelection, Input, InputNode, QueryType};
 use crate::passes::hydrate::DynamicEntityColumns;
-use crate::passes::lower::query_types::hydration::{latest_row_arm, properties_json};
+use crate::passes::lower::query_types::hydration::properties_json;
+use crate::passes::lower::sql::deleted_false;
 use crate::passes::plan::query_types::hydration::{
-    self as hydration_plan, HydrationCompileOptions,
+    self as hydration_plan, HydrationCompileOptions, HydrationNodePlan,
 };
 
 struct PageNode {
@@ -40,10 +45,9 @@ pub fn inline(
     let Node::Query(mut base) = node else {
         return Ok(node);
     };
-    let arms = property_arms(input, specs, model)?;
-    if arms.is_empty() {
+    let Some(properties) = node_properties(input, specs, model)? else {
         return Ok(Node::Query(base));
-    }
+    };
     let nodes = page_node_columns(input, &base);
     let order_by = base
         .order_by
@@ -62,7 +66,7 @@ pub fn inline(
         page_nodes_cte(),
         page_nodes(input.query_type, &nodes),
     ));
-    ctes.push(materialized(node_properties_cte(), union(arms)));
+    ctes.push(materialized(node_properties_cte(), properties));
     ctes.push(Cte::new(lookup_cte(), lookup()));
 
     let mut select: Vec<SelectExpr> = outputs
@@ -145,11 +149,11 @@ fn on_page(expr: &Expr, base: &Query) -> Option<Expr> {
     }
 }
 
-fn property_arms(
+fn node_properties(
     input: &Input,
     specs: &[DynamicEntityColumns],
     model: &(impl OrbitQueryModel + ?Sized),
-) -> Result<Vec<Query>> {
+) -> Result<Option<Query>> {
     let nodes: Vec<InputNode> = reachable_entities(input, model)
         .into_iter()
         .filter(|entity| model.entity_table(entity).is_some())
@@ -167,7 +171,7 @@ fn property_arms(
         })
         .collect();
     if nodes.is_empty() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     let input = Input {
         query_type: QueryType::Hydration,
@@ -175,69 +179,96 @@ fn property_arms(
         ..Input::default()
     };
     let plan = hydration_plan::plan(&input, model, HydrationCompileOptions::default())?;
-    Ok(plan
+    let reads = plan
         .operation
         .nodes
         .iter()
-        .map(|node| {
-            let alias = &node.alias;
-            let owner = model
-                .redaction_id_column_named(&node.entity)
-                .unwrap_or(DEFAULT_PRIMARY_KEY);
-            let ids = Expr::InSelect {
-                expr: Box::new(Expr::col(alias, &node.id_property)),
-                query: Box::new(page_nodes_of(&node.entity, node_ref_column(), None)),
-            };
-            let paths = model.entity_has_traversal_path(&node.entity).then(|| {
-                let known = Expr::InSelect {
-                    expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
-                    query: Box::new(page_nodes_of(
-                        &node.entity,
-                        node_path_column(),
-                        Some(Op::Ne),
-                    )),
-                };
-                let mut unknown = page_nodes_of(&node.entity, node_ref_column(), Some(Op::Eq));
-                unknown.select = vec![SelectExpr::new(
-                    Expr::aggregate(AggFunction::Count, None),
-                    node_ref_column(),
-                )];
-                let unknown = Expr::binary(Op::Gt, Expr::Scalar(Box::new(unknown)), Expr::int(0));
-                Expr::binary(Op::Or, known, unknown)
-            });
-            let value = Expr::func(
-                Function::Tuple,
-                vec![Expr::col(alias, owner), properties_json(node)],
-            );
-            latest_row_arm(
-                node,
-                Expr::conjoin(std::iter::once(ids).chain(paths).collect()),
-                &[owner],
-                vec![
-                    SelectExpr::new(
-                        node_key(
-                            Expr::string(&node.entity),
-                            Expr::col(alias, &node.id_property),
-                        ),
-                        node_key_column(),
-                    ),
-                    SelectExpr::new(value, node_value_column()),
-                ],
-            )
-        })
-        .collect())
+        .map(|node| raw_read(node, model))
+        .collect();
+    Ok(Some(latest_page_rows(union(reads))))
 }
 
-fn page_nodes_of(entity: &str, column: &str, path: Option<Op>) -> Query {
+/// Never references the page: the analyzer re-resolves the page CTE at every reference.
+fn raw_read(node: &HydrationNodePlan, model: &(impl OrbitQueryModel + ?Sized)) -> Query {
+    let alias = &node.alias;
+    let column = |name: &str| Expr::col(alias, name);
+    let owner = model
+        .redaction_id_column_named(&node.entity)
+        .unwrap_or(DEFAULT_PRIMARY_KEY);
+    let path = if model.entity_has_traversal_path(&node.entity) {
+        column(TRAVERSAL_PATH_COLUMN)
+    } else {
+        Expr::string("")
+    };
+    let id = column(&node.id_property);
+    Query {
+        select: vec![
+            SelectExpr::new(Expr::string(&node.entity), node_kind_column()),
+            SelectExpr::new(path, node_path_column()),
+            SelectExpr::new(id.clone(), node_ref_column()),
+            SelectExpr::new(column(VERSION_COLUMN), VERSION_COLUMN),
+            SelectExpr::new(column(DELETED_COLUMN), DELETED_COLUMN),
+            SelectExpr::new(node_key(Expr::string(&node.entity), id), node_key_column()),
+            SelectExpr::new(
+                Expr::func(Function::Tuple, vec![column(owner), properties_json(node)]),
+                node_value_column(),
+            ),
+        ],
+        from: TableRef::scan(&node.table, alias),
+        ..Default::default()
+    }
+}
+
+fn latest_page_rows(reads: Query) -> Query {
+    let read = |name: &str| Expr::col(node_reads_alias(), name);
+    let on_page = |expr: Expr, column: &str, path: Option<Op>| Expr::InSelect {
+        expr: Box::new(expr),
+        query: Box::new(page_nodes_of(column, path)),
+    };
+    let keys = [node_kind_column(), node_path_column(), node_ref_column()];
+    let latest = Query {
+        select: [node_key_column(), node_value_column(), DELETED_COLUMN]
+            .into_iter()
+            .map(|name| SelectExpr::new(read(name), name))
+            .collect(),
+        from: TableRef::subquery(reads, node_reads_alias()),
+        where_clause: Expr::conjoin(vec![
+            on_page(read(node_ref_column()), node_ref_column(), None),
+            Expr::binary(
+                Op::Or,
+                Expr::binary(
+                    Op::Or,
+                    on_page(read(node_path_column()), node_path_column(), Some(Op::Ne)),
+                    Expr::eq(read(node_path_column()), Expr::string("")),
+                ),
+                on_page(read(node_kind_column()), node_kind_column(), Some(Op::Eq)),
+            ),
+        ]),
+        order_by: keys
+            .iter()
+            .map(|key| OrderExpr::asc(read(key)))
+            .chain(std::iter::once(OrderExpr::desc(read(VERSION_COLUMN))))
+            .collect(),
+        limit_by: Some((1, keys.iter().map(|key| read(key)).collect())),
+        ..Default::default()
+    };
+    Query {
+        select: [node_key_column(), node_value_column()]
+            .into_iter()
+            .map(|name| SelectExpr::new(Expr::col(node_reads_alias(), name), name))
+            .collect(),
+        from: TableRef::subquery(latest, node_reads_alias()),
+        where_clause: Some(deleted_false(node_reads_alias())),
+        ..Default::default()
+    }
+}
+
+fn page_nodes_of(column: &str, path: Option<Op>) -> Query {
     let col = |name: &str| Expr::col(page_nodes_cte(), name);
     Query {
         select: vec![SelectExpr::new(col(column), column)],
         from: TableRef::cte(page_nodes_cte(), page_nodes_cte()),
-        where_clause: Expr::conjoin(
-            std::iter::once(Expr::eq(col(node_kind_column()), Expr::string(entity)))
-                .chain(path.map(|op| Expr::binary(op, col(node_path_column()), Expr::string(""))))
-                .collect(),
-        ),
+        where_clause: path.map(|op| Expr::binary(op, col(node_path_column()), Expr::string(""))),
         ..Default::default()
     }
 }
