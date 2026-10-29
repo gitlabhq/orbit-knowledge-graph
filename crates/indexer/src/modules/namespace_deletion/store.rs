@@ -31,11 +31,15 @@ static IS_NAMESPACE_STILL_DELETED: LazyLock<String> = LazyLock::new(|| {
 });
 
 static ENABLED_NAMESPACE_ROOTS_QUERY: LazyLock<String> = LazyLock::new(|| {
-    let del = ontology::siphon_deleted_column();
+    let (version, del) = (
+        ontology::siphon_version_column(),
+        ontology::siphon_deleted_column(),
+    );
     format!(
-        "SELECT traversal_path \
+        "SELECT argMax(traversal_path, {version}) AS traversal_path \
          FROM siphon_knowledge_graph_enabled_namespaces \
-         WHERE {del} = false AND traversal_path != ''"
+         GROUP BY root_namespace_id, id \
+         HAVING argMax({del}, {version}) = false AND traversal_path != ''"
     )
 });
 
