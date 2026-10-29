@@ -103,7 +103,7 @@ impl Tf {
                 } else {
                     EdgeDir::Outgoing
                 };
-                Tf::HasEdge(ek, dir)
+                Tf::HasEdge(ek, dir, args.get(1) == Some(&"parent"))
             }
             "concat" => {
                 let a = parse_nested_tf(arg(1)?, ctx.as_deref_mut())?;
@@ -327,10 +327,13 @@ impl Tf {
             }
             Tf::Tag(key) => t.get_tag(id, *key).unwrap_or(0),
             Tf::LitSym(s) => *s,
-            Tf::HasEdge(kind, dir) => {
-                let raw = id;
-                let found =
-                    edge_ctx.is_some_and(|ctx| ctx.edges.has(*kind, *dir, ctx.tree_index, raw));
+            Tf::HasEdge(kind, dir, parent) => {
+                let up = t.storage.parent(id).filter(|_| *parent);
+                let found = edge_ctx.is_some_and(|ctx| {
+                    std::iter::once(id)
+                        .chain(up)
+                        .any(|node| ctx.edges.has(*kind, *dir, ctx.tree_index, node))
+                });
                 lang.syms.intern(if found { "true" } else { "false" })
             }
             Tf::Concat(sep, a, b) => {
