@@ -1,74 +1,468 @@
 /*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
-var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/;
-function simpleCommands(command) {
-  const commands = [];
-  let words = [];
-  let word = "";
-  let inWord = false;
-  let quote = "";
-  let piped = false;
-  const endWord = () => {
-    if (inWord)
-      words.push(word);
-    word = "";
-    inWord = false;
-  };
-  const endCommand = () => {
-    endWord();
-    if (words.length)
-      commands.push(piped ? ["|", ...words] : words);
-    words = [];
-    piped = false;
-  };
-  for (let i = 0;i < command.length; i++) {
-    const c = command[i] ?? "";
-    if (quote !== "'" && (c === "`" || c === "$" && command[i + 1] === "("))
-      words.push(c === "`" ? "`" : "$(");
-    if (quote) {
-      if (c === quote)
-        quote = "";
-      else if (c === "\\" && quote === '"' && i + 1 < command.length)
-        word += command[++i];
-      else
-        word += c;
-    } else if (c === "'" || c === '"') {
-      quote = c;
-      inWord = true;
-    } else if (c === "\\" && command[i + 1] === `
-`) {
+function grepPatternOption(arg) {
+  if (arg === "--regexp")
+    return "separate";
+  if (arg.startsWith("--regexp="))
+    return "attached";
+  const letters = arg.startsWith("--") ? null : arg.match(/^-[A-Za-z]*?e(.*)$/);
+  if (!letters)
+    return null;
+  return letters[1] ? "attached" : "separate";
+}
+var LINES_OR_BYTES = /^-[A-Za-z]*[nc]$|^--(?:lines|bytes)$/;
+var FILTERS = {
+  head: { maxOperands: 0, numberOption: LINES_OR_BYTES },
+  tail: { maxOperands: 0, numberOption: LINES_OR_BYTES },
+  wc: { maxOperands: 0, fileOptions: /^--files0-from/ },
+  cut: { maxOperands: 0, numberOption: /^-[A-Za-z]*[bcf]$|^--(?:bytes|characters|fields)$/ },
+  grep: {
+    maxOperands: 1,
+    numberOption: /^-[A-Za-z]*[mABC]$|^--(?:max-count|after-context|before-context|context)$/,
+    fileOptions: /^-[A-Za-z]*[rRdf]|^--(?:recursive|dereference-recursive|directories|file)/,
+    patternOption: grepPatternOption
+  },
+  jq: {
+    maxOperands: 1,
+    fileOptions: /^-[A-Za-z]*[fL]|^--(?:from-file|slurpfile|rawfile|argfile)/,
+    notQuiet: /\b(?:import|include|env)\b|\$ENV|^-[A-Za-z]*n|^--null-input$/
+  }
+};
+function operandCount(spec, args, patternOptions) {
+  let operands = 0;
+  let optionsEnded = false;
+  for (let i = 0;i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (optionsEnded || !arg.startsWith("-")) {
+      const isNumberValue = !optionsEnded && /^\d+$/.test(arg) && spec.numberOption?.test(args[i - 1] ?? "");
+      if (!isNumberValue)
+        operands++;
+    } else if (arg === "--")
+      optionsEnded = true;
+    else if (spec.fileOptions?.test(arg))
+      return Infinity;
+    else if (patternOptions[i] === "separate")
       i++;
-      endWord();
-    } else if (c === "\\" && i + 1 < command.length) {
-      word += command[++i];
-      inWord = true;
-    } else if ("&>".includes(c) && HARMLESS_REDIRECT.test(command.slice(i))) {
-      if (/^\d+$/.test(word) && /\d/.test(command[i - 1] ?? "")) {
-        word = "";
-        inWord = false;
-      } else
-        endWord();
-      i += (command.slice(i).match(HARMLESS_REDIRECT)?.[0].length ?? 1) - 1;
-    } else if (c === "|" && command[i + 1] !== "|") {
-      endCommand();
-      piped = true;
-      if (command[i + 1] === "&")
-        i++;
-    } else if (c === `
-` || ";&|()".includes(c)) {
-      endCommand();
-      if ("&|".includes(c) && command[i + 1] === c)
-        i++;
-    } else if ("<>".includes(c) || c === "#" && !inWord) {
-      endWord();
-      words.push(c);
-    } else if (/\s/.test(c)) {
-      endWord();
-    } else {
-      word += c;
-      inWord = true;
+  }
+  return operands;
+}
+function isQuietFilter(program, args, readsInput) {
+  const spec = Object.hasOwn(FILTERS, program) ? FILTERS[program] : undefined;
+  if (!spec || readsInput || args.some((arg) => spec.notQuiet?.test(arg)))
+    return false;
+  const optionsEnd = args.includes("--") ? args.indexOf("--") : args.length;
+  const patternOptions = args.map((arg, i) => (i < optionsEnd ? spec.patternOption?.(arg) : null) ?? null);
+  const maxOperands = patternOptions.some(Boolean) ? 0 : spec.maxOperands;
+  return operandCount(spec, args, patternOptions) <= maxOperands;
+}
+
+var QUOTE_FORMS = {
+  single: { close: "'", escapes: false, substitutions: false, lineContinuation: false },
+  ansi: { close: "'", escapes: true, substitutions: false, lineContinuation: false },
+  double: { close: '"', escapes: true, substitutions: true, lineContinuation: true }
+};
+var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|[ \t]*\/dev\/null)(?=[\s;&|)]|$)/;
+var SUBSTITUTION = /\$\(|`/;
+var PREFIX_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
+var COMMENT_PRECEDERS = new Set([" ", "\t", `
+`, ";", "&", "|", "("]);
+function braceEnd(src, open) {
+  let depth = 0;
+  for (let i = open;i < src.length; i++) {
+    const c = src[i];
+    if (c === "\\")
+      i++;
+    else if (c === "'" || c === '"') {
+      const { end, closed } = scanQuoted(src, i + 1, c === "'" ? QUOTE_FORMS.single : QUOTE_FORMS.double);
+      if (!closed)
+        return -1;
+      i = end - 1;
+    } else if (c === "{" && src[i - 1] === "$")
+      depth++;
+    else if (c === "}" && --depth === 0)
+      return i + 1;
+  }
+  return -1;
+}
+function arithmeticEnd(src, open) {
+  let depth = 2;
+  for (let i = open + 2;i < src.length; i++) {
+    if (src[i] === "(")
+      depth++;
+    else if (src[i] === ")") {
+      if (depth === 2 && src[i + 1] === ")")
+        return i + 2;
+      if (--depth < 2)
+        return -1;
     }
   }
-  endCommand();
+  return -1;
+}
+function parenEnd(src, open) {
+  let depth = 0;
+  for (let i = open;i < src.length; i++) {
+    const c = src[i];
+    if (c === "\\")
+      i++;
+    else if (c === "#" && COMMENT_PRECEDERS.has(src[i - 1] ?? "")) {
+      const newline = src.indexOf(`
+`, i);
+      if (newline < 0)
+        return -1;
+      i = newline;
+    } else if (c === "'" || c === '"') {
+      const { end, closed } = scanQuoted(src, i + 1, c === "'" ? QUOTE_FORMS.single : QUOTE_FORMS.double);
+      if (!closed)
+        return -1;
+      i = end - 1;
+    } else if (c === "(")
+      depth++;
+    else if (c === ")" && --depth === 0)
+      return i + 1;
+  }
+  return -1;
+}
+function startsArithmetic(src, open) {
+  return src[open] === "(" && src[open + 1] === "(" && arithmeticEnd(src, open) >= 0;
+}
+function startsSubstitution(src, at) {
+  if (src[at] === "`")
+    return true;
+  return src[at] === "$" && src[at + 1] === "(" && !startsArithmetic(src, at + 1);
+}
+function nestedEnd(src, at) {
+  if (src[at + 1] === "{")
+    return braceEnd(src, at + 1);
+  if (src[at + 1] === "(" && !startsArithmetic(src, at + 1))
+    return parenEnd(src, at + 1);
+  return at;
+}
+function scanQuoted(src, start, form) {
+  let text = "";
+  let substitutes = false;
+  for (let i = start;i < src.length; i++) {
+    const c = src[i] ?? "";
+    if (c === form.close)
+      return { text, end: i + 1, closed: true, substitutes };
+    const nested = form.substitutions && c === "$" ? nestedEnd(src, i) : i;
+    if (nested < 0)
+      return { text, end: src.length, closed: false, substitutes };
+    if (nested > i) {
+      text += src.slice(i, nested);
+      substitutes ||= SUBSTITUTION.test(src.slice(i, nested));
+      i = nested - 1;
+    } else if (form.lineContinuation && c === "\\" && src[i + 1] === `
+`)
+      i++;
+    else if (form.escapes && c === "\\" && i + 1 < src.length)
+      text += src[++i];
+    else {
+      if (form.substitutions && startsSubstitution(src, i))
+        substitutes = true;
+      text += c;
+    }
+  }
+  return { text, end: src.length, closed: false, substitutes };
+}
+function scanHeredocOperand(src, start) {
+  let i = start;
+  let delimiter = "";
+  let quoted = false;
+  while (i < src.length && !/[\s;&|<>()]/.test(src[i] ?? "")) {
+    const c = src[i] ?? "";
+    if (c === "'" || c === '"') {
+      const { text, end } = scanQuoted(src, i + 1, c === "'" ? QUOTE_FORMS.single : QUOTE_FORMS.double);
+      quoted = true;
+      delimiter += text;
+      i = end;
+    } else if (c === "\\") {
+      quoted = true;
+      delimiter += src[i + 1] ?? "";
+      i += 2;
+    } else {
+      delimiter += c;
+      i++;
+    }
+  }
+  return { delimiter, quoted, end: i };
+}
+function scanHeredocBody(src, start, heredoc) {
+  let at = start;
+  let substitutes = false;
+  while (at < src.length) {
+    const newline = src.indexOf(`
+`, at);
+    const line = src.slice(at, newline < 0 ? src.length : newline);
+    at = newline < 0 ? src.length : newline + 1;
+    if ((heredoc.stripTabs ? line.replace(/^\t+/, "") : line) === heredoc.delimiter)
+      return { end: at, closed: true, substitutes };
+    if (!heredoc.quoted && SUBSTITUTION.test(line))
+      substitutes = true;
+  }
+  return { end: at, closed: false, substitutes };
+}
+
+class Lexer {
+  src;
+  pos = 0;
+  word = null;
+  unparsed = false;
+  tokens = [];
+  heredocs = [];
+  constructor(src) {
+    this.src = src;
+  }
+  run() {
+    while (this.pos < this.src.length)
+      this.step(this.src[this.pos] ?? "");
+    this.endWord();
+    return { tokens: this.tokens, unparsed: this.unparsed };
+  }
+  step(c) {
+    if (c === "'")
+      this.quoted("single", 1);
+    else if (c === '"')
+      this.quoted("double", 1);
+    else if (c === "\\")
+      this.escape();
+    else if (c === "$")
+      this.dollar();
+    else if (c === "`")
+      this.substitution();
+    else if (c === "(" && this.startsArithmeticCommand())
+      this.arithmeticCommand();
+    else if (c === "<" || c === ">" || c === "&" && this.src[this.pos + 1] === ">")
+      this.redirect(c);
+    else if (c === "|" && this.src[this.pos + 1] !== "|")
+      this.pipe();
+    else if (c === `
+` || ";&|()".includes(c))
+      this.separator(c);
+    else if (c === "#" && this.startsComment())
+      this.comment();
+    else if (c === " " || c === "\t")
+      this.whitespace();
+    else
+      this.plain(c);
+  }
+  append(text) {
+    this.word = (this.word ?? "") + text;
+  }
+  endWord() {
+    if (this.word !== null)
+      this.tokens.push({ kind: "word", text: this.word });
+    this.word = null;
+  }
+  currentCommandWords() {
+    const words = [];
+    for (const token of this.tokens.toReversed()) {
+      if (token.kind === "separator")
+        break;
+      if (token.kind === "word")
+        words.unshift(token.text);
+    }
+    return words;
+  }
+  startsArithmeticCommand() {
+    if (this.word !== null || !startsArithmetic(this.src, this.pos))
+      return false;
+    const words = this.currentCommandWords();
+    return words.every((word) => PREFIX_WORDS.has(word)) || words[0] === "for";
+  }
+  quoted(form, openingLength) {
+    const { text, end, closed, substitutes } = scanQuoted(this.src, this.pos + openingLength, QUOTE_FORMS[form]);
+    this.append(text);
+    if (substitutes)
+      this.tokens.push({ kind: "substitution" });
+    if (!closed)
+      this.unparsed = true;
+    this.pos = end;
+  }
+  escape() {
+    const next = this.src[this.pos + 1];
+    if (next === `
+`)
+      this.pos += 2;
+    else if (next === undefined)
+      this.plain("\\");
+    else {
+      this.append(next);
+      this.pos += 2;
+    }
+  }
+  dollar() {
+    const next = this.src[this.pos + 1];
+    if (next === "'")
+      this.quoted("ansi", 2);
+    else if (startsSubstitution(this.src, this.pos))
+      this.substitution();
+    else if (next === "(" && startsArithmetic(this.src, this.pos + 1))
+      this.arithmeticExpansion();
+    else if (next === "{" && braceEnd(this.src, this.pos + 1) >= 0)
+      this.parameterExpansion();
+    else
+      this.plain("$");
+  }
+  substitution() {
+    this.tokens.push({ kind: "substitution" });
+    this.pos++;
+  }
+  skipArithmetic(open) {
+    const end = arithmeticEnd(this.src, open);
+    if (SUBSTITUTION.test(this.src.slice(open + 2, end - 2)))
+      this.tokens.push({ kind: "substitution" });
+    this.pos = end;
+  }
+  arithmeticCommand() {
+    this.skipArithmetic(this.pos);
+  }
+  arithmeticExpansion() {
+    this.append("");
+    this.skipArithmetic(this.pos + 1);
+  }
+  parameterExpansion() {
+    const end = braceEnd(this.src, this.pos + 1);
+    const text = this.src.slice(this.pos, end);
+    if (SUBSTITUTION.test(text))
+      this.tokens.push({ kind: "substitution" });
+    this.append(text);
+    this.pos = end;
+  }
+  redirect(c) {
+    const harmless = this.src.slice(this.pos).match(HARMLESS_REDIRECT);
+    this.endWordOrDescriptor();
+    if (harmless) {
+      this.pos += harmless[0].length;
+      return;
+    }
+    if (c === "&")
+      this.pos++;
+    if (this.src[this.pos] === "<" && this.src[this.pos + 1] === "<" && this.src[this.pos + 2] !== "<")
+      this.heredocOperator();
+    else
+      this.redirectOperator();
+  }
+  endWordOrDescriptor() {
+    const isDescriptor = this.word !== null && /^\d+$/.test(this.word) && /\d/.test(this.src[this.pos - 1] ?? "");
+    if (isDescriptor)
+      this.word = null;
+    else
+      this.endWord();
+  }
+  redirectOperator() {
+    const operator = this.src[this.pos] === "<" ? "<" : ">";
+    this.pos += operator === "<" && this.src.startsWith("<<<", this.pos) ? 3 : 1;
+    if (operator === ">") {
+      if (this.src[this.pos] === ">")
+        this.pos++;
+      if (this.src[this.pos] === "|" || this.src[this.pos] === "&")
+        this.pos++;
+    }
+    this.tokens.push({ kind: "redirect", operator });
+  }
+  heredocOperator() {
+    const stripTabs = this.src[this.pos + 2] === "-";
+    const operandStart = this.pos + (stripTabs ? 3 : 2);
+    const { delimiter, quoted, end } = scanHeredocOperand(this.src, operandStart + (this.src.slice(operandStart).match(/^[ \t]*/)?.[0].length ?? 0));
+    if (delimiter)
+      this.heredocs.push({ delimiter, stripTabs, quoted });
+    else
+      this.unparsed = true;
+    this.pos = end;
+  }
+  pipe() {
+    this.endWord();
+    this.tokens.push({ kind: "separator", pipe: true });
+    this.pos += this.src[this.pos + 1] === "&" ? 2 : 1;
+  }
+  separator(c) {
+    if (c === `
+`)
+      this.skipHeredocBodies();
+    this.endWord();
+    this.tokens.push({ kind: "separator", pipe: false });
+    this.pos += (c === "&" || c === "|") && this.src[this.pos + 1] === c ? 2 : 1;
+  }
+  skipHeredocBodies() {
+    let at = this.pos + 1;
+    for (const heredoc of this.heredocs.splice(0)) {
+      const body = scanHeredocBody(this.src, at, heredoc);
+      if (body.substitutes)
+        this.tokens.push({ kind: "substitution" });
+      if (!body.closed)
+        this.unparsed = true;
+      at = body.end;
+    }
+    this.pos = at - 1;
+  }
+  startsComment() {
+    return this.word === null && (this.pos === 0 || COMMENT_PRECEDERS.has(this.src[this.pos - 1] ?? ""));
+  }
+  comment() {
+    const newline = this.src.indexOf(`
+`, this.pos);
+    this.pos = newline < 0 ? this.src.length : newline;
+  }
+  whitespace() {
+    this.endWord();
+    this.pos++;
+  }
+  plain(c) {
+    this.append(c);
+    this.pos++;
+  }
+}
+function lex(src) {
+  return new Lexer(src).run();
+}
+
+var MAX_NAME_LENGTH = 40;
+var INVISIBLE = /[\p{Cc}\p{Cf}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]/gu;
+function clip(text, max) {
+  const flat = text.replace(INVISIBLE, "").replace(/\s+/g, " ").trim();
+  return flat.length > max ? flat.slice(0, max - 1) + "\u2026" : flat;
+}
+function displayName(name) {
+  const text = clip(name, MAX_NAME_LENGTH);
+  return /[,\s']/.test(text) ? `'${text.replaceAll("'", "\\'")}'` : text;
+}
+function emptyCommand(piped) {
+  return { piped, words: [], readsInput: false, writes: [], substitutes: false };
+}
+function isEmpty(command) {
+  return !command.words.length && !command.writes.length && !command.substitutes;
+}
+function redirectTarget(tokens, from) {
+  let at = from;
+  while (tokens[at]?.kind === "substitution")
+    at++;
+  const token = tokens[at];
+  return token?.kind === "word" ? { target: token.text, end: at } : { end: from - 1 };
+}
+function groupCommands(tokens) {
+  const commands = [];
+  let current = emptyCommand(false);
+  for (let i = 0;i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token?.kind === "word")
+      current.words.push(token.text);
+    else if (token?.kind === "substitution")
+      current.substitutes = true;
+    else if (token?.kind === "redirect") {
+      const { target, end } = redirectTarget(tokens, i + 1);
+      if (token.operator === "<")
+        current.readsInput = true;
+      else if (target !== undefined)
+        current.writes.push(target);
+      current.substitutes ||= tokens.slice(i + 1, end + 1).some((skipped) => skipped.kind === "substitution");
+      i = end;
+    } else if (token?.kind === "separator") {
+      if (!isEmpty(current))
+        commands.push(current);
+      current = emptyCommand(token.pipe);
+    }
+  }
+  if (!isEmpty(current))
+    commands.push(current);
   return commands;
 }
 function orbitWords(words) {
@@ -85,29 +479,63 @@ function orbitWords(words) {
     i++;
   return words.slice(i);
 }
-var PREFIX_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "{"]);
-function runnable(command) {
-  const out = [];
-  let heredoc = "";
-  for (const words of simpleCommands(command)) {
-    if (heredoc) {
-      if (words.join(" ") === heredoc)
-        heredoc = "";
-      continue;
+var ASSIGNMENT = /^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/;
+var LOOP_HEADERS = new Set(["for", "select"]);
+function withoutKeywords(words) {
+  let i = 0;
+  for (;i < words.length; i++) {
+    const word = words[i] ?? "";
+    if (word === "case")
+      return [];
+    if (LOOP_HEADERS.has(word)) {
+      const body = words.findIndex((candidate, at) => at > i && (candidate === "do" || candidate === "{"));
+      return body < 0 ? [] : withoutKeywords(words.slice(body + 1));
     }
-    const at = words.findIndex((word, i) => word === "<" && words[i + 1] === "<");
-    if (at >= 0)
-      heredoc = (words[at + 2] ?? "").replace(/^-/, "");
-    let i = words[0] === "|" ? 1 : 0;
-    while (PREFIX_WORDS.has(words[i] ?? ""))
+    if (word === "function")
       i++;
-    if (i < words.length)
-      out.push(words.slice(i));
+    else if (PREFIX_WORDS.has(word)) {
+      if (word === "time" && words[i + 1] === "-p")
+        i++;
+    } else
+      break;
   }
-  return out;
+  return words.slice(i);
+}
+function runnable(command) {
+  const { tokens, unparsed } = lex(command);
+  const runs = groupCommands(tokens).map((simple) => ({ ...simple, words: withoutKeywords(simple.words) })).filter((run) => !isEmpty(run));
+  return { runs, unparsed };
 }
 function orbitInvocations(command) {
-  return runnable(command).map(orbitWords).filter((words) => words !== null);
+  return runnable(command).runs.map(({ words }) => orbitWords(words)).filter((words) => words !== null);
+}
+var SHELL_WORDS = new Set(["cd", "pushd", "popd", "true", ":", "fi", "done", "esac", "}"]);
+function isQuiet(program, args, run) {
+  if (program.includes("/"))
+    return false;
+  return SHELL_WORDS.has(program) || run.piped && isQuietFilter(program, args, run.readsInput);
+}
+function otherCommands(command, orbitExtras = []) {
+  const { runs, unparsed } = runnable(command);
+  const listed = new Map;
+  const writes = new Map;
+  if (unparsed)
+    listed.set("unparsed", "unparsed");
+  for (const run of runs) {
+    if (run.substitutes)
+      listed.set("$(...)", "$(...)");
+    for (const target of run.writes)
+      writes.set(target, "> " + displayName(target));
+    if (orbitWords(run.words))
+      continue;
+    const at = run.words.findIndex((word) => !ASSIGNMENT.test(word));
+    const program = run.words[at];
+    if (program === undefined || SUBSTITUTION.test(program))
+      continue;
+    if (!isQuiet(program, run.words.slice(at + 1), run))
+      listed.set(program, displayName(program));
+  }
+  return [...listed.values(), ...orbitExtras, ...writes.values()];
 }
 function subcommandOf(words, known) {
   const [sub, ...rest] = words;
@@ -332,10 +760,6 @@ function labelFor(table, key) {
 function callOf(label, detail) {
   return { label: label.done, active: label.running, detail };
 }
-function clip(text, max) {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > max ? flat.slice(0, max - 1) + "\u2026" : flat;
-}
 function firstArg(args, valueFlags) {
   for (let i = 0;i < args.length; i++) {
     const arg = args[i] ?? "";
@@ -367,19 +791,34 @@ function stringField(input, key) {
   return typeof value === "string" ? value : undefined;
 }
 var MAX_DETAIL = 96;
+var MAX_OTHERS_SHOWN = 6;
+function invocationOf(words, known) {
+  if (words.length === 0 || words.some((arg) => arg === "--help" || arg === "-h"))
+    return null;
+  const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
+  if (!sub)
+    return { call: null, name: "orbit " + displayName(words[0] ?? "") };
+  const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
+  const label = isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY;
+  return { call: callOf(label, detailFor(sub.key, sub.args, known)), name: "orbit " + sub.key };
+}
 function describeCommand(command, known = NO_ENTITIES) {
-  const calls = orbitInvocations(command).flatMap((words) => {
-    const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
-    if (!sub || sub.args.some((arg) => arg === "--help" || arg === "-h"))
-      return [];
-    const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
-    return [callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args, known))];
-  });
+  const invocations = orbitInvocations(command).flatMap((words) => invocationOf(words, known) ?? []);
+  const calls = invocations.flatMap(({ call }) => call ?? []);
   const [first] = calls;
   if (!first)
     return null;
   const detail = [...new Set(calls.filter((call) => call.label === first.label).map((call) => call.detail).filter(Boolean))].join(", ");
-  return { ...first, detail: clip(detail, MAX_DETAIL) };
+  const otherOrbit = invocations.filter(({ call }) => call?.label !== first.label).map(({ name }) => name);
+  const others = otherCommands(command, [...new Set(otherOrbit)]);
+  return { ...first, detail: clip(detail, MAX_DETAIL), ...others.length ? { others } : {} };
+}
+function othersText(call) {
+  if (!call.others?.length)
+    return "";
+  const shown = call.others.slice(0, MAX_OTHERS_SHOWN);
+  const hidden = call.others.length - shown.length;
+  return "  + " + shown.join(", ") + (hidden > 0 ? `, \u2026 +${hidden} more` : "");
 }
 function describeOrbitCall(tool, input, known = NO_ENTITIES) {
   const command = stringField(input, "command");
@@ -399,7 +838,7 @@ var OrbitUiPlugin = async ({ client }) => ({
       const call = describeOrbitCall(input.tool, output.args);
       if (!call)
         return;
-      const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "");
+      const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "") + othersText(call);
       client.tui.showToast({ body: { message, variant: "info", duration: 2000 } }).catch(() => {});
     } catch {}
   }
