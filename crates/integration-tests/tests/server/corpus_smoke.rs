@@ -472,15 +472,12 @@ fn push_shell_doc_queries(
             .skip(1)
             .map(|m| m.start())
             .chain([command_line.len()]);
-        for args in starts
-            .iter()
-            .zip(ends)
-            .map(|(&start, end)| &command_line[start..end])
-        {
+        for (start, end) in starts.into_iter().zip(ends) {
+            let args = &command_line[start..end];
             if !QUERY_WORD.is_match(args) || PLACEHOLDER.is_match(args) {
                 continue;
             }
-            let key = format!("{path_label}:{}", line + 1 + offset);
+            let key = format!("{path_label}:{}:{start}", line + 1 + offset);
             let query = QUOTED
                 .captures_iter(args)
                 .filter_map(|caps| caps.get(1).or_else(|| caps.get(2)))
