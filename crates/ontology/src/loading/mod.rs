@@ -445,7 +445,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     resolve_transform_property_inputs(&mut ontology, &pipeline_node_metadata)?;
 
     let has_denorm = !denormalization_entries.is_empty();
-    let mut writer_conflicts = Vec::new();
+    let mut writer_conflicts = std::collections::BTreeSet::new();
 
     for entry in &denormalization_entries {
         let node = ontology.nodes.get(&entry.node).ok_or_else(|| {
@@ -529,7 +529,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             }
         }
     }
-    ontology.edge_writer_conflicts = writer_conflicts;
+    ontology.edge_writer_conflicts = writer_conflicts.into_iter().collect();
 
     let auto_columns: Vec<crate::entities::StorageColumn> = if has_denorm {
         vec![

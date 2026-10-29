@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt};
 
-use crate::constants::DEFAULT_PRIMARY_KEY;
+use crate::constants::{DEFAULT_PRIMARY_KEY, SOURCE_TAGS_COLUMN, TARGET_TAGS_COLUMN};
 use crate::etl::{EdgeMapping, NodeRef, NodeRefKind, Pipeline, ReindexSource};
 use serde::Deserialize;
 
@@ -379,6 +379,10 @@ impl Default for NodeEntity {
 }
 
 impl NodeEntity {
+    pub fn field(&self, name: &str) -> Option<&Field> {
+        self.fields.iter().find(|field| field.name == name)
+    }
+
     pub fn reference_properties(&self) -> impl Iterator<Item = &str> {
         self.pipelines
             .iter()
@@ -498,18 +502,23 @@ impl DenormDirection {
 
     pub fn tag_column(&self) -> &'static str {
         match self {
-            Self::Source => "source_tags",
-            Self::Target => "target_tags",
+            Self::Source => SOURCE_TAGS_COLUMN,
+            Self::Target => TARGET_TAGS_COLUMN,
         }
     }
 }
 
 impl EdgeMapping {
     pub fn own_side(&self, node_name: &str) -> Option<DenormDirection> {
-        match (&self.source.kind, &self.target.kind) {
-            (NodeRefKind::Literal(kind), _) if kind == node_name => Some(DenormDirection::Source),
-            (_, NodeRefKind::Literal(kind)) if kind == node_name => Some(DenormDirection::Target),
-            _ => None,
+        let names = |node_ref: &NodeRef| matches!(&node_ref.kind, NodeRefKind::Literal(kind) if kind == node_name);
+        match (names(&self.source), names(&self.target)) {
+            (true, true) => [&self.source, &self.target]
+                .iter()
+                .position(|node_ref| node_ref.field == DEFAULT_PRIMARY_KEY)
+                .map(|side| [DenormDirection::Source, DenormDirection::Target][side].clone()),
+            (true, false) => Some(DenormDirection::Source),
+            (false, true) => Some(DenormDirection::Target),
+            (false, false) => None,
         }
     }
 }

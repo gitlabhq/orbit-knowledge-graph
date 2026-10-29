@@ -1539,20 +1539,8 @@ impl Ontology {
     /// `direction` side — i.e. whether a node property in that column can be
     /// denormalized onto the edge row. The single source of truth for which
     /// edges carry which denorm tags; both the read path (compiler) and the
-    /// write path (indexer) derive from it.
-    ///
-    /// The tag is declared when a writer of the label supplies it and every
-    /// other writer of the label does too ([`Self::edge_writer_conflict`]):
-    ///
-    /// - A standalone edge projects `column` only when the matching literal
-    ///   endpoint maps its ontology property to an extracted input field.
-    /// - An FK edge projects only on the side holding the key. A self edge
-    ///   names the same node on both sides, so it follows the node-pipeline rule.
-    /// - A node-pipeline edge projects only the pipeline's own node, on the
-    ///   side of its own row ([`EdgeMapping::own_side`]); derived-entity edges
-    ///   project nothing.
-    /// - An edge no declared pipeline emits has no writer the ontology can
-    ///   consult, so it is assumed to project on both sides.
+    /// write path (indexer) derive from it. A tag needs every writer of the
+    /// label to project it; `edge_writer_conflicts` lists the labels where one does not.
     pub fn edge_projects_column(
         &self,
         relationship_kind: &str,
@@ -1567,7 +1555,7 @@ impl Ontology {
                 .all(|(_, projects)| *projects)
     }
 
-    pub fn edge_writer_conflict(
+    pub(crate) fn edge_writer_conflict(
         &self,
         relationship_kind: &str,
         node_kind: &str,
@@ -1634,7 +1622,7 @@ impl Ontology {
                 holder == node_kind
                     && self
                         .get_node(holder)
-                        .is_some_and(|node| node.fields.iter().any(|field| field.name == fk))
+                        .is_some_and(|node| node.field(fk).is_some())
             });
         }
 
@@ -1656,11 +1644,7 @@ impl Ontology {
         endpoint_kind == node_kind
             && node_ref.property_inputs.keys().any(|property_name| {
                 self.get_node(node_kind)
-                    .and_then(|node| {
-                        node.fields
-                            .iter()
-                            .find(|field| field.name == *property_name)
-                    })
+                    .and_then(|node| node.field(property_name))
                     .and_then(|field| field.column_name())
                     == Some(column)
             })
@@ -2152,6 +2136,33 @@ mod tests {
             ),
             "IN_PROJECT (project_id on the MR) projects MergeRequest.state onto source_tags"
         );
+    }
+
+    #[test]
+    fn a_self_edge_mapping_owns_the_side_that_carries_its_id() {
+        let ontology = Ontology::load_embedded().expect("should load embedded ontology");
+        let mapping = |node: &str, label: &str| {
+            ontology
+                .get_node(node)
+                .unwrap()
+                .pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+                .find(|mapping| mapping.label == label)
+                .unwrap()
+                .clone()
+        };
+        use crate::entities::DenormDirection::{Source, Target};
+        assert_eq!(mapping("Group", "CONTAINS").own_side("Group"), Some(Target));
+        assert_eq!(
+            mapping("Pipeline", "AUTO_CANCELED_BY").own_side("Pipeline"),
+            Some(Source)
+        );
+        assert_eq!(
+            mapping("MergeRequest", "IN_PROJECT").own_side("Project"),
+            Some(Target)
+        );
+        assert_eq!(mapping("MergeRequest", "IN_PROJECT").own_side("User"), None);
     }
 
     // Another entity's pipeline writes these edges with empty tags (#1249).
