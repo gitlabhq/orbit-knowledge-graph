@@ -11,12 +11,13 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::constants::{
-    CATEGORY, EVENT_TYPE, REALM_SAAS, UNIT_OF_MEASURE, feature_qualified_name, normalize_realm,
+    CATEGORY, EVENT_TYPE, REALM_SAAS, REALM_SM, UNIT_OF_MEASURE, feature_qualified_name,
+    normalize_realm,
 };
 use crate::inputs::BillingInputs;
 use crate::metrics::{
-    METRICS, REASON_EVENT_BUILD_FAILED, REASON_REALM_MISSING, REASON_REALM_UNRECOGNIZED,
-    REASON_ROOT_NAMESPACE_MISSING,
+    METRICS, REASON_EVENT_BUILD_FAILED, REASON_LICENSE_CHECKSUM_MISSING, REASON_REALM_MISSING,
+    REASON_REALM_UNRECOGNIZED, REASON_ROOT_NAMESPACE_MISSING,
 };
 use crate::tracker::BillingTracker;
 
@@ -119,6 +120,20 @@ impl BillingObserver {
                 "billing event skipped: root_namespace_id missing from SaaS JWT claims"
             );
             record_dropped(REASON_ROOT_NAMESPACE_MISSING);
+            return None;
+        }
+        // Rails mints `license_checksum` only for online cloud licenses, so its
+        // absence on SM means an offline or legacy license.
+        if realm == REALM_SM && !self.inputs.has_license_checksum {
+            orbit_log_fields::debug!(
+                safe(GL_USER_ID) = self.inputs.user_id,
+                safe(SOURCE_TYPE) = self.inputs.source_type.as_str(),
+                safe(GL_GOVERNING_NAMESPACE_ID) = self.inputs.root_namespace_id,
+                safe(DEPLOYMENT_TYPE) = self.inputs.deployment_type.as_deref(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
+                "billing event skipped: license_checksum missing from SM JWT claims"
+            );
+            record_dropped(REASON_LICENSE_CHECKSUM_MISSING);
             return None;
         }
 
@@ -290,6 +305,7 @@ mod tests {
             realm: Some("SaaS".into()),
             is_gitlab_team_member: Some(true),
             coding_agent: Some("claude-code".into()),
+            has_license_checksum: false,
         }
     }
 
@@ -382,6 +398,7 @@ mod tests {
         let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             realm: Some("self-managed".into()),
+            has_license_checksum: true,
             ..test_inputs()
         };
         let mut obs = BillingObserver::new(Some(tracker.clone()), inputs);
@@ -424,7 +441,39 @@ mod tests {
         let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             realm: Some("self-managed".into()),
+            has_license_checksum: true,
             root_namespace_id: None,
+            ..test_inputs()
+        };
+        let mut obs = BillingObserver::new(Some(tracker.clone()), inputs);
+        obs.set_query_type("traversal");
+        obs.finish(1, 0);
+
+        assert_eq!(tracker.count(), 1);
+    }
+
+    #[test]
+    fn billing_observer_skips_self_managed_without_license_checksum() {
+        for realm in ["SM", "self-managed"] {
+            let tracker = Arc::new(InMemoryBillingTracker::default());
+            let inputs = BillingInputs {
+                realm: Some(realm.into()),
+                has_license_checksum: false,
+                ..test_inputs()
+            };
+            let mut obs = BillingObserver::new(Some(tracker.clone()), inputs);
+            obs.set_query_type("traversal");
+            obs.finish(1, 0);
+
+            assert_eq!(tracker.count(), 0, "realm {realm}");
+        }
+    }
+
+    #[test]
+    fn billing_observer_emits_saas_without_license_checksum() {
+        let tracker = Arc::new(InMemoryBillingTracker::default());
+        let inputs = BillingInputs {
+            has_license_checksum: false,
             ..test_inputs()
         };
         let mut obs = BillingObserver::new(Some(tracker.clone()), inputs);
