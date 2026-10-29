@@ -93,9 +93,9 @@ properties:
   when:
     type: enum
     source: when
-    nullable: true
+    nullable: false
     mutable: false
-    description: "Run condition."
+    description: "Run condition. Empty for bridges and generic commit statuses, which have no run condition."
     enum_type: string
     values:
       0: on_success
