@@ -1784,13 +1784,6 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     }
 
     for edge in &mut f.edges {
-        if edge.resolution == Resolution::None {
-            edge.resolution = match edge.kind {
-                EdgeKind::Calls | EdgeKind::Extends => Resolution::Local,
-                EdgeKind::Imports => Resolution::Import,
-                _ => Resolution::None,
-            };
-        }
         if edge.kind == EdgeKind::TypeFlow && f.shadowed_calls.contains(&edge.to_node) {
             edge.call_resolution = crate::tree::CallResolution::NonCallable;
         }

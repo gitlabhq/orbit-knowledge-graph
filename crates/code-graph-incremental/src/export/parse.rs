@@ -119,6 +119,8 @@ struct GraphEdgeYaml {
     #[serde(default)]
     receiver: bool,
     #[serde(default)]
+    lift: Option<String>,
+    #[serde(default)]
     target_tag: indexmap::IndexMap<String, Vec<String>>,
     #[serde(default)]
     reference: bool,
@@ -238,6 +240,7 @@ pub(super) struct GraphEdge {
     pub(super) site: Vec<u16>,
     pub(super) site_child: Option<u16>,
     pub(super) receiver: bool,
+    pub(super) lift: Option<usize>,
     pub(super) target_tag: Vec<(u32, Vec<u32>)>,
     pub(super) reference: bool,
     pub(super) set: Vec<(String, String)>,
@@ -352,6 +355,7 @@ impl ExportPlan {
                     site: g.site.iter().map(|k| lang.intern_kind(k)).collect(),
                     site_child: g.site_child.as_deref().map(|k| lang.intern_kind(k)),
                     receiver: g.receiver,
+                    lift: g.lift.as_deref().map(entity_index).transpose()?,
                     target_tag: g
                         .target_tag
                         .iter()

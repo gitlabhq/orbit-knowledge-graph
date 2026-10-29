@@ -3,7 +3,6 @@ use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::SNAPSHOT_VERSION;
-use code_graph_incremental::tree::EdgeKind;
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, State, pattern, rules, templates};
 mod common;
@@ -180,7 +179,7 @@ stages:
     for edge in updated
         .edges
         .iter()
-        .filter(|edge| edge.from_tree != edge.to_tree && edge.kind != EdgeKind::DependsOn)
+        .filter(|edge| edge.from_tree != edge.to_tree)
     {
         let target = updated.trees[edge.to_tree as usize].cursor(edge.to_node);
         assert_eq!(

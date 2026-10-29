@@ -19,8 +19,7 @@ pub enum EdgeKind {
     Imports = 3,
     Extends = 4,
     TypeFlow = 5,
-    DependsOn = 6,
-    Overrides = 7,
+    Overrides = 6,
 }
 
 impl EdgeKind {
