@@ -230,3 +230,27 @@ fn setup_lists_agent_plugins_when_the_plugin_is_installed() {
     );
     assert!(home.path().join(".claude/orbit").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn dry_run_does_not_plan_the_agent_plugin_when_it_would_be_skipped() {
+    let (_home, printed) = setup_with_claude_version("2.1.286", &["--dry-run"]);
+
+    assert!(
+        printed.contains("Orbit UI skipped: needs Claude Code"),
+        "{printed}"
+    );
+    let plan = &printed[printed.find("Plan").expect("Plan card")..];
+    assert!(!plan.contains("claude_plugin"), "{printed}");
+    assert!(!plan.contains("agent plugins"), "{printed}");
+}
+
+#[cfg(unix)]
+#[test]
+fn dry_run_plans_the_agent_plugin_when_claude_is_new_enough() {
+    let (_home, printed) = setup_with_claude_version("99.0.0", &["--dry-run"]);
+
+    assert!(!printed.contains("Orbit UI skipped"), "{printed}");
+    let plan = &printed[printed.find("Plan").expect("Plan card")..];
+    assert!(plan.contains("claude_plugin"), "{printed}");
+}

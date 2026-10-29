@@ -123,8 +123,13 @@ pub(crate) async fn install(
         return Ok(finish(&selection, Outcome::NoAgentSelected, false));
     }
 
-    let plan = plan::for_selection(&selection, &target)?;
+    let mut plan = plan::for_selection(&selection, &target)?;
     if options.dry_run {
+        let skips =
+            components::agent_plugins::drop_skipped_plugins(&mut plan, &selection.agents, &target)?;
+        for (label, reason) in skips {
+            tui::card("agent plugins", format!("{label}  {reason}"))?;
+        }
         show_dry_run(&plan, "Dry run: nothing written.")?;
         return Ok(finish(&selection, Outcome::DryRun, false));
     }
