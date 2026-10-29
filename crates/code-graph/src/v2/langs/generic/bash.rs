@@ -6,7 +6,7 @@ use treesitter_visit::extract::field;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::v2::linker::rules::{ReceiverMode, ResolutionRules};
+use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage};
 use crate::v2::linker::{HasRules, ResolveSettings};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
@@ -36,6 +36,10 @@ impl DslLanguage for BashDsl {
                 .def_kind(DefKind::Function)
                 .name_from(field("name")),
         ]
+    }
+
+    fn refs() -> Vec<ReferenceRule> {
+        vec![reference("command").name_from(field("name"))]
     }
 
     fn display() -> DisplayRules {
@@ -101,8 +105,8 @@ impl HasRules for BashRules {
             "bash",
             scopes,
             spec,
-            vec![],
-            vec![],
+            vec![ResolveStage::SSA, ResolveStage::ImportStrategies],
+            vec![ImportStrategy::SameFile, ImportStrategy::IncludeGraph],
             ReceiverMode::None,
             ".",
             &[],

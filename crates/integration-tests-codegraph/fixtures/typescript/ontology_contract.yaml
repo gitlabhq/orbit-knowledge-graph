@@ -1,0 +1,272 @@
+name: "TypeScript ontology contract: kinds, content columns, imports, files, and edges"
+pipeline: js
+
+fixtures:
+  - path: src/order.ts
+    content: |
+      import { Base } from "./base";
+      import * as path from "path";
+
+      /** An order of goods.
+       * More. */
+      export abstract class Order extends Base {
+        private readonly total: number = 0;
+        constructor(private repo: string) { super(); }
+        /** Charges the order. */
+        public static async charge(amount: number, note?: string): Promise<string> {
+          const order = new Order("r");
+          order.describe();
+          order.describe();
+          path.join("a");
+          return "";
+        }
+        protected abstract refund(x: number): void;
+        describe(): void {}
+        #secret() {}
+      }
+
+      export const MAX = 10;
+      let counter: number = 0;
+      export const twice = (a: number): number => a * 2;
+      function* gen() { yield 1; }
+      interface Store { get(k: string): string }
+      type Alias = string;
+      enum Color { Red, Green }
+      namespace Billing { export const tax = 1; }
+
+  - path: src/base.ts
+    content: |
+      export class Base {
+        describe(): void {}
+      }
+
+  - path: src/order.test.ts
+    content: |
+      import { Order } from "./order";
+
+      describe("Order", () => {
+        it("charges the card", () => {
+          Order.charge(1);
+        });
+      });
+
+  - path: vendor/lib/util.ts
+    content: |
+      export function util() {}
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/order.ts']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "top_level" } }
+          - { row: { name: "total", kind: "Field", category: "Value", lk: "Property", scope: "member" } }
+          - { row: { name: "constructor", kind: "Constructor", category: "Callable", lk: "Constructor", scope: "member" } }
+          - { row: { name: "charge", kind: "Method", category: "Callable", lk: "StaticMethod", scope: "member" } }
+          - { row: { name: "MAX", kind: "Constant", category: "Value", lk: "Const", scope: "top_level" } }
+          - { row: { name: "counter", kind: "Variable", category: "Value", lk: "Variable", scope: "top_level" } }
+          - { row: { name: "twice", kind: "Function", category: "Callable", lk: "ArrowFunction", scope: "top_level" } }
+          - { row: { name: "Store", kind: "Interface", category: "Type", lk: "Interface", scope: "top_level" } }
+          - { row: { name: "Alias", kind: "TypeAlias", category: "Type", lk: "TypeAlias", scope: "top_level" } }
+          - { row: { name: "Color", kind: "Enum", category: "Type", lk: "Enum", scope: "top_level" } }
+          - { row: { name: "Red", kind: "EnumMember", category: "Value", lk: "EnumMember", scope: "member" } }
+          - { row: { name: "Billing", kind: "Module", category: "Module", lk: "Namespace", scope: "top_level" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/order.ts']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Order", signature: "abstract class Order extends Base", doc: "An order of goods. More." } }
+          - { row: { name: "charge", signature: "public static async charge(amount: number, note?: string): Promise<string>", return_type: "Promise<string>", doc: "Charges the order." } }
+          - { row: { name: "counter", signature: "let counter: number", declared_type: "number", return_type: null } }
+          - { row: { name: "twice", signature: "const twice = (a: number): number", return_type: "number" } }
+
+  - name: "Parameters of Order::charge"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.fqn = 'Order::charge' AND 'amount: number' IN d.parameters AND 'note?: string' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Modifiers"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.fqn = 'Order::charge' AND 'static' IN d.modifiers AND 'async' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.fqn = 'Order::total' AND 'readonly' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'Order' AND 'abstract' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'gen' AND 'generator' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.fqn = 'Order::refund' AND 'abstract' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['total', 'charge', 'refund', 'secret', 'MAX', 'counter']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "total", visibility: "private" } }
+          - { row: { name: "charge", visibility: "public" } }
+          - { row: { name: "refund", visibility: "protected" } }
+          - { row: { name: "secret", visibility: "private" } }
+          - { row: { name: "MAX", visibility: "public" } }
+          - { row: { name: "counter", visibility: "file" } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'src/order.ts'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "Base", path: "./base", kind: "symbol", lk: "NamedImport", external: false } }
+          - { row: { name: "", path: "path", kind: "module", lk: "NamespaceImport", external: true } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'src/order.ts'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 2 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "src/order.test.ts", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "src/order.ts", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/util.ts", is_test: false, is_vendored: true } }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.fqn = 'Order::charge' AND t.fqn = 'Order::describe'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'charges the card' AND t.fqn = 'Order::charge'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "RESOLVES_TO"
+    queries:
+      - query: |
+          MATCH (s:Import)-[e:RESOLVES_TO]->(t:Definition)
+          WHERE s.name = 'Base' AND t.name = 'Base' AND e.resolution = 'import'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "DEPENDS_ON"
+    queries:
+      - query: |
+          MATCH (s:File)-[e:DEPENDS_ON]->(t:File)
+          WHERE s.path = 'src/order.ts' AND t.path = 'src/base.ts'
+          RETURN s.path AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "Test definition charges the card"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'charges the card'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "TestCase" } }
+
+  - name: "Test definition Order"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'Order'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "TestSuite" } }

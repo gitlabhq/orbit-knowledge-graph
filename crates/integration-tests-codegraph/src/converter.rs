@@ -62,6 +62,7 @@ pub fn convert_v2_graph(
         commit_sha,
     };
     let ids = graph.assign_ids(project_id, branch);
+    let unwritten = graph.unwritten_nodes();
     let write_repository_structure = graph.output.writes_repository_structure();
     let mut tables = Vec::new();
 
@@ -103,18 +104,11 @@ pub fn convert_v2_graph(
                 FileRow::to_record_batch(&rows, &specs, &ctx)?
             }
             "Definition" => {
-                DefinitionRow::to_record_batch(&graph.definition_rows(&ids), &specs, &ctx)?
+                let rows: Vec<_> = graph.definition_rows(&ids).collect();
+                DefinitionRow::to_record_batch(&rows, &specs, &ctx)?
             }
             "Import" => {
-                let rows: Vec<_> = graph
-                    .imports_iter()
-                    .map(|(idx, file_path, import)| ImportRow {
-                        file_path,
-                        import,
-                        pool: &graph.strings,
-                        id: ids[idx.index()],
-                    })
-                    .collect();
+                let rows: Vec<_> = graph.import_rows(&ids).collect();
                 ImportRow::to_record_batch(&rows, &specs, &ctx)?
             }
             other => panic!("no v2 converter for local entity '{other}'"),
@@ -135,6 +129,12 @@ pub fn convert_v2_graph(
             write_repository_structure
                 || graph.graph[ei].relationship.edge_kind.as_ref() != "CONTAINS"
         })
+        .filter(|&ei| {
+            graph
+                .graph
+                .edge_endpoints(ei)
+                .is_some_and(|(s, t)| !unwritten.contains(&s) && !unwritten.contains(&t))
+        })
         .collect();
 
     let edge_batch = orbit_arrow::BatchBuilder::new(&edge_specs(ontology), edge_indices.len())?
@@ -147,6 +147,7 @@ pub fn convert_v2_graph(
                 edge_kind: edge.relationship.edge_kind.as_ref(),
                 source_node_kind: edge.relationship.source_node.as_ref(),
                 target_node_kind: edge.relationship.target_node.as_ref(),
+                properties: graph.edge_properties(edge),
             }
             .write_row(b, &())
         })?;

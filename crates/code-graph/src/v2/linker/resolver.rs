@@ -280,6 +280,9 @@ impl<'a> FileResolver<'a> {
                 continue;
             }
             for target in targets {
+                if graph.graph[target].path() == graph.graph[import_node].path() {
+                    continue;
+                }
                 let target_def_kind = graph.graph[target]
                     .def_id()
                     .map(|did| graph.defs[did.0 as usize].kind);

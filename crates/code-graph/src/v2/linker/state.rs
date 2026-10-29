@@ -368,6 +368,17 @@ impl GraphDef {
 }
 
 impl GraphImport {
+    pub fn import_kind(&self, path_is_empty: bool) -> &'static str {
+        match self.binding_kind {
+            _ if self.wildcard => "wildcard",
+            ImportBindingKind::SideEffect => "side_effect",
+            ImportBindingKind::Namespace => "module",
+            ImportBindingKind::Primary => "symbol",
+            ImportBindingKind::Named if self.name.is_none() || path_is_empty => "module",
+            ImportBindingKind::Named => "symbol",
+        }
+    }
+
     pub fn from_canonical(imp: &crate::v2::types::CanonicalImport, pool: &mut StringPool) -> Self {
         Self {
             import_type: imp.import_type,

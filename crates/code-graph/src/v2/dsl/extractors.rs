@@ -275,6 +275,11 @@ impl DisplayRules {
                     .filter_map(|f| node.field(f))
                     .map(|c| c.range().start),
             )
+            .chain(
+                node.children()
+                    .filter_map(|c| body.iter().find_map(|f| c.field(f)))
+                    .map(|c| c.range().start),
+            )
             .min()
             .unwrap_or(node.range().end);
         let text = node.text();
@@ -380,7 +385,7 @@ impl DisplayRules {
 pub fn leading_comments(node: &N<'_>, kinds: &[&str], prefixes: &[&str]) -> Vec<String> {
     let mut texts: Vec<String> = Vec::new();
     let mut next_line = node.start_pos().line();
-    let mut prev = node.prev();
+    let mut prev = node.prev().map(|p| trailing_comment_host(p, kinds));
     while let Some(sibling) = prev {
         if !kinds.contains(&sibling.kind().as_ref()) || sibling.end_pos().line() + 1 < next_line {
             break;
@@ -395,4 +400,15 @@ pub fn leading_comments(node: &N<'_>, kinds: &[&str], prefixes: &[&str]) -> Vec<
     }
     texts.reverse();
     texts
+}
+
+fn trailing_comment_host<'r>(node: N<'r>, kinds: &[&str]) -> N<'r> {
+    let mut current = node;
+    while !kinds.contains(&current.kind().as_ref()) {
+        match current.children().last() {
+            Some(last) => current = last,
+            None => break,
+        }
+    }
+    current
 }

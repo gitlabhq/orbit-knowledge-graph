@@ -41,14 +41,21 @@ impl DslLanguage for CppDsl {
                 .def_kind(DefKind::Method)
                 .when(parent_is("field_declaration_list"))
                 .name_hook(c_family::cpp_declarator_name)
-                .metadata(metadata().parameters_with(c_family::c_parameters)),
+                .metadata(metadata().parameters_with(c_family::c_parameters))
+                .kind_if(
+                    c_family::cpp_is_constructor,
+                    DefKind::Constructor,
+                    "Constructor",
+                ),
             scope("class_specifier", "Class")
                 .def_kind(DefKind::Class)
-                .when(has_descendant("field_declaration_list")),
+                .when(has_descendant("field_declaration_list"))
+                .metadata(metadata().super_types(c_family::cpp_super_types)),
             // C++ treats a struct as a class with public default.
             scope("struct_specifier", "Struct")
                 .def_kind(DefKind::Struct)
-                .when(has_descendant("field_declaration_list")),
+                .when(has_descendant("field_declaration_list"))
+                .metadata(metadata().super_types(c_family::cpp_super_types)),
             scope("enum_specifier", "Enum")
                 .def_kind(DefKind::Enum)
                 .when(has_descendant("enumerator_list")),

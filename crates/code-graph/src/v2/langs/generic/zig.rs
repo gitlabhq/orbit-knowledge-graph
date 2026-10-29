@@ -107,7 +107,7 @@ fn zig_extract_imports(node: &N<'_>, imports: &mut Vec<crate::v2::types::Canonic
 
     imports.push(CanonicalImport {
         import_type: "Import",
-        binding_kind: ImportBindingKind::Named,
+        binding_kind: ImportBindingKind::Namespace,
         mode: ImportMode::Declarative,
         path,
         name,

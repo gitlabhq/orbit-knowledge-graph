@@ -113,6 +113,7 @@ impl<'a> Output<'a> {
                     target_node_kind: target_kind,
                     source_tags,
                     target_tags,
+                    properties: Default::default(),
                 }
                 .write_row(&mut edges, &())?;
                 edge_batches.extend(edges.take_if_over(self.batch_bytes)?);

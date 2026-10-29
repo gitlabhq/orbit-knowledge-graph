@@ -168,6 +168,33 @@ pub fn cpp_access(def: &N<'_>, _name: &str) -> Option<crate::v2::types::Visibili
     })
 }
 
+pub fn cpp_is_constructor(def: &N<'_>, name: &str) -> bool {
+    def.parent()
+        .and_then(|list| list.parent())
+        .filter(|owner| {
+            matches!(
+                owner.kind().as_ref(),
+                "class_specifier" | "struct_specifier"
+            )
+        })
+        .and_then(|owner| owner.field("name"))
+        .is_some_and(|owner_name| owner_name.text() == name)
+}
+
+pub fn cpp_super_types(def: &N<'_>) -> Vec<String> {
+    def.children()
+        .filter(|c| c.kind().as_ref() == "base_class_clause")
+        .flat_map(|clause| clause.children().collect::<Vec<_>>())
+        .filter(|c| {
+            matches!(
+                c.kind().as_ref(),
+                "type_identifier" | "qualified_identifier" | "template_type"
+            )
+        })
+        .map(|c| c.text().to_string())
+        .collect()
+}
+
 pub const C_DOC_MARKERS: &[&str] = &["///", "//!", "//", "/**", "/*!", "/*", "*/", "*"];
 
 pub const C_TOKENS: &[(&str, crate::v2::dsl::extractors::Token)] = &[

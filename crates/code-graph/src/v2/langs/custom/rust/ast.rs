@@ -895,7 +895,7 @@ impl RustStructureExtractor {
 
         self.imports.push(CanonicalImport {
             import_type,
-            binding_kind: if wildcard {
+            binding_kind: if wildcard || import_type == "ModDeclaration" {
                 crate::v2::types::ImportBindingKind::Namespace
             } else {
                 crate::v2::types::ImportBindingKind::Named

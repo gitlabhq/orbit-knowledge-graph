@@ -1,0 +1,261 @@
+name: "Kotlin ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: src/main/kotlin/shop/User.kt
+    content: |
+      package shop
+
+      import shop.base.Base
+      import kotlinx.coroutines.delay
+
+      /** A user. */
+      data class User(val name: String) : Base() {
+          private val nickname: String = "n"
+
+          constructor(id: Int) : this("x")
+
+          override suspend fun save(times: Int): String {
+              val copy = User("a")
+              copy.greet()
+              copy.greet()
+              delay(1)
+              return nickname
+          }
+
+          fun greet() {}
+      }
+
+      fun register(user: User): User = user
+
+      object Registry
+
+      const val LIMIT: Int = 3
+
+      internal fun String.shout(): String = this
+
+  - path: src/main/kotlin/shop/base/Base.kt
+    content: |
+      package shop.base
+
+      open class Base {
+          open suspend fun save(times: Int): String = ""
+      }
+
+  - path: src/test/kotlin/shop/UserTest.kt
+    content: |
+      package shop
+
+      import org.junit.Test
+
+      class UserTest {
+          @Test
+          fun savesTheUser() {
+              User("a").greet()
+          }
+      }
+
+  - path: vendor/lib/Util.kt
+    content: |
+      fun util() {}
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/main/kotlin/shop/User.kt']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "User", kind: "Class", category: "Type", lk: "DataClass", scope: "top_level" } }
+          - { row: { name: "constructor", kind: "Constructor", category: "Callable", lk: "PrimaryConstructor", scope: "member" } }
+          - { row: { name: "constructor", kind: "Constructor", category: "Callable", lk: "Constructor", scope: "member" } }
+          - { row: { name: "nickname", kind: "Field", category: "Value", lk: "Property", scope: "member" } }
+          - { row: { name: "save", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "Registry", kind: "Class", category: "Type", lk: "Object", scope: "top_level" } }
+          - { row: { name: "LIMIT", kind: "Constant", category: "Value", lk: "Constant", scope: "top_level" } }
+          - { row: { name: "shout", kind: "Function", category: "Callable", lk: "ExtensionFunction", scope: "top_level" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/main/kotlin/shop/User.kt']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "User", signature: "data class User(val name: String) : Base()", doc: "A user." } }
+          - { row: { name: "save", signature: "override suspend fun save(times: Int): String", return_type: "String", declared_type: null } }
+          - { row: { name: "nickname", declared_type: "String", return_type: null } }
+
+  - name: "Parameters of shop.User.save"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.fqn = 'shop.User.save' AND 'times: Int' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Modifiers"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.fqn = 'shop.User.save' AND 'async' IN d.modifiers AND 'override' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['nickname', 'greet', 'shout']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "nickname", visibility: "private" } }
+          - { row: { name: "greet", visibility: "public" } }
+          - { row: { name: "shout", visibility: "internal" } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'src/main/kotlin/shop/User.kt'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "Base", path: "shop.base", kind: "symbol", lk: "Import", fqn: "shop.base.Base", external: false } }
+          - { row: { name: "delay", path: "kotlinx.coroutines", kind: "symbol", lk: "Import", fqn: "kotlinx.coroutines.delay", external: true } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'src/main/kotlin/shop/User.kt'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 2 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "src/test/kotlin/shop/UserTest.kt", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "src/main/kotlin/shop/User.kt", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/Util.kt", is_test: false, is_vendored: true } }
+
+  - name: "EXTENDS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:EXTENDS]->(t:Definition)
+          WHERE s.name = 'User' AND t.fqn = 'shop.base.Base' AND e.resolution = 'import'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "OVERRIDES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:OVERRIDES]->(t:Definition)
+          WHERE s.fqn = 'shop.User.save' AND t.fqn = 'shop.base.Base.save'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "INSTANTIATES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:INSTANTIATES]->(t:Definition)
+          WHERE s.name = 'save' AND t.fqn = 'shop.User' AND t.kind = 'Class'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'save' AND t.fqn = 'shop.User.greet'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Import)
+          WHERE s.name = 'save' AND t.name = 'delay' AND e.resolution = 'import'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "USES_TYPE"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:USES_TYPE]->(t:Definition)
+          WHERE s.name = 'register' AND t.fqn = 'shop.User' AND e.usage = 'parameter'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "No IMPLEMENTS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "Test definition savesTheUser"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'savesTheUser'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "Test" } }

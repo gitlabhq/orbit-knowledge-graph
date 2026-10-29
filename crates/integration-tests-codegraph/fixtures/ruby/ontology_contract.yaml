@@ -1,0 +1,256 @@
+name: "Ruby ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: app/models/order.rb
+    content: |
+      require_relative "base"
+
+      # Weather tools.
+      module Billing
+        # An order of goods.
+        class Order < Base
+          attr_accessor :total
+          MAX = 10
+
+          def initialize(total, note = nil)
+            @total = total
+          end
+
+          def self.build(total)
+            order = Order.new(total)
+            order.describe
+            order.describe
+            order
+          end
+
+          def describe
+            MAX
+          end
+        end
+      end
+
+  - path: app/models/base.rb
+    content: |
+      class Base
+        def describe
+          "base"
+        end
+      end
+
+  - path: spec/models/order_spec.rb
+    content: |
+      describe Billing::Order do
+        it "builds an order" do
+          Billing::Order.build(1)
+        end
+      end
+
+  - path: vendor/lib/util.rb
+    content: |
+      def util; end
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['app/models/order.rb']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Billing", kind: "Module", category: "Module", lk: "Module", scope: "top_level" } }
+          - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "member" } }
+          - { row: { name: "total", kind: "Field", category: "Value", lk: "Attribute", scope: "member" } }
+          - { row: { name: "MAX", kind: "Constant", category: "Value", lk: "Constant", scope: "member" } }
+          - { row: { name: "initialize", kind: "Constructor", category: "Callable", lk: "Initializer", scope: "member" } }
+          - { row: { name: "build", kind: "Method", category: "Callable", lk: "SingletonMethod", scope: "member" } }
+          - { row: { name: "describe", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['app/models/order.rb']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Billing", signature: "module Billing", doc: "Weather tools." } }
+          - { row: { name: "Order", signature: "class Order < Base", doc: "An order of goods." } }
+          - { row: { name: "initialize", signature: "def initialize(total, note = nil)", return_type: null } }
+
+  - name: "Parameters of initialize"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'initialize' AND 'total' IN d.parameters AND 'note = nil' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Modifiers"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'build' AND 'static' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "No visibility rule"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Generated members name their generator"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'total' AND d.generated_by IS NOT NULL
+          RETURN d.generated_by AS generated_by
+        assert:
+          - { row: { generated_by: "attr_accessor" } }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'app/models/order.rb'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { path: "base", kind: "side_effect", lk: "RequireRelative", external: false } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'app/models/order.rb'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 1 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "spec/models/order_spec.rb", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "app/models/order.rb", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/util.rb", is_test: false, is_vendored: true } }
+
+  - name: "EXTENDS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:EXTENDS]->(t:Definition)
+          WHERE s.name = 'Order' AND t.name = 'Base'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "OVERRIDES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:OVERRIDES]->(t:Definition)
+          WHERE s.fqn = 'Billing::Order::describe' AND t.fqn = 'Base::describe'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'build' AND t.fqn = 'Billing::Order::describe'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "USES_VALUE"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:USES_VALUE]->(t:Definition)
+          WHERE s.fqn = 'Billing::Order::describe' AND t.name = 'MAX' AND e.access = 'read'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "RESOLVES_TO"
+    queries:
+      - query: |
+          MATCH (s:Import)-[e:RESOLVES_TO]->(t:File)
+          WHERE s.import_path = 'base' AND t.path = 'app/models/base.rb' AND e.resolution = 'import'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "DEPENDS_ON"
+    queries:
+      - query: |
+          MATCH (s:File)-[e:DEPENDS_ON]->(t:File)
+          WHERE s.path = 'app/models/order.rb' AND t.path = 'app/models/base.rb'
+          RETURN s.path AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'builds an order' AND t.name = 'build'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "No IMPLEMENTS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "Test definition builds an order"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'builds an order'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "Example" } }
+
+  - name: "Test definition Billing::Order"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'Billing::Order'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "ExampleGroup" } }

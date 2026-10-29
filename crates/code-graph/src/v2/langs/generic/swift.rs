@@ -34,21 +34,31 @@ const SWIFT_IMPORT_KINDS: &[&str] = &[
 
 fn swift_super_types(node: &N<'_>) -> Vec<String> {
     let mut result = Vec::new();
-    for child in node.children() {
-        if child.kind().as_ref() == "type_inheritance_clause" {
-            for inner in child.children() {
-                match inner.kind().as_ref() {
-                    "type_identifier" => result.push(inner.text().to_string()),
-                    "inheritance_specifier" => {
-                        for t in inner.children() {
-                            if t.kind().as_ref() == "type_identifier" {
-                                result.push(t.text().to_string());
-                            }
+    let specifiers = node
+        .children()
+        .flat_map(|child| match child.kind().as_ref() {
+            "type_inheritance_clause" => child.children().collect::<Vec<_>>(),
+            "inheritance_specifier" => vec![child],
+            _ => Vec::new(),
+        });
+    for spec in specifiers {
+        match spec.kind().as_ref() {
+            "type_identifier" => result.push(spec.text().to_string()),
+            "inheritance_specifier" => {
+                let target = spec.field("inherits_from").unwrap_or(spec);
+                match target.kind().as_ref() {
+                    "type_identifier" => result.push(target.text().to_string()),
+                    _ => {
+                        if let Some(t) = target
+                            .children()
+                            .find(|t| t.kind().as_ref() == "type_identifier")
+                        {
+                            result.push(t.text().to_string());
                         }
                     }
-                    _ => {}
                 }
             }
+            _ => {}
         }
     }
     result
@@ -81,10 +91,15 @@ fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bo
     }
 
     let name = path.rsplit('.').next().unwrap_or(&path).to_string();
+    let binding_kind = if path.contains('.') {
+        ImportBindingKind::Named
+    } else {
+        ImportBindingKind::Namespace
+    };
 
     imports.push(CanonicalImport {
         import_type: "Import",
-        binding_kind: ImportBindingKind::Named,
+        binding_kind,
         mode: ImportMode::Declarative,
         path,
         name: Some(name),

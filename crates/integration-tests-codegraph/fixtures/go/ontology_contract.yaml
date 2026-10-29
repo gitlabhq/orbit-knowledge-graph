@@ -1,0 +1,241 @@
+name: "Go ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: shop/order.go
+    content: |
+      package shop
+
+      import (
+      	"fmt"
+      	"example.com/app/base"
+      )
+
+      // Celsius is a temperature.
+      type Celsius float64
+
+      type Alias = Celsius
+
+      // Order holds goods.
+      type Order struct {
+      	base.Entity
+      	Total int
+      }
+
+      // Charge bills the order.
+      func (o *Order) Charge(amount int, note string) (int, error) {
+      	o.describe()
+      	o.describe()
+      	fmt.Println(o.Total)
+      	return 0, nil
+      }
+
+      func (o *Order) describe() {}
+
+      func NewOrder(total int) *Order {
+      	return &Order{Total: total}
+      }
+
+      const MaxSize = 10
+
+      var counter int
+
+  - path: base/entity.go
+    content: |
+      package base
+
+      type Entity struct {
+      	ID int
+      }
+
+  - path: shop/order_test.go
+    content: |
+      package shop
+
+      import "testing"
+
+      func TestCharge(t *testing.T) {
+      	o := NewOrder(1)
+      	o.Charge(1, "x")
+      }
+
+  - path: vendor/lib/util.go
+    content: |
+      package lib
+
+      func Util() {}
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['shop/order.go']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Celsius", kind: "Class", category: "Type", lk: "DefinedType", scope: "top_level" } }
+          - { row: { name: "Alias", kind: "TypeAlias", category: "Type", lk: "TypeAlias", scope: "top_level" } }
+          - { row: { name: "Order", kind: "Struct", category: "Type", lk: "Struct", scope: "top_level" } }
+          - { row: { name: "Charge", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "NewOrder", kind: "Function", category: "Callable", lk: "Function", scope: "top_level" } }
+          - { row: { name: "MaxSize", kind: "Constant", category: "Value", lk: "Const", scope: "top_level" } }
+          - { row: { name: "counter", kind: "Variable", category: "Value", lk: "Var", scope: "top_level" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['shop/order.go']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Celsius", signature: "Celsius float64", doc: "Celsius is a temperature." } }
+          - { row: { name: "Charge", signature: "func (o *Order) Charge(amount int, note string) (int, error)", return_type: "(int, error)", doc: "Charge bills the order." } }
+          - { row: { name: "counter", declared_type: "int", return_type: null } }
+
+  - name: "Parameters of Charge"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'Charge' AND 'amount int' IN d.parameters AND 'note string' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "No modifier rules"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE 'static' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['Charge', 'describe', 'counter', 'MaxSize']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "Charge", visibility: "public" } }
+          - { row: { name: "describe", visibility: "package" } }
+          - { row: { name: "counter", visibility: "package" } }
+          - { row: { name: "MaxSize", visibility: "public" } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'shop/order.go'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "fmt", path: "fmt", kind: "module", fqn: "fmt", external: true } }
+          - { row: { name: "base", path: "example.com/app/base", kind: "module", fqn: "example.com/app/base", external: true } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'shop/order.go'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 2 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "shop/order_test.go", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "shop/order.go", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/util.go", is_test: false, is_vendored: true } }
+
+  - name: "DEFINES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:DEFINES]->(t:Definition)
+          WHERE s.name = 'Order' AND t.name = 'Charge'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'Charge' AND t.name = 'describe'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Import)
+          WHERE s.name = 'Charge' AND t.import_path = 'fmt' AND e.resolution = 'import'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'TestCharge' AND t.name = 'Charge'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "Test definition TestCharge"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'TestCharge'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "Test" } }

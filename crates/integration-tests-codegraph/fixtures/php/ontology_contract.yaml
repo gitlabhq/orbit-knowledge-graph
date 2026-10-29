@@ -1,0 +1,235 @@
+name: "PHP ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: src/Order.php
+    content: |
+      <?php
+      namespace App;
+
+      use App\Base\Entity;
+      use App\Base\Payable;
+
+      /** An order of goods. */
+      final class Order extends Entity implements Payable {
+          private static int $max = 1;
+          const LIMIT = 5;
+
+          public function __construct(int $total, string $note = "x") {}
+
+          public function pay(int $amount): string {
+              $this->describe();
+              $this->describe();
+              return "";
+          }
+
+          protected function describe(): void {}
+      }
+
+      function helper($x) { return $x; }
+
+  - path: src/Base/Entity.php
+    content: |
+      <?php
+      namespace App\Base;
+
+      abstract class Entity {
+          abstract public function pay(int $amount): string;
+      }
+
+      interface Payable {
+          public function pay(int $amount): string;
+      }
+
+  - path: tests/OrderTest.php
+    content: |
+      <?php
+      namespace Tests;
+
+      class OrderTest {
+          public function testPays(): void {}
+      }
+
+  - path: vendor/lib/Util.php
+    content: |
+      <?php
+      function util() {}
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/Order.php']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "top_level" } }
+          - { row: { name: "max", kind: "Field", category: "Value", lk: "Property", scope: "member" } }
+          - { row: { name: "LIMIT", kind: "Constant", category: "Value", lk: "Constant", scope: "member" } }
+          - { row: { name: "__construct", kind: "Constructor", category: "Callable", lk: "Constructor", scope: "member" } }
+          - { row: { name: "pay", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "helper", kind: "Function", category: "Callable", lk: "Function", scope: "top_level" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/Order.php']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Order", signature: "final class Order extends Entity implements Payable", doc: "An order of goods." } }
+          - { row: { name: "pay", signature: "public function pay(int $amount): string", return_type: "string" } }
+          - { row: { name: "max", declared_type: "int", return_type: null } }
+
+  - name: "Parameters of __construct"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = '__construct' AND 'int $total' IN d.parameters AND 'string $note = "x"' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Modifiers"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'max' AND 'static' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.fqn = 'App\Order' AND 'final' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['max', 'pay', 'describe']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "max", visibility: "private" } }
+          - { row: { name: "pay", visibility: "public" } }
+          - { row: { name: "describe", visibility: "protected" } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'src/Order.php'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "Entity", path: "App\\Base", kind: "symbol", fqn: "App\\Base\\Entity", external: false } }
+          - { row: { name: "Payable", path: "App\\Base", kind: "symbol", fqn: "App\\Base\\Payable", external: false } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'src/Order.php'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 2 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "tests/OrderTest.php", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "src/Order.php", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/Util.php", is_test: false, is_vendored: true } }
+
+  - name: "EXTENDS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:EXTENDS]->(t:Definition)
+          WHERE s.name = 'Order' AND t.name = 'Entity'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "IMPLEMENTS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:IMPLEMENTS]->(t:Definition)
+          WHERE s.name = 'Order' AND t.name = 'Payable'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'pay' AND s.file_path = 'src/Order.php' AND t.name = 'describe'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "OVERRIDES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:OVERRIDES]->(t:Definition)
+          WHERE s.name = 'pay' AND s.file_path = 'src/Order.php' AND t.name = 'pay' AND t.file_path = 'src/Base/Entity.php'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 2 }
+
+  - name: "Test definition testPays"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'testPays'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "Test" } }

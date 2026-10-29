@@ -1,0 +1,207 @@
+name: "Zig ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: src/point.zig
+    content: |
+      const std = @import("std");
+
+      /// A point.
+      pub const Point = struct {
+          x: i32,
+          pub fn norm(self: Point) i32 {
+              return self.x;
+          }
+      };
+
+      /// Adds two numbers.
+      pub fn add(a: i32, b: i32) i32 {
+          return a + b;
+      }
+
+      fn twice(a: i32) i32 {
+          _ = add(a, a);
+          return add(a, a);
+      }
+
+      const Color = enum { red, green };
+
+      test "adds" {
+          _ = add(1, 2);
+      }
+
+  - path: tests/point_test.zig
+    content: |
+      test "x" {}
+
+  - path: vendor/lib/util.zig
+    content: |
+      fn util() void {}
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/point.zig']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Point", kind: "Struct", category: "Type", lk: "Struct", scope: "top_level" } }
+          - { row: { name: "norm", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "add", kind: "Function", category: "Callable", lk: "Function", scope: "top_level" } }
+          - { row: { name: "Color", kind: "Enum", category: "Type", lk: "Enum", scope: "top_level" } }
+          - { row: { name: "adds", kind: "Test", category: "Callable", lk: "Test", scope: "top_level" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/point.zig']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Point", signature: "pub const Point", doc: "A point." } }
+          - { row: { name: "add", signature: "pub fn add(a: i32, b: i32) i32", return_type: "i32", doc: "Adds two numbers." } }
+
+  - name: "Parameters of add"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'add' AND 'a: i32' IN d.parameters AND 'b: i32' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "No modifier rules"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE 'static' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['add', 'twice', 'adds']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "add", visibility: "public" } }
+          - { row: { name: "twice", visibility: "file" } }
+          - { row: { name: "adds", visibility: null } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'src/point.zig'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "std", path: "std", kind: "module", fqn: "std", external: true } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'src/point.zig'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 1 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "tests/point_test.zig", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "src/point.zig", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/util.zig", is_test: false, is_vendored: true } }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'twice' AND t.name = 'add'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'adds' AND t.name = 'add'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "No EXTENDS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:EXTENDS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "No IMPLEMENTS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "Test definition adds"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'adds'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "Test" } }

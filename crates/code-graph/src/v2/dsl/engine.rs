@@ -172,7 +172,8 @@ impl LanguageSpec {
         let (def_kind, label) = if rule.is_test(node, &name) {
             (DefKind::Test, "Test")
         } else {
-            (def_kind, label)
+            rule.conditional_kind(node, &name)
+                .unwrap_or((def_kind, label))
         };
         let mut metadata = rule.extract_metadata(node, &resolve).unwrap_or_default();
         match &rule.metadata_rule {
@@ -881,7 +882,7 @@ impl LanguageSpec {
             if let Some(fqn) = state.import_map.get(&bare) {
                 return fqn.clone();
             }
-            if let Some(prefix) = module_prefix {
+            if let Some(prefix) = module_prefix.filter(|_| !self.file_scope) {
                 return format!("{prefix}{sep}{bare}");
             }
             bare

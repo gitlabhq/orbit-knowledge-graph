@@ -1,0 +1,296 @@
+name: "C# ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: src/Billing/Order.cs
+    content: |
+      using System;
+      using Billing.Core;
+
+      namespace Billing
+      {
+          /// <summary>An order.</summary>
+          public sealed class Order : Entity, IPayable
+          {
+              private readonly int max = 1;
+              public const int Limit = 5;
+              public int Total { get; }
+
+              public Order(int total) { }
+
+              public override string Pay(int amount)
+              {
+                  var other = new Order(amount);
+                  other.Describe();
+                  other.Describe();
+                  return "";
+              }
+
+              public static async Task<int> Fetch(int id, string note) { return 1; }
+
+              internal void Describe() { }
+          }
+
+          public enum Color { Red, Green }
+
+          public struct Point { public int X; }
+      }
+
+  - path: src/Billing/Core/Entity.cs
+    content: |
+      namespace Billing.Core
+      {
+          public abstract class Entity
+          {
+              public abstract string Pay(int amount);
+          }
+
+          public interface IPayable
+          {
+              string Pay(int amount);
+          }
+      }
+
+  - path: tests/Billing.Tests/OrderTests.cs
+    content: |
+      using Xunit;
+      using Billing;
+
+      namespace Billing.Tests
+      {
+          public class OrderTests
+          {
+              [Fact]
+              public void PaysTheOrder()
+              {
+                  new Order(1).Pay(1);
+              }
+          }
+      }
+
+  - path: vendor/Lib/Util.cs
+    content: |
+      class Util {}
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/Billing/Order.cs']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Billing", kind: "Module", category: "Module", lk: "Namespace", scope: "top_level" } }
+          - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "member" } }
+          - { row: { name: "max", kind: "Field", category: "Value", lk: "Field", scope: "member" } }
+          - { row: { name: "Limit", kind: "Constant", category: "Value", lk: "Constant", scope: "member" } }
+          - { row: { name: "Total", kind: "Field", category: "Value", lk: "Property", scope: "member" } }
+          - { row: { name: "Order", kind: "Constructor", category: "Callable", lk: "Constructor", scope: "member" } }
+          - { row: { name: "Pay", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "Color", kind: "Enum", category: "Type", lk: "Enum", scope: "member" } }
+          - { row: { name: "Red", kind: "EnumMember", category: "Value", lk: "EnumMember", scope: "member" } }
+          - { row: { name: "Point", kind: "Struct", category: "Type", lk: "Struct", scope: "member" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/Billing/Order.cs']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Order", signature: "public sealed class Order : Entity, IPayable", doc: "An order." } }
+          - { row: { name: "Fetch", signature: "public static async Task<int> Fetch(int id, string note)", return_type: "Task<int>", declared_type: null } }
+          - { row: { name: "Total", signature: "public int Total", declared_type: "int", return_type: null } }
+
+  - name: "Parameters of Fetch"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'Fetch' AND 'int id' IN d.parameters AND 'string note' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Modifiers"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'Fetch' AND 'static' IN d.modifiers AND 'async' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'Pay' AND 'override' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'max' AND 'readonly' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.fqn = 'Billing.Order' AND 'sealed' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['max', 'Total', 'Describe', 'Billing']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "max", visibility: "private" } }
+          - { row: { name: "Total", visibility: "public" } }
+          - { row: { name: "Describe", visibility: "internal" } }
+          - { row: { name: "Billing", visibility: null } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'src/Billing/Order.cs'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "", path: "System", kind: "wildcard", lk: "WildcardImport", fqn: "System", external: true } }
+          - { row: { name: "", path: "Billing.Core", kind: "wildcard", lk: "WildcardImport", fqn: "Billing.Core", external: false } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'src/Billing/Order.cs'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 2 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "tests/Billing.Tests/OrderTests.cs", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "src/Billing/Order.cs", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/Lib/Util.cs", is_test: false, is_vendored: true } }
+
+  - name: "EXTENDS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:EXTENDS]->(t:Definition)
+          WHERE s.name = 'Order' AND s.kind = 'Class' AND t.fqn = 'Billing.Core.Entity'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "IMPLEMENTS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:IMPLEMENTS]->(t:Definition)
+          WHERE s.name = 'Order' AND s.kind = 'Class' AND t.fqn = 'Billing.Core.IPayable'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "OVERRIDES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:OVERRIDES]->(t:Definition)
+          WHERE s.fqn = 'Billing.Order.Pay' AND t.fqn = 'Billing.Core.Entity.Pay'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "INSTANTIATES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:INSTANTIATES]->(t:Definition)
+          WHERE s.name = 'PaysTheOrder' AND t.fqn = 'Billing.Order' AND t.kind = 'Class'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.fqn = 'Billing.Order.Pay' AND t.fqn = 'Billing.Order.Order' AND t.kind = 'Constructor'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.fqn = 'Billing.Order.Pay' AND t.fqn = 'Billing.Order.Describe'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'PaysTheOrder' AND t.fqn = 'Billing.Order.Pay'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "Test definition PaysTheOrder"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'PaysTheOrder'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "Test" } }

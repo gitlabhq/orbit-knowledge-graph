@@ -1092,25 +1092,6 @@ impl CodeGraph {
         })
     }
 
-    pub fn definition_rows(&self, ids: &[i64]) -> Vec<DefinitionRow<'_>> {
-        let languages: rustc_hash::FxHashMap<&str, &'static str> = self
-            .files()
-            .map(|(_, file)| (file.path.as_str(), file.language_name()))
-            .collect();
-        self.definitions()
-            .map(|(idx, file_path, def)| DefinitionRow {
-                file_path,
-                language: languages
-                    .get(file_path.as_ref())
-                    .copied()
-                    .unwrap_or_default(),
-                def,
-                pool: &self.strings,
-                id: ids[idx.index()],
-            })
-            .collect()
-    }
-
     pub fn imports_iter(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphImport)> {
         self.graph.node_indices().filter_map(|idx| {
             if let GraphNode::Import { file_path, id } = &self.graph[idx] {
@@ -1240,6 +1221,77 @@ impl CodeGraph {
         }
     }
 
+    pub fn edge_properties(&self, edge: &GraphEdge) -> EdgeProperties {
+        let kind = edge.relationship.edge_kind;
+        EdgeProperties {
+            lines: self.edge_lines(edge).into_iter().map(i64::from).collect(),
+            resolution: edge.resolution.as_str(),
+            access: match (kind, edge.write) {
+                (EdgeKind::UsesValue, true) => "write",
+                (EdgeKind::UsesValue, false) => "read",
+                _ => "",
+            },
+            usage: match kind {
+                EdgeKind::UsesType => edge.usage.as_str(),
+                _ => "",
+            },
+        }
+    }
+
+    pub fn is_written(&self, idx: NodeIndex) -> bool {
+        use crate::v2::types::text;
+        match self.try_import(idx) {
+            Some(import) => {
+                self.str(import.path).len() <= text::FQN_CAP
+                    && import
+                        .name
+                        .is_none_or(|n| self.str(n).len() <= text::NAME_CAP)
+            }
+            None => true,
+        }
+    }
+
+    pub fn unwritten_nodes(&self) -> FxHashSet<NodeIndex> {
+        self.imports_iter()
+            .map(|(idx, _, _)| idx)
+            .filter(|&idx| !self.is_written(idx))
+            .collect()
+    }
+
+    pub fn definition_rows<'a: 'b, 'b>(
+        &'a self,
+        ids: &'b [i64],
+    ) -> impl Iterator<Item = DefinitionRow<'a>> + 'b {
+        let languages: FxHashMap<&str, &'static str> = self
+            .files()
+            .map(|(_, f)| (f.path.as_str(), f.language_name()))
+            .collect();
+        self.definitions()
+            .map(move |(idx, file_path, def)| DefinitionRow {
+                file_path,
+                language: languages.get(file_path.as_ref()).copied().unwrap_or(""),
+                def,
+                pool: &self.strings,
+                id: ids[idx.index()],
+            })
+    }
+
+    pub fn import_rows<'a: 'b, 'b>(
+        &'a self,
+        ids: &'b [i64],
+    ) -> impl Iterator<Item = ImportRow<'a>> + 'b {
+        let sep = self.sep();
+        self.imports_iter()
+            .filter(|(idx, _, _)| self.is_written(*idx))
+            .map(move |(idx, file_path, import)| ImportRow {
+                file_path,
+                import,
+                pool: &self.strings,
+                sep,
+                id: ids[idx.index()],
+            })
+    }
+
     pub fn edge_lines(&self, edge: &GraphEdge) -> Vec<u32> {
         let mut single = [0u32; 1];
         edge.lines.get(&self.line_runs, &mut single).to_vec()
@@ -1285,6 +1337,36 @@ impl CodeGraph {
             .find(|&n| matches!(self.graph[n], GraphNode::File(_)))
     }
 
+    fn import_file_target(
+        &self,
+        import: NodeIndex,
+        path: &str,
+        files_by_path: &FxHashMap<String, NodeIndex>,
+    ) -> Option<NodeIndex> {
+        if path.is_empty() {
+            return None;
+        }
+        let importing = self.graph[import].path();
+        let dir = Path::new(importing).parent().unwrap_or(Path::new(""));
+        let extension = Path::new(importing).extension().and_then(|e| e.to_str());
+        let module_path = path.replace(self.sep(), "/");
+        let mut candidates: SmallVec<[String; 6]> = SmallVec::new();
+        for base in [path, module_path.as_str()] {
+            let relative = dir.join(base).to_string_lossy().to_string();
+            for candidate in [relative, base.to_string()] {
+                if let Some(ext) = extension {
+                    candidates.push(format!("{candidate}.{ext}"));
+                }
+                candidates.push(candidate);
+            }
+        }
+        candidates
+            .iter()
+            .filter_map(|c| files_by_path.get(normalize_relative(c).as_str()))
+            .copied()
+            .find(|&file| self.graph[file].path() != importing)
+    }
+
     fn owner_of(&self, node: NodeIndex) -> Option<NodeIndex> {
         self.graph
             .edges_directed(node, petgraph::Direction::Incoming)
@@ -1301,6 +1383,14 @@ impl CodeGraph {
             .node_indices()
             .filter(|&n| matches!(self.graph[n], GraphNode::Import { .. }))
             .collect();
+        let files_by_path: FxHashMap<&str, NodeIndex> = self
+            .files()
+            .map(|(idx, f)| (f.path.as_str(), idx))
+            .collect();
+        let files_by_path: FxHashMap<String, NodeIndex> = files_by_path
+            .into_iter()
+            .map(|(p, idx)| (p.to_string(), idx))
+            .collect();
         for node in import_nodes {
             let resolved = self
                 .graph
@@ -1311,16 +1401,34 @@ impl CodeGraph {
             }
             let import = self.import(node);
             let path = self.str(import.path);
+            let importing_path = self.graph[node].path();
             let targets: Vec<NodeIndex> = match (import.wildcard, import.name.map(|n| self.str(n)))
             {
+                (false, Some(name)) if path_names(path, name) => self.lookup_fqn(path).to_vec(),
                 (false, Some(name)) if !path.is_empty() => {
                     self.lookup_fqn(&format!("{path}{sep}{name}")).to_vec()
                 }
                 (false, Some(name)) => self.lookup_fqn(name).to_vec(),
                 (false, None) => self.lookup_fqn(path).to_vec(),
                 (true, _) => Vec::new(),
-            };
+            }
+            .into_iter()
+            .filter(|&t| self.graph[t].path() != importing_path)
+            .collect();
             let local_package = import.wildcard && self.has_members(path);
+            let file_target = if targets.is_empty() {
+                self.import_file_target(node, path, &files_by_path)
+            } else {
+                None
+            };
+            if let Some(file) = file_target {
+                added.push((
+                    node,
+                    file,
+                    GraphEdge::structural(EdgeKind::ResolvesTo, NodeKind::Import, NodeKind::File)
+                        .with_resolution(Resolution::Import),
+                ));
+            }
             for &target in &targets {
                 added.push((
                     node,
@@ -1335,7 +1443,7 @@ impl CodeGraph {
                     .with_resolution(Resolution::Import),
                 ));
             }
-            if targets.is_empty() && !local_package {
+            if targets.is_empty() && !local_package && file_target.is_none() {
                 self.mark_external_import(node);
             }
         }
@@ -1397,41 +1505,74 @@ impl CodeGraph {
             else {
                 continue;
             };
-            let Some(chain) = self.indexes.ancestors.get(&owner) else {
-                continue;
-            };
             let name = def.name;
-            for &ancestor in chain {
-                let found: Vec<NodeIndex> = self
-                    .indexes
-                    .nested
-                    .lookup(self.def(ancestor).fqn, name)
-                    .iter()
-                    .copied()
-                    .filter(|&n| n != idx && self.def_kind(n) == crate::v2::types::DefKind::Method)
-                    .collect();
-                if found.is_empty() {
-                    continue;
+            let parents: SmallVec<[NodeIndex; 4]> = self
+                .graph
+                .edges_directed(owner, petgraph::Direction::Outgoing)
+                .filter(|e| e.weight().relationship.edge_kind.is_supertype())
+                .map(|e| e.target())
+                .collect();
+            let mut targets: SmallVec<[NodeIndex; 4]> = SmallVec::new();
+            for parent in parents {
+                let chain = std::iter::once(parent)
+                    .chain(self.ancestors(parent).unwrap_or(&[]).iter().copied());
+                for ancestor in chain {
+                    let found = self
+                        .indexes
+                        .nested
+                        .lookup(self.def(ancestor).fqn, name)
+                        .iter()
+                        .copied()
+                        .find(|&n| {
+                            n != idx && self.def_kind(n) == crate::v2::types::DefKind::Method
+                        });
+                    if let Some(found) = found {
+                        if !targets.contains(&found) {
+                            targets.push(found);
+                        }
+                        break;
+                    }
                 }
-                for target in found {
-                    let resolution = self.resolution_between(idx, target);
-                    added.push((
-                        idx,
-                        target,
-                        GraphEdge::new(Relationship {
-                            edge_kind: EdgeKind::Overrides,
-                            source_node: NodeKind::Definition,
-                            target_node: NodeKind::Definition,
-                            source_def_kind: Some(crate::v2::types::DefKind::Method),
-                            target_def_kind: Some(crate::v2::types::DefKind::Method),
-                        })
-                        .with_resolution(resolution),
-                    ));
-                }
-                break;
+            }
+            for target in targets {
+                let resolution = self.resolution_between(idx, target);
+                added.push((
+                    idx,
+                    target,
+                    GraphEdge::new(Relationship {
+                        edge_kind: EdgeKind::Overrides,
+                        source_node: NodeKind::Definition,
+                        target_node: NodeKind::Definition,
+                        source_def_kind: Some(crate::v2::types::DefKind::Method),
+                        target_def_kind: Some(crate::v2::types::DefKind::Method),
+                    })
+                    .with_resolution(resolution),
+                ));
             }
         }
         for (source, target, edge) in added {
+            self.graph.add_edge(source, target, edge);
+        }
+        self.merge_all_parallel_edges();
+    }
+
+    fn merge_all_parallel_edges(&mut self) {
+        let mut seen: FxHashSet<(NodeIndex, NodeIndex, EdgeKind)> = FxHashSet::default();
+        let has_parallel = self
+            .graph
+            .edge_references()
+            .any(|e| !seen.insert((e.source(), e.target(), e.weight().relationship.edge_kind)));
+        if !has_parallel {
+            return;
+        }
+        let mut edges: Vec<EdgeTriple> = self
+            .graph
+            .edge_references()
+            .map(|e| (e.source(), e.target(), e.weight().clone()))
+            .collect();
+        self.graph.clear_edges();
+        merge_parallel_edges(&mut edges, &mut self.line_runs);
+        for (source, target, edge) in edges {
             self.graph.add_edge(source, target, edge);
         }
     }
@@ -1510,19 +1651,19 @@ impl CodeGraph {
                 GraphNode::File(f) => compute_id(&[&pid, branch, "file", &f.path]),
                 GraphNode::Definition { file_path, id } => {
                     let def = &self.defs[id.0 as usize];
-                    range.clear();
-                    let _ = write!(
-                        range,
-                        "{}:{}",
-                        def.range.byte_offset.0, def.range.byte_offset.1
-                    );
+                    let signature = def
+                        .metadata
+                        .as_ref()
+                        .and_then(|m| m.signature)
+                        .map_or("", |s| self.strings.get(s));
                     compute_id(&[
                         &pid,
                         branch,
                         "def",
                         file_path,
                         self.strings.get(def.fqn),
-                        &range,
+                        def.kind.kind().as_str(),
+                        signature,
                     ])
                 }
                 GraphNode::Import { file_path, id } => {
@@ -1553,6 +1694,26 @@ impl Default for CodeGraph {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn path_names(path: &str, name: &str) -> bool {
+    path.strip_suffix(name).is_some_and(|head| {
+        head.is_empty() || head.ends_with(|c: char| !c.is_alphanumeric() && c != '_')
+    })
+}
+
+fn normalize_relative(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            p => parts.push(p),
+        }
+    }
+    parts.join("/")
 }
 
 fn dir_to_string(dir: &Path) -> String {
@@ -1665,9 +1826,11 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
         b.col("size_bytes")?.push_int(self.file.size as i64)?;
         b.col("skip_reason")?
             .push_str(self.file.reason.to_string())?;
-        b.col("is_test")?.push_bool(false)?;
-        b.col("is_generated")?.push_bool(false)?;
-        b.col("is_vendored")?.push_bool(false)?;
+        b.col("is_test")?.push_bool(self.file.flags.is_test)?;
+        b.col("is_generated")?
+            .push_bool(self.file.flags.is_generated)?;
+        b.col("is_vendored")?
+            .push_bool(self.file.flags.is_vendored)?;
         Ok(())
     }
 }
@@ -1681,24 +1844,51 @@ pub struct DefinitionRow<'a> {
 }
 impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
+        use crate::v2::types::text;
         let kind = self.def.kind.kind();
+        let meta = self.def.metadata.as_deref();
+        let text_of = |id: Option<StrId>| id.map(|id| self.pool.get(id));
+        let parameters: Vec<&str> = meta
+            .map(|m| m.parameters.iter().map(|p| self.pool.get(*p)).collect())
+            .unwrap_or_default();
+        let modifiers: Vec<&str> = meta
+            .map(|m| m.modifiers.names().collect())
+            .unwrap_or_default();
+        let visibility = meta
+            .and_then(|m| m.visibility)
+            .filter(|_| self.def.scope != DefScope::Local)
+            .map(<&'static str>::from);
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
         b.col("language")?.push_str(self.language)?;
-        b.col("fqn")?.push_str(self.pool.get(self.def.fqn))?;
-        b.col("name")?.push_str(self.pool.get(self.def.name))?;
-        b.col("signature")?.push_str("")?;
-        b.col("parameters")?.push_str_list(&[])?;
-        b.col("return_type")?.push_opt_str(None::<&str>)?;
-        b.col("declared_type")?.push_opt_str(None::<&str>)?;
-        b.col("doc_comment")?.push_str("")?;
+        b.col("fqn")?.push_str(text::cap(
+            self.pool.get(self.def.fqn).to_string(),
+            text::FQN_CAP,
+        ))?;
+        b.col("name")?.push_str(text::cap(
+            self.pool.get(self.def.name).to_string(),
+            text::NAME_CAP,
+        ))?;
+        b.col("signature")?
+            .push_str(text_of(meta.and_then(|m| m.signature)).unwrap_or(""))?;
+        b.col("parameters")?.push_str_list(&parameters)?;
+        b.col("return_type")?
+            .push_opt_str(text_of(meta.and_then(|m| m.declared_return_type)))?;
+        b.col("declared_type")?
+            .push_opt_str(text_of(meta.and_then(|m| m.declared_type)))?;
+        b.col("doc_comment")?
+            .push_str(text_of(meta.and_then(|m| m.doc_comment)).unwrap_or(""))?;
         b.col("category")?.push_str(kind.category().as_str())?;
         b.col("kind")?.push_str(kind.as_str())?;
         b.col("language_kind")?.push_str(self.def.definition_type)?;
-        b.col("scope")?.push_str("")?;
-        b.col("modifiers")?.push_str_list(&[])?;
-        b.col("visibility")?.push_opt_str(None::<&str>)?;
-        b.col("generated_by")?.push_opt_str(None::<&str>)?;
+        b.col("scope")?
+            .push_str(<&'static str>::from(self.def.scope))?;
+        b.col("modifiers")?.push_str_list(&modifiers)?;
+        b.col("visibility")?.push_opt_str(visibility)?;
+        b.col("generated_by")?.push_opt_str(
+            text_of(meta.and_then(|m| m.generated_by))
+                .map(|g| text::cap(g.to_string(), text::GENERATED_BY_CAP)),
+        )?;
         write_range(b, &self.def.range)?;
         Ok(())
     }
@@ -1708,22 +1898,38 @@ pub struct ImportRow<'a> {
     pub file_path: &'a str,
     pub import: &'a GraphImport,
     pub pool: &'a StringPool,
+    pub sep: &'a str,
     pub id: i64,
 }
 impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
+        use crate::v2::types::text;
+        let path = self.pool.get(self.import.path);
+        let name = self.import.name.map(|id| self.pool.get(id));
+        let alias = self
+            .import
+            .alias
+            .map(|id| self.pool.get(id))
+            .filter(|a| a.len() <= text::IMPORT_ALIAS_CAP)
+            .unwrap_or("");
+        let import_kind = self.import.import_kind(path.is_empty());
+        let fqn = match (import_kind, name) {
+            ("symbol", Some(name)) if !path.is_empty() && !path_names(path, name) => {
+                format!("{path}{}{name}", self.sep)
+            }
+            (_, Some(name)) if path.is_empty() => name.to_string(),
+            _ => path.to_string(),
+        };
+        let fqn = (!fqn.is_empty() && fqn.len() <= text::FQN_CAP).then_some(fqn);
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
-        b.col("import_kind")?.push_str("")?;
+        b.col("import_kind")?.push_str(import_kind)?;
         b.col("language_kind")?.push_str(self.import.import_type)?;
-        b.col("import_path")?
-            .push_str(self.pool.get(self.import.path))?;
-        b.col("name")?
-            .push_str(self.import.name.map(|id| self.pool.get(id)).unwrap_or(""))?;
-        b.col("alias")?
-            .push_str(self.import.alias.map(|id| self.pool.get(id)).unwrap_or(""))?;
-        b.col("fqn")?.push_opt_str(None::<&str>)?;
-        b.col("is_external")?.push_bool(false)?;
+        b.col("import_path")?.push_str(path)?;
+        b.col("name")?.push_str(name.unwrap_or(""))?;
+        b.col("alias")?.push_str(alias)?;
+        b.col("fqn")?.push_opt_str(fqn)?;
+        b.col("is_external")?.push_bool(self.import.is_external)?;
         write_range(b, &self.import.range)?;
         Ok(())
     }
@@ -1735,6 +1941,15 @@ pub struct EdgeRow<'a> {
     pub edge_kind: &'a str,
     pub source_node_kind: &'a str,
     pub target_node_kind: &'a str,
+    pub properties: EdgeProperties,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct EdgeProperties {
+    pub lines: Vec<i64>,
+    pub resolution: &'static str,
+    pub access: &'static str,
+    pub usage: &'static str,
 }
 
 impl AsRecordBatch for EdgeRow<'_> {
@@ -1745,10 +1960,10 @@ impl AsRecordBatch for EdgeRow<'_> {
         b.col("target_id")?.push_int(self.target_id)?;
         b.col("target_kind")?.push_str(self.target_node_kind)?;
         b.col("traversal_path")?.push_str("")?;
-        b.col("lines")?.push_int_list(&[])?;
-        b.col("resolution")?.push_str("")?;
-        b.col("access")?.push_str("")?;
-        b.col("usage")?.push_str("")?;
+        b.col("lines")?.push_int_list(&self.properties.lines)?;
+        b.col("resolution")?.push_str(self.properties.resolution)?;
+        b.col("access")?.push_str(self.properties.access)?;
+        b.col("usage")?.push_str(self.properties.usage)?;
         Ok(())
     }
 }
@@ -1909,6 +2124,7 @@ mod tests {
         fqn_parts: &[&str],
         start: usize,
         end: usize,
+        signature: &str,
     ) -> CanonicalDefinition {
         CanonicalDefinition {
             definition_type: "Method",
@@ -1917,33 +2133,45 @@ mod tests {
             fqn: Fqn::from_parts(fqn_parts, "."),
             range: Range::new(Position::new(0, 0), Position::new(10, 0), (start, end)),
             is_top_level: false,
-            metadata: None,
+            metadata: Some(Box::new(DefinitionMetadata {
+                signature: Some(signature.to_string()),
+                ..Default::default()
+            })),
         }
+    }
+
+    fn definition_ids(cg: &CodeGraph) -> Vec<i64> {
+        let ids = cg.assign_ids(42, "main");
+        cg.definitions()
+            .map(|(idx, _, _)| ids[idx.index()])
+            .collect()
     }
 
     #[test]
     fn assign_ids_distinguishes_definitions_sharing_fqn_in_same_file() {
-        // Regression: v2 Definition ids previously hashed only
-        // (project_id, branch, file_path, fqn). Two methods that share
-        // an fqn (e.g. Go methods on different receivers, or generated
-        // protobuf methods with the same synthesized fqn) collapsed to
-        // one id and dedup'd on insert.
         let cg = build_graph(
             "/repo/main.go",
             vec![
-                make_def_at("Dup", &["main", "Dup"], 100, 120),
-                make_def_at("Dup", &["main", "Dup"], 200, 220),
+                make_def_at("Dup", &["main", "Dup"], 100, 120, "func (a A) Dup()"),
+                make_def_at("Dup", &["main", "Dup"], 200, 220, "func (b B) Dup()"),
             ],
         );
-
-        let ids = cg.assign_ids(42, "main");
-        let def_ids: Vec<i64> = cg
-            .definitions()
-            .map(|(idx, _, _)| ids[idx.index()])
-            .collect();
-
+        let def_ids = definition_ids(&cg);
         assert_eq!(def_ids.len(), 2);
         assert_ne!(def_ids[0], def_ids[1]);
+    }
+
+    #[test]
+    fn assign_ids_ignore_byte_offsets() {
+        let first = build_graph(
+            "/repo/main.go",
+            vec![make_def_at("Run", &["main", "Run"], 100, 120, "func Run()")],
+        );
+        let moved = build_graph(
+            "/repo/main.go",
+            vec![make_def_at("Run", &["main", "Run"], 300, 320, "func Run()")],
+        );
+        assert_eq!(definition_ids(&first), definition_ids(&moved));
     }
 
     #[test]

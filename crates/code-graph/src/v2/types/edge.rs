@@ -1,5 +1,5 @@
 use super::node::DefKind;
-use strum::{AsRefStr, Display, EnumIter, EnumString};
+use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 
 /// The high-level edge kind stored in the `relationship_kind` column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, EnumString, AsRefStr, Display)]
@@ -19,6 +19,18 @@ pub enum EdgeKind {
     AnnotatedBy,
 }
 
+impl Resolution {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
+impl TypeUsage {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
 impl EdgeKind {
     pub const fn is_supertype(&self) -> bool {
         matches!(self, Self::Extends | Self::Implements)
@@ -29,7 +41,9 @@ impl EdgeKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, AsRefStr)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, AsRefStr, IntoStaticStr,
+)]
 #[strum(serialize_all = "snake_case")]
 pub enum Resolution {
     #[default]
@@ -52,7 +66,7 @@ pub enum RefKind {
     Annotation,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, AsRefStr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, AsRefStr, IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum TypeUsage {
     #[default]

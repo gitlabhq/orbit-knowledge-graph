@@ -54,6 +54,7 @@ pub struct ScopeRule {
     kinds_by_label: &'static [(&'static str, DefKind)],
     pub(crate) metadata_rule: Option<MetadataRule>,
     pub(crate) test_if: Option<TestFn>,
+    kind_if: Option<(TestFn, DefKind, &'static str)>,
 }
 
 impl Rule for ScopeRule {
@@ -149,6 +150,21 @@ impl ScopeRule {
         self.test_if.is_some_and(|f| f(node, name))
     }
 
+    pub fn kind_if(mut self, f: TestFn, kind: DefKind, label: &'static str) -> Self {
+        self.kind_if = Some((f, kind, label));
+        self
+    }
+
+    pub(crate) fn conditional_kind(
+        &self,
+        node: &N<'_>,
+        name: &str,
+    ) -> Option<(DefKind, &'static str)> {
+        self.kind_if
+            .filter(|(f, _, _)| f(node, name))
+            .map(|(_, kind, label)| (kind, label))
+    }
+
     pub(crate) fn extract_metadata(
         &self,
         node: &N<'_>,
@@ -179,6 +195,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         kinds_by_label: &[],
         metadata_rule: None,
         test_if: None,
+        kind_if: None,
     }
 }
 
@@ -196,6 +213,7 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         kinds_by_label: &[],
         metadata_rule: None,
         test_if: None,
+        kind_if: None,
     }
 }
 
@@ -217,6 +235,7 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         kinds_by_label: &[],
         metadata_rule: None,
         test_if: None,
+        kind_if: None,
     }
 }
 

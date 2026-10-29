@@ -1,0 +1,194 @@
+name: "Scala ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: src/main/scala/shop/Point.scala
+    content: |
+      package shop
+
+      import shop.base.Shape
+
+      /** A point. */
+      case class Point(x: Int, y: Int) extends Shape {
+        private val z: Int = 1
+        override def area(scale: Double): Double = {
+          describe()
+          describe()
+          0.0
+        }
+        def describe(): Unit = {}
+      }
+
+      trait Store { def get(k: String): Option[String] }
+
+      object Registry
+
+  - path: src/main/scala/shop/base/Shape.scala
+    content: |
+      package shop.base
+
+      trait Shape { def area(scale: Double): Double }
+
+  - path: src/test/scala/shop/PointSpec.scala
+    content: |
+      package shop
+
+      class PointSpec
+
+  - path: vendor/lib/Util.scala
+    content: |
+      object Util
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/main/scala/shop/Point.scala']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Point", kind: "Class", category: "Type", lk: "CaseClass", scope: "top_level" } }
+          - { row: { name: "this", kind: "Constructor", category: "Callable", lk: "PrimaryConstructor", scope: "member" } }
+          - { row: { name: "z", kind: "Field", category: "Value", lk: "Val", scope: "member" } }
+          - { row: { name: "area", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "Store", kind: "Trait", category: "Type", lk: "Trait", scope: "top_level" } }
+          - { row: { name: "get", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "Registry", kind: "Class", category: "Type", lk: "Object", scope: "top_level" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/main/scala/shop/Point.scala']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Point", signature: "case class Point(x: Int, y: Int) extends Shape", doc: "A point." } }
+          - { row: { name: "area", signature: "override def area(scale: Double): Double", return_type: "Double" } }
+          - { row: { name: "z", signature: "private val z: Int", declared_type: "Int" } }
+
+  - name: "Parameters of this"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'this' AND 'x: Int' IN d.parameters AND 'y: Int' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Modifiers"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'area' AND 'override' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['z', 'area']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "z", visibility: "private" } }
+          - { row: { name: "area", visibility: "public" } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'src/main/scala/shop/Point.scala'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "Shape", path: "shop.base", kind: "symbol", fqn: "shop.base.Shape", external: false } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'src/main/scala/shop/Point.scala'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 1 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "src/test/scala/shop/PointSpec.scala", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "src/main/scala/shop/Point.scala", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/Util.scala", is_test: false, is_vendored: true } }
+
+  - name: "IMPLEMENTS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:IMPLEMENTS]->(t:Definition)
+          WHERE s.name = 'Point' AND t.fqn = 'shop.base.Shape'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "OVERRIDES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:OVERRIDES]->(t:Definition)
+          WHERE s.fqn = 'shop.Point.area' AND t.fqn = 'shop.base.Shape.area'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.fqn = 'shop.Point.area' AND t.fqn = 'shop.Point.describe'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }

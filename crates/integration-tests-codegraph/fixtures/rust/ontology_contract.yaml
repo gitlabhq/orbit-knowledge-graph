@@ -1,0 +1,260 @@
+name: "Rust ontology contract: kinds, content columns, imports, files, and edges"
+pipeline: generic
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "shop"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod base;
+
+      use crate::base::Store;
+
+      /// A point.
+      ///
+      /// More.
+      #[derive(Debug)]
+      pub struct Point {
+          pub x: i32,
+          y: i32,
+      }
+
+      pub(crate) enum Color {
+          Red,
+          Green(i32),
+      }
+
+      pub const MAX: u32 = 10;
+      static mut COUNT: i32 = 0;
+
+      impl Point {
+          pub fn new(x: i32) -> Self {
+              Point { x, y: 0 }
+          }
+
+          pub async unsafe fn charge(&self, amount: u64) -> Result<(), String> {
+              self.describe();
+              self.describe();
+              Ok(())
+          }
+
+          fn describe(&self) {}
+      }
+
+      impl Store for Point {
+          fn get(&self, k: &str) -> String {
+              String::new()
+          }
+      }
+
+      macro_rules! twice {
+          ($x:expr) => {
+              $x * 2
+          };
+      }
+
+      pub type Alias = Point;
+
+      #[test]
+      fn builds_a_point() {
+          Point::new(1);
+      }
+
+  - path: src/base.rs
+    content: |
+      pub trait Store {
+          fn get(&self, k: &str) -> String;
+      }
+
+  - path: tests/point_test.rs
+    content: |
+      fn helper() {}
+
+  - path: vendor/lib/util.rs
+    content: |
+      fn util() {}
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/lib.rs']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Point", kind: "Struct", category: "Type", lk: "Struct", scope: "top_level" } }
+          - { row: { name: "x", kind: "Field", category: "Value", lk: "Field", scope: "member" } }
+          - { row: { name: "Color", kind: "Enum", category: "Type", lk: "Enum", scope: "top_level" } }
+          - { row: { name: "Red", kind: "EnumMember", category: "Value", lk: "Variant", scope: "member" } }
+          - { row: { name: "MAX", kind: "Constant", category: "Value", lk: "Constant", scope: "top_level" } }
+          - { row: { name: "COUNT", kind: "Variable", category: "Value", lk: "Static", scope: "top_level" } }
+          - { row: { name: "charge", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "twice", kind: "Macro", category: "Macro", lk: "Macro", scope: "top_level" } }
+          - { row: { name: "Alias", kind: "TypeAlias", category: "Type", lk: "TypeAlias", scope: "top_level" } }
+          - { row: { name: "builds_a_point", kind: "Test", category: "Callable", lk: "Test", scope: "top_level" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/lib.rs']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Point", signature: "pub struct Point", doc: "A point." } }
+          - { row: { name: "charge", signature: "pub async unsafe fn charge(&self, amount: u64) -> Result<(), String>", return_type: "Result<(), String>" } }
+          - { row: { name: "MAX", signature: "pub const MAX: u32", declared_type: "u32" } }
+
+  - name: "Parameters of charge"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'charge' AND '&self' IN d.parameters AND 'amount: u64' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Modifiers"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'charge' AND 'async' IN d.modifiers AND 'unsafe' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['x', 'y', 'Color', 'get', 'describe']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "x", visibility: "public" } }
+          - { row: { name: "y", visibility: "private" } }
+          - { row: { name: "Color", visibility: "internal" } }
+          - { row: { name: "get", visibility: "public" } }
+          - { row: { name: "describe", visibility: "private" } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'src/lib.rs'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "base", path: "base", kind: "module", lk: "ModDeclaration", fqn: "base" } }
+          - { row: { name: "Store", path: "crate::base::Store", kind: "symbol", lk: "Use", fqn: "crate::base::Store" } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'src/lib.rs'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 2 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "tests/point_test.rs", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "src/lib.rs", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/util.rs", is_test: false, is_vendored: true } }
+
+  - name: "IMPLEMENTS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:IMPLEMENTS]->(t:Definition)
+          WHERE s.name = 'Point' AND t.name = 'Store' AND t.kind = 'Trait'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "OVERRIDES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:OVERRIDES]->(t:Definition)
+          WHERE s.name = 'get' AND s.file_path = 'src/lib.rs' AND t.name = 'get' AND t.file_path = 'src/base.rs'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'charge' AND t.name = 'describe'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'builds_a_point' AND t.name = 'new'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "Test definition builds_a_point"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'builds_a_point'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "Test" } }

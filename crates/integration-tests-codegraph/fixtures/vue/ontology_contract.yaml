@@ -1,0 +1,95 @@
+name: "Vue ontology contract: kinds, content columns, imports, files, and edges"
+pipeline: js
+
+fixtures:
+  - path: components/panel.vue
+    content: |
+      <script>
+      export default {
+        name: 'Panel',
+        data() { return { count: 0 }; },
+        computed: {
+          double() { return this.count * 2; },
+        },
+        watch: {
+          count() {},
+        },
+        mounted() {},
+        methods: {
+          bump() { this.count += 1; },
+        },
+      };
+      </script>
+
+  - path: components/panel.spec.js
+    content: |
+      describe("Panel", () => { it("bumps", () => {}); });
+
+  - path: vendor/lib/x.vue
+    content: |
+      <script>export default {};</script>
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['components/panel.vue']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "bump", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "double", kind: "Field", category: "Value", lk: "ComputedProperty", scope: "member" } }
+          - { row: { name: "watch_count", kind: "Method", category: "Callable", lk: "Watcher", scope: "member" } }
+          - { row: { name: "Panel", kind: "Class", category: "Type", lk: "Class", scope: "top_level" } }
+          - { row: { name: "mounted", kind: "Method", category: "Callable", lk: "LifecycleHook", scope: "member" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No visibility rule"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "components/panel.spec.js", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "components/panel.vue", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/x.vue", is_test: false, is_vendored: true } }

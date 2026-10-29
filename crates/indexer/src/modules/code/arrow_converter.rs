@@ -2,7 +2,7 @@ use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use code_graph::v2::SinkError;
-use code_graph::v2::linker::graph::{DirectoryRow, FileRow, GraphOutput, ImportRow};
+use code_graph::v2::linker::graph::{DirectoryRow, EdgeProperties, FileRow, GraphOutput};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
 use ontology::constants::{RELATIONSHIP_KIND_COLUMN, SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN};
@@ -110,10 +110,11 @@ fn convert_semantic_graph(
     let definitions = convert_definitions(graph, ids, envelope, &specs.definition)?;
     let imported_symbols = convert_imports(graph, ids, envelope, &specs.imported_symbol)?;
     let tag_cache = graph.build_node_tags(&specs.tag_properties);
+    let unwritten = graph.unwritten_nodes();
     // The tag cache is the last reader of the definition and import payloads, so
     // from here the edge build needs only endpoints, edge weights and the cache.
     graph.release_node_payloads();
-    let edges = convert_semantic_edges(graph, ids, envelope, specs, &tag_cache)?;
+    let edges = convert_semantic_edges(graph, ids, envelope, specs, &tag_cache, &unwritten)?;
     Ok(ConvertedGraphData {
         branch: convert_empty_branch(&specs.branch)?,
         directories: convert_empty_directories(envelope, &specs.directory)?,
@@ -318,7 +319,9 @@ fn convert_definitions(
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
-    convert_entity(graph, ids, env, specs, |g, ids| g.definition_rows(ids))
+    convert_entity(graph, ids, env, specs, |g, ids| {
+        g.definition_rows(ids).collect()
+    })
 }
 
 fn convert_imports(
@@ -328,14 +331,7 @@ fn convert_imports(
     specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
     convert_entity(graph, ids, env, specs, |g, ids| {
-        g.imports_iter()
-            .map(|(idx, file_path, import)| ImportRow {
-                file_path,
-                import,
-                pool: &g.strings,
-                id: ids[idx.index()],
-            })
-            .collect()
+        g.import_rows(ids).collect()
     })
 }
 
@@ -404,6 +400,7 @@ fn convert_repository_edges(
         target_node_kind: "Project",
         source_tags: &branch_tags,
         target_tags: &[],
+        properties: EdgeProperties::default(),
     });
 
     edge_rows.push(IndexerEdgeRow {
@@ -415,6 +412,7 @@ fn convert_repository_edges(
         target_node_kind: "Branch",
         source_tags: &[],
         target_tags: &branch_tags,
+        properties: EdgeProperties::default(),
     });
 
     edge_rows.extend(branch_contains_directory_rows(
@@ -437,7 +435,11 @@ fn convert_repository_edges(
     for row in &edge_rows {
         row.write_row(&mut builder, &())?;
     }
+    let unwritten = graph.unwritten_nodes();
     for ei in graph.graph.edge_indices() {
+        if endpoint_unwritten(graph, &unwritten, ei) {
+            continue;
+        }
         graph_edge_row(graph, ids, env, &tag_cache, ei).write_row(&mut builder, &())?;
     }
     builder.finish()
@@ -449,10 +451,13 @@ fn convert_semantic_edges(
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
     tag_cache: &code_graph::v2::linker::graph::NodeTags,
+    unwritten: &rustc_hash::FxHashSet<petgraph::graph::NodeIndex>,
 ) -> Result<RecordBatch, ArrowError> {
     let mut builder = BatchBuilder::new(&specs.edge, graph.graph.edge_count())?;
     for ei in graph.graph.edge_indices() {
-        if graph.graph[ei].relationship.edge_kind.as_ref() == "CONTAINS" {
+        if graph.graph[ei].relationship.edge_kind.as_ref() == "CONTAINS"
+            || endpoint_unwritten(graph, unwritten, ei)
+        {
             continue;
         }
         graph_edge_row(graph, ids, env, tag_cache, ei).write_row(&mut builder, &())?;
@@ -469,6 +474,7 @@ pub(super) struct IndexerEdgeRow<'a> {
     pub(super) target_node_kind: &'a str,
     pub(super) source_tags: &'a [String],
     pub(super) target_tags: &'a [String],
+    pub(super) properties: EdgeProperties,
 }
 
 impl AsRecordBatch for IndexerEdgeRow<'_> {
@@ -486,10 +492,10 @@ impl AsRecordBatch for IndexerEdgeRow<'_> {
         b.col("source_tags")?.push_str_list(&src)?;
         let tgt: Vec<&str> = self.target_tags.iter().map(|s| s.as_str()).collect();
         b.col("target_tags")?.push_str_list(&tgt)?;
-        b.col("lines")?.push_int_list(&[])?;
-        b.col("resolution")?.push_str("")?;
-        b.col("access")?.push_str("")?;
-        b.col("usage")?.push_str("")?;
+        b.col("lines")?.push_int_list(&self.properties.lines)?;
+        b.col("resolution")?.push_str(self.properties.resolution)?;
+        b.col("access")?.push_str(self.properties.access)?;
+        b.col("usage")?.push_str(self.properties.usage)?;
         b.col("_version")?
             .push_timestamp_micros(self.env.version_micros)?;
         b.col("_deleted")?.push_bool(false)?;
@@ -516,6 +522,7 @@ fn branch_contains_directory_rows<'a>(
             target_node_kind: "Directory",
             source_tags: branch_tags,
             target_tags: &[],
+            properties: EdgeProperties::default(),
         })
         .collect()
 }
@@ -540,6 +547,7 @@ fn branch_contains_file_rows<'a>(
             target_node_kind: "File",
             source_tags: branch_tags,
             target_tags: tag_cache.get(idx),
+            properties: EdgeProperties::default(),
         })
         .collect()
 }
@@ -566,7 +574,20 @@ fn graph_edge_row<'a>(
         target_node_kind: rel.target_node.as_ref(),
         source_tags: tag_cache.get(src),
         target_tags: tag_cache.get(tgt),
+        properties: graph.edge_properties(&graph.graph[ei]),
     }
+}
+
+fn endpoint_unwritten(
+    graph: &code_graph::v2::linker::CodeGraph,
+    unwritten: &rustc_hash::FxHashSet<petgraph::graph::NodeIndex>,
+    ei: petgraph::graph::EdgeIndex,
+) -> bool {
+    !unwritten.is_empty()
+        && graph
+            .graph
+            .edge_endpoints(ei)
+            .is_some_and(|(s, t)| unwritten.contains(&s) || unwritten.contains(&t))
 }
 
 pub(super) fn compute_branch_id(project_id: i64, branch: &str) -> i64 {

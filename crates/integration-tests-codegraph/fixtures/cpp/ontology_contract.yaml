@@ -1,0 +1,197 @@
+name: "C++ ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: src/order.cpp
+    content: |
+      #include "base.hpp"
+
+      namespace billing {
+
+      /// An order.
+      class Order : public Base {
+      public:
+        Order(int total) {}
+        virtual int charge(int amount) {
+          describe();
+          describe();
+          return 0;
+        }
+      private:
+        void describe() {}
+      };
+
+      }
+
+  - path: src/base.hpp
+    content: |
+      class Base {
+      public:
+        virtual int charge(int amount) { return 0; }
+      };
+
+  - path: tests/order_test.cpp
+    content: |
+      int test_order() { return 0; }
+
+  - path: vendor/lib/util.cpp
+    content: |
+      int util() { return 0; }
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/order.cpp']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "billing", kind: "Module", category: "Module", lk: "Namespace", scope: "top_level" } }
+          - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "member" } }
+          - { row: { name: "Order", kind: "Constructor", category: "Callable", lk: "Constructor", scope: "member" } }
+          - { row: { name: "charge", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/order.cpp']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Order", signature: "class Order : public Base", doc: "An order." } }
+          - { row: { name: "charge", signature: "virtual int charge(int amount)", return_type: "int" } }
+
+  - name: "Parameters of order::billing::Order::charge"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.fqn = 'order::billing::Order::charge' AND 'int amount' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Modifiers"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.fqn = 'order::billing::Order::charge' AND 'virtual' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['charge', 'describe']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "charge", visibility: "public" } }
+          - { row: { name: "describe", visibility: "private" } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'src/order.cpp'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "", path: '"base.hpp"', kind: "side_effect", external: false } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'src/order.cpp'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 1 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "tests/order_test.cpp", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "src/order.cpp", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/util.cpp", is_test: false, is_vendored: true } }
+
+  - name: "EXTENDS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:EXTENDS]->(t:Definition)
+          WHERE s.name = 'Order' AND s.kind = 'Class' AND t.name = 'Base'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.fqn = 'order::billing::Order::charge' AND t.name = 'describe'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "OVERRIDES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:OVERRIDES]->(t:Definition)
+          WHERE s.fqn = 'order::billing::Order::charge' AND t.name = 'charge' AND t.file_path = 'src/base.hpp'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "No IMPLEMENTS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }

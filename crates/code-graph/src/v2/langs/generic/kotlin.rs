@@ -132,7 +132,7 @@ fn kotlin_const() -> Pred {
     Pred::Exists(Box::new(
         Extract::one(Child, Kind("modifiers"))
             .nav(Child, Kind("property_modifier"))
-            .nav(Child, Text("const")),
+            .where_(Text("const")),
     ))
 }
 

@@ -1,0 +1,226 @@
+name: "C ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: src/shape.c
+    content: |
+      #include "shape.h"
+      #include <stdio.h>
+
+      /* A value. */
+      union Value { int i; float f; };
+
+      /** A point. */
+      struct Point { int x; };
+
+      typedef struct Point PointT;
+
+      enum Color { RED, GREEN };
+
+      #define MAX 10
+
+      // Adds two numbers.
+      static inline int add(int a, int b) {
+          return a + b;
+      }
+
+      int area(int w) {
+          add(w, 1);
+          add(w, 2);
+          return helper(w);
+      }
+
+  - path: src/shape.h
+    content: |
+      int helper(int w);
+
+  - path: src/helper.c
+    content: |
+      #include "shape.h"
+      int helper(int w) { return w; }
+
+  - path: tests/shape_test.c
+    content: |
+      int test_area(void) { return 0; }
+
+  - path: vendor/lib/util.c
+    content: |
+      int util(void) { return 0; }
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/shape.c']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Value", kind: "Struct", category: "Type", lk: "Union", scope: "top_level" } }
+          - { row: { name: "Point", kind: "Struct", category: "Type", lk: "Struct", scope: "top_level" } }
+          - { row: { name: "PointT", kind: "TypeAlias", category: "Type", lk: "Typedef", scope: "top_level" } }
+          - { row: { name: "Color", kind: "Enum", category: "Type", lk: "Enum", scope: "top_level" } }
+          - { row: { name: "RED", kind: "EnumMember", category: "Value", lk: "EnumConstant", scope: "member" } }
+          - { row: { name: "MAX", kind: "Macro", category: "Macro", lk: "Macro", scope: "top_level" } }
+          - { row: { name: "add", kind: "Function", category: "Callable", lk: "Function", scope: "top_level" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/shape.c']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Point", signature: "struct Point", doc: "A point." } }
+          - { row: { name: "add", signature: "static inline int add(int a, int b)", return_type: "int", doc: "Adds two numbers." } }
+
+  - name: "Parameters of add"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'add' AND 'int a' IN d.parameters AND 'int b' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Modifiers"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'add' AND 'static' IN d.modifiers AND 'inline' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['add', 'area']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "add", visibility: "file" } }
+          - { row: { name: "area", visibility: "public" } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'src/shape.c'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "", path: '"shape.h"', kind: "side_effect", lk: "Import", external: false } }
+          - { row: { name: "", path: "<stdio.h>", kind: "side_effect", lk: "Import", external: true } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'src/shape.c'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 2 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "tests/shape_test.c", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "src/shape.c", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/util.c", is_test: false, is_vendored: true } }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'area' AND t.name = 'add' AND e.resolution = 'local'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "RESOLVES_TO"
+    queries:
+      - query: |
+          MATCH (s:Import)-[e:RESOLVES_TO]->(t:File)
+          WHERE s.import_path CONTAINS 'shape.h' AND s.file_path = 'src/shape.c' AND t.path = 'src/shape.h' AND e.resolution = 'import'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "DEPENDS_ON"
+    queries:
+      - query: |
+          MATCH (s:File)-[e:DEPENDS_ON]->(t:File)
+          WHERE s.path = 'src/helper.c' AND t.path = 'src/shape.h'
+          RETURN s.path AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "No EXTENDS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:EXTENDS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "No IMPLEMENTS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "No OVERRIDES edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:OVERRIDES]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }

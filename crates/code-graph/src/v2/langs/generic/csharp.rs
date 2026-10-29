@@ -6,7 +6,7 @@ use crate::v2::types::{
 };
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::extract::{Extract, field, text};
+use treesitter_visit::extract::{Extract, child_of_kind, field, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -88,6 +88,16 @@ fn csharp_visibility(node: &N<'_>, _name: &str) -> Option<Visibility> {
         }
         _ => Visibility::Internal,
     })
+}
+
+fn csharp_field_name() -> Extract {
+    child_of_kind("variable_declaration")
+        .child_of_kind("variable_declarator")
+        .field("name")
+}
+
+fn csharp_field_type() -> Extract {
+    child_of_kind("variable_declaration").field("type")
 }
 
 fn csharp_const() -> Pred {
@@ -186,21 +196,21 @@ impl DslLanguage for CSharpDsl {
             scope("field_declaration", "Field")
                 .def_kind(DefKind::Field)
                 .no_scope()
-                .name_from(field("declaration").field("name"))
+                .name_from(csharp_field_name())
                 .metadata(
                     metadata()
-                        .type_annotation(field("declaration").field("type"))
-                        .declared_type(field("declaration").field("type")),
+                        .type_annotation(csharp_field_type())
+                        .declared_type(csharp_field_type()),
                 ),
             scope("field_declaration", "Constant")
                 .def_kind(DefKind::Constant)
                 .no_scope()
                 .when(csharp_const())
-                .name_from(field("declaration").field("name"))
+                .name_from(csharp_field_name())
                 .metadata(
                     metadata()
-                        .type_annotation(field("declaration").field("type"))
-                        .declared_type(field("declaration").field("type")),
+                        .type_annotation(csharp_field_type())
+                        .declared_type(csharp_field_type()),
                 ),
             scope("event_field_declaration", "Event")
                 .def_kind(DefKind::Field)

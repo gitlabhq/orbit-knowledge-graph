@@ -1,0 +1,331 @@
+name: "Java ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: src/main/java/com/shop/Order.java
+    content: |
+      package com.shop;
+
+      import java.util.List;
+      import com.shop.base.Entity;
+      import com.shop.base.Payable;
+
+      /** Order of goods.
+       * More text. */
+      public final class Order extends Entity implements Payable {
+          private static final int MAX = 10;
+          protected List<String> items;
+
+          /** Builds an order. */
+          public Order(int total, String note) {
+              super();
+          }
+
+          @Override
+          public String pay(int amount) {
+              Order other = new Order(amount, "x");
+              other.describe();
+              other.describe();
+              return note(items);
+          }
+
+          String note(List<String> values) {
+              return "n";
+          }
+
+          void describe() {
+              Runnable r = () -> describe();
+          }
+      }
+
+      record Forecast(int temperature) {}
+
+      enum Color { RED, GREEN }
+
+  - path: src/main/java/com/shop/base/Entity.java
+    content: |
+      package com.shop.base;
+
+      public abstract class Entity {
+          public abstract String pay(int amount);
+      }
+
+  - path: src/main/java/com/shop/base/Payable.java
+    content: |
+      package com.shop.base;
+
+      public interface Payable {
+          String pay(int amount);
+      }
+
+  - path: src/test/java/com/shop/OrderTest.java
+    content: |
+      package com.shop;
+
+      import org.junit.jupiter.api.Test;
+
+      class OrderTest {
+          @Test
+          void paysTheOrder() {
+              new Order(1, "a").pay(1);
+          }
+      }
+
+  - path: vendor/lib/Util.java
+    content: |
+      package lib;
+
+      class Util {}
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/main/java/com/shop/Order.java']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "top_level" } }
+          - { row: { name: "MAX", kind: "Field", category: "Value", lk: "Field", scope: "member" } }
+          - { row: { name: "Order", kind: "Constructor", category: "Callable", lk: "Constructor", scope: "member" } }
+          - { row: { name: "pay", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "Forecast", kind: "Class", category: "Type", lk: "Record", scope: "top_level" } }
+          - { row: { name: "temperature", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "Color", kind: "Enum", category: "Type", lk: "Enum", scope: "top_level" } }
+          - { row: { name: "RED", kind: "EnumMember", category: "Value", lk: "EnumConstant", scope: "member" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['src/main/java/com/shop/Order.java']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Order", signature: "public final class Order extends Entity implements Payable", doc: "Order of goods. More text." } }
+          - { row: { name: "MAX", signature: "private static final int MAX", declared_type: "int", return_type: null } }
+          - { row: { name: "pay", signature: "@Override public String pay(int amount)", return_type: "String", declared_type: null } }
+          - { row: { name: "note", return_type: "String", doc: "" } }
+
+  - name: "Parameters of note"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'note' AND 'List<String> values' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Modifiers"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'MAX' AND 'static' IN d.modifiers AND 'final' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'pay' AND 'override' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'Forecast' AND 'final' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['MAX', 'items', 'pay', 'note']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "MAX", visibility: "private" } }
+          - { row: { name: "items", visibility: "protected" } }
+          - { row: { name: "pay", visibility: "public" } }
+          - { row: { name: "note", visibility: "package" } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Generated members name their generator"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'temperature' AND d.generated_by IS NOT NULL
+          RETURN d.generated_by AS generated_by
+        assert:
+          - { row: { generated_by: "record" } }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'src/main/java/com/shop/Order.java'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "List", path: "java.util", kind: "symbol", lk: "Import", fqn: "java.util.List", external: true } }
+          - { row: { name: "Entity", path: "com.shop.base", kind: "symbol", lk: "Import", fqn: "com.shop.base.Entity", external: false } }
+          - { row: { name: "Payable", path: "com.shop.base", kind: "symbol", lk: "Import", fqn: "com.shop.base.Payable", external: false } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'src/main/java/com/shop/Order.java'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 3 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "src/test/java/com/shop/OrderTest.java", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "src/main/java/com/shop/Order.java", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/Util.java", is_test: false, is_vendored: true } }
+
+  - name: "EXTENDS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:EXTENDS]->(t:Definition)
+          WHERE s.name = 'Order' AND t.fqn = 'com.shop.base.Entity' AND e.resolution = 'import'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "IMPLEMENTS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:IMPLEMENTS]->(t:Definition)
+          WHERE s.name = 'Order' AND t.fqn = 'com.shop.base.Payable' AND e.resolution = 'import'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "OVERRIDES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:OVERRIDES]->(t:Definition)
+          WHERE s.fqn = 'com.shop.Order.pay' AND t.fqn = 'com.shop.base.Entity.pay'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "INSTANTIATES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:INSTANTIATES]->(t:Definition)
+          WHERE s.name = 'paysTheOrder' AND t.fqn = 'com.shop.Order' AND t.kind = 'Class'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'pay' AND t.fqn = 'com.shop.Order.Order' AND t.kind = 'Constructor' AND e.resolution = 'local'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'pay' AND t.fqn = 'com.shop.Order.describe' AND e.resolution = 'inferred_type'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'pay' AND t.fqn = 'com.shop.Order.note' AND e.resolution = 'local'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "USES_TYPE"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:USES_TYPE]->(t:Import)
+          WHERE s.name = 'note' AND t.name = 'List' AND e.usage = 'parameter'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "RESOLVES_TO"
+    queries:
+      - query: |
+          MATCH (s:Import)-[e:RESOLVES_TO]->(t:Definition)
+          WHERE s.name = 'Entity' AND t.fqn = 'com.shop.base.Entity' AND e.resolution = 'import'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "DEPENDS_ON"
+    queries:
+      - query: |
+          MATCH (s:File)-[e:DEPENDS_ON]->(t:File)
+          WHERE s.path = 'src/main/java/com/shop/Order.java' AND t.path = 'src/main/java/com/shop/base/Entity.java'
+          RETURN s.path AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'paysTheOrder' AND t.fqn = 'com.shop.Order.pay'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "Test definition paysTheOrder"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'paysTheOrder'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "Test" } }

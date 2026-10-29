@@ -1,0 +1,142 @@
+name: "HCL ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: infra/main.tf
+    content: |
+      resource "aws_instance" "web" {
+        ami = var.region
+      }
+
+      data "aws_ami" "ubuntu" {}
+
+      variable "region" {
+        default = "us"
+      }
+
+      output "ip" {
+        value = aws_instance.web.id
+      }
+
+      module "vpc" {
+        source = "./vpc"
+      }
+
+      locals {
+        tags = "x"
+      }
+
+  - path: infra/test/main_test.tf
+    content: |
+      variable "t" {}
+
+  - path: vendor/mod/main.tf
+    content: |
+      variable "v" {}
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['infra/main.tf']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "aws_instance", kind: "Class", category: "Type", lk: "Resource", scope: "top_level" } }
+          - { row: { name: "aws_ami", kind: "Class", category: "Type", lk: "DataSource", scope: "top_level" } }
+          - { row: { name: "region", kind: "Variable", category: "Value", lk: "Variable", scope: "top_level" } }
+          - { row: { name: "ip", kind: "Variable", category: "Value", lk: "Output", scope: "top_level" } }
+          - { row: { name: "vpc", kind: "Module", category: "Module", lk: "Module", scope: "top_level" } }
+          - { row: { name: "tags", kind: "Variable", category: "Value", lk: "Local", scope: "member" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No modifier rules"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE 'static' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No visibility rule"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "infra/test/main_test.tf", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "infra/main.tf", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/mod/main.tf", is_test: false, is_vendored: true } }
+
+  - name: "No EXTENDS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:EXTENDS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "No IMPLEMENTS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "No OVERRIDES edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:OVERRIDES]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "No declaration text for this language"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.signature <> ''
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }

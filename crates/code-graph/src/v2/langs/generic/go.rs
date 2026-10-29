@@ -318,7 +318,7 @@ fn extract_single_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) {
     let binding_kind = if is_blank {
         ImportBindingKind::SideEffect
     } else {
-        ImportBindingKind::Named
+        ImportBindingKind::Namespace
     };
 
     imports.push(CanonicalImport {

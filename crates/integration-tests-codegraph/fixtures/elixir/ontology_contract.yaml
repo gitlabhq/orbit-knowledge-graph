@@ -1,0 +1,197 @@
+name: "Elixir ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: lib/billing/order.ex
+    content: |
+      defmodule Billing.Order do
+        @moduledoc "An order of goods."
+        alias Billing.Tax
+        defstruct [:total, :note]
+
+        @doc "Charges the order."
+        def charge(order, amount) do
+          describe(order)
+          describe(order)
+          Tax.apply(amount)
+        end
+
+        defp describe(order), do: order
+
+        defmacro trace(x), do: x
+      end
+
+  - path: lib/billing/tax.ex
+    content: |
+      defmodule Billing.Tax do
+        def apply(amount), do: amount
+      end
+
+  - path: test/billing/order_test.exs
+    content: |
+      defmodule Billing.OrderTest do
+        test "charges the order" do
+          Billing.Order.charge(nil, 1)
+        end
+      end
+
+  - path: vendor/lib/util.ex
+    content: |
+      defmodule Util do
+      end
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['lib/billing/order.ex']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Billing.Order", kind: "Module", category: "Module", lk: "Module", scope: "top_level" } }
+          - { row: { name: "total", kind: "Field", category: "Value", lk: "StructField", scope: "member" } }
+          - { row: { name: "charge", kind: "Function", category: "Callable", lk: "Function", scope: "member" } }
+          - { row: { name: "describe", kind: "Function", category: "Callable", lk: "Function", scope: "member" } }
+          - { row: { name: "trace", kind: "Macro", category: "Macro", lk: "Macro", scope: "member" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['lib/billing/order.ex']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Billing.Order", signature: "defmodule Billing.Order", doc: "An order of goods." } }
+          - { row: { name: "charge", signature: "def charge(order, amount)", doc: "Charges the order.", return_type: null } }
+
+  - name: "Parameters of charge"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'charge' AND 'order' IN d.parameters AND 'amount' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "No modifier rules"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE 'static' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['charge', 'describe']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "charge", visibility: "public" } }
+          - { row: { name: "describe", visibility: "private" } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Generated members name their generator"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'total' AND d.generated_by IS NOT NULL
+          RETURN d.generated_by AS generated_by
+        assert:
+          - { row: { generated_by: "defstruct" } }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "test/billing/order_test.exs", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "lib/billing/order.ex", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/util.ex", is_test: false, is_vendored: true } }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'charge' AND t.name = 'describe'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'charge' AND t.name = 'apply'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'charges the order' AND t.name = 'charge'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "No EXTENDS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:EXTENDS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "No IMPLEMENTS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "Test definition charges the order"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'charges the order'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "Test" } }

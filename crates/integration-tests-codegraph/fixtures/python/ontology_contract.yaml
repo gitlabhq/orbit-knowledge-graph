@@ -1,0 +1,300 @@
+name: "Python ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: billing/models.py
+    content: |
+      import requests
+      from billing.base import Base
+
+
+      class Order(Base):
+          """Order of goods.
+
+          Second paragraph."""
+
+          status: str = "new"
+
+          def __init__(self, total: int, *items) -> None:
+              self.total = total
+
+          @staticmethod
+          async def fetch(order_id) -> "Order":
+              return Order(order_id)
+
+          def describe(self):
+              def label():
+                  return "order"
+              return label()
+
+          def items(self):
+              yield 1
+
+
+      def charge(order: Order, amount=0) -> Order:
+          created = Order(amount)
+          created.describe()
+          created.describe()
+          requests.get(created.status)
+          return created
+
+  - path: billing/base.py
+    content: |
+      def audited(fn):
+          return fn
+
+
+      class Base:
+          def describe(self):
+              return "base"
+
+
+      @audited
+      def settle():
+          return 0
+
+  - path: tests/test_billing.py
+    content: |
+      from billing.models import charge
+
+
+      def test_charge():
+          charge(None)
+
+  - path: vendor/lib/util.py
+    content: |
+      def helper():
+          return 1
+
+tests:
+  - name: "Kinds, categories, and language kinds"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'billing/models.py'
+      RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+    assert:
+      - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "top_level" } }
+      - { row: { name: "status", kind: "Field", category: "Value", lk: "Field", scope: "member" } }
+      - { row: { name: "__init__", kind: "Constructor", category: "Callable", lk: "Initializer", scope: "member" } }
+      - { row: { name: "fetch", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+      - { row: { name: "label", kind: "Function", category: "Callable", lk: "Function", scope: "local" } }
+      - { row: { name: "charge", kind: "Function", category: "Callable", lk: "Function", scope: "top_level" } }
+
+  - name: "Test kind from the pytest name rule"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'test_charge'
+      RETURN d.kind AS kind, d.category AS category, d.language_kind AS lk
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: "Test", category: "Callable", lk: "Test" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, and doc comment"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'billing/models.py'
+      RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.doc_comment AS doc
+    assert:
+      - { row: { name: "Order", signature: "class Order(Base)", doc: "Order of goods." } }
+      - { row: { name: "__init__", signature: "def __init__(self, total: int, *items) -> None", return_type: "None" } }
+      - { row: { name: "charge", signature: "def charge(order: Order, amount=0) -> Order", return_type: "Order" } }
+      - { row: { name: "describe", return_type: null, doc: "" } }
+
+  - name: "Parameters list"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = '__init__' AND 'total: int' IN d.parameters AND 'self' IN d.parameters AND '*items' IN d.parameters
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Declared type on a Value and null on a Callable"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'billing/models.py' AND d.name IN ['status', 'charge']
+      RETURN d.name AS name, d.declared_type AS declared_type
+    assert:
+      - { row: { name: "status", declared_type: "str" } }
+      - { row: { name: "charge", declared_type: null } }
+
+  - name: "Modifiers from keywords, decorators, and yield"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path = 'billing/models.py' AND 'async' IN d.modifiers AND 'static' IN d.modifiers
+          RETURN d.name AS name
+        assert:
+          - { row_count: 1 }
+          - { row: { name: "fetch" } }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path = 'billing/models.py' AND 'generator' IN d.modifiers
+          RETURN d.name AS name
+        assert:
+          - { row_count: 1 }
+          - { row: { name: "items" } }
+
+  - name: "Python has no visibility rule and no generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    query: |
+      MATCH (i:Import)
+      WHERE i.file_path = 'billing/models.py'
+      RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "", path: "requests", kind: "module", lk: "Import", fqn: "requests", external: true } }
+      - { row: { name: "Base", path: "billing.base", kind: "symbol", lk: "FromImport", fqn: "billing.base.Base", external: false } }
+
+  - name: "File flags"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+    assert:
+      - { row: { path: "tests/test_billing.py", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+      - { row: { path: "vendor/lib/util.py", is_test: false, is_vendored: true } }
+      - { row: { path: "billing/models.py", is_test: false, is_vendored: false, is_generated: false } }
+
+  - name: "DEFINES from the file to its imports"
+    query: |
+      MATCH (f:File)-[:DEFINES]->(i:Import)
+      WHERE f.path = 'billing/models.py'
+      RETURN i.name AS name
+    assert:
+      - { row_count: 2 }
+
+  - name: "RESOLVES_TO from an import to its definition"
+    query: |
+      MATCH (i:Import)-[r:RESOLVES_TO]->(d:Definition)
+      WHERE i.name = 'Base' AND r.resolution = 'import'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: "billing.base.Base" } }
+
+  - name: "DEPENDS_ON between files"
+    query: |
+      MATCH (a:File)-[:DEPENDS_ON]->(b:File)
+      WHERE a.path = 'billing/models.py'
+      RETURN b.path AS target
+    assert:
+      - { row: { target: "billing/base.py" } }
+
+  - name: "CALLS from two call sites is one edge with inferred resolution"
+    query: |
+      MATCH (s:Definition)-[c:CALLS]->(t:Definition)
+      WHERE s.name = 'charge' AND t.fqn = 'billing.models.Order.describe' AND c.resolution = 'inferred_type'
+      RETURN s.fqn AS source
+    assert:
+      - { row_count: 1 }
+
+  - name: "CALLS to an external import"
+    query: |
+      MATCH (s:Definition)-[c:CALLS]->(i:Import)
+      WHERE s.name = 'charge' AND c.resolution = 'import'
+      RETURN i.fqn AS fqn
+    assert:
+      - { row: { fqn: "requests" } }
+
+  - name: "INSTANTIATES a class and never a function"
+    query: |
+      MATCH (s:Definition)-[e:INSTANTIATES]->(t:Definition)
+      RETURN s.name AS source, t.name AS target, t.category AS category
+    assert:
+      - { row: { source: "charge", target: "Order", category: "Type" } }
+      - { no_nulls: target }
+      - { not: true, row: { category: "Callable" } }
+
+  - name: "USES_VALUE reads a field"
+    query: |
+      MATCH (s:Definition)-[u:USES_VALUE]->(t:Definition)
+      WHERE s.name = 'charge' AND t.name = 'status' AND u.access = 'read' AND u.resolution = 'inferred_type'
+      RETURN t.fqn AS field
+    assert:
+      - { row: { field: "billing.models.Order.status" } }
+
+  - name: "USES_TYPE with parameter usage"
+    query: |
+      MATCH (s:Definition)-[u:USES_TYPE]->(t:Definition)
+      WHERE s.name = 'charge' AND t.name = 'Order' AND u.usage = 'parameter'
+      RETURN t.fqn AS type
+    assert:
+      - { row: { type: "billing.models.Order" } }
+
+  - name: "EXTENDS a resolved superclass"
+    query: |
+      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      WHERE c.name = 'Order' AND e.resolution = 'import'
+      RETURN p.fqn AS parent
+    assert:
+      - { row: { parent: "billing.base.Base" } }
+
+  - name: "OVERRIDES the parent method by name"
+    query: |
+      MATCH (m:Definition)-[o:OVERRIDES]->(p:Definition)
+      RETURN m.fqn AS method, p.fqn AS parent
+    assert:
+      - { row: { method: "billing.models.Order.describe", parent: "billing.base.Base.describe" } }
+
+  - name: "ANNOTATED_BY a decorator"
+    query: |
+      MATCH (d:Definition)-[a:ANNOTATED_BY]->(t:Definition)
+      WHERE d.name = 'settle'
+      RETURN t.fqn AS decorator
+    assert:
+      - { row: { decorator: "billing.base.audited" } }
+
+  - name: "A built-in decorator gives no edge"
+    query: |
+      MATCH (d:Definition)-[:ANNOTATED_BY]->(t:Definition)
+      WHERE d.name = 'fetch'
+      RETURN t.fqn AS decorator
+    assert:
+      - { empty: true }
+
+  - name: "Python has no IMPLEMENTS"
+    query: |
+      MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+      RETURN a.fqn AS fqn
+    assert:
+      - { empty: true }
+
+  - name: "Test CALLS the code it covers"
+    query: |
+      MATCH (t:Definition)-[:CALLS]->(f:Definition)
+      WHERE t.kind = 'Test'
+      RETURN t.name AS test, f.name AS callee
+    assert:
+      - { row: { test: "test_charge", callee: "charge" } }

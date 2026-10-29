@@ -1,0 +1,144 @@
+name: "Bash ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: scripts/deploy.sh
+    content: |
+      source ./lib.sh
+
+      # Greets the user.
+      greet() {
+        echo hi
+      }
+
+      function deploy {
+        greet
+        greet
+        helper
+      }
+
+  - path: scripts/lib.sh
+    content: |
+      helper() { echo lib; }
+
+  - path: tests/deploy_test.bats
+    content: |
+      @test "deploys" { true; }
+
+  - path: vendor/lib/util.sh
+    content: |
+      util() { :; }
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['scripts/deploy.sh']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "greet", kind: "Function", category: "Callable", lk: "Function", scope: "top_level" } }
+          - { row: { name: "deploy", kind: "Function", category: "Callable", lk: "Function", scope: "top_level" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['scripts/deploy.sh']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "greet", signature: "greet()", doc: "Greets the user.", return_type: null } }
+
+  - name: "No modifier rules"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE 'static' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No visibility rule"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "tests/deploy_test.bats", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "scripts/deploy.sh", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/lib/util.sh", is_test: false, is_vendored: true } }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'deploy' AND t.name = 'greet'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'deploy' AND t.name = 'helper'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "No EXTENDS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:EXTENDS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }
+
+  - name: "No IMPLEMENTS edges"
+    queries:
+      - query: |
+          MATCH (a:Definition)-[:IMPLEMENTS]->(b:Definition)
+          RETURN a.id AS id
+        assert:
+          - { empty: true }

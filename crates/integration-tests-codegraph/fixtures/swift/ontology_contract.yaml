@@ -1,0 +1,215 @@
+name: "Swift ontology contract: kinds, content columns, imports, files, and edges"
+
+fixtures:
+  - path: Sources/Shop/Order.swift
+    content: |
+      import Foundation
+
+      /// A store.
+      protocol Store {
+          func get(k: String) -> String
+      }
+
+      /// An order.
+      public final class Order: Store {
+          private let total: Int = 0
+          init(total: Int) { }
+          public static func charge(amount: Int, note: String) async throws -> String {
+              let order = Order(total: amount)
+              order.describe()
+              order.describe()
+              return ""
+          }
+          func get(k: String) -> String { return k }
+          func describe() {}
+      }
+
+      extension String {
+          func shout() -> String { return self }
+      }
+
+      struct Point { }
+      enum Color { case red }
+
+  - path: Tests/ShopTests/OrderTests.swift
+    content: |
+      class OrderTests {
+          func testCharge() {}
+      }
+
+  - path: vendor/Lib/Util.swift
+    content: |
+      func util() {}
+
+tests:
+  - name: "Kinds, categories, language kinds, and scopes"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['Sources/Shop/Order.swift']
+          RETURN d.name AS name, d.kind AS kind, d.category AS category, d.language_kind AS lk, d.scope AS scope
+          LIMIT 100
+        assert:
+          - { row: { name: "Store", kind: "Interface", category: "Type", lk: "Protocol", scope: "top_level" } }
+          - { row: { name: "Order", kind: "Class", category: "Type", lk: "Class", scope: "top_level" } }
+          - { row: { name: "total", kind: "Field", category: "Value", lk: "Property", scope: "member" } }
+          - { row: { name: "init", kind: "Constructor", category: "Callable", lk: "Constructor", scope: "member" } }
+          - { row: { name: "charge", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "shout", kind: "Method", category: "Callable", lk: "Method", scope: "member" } }
+          - { row: { name: "Point", kind: "Struct", category: "Type", lk: "Struct", scope: "top_level" } }
+          - { row: { name: "Color", kind: "Enum", category: "Type", lk: "Enum", scope: "top_level" } }
+          - { row: { name: "red", kind: "EnumMember", category: "Value", lk: "EnumEntry", scope: "member" } }
+
+  - name: "Closed lists for kind, category, and scope"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.kind IN ['Class', 'Struct', 'Interface', 'Trait', 'Enum', 'TypeAlias', 'Function', 'Method', 'Constructor', 'Test', 'Field', 'Constant', 'Variable', 'EnumMember', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.category IN ['Type', 'Callable', 'Value', 'Module', 'Macro']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE NOT d.scope IN ['top_level', 'member', 'local']
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Signature, return type, declared type, and doc comment"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['Sources/Shop/Order.swift']
+          RETURN d.name AS name, d.signature AS signature, d.return_type AS return_type, d.declared_type AS declared_type, d.doc_comment AS doc
+          LIMIT 100
+        assert:
+          - { row: { name: "Order", signature: "public final class Order: Store", doc: "An order." } }
+          - { row: { name: "charge", signature: "public static func charge(amount: Int, note: String) async throws -> String", return_type: "String" } }
+          - { row: { name: "total", declared_type: "Int", return_type: null } }
+
+  - name: "Parameters of charge"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'charge' AND 'amount: Int' IN d.parameters AND 'note: String' IN d.parameters
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Modifiers"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'charge' AND 'static' IN d.modifiers AND 'async' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'Order' AND 'final' IN d.modifiers
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+
+  - name: "Visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['total', 'charge', 'describe']
+          RETURN d.name AS name, d.visibility AS visibility
+          LIMIT 100
+        assert:
+          - { row: { name: "total", visibility: "private" } }
+          - { row: { name: "charge", visibility: "public" } }
+          - { row: { name: "describe", visibility: "internal" } }
+
+  - name: "Local definitions have no visibility"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.scope = 'local' AND d.visibility IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "No generated members"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.generated_by IS NOT NULL
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "Import kinds, full names, and external flags"
+    queries:
+      - query: |
+          MATCH (i:Import)
+          WHERE i.file_path = 'Sources/Shop/Order.swift'
+          RETURN i.name AS name, i.import_path AS path, i.import_kind AS kind, i.language_kind AS lk, i.fqn AS fqn, i.is_external AS external
+          LIMIT 100
+        assert:
+          - { row: { name: "Foundation", path: "Foundation", kind: "module", fqn: "Foundation", external: true } }
+
+  - name: "DEFINES from the file to its imports"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(i:Import)
+          WHERE f.path = 'Sources/Shop/Order.swift'
+          RETURN i.import_path AS path
+          LIMIT 100
+        assert:
+          - { row_count: 1 }
+
+  - name: "File flags"
+    queries:
+      - query: |
+          MATCH (f:File)
+          RETURN f.path AS path, f.is_test AS is_test, f.is_vendored AS is_vendored, f.is_generated AS is_generated, f.skip_reason AS skip_reason
+          LIMIT 100
+        assert:
+          - { row: { path: "Tests/ShopTests/OrderTests.swift", is_test: true, is_vendored: false, is_generated: false, skip_reason: "" } }
+          - { row: { path: "Sources/Shop/Order.swift", is_test: false, is_vendored: false, is_generated: false } }
+          - { row: { path: "vendor/Lib/Util.swift", is_test: false, is_vendored: true } }
+
+  - name: "IMPLEMENTS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:IMPLEMENTS]->(t:Definition)
+          WHERE s.name = 'Order' AND t.name = 'Store' AND e.resolution = 'local'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "OVERRIDES"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:OVERRIDES]->(t:Definition)
+          WHERE s.fqn = 'Order.get' AND t.fqn = 'Store.get'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "CALLS"
+    queries:
+      - query: |
+          MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+          WHERE s.name = 'charge' AND t.fqn = 'Order.describe'
+          RETURN s.id AS source
+        assert:
+          - { row_count: 1 }
+
+  - name: "Test definition testCharge"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.kind = 'Test' AND d.name = 'testCharge'
+          RETURN d.language_kind AS lk
+        assert:
+          - { row: { lk: "Test" } }
