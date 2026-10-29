@@ -389,7 +389,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(d:Definition)
       WHERE f.path = 'io/reader.cpp'
-        AND d.language_kind = 'Function'
+        AND d.language_kind IN ['Function', 'Method', 'Constructor']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }

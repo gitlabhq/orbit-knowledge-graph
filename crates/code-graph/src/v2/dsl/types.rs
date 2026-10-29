@@ -55,7 +55,7 @@ pub struct ScopeRule {
     pub(crate) metadata_rule: Option<MetadataRule>,
     pub(crate) test_if: Option<TestFn>,
     kind_if: Option<(TestFn, DefKind, &'static str)>,
-    pub(crate) owner: Option<Extract>,
+    pub(crate) owner: Option<NameHookFn>,
 }
 
 impl Rule for ScopeRule {
@@ -142,10 +142,10 @@ impl ScopeRule {
             .or(self.def_kind)
     }
 
-    /// Qualify the fqn with the owner type named by `extract`, for members
+    /// Qualify the fqn with the owner type that `hook` names, for members
     /// declared outside their type.
-    pub fn owner_from(mut self, extract: Extract) -> Self {
-        self.owner = Some(extract);
+    pub fn owner_hook(mut self, hook: NameHookFn) -> Self {
+        self.owner = Some(hook);
         self
     }
 

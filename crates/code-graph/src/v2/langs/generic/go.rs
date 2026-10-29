@@ -89,7 +89,7 @@ impl DslLanguage for GoDsl {
                 .test_if(go_test),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
-                .owner_from(go_receiver())
+                .owner_hook(|node| go_receiver().apply(node))
                 .metadata(
                     metadata()
                         .return_type(field("result").inner("pointer_type", "type_identifier"))

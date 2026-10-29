@@ -119,6 +119,7 @@ pub fn c_parameters(def: &N<'_>) -> Vec<String> {
                     list.children()
                         .filter(|c| c.is_named() && c.kind().as_ref() != "comment")
                         .map(|c| c.text().to_string())
+                        .filter(|p| p != "void")
                         .collect()
                 })
                 .unwrap_or_default();
@@ -160,17 +161,33 @@ pub fn cpp_access(def: &N<'_>, _name: &str) -> Option<crate::v2::types::Visibili
     })
 }
 
-pub fn cpp_is_constructor(def: &N<'_>, name: &str) -> bool {
-    def.parent()
-        .and_then(|list| list.parent())
-        .filter(|owner| {
-            matches!(
-                owner.kind().as_ref(),
-                "class_specifier" | "struct_specifier"
-            )
-        })
-        .and_then(|owner| owner.field("name"))
-        .is_some_and(|owner_name| owner_name.text() == name)
+fn cpp_qualified_parts(def: &N<'_>) -> Option<(String, String)> {
+    if declared_name_node(def)?.kind().as_ref() != "qualified_identifier" {
+        return None;
+    }
+    let full = cpp_declarator_name(def)?;
+    let (owner, name) = full.rsplit_once("::")?;
+    Some((owner.to_string(), name.to_string()))
+}
+
+pub fn cpp_function_label(def: &N<'_>) -> &'static str {
+    let (owner, name) = match cpp_qualified_parts(def) {
+        Some((owner, name)) => (Some(owner), name),
+        None => (None, cpp_declarator_name(def).unwrap_or_default()),
+    };
+    let owner = owner.or_else(|| {
+        def.parent()
+            .filter(|p| p.kind().as_ref() == "field_declaration_list")
+            .and_then(|list| list.parent())
+            .and_then(|owner| owner.field("name"))
+            .map(|n| n.text().to_string())
+    });
+    match owner {
+        None => "Function",
+        Some(_) if name.starts_with('~') => "Destructor",
+        Some(owner) if owner.rsplit("::").next() == Some(name.as_str()) => "Constructor",
+        Some(_) => "Method",
+    }
 }
 
 pub fn cpp_super_types(def: &N<'_>) -> Vec<String> {

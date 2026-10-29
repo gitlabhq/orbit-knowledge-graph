@@ -97,9 +97,12 @@ impl MetadataRule {
             }
             None => rules.signature(node, self.signature_until),
         };
-        let parameters = match self.parameters_with {
-            Some(f) => text::parameters(f(node).iter().map(String::as_str)),
-            None => rules.parameters(node),
+        let parameters = match (category, self.parameters_with) {
+            (crate::v2::types::Category::Callable, Some(f)) => {
+                text::parameters(f(node).iter().map(String::as_str))
+            }
+            (crate::v2::types::Category::Callable, None) => rules.parameters(node),
+            _ => Vec::new(),
         };
         let return_type = match category {
             crate::v2::types::Category::Callable => {
@@ -274,8 +277,14 @@ impl DisplayRules {
         let end = node
             .children()
             .flat_map(|c| {
-                let grandchildren: Vec<N<'_>> = c.children().collect();
-                std::iter::once(c).chain(grandchildren)
+                let deeper: Vec<N<'_>> = c
+                    .children()
+                    .flat_map(|g| {
+                        let great: Vec<N<'_>> = g.children().collect();
+                        std::iter::once(g).chain(great)
+                    })
+                    .collect();
+                std::iter::once(c).chain(deeper)
             })
             .filter(|c| body.contains(&c.kind().as_ref()))
             .map(|c| c.range().start)

@@ -147,7 +147,13 @@ fn elixir_defstruct_fields(
         }
         let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
         defs.push(crate::v2::types::CanonicalDefinition {
-            display: Default::default(),
+            display: crate::v2::types::DefDisplay::new(
+                Some(name.clone()),
+                None,
+                None,
+                None,
+                Vec::new(),
+            ),
             definition_type: "Field",
             kind: DefKind::Field,
             name,

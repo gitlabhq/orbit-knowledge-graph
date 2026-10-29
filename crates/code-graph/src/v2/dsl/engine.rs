@@ -191,7 +191,7 @@ impl LanguageSpec {
             def_kind,
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
-            owner: rule.owner.as_ref().and_then(|e| e.apply(node)),
+            owner: rule.owner.and_then(|hook| hook(node)),
             display,
             metadata: rule.extract_metadata(node, &resolve),
         })

@@ -95,7 +95,7 @@ tests:
   - name: "Function definitions with namespaced FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function'
+      WHERE d.language_kind IN ['Function', 'Method', 'Constructor']
       RETURN d.fqn AS fqn
     assert:
       - { no_nulls: fqn }

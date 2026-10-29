@@ -33,20 +33,15 @@ impl DslLanguage for CppDsl {
 
     fn scopes() -> Vec<ScopeRule> {
         vec![
-            scope("function_definition", "Function")
+            scope_fn("function_definition", c_family::cpp_function_label)
                 .def_kind(DefKind::Function)
+                .kinds_by_label(&[
+                    ("Method", DefKind::Method),
+                    ("Destructor", DefKind::Method),
+                    ("Constructor", DefKind::Constructor),
+                ])
                 .name_hook(c_family::cpp_declarator_name)
                 .metadata(metadata().parameters_with(c_family::c_parameters)),
-            scope("function_definition", "Method")
-                .def_kind(DefKind::Method)
-                .when(parent_is("field_declaration_list"))
-                .name_hook(c_family::cpp_declarator_name)
-                .metadata(metadata().parameters_with(c_family::c_parameters))
-                .kind_if(
-                    c_family::cpp_is_constructor,
-                    DefKind::Constructor,
-                    "Constructor",
-                ),
             scope("class_specifier", "Class")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("field_declaration_list"))
@@ -75,7 +70,8 @@ impl DslLanguage for CppDsl {
                 .no_scope(),
             scope("concept_definition", "Concept")
                 .def_kind(DefKind::Interface)
-                .no_scope(),
+                .no_scope()
+                .metadata(metadata().signature_until(&["="])),
             // Template declarations wrap function/class definitions but
             // create no named scope; the inner scope handles naming.
         ]
@@ -83,7 +79,8 @@ impl DslLanguage for CppDsl {
 
     fn display() -> DisplayRules {
         DisplayRules {
-            body: &["body", "value"],
+            body: &["body", "value", "field_initializer_list"],
+            test_prefixes: &["TEST"],
             return_type: &["type"],
             doc_comments: &["comment"],
             doc_markers: c_family::C_DOC_MARKERS,

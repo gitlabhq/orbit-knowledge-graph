@@ -58,7 +58,14 @@ fn csharp_visibility(node: &N<'_>, _name: &str) -> Option<Visibility> {
         Some(parent)
     };
     Some(match container.as_ref().map(|c| c.kind()) {
-        Some(k) if k == "interface_declaration" => Visibility::Public,
+        Some(k)
+            if matches!(
+                k.as_ref(),
+                "interface_declaration" | "enum_member_declaration_list"
+            ) =>
+        {
+            Visibility::Public
+        }
         Some(k)
             if matches!(
                 k.as_ref(),

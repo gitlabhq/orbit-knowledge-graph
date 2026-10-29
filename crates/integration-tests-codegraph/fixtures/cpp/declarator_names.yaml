@@ -92,7 +92,7 @@ tests:
   - name: "Out-of-line member keeps its class qualifier (single level)"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.name IN ['Foo::bar', 'Foo::baz']
+      WHERE d.language_kind = 'Method' AND d.name IN ['Foo::bar', 'Foo::baz']
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -102,7 +102,7 @@ tests:
   - name: "Out-of-line member keeps the full nested qualifier"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.fqn = 'members::A::B::deep'
+      WHERE d.language_kind = 'Method' AND d.fqn = 'members::A::B::deep'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -111,7 +111,7 @@ tests:
   - name: "Operator and destructor names keep the qualifier, drop params"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.name IN ['Foo::operator==', 'Foo::~Foo']
+      WHERE d.language_kind IN ['Method', 'Destructor'] AND d.name IN ['Foo::operator==', 'Foo::~Foo']
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -136,7 +136,7 @@ tests:
   - name: "Out-of-line conversion operator keeps the qualifier at any depth"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function'
+      WHERE d.language_kind = 'Method'
         AND d.name IN ['Ptr::operator int', 'S::I::operator int']
       RETURN d.name AS name, d.fqn AS fqn
     assert:
@@ -147,7 +147,7 @@ tests:
   - name: "Comment before the parameter list does not leak into a conversion operator name"
     query: |
       MATCH (d:Definition)
-      WHERE d.language_kind = 'Function' AND d.name STARTS WITH 'Widget::operator'
+      WHERE d.language_kind = 'Method' AND d.name STARTS WITH 'Widget::operator'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
