@@ -611,8 +611,6 @@ tests:
       - { row_count: 1 }
 
   - name: "edges: CALLS through a declared parameter type has resolution declared_type"
-    # Known gap: the engine writes inferred_type for a call through a declared parameter type.
-    skip: true
     query: |
       MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'com.acme.edges.App.use' AND b.fqn = 'com.acme.edges.lib.Base.run' AND e.resolution = 'declared_type'
@@ -653,8 +651,6 @@ tests:
       - { row_count: 1 }
 
   - name: "edges: a static member call does not instantiate its type"
-    # Known gap: the type of a static or companion member call is linked at the call site, so the export writes INSTANTIATES.
-    skip: true
     query: |
       MATCH (a:Definition)-[e:INSTANTIATES]->(b:Definition)
       WHERE a.fqn = 'com.acme.edges.App.go' AND b.fqn = 'com.acme.edges.lib.Factory'

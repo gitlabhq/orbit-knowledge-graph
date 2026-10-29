@@ -1572,6 +1572,10 @@ fn dispatch(
     class: Option<Cursor>,
     uses: &[&Edge],
 ) -> Vec<Edge> {
+    let typed = match producer.is(C::Binding) && producer.has(C::SsaTyped) {
+        true => Resolution::DeclaredType,
+        false => Resolution::InferredType,
+    };
     let id = |c: Cursor| (c.fi(), c.index());
     let mut own_class = None;
     uses.iter()
@@ -1622,7 +1626,7 @@ fn dispatch(
             Some(Either::Right(call_edges(from, targets, usage.site)))
         })
         .flatten()
-        .map(|e| e.resolved(Resolution::InferredType))
+        .map(|e| e.resolved(typed))
         .collect()
 }
 
