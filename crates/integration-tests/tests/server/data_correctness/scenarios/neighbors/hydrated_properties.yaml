@@ -14,6 +14,7 @@ cases:
         MATCH (u:User)-->(n) WHERE u.id IN [2, 3] RETURN u, n
     expect:
       hydration: dynamic
+      sql_contains: [_orbit_node_properties, _orbit_neighbor_properties]
       node_count: 2
       nodes:
         User: { ids: [2], absent: [3] }

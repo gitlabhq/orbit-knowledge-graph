@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet};
 use arrow::array::{Array, Int64Array, ListArray, StringArray, StructArray};
 use arrow::record_batch::RecordBatch;
 use compiler::constants::{
-    edge_kinds_column, neighbor_id_column, neighbor_type_column, path_column,
+    edge_kinds_column, neighbor_id_column, neighbor_owner_column, neighbor_properties_column,
+    neighbor_type_column, path_column,
 };
 use compiler::internal_column_prefix;
 use compiler::{QueryType, RedactionNode, ResultContext};
@@ -16,9 +17,10 @@ pub struct NodeRef {
     pub id: i64,
     pub entity_type: String,
     /// Hydrated entity properties, populated after redaction.
-    /// Empty until the hydration stage fetches full properties for this node.
     pub properties: HashMap<String, ColumnValue>,
     pub owner_id: Option<i64>,
+    /// Properties the base query read as JSON, parsed only after redaction.
+    pub properties_json: Option<String>,
 }
 
 impl PartialEq for NodeRef {
@@ -36,7 +38,14 @@ impl NodeRef {
             entity_type: entity_type.into(),
             properties: HashMap::new(),
             owner_id: None,
+            properties_json: None,
         }
+    }
+
+    fn with_inline(mut self, owner: Option<i64>, properties_json: Option<&str>) -> Self {
+        self.owner_id = owner.filter(|owner| *owner > 0);
+        self.properties_json = properties_json.map(String::from);
+        self
     }
 }
 
@@ -183,6 +192,8 @@ enum DynamicNodeColumns<'a> {
     Neighbor {
         ids: &'a Int64Array,
         types: &'a StringArray,
+        owners: Option<&'a Int64Array>,
+        properties: Option<&'a StringArray>,
     },
 }
 
@@ -193,6 +204,8 @@ impl<'a> DynamicNodeColumns<'a> {
             Some(QueryType::Neighbors) => Ok(Self::Neighbor {
                 ids: column(batch, neighbor_id_column())?,
                 types: column(batch, neighbor_type_column())?,
+                owners: column(batch, neighbor_owner_column()).ok(),
+                properties: column(batch, neighbor_properties_column()).ok(),
             }),
             Some(QueryType::Traversal) => Ok(Self::Paths(
                 ctx.edges()
@@ -214,11 +227,21 @@ impl<'a> DynamicNodeColumns<'a> {
                 }
                 Ok(result)
             }
-            Self::Neighbor { ids, types } => {
+            Self::Neighbor {
+                ids,
+                types,
+                owners,
+                properties,
+            } => {
                 if ids.is_null(row) || types.is_null(row) {
                     return Err(QueryResultError);
                 }
-                Ok(vec![NodeRef::new(ids.value(row), types.value(row))])
+                Ok(vec![
+                    NodeRef::new(ids.value(row), types.value(row)).with_inline(
+                        owners.map(|owners| owners.value(row)),
+                        properties.map(|properties| properties.value(row)),
+                    ),
+                ])
             }
         }
     }
@@ -261,8 +284,21 @@ fn path_nodes(path: &ListArray, row: usize) -> Result<Vec<NodeRef>, QueryResultE
     if ids.null_count() > 0 || types.null_count() > 0 {
         return Err(QueryResultError);
     }
+    let owners = nodes
+        .columns()
+        .get(2)
+        .and_then(|owners| owners.as_any().downcast_ref::<Int64Array>());
+    let properties = nodes
+        .columns()
+        .get(3)
+        .and_then(|properties| properties.as_any().downcast_ref::<StringArray>());
     Ok((0..nodes.len())
-        .map(|index| NodeRef::new(ids.value(index), types.value(index)))
+        .map(|index| {
+            NodeRef::new(ids.value(index), types.value(index)).with_inline(
+                owners.map(|owners| owners.value(index)),
+                properties.map(|properties| properties.value(index)),
+            )
+        })
         .collect())
 }
 

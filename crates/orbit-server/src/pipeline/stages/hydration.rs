@@ -302,40 +302,12 @@ impl PipelineStage for HydrationStage {
             }
             HydrationPlan::Dynamic(entity_specs) => {
                 let static_nodes: Vec<_> = result_context.nodes().cloned().collect();
-                let refs = hydration_helpers::extract_dynamic_refs(&query_result, &static_nodes);
-                if !refs.is_empty() {
-                    let scope: Vec<_> = ctx
-                        .security_context()
-                        .map(|sec| {
-                            sec.traversal_paths
-                                .iter()
-                                .map(|tp| tp.path.clone())
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let ref_paths =
-                        hydration_helpers::collect_dynamic_ref_paths(&query_result, &static_nodes);
-                    let (nodes, ids_count) =
-                        hydration_helpers::hydrate_dynamic(entity_specs, &refs, &scope, &ref_paths)
-                            .inspect_err(|e| obs.record_error(e))?;
-                    let (property_map, debug, executions) =
-                        Self::execute_hydration(ctx, nodes, ids_count, "dynamic")
-                            .await
-                            .inspect_err(|e| obs.record_error(e))?;
-                    hydration_queries = debug;
-                    for exec in &executions {
-                        obs.query_executed(
-                            &exec.label,
-                            exec.stats.read_rows,
-                            exec.stats.read_bytes,
-                            exec.stats.memory_usage,
-                        );
-                    }
-                    ctx.phases
-                        .get_or_insert_default::<QueryExecutionLog>()
-                        .0
-                        .extend(executions);
-                    let mut property_map = property_map;
+                let mut property_map = hydration_helpers::inline_properties(
+                    &query_result,
+                    &static_nodes,
+                    &ctx.ontology,
+                );
+                if !property_map.is_empty() {
                     let entity_virtuals: Vec<EntityVirtualColumns<'_>> = entity_specs
                         .iter()
                         .map(|s| (s.entity_type.as_str(), s.virtual_columns.as_slice()))

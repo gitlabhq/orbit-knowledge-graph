@@ -115,6 +115,9 @@ pub enum Function {
     TupleElement,
     ArgMax,
     ArgMaxOrNull,
+    MapFromArrays,
+    ArrayElement,
+    RowNumberInAllBlocks,
 }
 
 impl Function {
@@ -130,6 +133,7 @@ impl Function {
             | Self::ArrayReverse
             | Self::Unnest => count == 1,
             Self::If | Self::Substring => count == 3,
+            Self::RowNumberInAllBlocks => count == 0,
             _ => count == 2,
         }
     }

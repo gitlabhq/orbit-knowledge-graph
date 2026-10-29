@@ -38,41 +38,8 @@ pub fn emit_hydration(nodes: &[HydrationNodePlan]) -> Result<Node> {
 }
 
 fn emit_arm(node: &HydrationNodePlan) -> Query {
-    let alias = &node.alias;
-    let pk = &node.id_property;
-
-    let json_expr = if node.columns.is_empty() {
-        Expr::string("{}")
-    } else {
-        let map_args: Vec<Expr> = node
-            .columns
-            .iter()
-            .flat_map(|col| {
-                let value = OutputValue::property(&node.null_as_epoch, Column::new(alias, col));
-                [
-                    Expr::string(col),
-                    Expr::func(Function::ToString, vec![output_value(&value)]),
-                ]
-            })
-            .collect();
-        Expr::func(
-            Function::ToJson,
-            vec![Expr::func(Function::Object, map_args)],
-        )
-    };
-
-    let mut scan_where = Vec::new();
-
-    let path_filter = match &node.path_filter {
-        Some(HydrationPathFilter::PrefixUnion(paths)) => or_starts_with(alias, paths),
-        Some(HydrationPathFilter::PrefixSet(paths)) => Some(array_exists_starts_with(alias, paths)),
-        None => None,
-    };
-    if let Some(tp_filter) = path_filter {
-        scan_where.push(tp_filter);
-    }
-
-    if let Some(id_filter) = Expr::col_in(
+    let (alias, pk) = (&node.alias, &node.id_property);
+    let ids = Expr::col_in(
         alias,
         pk,
         SqlType::Int64,
@@ -80,34 +47,77 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
             .iter()
             .map(|id| serde_json::Value::Number((*id).into()))
             .collect(),
-    ) {
-        scan_where.push(id_filter);
-    }
+    );
+    latest_row_arm(
+        node,
+        ids,
+        &[],
+        vec![
+            SelectExpr::new(Expr::col(alias, pk), format!("{alias}_{pk}")),
+            SelectExpr::new(Expr::string(&node.entity), format!("{alias}_entity_type")),
+            SelectExpr::new(properties_json(node), format!("{alias}_props")),
+        ],
+    )
+}
 
-    let mut inner_select = vec![
-        SelectExpr::col(alias, pk),
-        SelectExpr::col(alias, DELETED_COLUMN),
-    ];
-    for col in &node.columns {
-        if col != pk && col != DELETED_COLUMN {
-            inner_select.push(SelectExpr::col(alias, col));
+pub(crate) fn properties_json(node: &HydrationNodePlan) -> Expr {
+    if node.columns.is_empty() {
+        return Expr::string("{}");
+    }
+    let map_args: Vec<Expr> = node
+        .columns
+        .iter()
+        .flat_map(|col| {
+            let value = OutputValue::property(&node.null_as_epoch, Column::new(&node.alias, col));
+            [
+                Expr::string(col),
+                Expr::func(Function::ToString, vec![output_value(&value)]),
+            ]
+        })
+        .collect();
+    Expr::func(
+        Function::ToJson,
+        vec![Expr::func(Function::Object, map_args)],
+    )
+}
+
+pub(crate) fn latest_row_arm(
+    node: &HydrationNodePlan,
+    id_filter: Option<Expr>,
+    extra_columns: &[&str],
+    select: Vec<SelectExpr>,
+) -> Query {
+    let (alias, pk) = (&node.alias, &node.id_property);
+    let path_filter = match &node.path_filter {
+        Some(HydrationPathFilter::PrefixUnion(paths)) => or_starts_with(alias, paths),
+        Some(HydrationPathFilter::PrefixSet(paths)) => Some(array_exists_starts_with(alias, paths)),
+        None => None,
+    };
+    let mut inner_columns = vec![pk.as_str(), DELETED_COLUMN];
+    for column in node
+        .columns
+        .iter()
+        .map(String::as_str)
+        .chain(extra_columns.iter().copied())
+    {
+        if !inner_columns.contains(&column) {
+            inner_columns.push(column);
         }
     }
     let (order_by, limit_by) = latest_row_dedup(alias, &node.sort_key);
     let keys = Query {
-        select: inner_select,
+        select: inner_columns
+            .into_iter()
+            .map(|column| SelectExpr::col(alias, column))
+            .collect(),
         from: TableRef::scan(&node.table, alias),
-        where_clause: Expr::conjoin(scan_where),
+        where_clause: Expr::conjoin(path_filter.into_iter().chain(id_filter).collect()),
         order_by,
         limit_by,
         ..Default::default()
     };
     Query {
-        select: vec![
-            SelectExpr::new(Expr::col(alias, pk), format!("{alias}_{pk}")),
-            SelectExpr::new(Expr::string(&node.entity), format!("{alias}_entity_type")),
-            SelectExpr::new(json_expr, format!("{alias}_props")),
-        ],
+        select,
         from: TableRef::subquery(keys, alias),
         where_clause: Some(deleted_false(alias)),
         ..Default::default()

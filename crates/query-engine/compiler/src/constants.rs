@@ -3,7 +3,7 @@ pub use ontology::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 
 // Per-node columns embed a user alias and end in one of these suffixes. No other
 // internal name may, or an alias could reproduce it; the const asserts enforce that.
-const PER_NODE_SUFFIXES: [&str; 4] = ["pk", "id", "type", "tp"];
+const PER_NODE_SUFFIXES: [&str; 5] = ["pk", "id", "type", "tp", "props"];
 
 const fn takes_per_node_suffix(name: &str) -> bool {
     let mut index = 0;
@@ -69,6 +69,8 @@ internal_name!(pub relationship_type_column, "relationship_kind");
 internal_name!(pub neighbor_is_outgoing_column, "neighbor_is_outgoing");
 internal_name!(pub neighbor_traversal_path_column, "neighbor_traversal_path");
 internal_name!(pub hydration_node_alias, "hydrate");
+internal_name!(pub neighbor_properties_column, "neighbor_properties");
+internal_name!(pub neighbor_owner_column, "neighbor_owner");
 
 internal_name!(pub(crate) depth_column, "depth");
 internal_name!(pub(crate) path_nodes_column, "path_nodes");
@@ -88,6 +90,15 @@ internal_name!(pub(crate) neighbor_edge_alias, "neighbor_edge");
 internal_name!(pub(crate) center_rows_cte, "center_rows");
 internal_name!(pub(crate) scope_lookup_alias, "scope");
 internal_name!(pub(crate) id_source_alias, "id_source");
+internal_name!(pub(crate) page_cte, "page");
+internal_name!(pub(crate) page_nodes_cte, "page_nodes");
+internal_name!(pub(crate) node_properties_cte, "node_properties");
+internal_name!(pub(crate) row_position_column, "row_position");
+internal_name!(pub(crate) page_node_alias, "page_node");
+internal_name!(pub(crate) node_kind_column, "node_kind");
+internal_name!(pub(crate) node_ref_column, "node_ref");
+internal_name!(pub(crate) node_key_column, "node_key");
+internal_name!(pub(crate) node_value_column, "node_value");
 
 // _orbit_{alias}_pk  — always the entity's primary key (for hydration lookups)
 pub fn primary_key_column(alias: &str) -> String {
@@ -100,6 +111,10 @@ pub fn redaction_id_column(alias: &str) -> String {
 
 pub(crate) fn redaction_type_column(alias: &str) -> String {
     format!("{}{alias}_type", internal_column_prefix())
+}
+
+pub fn properties_column(alias: &str) -> String {
+    format!("{}{alias}_props", internal_column_prefix())
 }
 
 /// Hidden column carrying the entity's `traversal_path` value from the base

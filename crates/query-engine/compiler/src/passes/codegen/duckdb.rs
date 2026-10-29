@@ -435,7 +435,12 @@ impl Context {
             | Function::ArrayMap
             | Function::ArrayExists
             | Function::ByteLength
-            | Function::CountSubstrings => unreachable!("function arity checked before rendering"),
+            | Function::CountSubstrings
+            | Function::MapFromArrays
+            | Function::ArrayElement
+            | Function::RowNumberInAllBlocks => {
+                unreachable!("function arity checked before rendering")
+            }
         };
 
         let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();

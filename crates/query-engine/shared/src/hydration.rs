@@ -7,8 +7,8 @@ use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use compiler::constants::{
-    hydration_node_alias, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
-    traversal_path_column,
+    hydration_node_alias, neighbor_traversal_path_column, primary_key_column, properties_column,
+    redaction_id_column, traversal_path_column,
 };
 use compiler::{
     ColumnSelection, DynamicEntityColumns, FilterOp, HydrationTemplate, Input, InputFilter,
@@ -143,7 +143,7 @@ pub fn parse_hydration_batches(
     let id_col = format!("{alias}_id");
 
     let mut result = HashMap::new();
-    let mut field_types_cache: HashMap<String, HashMap<String, DataType>> = HashMap::new();
+    let mut parser = PropertyParser::new(ontology);
 
     for batch in batches {
         for row_idx in 0..batch.num_rows() {
@@ -152,57 +152,95 @@ pub fn parse_hydration_batches(
             };
 
             let row_data = ArrowUtils::extract_row(batch, row_idx);
-
-            let entity_type = row_data
-                .iter()
-                .find(|(name, _)| name.as_str() == entity_type_col)
-                .and_then(|(_, v)| v.as_string().cloned());
-
-            let Some(entity_type) = entity_type else {
+            let string_column = |column: &str| {
+                row_data
+                    .iter()
+                    .find(|(name, _)| name.as_str() == column)
+                    .and_then(|(_, v)| v.as_string().cloned())
+            };
+            let Some(entity_type) = string_column(&entity_type_col) else {
                 continue;
             };
-
-            let field_types = field_types_cache
-                .entry(entity_type.clone())
-                .or_insert_with(|| {
-                    ontology
-                        .get_node(&entity_type)
-                        .map(|node| {
-                            node.fields
-                                .iter()
-                                .map(|f| (f.name.clone(), f.data_type))
-                                .collect()
-                        })
-                        .unwrap_or_default()
-                });
-
-            let props: HashMap<String, ColumnValue> = row_data
-                .iter()
-                .find(|(name, _)| name.as_str() == props_col)
-                .and_then(|(_, v)| v.as_string())
-                .and_then(|json_str| {
-                    serde_json::from_str::<HashMap<String, serde_json::Value>>(json_str).ok()
-                })
-                .map(|m| {
-                    m.into_iter()
-                        .filter_map(|(k, v)| match ColumnValue::from(v) {
-                            ColumnValue::Null => None,
-                            ColumnValue::String(s) if s.is_empty() => None,
-                            cv @ ColumnValue::String(_) => {
-                                let typed = typed_string(cv, field_types.get(&k));
-                                Some((k, typed))
-                            }
-                            cv => Some((k, cv)),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-
+            let props = parser.parse(&entity_type, string_column(&props_col).as_deref());
             result.insert((entity_type, id), props);
         }
     }
 
     Ok(result)
+}
+
+pub fn inline_properties(
+    result: &QueryResult,
+    static_nodes: &[compiler::RedactionNode],
+    ontology: &Ontology,
+) -> PropertyMap {
+    let mut parser = PropertyParser::new(ontology);
+    let mut properties = HashMap::new();
+    for row in result.authorized_rows() {
+        for node_ref in row.dynamic_nodes() {
+            let props = parser.parse(&node_ref.entity_type, node_ref.properties_json.as_deref());
+            properties.insert((node_ref.entity_type.clone(), node_ref.id), props);
+        }
+        for node in static_nodes {
+            let (Some(id), Some(entity_type)) = (row.get_public_id(node), row.get_type(node))
+            else {
+                continue;
+            };
+            let json = row.get_column_string(&properties_column(&node.alias));
+            properties.insert(
+                (entity_type.to_string(), id),
+                parser.parse(entity_type, json.as_deref()),
+            );
+        }
+    }
+    properties
+}
+
+struct PropertyParser<'a> {
+    ontology: &'a Ontology,
+    field_types: HashMap<String, HashMap<String, DataType>>,
+}
+
+impl<'a> PropertyParser<'a> {
+    fn new(ontology: &'a Ontology) -> Self {
+        Self {
+            ontology,
+            field_types: HashMap::new(),
+        }
+    }
+
+    fn parse(&mut self, entity_type: &str, json: Option<&str>) -> HashMap<String, ColumnValue> {
+        let ontology = self.ontology;
+        let field_types = self
+            .field_types
+            .entry(entity_type.to_string())
+            .or_insert_with(|| {
+                ontology
+                    .get_node(entity_type)
+                    .map(|node| {
+                        node.fields
+                            .iter()
+                            .map(|f| (f.name.clone(), f.data_type))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            });
+        json.and_then(|json| serde_json::from_str::<HashMap<String, serde_json::Value>>(json).ok())
+            .map(|m| {
+                m.into_iter()
+                    .filter_map(|(k, v)| match ColumnValue::from(v) {
+                        ColumnValue::Null => None,
+                        ColumnValue::String(s) if s.is_empty() => None,
+                        cv @ ColumnValue::String(_) => {
+                            let typed = typed_string(cv, field_types.get(&k));
+                            Some((k, typed))
+                        }
+                        cv => Some((k, cv)),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 fn typed_string(cv: ColumnValue, data_type: Option<&DataType>) -> ColumnValue {

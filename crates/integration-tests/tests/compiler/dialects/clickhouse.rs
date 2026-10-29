@@ -758,7 +758,7 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
     let result = compile_pair(json, orbit_query, &ontology, &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    let gl_file_refs = rendered.matches("gl_file").count();
+    let gl_file_refs = rendered.matches("gl_file AS f ").count();
     assert_eq!(
         gl_file_refs, 2,
         "expected one gl_file scan per direction arm; got {gl_file_refs}\nSQL:\n{rendered}"

@@ -5,6 +5,7 @@ pub mod codegen;
 mod errors;
 pub mod frontend;
 pub mod hydrate;
+pub mod inline_hydration;
 pub mod lower;
 pub mod normalize;
 pub mod page;

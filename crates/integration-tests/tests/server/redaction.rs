@@ -3335,16 +3335,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     );
 }
 
-/// PathFinding with indirect-auth entities where the owner is NOT in the path.
-///
-/// Path: File 3000 → (DEFINES) → Definition 5000.
-/// Both authorize via Project 1000, but Project is not a node in the path.
-/// PathFinding has no static _orbit_* nodes in the result contract, so all nodes
-/// are dynamic (from _orbit_path array) with their own entity IDs. find_owner_id
-/// can only find the owner if it's actually in the path. Since File and
-/// Definition store their own IDs (3000, 5000), not project_id, the owner
-/// cannot be resolved → fail-closed.
-async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestContext) {
+async fn path_finding_indirect_auth_uses_each_node_owner(ctx: &TestContext) {
     setup_test_data(ctx).await;
     setup_indirect_auth_data(ctx).await;
 
@@ -3368,29 +3359,24 @@ async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestConte
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
-
-    let raw_count = result.len();
+    let paths = || QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
+    let raw_count = paths().len();
     assert!(
         raw_count > 0,
         "should find paths from File 3000 to Definitions"
     );
 
-    // Even though Project 1000 is authorized, the path nodes are File and
-    // Definition — their dynamic node IDs (3000, 5000/5001) don't match any
-    // authorized project ID, and find_owner_id can't locate the Project owner
-    // because it's not in the path. Result: fail-closed.
-    let mut mock_service = MockRedactionService::new();
-    mock_service.allow("project", &[1000]);
+    let mut allowed = paths();
+    let mut allow = MockRedactionService::new();
+    allow.allow("project", &[1000]);
+    assert_eq!(run_redaction(&mut allowed, &allow), 0);
+    assert_eq!(allowed.authorized_count(), raw_count);
 
-    let redacted = run_redaction(&mut result, &mock_service);
-
-    assert_eq!(
-        redacted, raw_count,
-        "all paths must be denied: owner Project is not in the path, \
-         so indirect-auth entities cannot resolve their auth ID"
-    );
-    assert_eq!(result.authorized_count(), 0);
+    let mut denied = paths();
+    let mut deny = MockRedactionService::new();
+    deny.deny("project", &[1000]);
+    assert_eq!(run_redaction(&mut denied, &deny), raw_count);
+    assert_eq!(denied.authorized_count(), 0);
 }
 
 async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
@@ -4315,7 +4301,7 @@ async fn redaction_integration() {
         column_selection_aggregation_only_group_by_node_has_mandatory_columns,
         column_selection_aggregation_with_wildcard_columns,
         neighbors_indirect_auth_definition_via_project,
-        path_finding_indirect_auth_fail_closed_no_owner_in_path,
+        path_finding_indirect_auth_uses_each_node_owner,
         neighbors_indirect_auth_mixed_projects,
         neighbors_query_filters_by_entity_type,
         cross_entity_id_collision_redaction,

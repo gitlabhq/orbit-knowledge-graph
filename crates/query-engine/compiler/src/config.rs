@@ -15,8 +15,8 @@ use crate::passes::plan::HydrationCompileOptions;
 use crate::passes::plan::QueryPlan;
 use crate::passes::result_contract::ResultContext;
 use crate::passes::{
-    codegen, hydrate, lower, normalize, page, plan, relationships, response_policy, restrict,
-    result_contract, security, security_check, settings, validate,
+    codegen, hydrate, inline_hydration, lower, normalize, page, plan, relationships,
+    response_policy, restrict, result_contract, security, security_check, settings, validate,
 };
 use crate::types::SecurityContext;
 
@@ -110,8 +110,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         hydrate_plan {
             reads_env: [security_ctx, data_model]
-            reads_state: [input, node]
-            mutates: [hydration_plan]
+            reads_state: [input]
+            mutates: [node, hydration_plan]
         }
         settings {
             reads_state: [input, node]
@@ -345,10 +345,17 @@ where
     C: CompilerCtx,
     C::Model: query_data_model::OrbitQueryModel,
 {
-    let input = require(ctx.input().as_ref(), "input")?;
-    let emitted = require(ctx.node().as_ref(), "node")?;
+    let input = require(ctx.input().clone(), "input")?;
+    let emitted = require(ctx.take_node(), "node")?;
     let plan =
-        hydrate::generate_hydration_plan(input, emitted, ctx.data_model(), ctx.security_ctx());
+        hydrate::generate_hydration_plan(&input, &emitted, ctx.data_model(), ctx.security_ctx());
+    let node = match &plan {
+        HydrationPlan::Dynamic(specs) => {
+            inline_hydration::inline(emitted, &input, specs, ctx.data_model())?
+        }
+        _ => emitted,
+    };
+    ctx.set_node(node);
     ctx.set_hydration_plan(plan);
     Ok(())
 }
