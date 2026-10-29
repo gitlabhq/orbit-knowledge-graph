@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query GitLab Orbit with GQL, a read-only, openCypher-like query language. Learn what GQL supports, the statement shape, filters, aggregations, pagination, and limits.
+description: Query GitLab Orbit with GQL, a read-only, OpenCypher-like query language. Learn what GQL supports, the statement shape, filters, aggregations, pagination, and limits.
 title: GitLab Orbit query language
 ---
 
@@ -19,7 +19,7 @@ title: GitLab Orbit query language
 
 {{< /history >}}
 
-GitLab Orbit accepts GQL, a read-only, openCypher-like query language that agents already know.
+GitLab Orbit accepts GQL, a read-only, OpenCypher-like query language that agents already know.
 To send a query, see [run a query](_index.md#run-a-query).
 The examples use the `gitlab-org/gitlab` project on GitLab.com.
 To run them on your own projects, see [bounded nodes](#bounded-nodes).

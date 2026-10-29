@@ -161,6 +161,7 @@ glab orbit query "MATCH (p:Project) WHERE p.full_path STARTS WITH 'my-group/' RE
 ```
 
 To list the properties of node types, run `glab orbit schema MergeRequest Project`.
+To send queries with the REST API, see [GitLab Orbit API](https://docs.gitlab.com/api/orbit/#run-a-query).
 
 ### Check indexing progress
 
@@ -182,6 +183,7 @@ When indexing is complete, **SDLC data** and **Code** show `indexed`, and the su
 | `--response-format` | string | No | `raw` for JSON, or `llm` for compact text. |
 
 Use only one of `--full-path`, `--namespace-id`, and `--project-id`.
+To get the indexing progress from the GraphQL API, see [`OrbitNamespace`](https://docs.gitlab.com/api/graphql/reference/objects/#orbitnamespace).
 
 ## Local graph
 
@@ -323,9 +325,9 @@ The CLI reads these environment variables:
 |-----------|---------|
 | `0` | Success. |
 | `1` | Other error, for example a missing credential, or HTTP `402`, `422`, or `503`. See stderr. `grep` also exits with `1`, with no error message, when nothing matches. |
-| `2` | A command-line usage error, or HTTP `404`: the path does not exist, or the endpoint is not available. |
+| `2` | A command-line usage error, or HTTP `404`: the path does not exist, or the endpoint is not available. `status` also exits with `2` when your user has no access to GitLab Orbit. |
 | `3` | HTTP `401`. The token is missing or expired. |
-| `4` | HTTP `403`. No group with GitLab Orbit turned on is available to you. |
+| `4` | HTTP `403`. No group with GitLab Orbit turned on is available to you, or the API denied access for another reason. |
 | `5` | HTTP `429`. Rate limited. Wait for `Retry-After`. |
 | `75` | A running index did not finish in the wait time. Try again later, or raise the wait. |
 | `130` | You canceled a prompt or indexing. |
