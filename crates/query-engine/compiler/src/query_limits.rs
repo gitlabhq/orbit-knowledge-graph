@@ -1,3 +1,4 @@
+// build.rs includes this file, so keep it independent of other crate modules.
 pub const MAX_HOPS_CAP: u32 = 3;
 pub const MAX_DEPTH_CAP: u32 = 3;
 pub const MAX_NODES_CAP: usize = 5;
