@@ -48,6 +48,23 @@
       "items": { "$ref": "#/definitions/registration" },
       "description": "Strings appended to a JSON array in the assistant's config, e.g. a plugin list."
     },
+    "retired": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Files and registrations an earlier release installed and this one no longer does. Install and uninstall remove them: a file only while its setup checksum shows it is unedited, and a registration by its value.",
+      "properties": {
+        "template_files": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/retiredFile" }
+        },
+        "registrations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/registration" }
+        }
+      }
+    },
     "mcp": {
       "type": "object",
       "required": ["file", "format", "coding_agent"],
@@ -182,6 +199,15 @@
           "minLength": 1,
           "description": "Template location under config/setup/, e.g. opencode_plugin.js."
         }
+      }
+    },
+    "retiredFile": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "ui": { "type": "boolean", "description": "Removed with the agent-plugins component instead of hooks." },
+        "path": { "$ref": "#/definitions/scopedPath" }
       }
     },
     "registration": {

@@ -606,14 +606,12 @@ mod tests {
         assert!(agents.contains("<!-- orbit:setup:begin -->"));
         assert!(agents.contains("# My rules"));
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
-        assert_eq!(
-            read_json(&opencode_config)["plugin"],
-            json!([
-                "other.js",
-                ".opencode/plugins/orbit.js",
-                ".opencode/plugins/orbit-ui.js"
-            ])
-        );
+        for part in ["index.js", "rpc.ts", "tui.tsx"] {
+            let path = dir.path().join(".opencode/plugins/orbit-ui").join(part);
+            assert!(path.is_file(), "{}", path.display());
+        }
+        // OpenCode discovers both plugins, so the user's plugin list is not touched.
+        assert_eq!(read_json(&opencode_config), json!({"plugin": ["other.js"]}));
         assert_eq!(
             read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],
             json!({
@@ -1423,6 +1421,68 @@ mod tests {
         );
     }
 
+    /// A file as an earlier `orbit setup` wrote it: checksum stamp, then the body.
+    fn stamped(body: &str) -> String {
+        format!(
+            "// orbit setup checksum: {}\n{body}",
+            ontology::migrations::sha256_hex(body)
+        )
+    }
+
+    #[test]
+    fn upgrading_removes_the_retired_opencode_plugin_and_its_registrations() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = dir.path().join(".opencode/plugins");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::write(
+            plugins.join("orbit-ui.js"),
+            stamped("export const OrbitUiPlugin = async () => ({});\n"),
+        )
+        .unwrap();
+        let opencode_config = dir.path().join(".opencode/opencode.json");
+        std::fs::write(
+            &opencode_config,
+            r#"{"plugin": ["other.js", ".opencode/plugins/orbit.js", ".opencode/plugins/orbit-ui.js"]}"#,
+        )
+        .unwrap();
+
+        install_with_mcp(&["opencode"], dir.path());
+
+        assert!(!plugins.join("orbit-ui.js").exists());
+        assert!(plugins.join("orbit-ui/index.js").is_file());
+        assert_eq!(read_json(&opencode_config), json!({"plugin": ["other.js"]}));
+    }
+
+    #[test]
+    fn an_edited_retired_plugin_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = dir.path().join(".opencode/plugins");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::write(plugins.join("orbit-ui.js"), "// my own toast plugin\n").unwrap();
+
+        install_with_mcp(&["opencode"], dir.path());
+        uninstall_named(&["opencode"], dir.path());
+
+        assert_eq!(
+            std::fs::read_to_string(plugins.join("orbit-ui.js")).unwrap(),
+            "// my own toast plugin\n"
+        );
+    }
+
+    #[test]
+    fn an_opencode_config_without_orbit_entries_is_not_parsed() {
+        let dir = tempfile::tempdir().unwrap();
+        let opencode_config = dir.path().join(".opencode/opencode.json");
+        std::fs::create_dir_all(opencode_config.parent().unwrap()).unwrap();
+        let jsonc = "{\n  // my settings\n  \"plugins\": [\"./plugins/mine\"]\n}\n";
+        std::fs::write(&opencode_config, jsonc).unwrap();
+
+        install_with_mcp(&["opencode"], dir.path());
+        uninstall_named(&["opencode"], dir.path());
+
+        assert_eq!(std::fs::read_to_string(&opencode_config).unwrap(), jsonc);
+    }
+
     #[test]
     fn preexisting_files_get_a_one_time_backup() {
         let dir = tempfile::tempdir().unwrap();
@@ -1491,14 +1551,27 @@ mod tests {
     }
 
     #[test]
-    fn opencode_plugin_shows_a_toast_for_orbit_calls() {
+    fn opencode_ui_plugin_reports_orbit_calls_to_its_tui_part() {
         let dir = tempfile::tempdir().unwrap();
         install_with_mcp(&["opencode"], dir.path());
 
-        let plugin =
-            std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit-ui.js")).unwrap();
-        assert!(plugin.contains(r#""tool.execute.before""#), "{plugin}");
-        assert!(plugin.contains("client.tui.showToast"), "{plugin}");
+        let ui = dir.path().join(".opencode/plugins/orbit-ui");
+        let read = |part: &str| std::fs::read_to_string(ui.join(part)).unwrap();
+        let server = read("index.js");
+        assert!(
+            server.contains(r#"ctx.tool.hook("execute.before""#),
+            "{server}"
+        );
+        assert!(
+            server.contains(r#"ctx.tool.hook("execute.after""#),
+            "{server}"
+        );
+        assert!(server.contains(r#"from "./rpc.ts""#), "{server}");
+        assert!(read("rpc.ts").contains("id: 'orbit.ui'"));
+        let tui = read("tui.tsx");
+        assert!(tui.contains("'session.composer.top'"), "{tui}");
+        assert!(tui.contains("'prompt.footer.status'"), "{tui}");
+        assert!(!dir.path().join(".opencode/plugins/orbit-ui.js").exists());
     }
 
     #[test]

@@ -9,7 +9,7 @@ use super::{
     write_unless_unchanged,
 };
 use crate::commands::setup::Target;
-use crate::commands::setup::spec::{self, Agent, Registration, TemplateFile};
+use crate::commands::setup::spec::{self, Agent, Registration, ScopedPath, TemplateFile};
 
 pub(super) struct Hooks;
 
@@ -78,7 +78,8 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
         agent.ui_registrations(false),
         target,
         report,
-    )
+    )?;
+    remove_retired(agent, false, target, report)
 }
 
 fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Result<()> {
@@ -94,11 +95,36 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
     }
 
     remove_files(
-        agent.ui_files(false),
+        agent.ui_files(false).map(|file| &file.path),
         agent.ui_registrations(false),
         target,
         report,
-    )
+    )?;
+    remove_retired(agent, false, target, report)
+}
+
+/// Removes what an earlier release installed. A config file is read only when it names a retired
+/// value, so a config Orbit never wrote to, such as one with comments, is left alone.
+pub(super) fn remove_retired(
+    agent: Agent,
+    ui: bool,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    remove_files(agent.retired_files(ui), std::iter::empty(), target, report)?;
+    for registration in agent.retired_registrations(ui) {
+        let (path, _) = target.resolve(&registration.file)?;
+        let value = target.registration_value(&registration.value)?;
+        if file_mentions(&path, &value) {
+            remove_files(
+                std::iter::empty(),
+                std::iter::once(registration),
+                target,
+                report,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn install_files<'a>(
@@ -133,13 +159,13 @@ pub(super) fn install_files<'a>(
 }
 
 pub(super) fn remove_files<'a>(
-    files: impl Iterator<Item = &'a TemplateFile>,
+    files: impl Iterator<Item = &'a ScopedPath>,
     registrations: impl Iterator<Item = &'a Registration>,
     target: &Target,
     report: &mut Report,
 ) -> Result<()> {
-    for template_file in files {
-        let (path, label) = target.resolve(&template_file.path)?;
+    for file in files {
+        let (path, label) = target.resolve(file)?;
         if !path.exists() {
             continue;
         }

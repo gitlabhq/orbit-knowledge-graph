@@ -1,6 +1,9 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
-# OpenCode has no PreToolUse-style context injection, so a tool.execute.before plugin prepends
-# a one-per-session graph reminder to the first bash command.
+# OpenCode has no PreToolUse-style context injection, so orbit.js appends a one-per-session graph
+# reminder to the first shell command's output. orbit-ui/ is an OpenCode 2 plugin directory: its
+# server part (index.js) reports each Orbit call and its TUI part (tui.tsx) draws it above the
+# prompt. OpenCode discovers both under its plugins directory, so neither is registered in
+# opencode.json; OpenCode 2 skips a single-file entry there with a warning.
 name: opencode
 title: OpenCode
 detect: ["$XDG_CONFIG_HOME/opencode", "~/.config/opencode"]
@@ -13,26 +16,43 @@ template_files:
       global: "~/.config/opencode/plugins/orbit.js"
     template: opencode_plugin.js
   - path:
-      project: .opencode/plugins/orbit-ui.js
-      global: "~/.config/opencode/plugins/orbit-ui.js"
-    template: agents/opencode_ui_plugin.js
+      project: .opencode/plugins/orbit-ui/index.js
+      global: "~/.config/opencode/plugins/orbit-ui/index.js"
+    template: agents/opencode_ui/index.js
     ui: true
-registrations:
-  - file:
-      project: .opencode/opencode.json
-      global: "~/.config/opencode/opencode.json"
-    path: [plugin]
-    value:
-      project: .opencode/plugins/orbit.js
-      global: "~/.config/opencode/plugins/orbit.js"
-  - file:
-      project: .opencode/opencode.json
-      global: "~/.config/opencode/opencode.json"
-    path: [plugin]
-    value:
-      project: .opencode/plugins/orbit-ui.js
-      global: "~/.config/opencode/plugins/orbit-ui.js"
+  - path:
+      project: .opencode/plugins/orbit-ui/rpc.ts
+      global: "~/.config/opencode/plugins/orbit-ui/rpc.ts"
+    template: agents/opencode_ui/rpc.ts
     ui: true
+  - path:
+      project: .opencode/plugins/orbit-ui/tui.tsx
+      global: "~/.config/opencode/plugins/orbit-ui/tui.tsx"
+    template: agents/opencode_ui/tui.tsx
+    ui: true
+# What earlier releases installed: the OpenCode 1 toast plugin and both plugin-list entries.
+retired:
+  template_files:
+    - path:
+        project: .opencode/plugins/orbit-ui.js
+        global: "~/.config/opencode/plugins/orbit-ui.js"
+      ui: true
+  registrations:
+    - file:
+        project: .opencode/opencode.json
+        global: "~/.config/opencode/opencode.json"
+      path: [plugin]
+      value:
+        project: .opencode/plugins/orbit.js
+        global: "~/.config/opencode/plugins/orbit.js"
+    - file:
+        project: .opencode/opencode.json
+        global: "~/.config/opencode/opencode.json"
+      path: [plugin]
+      value:
+        project: .opencode/plugins/orbit-ui.js
+        global: "~/.config/opencode/plugins/orbit-ui.js"
+      ui: true
 mcp:
   file:
     project: opencode.json

@@ -81,9 +81,12 @@ export function describeCommand(command: string, known: ReadonlySet<string> = NO
   return { ...first, detail: clip(detail, MAX_DETAIL) }
 }
 
+// Claude Code and OpenCode 1 name their shell tool `Bash` or `bash`; OpenCode 2 names it `shell`.
+const SHELL_TOOLS = new Set(['bash', 'shell'])
+
 export function describeOrbitCall(tool: string, input: unknown, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {
   const command = stringField(input, 'command')
-  if (tool.toLowerCase() === 'bash') return command === undefined ? null : describeCommand(command, known)
+  if (SHELL_TOOLS.has(tool.toLowerCase())) return command === undefined ? null : describeCommand(command, known)
   const [, server = '', name = tool] = tool.match(/^mcp__(.+?)__(.+)$/) ?? []
   if (!/orbit|knowledge[-_]?graph|gkg/i.test(server) && !/orbit|query_graph|get_graph_schema/i.test(name)) return null
   const invoked = stringField(input, 'command_name') ?? command ?? name

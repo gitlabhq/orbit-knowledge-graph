@@ -42,6 +42,7 @@ impl Installer for AgentPlugins {
                 target,
                 report,
             )?;
+            hooks::remove_retired(*agent, true, target, report)?;
         }
         Ok(())
     }
@@ -52,11 +53,12 @@ impl Installer for AgentPlugins {
                 remove_plugin(plugin, target, report)?;
             }
             hooks::remove_files(
-                agent.ui_files(true),
+                agent.ui_files(true).map(|file| &file.path),
                 agent.ui_registrations(true),
                 target,
                 report,
             )?;
+            hooks::remove_retired(*agent, true, target, report)?;
         }
         Ok(())
     }
