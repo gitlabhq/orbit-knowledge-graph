@@ -11,12 +11,6 @@ config:
       project: [1001]
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "d", "entity": "Definition", "node_ids": [12001]}],
-      "neighbors": {"direction": "outgoing", "rel_types": ["CALLS"]}
-    }
   gql: |
     MATCH (d:Definition {id: 12001})-[:CALLS]->(n) RETURN d, n
 

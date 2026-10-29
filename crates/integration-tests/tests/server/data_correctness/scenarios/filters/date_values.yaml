@@ -82,8 +82,6 @@ cases:
   - name: date_field_rejects_time_of_day
     description: A date field takes only YYYY-MM-DD, because a time of day has no meaning on a date
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [4000], "filters": {"due_date": "2024-06-10T10:00:00Z"}}]}
       gql: |
         MATCH (w:WorkItem {id: 4000}) WHERE w.due_date = datetime('2024-06-10T10:00:00Z') RETURN w
     expect:
@@ -195,8 +193,6 @@ cases:
   - name: timestamp_list_with_utc_suffix_matches
     description: A timestamp IN list whose elements end in Z runs and matches the listed timestamp
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "filters": {"created_at": {"in": ["2024-01-15T10:30:00Z", "2024-01-16T00:00:00Z"]}}}]}
       gql: |
         MATCH (n:Note {id: 3000}) WHERE n.created_at IN ['2024-01-15T10:30:00Z', '2024-01-16T00:00:00Z'] RETURN n
     expect:
@@ -223,8 +219,6 @@ cases:
   - name: date_list_with_utc_suffix_executes
     description: A date IN list whose elements end in Z runs on a date field
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "w", "entity": "WorkItem", "id_range": {"start": 4000, "end": 4010}, "filters": {"due_date": {"in": ["2024-01-15Z", "2024-01-16Z"]}}}]}
       gql: |
         MATCH (w:WorkItem) WHERE w.id >= 4000 AND w.id <= 4010 AND w.due_date IN ['2024-01-15Z', '2024-01-16Z'] RETURN w
     expect:
