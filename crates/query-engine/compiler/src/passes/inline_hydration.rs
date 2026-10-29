@@ -1,16 +1,16 @@
 //! Neighbors and path finding read node properties and owner ids inside the base query.
 //!
 //! ```sql
-//! WITH page AS MATERIALIZED (SELECT *, rowNumberInAllBlocks() AS row_position FROM (base) AS page),
-//!      page_nodes AS MATERIALIZED (SELECT node_ref, node_kind FROM page ...),
+//! WITH page AS MATERIALIZED (base),
+//!      page_nodes AS MATERIALIZED (SELECT node_ref, node_kind, node_path FROM page ...),
 //!      node_properties AS MATERIALIZED (latest row of each page node, one arm per entity)
 //! SELECT page columns, owner and properties looked up by kind and id
-//! FROM page ORDER BY row_position
+//! FROM page ORDER BY the base order, mapped to page columns
 //! ```
 
 use std::collections::BTreeSet;
 
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use query_data_model::OrbitQueryModel;
 
 use crate::ast::*;
@@ -44,19 +44,34 @@ pub fn inline(
                 .into_iter()
                 .find(|column| base.selects_alias(column))?;
             let kind = redaction_type_column(&node.id);
+            let path = traversal_path_column(&node.id);
             base.selects_alias(&kind).then(|| StaticNode {
                 alias: node.id.clone(),
                 id,
                 kind,
+                path: base.selects_alias(&path).then_some(path),
             })
         })
         .collect();
     let outputs: Vec<String> = base.select.iter().filter_map(|s| s.alias.clone()).collect();
+    let neighbor_path = base
+        .selects_alias(neighbor_traversal_path_column())
+        .then(|| page_col(neighbor_traversal_path_column()));
+    let order_by = base
+        .order_by
+        .iter()
+        .map(|order| {
+            Some(OrderExpr {
+                expr: on_page(&order.expr, &base)?,
+                desc: order.desc,
+            })
+        })
+        .collect::<Option<Vec<_>>>();
     let mut ctes = std::mem::take(&mut base.ctes);
-    ctes.push(materialized(page_cte(), page(*base)));
+    ctes.push(materialized(page_cte(), page(*base, order_by.is_none())));
     ctes.push(materialized(
         page_nodes_cte(),
-        page_nodes(input.query_type, &static_nodes),
+        page_nodes(input.query_type, &static_nodes, neighbor_path),
     ));
     ctes.push(materialized(node_properties_cte(), union(arms)));
 
@@ -96,9 +111,28 @@ pub fn inline(
         ctes,
         select,
         from: TableRef::cte(page_cte(), page_cte()),
-        order_by: vec![OrderExpr::asc(page_col(row_position_column()))],
+        order_by: order_by.unwrap_or_else(|| vec![OrderExpr::asc(page_col(row_position_column()))]),
         ..Default::default()
     })))
+}
+
+fn on_page(expr: &Expr, base: &Query) -> Option<Expr> {
+    if let Some(output) = base.select.iter().find(|output| {
+        output.expr == *expr
+            || matches!(expr, Expr::Identifier(name) if output.alias.as_ref() == Some(name))
+    }) {
+        return output.alias.as_deref().map(page_col);
+    }
+    match expr {
+        Expr::FuncCall { name, args } => Some(Expr::func(
+            *name,
+            args.iter()
+                .map(|arg| on_page(arg, base))
+                .collect::<Option<_>>()?,
+        )),
+        Expr::Literal(_) | Expr::Param { .. } => Some(expr.clone()),
+        _ => None,
+    }
 }
 
 fn property_arms(
@@ -149,21 +183,62 @@ fn property_arms(
                 Function::Tuple,
                 vec![Expr::col(alias, owner), properties_json(node)],
             );
-            let ids = Expr::InSelect {
-                expr: Box::new(Expr::col(alias, &node.id_property)),
-                query: Box::new(Query {
-                    select: vec![SelectExpr::col(page_nodes_cte(), node_ref_column())],
-                    from: TableRef::cte(page_nodes_cte(), page_nodes_cte()),
-                    where_clause: Some(Expr::eq(
+            let of_kind = |select: SelectExpr, path: Option<Op>| Query {
+                select: vec![select],
+                from: TableRef::cte(page_nodes_cte(), page_nodes_cte()),
+                where_clause: Expr::conjoin(
+                    std::iter::once(Expr::eq(
                         Expr::col(page_nodes_cte(), node_kind_column()),
                         Expr::string(&node.entity),
-                    )),
-                    ..Default::default()
-                }),
+                    ))
+                    .chain(path.map(|op| {
+                        Expr::binary(
+                            op,
+                            Expr::col(page_nodes_cte(), node_path_column()),
+                            Expr::string(""),
+                        )
+                    }))
+                    .collect(),
+                ),
+                ..Default::default()
             };
+            let ids = Expr::InSelect {
+                expr: Box::new(Expr::col(alias, &node.id_property)),
+                query: Box::new(of_kind(
+                    SelectExpr::col(page_nodes_cte(), node_ref_column()),
+                    None,
+                )),
+            };
+            let known_paths = Expr::InSelect {
+                expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
+                query: Box::new(of_kind(
+                    SelectExpr::col(page_nodes_cte(), node_path_column()),
+                    Some(Op::Ne),
+                )),
+            };
+            let unknown_path = Expr::binary(
+                Op::Gt,
+                Expr::Scalar(Box::new(of_kind(
+                    SelectExpr::new(
+                        Expr::Aggregate {
+                            function: AggFunction::Count,
+                            argument: None,
+                            distinct: false,
+                            condition: None,
+                        },
+                        node_ref_column(),
+                    ),
+                    Some(Op::Eq),
+                ))),
+                Expr::int(0),
+            );
+            let paths = model
+                .entity_has_traversal_path(&node.entity)
+                .then(|| Expr::or_all([Some(known_paths), Some(unknown_path)]))
+                .flatten();
             latest_row_arm(
                 node,
-                Some(ids),
+                Expr::conjoin(std::iter::once(ids).chain(paths).collect()),
                 &[owner],
                 vec![
                     SelectExpr::new(key, node_key_column()),
@@ -203,7 +278,10 @@ fn reachable_entities(input: &Input, model: &(impl OrbitQueryModel + ?Sized)) ->
     entities
 }
 
-fn page(base: Query) -> Query {
+fn page(base: Query, with_position: bool) -> Query {
+    if !with_position {
+        return base;
+    }
     Query {
         select: vec![
             SelectExpr::star(),
@@ -221,25 +299,41 @@ struct StaticNode {
     alias: String,
     id: String,
     kind: String,
+    path: Option<String>,
 }
 
-fn page_nodes(query_type: QueryType, static_nodes: &[StaticNode]) -> Query {
-    let from_page = |node_ref: Expr, node_kind: Expr| Query {
+fn page_nodes(
+    query_type: QueryType,
+    static_nodes: &[StaticNode],
+    neighbor_path: Option<Expr>,
+) -> Query {
+    let from_page = |node_ref: Expr, node_kind: Expr, node_path: Option<Expr>| Query {
         select: vec![
             SelectExpr::new(node_ref, node_ref_column()),
             SelectExpr::new(node_kind, node_kind_column()),
+            SelectExpr::new(
+                node_path.unwrap_or_else(|| Expr::string("")),
+                node_path_column(),
+            ),
         ],
         from: TableRef::cte(page_cte(), page_cte()),
         ..Default::default()
     };
     let mut arms: Vec<Query> = static_nodes
         .iter()
-        .map(|node| from_page(page_col(&node.id), page_col(&node.kind)))
+        .map(|node| {
+            from_page(
+                page_col(&node.id),
+                page_col(&node.kind),
+                node.path.as_deref().map(page_col),
+            )
+        })
         .collect();
     arms.push(match query_type {
         QueryType::Neighbors => from_page(
             page_col(neighbor_id_column()),
             page_col(neighbor_type_column()),
+            neighbor_path,
         ),
         _ => {
             let path_node = Expr::col(page_node_alias(), page_node_alias());
@@ -247,6 +341,7 @@ fn page_nodes(query_type: QueryType, static_nodes: &[StaticNode]) -> Query {
                 select: vec![
                     SelectExpr::new(tuple_element(path_node.clone(), 1), node_ref_column()),
                     SelectExpr::new(tuple_element(path_node, 2), node_kind_column()),
+                    SelectExpr::new(Expr::string(""), node_path_column()),
                 ],
                 from: TableRef::subquery(
                     Query {

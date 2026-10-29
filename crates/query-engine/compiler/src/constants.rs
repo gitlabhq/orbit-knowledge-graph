@@ -97,6 +97,7 @@ internal_name!(pub(crate) row_position_column, "row_position");
 internal_name!(pub(crate) page_node_alias, "page_node");
 internal_name!(pub(crate) node_kind_column, "node_kind");
 internal_name!(pub(crate) node_ref_column, "node_ref");
+internal_name!(pub(crate) node_path_column, "node_path");
 internal_name!(pub(crate) node_key_column, "node_key");
 internal_name!(pub(crate) node_value_column, "node_value");
 
