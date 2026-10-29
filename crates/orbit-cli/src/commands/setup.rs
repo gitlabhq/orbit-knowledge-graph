@@ -398,12 +398,6 @@ impl Target {
     }
 
     fn root(&self) -> Result<PathBuf> {
-        #[cfg(test)]
-        if let (Target::Global, Some(home)) =
-            (self, tests::TEST_HOME.with(|home| home.borrow().clone()))
-        {
-            return Ok(home);
-        }
         match self {
             Target::Project(root) => Ok(root.clone()),
             Target::Global(machine) => Ok(machine.home().to_path_buf()),
@@ -451,10 +445,6 @@ mod tests {
             .build()
             .unwrap()
             .block_on(super::install(options, target, machine))
-    }
-
-    thread_local! {
-        pub(super) static TEST_HOME: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
     }
 
     fn project(dir: &Path) -> Target {
@@ -1509,7 +1499,7 @@ mod tests {
     #[test]
     fn global_upgrade_removes_the_retired_plugin_and_its_absolute_registrations() {
         let home = tempfile::tempdir().unwrap();
-        TEST_HOME.with(|slot| *slot.borrow_mut() = Some(home.path().to_path_buf()));
+        let machine = Machine::new(home.path().to_path_buf(), BTreeMap::new());
         let config_dir = home.path().join(".config/opencode");
         let plugins = config_dir.join("plugins");
         let config = config_dir.join("opencode.json");
