@@ -6,7 +6,7 @@ First-run setup and the common `glab orbit` errors, organised by exit code. See 
 
 Read this when a command fails with "command not found", an auth error, or a feature-flag exit code. A working setup does not need these checks on every call.
 
-1. glab v1.117.0 or later, with the Orbit commands:
+1. glab v1.126.0 or later, with the Orbit commands:
 
    ```sh
    glab --version
@@ -50,7 +50,7 @@ Read this when a command fails with "command not found", an auth error, or a fea
 | `4`  | 403  | Access denied (no Knowledge Graph enabled namespaces).       |
 | `5`  | 429  | Rate limited.                                                |
 
-`glab orbit query --response-format raw` prints the full JSON error payload when the exit code alone is not enough.
+`glab orbit query --response-format raw` prints the full error payload when the exit code alone is not enough.
 
 ## Exit 2: feature flag off, or old glab
 
@@ -81,7 +81,7 @@ Common causes: a malformed `--file` request envelope, an unreachable hostname (c
 
 ## Named-query catalog
 
-The catalog lists parameterless named queries rendered in the caller's active mode. `raw_query` is a JSON query object when the per-user `orbit_gql_queries` flag is off and GQL text when on. There is no language field. Rails supplies the explorer's mode directly; an empty catalog does not reset it to JSON. The catalog binds caller identity and mode, so do not reuse another caller's response or retain it across mode changes. JSON queries reject in GQL mode, and GQL strings reject in JSON mode. There is no client override or parser fallback. Missing entries can require client parameters or depend on entities unavailable in the active schema.
+The catalog lists parameterless named queries. `raw_query` is GQL text. There is no language field. The catalog binds caller identity, so do not reuse another caller's response. Missing entries can require client parameters or depend on entities unavailable in the active schema.
 
 ## Query errors
 

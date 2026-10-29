@@ -15,303 +15,165 @@ Accepted (revised 2026-05-22)
 
 ## Context
 
-Originally, `GlobalHandler` processed global entities per message and
-`NamespaceHandler` processed all namespaced entities per namespace per message.
-Both ran entity pipelines concurrently behind `max_concurrent_entities`, but
-the work was bound to a single NATS message and a single engine worker slot.
+Software development lifecycle (SDLC) indexing had two handlers.
+For each message, the global handler processed all global entities, and the namespace handler processed all entities of one namespace.
+Both ran entity pipelines concurrently up to a fixed limit.
+But all the work for a message stayed bound to one message from NATS, the message bus, and one engine worker slot.
 
-Problems:
+This design had three problems:
 
-1. No cross-worker concurrency. A slow entity blocks all others in the same
-   message and the other workers sit idle.
-2. No intra-entity parallelism. A large entity cannot be split across workers.
-3. Noisy neighbours. All namespaced entities shared one NATS consumer, so a
-   backlog of large-namespace messages delayed all entity types.
+- No concurrency across workers.
+  A slow entity blocked all other entities in the same message, and the other workers stayed idle.
+- No parallelism inside an entity.
+  The indexer could not split a large entity across workers.
+- Noisy neighbors.
+  All namespaced entities shared one NATS consumer.
+  A backlog of messages for large namespaces delayed all entity types.
 
 ## Decision
 
-Replace `GlobalHandler` and `NamespaceHandler` with one `EntityHandler` per
-ontology entity. Each handler owns a single `Plan` and subscribes to the
-existing global/namespace NATS topic for its scope. The dispatcher publishes
-one message; every entity handler for that scope receives it (NATS pub/sub).
-This gives cross-entity parallelism without per-entity subjects or a new
-message type.
+**We replace the two handlers with one entity handler for each ontology entity.**
 
-Intra-entity parallelism comes from a pipeline's `extract.partition_count`.
-When the ontology declares it, the handler computes ID-range partitions on the
-fly during the first run. It then fans them out across a `JoinSet`. Once all partitions complete,
-the partition checkpoints are consolidated into a single completed checkpoint
-and subsequent runs skip partitioning.
+Each handler owns the plan for one entity.
+It subscribes to the existing global or namespace NATS topic for the scope of its entity.
+The dispatcher publishes one message, and NATS delivers it to every entity handler for that scope.
+This gives parallelism across entities without per-entity subjects or a new message type.
+The handlers read the existing request messages, which already carry the scope and the watermark, the point that the last run reached.
 
-### Handler
+Parallelism inside an entity comes from partitions.
+The ontology can declare a partition count for an entity pipeline.
+A pipeline without a partition count runs without partitions.
+On the first run, the handler computes ID-range partitions and runs them in parallel in the same process.
+After all partitions complete, the handler consolidates their checkpoints into one completed checkpoint.
+Later runs are incremental and do not partition.
 
-```rust
-pub struct EntityHandler {
-    plan: Plan,
-    scope: EtlScope,
-    pipeline: Arc<Pipeline>,
-    datalake: Arc<dyn DatalakeQuery>,
-    checkpoint_store: Arc<dyn CheckpointStore>,
-    partition_strategy: Option<PartitionStrategy>,
-    // ...
-}
-```
+### Partitions
 
-Registration loops `Ontology::nodes()`, builds a `Plan` per entity, and
-registers one `EntityHandler` against either `GlobalIndexingRequest` or
-`NamespaceIndexingRequest` based on the entity's `EtlScope`. The handler
-deserializes the existing request types, no new message envelope is needed.
+A partition range is one more filter on the prepared query, together with the watermark filter and the traversal path filter.
+Each range is half-open.
 
-### Partitioning
+The handler follows these steps:
 
-Filters compose via the existing `Filter` trait. A partition range is just
-another filter (half-open ID-range), so it belongs on the prepared query:
+1. Load the parent checkpoint for the entity and scope.
+   If it exists, the run is incremental and does not partition.
+1. Read the minimum and maximum of the partition column from the data lake source, inside the traversal path of the scope.
+   Slice that range into equal parts.
+   The handler skips this probe for scopes with few rows.
+1. Run one prepared query for each range, with a checkpoint for each partition.
+1. After all partitions finish, write the parent checkpoint and mark the partition checkpoints as deleted.
 
-```rust
-plan.prepare()
-    .with(WatermarkFilter { ... })
-    .with(TraversalPathFilter { ... })
-    .into_partitions(ranges)  // -> Vec<(PartitionAssignment, PreparedQuery)>
-```
+If a partition fails, the handler does not write the parent checkpoint.
+The next message enters the partition path again.
+The handler skips each partition that completed in an earlier attempt, and the rows of that partition stay in the graph.
+The parent checkpoint gets the oldest watermark of all partitions, and not the watermark of the current request.
+Partitions from an earlier attempt still hold their older watermark.
+The next incremental run then covers the window between that older watermark and the current one, so no data is lost.
+If all partitions are already complete, the handler consolidates at once.
+This case occurs when the last attempt completed every partition but stopped before consolidation.
 
-`PartitionStrategy` holds the partition count, the ID column, and the
-datalake table needed to probe `min/max`. `PartitionAssignment` carries the
-resulting half-open bounds for one shard.
+### Partition column
 
-The handler:
+The partition column is the first column of the sort key after the traversal path.
+For merge requests and for global users, that column is the ID.
+An entity whose first column after the traversal path has low cardinality is a bad candidate for partitions.
+An example is the type column of notes, which has about 10 values.
 
-1. Loads the parent checkpoint `{scope_key}.{entity}`. If it exists, this is
-   an incremental run, no partitioning.
-2. Otherwise, calls `strategy.compute_ranges(...)`, which runs
-   `SELECT min/max(col) FROM source WHERE [traversal_path...]` against the
-   datalake (using the ETL's `source` table) and slices the result evenly.
-3. `base_query.into_partitions(ranges)` yields N prepared queries.
-4. Each is spawned on a `JoinSet` against `Pipeline::run_plan` with its own
-   checkpoint key `{scope_key}.{entity}.p{idx}of{total}`.
-5. After all partitions finish, `CheckpointStore::consolidate(parent_key,
-   watermark)` writes the parent key and tombstones the partition rows.
+We use range partitions instead of hash partitions, because of a benchmark on a ClickHouse Cloud development instance on 2026-05-08.
+It used the source table for continuous integration (CI) builds, which has 100 million rows, and four partitions inside one top-level group.
+The primary key of that table is the traversal path, the ID, and the partition ID.
 
-#### Retry behavior
+| Filter | Rows read | Bytes read | Duration |
+|---|---:|---:|---:|
+| No partition filter | 147,456 | 50.53 MiB | 109 ms |
+| Hash of the ID, one of four buckets | 147,456 | 50.62 MiB | 649 ms |
+| ID range | 147,456 | 13.05 MiB | 48 ms |
 
-If any partition fails before they all complete, the parent checkpoint stays
-unwritten and the next message re-enters the partitioning path. To avoid
-re-extracting work that already succeeded:
+A range filter on a primary key column read 3.9 times less data than a hash filter.
+ClickHouse evaluates the range condition before it reads the other columns, so it skips the decompression of rows that do not match.
+In the query plan, the range filter used the path and the ID from the primary key, but the hash filter used only the path.
 
-- `run_partitions` loads each partition's checkpoint before spawning. Any
-  partition whose checkpoint has `cursor_values: None` (a successful
-  `save_completed` from a prior attempt) is skipped. Its task is never
-  spawned, and the rows it indexed last time stay in the destination.
-- `consolidate` writes the parent at `min(partition watermarks)` rather than
-  the current `request.watermark`. Partitions that completed in an earlier
-  attempt still hold their original (older) watermark. Pinning the parent to
-  the minimum keeps the next incremental run covering the
-  `(old_watermark, request.watermark]` window for those ID-ranges. So no data
-  is lost.
+### Checkpoint keys
 
-If every partition is already complete (e.g. the previous attempt finished
-all partitions but crashed before consolidation), `run_partitions` spawns
-nothing and `consolidate` runs immediately.
+A checkpoint key holds the scope and the entity.
+A partition key also holds the partition index and the partition total.
+The scope is global, or a namespace with its ID.
+Keys without a partition match the previous format, so checkpoints need no migration.
+The partition total in the key invalidates old partition checkpoints when the partition count changes.
+Namespace deletion matches keys by the namespace prefix, so it covers both formats.
+Consolidation inserts a completed row at the parent key and marks each partition row as deleted.
 
-#### Partition column: first non-scope sort key column
+### Indexing status
 
-The range filter is applied on the first non-`traversal_path` column of the
-plan's sort key.
+At the time of this decision, one NATS key-value entry for each namespace tracked indexing progress.
+On 2026-09-26, we removed that bucket, and status now reads the checkpoint tables.
+For more information, see [ADR 010](010_graph_status_endpoint.md).
 
-```sql
-AND {partition_column} >= '{lower_bound}' AND {partition_column} < '{upper_bound}'
-```
+Per-entity handlers broke the single status entry.
+When entity A completes and writes "indexed" while entity B still runs, the namespace status is wrong.
 
-Examples from the current ontology:
+Each entity handler wrote only its own status entry, keyed by the traversal path and the entity type.
+NATS message deduplication serializes runs for the same entity and scope, so the handlers need no coordination.
 
-| Entity | Source `order_by` | Partition column |
-|---|---|---|
-| MergeRequest | `[traversal_path, id]` | `id` |
-| User (global) | `[id]` | `id` |
+The status service gets the expected set of namespaced entity types from the ontology and reads one entry for each type.
+A missing entry counts as not indexed.
+The namespace state is the worst state of any entity.
+From best to worst, the order is indexed, indexing, error, backfilling, not indexed, and unknown.
+About 36 reads at under one millisecond each add up to about 18 ms.
 
-Entities where the first non-scope column has low cardinality are poor
-partitioning candidates. An example is Note's `noteable_type` with ~10 enum
-values. They should not have `partition_overrides` set.
+The existing global and namespace topic configurations still set engine-level policy for retries, concurrency groups, and the dead letter queue.
+The entity handlers subscribe to those topics.
 
-#### Why range over hash
+## Benefits of this approach
 
-Benchmarks ran on `siphon_p_ci_builds` (100M rows, PRIMARY KEY
-`(traversal_path, id, partition_id)`, ClickHouse Cloud dev instance,
-2026-05-08). They show range filtering on a primary key column reads 3.9× less
-data than hash. ClickHouse evaluates the range condition via PREWHERE and
-skips decompressing non-matching columns:
-
-| Filter (4 partitions, `startsWith(traversal_path, '158/')`) | read_rows | read_bytes | duration |
-|---|---|---|---|
-| Baseline (no partition filter) | 147,456 | 50.53 MiB | 109 ms |
-| `cityHash64(id) % 4 = 0` | 147,456 | 50.62 MiB | 649 ms |
-| `id >= 548 AND id < 24726584` | 147,456 | 13.05 MiB | 48 ms |
-
-`EXPLAIN indexes = 1` confirms range uses both `traversal_path` and `id` in
-the primary key condition (`generic exclusion search`), while hash uses only
-`traversal_path` (`binary search`).
-
-### Checkpoint key design
-
-```plaintext
-global.{entity_kind}                                  # global, no partition
-global.{entity_kind}.p{idx}of{total}                  # global, partitioned
-ns.{namespace_id}.{entity_kind}                       # namespaced, no partition
-ns.{namespace_id}.{entity_kind}.p{idx}of{total}       # namespaced, partitioned
-```
-
-Non-partitioned keys match the previous format (`global.User`,
-`ns.100.MergeRequest`), so no checkpoint migration is needed. The `of{total}`
-suffix invalidates old partitioned checkpoints when the partition count
-changes. Namespace deletion's `startsWith(key, 'ns.{id}.')` matches both
-formats.
-
-`CheckpointStore` gains `load_by_prefix` and `consolidate`. Consolidation
-inserts a completed row at the parent key and tombstones every row matching
-`{parent}.p%` via the `_deleted` column on the `ReplacingMergeTree`.
-
-### Indexing status tracking
-
-At the time of writing, one NATS KV key per namespace tracked indexing progress
-(`orbit_indexing_progress` bucket, consumed by `GraphStatusService`). The bucket was
-removed on 2026-09-26: status now reads the checkpoint tables, see ADR 010. With
-per-entity handlers, this breaks: Entity A completing and writing "Indexed"
-while Entity B is still running gives a wrong answer for the namespace.
-
-#### Per-entity status key
-
-Each entity handler writes its own status key:
-
-```plaintext
-status.{dotted_traversal_path}.{entity_kind}
-```
-
-For example: `status.42.9970.MergeRequest`, `status.42.9970.Issue`.
-
-```rust
-fn entity_status_key(traversal_path: &str, entity_kind: &str) -> String {
-    let dotted = orbit_utils::traversal_path::to_dotted(traversal_path);
-    format!("status.{dotted}.{entity_kind}")
-}
-```
-
-Each handler writes only its own key. NATS message deduplication serializes
-runs for the same (entity, scope) pair, so no cross-handler coordination is
-needed.
-
-#### GraphStatusService aggregation
-
-`GraphStatusService` uses the ontology to derive the expected set of
-namespaced entity kinds, then reads one NATS KV key per entity. Missing keys
-are treated as `NotIndexed`. The namespace-level state is the worst of any
-entity's state:
-
-```rust
-// Priority: higher = worse. NotIndexed dominates (missing key = not started).
-fn state_priority(state: IndexingState) -> u8 {
-    match state {
-        IndexingState::Indexed     => 0,
-        IndexingState::Indexing    => 1,
-        IndexingState::Error       => 2,
-        IndexingState::Backfilling => 3,
-        IndexingState::NotIndexed  => 4,
-        IndexingState::Unknown     => 5,
-    }
-}
-```
-
-~36 KV reads at sub-millisecond each ≈ ~18ms total.
-
-#### Migration
-
-During rollout, `GraphStatusService` checks both old-format keys
-(`status.42.9970`) and new entity-suffixed keys. Old keys become stale once
-all handlers run the new code and can be purged by TTL.
-
-### Configuration
-
-Partition count is declared per pipeline in the ontology node YAML, under
-`extract.partition_count`. Pipelines that omit it run un-partitioned. The probe
-skips scopes below `PARTITION_MIN_ROWS` (`crates/indexer/src/modules/sdlc/partitioning.rs`).
-
-```yaml
-# config/ontology/nodes/ci/job.yaml
-pipelines:
-  - name: Job
-    extract:
-      type: clickhouse
-      tables: [siphon_p_ci_builds]
-      order_by: [traversal_path, id, partition_id]
-      query: generated
-      partition_count: 5
-```
-
-The existing `global-handler` and `namespace-handler` topic configs continue
-to govern engine-level policy (retry, concurrency group, DLQ) since per-entity
-handlers subscribe to those topics.
-
-## Why not the alternatives
-
-### Keep two handlers, add internal entity-level parallelism
-
-`Pipeline::run` (now removed) already ran entities concurrently behind a
-semaphore. Increasing `max_concurrent_entities` helped within one handler
-invocation, but the work was still bound to one NATS message and one engine
-worker slot. Multiple workers could not help with a single namespace's
-entities. One slow entity delayed the NATS ack for the entire message, which
-triggered redelivery of all entities.
-
-### Per-subject `sdlc.entity.indexing.requested.>` with an `EntityIndexingRequest` envelope
-
-Originally proposed: a dispatcher publishes one message per (entity, scope,
-partition) on a per-entity-kind subject, and the handler routes by
-`entity_kind`. This required a new message type, a new NATS subject family,
-and a dispatcher that owned partition orchestration (boundary computation,
-publishing, consolidation).
-
-Switched to per-entity handlers on shared topics because:
-
-- The existing `GlobalIndexingRequest` and `NamespaceIndexingRequest` already
-  carry everything needed (watermark + scope). The new envelope was pure
-  overhead.
-- The dispatcher had nothing useful to do, the entity handler already knows
-  its plan, its scope, its partition strategy. Pushing that work to the
-  dispatcher just moved the same logic across a network hop and added a
-  partition-state-machine to the dispatcher.
-- Local `JoinSet` partition execution is simpler than dispatcher-orchestrated
-  partition messages: failure isolation, retry, and ack semantics all stay in
-  one handler invocation.
-
-### Hash partitioning from day 1
-
-`cityHash64(column) % N = i` needs no boundary computation and is stable
-across retries. Benchmarks above show it reads 3.9× more data than range
-for the same scope. Hash cannot benefit from ClickHouse's primary key index.
+Each entity type has its own NATS consumer on the shared subscription.
+A slow merge request run does not delay issue or job runs.
+To partition a large entity, a developer declares a partition count in the ontology, and the message bus does not change.
+Checkpoint keys stay compatible, so a deploy does not reprocess data.
 
 ## Consequences
 
-### What improves
+- The refactor is breaking.
+  The global and namespace handlers are gone, together with the pipeline path that ran many plans.
+  Only the single-plan path remains.
+- Failure isolation across entities now depends on the retry and concurrency layer of the engine.
+  Before, each handler collected the errors of its entities.
+- Indexing status needs one entry for each entity and namespace, and the status service aggregates them.
+  During rollout, the status service read the old and the new formats.
+  Old entries became stale after all handlers ran the new code, and a time to live can remove them.
 
-- Each entity kind has its own NATS consumer (per-handler registration on the
-  shared subscription), so a slow MergeRequest does not delay Issue or Job
-  processing.
-- Large entities can be partitioned with no message-bus changes: declare
-  `extract.partition_count: 5` on the pipeline and the handler does the rest.
-- Backward-compatible checkpoint keys, no re-processing on deploy.
+## Why not the alternatives
 
-### What gets harder
+### Keep two handlers and add parallelism inside each handler
 
-- Breaking refactor: `GlobalHandler` and `NamespaceHandler` are gone, along
-  with `Pipeline::run` (multi-plan). Only `Pipeline::run_plan` remains.
-  Failure isolation across entities now relies on the engine's
-  retry/concurrency layer rather than per-handler error aggregation.
-- Indexing status: one KV key per (entity, namespace) instead of one per
-  namespace. `GraphStatusService` aggregates with worst-state-wins. Old and
-  new key formats coexist during rollout.
+The old pipeline already ran entities concurrently up to a limit.
+A higher limit helped inside one handler run.
+The work was still bound to one NATS message and one engine worker slot.
+More workers could not help with the entities of one namespace.
+One slow entity delayed the NATS acknowledgment for the whole message, and redelivery then ran all entities again.
+
+### Per-entity subjects with a new request envelope
+
+The first proposal had the dispatcher publish one message for each entity, scope, and partition.
+The messages used a new subject for each entity type, and the handler routed by entity type.
+This needed a new message type, a new NATS subject family, and a dispatcher that ran partitions.
+That dispatcher computed boundaries, published partitions, and consolidated them.
+
+We chose per-entity handlers on shared topics for these reasons:
+
+- The existing global and namespace requests already carry the watermark and the scope.
+  The new envelope added cost and no information.
+- The entity handler already knows its plan, its scope, and its partition strategy.
+  Dispatcher partitions move the same logic across a network hop and add a partition state machine to the dispatcher.
+- Local parallel partitions are simpler than dispatcher partition messages.
+  Failure isolation, retry, and acknowledgment all stay in one handler run.
+
+### Hash partitions from the start
+
+A hash partition needs no boundary computation and is stable across retries.
+In the benchmark, a hash filter read 3.9 times more data than a range filter for the same scope.
+A hash filter cannot use the ClickHouse primary key index.
 
 ## References
 
 - [SDLC indexing design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)
 - [Observability design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/observability.md)
-- Handler implementation: `crates/indexer/src/modules/sdlc/handler/entity.rs`
-- Partitioning logic: `crates/indexer/src/modules/sdlc/partitioning.rs`
-- Range vs hash partition benchmarks: `siphon_p_ci_builds` (100M rows, ClickHouse Cloud dev instance, 2026-05-08)

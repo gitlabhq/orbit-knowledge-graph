@@ -1,3 +1,4 @@
+pub(super) mod agent_plugins;
 mod hooks;
 mod instructions;
 pub(super) mod json;
@@ -46,6 +47,7 @@ pub(super) fn installer_for(component: Component) -> &'static dyn Installer {
         Component::Hooks => &hooks::Hooks,
         Component::Skill => &skill::WITHOUT_FILES,
         Component::Mcp => &mcp::McpServer,
+        Component::AgentPlugins => &agent_plugins::AgentPlugins,
     }
 }
 
@@ -147,7 +149,8 @@ fn write_unless_unchanged(
 
 fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let backup = backup_path(path);
-    if backup.exists() || !path.exists() {
+    let written_this_run = report.outcomes.iter().any(|outcome| outcome.label == label);
+    if backup.exists() || !path.exists() || written_this_run {
         return Ok(());
     }
     std::fs::copy(path, &backup)

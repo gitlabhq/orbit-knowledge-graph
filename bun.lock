@@ -20,6 +20,14 @@
         "semantic-release-slack-bot": "4.0.2",
       },
     },
+    "packages/agent-plugins": {
+      "name": "@orbit/agent-plugins",
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "es-toolkit": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/site": {
       "name": "@orbit/site",
       "dependencies": {
@@ -40,12 +48,13 @@
     },
   },
   "catalog": {
-    "@gitlab-org/orbit-markdown": "0.11.0",
-    "@gitlab-org/orbit-site": "0.11.0",
+    "@gitlab-org/orbit-markdown": "0.12.1",
+    "@gitlab-org/orbit-site": "0.12.1",
     "@tanstack/react-router": "1.170.17",
     "@types/bun": "1.4.4",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
+    "es-toolkit": "1.52.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "typescript": "7.0.2",
@@ -149,9 +158,9 @@
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.12", "", {}, "sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww=="],
 
-    "@gitlab-org/orbit-markdown": ["@gitlab-org/orbit-markdown@0.11.0", "https://gitlab.com/api/v4/projects/87795151/packages/npm/@gitlab-org/orbit-markdown/-/@gitlab-org/orbit-markdown-0.11.0.tgz", { "dependencies": { "dompurify": "^3.4.12", "katex": "0.17.0", "lucide-react": "^1.59.0", "marked": "^18.0.6", "mermaid": "^11.16.0", "quick-lru": "^7.3.0", "shiki": "^4.4.3", "yaml": "^2.9.1", "yet-another-react-lightbox": "^3.32.2" }, "peerDependencies": { "react": "^19.2.0", "react-dom": "^19.2.0" } }, "sha1-tQz14rdNejFcIZe3N3nBac2AVgY="],
+    "@gitlab-org/orbit-markdown": ["@gitlab-org/orbit-markdown@0.12.1", "https://gitlab.com/api/v4/projects/87795151/packages/npm/@gitlab-org/orbit-markdown/-/@gitlab-org/orbit-markdown-0.12.1.tgz", { "dependencies": { "dompurify": "^3.4.12", "katex": "0.17.0", "lucide-react": "^1.59.0", "marked": "^18.0.6", "mermaid": "^11.16.0", "quick-lru": "^7.3.0", "shiki": "^4.4.3", "yaml": "^2.9.1", "yet-another-react-lightbox": "^3.32.2" }, "peerDependencies": { "react": "^19.2.0", "react-dom": "^19.2.0" } }, "sha1-bFRzxKWX5gfvuu2h9dZ08PaSiDQ="],
 
-    "@gitlab-org/orbit-site": ["@gitlab-org/orbit-site@0.11.0", "https://gitlab.com/api/v4/projects/87795151/packages/npm/@gitlab-org/orbit-site/-/@gitlab-org/orbit-site-0.11.0.tgz", { "dependencies": { "@babel/core": "^8.0.1", "@gitlab-org/orbit-markdown": "^0.11.0", "@gitlab/fonts": "^1.3.1", "@gitlab/svgs": "3.163.0", "@gitlab/ui": "135.0.2", "@mdx-js/rollup": "^3.1.1", "@rolldown/plugin-babel": "^0.2.3", "@tailwindcss/vite": "^4.3.2", "@tanstack/router-plugin": "^1.168.19", "@vitejs/plugin-react": "^6.0.3", "babel-plugin-react-compiler": "^1.0.0", "cnfast": "^0.0.8", "rehype-slug": "^6.0.0", "remark-frontmatter": "^5.0.0", "remark-gfm": "^4.0.1", "tailwindcss": "^4.3.2", "yaml": "^2.9.1" }, "peerDependencies": { "@tanstack/react-router": "^1.170.17", "react": "^19.2.0", "react-dom": "^19.2.0", "vite": "^8.1.4" } }, "sha1-gpZSw4Hnm4Ysdq7dN/4lrOWF27g="],
+    "@gitlab-org/orbit-site": ["@gitlab-org/orbit-site@0.12.1", "https://gitlab.com/api/v4/projects/87795151/packages/npm/@gitlab-org/orbit-site/-/@gitlab-org/orbit-site-0.12.1.tgz", { "dependencies": { "@babel/core": "^8.0.1", "@gitlab-org/orbit-markdown": "^0.12.1", "@gitlab/fonts": "^1.3.1", "@gitlab/svgs": "3.163.0", "@gitlab/ui": "135.0.2", "@mdx-js/rollup": "^3.1.1", "@rolldown/plugin-babel": "^0.2.3", "@tailwindcss/vite": "^4.3.2", "@tanstack/router-plugin": "^1.168.19", "@vitejs/plugin-react": "^6.0.3", "babel-plugin-react-compiler": "^1.0.0", "cnfast": "^0.0.8", "rehype-slug": "^6.0.0", "remark-frontmatter": "^5.0.0", "remark-gfm": "^4.0.1", "tailwindcss": "^4.3.2", "yaml": "^2.9.1" }, "peerDependencies": { "@tanstack/react-router": "^1.170.17", "react": "^19.2.0", "react-dom": "^19.2.0", "vite": "^8.1.4" } }, "sha1-+hZauz9gXxZXeDONe8+/eJqDZj8="],
 
     "@gitlab/fonts": ["@gitlab/fonts@1.3.1", "", {}, "sha512-/7Q5Sy9Q3pmutV/1EgURm3iDZtV0HcE4nTwFpHLCrGDdxQ3pNv6SdujzeJExnfiI5Y+1FGfOvKwOlmiVuyDtzA=="],
 
@@ -212,6 +221,8 @@
     "@octokit/request-error": ["@octokit/request-error@7.1.2", "", { "dependencies": { "@octokit/types": "^18.0.0" } }, "sha512-XZRuT3xZ84D3gYErI1DZvhJ33dCWVV6uzBtWkaBB4TvA/L6eOeTZodxLFVB44bBEEo3vEx7y00UfX1tBLrtLRg=="],
 
     "@octokit/types": ["@octokit/types@18.0.0", "", { "dependencies": { "@octokit/openapi-types": "^29.0.1" } }, "sha512-l6bAF43PNxkJp6g+W4PjoUSSkxHomXw2nOum5CTftJz1NlV3vu93NImgOYtLf6CbBUb5j+fiuzW0PPQ5JTSvZA=="],
+
+    "@orbit/agent-plugins": ["@orbit/agent-plugins@workspace:packages/agent-plugins"],
 
     "@orbit/site": ["@orbit/site@workspace:packages/site"],
 
@@ -801,7 +812,7 @@
 
     "error-ex": ["error-ex@1.3.4", "", { "dependencies": { "is-arrayish": "^0.2.1" } }, "sha512-sqQamAnR14VgCr1A618A3sGrygcpK+HEbenA/HiEAkkUwcZIIB/tgWqHFxWgOyDh4nB4JCRimh79dR5Ywc9MDQ=="],
 
-    "es-toolkit": ["es-toolkit@1.53.0", "", {}, "sha512-3+AYXp9fmJ/UhHBMYj2/U+RaUouMD90SzoItyDOB2Za7W6dB7fQApFGnZPl2MF6K8/Tv1koh1JyirSx/kju6Pw=="],
+    "es-toolkit": ["es-toolkit@1.52.0", "", {}, "sha512-XTNEJQh1tY1ZJVcf6ayP/2n4ZPyaHlW2FWs7xvw5ddPuhUVjLD3olQVQS7kf58JbAB48iL0uL/jerTrjtV3lDA=="],
 
     "esast-util-from-estree": ["esast-util-from-estree@2.0.0", "", { "dependencies": { "@types/estree-jsx": "^1.0.0", "devlop": "^1.0.0", "estree-util-visit": "^2.0.0", "unist-util-position-from-estree": "^2.0.0" } }, "sha512-4CyanoAudUSBAn5K13H4JhsMH6L9ZP7XbLVe/dKybkxMO7eDyLsT8UHl9TRNrU2Gr9nz+FovfSIjuXWJ81uVwQ=="],
 
@@ -1669,9 +1680,15 @@
 
     "@commitlint/config-conventional/conventional-changelog-conventionalcommits": ["conventional-changelog-conventionalcommits@10.4.1", "", { "dependencies": { "@conventional-changelog/template": "^1.4.0" } }, "sha512-jS1LRFSbRoAr6JbhhRy1JYfNNUj5LM3+v49hRE03CgccsiYqgdVj/RTmrw4J1rylrqijHwdOlJWiJa61JHOgHg=="],
 
+    "@commitlint/ensure/es-toolkit": ["es-toolkit@1.53.0", "", {}, "sha512-3+AYXp9fmJ/UhHBMYj2/U+RaUouMD90SzoItyDOB2Za7W6dB7fQApFGnZPl2MF6K8/Tv1koh1JyirSx/kju6Pw=="],
+
+    "@commitlint/load/es-toolkit": ["es-toolkit@1.53.0", "", {}, "sha512-3+AYXp9fmJ/UhHBMYj2/U+RaUouMD90SzoItyDOB2Za7W6dB7fQApFGnZPl2MF6K8/Tv1koh1JyirSx/kju6Pw=="],
+
     "@commitlint/parse/conventional-changelog-angular": ["conventional-changelog-angular@9.4.0", "", { "dependencies": { "@conventional-changelog/template": "^1.4.0" } }, "sha512-HdxRxuS8bBXVIuo4V82gvSwAXT0vYQUizrjs/izmPg5JdDstr8v8I5hduGL3iQbG+o310dUDxC4+LetuS5hu9w=="],
 
     "@commitlint/parse/conventional-commits-parser": ["conventional-commits-parser@7.1.3", "", { "dependencies": { "@simple-libs/stream-utils": "^2.0.0", "argue-cli": "^3.1.0" }, "bin": { "conventional-commits-parser": "./dist/cli/index.js" } }, "sha512-Q9oWm1o9uy/oEsZQIraoFMZ4RuPD+79KgwWj6mJVP356tazolCB0piRLZ5Kz9te9p027uSEcUW+Gu44Eh+X79g=="],
+
+    "@commitlint/resolve-extends/es-toolkit": ["es-toolkit@1.53.0", "", {}, "sha512-3+AYXp9fmJ/UhHBMYj2/U+RaUouMD90SzoItyDOB2Za7W6dB7fQApFGnZPl2MF6K8/Tv1koh1JyirSx/kju6Pw=="],
 
     "@commitlint/types/conventional-commits-parser": ["conventional-commits-parser@7.1.3", "", { "dependencies": { "@simple-libs/stream-utils": "^2.0.0", "argue-cli": "^3.1.0" }, "bin": { "conventional-commits-parser": "./dist/cli/index.js" } }, "sha512-Q9oWm1o9uy/oEsZQIraoFMZ4RuPD+79KgwWj6mJVP356tazolCB0piRLZ5Kz9te9p027uSEcUW+Gu44Eh+X79g=="],
 
@@ -1890,6 +1907,8 @@
     "mdast-util-to-hast/unist-util-visit": ["unist-util-visit@5.2.0", "", { "dependencies": { "@types/unist": "^3.0.0", "unist-util-is": "^6.0.0", "unist-util-visit-parents": "^6.1.0" } }, "sha512-fpsYs/VVoZxfGY9/j3FQpZmN8wdLJaV1Pt38AaJNZu9uKIHcFU3halCdBveEq1HGKO1OEfJY65w1zvoFV1b3qQ=="],
 
     "mdast-util-to-markdown/parse-entities": ["parse-entities@2.0.0", "", { "dependencies": { "character-entities": "^1.0.0", "character-entities-legacy": "^1.0.0", "character-reference-invalid": "^1.0.0", "is-alphanumerical": "^1.0.0", "is-decimal": "^1.0.0", "is-hexadecimal": "^1.0.0" } }, "sha512-kkywGpCcRYhqQIchaWqZ875wzpS/bMKhz5HnN3p7wveJTkTtyAB/AlnS0f8DFSqYW1T82t6yEAkEcB+A1I3MbQ=="],
+
+    "mermaid/es-toolkit": ["es-toolkit@1.53.0", "", {}, "sha512-3+AYXp9fmJ/UhHBMYj2/U+RaUouMD90SzoItyDOB2Za7W6dB7fQApFGnZPl2MF6K8/Tv1koh1JyirSx/kju6Pw=="],
 
     "mermaid/katex": ["katex@0.16.47", "", { "dependencies": { "commander": "^8.3.0" }, "bin": { "katex": "cli.js" } }, "sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg=="],
 

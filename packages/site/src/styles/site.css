@@ -26,7 +26,6 @@
   .tone-bar {
     background: color-mix(in srgb, var(--tone) 16%, var(--gl-background-color-default));
     border: 1px solid color-mix(in srgb, var(--tone) 55%, transparent);
-    box-shadow: inset 3px 0 0 var(--tone);
   }
 
   .tone-bar[data-status="exploring"] {
