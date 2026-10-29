@@ -40,7 +40,7 @@ tests:
 
   - name: Cross-file call from run to create_user does not resolve
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'create_user'
         AND caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee

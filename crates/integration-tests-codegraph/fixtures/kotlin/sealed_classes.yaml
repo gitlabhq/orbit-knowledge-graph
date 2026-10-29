@@ -107,7 +107,7 @@ tests:
 
   - name: "File defines the sealed interface and all three subclasses"
     query: |
-      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(d:Definition)
       WHERE f.path = 'com/example/sealed/Expr.kt'
         AND d.fqn IN [
           'com.example.sealed.Expr',

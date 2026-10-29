@@ -141,14 +141,14 @@ tests:
   - name: "wildcard __init__ re-export resolves to the defining module"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
           WHERE caller.fqn = 'api.handler.build_registry'
             AND callee.fqn = 'prompts.base.BasePromptRegistry'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
           WHERE caller.fqn = 'api.handler.build_registry'
             AND sym.name = 'BasePromptRegistry'
           RETURN caller.fqn AS caller
@@ -157,7 +157,7 @@ tests:
 
   - name: "direct module import still binds (no regression)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'api.monitoring.build_registry_direct'
         AND callee.fqn = 'prompts.base.BasePromptRegistry'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -166,7 +166,7 @@ tests:
 
   - name: "renaming named re-export resolves to the underlying definition"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'selection.caller.load_config'
         AND callee.fqn = 'selection.impl.RealConfig'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -175,7 +175,7 @@ tests:
 
   - name: "sibling-module re-export resolves to the defining module"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'processing.caller.make_language_id'
         AND callee.fqn = 'processing.typing.LanguageId'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -184,7 +184,7 @@ tests:
 
   - name: "multi-hop re-export chain resolves to the defining module"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'deep.caller.make_deep'
         AND callee.fqn = 'deep.impl.Deep'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -194,13 +194,13 @@ tests:
   - name: "external import without a local definition stays an Import"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
           WHERE caller.fqn = 'ext.caller.build_widget'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { empty: true }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
           WHERE caller.fqn = 'ext.caller.build_widget'
             AND sym.import_path = 'thirdparty'
             AND sym.name = 'Widget'
@@ -211,13 +211,13 @@ tests:
   - name: "name a package does not re-export is not bound to a definition"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
           WHERE caller.fqn = 'empty_pkg.caller.use_absent'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { empty: true }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
           WHERE caller.fqn = 'empty_pkg.caller.use_absent'
             AND sym.name = 'Absent'
           RETURN caller.fqn AS caller
@@ -227,13 +227,13 @@ tests:
   - name: "ambiguous wildcard re-export does not bind arbitrarily"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
           WHERE caller.fqn = 'amb.caller.make_thing'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { empty: true }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
           WHERE caller.fqn = 'amb.caller.make_thing'
             AND sym.name = 'Thing'
           RETURN caller.fqn AS caller

@@ -13,7 +13,7 @@ fixtures:
 tests:
   - name: inner() resolves within outer
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE callee.name = 'inner'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

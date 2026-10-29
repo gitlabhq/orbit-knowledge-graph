@@ -13,7 +13,7 @@ fixtures:
 tests:
   - name: Recursive call resolves to self
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'factorial' AND callee.name = 'factorial'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

@@ -92,7 +92,7 @@ tests:
 
   - name: "String interpolation refs resolve: aws_subnet type scope -> region"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'aws_subnet'
         AND callee.name = 'region'
       RETURN caller.fqn AS caller, callee.name AS callee
@@ -101,7 +101,7 @@ tests:
 
   - name: "Chained resource refs: aws_db_subnet_group type scope -> both subnets"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'aws_db_subnet_group'
         AND callee.fqn STARTS WITH 'aws_subnet.'
       RETURN callee.fqn AS callee
@@ -112,7 +112,7 @@ tests:
 
   - name: "Sensitive variable ref resolves: aws_db_instance type scope -> db_password"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'aws_db_instance'
         AND callee.name = 'db_password'
       RETURN caller.fqn AS caller, callee.name AS callee

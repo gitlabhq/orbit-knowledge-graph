@@ -56,7 +56,7 @@ fixtures:
 tests:
   - name: "D25: builder caller calls step1"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'builder_caller' AND callee.name = 'step1'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -65,7 +65,7 @@ tests:
 
   - name: "D25: builder caller calls build"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'builder_caller' AND callee.name = 'build'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -74,7 +74,7 @@ tests:
 
   - name: "D26: mixed_caller calls MyClass (instantiation)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'mixed_caller' AND callee.name = 'MyClass'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -83,7 +83,7 @@ tests:
 
   - name: "D26: mixed_caller calls method (instance method)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'mixed_caller' AND callee.name = 'method'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -92,7 +92,7 @@ tests:
 
   - name: "D26: mixed_caller calls my_function (bare function)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'mixed_caller' AND callee.name = 'my_function'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -101,7 +101,7 @@ tests:
 
   - name: "D28: callable_caller calls Callable (instantiation)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'callable_caller' AND callee.name = 'Callable'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -110,7 +110,7 @@ tests:
 
   - name: "D41: C.method_c calls method_a (from parent A)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'method_c' AND callee.name = 'method_a'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -119,7 +119,7 @@ tests:
 
   - name: "D41: C.method_c calls method_b (from parent B)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'method_c' AND callee.name = 'method_b'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

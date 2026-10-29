@@ -58,7 +58,7 @@ tests:
 
   - name: fetch calls self.speak()
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.name = 'fetch' AND callee.name = 'speak'
       RETURN caller.fqn AS caller
     assert:

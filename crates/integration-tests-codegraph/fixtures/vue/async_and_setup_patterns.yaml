@@ -51,7 +51,7 @@ tests:
 
   - name: defineAsyncComponent setup methods resolve imported helper calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'AsyncPanel::setup'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -69,7 +69,7 @@ tests:
 
   - name: script setup function bodies resolve imported helper calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'runSetup'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

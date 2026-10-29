@@ -47,7 +47,7 @@ fixtures:
 tests:
   - name: "loop back-edge preserves prior and reassigned bindings"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'loop_reassign'
       RETURN callee.fqn AS fqn
     assert:
@@ -57,7 +57,7 @@ tests:
 
   - name: "tuple destructure binds elements positionally"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'tuple_destructure'
       RETURN callee.fqn AS fqn
     assert:
@@ -67,7 +67,7 @@ tests:
 
   - name: "field reassignment tracks both assigned targets"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'field_reassign'
       RETURN callee.fqn AS fqn
     assert:

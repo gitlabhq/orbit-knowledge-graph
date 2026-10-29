@@ -97,7 +97,7 @@ tests:
 
   - name: "Extends edges connect permitted classes to the sealed interface"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS|IMPLEMENTS]->(parent:Definition)
       WHERE child.fqn IN [
           'com.example.shapes.Circle',
           'com.example.shapes.Rectangle',
@@ -113,7 +113,7 @@ tests:
 
   - name: "Permits-side references link the sealed parent to each permitted class"
     query: |
-      MATCH (parent:Definition)-[e:CALLS]->(child:Definition)
+      MATCH (parent:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(child:Definition)
       WHERE parent.fqn = 'com.example.shapes.Shape'
         AND child.fqn IN [
           'com.example.shapes.Circle',
@@ -129,7 +129,7 @@ tests:
 
   - name: "Malformed child: no Extends edge exists between Square and Quad"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS|IMPLEMENTS]->(parent:Definition)
       WHERE child.fqn = 'com.example.shapes.Square'
         AND parent.fqn = 'com.example.shapes.Quad'
       RETURN child.fqn AS child
@@ -138,7 +138,7 @@ tests:
 
   - name: "Malformed child: the permits-side reference is the only remaining link"
     query: |
-      MATCH (parent:Definition)-[e:CALLS]->(child:Definition)
+      MATCH (parent:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(child:Definition)
       WHERE parent.fqn = 'com.example.shapes.Quad'
         AND child.fqn = 'com.example.shapes.Square'
       RETURN child.fqn AS child

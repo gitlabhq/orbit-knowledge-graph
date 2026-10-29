@@ -55,7 +55,7 @@ tests:
 
   - name: self.speak() resolves within impl
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.name = 'greet' AND callee.name = 'speak'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -63,7 +63,7 @@ tests:
 
   - name: No spurious call edges from the struct itself
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.name = 'Dog'
       RETURN callee.name AS callee
     assert:

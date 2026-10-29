@@ -45,7 +45,7 @@ fixtures:
 tests:
   - name: "package, aliased, and dotted package imports target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
       WHERE caller.name = 'package_import_call'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path
@@ -58,7 +58,7 @@ tests:
 
   - name: "from imports target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
       WHERE caller.name = 'from_import_call'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path, name
@@ -80,14 +80,14 @@ tests:
   - name: "locally resolved imports do not emit imported-symbol fallback"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
           WHERE caller.name = 'local_import_call'
             AND callee.fqn = 'local_models.LocalClient'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
           WHERE caller.name = 'local_import_call'
           RETURN sym.import_path AS path
         assert:
@@ -95,7 +95,7 @@ tests:
 
   - name: "wildcard imports target wildcard imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
       WHERE caller.name = 'wildcard_import_call'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.language_kind AS language_kind
     assert:
@@ -104,7 +104,7 @@ tests:
 
   - name: "built-ins do not target wildcard imports"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
       WHERE caller.name IN ['builtin_len_call', 'builtin_print_call']
       RETURN sym.import_path AS path
     assert:

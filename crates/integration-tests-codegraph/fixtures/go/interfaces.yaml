@@ -57,7 +57,7 @@ tests:
   - name: "process calls Repository.Get and Repository.Save, not Close"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
           WHERE caller.fqn = 'main.process'
           RETURN callee.fqn AS callee
           ORDER BY callee
@@ -66,7 +66,7 @@ tests:
           - { row: { callee: "main.Repository.Save" } }
       # No edges to unrelated methods
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.fqn = 'main.process' AND callee.name = 'Close'
           RETURN callee.name
         assert:

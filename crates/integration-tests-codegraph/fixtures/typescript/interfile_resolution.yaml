@@ -64,7 +64,7 @@ tests:
 
   - name: run calls buildUser cross-file
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'buildUser'
         AND caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -74,7 +74,7 @@ tests:
 
   - name: No call edges from models.ts (it only defines)
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.file_path = 'models.ts'
       RETURN caller.fqn AS caller
     assert:

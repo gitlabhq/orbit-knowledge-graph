@@ -225,7 +225,7 @@ tests:
 
   - name: External React and JSX package calls target imported symbols
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
       WHERE caller.fqn = 'Home'
         AND sym.import_path IN ['react', '@external/ui']
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name
@@ -237,7 +237,7 @@ tests:
 
   - name: Cross-file JSX calls resolve through named default namespace and star reexports
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'Home'
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY callee_file, callee
@@ -254,7 +254,7 @@ tests:
   - name: Resolved JSX component calls do not emit imported-symbol fallback
     skip: true
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(sym:Import)
       WHERE caller.fqn IN [
         'Home',
         'FragmentHost',
@@ -269,7 +269,7 @@ tests:
 
   - name: Cross-file JSX calls resolve from default component internals
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'Card'
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY callee
@@ -281,7 +281,7 @@ tests:
 
   - name: Local JSX calls inside the same TSX file still resolve
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn IN ['IconButton', 'CardFooter']
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY caller
@@ -292,7 +292,7 @@ tests:
 
   - name: JSX fragments children aliases and default imports resolve
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn IN ['FragmentHost', 'AliasDefaultHost', 'NamespaceDefaultHost']
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY caller, callee_file, callee
@@ -306,7 +306,7 @@ tests:
 
   - name: Plain JSX files resolve imported TSX components
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.file_path = 'src/Plain.jsx'
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
     assert:
@@ -324,7 +324,7 @@ tests:
 
   - name: TSX type declarations do not create runtime call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.file_path = 'src/components/button.tsx'
         AND callee.name = 'ButtonProps'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -333,7 +333,7 @@ tests:
 
   - name: Intrinsic JSX tags do not create code call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'NativeOnly'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

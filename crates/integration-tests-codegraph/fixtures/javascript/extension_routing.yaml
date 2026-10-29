@@ -133,7 +133,7 @@ tests:
 
   - name: Generic pipeline resolves cross-file calls for JS-family extensions
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.file_path IN [
           'jsx/consumer.js',
           'tsx/consumer.ts',

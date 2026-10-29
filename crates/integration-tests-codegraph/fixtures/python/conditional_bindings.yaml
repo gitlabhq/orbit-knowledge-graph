@@ -90,7 +90,7 @@ tests:
     skip: true
     queries:
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'if_else_caller'
           RETURN caller.fqn AS caller_fqn, callee.name AS callee, callee.fqn AS callee_fqn
           ORDER BY callee
@@ -100,7 +100,7 @@ tests:
           - { row: { caller_fqn: "main.if_else_caller", callee: "option_b", callee_fqn: "main.option_b" } }
       # false positive: no edge to option_c, foo, bar, or any other def
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'if_else_caller'
             AND NOT callee.name IN ['option_a', 'option_b']
           RETURN callee.name
@@ -112,7 +112,7 @@ tests:
     skip: true
     queries:
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'try_except_caller'
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
           ORDER BY callee
@@ -121,7 +121,7 @@ tests:
           - { row: { callee: "bar", callee_fqn: "main.bar" } }
           - { row: { callee: "foo", callee_fqn: "main.foo" } }
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'try_except_caller'
             AND NOT callee.name IN ['foo', 'bar']
           RETURN callee.name
@@ -132,7 +132,7 @@ tests:
   - name: "trivial phi: exactly 1 edge (collapsed)"
     queries:
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'trivial_phi_caller'
           RETURN callee.name AS callee
         assert:
@@ -144,7 +144,7 @@ tests:
     skip: true
     queries:
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'no_else_caller'
           RETURN callee.name AS callee
           ORDER BY callee
@@ -153,7 +153,7 @@ tests:
           - { row: { callee: "bar" } }
           - { row: { callee: "foo" } }
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'no_else_caller'
             AND NOT callee.name IN ['foo', 'bar']
           RETURN callee.name
@@ -164,7 +164,7 @@ tests:
   - name: "reassignment kills phi: exactly 1 edge to final value"
     queries:
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'reassign_after_branch'
           RETURN callee.name AS callee
         assert:
@@ -172,7 +172,7 @@ tests:
           - { row: { callee: "option_c" } }
       # false positive: phi targets should NOT survive reassignment
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'reassign_after_branch'
             AND callee.name IN ['option_a', 'option_b']
           RETURN callee.name
@@ -184,7 +184,7 @@ tests:
     skip: true
     queries:
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'nested_caller'
           RETURN callee.name AS callee
           ORDER BY callee
@@ -194,7 +194,7 @@ tests:
           - { row: { callee: "option_b" } }
           - { row: { callee: "option_c" } }
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'nested_caller'
             AND NOT callee.name IN ['option_a', 'option_b', 'option_c']
           RETURN callee.name
@@ -206,7 +206,7 @@ tests:
     skip: true
     queries:
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'elif_caller'
           RETURN callee.name AS callee
           ORDER BY callee
@@ -216,7 +216,7 @@ tests:
           - { row: { callee: "option_b" } }
           - { row: { callee: "option_c" } }
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'elif_caller'
             AND NOT callee.name IN ['option_a', 'option_b', 'option_c']
           RETURN callee.name
@@ -227,7 +227,7 @@ tests:
   - name: "no_calls: zero outgoing edges"
     queries:
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.name = 'no_calls'
           RETURN callee.name
         assert:
@@ -238,7 +238,7 @@ tests:
     skip: true
     queries:
       - query: |
-          MATCH (src:Definition)-[e:CALLS|DEFINES|EXTENDS]->(tgt:Definition)
+          MATCH (src:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(tgt:Definition)
           WITH src.name AS caller, tgt.name AS callee, count(src) AS cnt
           WHERE cnt > 1
           RETURN caller, callee, cnt

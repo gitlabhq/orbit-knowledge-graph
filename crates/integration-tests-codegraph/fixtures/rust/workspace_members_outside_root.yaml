@@ -48,7 +48,7 @@ fixtures:
 tests:
   - name: "members outside workspace root still resolve through workspace.dependencies"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.file_path = 'members/app/src/main.rs'
         AND caller.name = 'boot'
         AND callee.name = 'helper'

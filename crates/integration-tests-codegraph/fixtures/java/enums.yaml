@@ -60,7 +60,7 @@ tests:
 
   - name: "Enum constants are extracted as EnumConstant definitions"
     query: |
-      MATCH (e:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
+      MATCH (e:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND c.language_kind = 'EnumConstant'
       RETURN c.name AS name
@@ -73,7 +73,7 @@ tests:
 
   - name: "Enum constructor is extracted"
     query: |
-      MATCH (e:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
+      MATCH (e:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND c.language_kind = 'Constructor'
       RETURN c.name AS name
@@ -123,7 +123,7 @@ tests:
 
   - name: "Enum Planet has an Extends edge to the Describable interface"
     query: |
-      MATCH (e:Definition)-[r:EXTENDS]->(i:Definition)
+      MATCH (e:Definition)-[r:EXTENDS|IMPLEMENTS]->(i:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND i.fqn = 'com.example.enums.Describable'
       RETURN i.fqn AS fqn
@@ -132,7 +132,7 @@ tests:
 
   - name: "File defines the enum"
     query: |
-      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(d:Definition)
       WHERE f.path = 'com/example/enums/Planet.java'
         AND d.fqn = 'com.example.enums.Planet'
       RETURN d.fqn AS fqn

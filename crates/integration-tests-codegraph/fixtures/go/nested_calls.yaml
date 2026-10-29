@@ -33,7 +33,7 @@ tests:
   - name: "Start calls Info and process, not Error"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
           WHERE caller.fqn = 'main.Start'
           RETURN callee.fqn AS callee
           ORDER BY callee
@@ -41,7 +41,7 @@ tests:
           - { row: { callee: "main.Info" } }
           - { row: { callee: "main.process" } }
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.fqn = 'main.Start' AND callee.name = 'Error'
           RETURN callee.name
         assert:
@@ -49,7 +49,7 @@ tests:
 
   - name: "process calls Info and Error"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'main.process'
       RETURN callee.fqn AS callee
       ORDER BY callee
@@ -59,7 +59,7 @@ tests:
 
   - name: "recursive calls itself"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.fqn = 'main.recursive' AND callee.fqn = 'main.recursive'
       RETURN callee.fqn AS callee
     assert:

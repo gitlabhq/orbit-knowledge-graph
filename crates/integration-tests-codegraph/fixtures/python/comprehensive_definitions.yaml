@@ -89,7 +89,7 @@ tests:
 
   - name: ClassWithMethods has multiple methods
     query: |
-      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
+      MATCH (cls:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(m:Definition)
       WHERE cls.name = 'ClassWithMethods'
       RETURN count(m) AS n
     assert:

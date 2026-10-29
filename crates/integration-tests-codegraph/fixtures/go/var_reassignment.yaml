@@ -42,13 +42,13 @@ tests:
   - name: "varDecl calls Meow via var declaration type"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
           WHERE caller.fqn = 'main.varDecl'
           RETURN callee.fqn AS callee
         assert:
           - { row: { callee: "main.Meow" } }
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
           WHERE caller.fqn = 'main.varDecl' AND callee.name = 'Bark'
           RETURN callee.name
         assert:
@@ -57,7 +57,7 @@ tests:
   - name: "separateVars calls Meow and Bark without cross-contamination"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
           WHERE caller.fqn = 'main.separateVars'
           RETURN callee.fqn AS callee
           ORDER BY callee
@@ -67,7 +67,7 @@ tests:
 
   - name: "reassigned: both Meow and Bark resolve (phi merges both types)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'main.reassigned'
       RETURN callee.fqn AS callee
       ORDER BY callee
@@ -77,7 +77,7 @@ tests:
 
   - name: "groupedParams: both a and b resolve Query"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'main.groupedParams'
         AND callee.name = 'Query'
       RETURN callee.fqn AS callee

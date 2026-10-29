@@ -55,7 +55,7 @@ fixtures:
 tests:
   - name: "if-expression joins preserve both callable targets"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'branch_join'
       RETURN callee.fqn AS fqn
     assert:
@@ -65,7 +65,7 @@ tests:
 
   - name: "mutable rebindings preserve prior and reassigned targets"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'rebinding'
       RETURN callee.fqn AS fqn
     assert:
@@ -75,7 +75,7 @@ tests:
 
   - name: "block-expression aliases resolve through inner locals"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'block_alias'
       RETURN callee.fqn AS fqn
     assert:
@@ -84,7 +84,7 @@ tests:
 
   - name: "loop-carried aliases preserve both callable targets"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'loop_rebinding'
       RETURN callee.fqn AS fqn
     assert:
@@ -94,7 +94,7 @@ tests:
 
   - name: "match-expression joins preserve both callable targets"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'match_join'
       RETURN callee.fqn AS fqn
     assert:

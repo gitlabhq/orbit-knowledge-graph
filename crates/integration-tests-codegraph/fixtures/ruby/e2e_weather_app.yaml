@@ -176,7 +176,7 @@ tests:
 
   - name: "File defines top-level module"
     query: |
-      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(d:Definition)
       WHERE f.path = 'lib/weather_app/forecast.rb'
         AND d.fqn = 'WeatherApp::Forecast'
       RETURN f.path AS file, d.fqn AS def

@@ -39,7 +39,7 @@ fixtures:
 tests:
   - name: "aliased re-exported function resolves to its original definition"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_reexports' AND callee.name = 'helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -48,7 +48,7 @@ tests:
 
   - name: "re-exported type keeps associated function resolution"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_reexports' AND callee.name = 'create'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.language_kind AS type
     assert:
@@ -57,7 +57,7 @@ tests:
 
   - name: "Self::new inside impl resolves to the inherent constructor"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'create' AND callee.name = 'new'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.language_kind AS type
     assert:

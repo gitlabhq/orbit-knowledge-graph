@@ -12,7 +12,7 @@ fixtures:
 tests:
   - name: "build -> helper resolves in the same file"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'build' AND callee.name = 'helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:

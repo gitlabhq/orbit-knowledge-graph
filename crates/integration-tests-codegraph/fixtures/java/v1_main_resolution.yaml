@@ -124,7 +124,7 @@ tests:
 
   - name: "Main extends Application"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS|IMPLEMENTS]->(parent:Definition)
       WHERE child.fqn = 'com.example.app.Main'
         AND parent.fqn = 'com.example.app.Application'
       RETURN child.fqn AS child, parent.fqn AS parent
@@ -133,7 +133,7 @@ tests:
 
   - name: "Main.main -> Traceable annotation"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.app.Traceable'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -143,7 +143,7 @@ tests:
 
   - name: "Main constructor -> new Foo()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.Main'
         AND callee.fqn = 'com.example.app.Foo'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -152,7 +152,7 @@ tests:
 
   - name: "Main.main -> Foo.bar (this.myParameter.bar())"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.app.Foo.bar'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -162,7 +162,7 @@ tests:
 
   - name: "Main.main -> Bar.baz (pattern variable instanceof)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.app.Bar.baz'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -172,7 +172,7 @@ tests:
 
   - name: "Main.main -> Bar (instanceof type ref)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.app.Bar'
       RETURN callee.fqn AS callee
@@ -181,7 +181,7 @@ tests:
 
   - name: "Main.main -> Executor.execute (method reference)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.app.Executor.execute'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -190,7 +190,7 @@ tests:
 
   - name: "Main.main -> Main.await (same-class call)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.app.Main.await'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -200,7 +200,7 @@ tests:
 
   - name: "Main.main -> Application.run (super call)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.app.Application.run'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -210,7 +210,7 @@ tests:
 
   - name: "Main.main -> Outer.make (cross-package import)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.util.Outer.make'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -220,7 +220,7 @@ tests:
 
   - name: "Main.main -> Outer.outerMethod (resolved variable type)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.util.Outer.outerMethod'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -230,7 +230,7 @@ tests:
 
   - name: "Main.main -> Outer.Inner (nested class constructor)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.util.Outer.Inner'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -240,7 +240,7 @@ tests:
 
   - name: "Main.main -> Outer.Inner.innerMethod (nested class instance method)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.util.Outer.Inner.innerMethod'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -250,7 +250,7 @@ tests:
 
   - name: "Main.main -> Outer.Inner.innerStatic (nested class static method)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.util.Outer.Inner.innerStatic'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -260,7 +260,7 @@ tests:
 
   - name: "InnerInnerHelpers.innerInnerDoHelp -> InnerHelpers.innerDoHelp (super call)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.helpers.Helpers.InnerInnerHelpers.innerInnerDoHelp'
         AND callee.fqn = 'com.example.helpers.Helpers.InnerHelpers.innerDoHelp'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -269,7 +269,7 @@ tests:
 
   - name: "Main.main -> EnumClass.enumMethod1 (enum constant method)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.app.EnumClass.enumMethod1'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -278,7 +278,7 @@ tests:
 
   - name: "Main.main -> EnumClass.enumMethod2 (enum var method)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND callee.fqn = 'com.example.app.EnumClass.enumMethod2'
       RETURN caller.fqn AS caller, callee.fqn AS callee

@@ -110,7 +110,7 @@ fixtures:
 tests:
   - name: "trait method call resolves to impl method"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_trait_method' AND callee.name = 'run'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
@@ -119,7 +119,7 @@ tests:
 
   - name: "trait UFCS call resolves to impl method"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_trait_ufcs' AND callee.name = 'run'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
@@ -128,7 +128,7 @@ tests:
 
   - name: "associated function call resolves"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_trait_method' AND callee.name = 'construct'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.language_kind AS type
     assert:
@@ -137,7 +137,7 @@ tests:
 
   - name: "tuple struct constructor resolves to struct definition"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_tuple_struct' AND callee.name = 'Wrapper'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
@@ -146,7 +146,7 @@ tests:
 
   - name: "enum variant constructor resolves to variant definition"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_enum_variant' AND callee.name = 'Start'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.language_kind AS type
     assert:
@@ -155,7 +155,7 @@ tests:
 
   - name: "function-item alias call still resolves to original function"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_fn_alias' AND callee.name = 'helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -164,7 +164,7 @@ tests:
 
   - name: "fn pointer coercion still resolves to original function"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_fn_pointer_alias' AND callee.name = 'helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -173,7 +173,7 @@ tests:
 
   - name: "local alias chain preserves callable target"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_alias_chain' AND callee.name = 'helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -182,7 +182,7 @@ tests:
 
   - name: "trait associated UFCS resolves to impl associated function"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_trait_associated_ufcs' AND callee.name = 'construct'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.language_kind AS type
     assert:
@@ -191,7 +191,7 @@ tests:
 
   - name: "type alias associated call resolves to underlying impl"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_type_alias_associated' AND callee.name = 'construct'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.language_kind AS type
     assert:
@@ -200,7 +200,7 @@ tests:
 
   - name: "autoderef method call resolves through Deref target"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|INSTANTIATES|USES_VALUE|USES_TYPE|ANNOTATED_BY|DEFINES|EXTENDS|IMPLEMENTS]->(callee:Definition)
       WHERE caller.name = 'call_autoderef_method' AND callee.name = 'run'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
