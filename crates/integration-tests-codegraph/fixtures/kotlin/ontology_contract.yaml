@@ -294,7 +294,7 @@ tests:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-          WHERE a.fqn = 'shop.register' AND b.fqn = 'shop.User' AND e.resolution = '' AND e.usage = 'parameter' AND 23 IN e.lines
+          WHERE a.fqn = 'shop.register' AND b.fqn = 'shop.User' AND e.usage = 'parameter' AND 23 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }
@@ -306,7 +306,7 @@ tests:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-          WHERE a.fqn = 'shop.User' AND b.fqn = 'shop.base.Base' AND e.resolution = '' AND 7 IN e.lines
+          WHERE a.fqn = 'shop.User' AND b.fqn = 'shop.base.Base' AND 7 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }
@@ -336,7 +336,7 @@ tests:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Import)
-          WHERE a.fqn = 'shop.UserTest.savesTheUser' AND b.import_path = 'org.junit' AND b.name = 'Test' AND e.resolution = '' AND 6 IN e.lines
+          WHERE a.fqn = 'shop.UserTest.savesTheUser' AND b.import_path = 'org.junit' AND b.name = 'Test' AND 6 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }

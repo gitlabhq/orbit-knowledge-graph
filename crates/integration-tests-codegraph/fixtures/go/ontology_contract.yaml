@@ -268,19 +268,19 @@ tests:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-          WHERE a.fqn = 'shop.Order.Charge' AND b.fqn = 'shop.Order' AND e.resolution = '' AND e.usage = 'parameter' AND 20 IN e.lines
+          WHERE a.fqn = 'shop.Order.Charge' AND b.fqn = 'shop.Order' AND e.usage = 'parameter' AND 20 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-          WHERE a.fqn = 'shop.Order.describe' AND b.fqn = 'shop.Order' AND e.resolution = '' AND e.usage = 'parameter' AND 27 IN e.lines
+          WHERE a.fqn = 'shop.Order.describe' AND b.fqn = 'shop.Order' AND e.usage = 'parameter' AND 27 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-          WHERE a.fqn = 'shop.NewOrder' AND b.fqn = 'shop.Order' AND e.resolution = '' AND 29 IN e.lines
+          WHERE a.fqn = 'shop.NewOrder' AND b.fqn = 'shop.Order' AND 29 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }

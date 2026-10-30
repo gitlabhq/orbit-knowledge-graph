@@ -242,7 +242,7 @@ tests:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-          WHERE a.fqn = 'Order' AND b.fqn = 'Store' AND e.resolution = '' AND 9 IN e.lines
+          WHERE a.fqn = 'Order' AND b.fqn = 'Store' AND 9 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }

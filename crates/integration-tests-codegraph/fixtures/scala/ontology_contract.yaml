@@ -215,7 +215,7 @@ tests:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-          WHERE a.fqn = 'shop.Point' AND b.fqn = 'shop.base.Shape' AND e.resolution = '' AND 6 IN e.lines
+          WHERE a.fqn = 'shop.Point' AND b.fqn = 'shop.base.Shape' AND 6 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }

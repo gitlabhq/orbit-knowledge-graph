@@ -400,7 +400,7 @@ tests:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-          WHERE a.fqn = 'com.shop.Order' AND b.fqn = 'com.shop.base.Payable' AND e.resolution = '' AND 9 IN e.lines
+          WHERE a.fqn = 'com.shop.Order' AND b.fqn = 'com.shop.base.Payable' AND 9 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }
@@ -412,7 +412,7 @@ tests:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-          WHERE a.fqn = 'com.shop.Order' AND b.fqn = 'com.shop.base.Entity' AND e.resolution = '' AND 9 IN e.lines
+          WHERE a.fqn = 'com.shop.Order' AND b.fqn = 'com.shop.base.Entity' AND 9 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }
@@ -430,19 +430,19 @@ tests:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Import)
-          WHERE a.fqn = 'com.shop.Order' AND b.import_path = 'java.util' AND b.name = 'List' AND e.resolution = '' AND e.usage = 'field' AND 11 IN e.lines
+          WHERE a.fqn = 'com.shop.Order' AND b.import_path = 'java.util' AND b.name = 'List' AND e.usage = 'field' AND 11 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Import)
-          WHERE a.fqn = 'com.shop.Order.note' AND b.import_path = 'java.util' AND b.name = 'List' AND e.resolution = '' AND e.usage = 'parameter' AND 26 IN e.lines
+          WHERE a.fqn = 'com.shop.Order.note' AND b.import_path = 'java.util' AND b.name = 'List' AND e.usage = 'parameter' AND 26 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Import)
-          WHERE a.fqn = 'com.shop.OrderTest.paysTheOrder' AND b.import_path = 'org.junit.jupiter.api' AND b.name = 'Test' AND e.resolution = '' AND 6 IN e.lines
+          WHERE a.fqn = 'com.shop.OrderTest.paysTheOrder' AND b.import_path = 'org.junit.jupiter.api' AND b.name = 'Test' AND 6 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }

@@ -492,14 +492,10 @@ impl AsRecordBatch for IndexerEdgeRow<'_> {
         b.col("source_tags")?.push_str_list(&src)?;
         let tgt: Vec<&str> = self.target_tags.iter().map(|s| s.as_str()).collect();
         b.col("target_tags")?.push_str_list(&tgt)?;
-        b.col("lines")?.push_int_list(&self.properties.lines)?;
-        b.col("resolution")?.push_str(self.properties.resolution)?;
-        b.col("access")?.push_str(self.properties.access)?;
-        b.col("usage")?.push_str(self.properties.usage)?;
         b.col("_version")?
             .push_timestamp_micros(self.env.version_micros)?;
         b.col("_deleted")?.push_bool(false)?;
-        b.fill_row_defaults()
+        self.properties.write(b)
     }
 }
 
@@ -852,6 +848,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn declared_edge_properties_reach_the_code_edge_batch_with_their_defaults() {
+        use arrow::array::{Array, Int64Array, ListArray};
+        use code_graph::v2::linker::graph::EdgeValue;
+        let ontology = Ontology::load_embedded_with_overlay(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/seeds/overlays/code_edge_properties"
+        ))
+        .unwrap();
+        let specs = edge_specs(&ontology);
+        let env = IndexerEnvelope::new(
+            TraversalPath::new_unchecked("1/42/"),
+            42,
+            "main".to_string(),
+            "abc".to_string(),
+            Utc::now(),
+        );
+        let mut properties = EdgeProperties::default();
+        properties.insert("lines", EdgeValue::Ints(vec![3, 7]));
+        let mut builder = BatchBuilder::new(&specs, 1).unwrap();
+        IndexerEdgeRow {
+            env: &env,
+            source_id: 1,
+            target_id: 2,
+            edge_kind: "CALLS",
+            source_node_kind: "Definition",
+            target_node_kind: "Definition",
+            source_tags: &[],
+            target_tags: &[],
+            properties,
+        }
+        .write_row(&mut builder, &())
+        .unwrap();
+        let batch = builder.finish().unwrap();
+        let weight = batch
+            .column_by_name("weight")
+            .and_then(|c| c.as_any().downcast_ref::<Int64Array>())
+            .expect("overlay property column");
+        assert_eq!(weight.value(0), 0);
+        let lines = batch
+            .column_by_name("lines")
+            .and_then(|c| c.as_any().downcast_ref::<ListArray>())
+            .expect("lines column");
+        let first = lines.value(0);
+        let first = first.as_any().downcast_ref::<Int64Array>().unwrap();
+        assert_eq!(first.values(), &[3, 7]);
+        let resolution = batch
+            .column_by_name("resolution")
+            .expect("resolution column");
+        assert!(!resolution.is_null(0));
+        assert_eq!(
+            arrow::util::display::array_value_to_string(resolution.as_ref(), 0).unwrap(),
+            ""
+        );
+    }
+
+    #[test]
     fn edge_specs_carry_declared_edge_properties() {
         let ontology = Ontology::load_embedded_with_overlay(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -904,6 +956,7 @@ mod tests {
                 target_node_kind: target_kind,
                 source_tags: &[],
                 target_tags: &[],
+                properties: EdgeProperties::default(),
             }
             .write_row(&mut builder, &())
             .unwrap();

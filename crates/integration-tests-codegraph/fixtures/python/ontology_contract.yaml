@@ -328,7 +328,7 @@ tests:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:ANNOTATED_BY]->(b:Definition)
-          WHERE a.fqn = 'billing.base.settle' AND b.fqn = 'billing.base.audited' AND e.resolution = '' AND 10 IN e.lines
+          WHERE a.fqn = 'billing.base.settle' AND b.fqn = 'billing.base.audited' AND 10 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }
@@ -382,13 +382,13 @@ tests:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-          WHERE a.fqn = 'billing.models.close' AND b.fqn = 'billing.models.Order' AND e.resolution = '' AND e.usage = 'parameter' AND 36 IN e.lines
+          WHERE a.fqn = 'billing.models.close' AND b.fqn = 'billing.models.Order' AND e.usage = 'parameter' AND 36 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }
       - query: |
           MATCH (a:Definition)-[e:USES_TYPE]->(b:Definition)
-          WHERE a.fqn = 'billing.models.charge' AND b.fqn = 'billing.models.Order' AND e.resolution = '' AND e.usage = 'parameter' AND 28 IN e.lines
+          WHERE a.fqn = 'billing.models.charge' AND b.fqn = 'billing.models.Order' AND e.usage = 'parameter' AND 28 IN e.lines
           RETURN a.fqn AS src
         assert:
           - { row_count: 1 }

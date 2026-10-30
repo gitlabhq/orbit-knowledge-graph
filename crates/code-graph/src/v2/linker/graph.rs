@@ -1246,19 +1246,27 @@ impl CodeGraph {
 
     pub fn edge_properties(&self, edge: &GraphEdge) -> EdgeProperties {
         let kind = edge.relationship.edge_kind;
-        EdgeProperties {
-            lines: self.edge_lines(edge).into_iter().map(i64::from).collect(),
-            resolution: edge.resolution.as_str(),
-            access: match (kind, edge.write) {
-                (EdgeKind::UsesValue, true) => "write",
-                (EdgeKind::UsesValue, false) => "read",
-                _ => "",
-            },
-            usage: match kind {
-                EdgeKind::UsesType => edge.usage.as_str(),
-                _ => "",
-            },
+        let mut properties = EdgeProperties::default();
+        let lines = self.edge_lines(edge);
+        if !lines.is_empty() {
+            properties.insert(
+                "lines",
+                EdgeValue::Ints(lines.into_iter().map(i64::from).collect()),
+            );
         }
+        if edge.resolution != Resolution::None {
+            properties.insert("resolution", EdgeValue::Str(edge.resolution.as_str()));
+        }
+        if kind == EdgeKind::UsesValue {
+            properties.insert(
+                "access",
+                EdgeValue::Str(if edge.write { "write" } else { "read" }),
+            );
+        }
+        if kind == EdgeKind::UsesType && edge.usage != TypeUsage::Unknown {
+            properties.insert("usage", EdgeValue::Str(edge.usage.as_str()));
+        }
+        properties
     }
 
     pub fn is_written(&self, idx: NodeIndex) -> bool {
@@ -1992,12 +2000,40 @@ pub struct EdgeRow<'a> {
     pub properties: EdgeProperties,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EdgeValue {
+    Str(&'static str),
+    Ints(Vec<i64>),
+}
+
+/// Edge property values keyed by the column the edge YAML declares.
 #[derive(Debug, Clone, Default)]
-pub struct EdgeProperties {
-    pub lines: Vec<i64>,
-    pub resolution: &'static str,
-    pub access: &'static str,
-    pub usage: &'static str,
+pub struct EdgeProperties(SmallVec<[(&'static str, EdgeValue); 4]>);
+
+impl EdgeProperties {
+    pub fn insert(&mut self, column: &'static str, value: EdgeValue) {
+        self.0.push((column, value));
+    }
+
+    pub fn get(&self, column: &str) -> Option<&EdgeValue> {
+        self.0
+            .iter()
+            .find(|(name, _)| *name == column)
+            .map(|(_, value)| value)
+    }
+
+    /// Push each value into its column, then the column default into every
+    /// other declared column of the row.
+    pub fn write(&self, b: &mut BatchBuilder) -> Result<(), arrow::error::ArrowError> {
+        for (column, value) in &self.0 {
+            let mut col = b.col(column)?;
+            match value {
+                EdgeValue::Str(v) => col.push_str(v)?,
+                EdgeValue::Ints(v) => col.push_int_list(v)?,
+            }
+        }
+        b.fill_row_defaults()
+    }
 }
 
 impl AsRecordBatch for EdgeRow<'_> {
@@ -2008,11 +2044,7 @@ impl AsRecordBatch for EdgeRow<'_> {
         b.col("target_id")?.push_int(self.target_id)?;
         b.col("target_kind")?.push_str(self.target_node_kind)?;
         b.col("traversal_path")?.push_str("")?;
-        b.col("lines")?.push_int_list(&self.properties.lines)?;
-        b.col("resolution")?.push_str(self.properties.resolution)?;
-        b.col("access")?.push_str(self.properties.access)?;
-        b.col("usage")?.push_str(self.properties.usage)?;
-        Ok(())
+        self.properties.write(b)
     }
 }
 
