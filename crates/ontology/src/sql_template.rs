@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use minijinja::{Environment, UndefinedBehavior};
 use serde::Serialize;
 
-pub use minijinja::{Error, context};
+pub use minijinja::{Error, Value, context};
 
 pub fn render(template: &str, ctx: impl Serialize) -> Result<String, Error> {
     environment().render_str(template, ctx)

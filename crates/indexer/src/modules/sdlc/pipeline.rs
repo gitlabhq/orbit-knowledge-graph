@@ -540,8 +540,8 @@ mod tests {
                  _siphon_deleted AS _deleted \
                  FROM source_table {{final}} \
                  WHERE 1=1 {{filters}} \
-                 ORDER BY id LIMIT {{batch_size}}"
-                    .to_string(),
+                 ORDER BY id LIMIT {{batch_size}}",
+                ontology::sql_template::context! {},
             )
             .expect("valid template"),
             watermark_column: "_siphon_watermark".to_string(),

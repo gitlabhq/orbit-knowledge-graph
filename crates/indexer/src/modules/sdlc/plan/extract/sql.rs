@@ -1,33 +1,17 @@
 use super::super::build::PlanError;
+use super::{ClickHouseExtractDeclaration, ExtractSpec, ExtractTemplate};
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
-use ontology::sql_template;
-
-use super::{
-    BATCH_SIZE_MARKER, ClickHouseExtractDeclaration, ExtractSpec, ExtractTemplate, FILTERS_MARKER,
-    FINAL_MARKER,
-};
 
 pub(in crate::modules::sdlc) fn compile_authored_extract(
     declaration: &ClickHouseExtractDeclaration,
     raw: &str,
 ) -> Result<ExtractSpec, PlanError> {
-    let rendered = sql_template::render(
-        raw,
-        sql_template::context! {
-            version_column => declaration.version,
-            watermark_column => declaration.watermark,
-            deleted_column => declaration.deleted,
-            // Re-emit the per-page markers unchanged so `PreparedQuery::to_sql` renders them at extraction time.
-            filters => FILTERS_MARKER,
-            batch_size => BATCH_SIZE_MARKER,
-            final => FINAL_MARKER,
-        },
-    )
-    .map_err(|e| {
+    let template = ExtractTemplate::new(raw, declaration.template_columns()).map_err(|e| {
         PlanError::MalformedTemplate(format!("authored SQL for '{}': {e}", declaration.entity))
     })?;
+    let rendered = template.incremental();
 
-    let version = aliased_expression(&rendered, VERSION_COLUMN).ok_or_else(|| {
+    let version = aliased_expression(rendered, VERSION_COLUMN).ok_or_else(|| {
         PlanError::MalformedTemplate(format!(
             "authored SQL for '{}' must select a version expression AS {VERSION_COLUMN}",
             declaration.entity
@@ -41,11 +25,11 @@ pub(in crate::modules::sdlc) fn compile_authored_extract(
                     declaration.entity, declaration.version
                 ))
             })?;
-    let deleted = aliased_expression(&rendered, DELETED_COLUMN)
-        .unwrap_or_else(|| declaration.deleted.clone());
+    let deleted =
+        aliased_expression(rendered, DELETED_COLUMN).unwrap_or_else(|| declaration.deleted.clone());
 
     Ok(ExtractSpec {
-        template: ExtractTemplate::new(rendered)?,
+        template,
         watermark,
         deleted,
     })
@@ -99,10 +83,10 @@ mod tests {
             "SELECT namespace.{{version_column}} AS _version, (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted FROM t {{final}} WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
         )
         .expect("valid authored SQL");
-        assert!(!spec.template.as_str().contains("{{version_column}}"));
+        assert!(!spec.template.incremental().contains("{{version_column}}"));
         assert!(
             spec.template
-                .as_str()
+                .incremental()
                 .contains("namespace._siphon_replicated_at AS _version")
         );
         assert_eq!(spec.watermark, "namespace._siphon_watermark");

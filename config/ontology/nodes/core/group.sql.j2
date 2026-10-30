@@ -1,3 +1,4 @@
+{% if final -%}
 WITH
   _keys AS (SELECT
     id,
@@ -7,6 +8,7 @@ WITH
       id
     FROM namespace_traversal_paths
     WHERE startsWith(traversal_path, {traversal_path:String})))
+{% endif -%}
 SELECT
   namespace.id AS id,
   namespace.name AS name,
@@ -46,9 +48,11 @@ LEFT JOIN (
   GROUP BY source_id
   HAVING argMax({{deleted_column}}, {{version_column}}) = false ) routes ON namespace.id = routes.source_id
 WHERE startsWith(traversal_paths.current_path, {traversal_path:String})
+{%- if final %}
   AND (namespace.id, namespace.{{version_column}}) IN (SELECT
       id,
       version
-    FROM _keys) {{filters}}
+    FROM _keys)
+{%- endif %} {{filters}}
 ORDER BY traversal_path, id
 LIMIT {{batch_size}}

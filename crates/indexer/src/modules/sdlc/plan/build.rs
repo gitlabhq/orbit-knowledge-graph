@@ -225,6 +225,7 @@ mod tests {
         Cursor, CursorFilter, Plan, TransformSpec, TraversalPathFilter, WatermarkFilter,
     };
     use chrono::Utc;
+    use ontology::sql_template;
     use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
     use orbit_utils::traversal_path::TraversalPath;
 
@@ -322,8 +323,8 @@ mod tests {
         let changed_extract = compile_extract_spec(&changed_declaration).expect("changed extract");
 
         assert_eq!(
-            original_extract.template.as_str(),
-            changed_extract.template.as_str()
+            original_extract.template.incremental(),
+            changed_extract.template.incremental()
         );
     }
 
@@ -410,8 +411,8 @@ mod tests {
             target: name.to_string(),
             scope: EtlScope::Namespaced,
             extract_template: crate::modules::sdlc::plan::ExtractTemplate::new(
-                "SELECT x AS _version, y AS _deleted FROM t {{final}} WHERE 1=1 {{filters}} LIMIT {{batch_size}}"
-                    .to_string(),
+                "SELECT x AS _version, y AS _deleted FROM t {{final}} WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+                sql_template::context! {},
             )
             .unwrap(),
             watermark_column: String::new(),
@@ -477,7 +478,7 @@ mod tests {
         let built = plans(&test_ontology(), 1000);
         for name in ["WorkItem", "Milestone"] {
             let plan = built.namespaced.iter().find(|p| p.name == name).unwrap();
-            let sql = plan.extract_template.as_str();
+            let sql = plan.extract_template.incremental();
             for col in ["due_date", "start_date"] {
                 assert!(
                     sql.contains(&format!(
@@ -531,10 +532,10 @@ mod tests {
         let expected = format!("state = {REOPENED_STATE}");
         for plan in &reopened {
             assert!(
-                plan.extract_template.as_str().contains(&expected),
+                plan.extract_template.incremental().contains(&expected),
                 "{}: {}",
                 plan.name,
-                plan.extract_template.as_str()
+                plan.extract_template.incremental()
             );
         }
         assert!(reopened.iter().any(|p| p.name.ends_with("_MergeRequest")));
@@ -771,10 +772,30 @@ mod tests {
     }
 
     #[test]
+    fn id_keyed_templates_narrow_keys_only_in_full_mode() {
+        let plans = plans(&test_ontology(), 1000);
+        for (name, narrowing) in [
+            ("Group", "FROM _keys"),
+            ("Project", "PREWHERE project.id IN"),
+        ] {
+            let plan = plans.namespaced.iter().find(|p| p.name == name).unwrap();
+            assert!(plan.extract_template.full().contains(narrowing), "{name}");
+            assert!(
+                !plan.extract_template.incremental().contains(narrowing),
+                "{name}"
+            );
+            assert!(
+                !plan.extract_template.incremental().contains("FINAL"),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn every_extract_orders_its_outermost_select() {
         let plans = plans(&test_ontology(), 1_000_000);
         for plan in plans.global.iter().chain(plans.namespaced.iter()) {
-            let sql = plan.extract_template.as_str();
+            let sql = plan.extract_template.incremental();
             let last_from = sql.rfind("FROM ").expect("extract has a FROM");
             let last_order_by = sql.rfind("ORDER BY").unwrap_or(0);
             assert!(

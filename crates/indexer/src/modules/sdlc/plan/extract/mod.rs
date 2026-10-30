@@ -4,8 +4,6 @@ mod generated;
 mod lookup;
 mod sql;
 
-use std::collections::HashSet;
-
 use indexmap::IndexSet;
 use ontology::sql_template;
 use ontology::{
@@ -27,9 +25,13 @@ pub(in crate::modules::sdlc) struct ExtractSpec {
     pub deleted: String,
 }
 
-/// Validated template — the only way a `Plan` gets its `extract_template`.
+/// Validated template — the only way a `Plan` gets its `extract_template`. `final` is the one
+/// mode switch: `{{final}}` reads `FINAL` in full mode and `{% if final %}` keeps SQL to full mode.
 #[derive(Debug, Clone)]
-pub(in crate::modules::sdlc) struct ExtractTemplate(String);
+pub(in crate::modules::sdlc) struct ExtractTemplate {
+    full: String,
+    incremental: String,
+}
 
 pub(super) struct ClickHouseExtractDeclaration {
     pub entity: String,
@@ -62,41 +64,48 @@ pub(super) fn compile_extract_spec(
 }
 
 impl ExtractTemplate {
-    pub fn new(sql: String) -> Result<Self, PlanError> {
-        let undeclared = sql_template::undeclared_variables(&sql)
-            .map_err(|e| PlanError::MalformedTemplate(format!("template parse failed: {e}")))?;
-        let expected: HashSet<String> = [FILTERS_MARKER, BATCH_SIZE_MARKER, FINAL_MARKER]
-            .iter()
-            .map(|marker| marker.trim_matches(|c| c == '{' || c == '}').to_string())
-            .collect();
-        if undeclared != expected {
-            return Err(PlanError::MalformedTemplate(format!(
-                "template variables must be exactly {{{{filters}}}}, {{{{batch_size}}}} and {{{{final}}}}, found {undeclared:?}"
-            )));
-        }
+    pub fn new(source: &str, columns: sql_template::Value) -> Result<Self, PlanError> {
         for (marker, name) in [
             (FILTERS_MARKER, "filters"),
             (BATCH_SIZE_MARKER, "batch_size"),
             (FINAL_MARKER, "final"),
         ] {
-            if sql.matches(marker).count() != 1 {
+            if source.matches(marker).count() != 1 {
                 return Err(PlanError::MalformedTemplate(format!(
                     "template must contain exactly one {{{{{name}}}}} marker"
                 )));
             }
         }
+        let render = |read: &str| {
+            sql_template::render(
+                source,
+                sql_template::context! {
+                    final => read,
+                    filters => FILTERS_MARKER,
+                    batch_size => BATCH_SIZE_MARKER,
+                    ..columns.clone()
+                },
+            )
+            .map_err(|e| PlanError::MalformedTemplate(format!("template render failed: {e}")))
+        };
+        let full = render("FINAL")?;
+        let incremental = render("")?;
         for alias in [VERSION_COLUMN, DELETED_COLUMN] {
-            if !sql.contains(&format!(" AS {alias}")) {
+            if !incremental.contains(&format!(" AS {alias}")) {
                 return Err(PlanError::MalformedTemplate(format!(
                     "template must select a column ` AS {alias}`"
                 )));
             }
         }
-        Ok(Self(sql))
+        Ok(Self { full, incremental })
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
+    pub fn full(&self) -> &str {
+        &self.full
+    }
+
+    pub fn incremental(&self) -> &str {
+        &self.incremental
     }
 }
 
@@ -169,9 +178,17 @@ impl ClickHouseExtractDeclaration {
         }
     }
 
+    pub(super) fn template_columns(&self) -> sql_template::Value {
+        sql_template::context! {
+            version_column => self.version,
+            watermark_column => self.watermark,
+            deleted_column => self.deleted,
+        }
+    }
+
     fn build_spec(&self, sql: String) -> Result<ExtractSpec, PlanError> {
         Ok(ExtractSpec {
-            template: ExtractTemplate::new(sql)?,
+            template: ExtractTemplate::new(&sql, self.template_columns())?,
             watermark: self.watermark.clone(),
             deleted: self.deleted.clone(),
         })

@@ -278,7 +278,7 @@ pub(in crate::modules::sdlc) struct Plan {
 
 #[derive(Clone)]
 pub(in crate::modules::sdlc) struct PreparedQuery {
-    template: String,
+    template: ExtractTemplate,
     filters: Vec<String>,
     params: serde_json::Map<String, Value>,
     batch_size: u64,
@@ -289,7 +289,7 @@ pub(in crate::modules::sdlc) struct PreparedQuery {
 impl Plan {
     pub fn prepare(&self) -> PreparedQuery {
         PreparedQuery {
-            template: self.extract_template.as_str().to_string(),
+            template: self.extract_template.clone(),
             filters: Vec::new(),
             params: serde_json::Map::new(),
             batch_size: self.batch_size,
@@ -325,12 +325,16 @@ impl PreparedQuery {
                 .join(" AND ");
             format!("AND {joined}")
         };
+        let template = if self.needs_final {
+            self.template.full()
+        } else {
+            self.template.incremental()
+        };
         sql_template::render(
-            &self.template,
+            template,
             sql_template::context! {
                 filters => filters_sql,
                 batch_size => self.batch_size,
-                final => if self.needs_final { "FINAL" } else { "" },
             },
         )
         .map_err(|e| HandlerError::Processing(format!("rendering extract SQL: {e}")))
@@ -454,14 +458,17 @@ mod tests {
             name: "Test".to_string(),
             target: "Test".to_string(),
             scope: EtlScope::Namespaced,
-            extract_template: ExtractTemplate::new(format!(
-                "SELECT id, name, _siphon_replicated_at AS _version, \
-                 _siphon_deleted AS _deleted \
-                 FROM source_table {{{{final}}}} \
-                 WHERE 1=1 {{{{filters}}}} \
-                 ORDER BY {sort_key_sql} \
-                 LIMIT {{{{batch_size}}}}"
-            ))
+            extract_template: ExtractTemplate::new(
+                &format!(
+                    "SELECT id, name, _siphon_replicated_at AS _version, \
+                     _siphon_deleted AS _deleted \
+                     FROM source_table {{{{final}}}} \
+                     WHERE 1=1 {{{{filters}}}} \
+                     ORDER BY {sort_key_sql} \
+                     LIMIT {{{{batch_size}}}}"
+                ),
+                sql_template::context! {},
+            )
             .expect("valid template"),
             watermark_column: "_siphon_watermark".to_string(),
             deleted_column: "_siphon_deleted".to_string(),
@@ -710,6 +717,32 @@ mod tests {
             prepared.settings(Some(500)).lazy_materialization_limit,
             None
         );
+    }
+
+    #[test]
+    fn full_load_block_renders_only_with_final() {
+        let template = ExtractTemplate::new(
+            "{% if final -%}WITH _keys AS (SELECT id FROM source_table {{final}}){% endif -%} \
+             SELECT id, _siphon_replicated_at AS _version, _siphon_deleted AS _deleted \
+             FROM source_table WHERE 1=1 \
+             {%- if final %} AND id IN (SELECT id FROM _keys){%- endif %} {{filters}} \
+             ORDER BY id LIMIT {{batch_size}}",
+            sql_template::context! {},
+        )
+        .expect("valid template");
+        assert!(
+            template
+                .full()
+                .starts_with("WITH _keys AS (SELECT id FROM source_table FINAL)")
+        );
+        assert!(
+            template
+                .full()
+                .contains("WHERE 1=1 AND id IN (SELECT id FROM _keys) {{filters}}")
+        );
+        assert!(template.incremental().starts_with("SELECT id,"));
+        assert!(!template.incremental().contains("_keys"));
+        assert!(!template.incremental().contains("FINAL"));
     }
 
     #[test]
