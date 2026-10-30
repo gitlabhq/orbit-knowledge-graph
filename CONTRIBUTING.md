@@ -64,8 +64,10 @@ Run `mise lint:docs` before pushing any documentation changes.
   Put lists such as languages, entity types, and commands only in the page that
   owns them, and link to that page. Link to repository files by relative path, so
   the `check_docs_markdown` CI job checks each link.
-- When you add, move, or remove an owning guide, update its pointers in the
-  byte-identical `AGENTS.md` and `CLAUDE.md` files.
+- When you add, move, or remove an owning guide, update its pointers in
+  `AGENTS.md`.
+- Claude Code reads `AGENTS.md` from v2.1.277. Do not add a `CLAUDE.md` or
+  `CLAUDE.local.md`: either one stops Claude Code from reading `AGENTS.md`.
 - Use the canonical terms in `CONTEXT.md`. Add a term only when a new domain
   concept could confuse a new contributor.
 - Follow the GitLab documentation principles in `.ai/principles/distilled/` when

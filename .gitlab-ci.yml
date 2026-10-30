@@ -276,17 +276,6 @@ stages:
 
 # Lint Stage
 
-agent-file-sync-check:
-  stage: lint
-  image: alpine:latest
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - diff AGENTS.md CLAUDE.md || (echo "AGENTS.md and CLAUDE.md are out of sync. Please ensure they have identical content." && exit 1)
-
 docs-in-code-mr-check:
   stage: lint
   image: alpine:latest
