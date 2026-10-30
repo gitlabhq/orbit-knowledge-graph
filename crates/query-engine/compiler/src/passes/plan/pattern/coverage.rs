@@ -85,14 +85,15 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             && relation.fk.is_none()
             && relation.max_hops == 1
             && relation.endpoint_column(node).is_some()
-            && self
-                .model
-                .graph()
-                .relationships_declaring(property)
-                .is_empty()
-            && self
-                .edge_columns(relation)
-                .is_some_and(|columns| columns.contains(property))
+            && relation.single_edge_table().is_some_and(|table| {
+                self.model
+                    .table_property_columns(table)
+                    .is_none_or(|columns| !columns.contains(property))
+                    && self
+                        .model
+                        .table_columns(table)
+                        .is_some_and(|columns| columns.contains(property))
+            })
     }
 
     pub fn has_uncovered_filter(&self, node: &NodePlan) -> bool {
@@ -122,10 +123,6 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         self.relations
             .iter()
             .any(|relation| relation.fk.as_ref().is_some_and(|key| key.node == node))
-    }
-
-    fn edge_columns(&self, relation: &EdgeRelation) -> Option<&HashSet<String>> {
-        self.model.table_columns(relation.single_edge_table()?)
     }
 
     /// Endpoint filters on properties the edge table stores as columns, each property once.
