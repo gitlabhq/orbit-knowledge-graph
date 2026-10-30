@@ -1,0 +1,18 @@
+name: A relationship property group key keeps the owner-scoped node table in the statement
+ontology_overlay: owner_scope_edge_properties
+
+query:
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})-[r:HAS_NOTE]->(n:Note) RETURN r.created_at, count(n) AS notes
+
+missing_frontends:
+  json: the JSON frontend has no relationship variables, so it cannot name a relationship property
+
+logical:
+  expect: ["(Aggregate group r.created_at AS r_created_at, COUNT(n) AS notes (_))"]
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Scan Table(gl_note) AS n)

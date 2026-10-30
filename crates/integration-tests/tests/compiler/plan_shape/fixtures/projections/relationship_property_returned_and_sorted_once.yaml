@@ -1,0 +1,19 @@
+name: A relationship property that is returned and sorted is projected once under the edge alias
+ontology_overlay: edge_properties
+
+query:
+  gql: |
+    MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) RETURN u.username, r.created_at ORDER BY r.created_at DESC LIMIT 10
+
+missing_frontends:
+  json: the JSON frontend has no relationship variables, so it cannot name a relationship property
+
+logical:
+  expect:
+    - (EdgeScan REVIEWED_BY u->mr AS e0)
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Project _orbit_edge_0.created_at AS _orbit_e0_created_at, ... (_))

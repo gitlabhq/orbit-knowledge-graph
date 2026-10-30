@@ -1,0 +1,6 @@
+properties:
+  created_at:
+    type: datetime
+    source: created_at
+    nullable: false
+    description: "When the note was attached (test overlay)."
