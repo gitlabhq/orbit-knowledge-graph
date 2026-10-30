@@ -107,7 +107,6 @@ pub struct EdgeTableConfig {
     pub domains: BTreeSet<String>,
     pub sort_key: Vec<String>,
     pub columns: Vec<EdgeColumn>,
-    pub property_columns: Vec<EdgeColumn>,
     pub storage: EdgeTableStorage,
 }
 
@@ -188,7 +187,6 @@ impl Ontology {
             domains: BTreeSet::new(),
             sort_key: default_sort_key,
             columns: Vec::new(),
-            property_columns: Vec::new(),
             storage: EdgeTableStorage::default(),
         };
         Self {
@@ -342,7 +340,6 @@ impl Ontology {
                 domains: BTreeSet::new(),
                 sort_key,
                 columns: Vec::new(),
-                property_columns: Vec::new(),
                 storage: EdgeTableStorage::default(),
             },
         );
@@ -419,13 +416,7 @@ impl Ontology {
     pub fn get_edge_table_column_type(&self, table: &str, name: &str) -> Option<DataType> {
         self.edge_table_configs
             .get(table)
-            .and_then(|config| {
-                config
-                    .columns
-                    .iter()
-                    .chain(&config.property_columns)
-                    .find(|c| c.name == name)
-            })
+            .and_then(|config| config.columns.iter().find(|c| c.name == name))
             .map(|c| c.data_type)
     }
 
@@ -1504,6 +1495,27 @@ impl Ontology {
             .map_or(&[], Vec::as_slice)
     }
 
+    pub fn local_edge_property_fields(&self) -> impl Iterator<Item = &Field> {
+        self.edges
+            .iter()
+            .filter(|(_, variants)| {
+                variants.iter().any(|edge| {
+                    self.local_entities.contains_key(&edge.source_kind)
+                        && self.local_entities.contains_key(&edge.target_kind)
+                })
+            })
+            .flat_map(|(edge_name, _)| self.edge_properties(edge_name))
+    }
+
+    pub fn edge_table_property_names(&self, table: &str) -> BTreeSet<&str> {
+        self.edges
+            .iter()
+            .filter(|(_, variants)| variants.iter().any(|edge| edge.destination_table == table))
+            .flat_map(|(edge_name, _)| self.edge_properties(edge_name))
+            .map(|field| field.name.as_str())
+            .collect()
+    }
+
     /// Returns `Some` only for edges sourced from standalone pipelines.
     pub fn get_edge_etl(&self, relationship_kind: &str) -> Option<&[Pipeline]> {
         self.edge_pipelines
@@ -2282,16 +2294,16 @@ mod tests {
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].name, "state");
         let table = ontology.edge_table_config("gl_edge").unwrap();
-        assert_eq!(table.property_columns.len(), 1);
-        assert_eq!(table.property_columns[0].data_type, DataType::Enum);
-        assert_eq!(
-            table.storage.property_columns[0].ch_type,
-            "LowCardinality(String)"
-        );
-        assert_eq!(
-            table.storage.property_columns[0].default.as_deref(),
-            Some("''")
-        );
+        let state = table.columns.iter().find(|c| c.name == "state").unwrap();
+        assert_eq!(state.data_type, DataType::Enum);
+        let stored = table
+            .storage
+            .columns
+            .iter()
+            .find(|c| c.name == "state")
+            .unwrap();
+        assert_eq!(stored.ch_type, "LowCardinality(String)");
+        assert_eq!(stored.default.as_deref(), Some("''"));
         assert_eq!(
             ontology.get_edge_table_column_type("gl_edge", "state"),
             Some(DataType::Enum)
@@ -2300,13 +2312,44 @@ mod tests {
     }
 
     #[test]
+    fn edge_properties_between_local_entities_join_the_local_edge_list() {
+        let ontology = Ontology::load_embedded_with_overlay(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/seeds/overlays/code_edge_properties"
+        ))
+        .unwrap();
+        let local: Vec<&str> = ontology
+            .local_edge_columns()
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert!(local.contains(&"weight"), "{local:?}");
+        let code = ontology.edge_table_config("gl_code_edge").unwrap();
+        assert!(
+            code.columns
+                .iter()
+                .any(|c| c.name == "weight" && c.data_type == DataType::Int)
+        );
+        assert!(
+            code.storage
+                .columns
+                .iter()
+                .any(|c| c.name == "weight" && c.ch_type == "Int64")
+        );
+        let global = ontology.edge_table_config("gl_edge").unwrap();
+        assert!(global.columns.iter().all(|c| c.name != "weight"));
+    }
+
+    #[test]
     fn two_edges_may_share_a_property_column_only_with_one_storage() {
         let same = edge_property_overlay(REVIEWER_STATE, Some(REVIEWER_STATE)).unwrap();
         assert_eq!(
             same.edge_table_config("gl_edge")
                 .unwrap()
-                .property_columns
-                .len(),
+                .columns
+                .iter()
+                .filter(|c| c.name == "state")
+                .count(),
             1
         );
         let other = "properties:\n  state:\n    type: string\n    source: state\n";

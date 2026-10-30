@@ -519,11 +519,7 @@ fn edge_table_metadata(table: &str, ontology: &Ontology) -> EdgeTableMetadata {
         .unwrap_or_default();
     let dict_columns = ontology
         .edge_table_config(table)
-        .map(|config| {
-            let mut columns = low_cardinality_columns(&config.storage.columns);
-            columns.extend(low_cardinality_columns(&config.storage.property_columns));
-            columns
-        })
+        .map(|config| low_cardinality_columns(&config.storage.columns))
         .unwrap_or_default();
     EdgeTableMetadata {
         sort_key,

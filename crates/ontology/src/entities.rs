@@ -34,7 +34,7 @@ impl StorageColumn {
             DataType::Date => ("Date32", "'1970-01-01'", &["ZSTD(1)"]),
             DataType::DateTime => (
                 "DateTime64(0, 'UTC')",
-                "toDateTime64(0, 0, 'UTC')",
+                "'1970-01-01 00:00:00'",
                 &["Delta(8)", "ZSTD(1)"],
             ),
             DataType::IntList => ("Array(Int64)", "[]", &["ZSTD(1)"]),
@@ -135,7 +135,6 @@ pub struct EdgeTableStorage {
     pub projections: Vec<StorageProjection>,
     pub denormalized_columns: Vec<StorageColumn>,
     pub denormalized_indexes: Vec<StorageIndex>,
-    pub property_columns: Vec<StorageColumn>,
     pub settings: BTreeMap<String, String>,
 }
 

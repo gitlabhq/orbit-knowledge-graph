@@ -1,0 +1,6 @@
+properties:
+  weight:
+    type: int
+    source: weight
+    nullable: false
+    description: "Call count on the edge (test overlay)."

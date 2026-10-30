@@ -25,6 +25,7 @@ pub struct DuckDbBindings {
     edge_sort_key: Vec<String>,
     edge_column_types: std::collections::BTreeMap<String, ontology::DataType>,
     edge_columns: HashSet<String>,
+    edge_property_columns: HashSet<String>,
     entities: Vec<Option<DuckDbEntityLayout>>,
     property_facts: Vec<PropertyBackendFacts>,
     relationships: Vec<String>,
@@ -134,8 +135,8 @@ impl RelationalMapping for DuckDbBindings {
         (table == self.edge_table()).then(|| self.edge_columns())
     }
 
-    fn table_property_columns(&self, _table: &str) -> Option<&HashSet<String>> {
-        None
+    fn table_property_columns(&self, table: &str) -> Option<&HashSet<String>> {
+        (table == self.edge_table()).then_some(&self.edge_property_columns)
     }
 
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {

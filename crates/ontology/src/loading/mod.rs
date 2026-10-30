@@ -187,7 +187,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     .collect(),
                 denormalized_columns: vec![],
                 denormalized_indexes: vec![],
-                property_columns: vec![],
                 settings: s.settings,
             });
             let config = crate::EdgeTableConfig {
@@ -202,7 +201,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                         default: c.default,
                     })
                     .collect(),
-                property_columns: Vec::new(),
                 storage: storage.unwrap_or_default(),
             };
             (name, config)
@@ -1418,12 +1416,12 @@ fn assign_edge_property_columns(ontology: &mut crate::Ontology) -> Result<(), On
             .edge_table_configs
             .get_mut(&table)
             .expect("edge routes name a declared table");
-        config.property_columns.push(EdgeColumn {
+        config.columns.push(EdgeColumn {
             name,
             data_type,
             default: column.default.clone(),
         });
-        config.storage.property_columns.push(column);
+        config.storage.columns.push(column);
     }
     Ok(())
 }
@@ -1432,27 +1430,18 @@ fn assign_local_edge_property_columns(ontology: &mut crate::Ontology) {
     if ontology.local_edge_table_name.is_none() {
         return;
     }
-    let local = |kind: &str| ontology.local_entities.contains_key(kind);
     let mut columns: Vec<EdgeColumn> = Vec::new();
-    for (edge_name, fields) in &ontology.edge_properties {
-        let between_local = ontology.edges[edge_name]
-            .iter()
-            .any(|edge| local(&edge.source_kind) && local(&edge.target_kind));
-        if !between_local {
-            continue;
-        }
-        for field in fields {
-            if !columns.iter().any(|column| column.name == field.name)
-                && !ontology
-                    .local_edge_columns
-                    .iter()
-                    .any(|column| column.name == field.name)
-            {
-                columns.push(EdgeColumn {
-                    name: field.name.clone(),
-                    data_type: field.data_type,
-                });
-            }
+    for field in ontology.local_edge_property_fields() {
+        if !columns.iter().any(|column| column.name == field.name)
+            && !ontology
+                .local_edge_columns
+                .iter()
+                .any(|column| column.name == field.name)
+        {
+            columns.push(EdgeColumn {
+                name: field.name.clone(),
+                data_type: field.data_type,
+            });
         }
     }
     columns.sort_by(|a, b| a.name.cmp(&b.name));
