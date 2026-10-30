@@ -34,6 +34,10 @@ leaves out security entities, even from aggregate counts.
 Queries from administrators and auditors return data from each group where GitLab Orbit is on.
 If Admin Mode is on for the instance, the administrator must be in Admin Mode, and a personal access token needs the `admin_mode` scope.
 
+Queries through the [GitLab Duo Agent Platform](agents/duo.md) do not use Admin Mode.
+These queries return data only from groups where the administrator has a role,
+even when the administrator is in Admin Mode in the UI.
+
 ## How GitLab Orbit enforces access
 
 GitLab authorizes every query.
@@ -53,6 +57,20 @@ GitLab Orbit enforces access in two layers:
 
 The graph is read-only.
 It reads changes from GitLab and never writes back.
+
+### Access through shared groups
+
+When a group is shared with another group, only direct members of the invited group get access to the shared group.
+Inherited members of the invited group do not get access, in GitLab or in GitLab Orbit.
+The same rule applies to members of shared groups and subgroups of the invited group.
+
+For example, the `platform/developers` group is shared with the `products` group:
+
+- A direct member of `platform/developers` can query `products`.
+- A member of `platform` who is not a direct member of `platform/developers` cannot query `products`.
+
+To give a user access, add the user as a direct member of the invited group.
+For more information, see [share a group with another group](https://docs.gitlab.com/user/project/members/sharing_projects_groups/).
 
 ## Programmatic access
 
@@ -89,7 +107,7 @@ The token keeps working after the SAML session of its owner expires.
 Use a [service account](https://docs.gitlab.com/user/profile/service_accounts/) for automation that runs
 without a personal account, such as a script, a scheduled report, or an agent.
 To see data from a group, the service account must be a direct member of the group,
-or a member of a group that is shared with the group.
+or a direct member of a group that is shared with the group.
 Project membership, and membership of groups where GitLab Orbit is off, do not give access.
 
 > [!warning]
