@@ -38,7 +38,7 @@ gitlab:
 gitlab_lanes:
   "19-4":
     chart: "10.4.3"
-    ref: "e9d659672da832985a6e2a3d8ebbbdae8cbb3198"
+    ref: "5d1ba15b8dbf7b5681d2168b4eb0a57724b4133e"
     images:
       webservice:
         digest: "sha256:0bae019f37599425e7f1f039f329a52d80946c8fcad0661a1c6ed8d372c577b0"
@@ -51,7 +51,7 @@ gitlab_lanes:
     repository: registry.gitlab.com/gitlab-org/build/cng-mirror
   "19-5":
     chart: "10.5.1"
-    ref: "afad57791f099fd9d8a0e7c584dc8e08b4c0cb5c"
+    ref: "222b4bd2088c3f88bbc07e7cd38c1c3b84973361"
     images:
       webservice:
         digest: "sha256:52645c59726c2367b6d2621fcb638a18702a8a59eb42f57f6cc7bb9eee4fae84"
