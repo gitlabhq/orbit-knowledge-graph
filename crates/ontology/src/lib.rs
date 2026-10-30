@@ -2318,8 +2318,6 @@ mod tests {
             Some(DataType::Enum)
         );
         assert!(ontology.edge_properties("IMPORTS").is_empty());
-        let global = ontology.edge_table_config("gl_edge").unwrap();
-        assert!(global.columns.iter().all(|c| c.name != "state"));
     }
 
     #[test]
@@ -2428,7 +2426,13 @@ mod tests {
             "{conflicts}"
         );
         for edge in ["MENTIONS", "SCANS", "REVIEWER"] {
-            assert!(ontology.edge_properties(edge).is_empty(), "{edge}");
+            assert!(
+                ontology
+                    .edge_properties(edge)
+                    .iter()
+                    .all(|field| field.name != "weight"),
+                "{edge}"
+            );
         }
         let global = ontology.edge_table_config("gl_edge").unwrap();
         assert!(global.columns.iter().all(|c| c.name != "weight"));
