@@ -7,7 +7,6 @@ query:
     MATCH (f:File) WHERE f.id IN [1, 2] RETURN f.path
 
 hydration:
-  dynamic: true
   paths:
     f: ["1/", "1/100/", "1/200/"]
 

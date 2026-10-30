@@ -1,4 +1,4 @@
-name: Dynamic hydration without paths filters only pinned IDs
+name: Hydration without paths filters only pinned IDs
 
 query:
   json: |
@@ -6,8 +6,7 @@ query:
   gql: |
     MATCH (f:File) WHERE f.id IN [1, 2] RETURN f.path
 
-hydration:
-  dynamic: true
+hydration: {}
 
 logical:
   expect: ["(Input hydration (...))"]

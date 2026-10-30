@@ -5,14 +5,12 @@ use std::collections::HashMap;
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
-use compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use compiler::constants::{
-    hydration_node_alias, neighbor_traversal_path_column, primary_key_column, properties_column,
-    redaction_id_column, traversal_path_column,
+    hydration_node_alias, primary_key_column, properties_column, redaction_id_column,
+    traversal_path_column,
 };
 use compiler::{
-    ColumnSelection, DynamicEntityColumns, FilterOp, HydrationTemplate, Input, InputFilter,
-    InputNode, QueryType,
+    ColumnSelection, FilterOp, HydrationTemplate, Input, InputFilter, InputNode, QueryType,
 };
 use ontology::{DataType, Ontology};
 use orbit_arrow::{ArrowUtils, ColumnValue};
@@ -51,75 +49,6 @@ pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<Travers
     paths.sort_unstable();
     paths.dedup();
     paths
-}
-
-/// When `static_nodes` is provided (e.g. the center node in a neighbors query),
-/// their IDs are also collected so properties can be hydrated for them.
-pub fn extract_dynamic_refs(
-    result: &QueryResult,
-    static_nodes: &[compiler::RedactionNode],
-) -> HashMap<String, Vec<i64>> {
-    let mut refs: HashMap<String, Vec<i64>> = HashMap::new();
-    for row in result.authorized_rows() {
-        for node_ref in row.dynamic_nodes() {
-            refs.entry(node_ref.entity_type.clone())
-                .or_default()
-                .push(node_ref.id);
-        }
-        for node in static_nodes {
-            if let Some(id) = row.get_public_id(node)
-                && let Some(entity_type) = row.get_type(node)
-            {
-                refs.entry(entity_type.to_string()).or_default().push(id);
-            }
-        }
-    }
-    for ids in refs.values_mut() {
-        ids.sort_unstable();
-        ids.dedup();
-    }
-    refs
-}
-
-pub fn collect_dynamic_ref_paths(
-    result: &QueryResult,
-    static_nodes: &[compiler::RedactionNode],
-) -> HashMap<String, Vec<TraversalPath>> {
-    let mut paths: HashMap<String, Option<Vec<TraversalPath>>> = HashMap::new();
-    let mut record = |entity_type: &str, path: Option<String>| {
-        let entry = paths
-            .entry(entity_type.to_string())
-            .or_insert_with(|| Some(Vec::new()));
-        match (entry.as_mut(), path.filter(|p| !p.is_empty())) {
-            (Some(list), Some(path)) => list.push(TraversalPath::new_unchecked(path)),
-            _ => *entry = None,
-        }
-    };
-    for row in result.authorized_rows() {
-        let neighbor_path = row.get_column_string(neighbor_traversal_path_column());
-        for node_ref in row.dynamic_nodes() {
-            record(&node_ref.entity_type, neighbor_path.clone());
-        }
-        for node in static_nodes {
-            if row.get_public_id(node).is_some()
-                && let Some(entity_type) = row.get_type(node)
-            {
-                record(
-                    entity_type,
-                    row.get_column_string(&traversal_path_column(&node.alias)),
-                );
-            }
-        }
-    }
-    paths
-        .into_iter()
-        .filter_map(|(entity_type, list)| {
-            let mut list = list?;
-            list.sort_unstable();
-            list.dedup();
-            Some((entity_type, list))
-        })
-        .collect()
 }
 
 /// Caps limit at `u32::MAX` to prevent truncation.
@@ -364,62 +293,6 @@ pub fn hydrate_static(
             columns: Some(ColumnSelection::List(template.columns.clone())),
             node_ids: ids,
             traversal_paths,
-            ..InputNode::default()
-        });
-    }
-
-    Ok((nodes, total_ids))
-}
-
-/// Uses pre-resolved column specs from the compilation plan; no ontology
-/// lookups at runtime.
-///
-/// `traversal_paths` is the authorized scope; `ref_paths` narrows an entity type to the paths
-/// its own rows carry. A neighbor can sit above the center node, so the center path is no fallback.
-pub fn hydrate_dynamic(
-    entity_specs: &[DynamicEntityColumns],
-    refs: &HashMap<String, Vec<i64>>,
-    traversal_paths: &[TraversalPath],
-    ref_paths: &HashMap<String, Vec<TraversalPath>>,
-) -> Result<(Vec<InputNode>, usize), PipelineError> {
-    let mut nodes = Vec::new();
-    let mut total_ids: usize = 0;
-
-    for (entity_type, ids) in refs {
-        if ids.is_empty() {
-            continue;
-        }
-
-        let spec = match entity_specs.iter().find(|s| s.entity_type == *entity_type) {
-            Some(s) => s,
-            None => continue,
-        };
-
-        if spec.columns.is_empty() {
-            continue;
-        }
-
-        let capped_ids: Vec<i64> = ids
-            .iter()
-            .copied()
-            .take(MAX_DYNAMIC_HYDRATION_RESULTS)
-            .collect();
-        total_ids += capped_ids.len();
-
-        let tps = if spec.has_traversal_path {
-            ref_paths
-                .get(entity_type)
-                .map_or_else(|| traversal_paths.to_vec(), Clone::clone)
-        } else {
-            Vec::new()
-        };
-
-        nodes.push(InputNode {
-            id: hydration_node_alias().to_string(),
-            entity: Some(entity_type.clone()),
-            columns: Some(ColumnSelection::List(spec.columns.clone())),
-            node_ids: capped_ids,
-            traversal_paths: tps,
             ..InputNode::default()
         });
     }

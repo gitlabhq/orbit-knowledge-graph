@@ -54,7 +54,6 @@ impl Scenario {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct HydrationSetup {
-    dynamic: bool,
     path_segment_budget: Option<usize>,
     paths: BTreeMap<String, Vec<String>>,
 }
@@ -271,7 +270,6 @@ fn check<M: OrbitQueryModel>(
                     .collect();
             }
             options = plan::HydrationCompileOptions {
-                dynamic: hydration.dynamic,
                 path_segment_budget: hydration.path_segment_budget,
             };
         }
@@ -783,17 +781,11 @@ reject:
 #[test]
 fn hydration_planning_selects_paths_before_sql_rendering() {
     use compiler::input::{InputNode, QueryType};
-    use compiler::passes::plan::query_types::hydration::HydrationPathFilter;
     use orbit_utils::traversal_path::TraversalPath;
 
     let model = ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
         .unwrap();
-    for (count, dynamic, budget, set, expected_paths) in [
-        (256, true, None, false, 256),
-        (257, true, None, true, 257),
-        (257, false, None, false, 257),
-        (257, true, Some(1), false, 1),
-    ] {
+    for (count, budget, expected_paths) in [(257, None, 257), (257, Some(1), 1)] {
         let input = Input {
             query_type: QueryType::Hydration,
             nodes: vec![InputNode {
@@ -811,7 +803,6 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             &input,
             &model,
             plan::HydrationCompileOptions {
-                dynamic,
                 path_segment_budget: budget,
             },
         )
@@ -819,24 +810,14 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         let plan::QueryPlan::Hydration(hydration) = &plan else {
             panic!("expected hydration");
         };
-        let (actual_set, paths) = match hydration.operation.nodes[0].path_filter.as_ref().unwrap() {
-            HydrationPathFilter::PrefixUnion(paths) => (false, paths),
-            HydrationPathFilter::PrefixSet(paths) => (true, paths),
-        };
-        assert_eq!((actual_set, paths.len()), (set, expected_paths));
+        let paths = hydration.operation.nodes[0].path_filter.as_ref().unwrap();
+        assert_eq!(paths.len(), expected_paths);
         let lowered = lower::emit(&plan, &input, None).unwrap();
         let (sql, _) = compiler::emit_simple_query(&lowered.ast).unwrap();
-        assert_eq!(sql.contains("arrayExists"), set);
-        assert_eq!(
-            sql.matches("startsWith").count(),
-            if set { 1 } else { expected_paths }
-        );
+        assert_eq!(sql.matches("startsWith").count(), expected_paths);
         let (planned, _) = explain::physical(&plan, &lowered.ast);
-        let mode = if set { "SET" } else { "UNION" };
         Assertions {
-            expect: vec![format!(
-                "(Filter f.traversal_path PREFIX {mode} ?, ... (_))"
-            )],
+            expect: vec!["(Filter f.traversal_path PREFIX UNION ?, ... (_))".into()],
             ..Default::default()
         }
         .check(&planned, "hydration.planned")

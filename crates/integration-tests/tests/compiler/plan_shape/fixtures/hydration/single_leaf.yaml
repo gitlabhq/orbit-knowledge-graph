@@ -1,4 +1,4 @@
-name: Dynamic hydration prunes an ancestor to one prefix
+name: Hydration prunes an ancestor to one prefix
 
 query:
   json: |
@@ -7,7 +7,6 @@ query:
     MATCH (f:File {id: 1}) RETURN f.path
 
 hydration:
-  dynamic: true
   paths:
     f: ["1/", "1/100/"]
 

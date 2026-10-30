@@ -17,7 +17,6 @@ use super::Emitted;
 use crate::passes::lower::predicates::output_value;
 use crate::passes::lower::sql::{deleted_false, latest_row_dedup};
 use crate::passes::plan::predicates::{Column, OutputValue};
-use crate::passes::plan::query_types::hydration::HydrationPathFilter;
 use crate::passes::plan::{Hydration, HydrationNodePlan, Plan};
 
 use orbit_utils::traversal_path::TraversalPath;
@@ -88,11 +87,10 @@ pub(crate) fn latest_row_arm(
     select: Vec<SelectExpr>,
 ) -> Query {
     let (alias, pk) = (&node.alias, &node.id_property);
-    let path_filter = match &node.path_filter {
-        Some(HydrationPathFilter::PrefixUnion(paths)) => or_starts_with(alias, paths),
-        Some(HydrationPathFilter::PrefixSet(paths)) => Some(array_exists_starts_with(alias, paths)),
-        None => None,
-    };
+    let path_filter = node
+        .path_filter
+        .as_deref()
+        .and_then(|paths| or_starts_with(alias, paths));
     let mut inner_columns = vec![pk.as_str(), DELETED_COLUMN];
     for column in node
         .columns
@@ -138,34 +136,6 @@ fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
     )
 }
 
-fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
-    let lambda_param = "_orbit_path";
-    Expr::func(
-        Function::ArrayExists,
-        vec![
-            Expr::lambda(
-                lambda_param,
-                Expr::func(
-                    Function::StartsWith,
-                    vec![
-                        Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                        Expr::ident(lambda_param),
-                    ],
-                ),
-            ),
-            Expr::param(
-                SqlType::String.to_array(),
-                serde_json::Value::Array(
-                    paths
-                        .iter()
-                        .map(|p| serde_json::Value::String(p.as_str().to_string()))
-                        .collect(),
-                ),
-            ),
-        ],
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,16 +150,6 @@ mod tests {
         codegen(node, ResultContext::new(), QueryConfig::default())
             .unwrap()
             .sql
-    }
-
-    fn render_with_params(
-        node: &Node,
-    ) -> (
-        String,
-        std::collections::HashMap<String, crate::passes::codegen::ParamValue>,
-    ) {
-        let q = codegen(node, ResultContext::new(), QueryConfig::default()).unwrap();
-        (q.sql, q.params)
     }
 
     fn plan(columns: Vec<&str>, node_ids: Vec<i64>, traversal_paths: Vec<&str>) -> InputNode {
@@ -208,15 +168,7 @@ mod tests {
         }
     }
 
-    fn emit_dynamic(plans: &[InputNode]) -> Node {
-        emit(plans, true)
-    }
-
-    fn emit_static(plans: &[InputNode]) -> Node {
-        emit(plans, false)
-    }
-
-    fn emit(nodes: &[InputNode], dynamic: bool) -> Node {
+    fn emit(nodes: &[InputNode]) -> Node {
         let model = query_data_model::ClickHouseDataModel::derive(Arc::new(
             ontology::Ontology::load_embedded().unwrap(),
         ))
@@ -230,7 +182,6 @@ mod tests {
             &input,
             &model,
             HydrationCompileOptions {
-                dynamic,
                 path_segment_budget: None,
             },
         )
@@ -239,44 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn large_dynamic_tp_sets_emit_array_exists() {
-        let paths: Vec<TraversalPath> = (0..=256)
-            .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
-            .collect();
-        let plan = InputNode {
-            traversal_paths: paths.clone(),
-            ..plan(vec!["title"], vec![1], vec![])
-        };
-
-        let node = emit_dynamic(&[plan]);
-        let (sql, params) = render_with_params(&node);
-
-        assert!(
-            sql.contains("arrayExists"),
-            "large dynamic TP sets should use arrayExists: {sql}"
-        );
-        assert_eq!(
-            sql.matches("startsWith").count(),
-            1,
-            "arrayExists should keep one startsWith in the lambda: {sql}"
-        );
-        let array_params: Vec<_> = params
-            .values()
-            .filter_map(|p| match &p.value {
-                serde_json::Value::Array(items) => Some(items),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            array_params.len(),
-            1,
-            "expected one traversal-path array param"
-        );
-        assert_eq!(array_params[0].len(), paths.len());
-    }
-
-    #[test]
-    fn large_static_tp_sets_emit_or() {
+    fn large_tp_sets_emit_or() {
         let paths: Vec<TraversalPath> = (0..=256)
             .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
             .collect();
@@ -285,31 +199,19 @@ mod tests {
             ..plan(vec!["title"], vec![1], vec![])
         };
 
-        let node = emit_static(&[plan]);
+        let node = emit(&[plan]);
         let sql = render(&node);
 
         assert!(
             !sql.contains("arrayExists"),
-            "static TP sets should keep OR startsWith: {sql}"
+            "TP sets should use OR startsWith: {sql}"
         );
         assert_eq!(sql.matches("startsWith").count(), 257);
     }
 
     #[test]
-    fn dynamic_tp_filter_precedes_id_filter() {
-        let node = emit_dynamic(&[plan(vec!["title"], vec![1], vec!["1/9970/"])]);
-        let sql = render(&node);
-        let tp_pos = sql.find("startsWith").unwrap();
-        let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();
-        assert!(
-            tp_pos < in_pos,
-            "TP filter should precede ID filter for primary key pruning: {sql}"
-        );
-    }
-
-    #[test]
-    fn static_tp_filter_precedes_id_filter() {
-        let node = emit_static(&[plan(vec!["title"], vec![1], vec!["1/9970/"])]);
+    fn tp_filter_precedes_id_filter() {
+        let node = emit(&[plan(vec!["title"], vec![1], vec!["1/9970/"])]);
         let sql = render(&node);
         let tp_pos = sql.find("startsWith").unwrap();
         let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();

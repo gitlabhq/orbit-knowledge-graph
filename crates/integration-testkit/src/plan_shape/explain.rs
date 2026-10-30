@@ -350,7 +350,6 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 .nodes
                 .iter()
                 .map(|node| {
-                    use compiler::passes::plan::query_types::hydration::HydrationPathFilter;
                     let mut predicates = Vec::new();
                     if !node.node_ids.is_empty() {
                         predicates.push(format!(
@@ -359,10 +358,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                         ));
                     }
                     if let Some(paths) = &node.path_filter {
-                        let (mode, paths) = match paths {
-                            HydrationPathFilter::PrefixUnion(paths) => ("PREFIX UNION", paths),
-                            HydrationPathFilter::PrefixSet(paths) => ("PREFIX SET", paths),
-                        };
+                        let mode = "PREFIX UNION";
                         predicates.insert(
                             0,
                             format!(

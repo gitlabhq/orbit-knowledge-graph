@@ -7,8 +7,7 @@ use orbit_log_fields::warn;
 use query_data_model::OrbitQueryModel;
 use query_engine::compiler::constants::{MAX_DYNAMIC_HYDRATION_RESULTS, hydration_node_alias};
 use query_engine::compiler::{
-    ColumnSelection, HydrationCompileOptions, HydrationPlan, InputNode, QueryType,
-    compile_input_model,
+    ColumnSelection, HydrationCompileOptions, HydrationPlan, InputNode, compile_input_model,
 };
 
 use query_engine::pipeline::{
@@ -149,10 +148,6 @@ impl HydrationStage {
 
         let hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
         let options = HydrationCompileOptions {
-            dynamic: matches!(
-                ctx.compiled()?.input.query_type,
-                QueryType::Neighbors | QueryType::PathFinding
-            ),
             path_segment_budget: Some(orbit_utils::clickhouse::MAX_BOUND_PATH_SEGMENTS),
         };
 

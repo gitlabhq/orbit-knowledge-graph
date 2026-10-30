@@ -9,11 +9,8 @@ use crate::input::*;
 use crate::passes::plan::filters::NullAsEpochColumns;
 use crate::passes::plan::{Plan, sort_key};
 
-const PREFIX_SET_PATH_THRESHOLD: usize = 256;
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HydrationCompileOptions {
-    pub dynamic: bool,
     pub path_segment_budget: Option<usize>,
 }
 
@@ -28,20 +25,15 @@ pub struct HydrationNodePlan {
     pub id_property: String,
     pub node_ids: Vec<i64>,
     pub columns: Vec<String>,
-    pub path_filter: Option<HydrationPathFilter>,
+    pub path_filter: Option<Vec<TraversalPath>>,
     pub sort_key: Vec<String>,
     pub null_as_epoch: NullAsEpochColumns,
-}
-
-pub enum HydrationPathFilter {
-    PrefixUnion(Vec<TraversalPath>),
-    PrefixSet(Vec<TraversalPath>),
 }
 
 fn path_filter(
     paths: &[TraversalPath],
     options: HydrationCompileOptions,
-) -> Option<HydrationPathFilter> {
+) -> Option<Vec<TraversalPath>> {
     let mut leaves = prune_to_leaves(paths);
     if leaves.is_empty() {
         return None;
@@ -60,13 +52,7 @@ fn path_filter(
             leaves = prune_to_leaves(&parents);
         }
     }
-    Some(
-        if options.dynamic && leaves.len() > PREFIX_SET_PATH_THRESHOLD {
-            HydrationPathFilter::PrefixSet(leaves)
-        } else {
-            HydrationPathFilter::PrefixUnion(leaves)
-        },
-    )
+    Some(leaves)
 }
 
 pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(

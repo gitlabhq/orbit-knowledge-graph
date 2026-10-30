@@ -691,7 +691,6 @@ fn hydration_widens_paths_to_segment_budget() {
         compile_input(
             input,
             HydrationCompileOptions {
-                dynamic: true,
                 path_segment_budget: budget,
             },
             &embedded_ontology(),
@@ -700,17 +699,17 @@ fn hydration_widens_paths_to_segment_budget() {
         .unwrap()
     };
     let bound_paths = |result: &compiler::CompiledQueryContext| -> Vec<TraversalPath> {
-        result
-            .base
-            .params
-            .values()
-            .filter_map(|p| match &p.value {
-                serde_json::Value::Array(items) => Some(items),
-                _ => None,
-            })
-            .flat_map(|items| items.iter().filter_map(|v| v.as_str()))
+        let sql = result.base.render();
+        let mut paths: Vec<_> = sql
+            .split("startsWith(")
+            .skip(1)
+            .filter_map(|call| call.split('\'').nth(1))
+            .filter(|path| *path != "1/")
             .map(TraversalPath::new_unchecked)
-            .collect()
+            .collect();
+        paths.sort_unstable();
+        paths.dedup();
+        paths
     };
 
     let exact = deep(500);
@@ -718,13 +717,6 @@ fn hydration_widens_paths_to_segment_budget() {
         vec![node("Note", exact.clone()), node("Project", exact.clone())],
         Some(2000),
     );
-    let array_params = result
-        .base
-        .params
-        .values()
-        .filter(|p| matches!(p.value, serde_json::Value::Array(_)))
-        .count();
-    assert_eq!(array_params, 1, "arms share one path array param");
     let mut kept = bound_paths(&result);
     kept.sort_unstable();
     let mut expected = exact;
