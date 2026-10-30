@@ -17,3 +17,13 @@ properties:
     source: created_at
     nullable: false
     description: "When the reviewer was requested."
+  project_id:
+    type: int
+    source: project_id
+    nullable: false
+    description: "Project of the merge request, a name that gl_code_edge also uses as a base column."
+  review_note:
+    type: string
+    source: review_note
+    nullable: true
+    description: "Free text the reviewer left, when any."
