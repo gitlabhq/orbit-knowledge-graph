@@ -20,7 +20,7 @@
     "nats": {
       "$ref": "#/$defs/NatsConfiguration"
     },
-    "clickhouse_session_settings": {
+    "global_clickhouse_session_settings": {
       "description": "Session settings every ClickHouse client starts from; `graph` and `datalake` add to them.",
       "type": "object",
       "additionalProperties": {

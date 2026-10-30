@@ -43,8 +43,10 @@ nats:
   release_gc_idle_threshold_secs: 3600
 
 # Session settings every ClickHouse client starts from. datalake and graph session_settings add to
-# them, and win on a conflict.
-clickhouse_session_settings:
+# them, and win on a conflict. The Arrow output formats are what the client's decoder expects.
+global_clickhouse_session_settings:
+  output_format_arrow_string_as_string: "1"
+  output_format_arrow_fixed_string_as_fixed_byte_array: "1"
   use_query_condition_cache: "1"
   join_use_nulls: "0"
   query_plan_join_swap_table: "auto"

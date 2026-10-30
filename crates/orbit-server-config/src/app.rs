@@ -41,7 +41,7 @@ pub struct AppConfig {
     pub nats: NatsConfiguration,
     /// Session settings every ClickHouse client starts from; `graph` and `datalake` add to them.
     #[serde(default)]
-    pub clickhouse_session_settings: HashMap<String, String>,
+    pub global_clickhouse_session_settings: HashMap<String, String>,
     pub datalake: ClickHouseConfiguration,
     pub graph: ClickHouseConfiguration,
     pub clickhouse_setup: ClickHouseSetupConfig,
@@ -100,7 +100,7 @@ impl AppConfig {
 
     fn with_shared_session_settings(mut self) -> Self {
         for client in [&mut self.graph, &mut self.datalake] {
-            let mut settings = self.clickhouse_session_settings.clone();
+            let mut settings = self.global_clickhouse_session_settings.clone();
             settings.extend(std::mem::take(&mut client.session_settings));
             client.session_settings = settings;
         }
@@ -167,10 +167,12 @@ mod tests {
     fn clickhouse_clients_share_session_settings_and_keep_their_own() {
         let config = AppConfig::embedded_defaults();
         for client in [&config.graph, &config.datalake] {
-            assert_eq!(
-                client.session_settings.get("use_query_condition_cache"),
-                Some(&"1".to_string())
-            );
+            for name in [
+                "use_query_condition_cache",
+                "output_format_arrow_string_as_string",
+            ] {
+                assert_eq!(client.session_settings.get(name), Some(&"1".to_string()));
+            }
         }
         assert_eq!(
             config.graph.session_settings.get("max_query_size"),
