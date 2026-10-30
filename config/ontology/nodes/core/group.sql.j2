@@ -1,3 +1,12 @@
+WITH
+  _keys AS (SELECT
+    namespace.id AS id,
+    namespace.{{version_column}} AS version
+  FROM siphon_namespaces namespace {{final}}
+  WHERE namespace.id IN (SELECT
+      id
+    FROM namespace_traversal_paths
+    WHERE startsWith(traversal_path, {traversal_path:String})) {{filters}})
 SELECT
   namespace.id AS id,
   namespace.name AS name,
@@ -11,7 +20,7 @@ SELECT
   traversal_paths.current_path AS traversal_path,
   namespace.{{version_column}} AS _version,
   (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted
-FROM siphon_namespaces namespace {{final}}
+FROM siphon_namespaces namespace
 INNER JOIN (
   SELECT
     id,
@@ -37,9 +46,9 @@ LEFT JOIN (
   GROUP BY source_id
   HAVING argMax({{deleted_column}}, {{version_column}}) = false ) routes ON namespace.id = routes.source_id
 WHERE startsWith(traversal_paths.current_path, {traversal_path:String})
-  AND (namespace.id IN (SELECT
-      id
-    FROM namespace_traversal_paths
-    WHERE startsWith(traversal_path, {traversal_path:String}))) {{filters}}
+  AND (namespace.id, namespace.{{version_column}}) IN (SELECT
+      id,
+      version
+    FROM _keys)
 ORDER BY traversal_path, id
 LIMIT {{batch_size}}
