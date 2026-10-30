@@ -235,7 +235,6 @@ pub trait OrbitQueryModel {
                 .map(|owner| OwnerScope {
                     column: &owner.column,
                     admin_bypass: owner.admin_bypass,
-                    allows_unowned: true,
                 }),
         }
     }

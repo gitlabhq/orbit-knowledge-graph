@@ -181,29 +181,18 @@ fn is_owner_filter(expr: &Expr, alias: &str, scope: OwnerScope<'_>, user_id: Opt
         return false;
     };
     let Expr::BinaryOp {
-        op,
+        op: Op::Eq,
         left: owner,
         right: caller,
     } = left.as_ref()
     else {
         return false;
     };
-    let Some(user_id) = user_id else {
-        return false;
-    };
-    let caller_matches = match (scope.allows_unowned, op) {
-        (false, Op::Eq) => matches!(
-            caller.as_ref(),
-            Expr::Literal(Value::Number(value)) | Expr::Param { value: Value::Number(value), .. }
-                if value.as_i64() == Some(user_id)
-        ),
-        (true, Op::In) => matches!(
-            caller.as_ref(),
-            Expr::Param { value: Value::Array(values), .. }
-                if values.iter().map(Value::as_i64).eq([Some(0), Some(user_id)])
-        ),
-        _ => false,
-    };
+    let caller_matches = matches!(
+        caller.as_ref(),
+        Expr::Literal(Value::Number(value)) | Expr::Param { value: Value::Number(value), .. }
+            if user_id.is_some_and(|user_id| value.as_i64() == Some(user_id))
+    );
     caller_matches
         && is_column(owner, alias, scope.column)
         && is_column(tombstone, alias, ontology::constants::DELETED_COLUMN)
@@ -1063,7 +1052,7 @@ mod tests {
     }
 
     #[test]
-    fn owner_edge_table_needs_the_caller_or_unowned_filter() {
+    fn owner_edge_table_needs_the_caller_filter() {
         let model = derive_model(
             ontology::Ontology::new()
                 .with_nodes(["User", "Todo"])
@@ -1079,20 +1068,25 @@ mod tests {
             Function::StartsWith,
             vec![Expr::col("e", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
         );
-        let owned = |values: Vec<i64>| {
+        let owned = |user_id| {
             Expr::binary(
                 Op::Or,
-                Expr::binary(
-                    Op::In,
-                    Expr::col("e", "_owner_id"),
-                    Expr::Param {
-                        data_type: crate::ast::SqlType::Int64.to_array(),
-                        value: Value::Array(values.into_iter().map(Value::from).collect()),
-                    },
-                ),
+                Expr::eq(Expr::col("e", "_owner_id"), Expr::int(user_id)),
                 Expr::col("e", "_deleted"),
             )
         };
+        let unowned_or_caller = Expr::binary(
+            Op::Or,
+            Expr::binary(
+                Op::In,
+                Expr::col("e", "_owner_id"),
+                Expr::Param {
+                    data_type: crate::ast::SqlType::Int64.to_array(),
+                    value: Value::Array(vec![0.into(), 7.into()]),
+                },
+            ),
+            Expr::col("e", "_deleted"),
+        );
         let edge_query = |where_clause| {
             Node::Query(Box::new(Query {
                 select: vec![SelectExpr::col("e", "target_id")],
@@ -1109,13 +1103,13 @@ mod tests {
         );
         assert!(
             check(
-                &edge_query(Expr::and(path_filter.clone(), owned(vec![0, 7]))),
+                &edge_query(Expr::and(path_filter.clone(), owned(7))),
                 &ctx,
                 &model
             )
             .is_ok()
         );
-        for wrong in [owned(vec![0, 8]), owned(vec![7]), owned(vec![0, 7, 9])] {
+        for wrong in [owned(8), unowned_or_caller] {
             assert!(
                 check(
                     &edge_query(Expr::and(path_filter.clone(), wrong)),

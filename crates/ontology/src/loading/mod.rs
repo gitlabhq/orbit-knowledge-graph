@@ -144,9 +144,25 @@ fn merge_values(base: &mut serde_json::Value, overlay: serde_json::Value) {
                 merge_values(b.entry(k).or_insert(serde_json::Value::Null), v);
             }
         }
-        (Array(b), Array(o)) => b.extend(o),
+        (Array(b), Array(o)) => {
+            for item in o {
+                match b
+                    .iter_mut()
+                    .find(|existing| same_edge_variant(existing, &item))
+                {
+                    Some(existing) => merge_values(existing, item),
+                    None => b.push(item),
+                }
+            }
+        }
         (b, o) => *b = o,
     }
+}
+
+fn same_edge_variant(base: &serde_json::Value, overlay: &serde_json::Value) -> bool {
+    ["from_node", "to_node"]
+        .iter()
+        .all(|key| base.get(key).is_some() && base.get(key) == overlay.get(key))
 }
 
 pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, OntologyError> {
@@ -854,6 +870,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_unique_denormalized_joins(&ontology)?;
     validate_edge_table_owner_columns(&ontology)?;
     validate_owner_scoped_edges_declare_owner(&ontology)?;
+    validate_owner_edge_tables_have_owned_writers(&ontology)?;
     let mut occupied: std::collections::BTreeSet<String> = all_table_names
         .into_iter()
         .chain(
@@ -1569,6 +1586,52 @@ fn validate_edge_table_owner_columns(ontology: &crate::Ontology) -> Result<(), O
     Ok(())
 }
 
+fn validate_owner_edge_tables_have_owned_writers(
+    ontology: &crate::Ontology,
+) -> Result<(), OntologyError> {
+    let owner_table = |mapping: &crate::EdgeMapping| {
+        ontology
+            .edge_routes_for_mapping(mapping)
+            .into_iter()
+            .map(|route| route.destination_table.as_str())
+            .find(|table| {
+                ontology
+                    .edge_table_configs
+                    .get(*table)
+                    .is_some_and(|config| config.owner.is_some())
+            })
+    };
+    let unowned_writers = ontology
+        .nodes()
+        .filter(|node| {
+            node.redaction
+                .as_ref()
+                .is_none_or(|redaction| redaction.owner_column.is_none())
+        })
+        .flat_map(|node| {
+            node.pipelines
+                .iter()
+                .map(move |pipeline| (&node.name, pipeline))
+        })
+        .chain(ontology.derived_entities().flat_map(|derived| {
+            derived
+                .pipelines
+                .iter()
+                .map(move |pipeline| (&derived.name, pipeline))
+        }));
+    for (writer, pipeline) in unowned_writers {
+        for mapping in pipeline.transform.edges() {
+            if let Some(table) = owner_table(mapping) {
+                return Err(OntologyError::Validation(format!(
+                    "'{writer}' writes '{}' to '{table}', which declares redaction.owner_column; only a node with redaction.owner_column may write there",
+                    mapping.label
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_owner_scoped_edges_declare_owner(
     ontology: &crate::Ontology,
 ) -> Result<(), OntologyError> {
@@ -1880,22 +1943,60 @@ mod tests {
             error.to_string().contains("owner_column '_owner_id'"),
             "{error}"
         );
-        let loaded = load_modified_sources("schema.yaml", |doc| {
+        let error = load_modified_sources("schema.yaml", |doc| {
             declare(doc, "_owner_id");
             doc["settings"]["edge_tables"]["gl_edge"]["storage"]["columns"]
                 .as_array_mut()
                 .unwrap()
                 .push(serde_json::json!({ "name": "_owner_id", "type": "Int64", "default": "0" }));
         })
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("to 'gl_edge', which declares redaction.owner_column"),
+            "{error}"
+        );
+        let loaded = load_modified_sources("schema.yaml", |doc| {
+            let mut owned = doc["settings"]["edge_tables"]["gl_edge"].clone();
+            owned["redaction"] =
+                serde_json::json!({ "owner_column": "_owner_id", "owner_bypass": "admin" });
+            owned["storage"]["columns"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({ "name": "_owner_id", "type": "Int64", "default": "0" }));
+            doc["settings"]["edge_tables"]["gl_owned_edge"] = owned;
+        })
         .unwrap();
         let owner = loaded
-            .edge_table_config("gl_edge")
+            .edge_table_config("gl_owned_edge")
             .unwrap()
             .owner
             .clone()
             .unwrap();
         assert_eq!(owner.column, "_owner_id");
         assert_eq!(owner.bypass, crate::OwnerBypass::Admin);
+    }
+
+    #[test]
+    fn overlay_variants_merge_by_their_endpoints() {
+        use serde_json::json;
+        let mut base = json!({"variants": [
+            {"from_node": {"type": "User", "id": "id"}, "to_node": {"type": "Note", "id": "id"}, "fk_column": "author_id"},
+            {"from_node": {"type": "User", "id": "id"}, "to_node": {"type": "MergeRequest", "id": "id"}}
+        ]});
+        merge_values(
+            &mut base,
+            json!({"variants": [
+                {"from_node": {"type": "User", "id": "id"}, "to_node": {"type": "Note", "id": "id"}, "table": "gl_note_edge"},
+                {"from_node": {"type": "User", "id": "id"}, "to_node": {"type": "Branch", "id": "id"}}
+            ]}),
+        );
+        let variants = base["variants"].as_array().unwrap();
+        assert_eq!(variants.len(), 3);
+        assert_eq!(variants[0]["table"], "gl_note_edge");
+        assert_eq!(variants[0]["fk_column"], "author_id");
+        assert!(variants[1].get("table").is_none());
     }
 
     #[test]

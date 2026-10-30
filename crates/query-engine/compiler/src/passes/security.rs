@@ -4,7 +4,7 @@
 use serde_json::Value;
 
 use crate::ast::visit::{visit_queries_mut, visit_relations};
-use crate::ast::{Expr, Function, Node, Op, SqlType, TableRef};
+use crate::ast::{Expr, Function, Node, Op, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 pub use crate::types::SecurityContext;
@@ -69,21 +69,9 @@ fn build_owner_filter(alias: &str, scope: OwnerScope<'_>, user_id: Option<i64>) 
     let Some(user_id) = user_id else {
         return Expr::Literal(Value::Bool(false));
     };
-    let owner = Expr::col(alias, scope.column);
-    let owned = match scope.allows_unowned {
-        true => Expr::binary(
-            Op::In,
-            owner,
-            Expr::Param {
-                data_type: SqlType::Int64.to_array(),
-                value: Value::Array(vec![0.into(), user_id.into()]),
-            },
-        ),
-        false => Expr::eq(owner, Expr::int(user_id)),
-    };
     Expr::binary(
         Op::Or,
-        owned,
+        Expr::eq(Expr::col(alias, scope.column), Expr::int(user_id)),
         Expr::col(alias, ontology::constants::DELETED_COLUMN),
     )
 }
@@ -662,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn owner_edge_table_filters_edge_rows_to_the_caller_or_unowned() {
+    fn owner_edge_table_filters_edge_rows_to_the_caller() {
         let edge_model = |bypass| {
             ClickHouseDataModel::derive(Arc::new(
                 ontology::Ontology::new()
@@ -683,14 +671,7 @@ mod tests {
         };
         let owner_filter = Expr::binary(
             Op::Or,
-            Expr::binary(
-                Op::In,
-                Expr::col("e", "_owner_id"),
-                Expr::Param {
-                    data_type: SqlType::Int64.to_array(),
-                    value: Value::Array(vec![0.into(), 7.into()]),
-                },
-            ),
+            Expr::eq(Expr::col("e", "_owner_id"), Expr::int(7)),
             Expr::col("e", "_deleted"),
         );
         let ctx = SecurityContext::new(1, vec!["1/".into()])

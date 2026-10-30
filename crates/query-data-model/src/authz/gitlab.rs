@@ -22,7 +22,6 @@ pub trait GitLabPolicy: Send + Sync {
 pub struct OwnerScope<'a> {
     pub column: &'a str,
     pub admin_bypass: bool,
-    pub allows_unowned: bool,
 }
 
 impl OwnerScope<'_> {
@@ -135,7 +134,6 @@ impl GitLabPolicy for GitLabAuthzCatalog {
         Some(OwnerScope {
             column: authorization.owner_column.as_deref()?,
             admin_bypass: authorization.owner_admin_bypass,
-            allows_unowned: false,
         })
     }
 }
