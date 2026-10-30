@@ -17,6 +17,7 @@ config:
     gl_note_edge:
       - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, _owner_id: 1 }
       - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3100, target_kind: Note, _owner_id: 1 }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3002, target_kind: Note, _owner_id: 0 }
       - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3101, target_kind: Note, _owner_id: 2 }
       - { traversal_path: "1/100/1000/", source_id: 2001, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3102, target_kind: Note, _owner_id: 2 }
       - { traversal_path: "1/100/1000/", source_id: 3101, source_kind: Note, relationship_kind: IN_PROJECT, target_id: 1001, target_kind: Project, _owner_id: 2 }
@@ -45,7 +46,7 @@ steps:
             - entity: MergeRequest
               id: 2000
               values:
-                notes: 3
+                notes: 4
             - entity: MergeRequest
               id: 2001
               values:
@@ -57,11 +58,11 @@ steps:
       gql: |
         MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n) RETURN mr, n
     expect:
-      node_count: 4
+      node_count: 5
       nodes:
         MergeRequest: { ids: [2000] }
-        Note: { ids: [3000, 3100, 3101] }
-      edge_count: { HAS_NOTE: 3 }
+        Note: { ids: [3000, 3002, 3100, 3101] }
+      edge_count: { HAS_NOTE: 4 }
       skip_requirements: [node_ids]
 
   - query:

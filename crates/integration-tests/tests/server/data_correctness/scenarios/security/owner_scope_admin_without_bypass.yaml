@@ -1,4 +1,4 @@
-description: A caller with the admin claim gets no rows of an owner-scoped entity that declares no owner_bypass; the owner filter and the edge-read kind gates apply as for any caller
+description: A caller with the admin claim gets no rows of an owner-scoped entity that declares no owner_bypass, and no edge row of its owner edge table, not even one with _owner_id 0
 
 config:
   ontology_overlay: owner_scope_strict
@@ -15,6 +15,7 @@ config:
     gl_note_edge:
       - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, _owner_id: 1 }
       - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3100, target_kind: Note, _owner_id: 1 }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3002, target_kind: Note, _owner_id: 0 }
       - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3101, target_kind: Note, _owner_id: 2 }
 
 steps:
