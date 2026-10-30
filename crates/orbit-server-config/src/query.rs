@@ -53,9 +53,16 @@ impl QueryConfig {
     }
 
     pub fn get_bool(&self, name: &str) -> Option<bool> {
-        match self.0.get(name) {
-            Some(SettingValue::Bool(value)) => Some(*value),
-            _ => None,
+        match self.0.get(name)? {
+            SettingValue::Bool(value) => Some(*value),
+            SettingValue::Number(0) => Some(false),
+            SettingValue::Number(1) => Some(true),
+            SettingValue::Text(text) => match text.as_str() {
+                "0" | "false" => Some(false),
+                "1" | "true" => Some(true),
+                _ => None,
+            },
+            SettingValue::Number(_) => None,
         }
     }
 
@@ -196,6 +203,26 @@ mod tests {
         assert_eq!(
             cfg.to_http_settings(),
             Ok(vec![("join_algorithm".into(), "it's".into())])
+        );
+    }
+
+    #[test]
+    fn get_bool_reads_booleans_written_as_numbers_or_strings() {
+        for value in [true.into(), 1u64.into(), SettingValue::Text("true".into())] {
+            assert_eq!(
+                config(&[("use_query_cache", value)]).get_bool("use_query_cache"),
+                Some(true)
+            );
+        }
+        for value in [false.into(), 0u64.into(), SettingValue::Text("0".into())] {
+            assert_eq!(
+                config(&[("use_query_cache", value)]).get_bool("use_query_cache"),
+                Some(false)
+            );
+        }
+        assert_eq!(
+            config(&[("use_query_cache", 2u64.into())]).get_bool("use_query_cache"),
+            None
         );
     }
 
