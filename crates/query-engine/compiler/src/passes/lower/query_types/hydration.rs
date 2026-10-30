@@ -223,7 +223,6 @@ mod tests {
                 dynamic,
                 path_segment_budget: None,
             },
-            &[],
         )
         .unwrap();
         crate::passes::lower::emit(&plan, &input, None).unwrap().ast

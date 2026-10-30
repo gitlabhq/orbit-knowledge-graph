@@ -69,7 +69,6 @@ pub(super) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
     pub nodes: HashMap<String, NodePlan>,
     pub relations: Vec<EdgeRelation>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
-    pub owner_gates: Vec<String>,
     scans: Vec<Option<String>>,
 }
 
@@ -108,12 +107,11 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
 }
 
 impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
-    pub(super) fn new(input: &'a Input, model: &'a M, owner_gates: &[String]) -> Result<Self> {
+    pub(super) fn new(input: &'a Input, model: &'a M) -> Result<Self> {
         let nodes = nodes::build_nodes(input, model);
         let mut pattern = Self {
             input,
             model,
-            owner_gates: owner_gates.to_vec(),
             relations: relations::build_relations(input, model, &nodes),
             nodes,
             denormalized: super::filters::denormalized_facts(input, model),
@@ -168,7 +166,6 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
             relations: self.relations,
             node_edge_mappings,
             denormalized: self.denormalized,
-            owner_gates: self.owner_gates,
             operation: operation(execution),
         }
     }

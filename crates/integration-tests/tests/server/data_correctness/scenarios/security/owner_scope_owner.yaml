@@ -82,8 +82,12 @@ steps:
       gql: |
         MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n) RETURN mr, n
     expect:
-      edge_count: { HAS_NOTE: 0 }
-      skip_requirements: [node_ids, node_count]
+      node_count: 2
+      nodes:
+        MergeRequest: { ids: [2000] }
+        Note: { ids: [3101] }
+      edge_count: { HAS_NOTE: 1 }
+      skip_requirements: [node_ids]
 
   - query:
       json: |
@@ -91,7 +95,9 @@ steps:
       gql: |
         MATCH p = ANY SHORTEST (start:MergeRequest {id: 2000})-[:HAS_NOTE|IN_PROJECT*1..2]->(`end`:Project {id: 1001}) RETURN p
     expect:
-      path_count: 0
+      path_count: 1
+      path_edges:
+        - [{ from: MergeRequest, from_id: 2000, type: HAS_NOTE, to: Note, to_id: 3101 }, { from: Note, from_id: 3101, type: IN_PROJECT, to: Project, to_id: 1001 }]
 
   - query:
       json: |
@@ -99,5 +105,8 @@ steps:
       gql: |
         MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE|IN_PROJECT*2..2]->(p:Project) RETURN mr, p LIMIT 20
     expect:
-      node_count: 0
-      skip_requirements: [node_ids, "relationship:HAS_NOTE", "relationship:IN_PROJECT"]
+      node_count: 2
+      nodes:
+        MergeRequest: { ids: [2000] }
+        Project: { ids: [1001] }
+      skip_requirements: ["relationship:HAS_NOTE", "relationship:IN_PROJECT"]

@@ -240,18 +240,6 @@ pub trait OrbitQueryModel {
         }
     }
 
-    fn owner_gated_entities(&self, admin: bool) -> Vec<String> {
-        self.graph()
-            .entities()
-            .filter(|entity| {
-                self.query_authorization()
-                    .owner_scope(entity.id)
-                    .is_some_and(|scope| scope.gates(admin))
-            })
-            .map(|entity| entity.name.clone())
-            .collect()
-    }
-
     fn property_is_admin_only(&self, property: PropertyId) -> bool {
         self.query_authorization().is_admin_only(property)
     }

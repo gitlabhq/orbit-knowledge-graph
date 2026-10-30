@@ -31,7 +31,6 @@ pub struct Neighbors {
 pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
     input: &Input,
     model: &M,
-    owner_gates: &[String],
 ) -> Result<Plan<Neighbors>> {
     let config = input
         .neighbors
@@ -250,28 +249,25 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         && tables.len() == 1)
         .then(|| tables.remove(0));
 
-    let mut plan = Plan::new(
-        Neighbors {
-            center: center.alias.clone(),
-            direction,
-            edge,
-            has_non_denorm,
-            fused_table,
-            outgoing_kinds: arm_kinds(true),
-            incoming_kinds: arm_kinds(false),
-            incoming_scope_preserving,
-            incoming_cross_scope,
-            outgoing_scope_preserving,
-            outgoing_cross_scope,
-            outgoing_neighbor_paths: neighbor_paths(true),
-            incoming_neighbor_paths: neighbor_paths(false),
-            center_sort_key: match center.table.as_deref() {
-                Some(table) => super::super::sort_key(model, table)?.to_vec(),
-                None => Vec::new(),
-            },
+    let mut plan = Plan::new(Neighbors {
+        center: center.alias.clone(),
+        direction,
+        edge,
+        has_non_denorm,
+        fused_table,
+        outgoing_kinds: arm_kinds(true),
+        incoming_kinds: arm_kinds(false),
+        incoming_scope_preserving,
+        incoming_cross_scope,
+        outgoing_scope_preserving,
+        outgoing_cross_scope,
+        outgoing_neighbor_paths: neighbor_paths(true),
+        incoming_neighbor_paths: neighbor_paths(false),
+        center_sort_key: match center.table.as_deref() {
+            Some(table) => super::super::sort_key(model, table)?.to_vec(),
+            None => Vec::new(),
         },
-        owner_gates,
-    );
+    });
     plan.node_edge_mappings.insert(
         center.alias.clone(),
         (

@@ -111,5 +111,5 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(Plan::new(Hydration { nodes }, &[]))
+    Ok(Plan::new(Hydration { nodes }))
 }

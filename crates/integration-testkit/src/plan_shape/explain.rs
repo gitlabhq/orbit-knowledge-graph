@@ -615,15 +615,6 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             planned_column(column),
             text_literal(entity)
         )],
-        Predicate::EntityKindNotIn { column, entities } => vec![format!(
-            "{} NOT IN [{}]",
-            planned_column(column),
-            entities
-                .iter()
-                .map(|entity| text_literal(entity))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )],
         Predicate::ColumnEq { left, right } => vec![format!(
             "{} = {}",
             planned_column(left),

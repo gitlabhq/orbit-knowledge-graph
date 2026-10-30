@@ -53,10 +53,6 @@ pub enum Predicate {
         column: Column,
         entity: String,
     },
-    EntityKindNotIn {
-        column: Column,
-        entities: Vec<String>,
-    },
     ColumnEq {
         left: Column,
         right: Column,
@@ -155,8 +151,7 @@ impl Predicate {
             }
             Self::Ids { column, .. }
             | Self::IdRange { column, .. }
-            | Self::EntityKind { column, .. }
-            | Self::EntityKindNotIn { column, .. } => in_key(&column.name),
+            | Self::EntityKind { column, .. } => in_key(&column.name),
             Self::Membership { columns, .. } => columns.iter().all(|column| in_key(&column.name)),
             Self::RelationshipKinds { .. } => in_key(RELATIONSHIP_KIND_COLUMN),
             _ => false,
@@ -246,13 +241,6 @@ pub fn live(alias: &str) -> Predicate {
     Predicate::Live {
         alias: alias.into(),
     }
-}
-
-pub fn entity_kind_not_in(column: Column, entities: &[String]) -> Option<Predicate> {
-    (!entities.is_empty()).then(|| Predicate::EntityKindNotIn {
-        column,
-        entities: entities.to_vec(),
-    })
 }
 
 pub fn relationship_kinds(alias: &str, kinds: &[String]) -> Option<Predicate> {

@@ -15,9 +15,8 @@ pub struct Traversal {
 pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
     input: &Input,
     model: &M,
-    owner_gates: &[String],
 ) -> Result<Plan<Traversal>> {
-    let pattern = Pattern::new(input, model, owner_gates)?;
+    let pattern = Pattern::new(input, model)?;
     let execution = pattern.execution()?;
     Ok(pattern.into_plan(execution, |execution| Traversal { execution }))
 }

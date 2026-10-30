@@ -106,8 +106,12 @@ steps:
       gql: |
         MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n) RETURN mr, n
     expect:
-      edge_count: { HAS_NOTE: 0 }
-      skip_requirements: [node_ids, node_count]
+      node_count: 3
+      nodes:
+        MergeRequest: { ids: [2000] }
+        Note: { ids: [3000, 3100] }
+      edge_count: { HAS_NOTE: 2 }
+      skip_requirements: [node_ids]
 
   - query:
       json: |

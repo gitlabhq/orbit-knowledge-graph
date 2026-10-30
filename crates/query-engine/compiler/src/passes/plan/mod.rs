@@ -34,18 +34,16 @@ pub struct Plan<T> {
     pub relations: Vec<EdgeRelation>,
     pub node_edge_mappings: HashMap<String, (String, String)>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
-    pub owner_gates: Vec<String>,
     pub operation: T,
 }
 
 impl<T> Plan<T> {
-    fn new(operation: T, owner_gates: &[String]) -> Self {
+    fn new(operation: T) -> Self {
         Self {
             nodes: HashMap::new(),
             relations: Vec::new(),
             node_edge_mappings: HashMap::new(),
             denormalized: HashMap::new(),
-            owner_gates: owner_gates.to_vec(),
             operation,
         }
     }
@@ -113,9 +111,8 @@ pub fn plan_clickhouse(
     input: &Input,
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
-    owner_gates: &[String],
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, owner_gates)
+    plan(input, model, hydration_options)
 }
 
 pub fn plan_duckdb(
@@ -123,30 +120,25 @@ pub fn plan_duckdb(
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, &[])
+    plan(input, model, hydration_options)
 }
 
 fn plan<M>(
     input: &Input,
     model: &M,
     hydration_options: HydrationCompileOptions,
-    owner_gates: &[String],
 ) -> Result<QueryPlan>
 where
     M: OrbitQueryModel + ?Sized,
 {
     Ok(match input.query_type {
-        QueryType::Traversal => {
-            QueryPlan::Traversal(query_types::traversal::plan(input, model, owner_gates)?)
-        }
+        QueryType::Traversal => QueryPlan::Traversal(query_types::traversal::plan(input, model)?),
         QueryType::Aggregation => {
-            QueryPlan::Aggregation(query_types::aggregation::plan(input, model, owner_gates)?)
+            QueryPlan::Aggregation(query_types::aggregation::plan(input, model)?)
         }
-        QueryType::Neighbors => {
-            QueryPlan::Neighbors(query_types::neighbors::plan(input, model, owner_gates)?)
-        }
+        QueryType::Neighbors => QueryPlan::Neighbors(query_types::neighbors::plan(input, model)?),
         QueryType::PathFinding => {
-            QueryPlan::PathFinding(query_types::pathfinding::plan(input, model, owner_gates)?)
+            QueryPlan::PathFinding(query_types::pathfinding::plan(input, model)?)
         }
         QueryType::Hydration => QueryPlan::Hydration(query_types::hydration::plan(
             input,

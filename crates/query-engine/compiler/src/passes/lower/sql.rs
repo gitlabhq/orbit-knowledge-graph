@@ -242,19 +242,6 @@ pub fn deleted_false(alias: &str) -> Expr {
     )
 }
 
-pub fn kind_not_in(alias: &str, column: &str, kinds: &[String]) -> Option<Expr> {
-    Expr::col_in(
-        alias,
-        column,
-        SqlType::String,
-        kinds
-            .iter()
-            .map(|kind| serde_json::Value::from(kind.as_str()))
-            .collect(),
-    )
-    .map(|membership| Expr::unary(Op::Not, membership))
-}
-
 pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
     if crate::passes::normalize::is_wildcard(types) {
         return None;

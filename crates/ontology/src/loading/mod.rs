@@ -853,6 +853,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     }
     validate_unique_denormalized_joins(&ontology)?;
     validate_edge_table_owner_columns(&ontology)?;
+    validate_owner_scoped_edges_declare_owner(&ontology)?;
     let mut occupied: std::collections::BTreeSet<String> = all_table_names
         .into_iter()
         .chain(
@@ -1568,6 +1569,38 @@ fn validate_edge_table_owner_columns(ontology: &crate::Ontology) -> Result<(), O
     Ok(())
 }
 
+fn validate_owner_scoped_edges_declare_owner(
+    ontology: &crate::Ontology,
+) -> Result<(), OntologyError> {
+    let owner_scoped = |kind: &str| {
+        ontology
+            .get_node(kind)
+            .and_then(|node| node.redaction.as_ref()?.owner_column.as_ref())
+            .is_some()
+    };
+    for (edge_name, variants) in &ontology.edges {
+        for variant in variants {
+            let Some(node) = [&variant.source_kind, &variant.target_kind]
+                .into_iter()
+                .find(|kind| owner_scoped(kind))
+            else {
+                continue;
+            };
+            let declares_owner = ontology
+                .edge_table_configs
+                .get(&variant.destination_table)
+                .is_some_and(|config| config.owner.is_some());
+            if !declares_owner {
+                return Err(OntologyError::Validation(format!(
+                    "edge '{edge_name}' touches '{node}', which has redaction.owner_column, but its table '{}' declares no redaction.owner_column",
+                    variant.destination_table
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_unique_denormalized_joins(ontology: &crate::Ontology) -> Result<(), OntologyError> {
     let mut seen = std::collections::HashSet::new();
     for join in &ontology.denormalized_joins {
@@ -1881,11 +1914,15 @@ mod tests {
         })
         .unwrap_err();
         assert!(error.to_string().contains("owner_column 'note'"), "{error}");
+        let error = load_modified_sources("nodes/core/note.yaml", |node| {
+            node["redaction"]["owner_column"] = serde_json::json!("author_id");
+        })
+        .unwrap_err();
         assert!(
-            load_modified_sources("nodes/core/note.yaml", |node| {
-                node["redaction"]["owner_column"] = serde_json::json!("author_id");
-            })
-            .is_ok()
+            error
+                .to_string()
+                .contains("'gl_edge' declares no redaction.owner_column"),
+            "{error}"
         );
     }
 

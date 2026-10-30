@@ -45,9 +45,8 @@ pub struct AggregationPlan {
 pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
     input: &Input,
     model: &M,
-    owner_gates: &[String],
 ) -> Result<Plan<Aggregation>> {
-    let pattern = Pattern::new(input, model, owner_gates)?;
+    let pattern = Pattern::new(input, model)?;
     let execution = pattern.execution()?;
     let result = aggregation_plan(input, &pattern.nodes, &execution);
     Ok(pattern.into_plan(execution, |execution| Aggregation { execution, result }))
