@@ -194,7 +194,7 @@ impl TestContext {
                 "default",
                 USERNAME,
                 Some(PASSWORD),
-                &std::collections::HashMap::new(),
+                &graph_session_settings(),
                 &std::collections::HashMap::new(),
                 "graph",
             );
@@ -263,7 +263,7 @@ impl TestContext {
             &self.database,
             USERNAME,
             Some(PASSWORD),
-            &std::collections::HashMap::new(),
+            &graph_session_settings(),
             &std::collections::HashMap::new(),
             "graph",
         );
@@ -943,4 +943,10 @@ async fn sdlc_dispatch_policy_redelivers_a_transient_failure() {
         1,
         "a transient failure must be redelivered and then succeed"
     );
+}
+
+fn graph_session_settings() -> std::collections::HashMap<String, String> {
+    orbit_server_config::AppConfig::embedded_defaults()
+        .graph
+        .session_settings
 }

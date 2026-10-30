@@ -79,7 +79,9 @@ impl ClickHouseConfig {
             &self.database,
             &self.username,
             self.password.as_deref(),
-            &std::collections::HashMap::new(),
+            &orbit_server_config::AppConfig::embedded_defaults()
+                .graph
+                .session_settings,
             &std::collections::HashMap::new(),
             "graph",
         )
