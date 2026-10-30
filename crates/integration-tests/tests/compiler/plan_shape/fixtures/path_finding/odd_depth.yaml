@@ -15,8 +15,8 @@ physical:
       expect: ["(PathFinding a->b depth=3 forward=2 backward=1 scoped=true ... (_) (_))"]
     emitted:
       ctes:
-        exact_order: [_orbit_nf_a, _orbit_nf_b, _orbit_path_scope, _orbit_forward, _orbit_backward]
+        exact_order: [_orbit_nf_a, _orbit_nf_b, _orbit_path_scope, _orbit_forward_reach_1, _orbit_forward, _orbit_backward]
       expect:
         - (CTE _orbit_forward (Union ALL (_) (_)))
-        - (Join ON (_orbit_e1.target_id = _orbit_e2.source_id) AND (_orbit_e1.target_kind = _orbit_e2.source_kind) AND (_orbit_e1.traversal_path = _orbit_e2.traversal_path) AND (_orbit_e2.relationship_kind = 'CALLS') AND _orbit_e2.traversal_path IN _orbit_path_scope.traversal_path (Deduplicate Final (_)) (Deduplicate Final (_)))
+        - (Join ON (_orbit_e1.target_id = _orbit_e2.source_id) AND (_orbit_e1.target_kind = _orbit_e2.source_kind) AND (_orbit_e1.traversal_path = _orbit_e2.traversal_path) AND (_orbit_e2.relationship_kind = 'CALLS') AND _orbit_e2.traversal_path IN _orbit_path_scope.traversal_path AND _orbit_e2.source_id IN _orbit_forward_reach_1._orbit_end_node (Deduplicate Final (_)) (Deduplicate Final (_)))
         - (Filter (_orbit_forward._orbit_depth + _orbit_backward._orbit_depth) <= 3 (_))

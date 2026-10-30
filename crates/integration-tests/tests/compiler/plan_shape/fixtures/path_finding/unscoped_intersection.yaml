@@ -15,6 +15,6 @@ physical:
       expect: ["(PathFinding a->b depth=3 forward=2 backward=1 scoped=false ... (_) (_))"]
     emitted:
       ctes:
-        exact_order: [_orbit_forward, _orbit_backward]
+        exact_order: [_orbit_forward_reach_1, _orbit_forward, _orbit_backward]
       expect: ["(Join ON (_orbit_forward._orbit_end_node = _orbit_backward._orbit_end_node) AND (_orbit_forward._orbit_end_kind = _orbit_backward._orbit_end_kind) (_) (_))"]
       reject: ["(CTE _orbit_path_scope (_))"]

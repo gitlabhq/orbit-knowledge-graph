@@ -140,6 +140,11 @@ pub(crate) fn hop_alias(depth: u32) -> String {
     format!("{}e{depth}", internal_column_prefix())
 }
 
+/// Node ids a path frontier reaches after `depth` hops, in one direction.
+pub(crate) fn frontier_reach_cte(direction: &str, depth: u32) -> String {
+    format!("{}{direction}_reach_{depth}", internal_column_prefix())
+}
+
 pub(crate) fn reached_depth_alias(depth: u32) -> String {
     format!("{}depth_{depth}", internal_column_prefix())
 }
