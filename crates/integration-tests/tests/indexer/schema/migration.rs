@@ -58,41 +58,86 @@ fn campaign() -> indexer::campaign::CampaignState {
 }
 
 #[test]
-fn reordered_table_declarations_do_not_change_deployed_schema() {
-    let base = ontology::Ontology::load_embedded().unwrap();
-    let overlay = integration_testkit::load_ontology_overlay("reordered_edges");
-    let base_schema = test_schema(&base);
-    let overlay_schema = test_schema(&overlay);
-    assert_eq!(
-        base_schema
+fn reordered_table_declarations_deploy_each_copy_with_its_insert_view() {
+    let base = test_schema(&ontology::Ontology::load_embedded().unwrap());
+    let overlay = test_schema(&integration_testkit::load_ontology_overlay(
+        "reordered_edges",
+    ));
+    let added = |base: Vec<String>, overlay: Vec<String>| -> Vec<String> {
+        overlay
+            .into_iter()
+            .filter(|name| !base.contains(name))
+            .collect()
+    };
+    let tables = |schema: &GraphSchema| {
+        schema
             .tables
             .iter()
-            .map(|table| table.name.as_str())
-            .collect::<Vec<_>>(),
-        overlay_schema
-            .tables
-            .iter()
-            .map(|table| table.name.as_str())
-            .collect::<Vec<_>>()
+            .map(|table| table.name.clone())
+            .collect()
+    };
+    let views = |schema: &GraphSchema| schema.views.iter().map(|view| view.name.clone()).collect();
+    assert_eq!(
+        added(tables(&base), tables(&overlay)),
+        ["gl_code_edge_by_target", "gl_edge_by_source"]
     );
     assert_eq!(
-        base_schema
-            .views
-            .iter()
-            .map(|view| view.name.as_str())
-            .collect::<Vec<_>>(),
-        overlay_schema
-            .views
-            .iter()
-            .map(|view| view.name.as_str())
-            .collect::<Vec<_>>()
+        added(views(&base), views(&overlay)),
+        [
+            "gl_code_edge_by_target__on_insert",
+            "gl_edge_by_source__on_insert"
+        ]
     );
+    let view = overlay
+        .views
+        .iter()
+        .find(|view| view.name == "gl_edge_by_source__on_insert")
+        .unwrap();
+    assert_eq!(view.to_table.as_deref(), Some("gl_edge_by_source"));
     assert!(
-        !overlay_schema
-            .tables
-            .iter()
-            .any(|table| table.name == "gl_code_edge_by_target")
+        view.select_query.ends_with("FROM {gl_edge}"),
+        "{}",
+        view.select_query
     );
+}
+
+#[tokio::test]
+async fn insert_view_mirrors_source_rows_and_tombstones_into_the_copy() {
+    let (ctx, _, metrics) = setup().await;
+    let overlay = integration_testkit::load_ontology_overlay("reordered_edges");
+    let client = ctx.create_client();
+    migration::run_if_needed(
+        &client,
+        &dictionary_credentials(&ctx.config),
+        &lock(),
+        &overlay,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    let source = prefixed_table_name("gl_edge", *SCHEMA_VERSION);
+    let copy = prefixed_table_name("gl_edge_by_source", *SCHEMA_VERSION);
+    for (target, version, deleted) in [
+        (100, SEED_VERSION, false),
+        (101, SEED_VERSION, false),
+        (101, REINDEX_VERSION, true),
+    ] {
+        ctx.execute(&format!(
+            "INSERT INTO {source} \
+             (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version, _deleted) \
+             VALUES ('1/100/', 'MEMBER_OF', 7, 'User', {target}, 'Group', '{version}', {deleted})"
+        ))
+        .await;
+    }
+
+    let live = ctx
+        .query(&format!(
+            "SELECT target_id FROM {copy} FINAL WHERE source_id = 7 AND _deleted = false ORDER BY target_id"
+        ))
+        .await;
+    assert_eq!(i64::extract_column(&live, 0).unwrap(), vec![100]);
 }
 
 #[tokio::test]
@@ -1046,10 +1091,14 @@ impl MigrationScenario {
     }
 
     async fn migrate(&self, scope: MigrationScope) {
-        let schema = test_schema(&self.ontology);
+        self.migrate_to(&self.ontology, scope).await;
+    }
+
+    async fn migrate_to(&self, ontology: &ontology::Ontology, scope: MigrationScope) {
+        let schema = test_schema(ontology);
         orbit_migrations::execute::create_tables_with_selective_cloning(
             &self.ctx.create_client(),
-            &self.ontology,
+            ontology,
             &schema,
             &dictionary_credentials(&self.ctx.config),
             &scope,
@@ -1423,6 +1472,26 @@ async fn none_scope_clones_every_table_and_every_checkpoint_key() {
             "maintenance.code_stale_sweep",
             "ns.100.Note",
         ])
+        .await;
+}
+
+#[tokio::test]
+async fn new_copy_of_a_cloned_source_is_filled_from_it() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario
+        .seed_edge("MEMBER_OF", (7, "User"), (100, "Group"))
+        .await;
+
+    scenario
+        .migrate_to(
+            &integration_testkit::load_ontology_overlay("reordered_edges"),
+            MigrationScope::None,
+        )
+        .await;
+
+    scenario.assert_table_row_count("gl_edge", 1).await;
+    scenario
+        .assert_table_row_count("gl_edge_by_source", 1)
         .await;
 }
 

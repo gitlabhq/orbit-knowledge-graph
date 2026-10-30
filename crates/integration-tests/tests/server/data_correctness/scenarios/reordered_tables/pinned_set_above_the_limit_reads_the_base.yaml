@@ -1,0 +1,31 @@
+description: A pinned user set larger than the copy limit reads the base edge table, which holds the preset memberships the copy never received
+
+config:
+  ontology_overlay: reordered_edges
+  unmerged_seed: true
+  redaction:
+    allow:
+      user: [1, 2, 77]
+      group: [100, 101, 102]
+  extra_seed:
+    gl_user:
+      - { id: 77, username: copy_user, name: Copy User, state: active, user_type: human, email: copy_user@example.com }
+    gl_edge:
+      - { traversal_path: "1/100/", source_id: 77, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: [state:active], target_tags: [], _version: "2024-01-01 00:00:00", _deleted: false }
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[77,1,2]},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":20}
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id IN [77, 1, 2] RETURN u, g LIMIT 20
+
+expect:
+  sql_not_contains: ["gl_edge_by_source"]
+  node_count: 5
+  nodes:
+    User:
+      ids: [1, 2, 77]
+    Group:
+      ids: [100, 102]
+  edges:
+    MEMBER_OF: [[1, 100], [1, 102], [2, 100], [77, 100]]

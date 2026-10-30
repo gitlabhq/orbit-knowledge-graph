@@ -45,6 +45,20 @@ mod tests {
         let model = ClickHouseDataModel::derive(overlay_ontology("reordered_edges")).unwrap();
         let layouts = model.backend().equivalent_layouts("gl_code_edge");
         assert_eq!(layouts, ["gl_code_edge_by_target"]);
+        assert_eq!(
+            model.backend().equivalent_layouts("gl_edge"),
+            ["gl_edge_by_source"]
+        );
+        assert_eq!(
+            model.backend().pinned_layout_limit("gl_edge_by_source"),
+            Some(2)
+        );
+        assert_eq!(
+            model
+                .backend()
+                .pinned_layout_limit("gl_code_edge_by_target"),
+            None
+        );
         let storage = model.layout().schema();
         let source = storage.table("gl_code_edge").unwrap();
         let copy = storage.table("gl_code_edge_by_target").unwrap();

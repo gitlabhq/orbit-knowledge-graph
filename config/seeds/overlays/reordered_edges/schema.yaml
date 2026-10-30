@@ -3,3 +3,7 @@ settings:
     - name: gl_code_edge_by_target
       source: gl_code_edge
       sort_key: [traversal_path, target_id, relationship_kind, project_id, branch, source_id, source_kind, target_kind]
+    - name: gl_edge_by_source
+      source: gl_edge
+      sort_key: [source_id, traversal_path, relationship_kind, target_id, source_kind, target_kind]
+      max_pinned_ids: 2

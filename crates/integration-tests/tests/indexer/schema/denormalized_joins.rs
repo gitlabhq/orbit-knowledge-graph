@@ -95,3 +95,28 @@ fn live_source_join(join: &DenormalizedJoin) -> String {
         .collect();
     sql + " WHERE " + &live.join(" AND ")
 }
+
+#[tokio::test]
+async fn reordered_copies_match_their_source() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    load_seed(&ctx, "data_correctness").await;
+    ctx.optimize_all().await;
+
+    for copy in load_ontology().reordered_tables() {
+        let live = |table: &str| format!("SELECT * FROM {table} FINAL WHERE _deleted = false");
+        let (stored, source) = (live(&copy.name), live(&copy.source));
+        assert!(
+            count(&ctx, &format!("FROM ({source})")).await > 0,
+            "{}: the seed writes no rows to its source",
+            copy.name
+        );
+        for (left, right) in [(&stored, &source), (&source, &stored)] {
+            assert_eq!(
+                count(&ctx, &format!("FROM ({left} EXCEPT ALL {right})")).await,
+                0,
+                "{}: the copy and its source hold different live rows",
+                copy.name
+            );
+        }
+    }
+}

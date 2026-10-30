@@ -1,0 +1,35 @@
+description: A pinned user reads its memberships from the user-first copy, which the insert view fills; tombstones and out-of-scope rows stay hidden
+
+config:
+  ontology_overlay: reordered_edges
+  unmerged_seed: true
+  redaction:
+    allow:
+      user: [1, 2, 77]
+      group: [100, 101, 102]
+  extra_seed:
+    gl_user:
+      - { id: 77, username: copy_user, name: Copy User, state: active, user_type: human, email: copy_user@example.com }
+    gl_edge:
+      - { traversal_path: "1/100/", source_id: 77, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: [state:active], target_tags: [], _version: "2024-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/101/", source_id: 77, source_kind: User, relationship_kind: MEMBER_OF, target_id: 101, target_kind: Group, source_tags: [state:active], target_tags: [], _version: "2024-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/101/", source_id: 77, source_kind: User, relationship_kind: MEMBER_OF, target_id: 101, target_kind: Group, source_tags: [state:active], target_tags: [], _version: "2024-06-01 00:00:00", _deleted: true }
+      - { traversal_path: "2/900/", source_id: 77, source_kind: User, relationship_kind: MEMBER_OF, target_id: 102, target_kind: Group, source_tags: [state:active], target_tags: [], _version: "2024-01-01 00:00:00", _deleted: false }
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[77]},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":10}
+  gql: |
+    MATCH (u:User {id: 77})-[:MEMBER_OF]->(g:Group) RETURN u, g LIMIT 10
+
+expect:
+  sql_contains: ["gl_edge_by_source"]
+  node_count: 2
+  nodes:
+    User:
+      ids: [77]
+    Group:
+      ids: [100]
+      absent: [101, 102]
+  edges:
+    MEMBER_OF: [[77, 100]]

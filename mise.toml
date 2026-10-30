@@ -174,7 +174,7 @@ env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, redaction, graph formatter)"
 
 [tasks."test:integration:overlay"]
-run = "GKG_TEST_ONTOLOGY_OVERLAY={{arg(name='overlay')}} ./scripts/dev/run-container-tests.sh --all-features --test server_containers --test indexer_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(denormalized_tables_match_their_source_join)'"
+run = "GKG_TEST_ONTOLOGY_OVERLAY={{arg(name='overlay')}} ./scripts/dev/run-container-tests.sh --all-features --test server_containers --test indexer_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(denormalized_tables_match_their_source_join) | test(reordered_copies_match_their_source)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run data correctness against the ontology with config/seeds/overlays/<name>/ merged over it"
 
