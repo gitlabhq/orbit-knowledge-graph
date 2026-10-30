@@ -119,10 +119,22 @@ where
             let mut filtered: Vec<&str> = relationship.filters.keys().map(String::as_str).collect();
             filtered.sort_unstable();
             let mut properties: Vec<String> = Vec::new();
+            let aggregated = relationship_groups(&input.aggregation.group_by)
+                .filter(|(relationship, _)| *relationship == input_index)
+                .map(|(_, property)| property)
+                .chain(
+                    input
+                        .aggregation
+                        .metrics
+                        .iter()
+                        .filter(|metric| metric.relationship == Some(input_index))
+                        .filter_map(|metric| metric.expr.property()),
+                );
             for property in input
                 .relationship_return
                 .read_properties(input_index)
                 .chain(filtered)
+                .chain(aggregated)
                 .chain(
                     input
                         .conditions()

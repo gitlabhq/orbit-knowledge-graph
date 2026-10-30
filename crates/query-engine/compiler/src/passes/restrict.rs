@@ -434,6 +434,7 @@ mod tests {
                     expr: AggExpr::from_parts(function, "_u", property),
                     alias: Some("_agg".into()),
                     distinct: false,
+                    relationship: None,
                 }],
                 ..Default::default()
             },
@@ -465,6 +466,7 @@ mod tests {
                     expr: AggExpr::from_parts(AggFunction::Count, "_u", None),
                     alias: Some("_agg".into()),
                     distinct: false,
+                    relationship: None,
                 }],
                 ..Default::default()
             },
@@ -486,6 +488,7 @@ mod tests {
                     expr: AggExpr::from_parts(function, "_u", property),
                     alias: Some("_agg".into()),
                     distinct: false,
+                    relationship: None,
                 }],
                 ..Default::default()
             },

@@ -151,15 +151,15 @@
         "kind": {
           "type": "string",
           "description": "Group key kind.",
-          "enum": ["node", "property"]
+          "enum": ["node", "property", "relationship"]
         },
         "node": {
           "type": "string",
-          "description": "Node alias used by the group key."
+          "description": "Node or relationship alias used by the group key."
         },
         "property": {
           "type": "string",
-          "description": "Ontology property used as the group key. Present when kind is property."
+          "description": "Ontology property used as the group key. Present when kind is property or relationship."
         },
         "entity": {
           "type": "string",

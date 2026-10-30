@@ -138,3 +138,39 @@ cases:
         MATCH (u:User)-[r]->(mr:MergeRequest {id: 2000}) WHERE r.state = 'reviewed' RETURN u, mr LIMIT 10
     expect:
       compile_error_contains: ['reads property "state"', "name one of those relationship types"]
+
+  - name: group_by_relationship_property
+    description: An aggregation groups the reviews of a merge request by the review state
+    query:
+      gql: |
+        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) RETURN r.state, count(u) AS n ORDER BY n DESC
+    expect:
+      skip_requirements: [node_ids]
+      row_count: 2
+      row_values: [{ r_state: reviewed, n: 2 }, { r_state: unreviewed, n: 1 }]
+
+  - name: aggregate_relationship_property
+    description: An aggregation measures a relationship time per merge request
+    query:
+      gql: |
+        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest) WHERE mr.id IN [2000, 2001] RETURN mr.id, max(r.created_at) AS last_request, count(r) AS reviews ORDER BY reviews DESC
+    expect:
+      skip_requirements: [node_ids, "filter:id"]
+      row_count: 2
+      row_values: [{ reviews: 3 }, { reviews: 1 }]
+
+  - name: aggregate_rejects_an_undeclared_relationship_property
+    description: An aggregation over a property that the relationship type does not declare is rejected
+    query:
+      gql: |
+        MATCH (u:User)-[r:APPROVED]->(mr:MergeRequest {id: 2000}) RETURN r.state, count(u) AS n
+    expect:
+      compile_error_contains: ['reads property "state"', REVIEWER]
+
+  - name: aggregate_rejects_an_enum_measure
+    description: A min or max over an enum relationship property is rejected and points to grouping
+    query:
+      gql: |
+        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) RETURN max(r.state) AS s
+    expect:
+      compile_error_contains: [does not apply to enum, group by it instead]

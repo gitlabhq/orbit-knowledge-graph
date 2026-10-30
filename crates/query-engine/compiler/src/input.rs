@@ -586,6 +586,8 @@ pub struct InputAggregationMetric {
     pub alias: Option<String>,
     #[serde(default)]
     pub distinct: bool,
+    #[serde(skip)]
+    pub relationship: Option<usize>,
 }
 
 impl InputAggregationMetric {
@@ -743,6 +745,12 @@ pub enum InputGroupByKey {
         truncate: Option<TruncateUnit>,
         alias: Option<String>,
     },
+    Relationship {
+        relationship: usize,
+        node: String,
+        property: String,
+        alias: Option<String>,
+    },
 }
 
 impl<'de> Deserialize<'de> for InputGroupByKey {
@@ -876,21 +884,31 @@ impl TruncateUnit {
 impl InputGroupByKey {
     pub fn node(&self) -> &str {
         match self {
-            Self::Node { node, .. } | Self::Property { node, .. } => node,
+            Self::Node { node, .. }
+            | Self::Property { node, .. }
+            | Self::Relationship { node, .. } => node,
         }
     }
 
     pub fn property(&self) -> Option<&str> {
         match self {
             Self::Node { .. } => None,
-            Self::Property { property, .. } => Some(property),
+            Self::Property { property, .. } | Self::Relationship { property, .. } => Some(property),
         }
     }
 
     pub fn truncate(&self) -> Option<TruncateUnit> {
         match self {
             Self::Property { truncate, .. } => *truncate,
-            Self::Node { .. } => None,
+            Self::Node { .. } | Self::Relationship { .. } => None,
+        }
+    }
+
+    pub fn alias(&self) -> Option<&str> {
+        match self {
+            Self::Node { alias, .. }
+            | Self::Property { alias, .. }
+            | Self::Relationship { alias, .. } => alias.as_deref(),
         }
     }
 
@@ -906,6 +924,14 @@ impl InputGroupByKey {
                 Some(unit) => format!("{}_{}_{}", node, property, unit.name()),
                 None => format!("{}_{}", node, property),
             }),
+            Self::Relationship {
+                node,
+                property,
+                alias,
+                ..
+            } => alias
+                .clone()
+                .unwrap_or_else(|| format!("{node}_{property}")),
         }
     }
 }
@@ -917,7 +943,7 @@ pub fn group_by_output_names(groups: &[InputGroupByKey]) -> Vec<String> {
 pub fn node_group_ids(groups: &[InputGroupByKey]) -> impl Iterator<Item = &str> {
     groups.iter().filter_map(|group| match group {
         InputGroupByKey::Node { node, .. } => Some(node.as_str()),
-        InputGroupByKey::Property { .. } => None,
+        InputGroupByKey::Property { .. } | InputGroupByKey::Relationship { .. } => None,
     })
 }
 
@@ -926,7 +952,18 @@ pub fn property_groups(groups: &[InputGroupByKey]) -> impl Iterator<Item = (&str
         InputGroupByKey::Property { node, property, .. } => {
             Some((node.as_str(), property.as_str()))
         }
-        InputGroupByKey::Node { .. } => None,
+        InputGroupByKey::Node { .. } | InputGroupByKey::Relationship { .. } => None,
+    })
+}
+
+pub fn relationship_groups(groups: &[InputGroupByKey]) -> impl Iterator<Item = (usize, &str)> {
+    groups.iter().filter_map(|group| match group {
+        InputGroupByKey::Relationship {
+            relationship,
+            property,
+            ..
+        } => Some((*relationship, property.as_str())),
+        InputGroupByKey::Node { .. } | InputGroupByKey::Property { .. } => None,
     })
 }
 
@@ -934,6 +971,7 @@ pub fn group_by_kind(group: &InputGroupByKey) -> &'static str {
     match group {
         InputGroupByKey::Node { .. } => "node",
         InputGroupByKey::Property { .. } => "property",
+        InputGroupByKey::Relationship { .. } => "relationship",
     }
 }
 

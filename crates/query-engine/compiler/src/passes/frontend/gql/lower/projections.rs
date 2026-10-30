@@ -45,6 +45,17 @@ impl Lowering {
                     distinct,
                     target,
                 } => {
+                    let variable = match &target {
+                        Target::Property(p) => &p.node,
+                        Target::Variable(v) => v,
+                    };
+                    let relationship = match self.edges.get(&variable.value) {
+                        Some(&relationship) => {
+                            self.one_hop(variable.span, variable)?;
+                            Some(relationship)
+                        }
+                        None => None,
+                    };
                     let expr = match (function, target) {
                         (AggregateFunction::Count, Target::Property(p)) => {
                             AggExpr::Count(TargetRef {
@@ -73,6 +84,7 @@ impl Lowering {
                         expr,
                         alias,
                         distinct,
+                        relationship,
                     });
                 }
                 Expression::DateTrunc {
@@ -84,6 +96,12 @@ impl Lowering {
                         return Err(invalid(
                             span,
                             "date_trunc is only supported as an aggregation group key",
+                        ));
+                    }
+                    if self.edges.contains_key(&property.node.value) {
+                        return Err(invalid(
+                            span,
+                            "date_trunc on a relationship property is not supported yet",
                         ));
                     }
                     self.input
@@ -144,17 +162,23 @@ impl Lowering {
                     let span = property.span;
                     let PropertyRef { node, property } = property.into();
                     if let Some(&relationship) = self.edges.get(&node) {
-                        if aggregate {
-                            return Err(invalid(
-                                span,
-                                "grouping by a relationship property is not supported yet",
-                            ));
-                        }
                         let variable = Name {
                             span,
                             value: node.clone(),
                         };
                         self.one_hop(span, &variable)?;
+                        if aggregate {
+                            self.input
+                                .aggregation
+                                .group_by
+                                .push(InputGroupByKey::Relationship {
+                                    relationship,
+                                    node,
+                                    property,
+                                    alias,
+                                });
+                            continue;
+                        }
                         self.relationship_item(
                             span,
                             alias,
