@@ -16,11 +16,12 @@ config:
       - { id: 3102, note: Bob on bug B, noteable_type: MergeRequest, noteable_id: 2001, confidential: false, internal: false, author_id: 2, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
       - { id: 3105, note: Bob deleted this, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, author_id: 2, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
       - { id: 3105, note: "", noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: true }
-    gl_edge:
-      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3100, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
-      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3101, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
-      - { traversal_path: "1/100/1000/", source_id: 2001, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3102, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
-      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3105, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
+    gl_note_edge:
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, _version: "2024-01-01 00:00:00", _owner_id: 1 }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3100, target_kind: Note, _version: "2024-01-01 00:00:00", _owner_id: 1 }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3101, target_kind: Note, _version: "2024-01-01 00:00:00", _owner_id: 2 }
+      - { traversal_path: "1/100/1000/", source_id: 2001, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3102, target_kind: Note, _version: "2024-01-01 00:00:00", _owner_id: 2 }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3105, target_kind: Note, _version: "2024-01-01 00:00:00", _owner_id: 2 }
 
 steps:
   - query:

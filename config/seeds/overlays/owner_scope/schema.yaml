@@ -1,0 +1,22 @@
+settings:
+  edge_tables:
+    gl_note_edge:
+      sort_key: [traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind]
+      columns:
+        - {name: traversal_path, type: string}
+        - {name: relationship_kind, type: string}
+        - {name: source_id, type: int64}
+        - {name: source_kind, type: string}
+        - {name: target_id, type: int64}
+        - {name: target_kind, type: string}
+      redaction: {owner_column: _owner_id, owner_bypass: admin}
+      storage:
+        primary_key: [traversal_path, relationship_kind, source_id]
+        columns:
+          - {name: traversal_path, type: "String", default: "'0/'"}
+          - {name: source_id, type: "Int64"}
+          - {name: source_kind, type: "LowCardinality(String)"}
+          - {name: relationship_kind, type: "LowCardinality(String)"}
+          - {name: target_id, type: "Int64"}
+          - {name: target_kind, type: "LowCardinality(String)"}
+          - {name: _owner_id, type: "Int64", default: "0"}
