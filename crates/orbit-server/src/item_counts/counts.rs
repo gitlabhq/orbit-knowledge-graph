@@ -12,7 +12,7 @@ use crate::status_query::{
     map_column_extraction_error,
 };
 
-const COUNT_CACHE_TTL_SECONDS: u32 = 5;
+const COUNT_CACHE_TTL_SECONDS: u64 = 5;
 const MAX_CONCURRENT_COUNT_QUERIES: usize = 8;
 const PARALLEL_REPLICA_SETTINGS: [(&str, &str); 3] = [
     ("enable_parallel_replicas", "1"),
@@ -106,8 +106,7 @@ fn build_scope_parameter_name(index: usize) -> String {
 }
 
 fn count_query_config() -> QueryConfig {
-    QueryConfig {
-        query_cache_ttl: Some(COUNT_CACHE_TTL_SECONDS),
-        ..orbit_server_config::query::default_config()
-    }
+    let mut config = orbit_server_config::query::default_config();
+    config.set("query_cache_ttl", COUNT_CACHE_TTL_SECONDS);
+    config
 }

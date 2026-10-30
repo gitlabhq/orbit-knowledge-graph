@@ -1218,11 +1218,19 @@
       "additionalProperties": false
     },
     "QuerySettings": {
-      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n    use_query_cache: true\n    query_cache_ttl: 10\n  aggregation:\n    max_execution_time: 60\n```",
+      "description": "`query.default`, `query.when`, and per-query-type overrides keyed by snake_case query type.\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n  path_finding:\n    max_execution_time: 15\n  when:\n    final_scan:\n      use_skip_indexes_if_final: true\n```",
       "type": "object",
       "properties": {
         "default": {
           "$ref": "#/$defs/QueryConfig"
+        },
+        "when": {
+          "$ref": "#/$defs/ShapeSettings",
+          "default": {
+            "final_scan": {},
+            "with_ctes": {},
+            "multi_join": {}
+          }
         }
       },
       "required": [
@@ -1233,96 +1241,42 @@
       }
     },
     "QueryConfig": {
-      "description": "Query execution settings. All fields map to ClickHouse query-level\nsettings. The closed set of fields prevents arbitrary user input from\nreaching the SETTINGS clause (CWE-89).\n\n`None` means \"not specified at this layer\" -- the merge logic in\n[`QuerySettings::resolve`] fills in from the default. The derived\n`Default` is therefore all-`None`: nothing specified, nothing emitted.",
+      "description": "ClickHouse settings by name. Names must be lowercase identifiers, so a value can never\nreach the SETTINGS clause as SQL.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/SettingValue"
+      }
+    },
+    "SettingValue": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "ShapeSettings": {
+      "description": "Settings the compiler adds when a query has the matching shape.",
       "type": "object",
       "properties": {
-        "max_execution_time": {
-          "description": "ClickHouse `max_execution_time` in seconds.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0
+        "final_scan": {
+          "$ref": "#/$defs/QueryConfig",
+          "default": {}
         },
-        "max_memory_usage": {
-          "description": "ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM\na single query can consume on the ClickHouse server. When exceeded,\nClickHouse aborts the query with MEMORY_LIMIT_EXCEEDED. Unset by\ndefault (ClickHouse uses its server-level setting).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0
+        "with_ctes": {
+          "$ref": "#/$defs/QueryConfig",
+          "default": {}
         },
-        "max_bytes_to_read": {
-          "description": "ClickHouse `max_bytes_to_read` in bytes. Limits uncompressed data\nread from tables. Unset by default.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0
-        },
-        "max_rows_to_read": {
-          "description": "ClickHouse `max_rows_to_read`. Limits the total number of rows\nread from tables during query execution. Unset by default.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0
-        },
-        "max_rows_in_set": {
-          "description": "ClickHouse `max_rows_in_set`. Limits the size of hash tables built\nfor IN (subquery) clauses. Unset by default.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0
-        },
-        "max_ast_elements": {
-          "description": "ClickHouse `max_ast_elements`. Limits AST node count after parsing.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0
-        },
-        "max_expanded_ast_elements": {
-          "description": "ClickHouse `max_expanded_ast_elements`. Limits AST node count after\nalias/macro expansion.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0
-        },
-        "max_ast_depth": {
-          "description": "ClickHouse `max_ast_depth`. Limits AST nesting depth.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0
-        },
-        "use_query_cache": {
-          "description": "ClickHouse `use_query_cache`. Queries with non-deterministic functions\nor system tables still run, but uncached.",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "query_cache_ttl": {
-          "description": "ClickHouse `query_cache_ttl` in seconds.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 0
+        "multi_join": {
+          "$ref": "#/$defs/QueryConfig",
+          "default": {}
         }
       },
       "additionalProperties": false

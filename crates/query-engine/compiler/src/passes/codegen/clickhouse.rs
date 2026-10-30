@@ -1079,12 +1079,9 @@ mod tests {
     fn insert_skips_settings() {
         let ins = Insert::new("t", vec!["a".into()], vec![vec![Expr::int(1)]]);
 
-        let cfg = QueryConfig {
-            max_execution_time: None,
-            use_query_cache: Some(true),
-            query_cache_ttl: Some(60),
-            ..Default::default()
-        };
+        let mut cfg = QueryConfig::default();
+        cfg.set("use_query_cache", true);
+        cfg.set("query_cache_ttl", 60u64);
         let result = codegen(&Node::Insert(Box::new(ins)), empty_ctx(), cfg).unwrap();
         assert!(
             !result.sql.contains("SETTINGS"),
@@ -1213,11 +1210,9 @@ mod tests {
             ..Default::default()
         };
 
-        let cfg = QueryConfig {
-            use_query_cache: Some(true),
-            query_cache_ttl: Some(60),
-            ..QueryConfig::default()
-        };
+        let mut cfg = QueryConfig::default();
+        cfg.set("use_query_cache", true);
+        cfg.set("query_cache_ttl", 60u64);
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), cfg).unwrap();
         assert!(
             result.sql.contains("LIMIT 100 SETTINGS"),
@@ -1233,7 +1228,7 @@ mod tests {
     }
 
     #[test]
-    fn compiler_derived_settings_reach_the_settings_clause() {
+    fn configured_settings_reach_the_settings_clause() {
         let q = Query {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
@@ -1243,10 +1238,8 @@ mod tests {
             ..Default::default()
         };
         let mut config = QueryConfig::default();
-        config.compiler_derived.final_scan = true;
-        config
-            .compiler_derived
-            .use_index_for_in_with_subqueries_max_values = Some(100_000);
+        config.set("optimize_move_to_prewhere_if_final", true);
+        config.set("use_index_for_in_with_subqueries_max_values", 100_000u64);
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), config).unwrap();
         assert!(

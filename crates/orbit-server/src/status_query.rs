@@ -57,8 +57,7 @@ pub(crate) fn map_column_extraction_error(error: impl std::fmt::Display) -> Stat
 }
 
 pub(crate) fn uncached_query_config() -> QueryConfig {
-    QueryConfig {
-        use_query_cache: Some(false),
-        ..orbit_server_config::query::default_config()
-    }
+    let mut config = orbit_server_config::query::default_config();
+    config.set("use_query_cache", false);
+    config
 }

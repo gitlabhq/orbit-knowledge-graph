@@ -1,240 +1,127 @@
-//! Query execution configuration shared between server and compiler.
+//! ClickHouse settings for end-user and consumer read queries.
 //!
-//! [`QuerySettings`] holds a default [`QueryConfig`] plus optional
-//! per-query-type overrides, loaded from `AppConfig` at startup and
-//! stored in a process-wide global via [`init`] / [`for_query_type`].
+//! `config/default.yaml` is the single source of truth: `query.default`, per-query-type
+//! overrides, and the `query.when` groups the compiler adds for matching query shapes.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-/// Escape a string for use as a ClickHouse SETTINGS value.
-/// Single-quotes the value and escapes embedded quotes and backslashes.
-fn escape_setting_str(s: &str) -> String {
-    let escaped = s.replace('\\', "\\\\").replace('\'', "\\'");
-    format!("'{escaped}'")
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SettingValue {
+    Bool(bool),
+    Number(u64),
+    Text(String),
 }
 
-const QUERY_CACHE_UNCACHEABLE_HANDLING: [(&str, &str); 2] = [
-    ("query_cache_nondeterministic_function_handling", "ignore"),
-    ("query_cache_system_table_handling", "ignore"),
-];
-
-/// Query execution settings. All fields map to ClickHouse query-level
-/// settings. The closed set of fields prevents arbitrary user input from
-/// reaching the SETTINGS clause (CWE-89).
-///
-/// `None` means "not specified at this layer" -- the merge logic in
-/// [`QuerySettings::resolve`] fills in from the default. The derived
-/// `Default` is therefore all-`None`: nothing specified, nothing emitted.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct QueryConfig {
-    /// ClickHouse `max_execution_time` in seconds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_execution_time: Option<u64>,
-
-    /// ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM
-    /// a single query can consume on the ClickHouse server. When exceeded,
-    /// ClickHouse aborts the query with MEMORY_LIMIT_EXCEEDED. Unset by
-    /// default (ClickHouse uses its server-level setting).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_memory_usage: Option<u64>,
-
-    /// ClickHouse `max_bytes_to_read` in bytes. Limits uncompressed data
-    /// read from tables. Unset by default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_bytes_to_read: Option<u64>,
-
-    /// ClickHouse `max_rows_to_read`. Limits the total number of rows
-    /// read from tables during query execution. Unset by default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_rows_to_read: Option<u64>,
-
-    /// ClickHouse `max_rows_in_set`. Limits the size of hash tables built
-    /// for IN (subquery) clauses. Unset by default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_rows_in_set: Option<u64>,
-
-    /// ClickHouse `max_ast_elements`. Limits AST node count after parsing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_ast_elements: Option<u64>,
-
-    /// ClickHouse `max_expanded_ast_elements`. Limits AST node count after
-    /// alias/macro expansion.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_expanded_ast_elements: Option<u64>,
-
-    /// ClickHouse `max_ast_depth`. Limits AST nesting depth.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_ast_depth: Option<u64>,
-
-    /// ClickHouse `use_query_cache`. Queries with non-deterministic functions
-    /// or system tables still run, but uncached.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub use_query_cache: Option<bool>,
-
-    /// ClickHouse `query_cache_ttl` in seconds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub query_cache_ttl: Option<u32>,
-
-    /// Compiler-derived ClickHouse settings. Set by the compiler's settings
-    /// pass based on AST inspection (e.g. materialized CTEs). Invisible to
-    /// serde and the JSON schema — never loaded from YAML or user input.
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub compiler_derived: CompilerDerivedSettings,
-}
-
-/// ClickHouse settings derived from compiler AST inspection. Not
-/// user-configurable — set by the compiler's settings pass and appended
-/// to the SETTINGS clause by codegen.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct CompilerDerivedSettings {
-    /// ClickHouse `enable_materialized_cte`. Required when any CTE uses
-    /// the `MATERIALIZED` keyword (ClickHouse 26.4+).
-    pub enable_materialized_cte: bool,
-    /// ClickHouse `query_plan_optimize_join_order_algorithm`. When set,
-    /// enables dynamic-programming join reordering for queries with 3+
-    /// JOINs. Experimental in ClickHouse 26.x.
-    pub join_order_algorithm: Option<String>,
-    pub final_scan: bool,
-    pub use_index_for_in_with_subqueries_max_values: Option<u64>,
-    pub null_in_is_unknown: bool,
-}
-
-impl CompilerDerivedSettings {
-    /// Render as ClickHouse SETTINGS key-value pairs.
-    pub fn to_clickhouse_settings(&self) -> Vec<(String, String)> {
-        let mut out = Vec::new();
-        if self.enable_materialized_cte {
-            out.push(("enable_materialized_cte".into(), "1".into()));
-        }
-        if let Some(ref algo) = self.join_order_algorithm {
-            out.push((
-                "query_plan_optimize_join_order_algorithm".into(),
-                format!("'{algo}'"),
-            ));
-        }
-        if self.final_scan {
-            for setting in [
-                "optimize_move_to_prewhere_if_final",
-                "use_skip_indexes_if_final",
-                "use_skip_indexes_if_final_exact_mode",
-            ] {
-                out.push((setting.into(), "1".into()));
-            }
-        }
-        if let Some(max) = self.use_index_for_in_with_subqueries_max_values {
-            out.push((
-                "use_index_for_in_with_subqueries_max_values".into(),
-                max.to_string(),
-            ));
-        }
-        if self.null_in_is_unknown {
-            out.push(("transform_null_in".into(), "0".into()));
-        }
-        out
+impl From<bool> for SettingValue {
+    fn from(value: bool) -> Self {
+        Self::Bool(value)
     }
 }
+
+impl From<u64> for SettingValue {
+    fn from(value: u64) -> Self {
+        Self::Number(value)
+    }
+}
+
+/// ClickHouse settings by name. Names must be lowercase identifiers, so a value can never
+/// reach the SETTINGS clause as SQL.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct QueryConfig(BTreeMap<String, SettingValue>);
 
 impl QueryConfig {
-    /// Merge `overrides` on top of `self`. Fields set in `overrides`
-    /// win; `None` fields fall through to `self`.
     pub fn merge(&self, overrides: &QueryConfig) -> QueryConfig {
-        QueryConfig {
-            max_execution_time: overrides.max_execution_time.or(self.max_execution_time),
-            max_memory_usage: overrides.max_memory_usage.or(self.max_memory_usage),
-            max_bytes_to_read: overrides.max_bytes_to_read.or(self.max_bytes_to_read),
-            max_rows_to_read: overrides.max_rows_to_read.or(self.max_rows_to_read),
-            max_rows_in_set: overrides.max_rows_in_set.or(self.max_rows_in_set),
-            max_ast_elements: overrides.max_ast_elements.or(self.max_ast_elements),
-            max_expanded_ast_elements: overrides
-                .max_expanded_ast_elements
-                .or(self.max_expanded_ast_elements),
-            max_ast_depth: overrides.max_ast_depth.or(self.max_ast_depth),
-            use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
-            query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
-            // compiler_derived is never merged from YAML overrides — it's
-            // set by the compiler after merge() runs.
-            compiler_derived: self.compiler_derived.clone(),
+        let mut merged = self.clone();
+        merged.0.extend(overrides.0.clone());
+        merged
+    }
+
+    pub fn set(&mut self, name: &str, value: impl Into<SettingValue>) {
+        self.0.insert(name.to_string(), value.into());
+    }
+
+    pub fn get_bool(&self, name: &str) -> Option<bool> {
+        match self.0.get(name) {
+            Some(SettingValue::Bool(value)) => Some(*value),
+            _ => None,
         }
     }
 
-    /// Set fields as SETTINGS clause literals; strings are single-quoted and escaped.
+    /// SETTINGS clause literals: strings are single-quoted and escaped.
     pub fn to_clickhouse_settings(&self) -> Result<Vec<(String, String)>, String> {
-        let mut settings = self.render_settings(escape_setting_str)?;
-        settings.extend(self.compiler_derived.to_clickhouse_settings());
-        Ok(settings)
+        self.render(|text| format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'")))
     }
 
     pub fn to_http_settings(&self) -> Result<Vec<(String, String)>, String> {
-        self.render_settings(str::to_owned)
+        self.render(str::to_owned)
     }
 
-    fn render_settings(
-        &self,
-        render_str: fn(&str) -> String,
-    ) -> Result<Vec<(String, String)>, String> {
-        let map = match serde_json::to_value(self) {
-            Ok(Value::Object(m)) => m,
-            _ => return Ok(Vec::new()),
-        };
-        let mut settings = map
-            .into_iter()
-            .filter(|(_, v)| !v.is_null())
-            .map(|(k, v)| {
-                let formatted = match &v {
-                    Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
-                    Value::Number(n) => {
-                        n.as_u64()
-                            .ok_or_else(|| format!("setting `{k}` has non-u64 value: {v}"))?;
-                        n.to_string()
-                    }
-                    Value::String(s) => render_str(s),
-                    _ => return Err(format!("setting `{k}` has unsupported type: {v}")),
+    fn render(&self, text: fn(&str) -> String) -> Result<Vec<(String, String)>, String> {
+        self.0
+            .iter()
+            .map(|(name, value)| {
+                if name.is_empty()
+                    || !name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                {
+                    return Err(format!("setting name `{name}` is not a ClickHouse setting"));
+                }
+                let rendered = match value {
+                    SettingValue::Bool(value) => u8::from(*value).to_string(),
+                    SettingValue::Number(value) => value.to_string(),
+                    SettingValue::Text(value) => text(value),
                 };
-                Ok((k, formatted))
+                Ok((name.clone(), rendered))
             })
-            .collect::<Result<Vec<_>, String>>()?;
-        if self.use_query_cache == Some(true) {
-            settings.extend(
-                QUERY_CACHE_UNCACHEABLE_HANDLING.map(|(k, v)| (k.to_string(), render_str(v))),
-            );
-        }
-        Ok(settings)
+            .collect()
     }
 }
 
-/// Top-level query settings loaded from YAML. Contains a `default` config
-/// and optional per-query-type overrides keyed by snake_case query type
-/// name (e.g. `traversal`, `aggregation`, `search`).
+/// Settings the compiler adds when a query has the matching shape.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ShapeSettings {
+    #[serde(default)]
+    pub final_scan: QueryConfig,
+    #[serde(default)]
+    pub with_ctes: QueryConfig,
+    #[serde(default)]
+    pub multi_join: QueryConfig,
+}
+
+/// `query.default`, `query.when`, and per-query-type overrides keyed by snake_case query type.
 ///
 /// ```yaml
 /// query:
 ///   default:
 ///     max_execution_time: 30
-///     use_query_cache: true
-///     query_cache_ttl: 10
-///   aggregation:
-///     max_execution_time: 60
+///   path_finding:
+///     max_execution_time: 15
+///   when:
+///     final_scan:
+///       use_skip_indexes_if_final: true
 /// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct QuerySettings {
     pub default: QueryConfig,
 
-    /// Per-query-type overrides. Keys must match `QueryType` variant names
-    /// in snake_case. Validated at startup by the server.
+    #[serde(default)]
+    pub when: ShapeSettings,
+
+    /// Keys must match `QueryType` variant names. Validated at startup by the server.
     #[serde(flatten)]
     pub overrides: HashMap<String, QueryConfig>,
 }
 
 impl QuerySettings {
-    /// Resolve the effective config for a query type by merging the
-    /// default with any type-specific override.
     pub fn resolve(&self, query_type: &str) -> QueryConfig {
         match self.overrides.get(query_type) {
             Some(override_cfg) => self.default.merge(override_cfg),
@@ -242,8 +129,6 @@ impl QuerySettings {
         }
     }
 
-    /// Returns unrecognized override keys sorted alphabetically
-    /// (empty if all valid).
     pub fn validate_keys(&self, valid_types: &[&str]) -> Vec<String> {
         let mut invalid: Vec<String> = self
             .overrides
@@ -258,27 +143,34 @@ impl QuerySettings {
 
 static QUERY_SETTINGS: OnceLock<QuerySettings> = OnceLock::new();
 
-/// Initialize the global query settings. Called once at startup by the
-/// server after loading `AppConfig`.
+/// Called once at startup by the server after loading `AppConfig`.
 pub fn init(settings: QuerySettings) {
     QUERY_SETTINGS
         .set(settings)
         .expect("orbit_server_config::query::init called twice");
 }
 
-/// Resolve the effective [`QueryConfig`] for a given query type from
-/// the global settings. Before [`init`] has run (unit tests that never load
-/// config) every field is `None`, so no SETTINGS are emitted.
-pub fn for_query_type(query_type: &str) -> QueryConfig {
-    match QUERY_SETTINGS.get() {
-        Some(settings) => settings.resolve(query_type),
-        None => QueryConfig::default(),
-    }
+/// For tools and tests that run queries without a server: the settings in `config/default.yaml`.
+pub fn init_embedded_defaults() {
+    QUERY_SETTINGS.get_or_init(|| crate::AppConfig::embedded_defaults().query);
 }
 
-/// The `query.default` section, for callers outside the compiler pipeline
-/// that issue their own ClickHouse queries. Same pre-[`init`] behavior as
-/// [`for_query_type`].
+/// Before [`init`] every config is empty, so no SETTINGS are emitted.
+pub fn for_query_type(query_type: &str) -> QueryConfig {
+    QUERY_SETTINGS
+        .get()
+        .map(|settings| settings.resolve(query_type))
+        .unwrap_or_default()
+}
+
+pub fn shape_settings() -> ShapeSettings {
+    QUERY_SETTINGS
+        .get()
+        .map(|settings| settings.when.clone())
+        .unwrap_or_default()
+}
+
+/// `query.default`, for callers outside the compiler that issue their own ClickHouse queries.
 pub fn default_config() -> QueryConfig {
     QUERY_SETTINGS
         .get()
@@ -290,146 +182,76 @@ pub fn default_config() -> QueryConfig {
 mod tests {
     use super::*;
 
+    fn config(pairs: &[(&str, SettingValue)]) -> QueryConfig {
+        let mut config = QueryConfig::default();
+        for (name, value) in pairs {
+            config.set(name, value.clone());
+        }
+        config
+    }
+
     #[test]
     fn merge_override_wins() {
-        let base = QueryConfig {
-            max_execution_time: Some(30),
-            use_query_cache: Some(false),
-            query_cache_ttl: Some(60),
-            ..Default::default()
-        };
-        let over = QueryConfig {
-            max_execution_time: Some(120),
-            ..Default::default()
-        };
-        let merged = base.merge(&over);
-        assert_eq!(merged.max_execution_time, Some(120));
-        assert_eq!(merged.use_query_cache, Some(false));
-        assert_eq!(merged.query_cache_ttl, Some(60));
-    }
-
-    #[test]
-    fn to_clickhouse_settings_skips_none_and_formats_bools() -> Result<(), String> {
-        let cfg = QueryConfig {
-            max_execution_time: Some(30),
-            use_query_cache: Some(true),
-            ..Default::default()
-        };
-        let mut settings = cfg.to_clickhouse_settings()?;
-        settings.sort_by(|a, b| a.0.cmp(&b.0));
+        let base = config(&[
+            ("max_execution_time", 30u64.into()),
+            ("use_query_cache", false.into()),
+        ]);
+        let merged = base.merge(&config(&[("max_execution_time", 120u64.into())]));
         assert_eq!(
-            settings,
-            vec![
-                ("max_execution_time".into(), "30".into()),
-                (
-                    "query_cache_nondeterministic_function_handling".into(),
-                    "'ignore'".into()
-                ),
-                (
-                    "query_cache_system_table_handling".into(),
-                    "'ignore'".into()
-                ),
-                ("use_query_cache".into(), "1".into()),
-            ]
+            merged.to_clickhouse_settings(),
+            Ok(vec![
+                ("max_execution_time".into(), "120".into()),
+                ("use_query_cache".into(), "0".into()),
+            ])
         );
-        Ok(())
     }
 
     #[test]
-    fn embedded_defaults_emit_every_declared_setting() -> Result<(), String> {
-        let cfg = crate::AppConfig::embedded_defaults()
-            .query
-            .resolve("traversal");
-        let mut settings = cfg.to_clickhouse_settings()?;
-        settings.sort_by(|a, b| a.0.cmp(&b.0));
+    fn renders_strings_quoted_for_sql_and_raw_for_http() {
+        let cfg = config(&[("join_algorithm", SettingValue::Text("it's".into()))]);
         assert_eq!(
-            settings,
-            vec![
-                ("max_ast_depth".into(), "10000".into()),
-                ("max_ast_elements".into(), "1000000".into()),
-                ("max_execution_time".into(), "30".into()),
-                ("max_expanded_ast_elements".into(), "10000000".into()),
-                (
-                    "query_cache_nondeterministic_function_handling".into(),
-                    "'ignore'".into()
-                ),
-                (
-                    "query_cache_system_table_handling".into(),
-                    "'ignore'".into()
-                ),
-                ("query_cache_ttl".into(), "10".into()),
-                ("use_query_cache".into(), "1".into()),
-            ]
+            cfg.to_clickhouse_settings(),
+            Ok(vec![("join_algorithm".into(), "'it\\'s'".into())])
         );
-        Ok(())
+        assert_eq!(
+            cfg.to_http_settings(),
+            Ok(vec![("join_algorithm".into(), "it's".into())])
+        );
     }
 
     #[test]
-    fn compiler_derived_renders_only_set_settings() {
+    fn rejects_setting_names_that_are_not_identifiers() {
+        let cfg = config(&[("max_threads = 1, readonly", 1u64.into())]);
+        assert!(cfg.to_clickhouse_settings().is_err());
+    }
+
+    #[test]
+    fn embedded_defaults_resolve_per_query_type() {
+        let settings = crate::AppConfig::embedded_defaults().query;
+        let traversal = settings
+            .resolve("traversal")
+            .to_clickhouse_settings()
+            .unwrap();
+        assert!(traversal.contains(&("max_execution_time".into(), "30".into())));
+        assert!(traversal.contains(&("max_memory_usage".into(), "17179869184".into())));
+        assert!(traversal.contains(&(
+            "query_cache_nondeterministic_function_handling".into(),
+            "'ignore'".into()
+        )));
+        let path_finding = settings
+            .resolve("path_finding")
+            .to_clickhouse_settings()
+            .unwrap();
+        assert!(path_finding.contains(&("max_execution_time".into(), "15".into())));
         assert!(
-            CompilerDerivedSettings::default()
+            settings
+                .when
+                .final_scan
                 .to_clickhouse_settings()
-                .is_empty()
+                .unwrap()
+                .contains(&("use_skip_indexes_if_final".into(), "1".into()))
         );
-
-        let derived = CompilerDerivedSettings {
-            final_scan: true,
-            use_index_for_in_with_subqueries_max_values: Some(100_000),
-            ..Default::default()
-        };
-        assert_eq!(
-            derived.to_clickhouse_settings(),
-            vec![
-                (
-                    "optimize_move_to_prewhere_if_final".to_string(),
-                    "1".to_string()
-                ),
-                ("use_skip_indexes_if_final".to_string(), "1".to_string()),
-                (
-                    "use_skip_indexes_if_final_exact_mode".to_string(),
-                    "1".to_string()
-                ),
-                (
-                    "use_index_for_in_with_subqueries_max_values".to_string(),
-                    "100000".to_string()
-                ),
-            ]
-        );
-    }
-
-    #[test]
-    fn escape_setting_str_quotes_and_backslashes() {
-        assert_eq!(escape_setting_str("hello"), "'hello'");
-        assert_eq!(escape_setting_str("it's a test"), "'it\\'s a test'");
-        assert_eq!(escape_setting_str("back\\slash"), "'back\\\\slash'");
-    }
-
-    #[test]
-    fn resolve_merges_type_override_and_falls_back_to_default() {
-        let mut overrides = HashMap::new();
-        overrides.insert(
-            "aggregation".to_string(),
-            QueryConfig {
-                max_execution_time: Some(120),
-                ..Default::default()
-            },
-        );
-        let settings = QuerySettings {
-            default: QueryConfig {
-                max_execution_time: Some(30),
-                use_query_cache: Some(false),
-                query_cache_ttl: Some(60),
-                ..Default::default()
-            },
-            overrides,
-        };
-
-        let agg = settings.resolve("aggregation");
-        assert_eq!(agg.max_execution_time, Some(120));
-        assert_eq!(agg.use_query_cache, Some(false));
-
-        let search = settings.resolve("traversal");
-        assert_eq!(search, settings.default);
+        assert!(settings.validate_keys(&["path_finding"]).is_empty());
     }
 
     #[test]
@@ -438,31 +260,43 @@ mod tests {
 default:
   max_execution_time: 30
   use_query_cache: false
-  query_cache_ttl: 60
 aggregation:
   max_execution_time: 120
+when:
+  multi_join:
+    query_plan_optimize_join_order_algorithm: dpsize
 "#;
         let settings: QuerySettings = orbit_utils::yaml::from_str(yaml).unwrap();
-        assert_eq!(settings.default.max_execution_time, Some(30));
         assert_eq!(settings.overrides.len(), 1);
         assert_eq!(
-            settings.resolve("aggregation").max_execution_time,
-            Some(120)
+            settings.resolve("aggregation").to_http_settings(),
+            Ok(vec![
+                ("max_execution_time".into(), "120".into()),
+                ("use_query_cache".into(), "0".into()),
+            ])
         );
-        assert_eq!(settings.resolve("aggregation").query_cache_ttl, Some(60));
+        assert_eq!(
+            settings.when.multi_join.to_clickhouse_settings(),
+            Ok(vec![(
+                "query_plan_optimize_join_order_algorithm".into(),
+                "'dpsize'".into()
+            )])
+        );
     }
 
     #[test]
     fn validate_keys_rejects_unknown_types() {
-        let valid = &["traversal", "aggregation"];
         let mut overrides = HashMap::new();
         overrides.insert("aggregation".to_string(), QueryConfig::default());
         overrides.insert("bogus_type".to_string(), QueryConfig::default());
         let settings = QuerySettings {
             default: QueryConfig::default(),
+            when: ShapeSettings::default(),
             overrides,
         };
-        let invalid = settings.validate_keys(valid);
-        assert_eq!(invalid, vec!["bogus_type"]);
+        assert_eq!(
+            settings.validate_keys(&["traversal", "aggregation"]),
+            vec!["bogus_type"]
+        );
     }
 }

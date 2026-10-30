@@ -686,7 +686,8 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_clamps_settings_to_safety_ceiling() {
+    fn path_finding_settings_come_from_default_yaml() {
+        orbit_server_config::query::init_embedded_defaults();
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -700,14 +701,8 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        assert!(
-            sql.contains("max_execution_time = 15"),
-            "pathfinding max_execution_time must not exceed 15, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("max_memory_usage = 16106127360"),
-            "pathfinding max_memory_usage must not exceed 15 GiB, got:\n{sql}"
-        );
+        assert!(sql.contains("max_execution_time = 15"), "{sql}");
+        assert!(sql.contains("max_memory_usage = 17179869184"), "{sql}");
     }
 
     #[test]
@@ -1318,6 +1313,7 @@ mod tests {
 
     #[test]
     fn final_settings_follow_final_scans() {
+        orbit_server_config::query::init_embedded_defaults();
         let sql = compile_sql(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":"active"}}],"limit":10}"#,
         );
@@ -1337,6 +1333,7 @@ mod tests {
 
     #[test]
     fn in_subquery_index_cap_follows_in_select() {
+        orbit_server_config::query::init_embedded_defaults();
         let sql = compile_sql(
             r#"{
                 "query_type": "aggregation",

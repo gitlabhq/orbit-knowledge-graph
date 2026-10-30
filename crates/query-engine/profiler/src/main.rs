@@ -454,25 +454,25 @@ async fn main() -> Result<()> {
     let security_ctx = SecurityContext::new_with_roles(org_id, authorized_paths)
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
 
+    orbit_server_config::query::init_embedded_defaults();
     if let Some(show) = &cli.compile_only {
         return run_compile_only(&query_json, &ontology, &security_ctx, show, &cli);
     }
 
-    let custom_settings: std::collections::HashMap<String, String> = cli
-        .settings
-        .iter()
-        .filter_map(|s| {
-            let (k, v) = s.split_once('=')?;
-            Some((k.to_string(), v.to_string()))
-        })
-        .collect();
+    let mut session_settings = orbit_server_config::AppConfig::embedded_defaults()
+        .graph
+        .session_settings;
+    session_settings.extend(cli.settings.iter().filter_map(|s| {
+        let (k, v) = s.split_once('=')?;
+        Some((k.to_string(), v.to_string()))
+    }));
 
     let client = Arc::new(ArrowClickHouseClient::new(
         &cli.ch_url,
         &cli.ch_database,
         &cli.ch_user,
         cli.ch_password.as_deref(),
-        &custom_settings,
+        &session_settings,
         &std::collections::HashMap::new(),
         "graph",
     ));

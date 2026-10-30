@@ -44,9 +44,6 @@ engine:
 query:
   default:
     use_query_cache: false
-  path_finding:
-    max_execution_time: 15
-    max_memory_usage: 16106127360
 
 health_check:
   bind_address: "127.0.0.1:4201"
