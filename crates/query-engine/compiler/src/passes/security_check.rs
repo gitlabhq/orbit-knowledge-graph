@@ -5,7 +5,7 @@
 //! table alias has a role-eligible traversal path predicate or a fail-closed
 //! false predicate.
 
-use query_data_model::GitLabPolicy;
+use query_data_model::{GitLabPolicy, OwnerScope};
 use serde_json::Value;
 
 use crate::ast::visit::{visit_queries, visit_relations};
@@ -102,7 +102,7 @@ fn check_query(
                 .table_owner_scope(table)
                 .filter(|scope| scope.gates(ctx.admin))
                 && !gates_every_row(q.where_clause.as_ref(), &|expr| {
-                    is_owner_filter(expr, alias, scope.column, ctx.user_id)
+                    is_owner_filter(expr, alias, scope, ctx.user_id)
                 })
             {
                 error = Some(QueryError::Security(format!(
@@ -171,7 +171,7 @@ fn is_path_filter(
     }
 }
 
-fn is_owner_filter(expr: &Expr, alias: &str, column: &str, user_id: Option<i64>) -> bool {
+fn is_owner_filter(expr: &Expr, alias: &str, scope: OwnerScope<'_>, user_id: Option<i64>) -> bool {
     let Expr::BinaryOp {
         op: Op::Or,
         left,
@@ -181,20 +181,32 @@ fn is_owner_filter(expr: &Expr, alias: &str, column: &str, user_id: Option<i64>)
         return false;
     };
     let Expr::BinaryOp {
-        op: Op::Eq,
+        op,
         left: owner,
         right: caller,
     } = left.as_ref()
     else {
         return false;
     };
-    is_column(owner, alias, column)
-        && is_column(tombstone, alias, ontology::constants::DELETED_COLUMN)
-        && matches!(
+    let Some(user_id) = user_id else {
+        return false;
+    };
+    let caller_matches = match (scope.allows_unowned, op) {
+        (false, Op::Eq) => matches!(
             caller.as_ref(),
             Expr::Literal(Value::Number(value)) | Expr::Param { value: Value::Number(value), .. }
-                if user_id.is_some_and(|user_id| value.as_i64() == Some(user_id))
-        )
+                if value.as_i64() == Some(user_id)
+        ),
+        (true, Op::In) => matches!(
+            caller.as_ref(),
+            Expr::Param { value: Value::Array(values), .. }
+                if values.iter().map(Value::as_i64).eq([Some(0), Some(user_id)])
+        ),
+        _ => false,
+    };
+    caller_matches
+        && is_column(owner, alias, scope.column)
+        && is_column(tombstone, alias, ontology::constants::DELETED_COLUMN)
 }
 
 fn is_column(expr: &Expr, alias: &str, column: &str) -> bool {
@@ -1048,6 +1060,79 @@ mod tests {
             ),
         );
         assert!(verify(&with_todo, &ctx, &model, &result_ctx).is_ok());
+    }
+
+    #[test]
+    fn owner_edge_table_needs_the_caller_or_unowned_filter() {
+        let model = derive_model(
+            ontology::Ontology::new()
+                .with_nodes(["User", "Todo"])
+                .with_edges(["HAS_TODO"])
+                .with_edge_table("gl_todo_edge")
+                .with_edge_for_table("HAS_TODO", "gl_todo_edge")
+                .with_edge_table_owner("gl_todo_edge", "_owner_id", ontology::OwnerBypass::None),
+        );
+        let ctx = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_user_id(Some(7));
+        let path_filter = Expr::func(
+            Function::StartsWith,
+            vec![Expr::col("e", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
+        );
+        let owned = |values: Vec<i64>| {
+            Expr::binary(
+                Op::Or,
+                Expr::binary(
+                    Op::In,
+                    Expr::col("e", "_owner_id"),
+                    Expr::Param {
+                        data_type: crate::ast::SqlType::Int64.to_array(),
+                        value: Value::Array(values.into_iter().map(Value::from).collect()),
+                    },
+                ),
+                Expr::col("e", "_deleted"),
+            )
+        };
+        let edge_query = |where_clause| {
+            Node::Query(Box::new(Query {
+                select: vec![SelectExpr::col("e", "target_id")],
+                from: TableRef::scan("gl_todo_edge", "e"),
+                where_clause: Some(where_clause),
+                ..Default::default()
+            }))
+        };
+
+        let error = check(&edge_query(path_filter.clone()), &ctx, &model).unwrap_err();
+        assert!(
+            error.to_string().contains("missing owner filter"),
+            "{error}"
+        );
+        assert!(
+            check(
+                &edge_query(Expr::and(path_filter.clone(), owned(vec![0, 7]))),
+                &ctx,
+                &model
+            )
+            .is_ok()
+        );
+        for wrong in [owned(vec![0, 8]), owned(vec![7]), owned(vec![0, 7, 9])] {
+            assert!(
+                check(
+                    &edge_query(Expr::and(path_filter.clone(), wrong)),
+                    &ctx,
+                    &model
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            check(
+                &edge_query(path_filter.clone()),
+                &ctx.clone().with_role(true, None),
+                &model
+            )
+            .is_err()
+        );
     }
 
     #[test]

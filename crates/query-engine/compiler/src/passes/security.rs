@@ -4,11 +4,12 @@
 use serde_json::Value;
 
 use crate::ast::visit::{visit_queries_mut, visit_relations};
-use crate::ast::{Expr, Function, Node, Op, TableRef};
+use crate::ast::{Expr, Function, Node, Op, SqlType, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 pub use crate::types::SecurityContext;
 use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
+use query_data_model::OwnerScope;
 
 /// Per-alias role floors come from the query data model.
 /// Tables without authorization metadata keep the historical Reporter floor.
@@ -52,7 +53,7 @@ pub fn apply_security_context(
                 model
                     .table_owner_scope(table)
                     .filter(|scope| scope.gates(ctx.admin))
-                    .map(|scope| build_owner_filter(alias, scope.column, ctx.user_id)),
+                    .map(|scope| build_owner_filter(alias, scope, ctx.user_id)),
             );
         }
         query.where_clause = Expr::and_all(
@@ -64,15 +65,27 @@ pub fn apply_security_context(
     })
 }
 
-fn build_owner_filter(alias: &str, column: &str, user_id: Option<i64>) -> Expr {
-    match user_id {
-        Some(user_id) => Expr::binary(
-            Op::Or,
-            Expr::eq(Expr::col(alias, column), Expr::int(user_id)),
-            Expr::col(alias, ontology::constants::DELETED_COLUMN),
+fn build_owner_filter(alias: &str, scope: OwnerScope<'_>, user_id: Option<i64>) -> Expr {
+    let Some(user_id) = user_id else {
+        return Expr::Literal(Value::Bool(false));
+    };
+    let owner = Expr::col(alias, scope.column);
+    let owned = match scope.allows_unowned {
+        true => Expr::binary(
+            Op::In,
+            owner,
+            Expr::Param {
+                data_type: SqlType::Int64.to_array(),
+                value: Value::Array(vec![0.into(), user_id.into()]),
+            },
         ),
-        None => Expr::Literal(Value::Bool(false)),
-    }
+        false => Expr::eq(owner, Expr::int(user_id)),
+    };
+    Expr::binary(
+        Op::Or,
+        owned,
+        Expr::col(alias, ontology::constants::DELETED_COLUMN),
+    )
 }
 
 fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
@@ -646,6 +659,72 @@ mod tests {
             let error = apply(&mut scan(table), &ctx, model).unwrap_err();
             assert!(matches!(error, QueryError::Security(_)), "{table}: {error}");
         }
+    }
+
+    #[test]
+    fn owner_edge_table_filters_edge_rows_to_the_caller_or_unowned() {
+        let edge_model = |bypass| {
+            ClickHouseDataModel::derive(Arc::new(
+                ontology::Ontology::new()
+                    .with_nodes(["User", "Todo"])
+                    .with_edges(["HAS_TODO"])
+                    .with_edge_table("gl_todo_edge")
+                    .with_edge_for_table("HAS_TODO", "gl_todo_edge")
+                    .with_edge_table_owner("gl_todo_edge", "_owner_id", bypass),
+            ))
+            .unwrap()
+        };
+        let edge_query = || {
+            Node::Query(Box::new(Query {
+                select: vec![SelectExpr::col("e", "target_id")],
+                from: TableRef::scan("gl_todo_edge", "e"),
+                ..Default::default()
+            }))
+        };
+        let owner_filter = Expr::binary(
+            Op::Or,
+            Expr::binary(
+                Op::In,
+                Expr::col("e", "_owner_id"),
+                Expr::Param {
+                    data_type: SqlType::Int64.to_array(),
+                    value: Value::Array(vec![0.into(), 7.into()]),
+                },
+            ),
+            Expr::col("e", "_deleted"),
+        );
+        let ctx = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_user_id(Some(7));
+
+        let strict = edge_model(ontology::OwnerBypass::None);
+        let mut node = edge_query();
+        apply(&mut node, &ctx, &strict).unwrap();
+        assert!(has_expr(where_clause(&node), &owner_filter));
+        assert_eq!(
+            starts_with_paths_for_alias(where_clause(&node), "e"),
+            ["1/"]
+        );
+
+        let mut node = edge_query();
+        apply(&mut node, &ctx.clone().with_role(true, None), &strict).unwrap();
+        assert!(has_expr(where_clause(&node), &owner_filter));
+
+        let mut node = edge_query();
+        apply(
+            &mut node,
+            &ctx.clone().with_role(true, None),
+            &edge_model(ontology::OwnerBypass::Admin),
+        )
+        .unwrap();
+        assert!(!has_expr(where_clause(&node), &owner_filter));
+
+        let mut node = edge_query();
+        apply(&mut node, &ctx.with_user_id(None), &strict).unwrap();
+        assert!(has_expr(
+            where_clause(&node),
+            &Expr::Literal(Value::Bool(false))
+        ));
     }
 
     #[test]
