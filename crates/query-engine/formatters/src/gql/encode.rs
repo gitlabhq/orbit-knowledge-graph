@@ -85,9 +85,7 @@ fn relationship_cell(
     if let RelationshipColumnKind::Property(property) = &column.kind {
         return edge
             .and_then(|edge| row.get(&edge.property_column(property)))
-            .map_or_else(null, |value| {
-                literal(&column_value_to_json(value), property)
-            });
+            .map_or_else(null, |value| literal(&value.to_json(), property));
     }
     edge.and_then(|edge| {
         row.get_column_string(&edge.type_column).or_else(|| {

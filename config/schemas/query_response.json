@@ -108,9 +108,7 @@
         "properties": {
           "type": "object",
           "description": "Relationship properties the query returns. Absent when the query returns none.",
-          "additionalProperties": {
-            "type": ["string", "integer", "number", "boolean", "null"]
-          }
+          "additionalProperties": {"$ref": "#/$defs/property_value"}
         }
       },
       "additionalProperties": false

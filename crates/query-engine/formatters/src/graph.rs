@@ -320,7 +320,7 @@ impl GraphFormatter {
                         .iter()
                         .filter_map(|property| {
                             row.get(&meta.property_column(property))
-                                .map(|value| (property.clone(), column_value_to_json(value)))
+                                .map(|value| (property.clone(), value.to_json()))
                         })
                         .collect(),
                 });
