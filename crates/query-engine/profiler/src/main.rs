@@ -57,6 +57,10 @@ struct Cli {
     #[arg(short = 't', long, required = true)]
     traversal_paths: Vec<String>,
 
+    /// Caller user id for owner-scoped entities; without it their reads return nothing
+    #[arg(long)]
+    user_id: Option<i64>,
+
     /// Ontology config directory
     #[arg(long, default_value = "config/ontology")]
     ontology: PathBuf,
@@ -452,7 +456,8 @@ async fn main() -> Result<()> {
         .context("failed to parse org_id from first traversal path")?;
 
     let security_ctx = SecurityContext::new_with_roles(org_id, authorized_paths)
-        .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?
+        .with_user_id(cli.user_id);
 
     if let Some(show) = &cli.compile_only {
         return run_compile_only(&query_json, &ontology, &security_ctx, show, &cli);

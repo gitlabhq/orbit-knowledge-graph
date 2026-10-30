@@ -679,12 +679,19 @@ mod tests {
         apply(&mut node, &ctx.clone().with_role(true, None), &strict).unwrap();
         assert!(has_expr(where_clause(&node), &owner_filter));
 
-        let mut node = todo_query();
-        apply(&mut node, &ctx.with_user_id(None), owner_model()).unwrap();
-        assert!(has_expr(
-            where_clause(&node),
-            &Expr::Literal(Value::Bool(false))
-        ));
+        for missing_caller in [None, Some(0)] {
+            let mut node = todo_query();
+            apply(
+                &mut node,
+                &ctx.clone().with_user_id(missing_caller),
+                owner_model(),
+            )
+            .unwrap();
+            assert!(has_expr(
+                where_clause(&node),
+                &Expr::Literal(Value::Bool(false))
+            ));
+        }
 
         let mut node = simple_query();
         apply(

@@ -136,7 +136,7 @@ impl SecurityContext {
     }
 
     pub fn with_user_id(mut self, user_id: Option<i64>) -> Self {
-        self.user_id = user_id;
+        self.user_id = user_id.filter(|id| *id > 0);
         self
     }
 
