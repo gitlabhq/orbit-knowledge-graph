@@ -193,7 +193,7 @@ pub struct EntityHandlerConfig {
     #[serde(default)]
     pub batch_size_overrides: HashMap<String, u64>,
 
-    /// ClickHouse `max_threads` for a full-load page, which reads its source table with `FINAL`; each stream merges one key range and reads ahead with full rows, so one stream keeps the page near the plain scan's rows and well under its memory.
+    /// ClickHouse `max_final_threads` for a full-load page, which reads its source table with `FINAL`; each FINAL stream merges one key range and reads ahead with full rows, so one stream keeps the page near the plain scan's rows and well under its memory while joins keep the server's thread count.
     #[serde(default = "default_final_read_max_threads")]
     #[schemars(range(min = 1))]
     pub final_read_max_threads: u64,

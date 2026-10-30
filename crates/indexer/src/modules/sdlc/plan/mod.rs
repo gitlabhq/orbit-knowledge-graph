@@ -347,7 +347,7 @@ impl PreparedQuery {
     pub fn settings(&self, max_block_size: Option<u64>) -> QuerySettings {
         QuerySettings {
             max_block_size,
-            max_threads: self.needs_final.then_some(self.final_read_threads),
+            max_final_threads: self.needs_final.then_some(self.final_read_threads),
             lazy_materialization_limit: (!self.needs_final).then_some(self.batch_size),
         }
     }
@@ -702,7 +702,7 @@ mod tests {
         let sql = prepared.to_sql().expect("renders extract SQL");
         assert!(sql.contains("FROM source_table FINAL"), "sql: {sql}");
         assert!(sql.contains("_siphon_deleted = false"), "sql: {sql}");
-        assert_eq!(prepared.settings(Some(500)).max_threads, Some(4));
+        assert_eq!(prepared.settings(Some(500)).max_final_threads, Some(4));
         assert_eq!(prepared.settings(Some(500)).max_block_size, Some(500));
         assert_eq!(
             prepared.settings(Some(500)).lazy_materialization_limit,

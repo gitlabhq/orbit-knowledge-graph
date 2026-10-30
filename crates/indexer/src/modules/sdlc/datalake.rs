@@ -53,7 +53,7 @@ pub(crate) struct ScanStats {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct QuerySettings {
     pub max_block_size: Option<u64>,
-    pub max_threads: Option<u64>,
+    pub max_final_threads: Option<u64>,
     pub lazy_materialization_limit: Option<u64>,
 }
 
@@ -119,8 +119,8 @@ impl Datalake {
                 query = query.param(&key, value);
             }
         }
-        if let Some(threads) = settings.max_threads {
-            query = query.with_setting("max_threads", threads.to_string());
+        if let Some(threads) = settings.max_final_threads {
+            query = query.with_setting("max_final_threads", threads.to_string());
         }
         if let Some(limit) = settings.lazy_materialization_limit {
             query = query
