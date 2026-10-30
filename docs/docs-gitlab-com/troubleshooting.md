@@ -189,6 +189,21 @@ glab orbit status --full-path <my-group>
 
 Without `--full-path`, `--namespace-id`, or `--project-id`, `glab orbit status` shows only the health of the service, not indexing progress.
 
+### An empty result is read as no dependency
+
+Your agent answers that a project has no dependencies, no callers, or no related vulnerabilities, because its query returned no rows.
+
+This issue occurs when the agent infers that an empty result means that no relationship exists.
+A query can also return no rows when indexing of the group is not complete, when the scope filter matches nothing, or when your role removes the data from the results.
+For security data, see [Results have no security data](#results-have-no-security-data).
+
+To resolve this issue:
+
+1. Ask the agent to show the query that it ran, and to explain why the query returned nothing.
+1. Narrow the scope to one project, a shorter time window, or a smaller `LIMIT`, then ask again.
+1. If the results are still empty, check the indexing progress.
+   For more information, see [Results are missing recent data](#results-are-missing-recent-data).
+
 ## Tokens and service accounts
 
 {{< details >}}
@@ -269,6 +284,20 @@ On GitLab.com, GitLab Orbit must be turned on for a group that you belong to.
 On GitLab Self-Managed and GitLab Dedicated, an administrator can turn off GitLab Orbit in GitLab Duo for the instance.
 
 <!-- vale orbit.StandaloneProductName = YES -->
+
+### Administrators see fewer results in GitLab Duo than in the UI
+
+An administrator gets fewer results from a GitLab Duo agent than from the same data in GitLab, or from the same query through the REST API in Admin Mode.
+
+This issue occurs when Admin Mode is on for the instance.
+Queries through GitLab Duo Agent Platform never use Admin Mode, so they return data only from groups where the administrator has the required role.
+
+To resolve this issue, do one of the following:
+
+- Add the administrator as a direct member of each group to query, with the Reporter, Security Manager, Developer, Maintainer, or Owner role.
+- Send the query through the [REST API](https://docs.gitlab.com/api/orbit/) in Admin Mode, with a personal access token that has the `admin_mode` scope.
+
+For more information, see [roles](security.md#roles).
 
 ## Local graph
 
