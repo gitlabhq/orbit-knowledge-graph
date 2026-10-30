@@ -84,6 +84,18 @@ fn aggregation_plan(
                 plan.group_outputs.push((group.clone(), alias));
                 add_group(&mut plan.groups, group);
             }
+            InputGroupByKey::Relationship {
+                relationship,
+                property,
+                ..
+            } => {
+                let group = Group {
+                    value: OutputValue::Column(relationship_column(*relationship, property)),
+                    truncate: None,
+                };
+                plan.group_outputs.push((group.clone(), alias));
+                add_group(&mut plan.groups, group);
+            }
             InputGroupByKey::Node { node, .. } => {
                 let Some(metadata) = nodes.get(node.as_str()) else {
                     continue;
@@ -124,6 +136,17 @@ fn aggregation_plan(
         }
     }
     for metric in &aggregation.metrics {
+        if let Some(relationship) = metric.relationship {
+            plan.measures.push(Measure {
+                function: metric.expr.function(),
+                argument: metric.expr.property().map(|property| {
+                    OutputValue::Column(relationship_column(relationship, property))
+                }),
+                distinct: metric.distinct,
+                name: metric.output_name(),
+            });
+            continue;
+        }
         let argument = match &metric.expr {
             AggExpr::Count(target) if metric.distinct => Some(property_value(
                 nodes,
@@ -162,6 +185,13 @@ fn aggregation_plan(
         });
     }
     plan
+}
+
+fn relationship_column(relationship: usize, property: &str) -> Column {
+    Column::new(
+        crate::constants::edge_relation_alias(relationship),
+        property,
+    )
 }
 
 fn add_group(groups: &mut Vec<Group>, group: Group) {

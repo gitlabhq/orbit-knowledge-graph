@@ -381,7 +381,8 @@ impl GraphFormatter {
 
             for (group, col_name) in groups.iter().zip(&group_col_names) {
                 match group {
-                    compiler::input::InputGroupByKey::Property { .. } => {
+                    compiler::input::InputGroupByKey::Property { .. }
+                    | compiler::input::InputGroupByKey::Relationship { .. } => {
                         obj.insert(
                             col_name.clone(),
                             row.get(col_name)

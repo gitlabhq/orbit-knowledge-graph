@@ -323,6 +323,40 @@ fn is_timestamp(value: &str) -> bool {
             .any(|format| chrono::NaiveDateTime::parse_from_str(value, format).is_ok())
 }
 
+fn check_aggregate_type(
+    alias: &str,
+    function: AggFunction,
+    target: &str,
+    data_type: DataType,
+) -> Result<()> {
+    if !matches!(
+        function,
+        AggFunction::Sum | AggFunction::Avg | AggFunction::Min | AggFunction::Max
+    ) {
+        return Ok(());
+    }
+    if matches!(function, AggFunction::Sum | AggFunction::Avg)
+        && !matches!(data_type, DataType::Int | DataType::Float)
+    {
+        return Err(QueryError::Validation(format!(
+            "aggregation \"{alias}\": \"{}\" requires a numeric property, got {target} ({data_type})",
+            function.to_string().to_uppercase(),
+        )));
+    }
+    if data_type == DataType::Enum {
+        return Err(QueryError::Validation(format!(
+            "aggregation \"{alias}\": \"{}\" does not apply to enum {target}, because enum values have no order; group by it instead",
+            function.to_string().to_uppercase(),
+        )));
+    }
+    if !is_aggregate_scalar(data_type) {
+        return Err(QueryError::Validation(format!(
+            "aggregation \"{alias}\": aggregates are restricted to scalars, got {target} ({data_type})"
+        )));
+    }
+    Ok(())
+}
+
 fn is_aggregate_scalar(data_type: DataType) -> bool {
     matches!(
         data_type,
@@ -527,9 +561,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             if let Some(property) = group.property() {
                 validate_identifier(property)?;
             }
-            let (InputGroupByKey::Node { alias, .. } | InputGroupByKey::Property { alias, .. }) =
-                group;
-            if let Some(alias) = alias {
+            if let Some(alias) = group.alias() {
                 validate_identifier(alias)?;
             }
         }
@@ -1029,7 +1061,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         index: usize,
         prop: &str,
         filters: &[InputFilter],
-    ) -> Result<()> {
+    ) -> Result<DataType> {
         let model = self.model.get();
         if prop.starts_with('_') || prop == TRAVERSAL_PATH_COLUMN {
             return Err(QueryError::Validation(format!(
@@ -1103,7 +1135,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             self.check_one_filter(&format!("relationship[{index}]"), prop, filter, data_type)?;
             self.check_edge_kind_filter(input, index, prop, filter)?;
         }
-        Ok(())
+        Ok(data_type)
     }
 
     const MIN_LIKE_PATTERN_LEN: usize = 3;
@@ -1390,6 +1422,14 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             }
 
             let target = agg.expr.node();
+            if let Some(relationship) = agg.relationship {
+                if let Some(prop) = agg.expr.property() {
+                    let data_type =
+                        self.check_relationship_filters(input, relationship, prop, &[])?;
+                    check_aggregate_type(&alias, function, &format!("{target}.{prop}"), data_type)?;
+                }
+                continue;
+            }
             if !node_ids.contains(&target) {
                 return Err(QueryError::ReferenceError(format!(
                     "aggregation \"{alias}\" references undefined node \"{target}\""
@@ -1415,44 +1455,25 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     )));
                 }
 
-                if matches!(
-                    function,
-                    AggFunction::Sum | AggFunction::Avg | AggFunction::Min | AggFunction::Max
-                ) {
-                    let data_type = self.field_type(entity, prop).ok_or_else(|| {
-                        QueryError::AllowlistRejected(format!(
-                            "invalid property in aggregation \"{alias}\": {entity}.{prop}"
-                        ))
-                    })?;
-
-                    if matches!(function, AggFunction::Sum | AggFunction::Avg)
-                        && !matches!(data_type, DataType::Int | DataType::Float)
-                    {
-                        return Err(QueryError::Validation(format!(
-                            "aggregation \"{alias}\": \"{}\" requires a numeric property, got {}.{} ({data_type})",
-                            function.to_string().to_uppercase(),
-                            entity,
-                            prop
-                        )));
-                    }
-
-                    if data_type == DataType::Enum {
-                        return Err(QueryError::Validation(format!(
-                            "aggregation \"{alias}\": \"{}\" does not apply to enum {entity}.{prop}, because enum values have no order; group by it instead",
-                            function.to_string().to_uppercase(),
-                        )));
-                    }
-
-                    if !is_aggregate_scalar(data_type) {
-                        return Err(QueryError::Validation(format!(
-                            "aggregation \"{alias}\": aggregates are restricted to scalars, got {entity}.{prop} ({data_type})"
-                        )));
-                    }
-                }
+                let data_type = self.field_type(entity, prop).ok_or_else(|| {
+                    QueryError::AllowlistRejected(format!(
+                        "invalid property in aggregation \"{alias}\": {entity}.{prop}"
+                    ))
+                })?;
+                check_aggregate_type(&alias, function, &format!("{entity}.{prop}"), data_type)?;
             }
         }
 
         for (i, group) in input.aggregation.group_by.iter().enumerate() {
+            if let InputGroupByKey::Relationship {
+                relationship,
+                property,
+                ..
+            } = group
+            {
+                self.check_relationship_filters(input, *relationship, property, &[])?;
+                continue;
+            }
             let group_node = group.node();
             let node = input
                 .nodes
