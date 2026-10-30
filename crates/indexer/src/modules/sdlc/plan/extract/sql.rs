@@ -135,6 +135,23 @@ mod tests {
     }
 
     #[test]
+    fn full_load_deleted_filter_keeps_a_function_call_with_commas() {
+        use crate::modules::sdlc::plan::{DeletedFilter, Filter};
+        let spec = compile_authored_extract(
+            &group_decl(),
+            "SELECT id, {{version_column}} AS _version, ({{deleted_column}} OR dictGetOrDefault('d', 'traversal_path', toUInt64(id), '0/') != traversal_path) AS _deleted FROM t {{final}} WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+        )
+        .expect("valid authored SQL");
+        assert_eq!(
+            DeletedFilter {
+                column: &spec.deleted
+            }
+            .condition(),
+            "(_siphon_deleted OR dictGetOrDefault('d', 'traversal_path', toUInt64(id), '0/') != traversal_path) = false"
+        );
+    }
+
+    #[test]
     fn unresolved_marker_is_rejected() {
         let err = compile_authored_extract(
             &group_decl(),
