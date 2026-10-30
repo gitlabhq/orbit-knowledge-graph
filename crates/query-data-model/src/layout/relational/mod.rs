@@ -4,7 +4,7 @@ pub mod materialized;
 pub use mapping::VariantRoute;
 pub use mapping::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint,
-    ForeignKey, PathColumn, PropertyRealization, RelationalMapping, RelationshipRoute,
+    ForeignKey, PathColumn, PropertyRealization, RelationalMapping, RelationshipRoute, TableOwner,
     TraversalPathLookup,
 };
 pub use materialized::{MaterializedJoin, MaterializedNode, MaterializedRelationship};

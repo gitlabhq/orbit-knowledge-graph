@@ -330,12 +330,12 @@
         },
         "owner_column": {
           "type": "string",
-          "description": "Int column that holds the owning user ID. Every read of the entity table is filtered to the caller's user ID."
+          "description": "Int column with the owning user ID; every read of the table is filtered to the caller."
         },
         "owner_bypass": {
           "type": "string",
           "enum": ["none", "admin"],
-          "description": "'admin' skips the owner filter for the admin claim. Default 'none'."
+          "description": "'admin' skips the owner filter for the admin claim."
         }
       },
       "required": [
@@ -379,7 +379,7 @@
         "default_edge_table": {
           "type": "string",
           "pattern": "^[a-z_]+$",
-          "description": "Default ClickHouse edge table name. Must be a key in edge_tables."
+          "description": "Default edge table; a key of edge_tables."
         },
         "default_entity_sort_key": {
           "type": "array",
@@ -392,7 +392,7 @@
         },
         "edge_tables": {
           "type": "object",
-          "description": "Edge table definitions keyed by table name. Each defines sort_key and columns.",
+          "description": "Edge tables keyed by table name.",
           "propertyNames": {
             "pattern": "^[a-z_]+$"
           },
@@ -401,15 +401,24 @@
             "properties": {
               "domains": {
                 "type": "array",
-                "description": "Node domains whose same-domain edge variants route to this table unless an edge or variant overrides the table.",
+                "description": "Domains whose same-domain edge variants route here unless an edge or variant sets a table.",
                 "items": {
                   "type": "string"
                 },
                 "uniqueItems": true
               },
+              "redaction": {
+                "type": "object",
+                "description": "Owner scope of the edge rows.",
+                "properties": {
+                  "owner_column": {"type": "string"},
+                  "owner_bypass": {"type": "string", "enum": ["none", "admin"]}
+                },
+                "required": ["owner_column"]
+              },
               "sort_key": {
                 "type": "array",
-                "description": "ClickHouse ORDER BY columns for this edge table.",
+                "description": "ORDER BY columns of this edge table.",
                 "items": {
                   "type": "string"
                 },
@@ -418,7 +427,7 @@
               },
               "columns": {
                 "type": "array",
-                "description": "Column definitions for this edge table, in schema order.",
+                "description": "Columns of this edge table, in schema order.",
                 "items": {
                   "type": "object",
                   "properties": {
@@ -871,7 +880,7 @@
               },
               "to_table": {
                 "type": "string",
-                "description": "Target table for the TO clause. The table must be an ontology-tracked table (auxiliary, node, or edge) so it is created and dropped alongside other graph tables during schema migration. Receives the schema-version prefix during migration unless versioned is false, in which case it must be an unversioned auxiliary table."
+                "description": "Target table for the TO clause: an ontology-tracked table, created and dropped with the graph tables. Gets the schema-version prefix unless versioned is false (then an unversioned auxiliary table)."
               },
               "select_query": {
                 "type": "string",
@@ -1300,7 +1309,7 @@
         "prune_to_source",
         "prune_to_target"
       ],
-      "description": "How traversal_path scope crosses an edge. namespace_anchor uses a Project or Group FK. same_namespace propagates within one subtree. prune_to_source and prune_to_target scope only the edge scan to that path-scopable endpoint. An omitted value does not scope or propagate."
+      "description": "How traversal_path scope crosses an edge: namespace_anchor uses a Project or Group FK; same_namespace stays in one subtree; prune_to_source and prune_to_target scope the edge scan to that endpoint; omitted = no scope."
     },
     "edgeVariant": {
       "type": "object",
@@ -1319,7 +1328,7 @@
         },
         "fk_column": {
           "type": "string",
-          "description": "Foreign key column on one of the two node tables that encodes this relationship (e.g. 'project_id', 'author_id'). The loader resolves which node has the column. When present, the compiler can join node tables directly instead of scanning the edge table."
+          "description": "Foreign key column on one of the two node tables that encodes this relationship (e.g. 'project_id'). The loader resolves which node has the column. When present, the compiler can join node tables directly instead of scanning the edge table."
         },
         "scope": {
           "$ref": "#/definitions/edgeVariantScope",

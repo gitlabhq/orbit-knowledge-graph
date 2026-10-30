@@ -109,6 +109,13 @@ pub struct EdgeTableConfig {
     pub sort_key: Vec<String>,
     pub columns: Vec<EdgeColumn>,
     pub storage: EdgeTableStorage,
+    pub owner: Option<EdgeOwner>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EdgeOwner {
+    pub column: String,
+    pub bypass: OwnerBypass,
 }
 
 impl EdgeTableConfig {
@@ -188,6 +195,7 @@ impl Ontology {
             sort_key: default_sort_key,
             columns: Vec::new(),
             storage: EdgeTableStorage::default(),
+            owner: None,
         };
         Self {
             schema_version: String::new(),
@@ -339,8 +347,21 @@ impl Ontology {
                 sort_key,
                 columns: Vec::new(),
                 storage: EdgeTableStorage::default(),
+                owner: None,
             },
         );
+        self
+    }
+
+    #[must_use]
+    pub fn with_edge_table_owner(mut self, table: &str, column: &str, bypass: OwnerBypass) -> Self {
+        self.edge_table_configs
+            .get_mut(table)
+            .unwrap_or_else(|| panic!("edge table \"{table}\" does not exist"))
+            .owner = Some(EdgeOwner {
+            column: column.to_string(),
+            bypass,
+        });
         self
     }
 

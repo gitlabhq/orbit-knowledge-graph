@@ -18,9 +18,9 @@ pub use layout::relational::{
     MaterializedJoin, MaterializedNode, MaterializedRelationship, VariantRoute,
 };
 
-pub use layout::relational::RelationalMapping;
 pub use layout::relational::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint,
     ForeignKey, PathColumn, PropertyRealization, RelationshipRoute, TraversalPathLookup,
 };
+pub use layout::relational::{RelationalMapping, TableOwner};
 pub use models::orbit::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};

@@ -29,6 +29,15 @@ pub(super) struct EdgeTableYaml {
     pub columns: Vec<EdgeColumnYaml>,
     #[serde(default)]
     pub storage: Option<EdgeTableStorageYaml>,
+    #[serde(default)]
+    pub redaction: Option<EdgeRedactionYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct EdgeRedactionYaml {
+    pub owner_column: String,
+    #[serde(default)]
+    pub owner_bypass: crate::entities::OwnerBypass,
 }
 
 #[derive(Debug, Clone, Deserialize)]

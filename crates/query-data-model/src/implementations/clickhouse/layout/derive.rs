@@ -276,6 +276,20 @@ impl crate::Relational<ClickHouse> {
                 copies,
                 dependencies,
                 entities: crate::implementations::entity_facts(ontology, false),
+                edge_owners: ontology
+                    .edge_tables()
+                    .into_iter()
+                    .filter_map(|name| {
+                        let owner = ontology.edge_table_config(name)?.owner.as_ref()?;
+                        Some((
+                            name.to_string(),
+                            crate::TableOwner {
+                                column: owner.column.clone(),
+                                admin_bypass: owner.bypass == ontology::OwnerBypass::Admin,
+                            },
+                        ))
+                    })
+                    .collect(),
                 default_edge_table: ontology.edge_table().to_string(),
                 denormalized: ontology.denormalized_properties().to_vec(),
                 traversal_path_lookups: ontology.traversal_path_lookups().to_vec(),

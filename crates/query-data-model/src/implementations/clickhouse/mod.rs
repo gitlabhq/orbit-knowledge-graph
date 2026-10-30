@@ -19,6 +19,7 @@ pub struct TableLayout {
     pub sort_key: Vec<String>,
     pub entity: Option<EntityId>,
     pub path_columns: Vec<PathColumn>,
+    pub owner: Option<crate::TableOwner>,
 }
 
 impl TableLayout {
@@ -46,6 +47,7 @@ impl TableLayout {
             sort_key: table.sort_key.clone(),
             entity,
             path_columns,
+            owner: None,
         }
     }
 }
@@ -224,6 +226,10 @@ impl RelationalMapping for ClickHouseBindings {
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {
         self.table(table)
             .map(|layout| layout.path_columns.as_slice())
+    }
+
+    fn table_owner(&self, table: &str) -> Option<&crate::TableOwner> {
+        self.table(table)?.owner.as_ref()
     }
 
     fn default_edge_table(&self) -> &str {

@@ -201,6 +201,7 @@ pub struct Metadata {
     copies: Vec<ReorderedCopy>,
     dependencies: BTreeMap<String, BTreeSet<String>>,
     pub(crate) entities: Vec<crate::implementations::EntityFacts>,
+    pub(crate) edge_owners: BTreeMap<String, crate::TableOwner>,
     pub(crate) default_edge_table: String,
     pub(crate) denormalized: Vec<ontology::DenormalizedProperty>,
     pub(crate) traversal_path_lookups: Vec<ontology::TraversalPathLookup>,

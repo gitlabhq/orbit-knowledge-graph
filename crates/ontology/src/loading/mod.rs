@@ -205,6 +205,10 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     })
                     .collect(),
                 storage: storage.unwrap_or_default(),
+                owner: cfg.redaction.map(|redaction| crate::EdgeOwner {
+                    column: redaction.owner_column,
+                    bypass: redaction.owner_bypass,
+                }),
             };
             (name, config)
         })
@@ -848,6 +852,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         ontology.denormalized_joins.push(resolved);
     }
     validate_unique_denormalized_joins(&ontology)?;
+    validate_edge_table_owner_columns(&ontology)?;
     let mut occupied: std::collections::BTreeSet<String> = all_table_names
         .into_iter()
         .chain(
@@ -1545,6 +1550,24 @@ pub(crate) fn resolve_denormalized_join(
     })
 }
 
+fn validate_edge_table_owner_columns(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for (table, config) in &ontology.edge_table_configs {
+        let Some(owner) = &config.owner else { continue };
+        if !config
+            .storage
+            .columns
+            .iter()
+            .any(|column| column.name == owner.column && column.ch_type == "Int64")
+        {
+            return Err(OntologyError::Validation(format!(
+                "edge table '{table}': redaction.owner_column '{}' must name an Int64 storage column",
+                owner.column
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn validate_unique_denormalized_joins(ontology: &crate::Ontology) -> Result<(), OntologyError> {
     let mut seen = std::collections::HashSet::new();
     for join in &ontology.denormalized_joins {
@@ -1810,6 +1833,36 @@ mod tests {
                 assert!(error.to_string().contains("already exists"), "{error}");
             }
         }
+    }
+
+    #[test]
+    fn edge_table_owner_column_names_an_int64_storage_column() {
+        let declare = |doc: &mut serde_json::Value, column: &str| {
+            doc["settings"]["edge_tables"]["gl_edge"]["redaction"] =
+                serde_json::json!({ "owner_column": column, "owner_bypass": "admin" });
+        };
+        let error =
+            load_modified_sources("schema.yaml", |doc| declare(doc, "_owner_id")).unwrap_err();
+        assert!(
+            error.to_string().contains("owner_column '_owner_id'"),
+            "{error}"
+        );
+        let loaded = load_modified_sources("schema.yaml", |doc| {
+            declare(doc, "_owner_id");
+            doc["settings"]["edge_tables"]["gl_edge"]["storage"]["columns"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({ "name": "_owner_id", "type": "Int64", "default": "0" }));
+        })
+        .unwrap();
+        let owner = loaded
+            .edge_table_config("gl_edge")
+            .unwrap()
+            .owner
+            .clone()
+            .unwrap();
+        assert_eq!(owner.column, "_owner_id");
+        assert_eq!(owner.bypass, crate::OwnerBypass::Admin);
     }
 
     #[test]

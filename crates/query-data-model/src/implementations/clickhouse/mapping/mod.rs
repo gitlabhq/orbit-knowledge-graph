@@ -91,14 +91,17 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
         {
             tables.insert(
                 table_name.to_string(),
-                TableLayout::from_storage(
-                    storage.require_table(table_name)?,
-                    None,
-                    vec![PathColumn {
-                        name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
-                        entity: None,
-                    }],
-                ),
+                TableLayout {
+                    owner: storage.metadata.edge_owners.get(table_name).cloned(),
+                    ..TableLayout::from_storage(
+                        storage.require_table(table_name)?,
+                        None,
+                        vec![PathColumn {
+                            name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
+                            entity: None,
+                        }],
+                    )
+                },
             );
         }
 

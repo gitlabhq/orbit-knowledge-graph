@@ -227,8 +227,17 @@ pub trait OrbitQueryModel {
     }
 
     fn table_owner_scope(&self, table: &str) -> Option<OwnerScope<'_>> {
-        let entity = self.query_backend().table_entity(table)?;
-        self.query_authorization().owner_scope(entity)
+        match self.query_backend().table_entity(table) {
+            Some(entity) => self.query_authorization().owner_scope(entity),
+            None => self
+                .query_backend()
+                .table_owner(table)
+                .map(|owner| OwnerScope {
+                    column: &owner.column,
+                    admin_bypass: owner.admin_bypass,
+                    allows_unowned: true,
+                }),
+        }
     }
 
     fn owner_gated_entities(&self, admin: bool) -> Vec<String> {

@@ -140,6 +140,9 @@ pub trait RelationalMapping: Send + Sync {
     fn property_unique(&self, property: PropertyId) -> bool;
     fn property_mutable(&self, property: PropertyId) -> bool;
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]>;
+    fn table_owner(&self, _table: &str) -> Option<&TableOwner> {
+        None
+    }
     fn default_edge_table(&self) -> &str;
     fn relationship_table(&self, relationship: RelationshipId) -> Option<&str>;
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String>;
@@ -158,4 +161,10 @@ pub trait RelationalMapping: Send + Sync {
         entity: EntityId,
         kind: ontology::TraversalPathKind,
     ) -> Option<&TraversalPathLookup>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableOwner {
+    pub column: String,
+    pub admin_bypass: bool,
 }
