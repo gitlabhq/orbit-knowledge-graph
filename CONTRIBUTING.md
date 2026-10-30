@@ -40,7 +40,7 @@ For all test layers, the CI jobs, and where to add a test, see [Testing](docs/pa
 ```shell
 mise lint:code        # Clippy with warnings as errors
 mise lint:code:fix    # Apply auto-fixable Clippy suggestions
-mise lint:docs        # markdownlint + Vale + lychee link checks
+mise lint:docs        # markdownlint + rumdl + Vale + lychee link checks
 ```
 
 Run `mise lint:docs` before pushing any documentation changes.

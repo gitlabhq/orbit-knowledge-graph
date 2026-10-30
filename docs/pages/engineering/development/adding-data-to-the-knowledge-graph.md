@@ -21,7 +21,7 @@ Two repositories are involved. Know which one you're in at every step.
 
 **Data flow (one direction):**
 
-```text
+```plaintext
 Postgres table (monolith)
    └─ Siphon CDC (db/siphon/tables/*.yml + ClickHouse migration)
         └─ siphon_<table> ClickHouse table  ── replicated to prod CH ──┐
@@ -81,7 +81,7 @@ Branch off **fresh `master`**. One table per MR keeps `main.sql` conflicts small
 
 ### 3.1 Generate
 
-```bash
+```shell
 bundle exec rails generate gitlab:click_house:siphon <table> --with-traversal-path
 ```
 
@@ -101,7 +101,7 @@ This emits three files:
 - **Keep the generator's CODECs.** Do **not** "normalize" `CODEC(DoubleDelta, ZSTD)` → `ZSTD(1)` or `Delta` → `Delta(8)`. The bare forms are the generator default; ClickHouse normalizes them at table creation and that normalized form is what `main.sql` records. Reviewers (and GitLab Duo) will suggest the explicit form. Decline it.
 - **`smallint` → `Int16`**, no default (mirror existing tables).
 - Don't hand-tune the PK to a composite like `(package_id, id)`. The `id`-leading companion table is what reconciliation needs; premature tuning has been reverted in review.
-- Confirm `# frozen_string_literal: true` and every PG column is represented.
+- Confirm `# frozen_string_literal: true` and every PostgreSQL column is represented.
 
 ### 3.3 Regenerate `main.sql` (NEVER hand-edit)
 
@@ -111,12 +111,12 @@ a slightly different dump (e.g. single-column-key parens) that fails `clickhouse
 Run this from `repos/gitlab` with the monolith in edit mode. Port 8123 must be free on the
 host, so stop `mise run dev` (its ClickHouse port-forward uses it) first.
 
-```bash
+```shell
 docker rm -f gl-ch-dump 2>/dev/null
 docker run -d --name gl-ch-dump -e CLICKHOUSE_SKIP_USER_SETUP=1 \
   -p 8123:8123 -p 9000:9000 clickhouse/clickhouse-server:25.12.3-alpine
-until curl -sf http://localhost:8123/ping | grep -q Ok; do sleep 1; done   # wait for CH to be ready
-curl -s http://localhost:8123/ --data "CREATE DATABASE IF NOT EXISTS gitlab_clickhouse_development"
+until curl -sf "http://localhost:8123/ping" | grep -q Ok; do sleep 1; done   # wait for CH to be ready
+curl -s "http://localhost:8123/" --data "CREATE DATABASE IF NOT EXISTS gitlab_clickhouse_development"
 bundle exec rake gitlab:clickhouse:migrate:main
 bundle exec rake gitlab:clickhouse:schema:dump:main   # writes main.sql + schema_cache/*.yml
 git diff db/click_house/main.sql          # MUST be only your new table's blocks
@@ -146,7 +146,7 @@ Do **not** commit / explicitly discard:
 
 ### 3.5 Validate
 
-```bash
+```shell
 bundle exec rubocop --no-server db/click_house/migrate/main/<TS>_create_siphon_<table>*.rb
 # Run the siphon spec against the pinned CH while the Docker container is still up:
 bundle exec rspec spec/db/clickhouse_siphon_tables_spec.rb
@@ -185,7 +185,7 @@ Skip this for edges. An edge needs no registration as long as both endpoint
    - `EE_PRELOAD_ASSOCIATIONS`: `your_type: [{ project: [:namespace, :project_feature, :group, :organization] }]`
    - **Right-size the preloads: measure, don't guess.** Redaction runs the policy
      per record, so a missing preload becomes an N+1. Exercise the redaction locally
-     against a realistic multi-record set and **count the PG queries** it issues
+     against a realistic multi-record set and **count the PostgreSQL queries** it issues
      (`ActiveRecord::QueryRecorder`, query logging, or watch `development.log`).
      **Dump the actual SQL and its `EXPLAIN` plan** for the queries that repeat.
      Every association the policy touches per record must appear in
@@ -264,7 +264,7 @@ edges:
 
 ### 5.4 Bump the schema version + regenerate DDL
 
-```bash
+```shell
 mise schema:bump              # bumps the `schema:` pin in config/versions.yaml, adds a ledger entry, re-snapshots fingerprints
 mise run schema:generate:ddl  # regenerates the DDL (do NOT hand-edit graph.sql)
 ```
@@ -309,7 +309,7 @@ its domain. Update the node count in the page description and the intro.
 
 ### 5.7 Validate (toolchain matters)
 
-```bash
+```shell
 # The repo pins rustc via rust-toolchain.toml; a BARE `cargo` may pick up an older
 # toolchain on PATH. Use mise's env or an explicit +version.
 cargo +<pinned> test -p ontology                           # load, constants, references
@@ -339,7 +339,7 @@ Monolith, per Siphon table:
 - [ ] Branch off fresh `master`; generator run with correct `--with-traversal-path`.
 - [ ] `project_id Int64`, explicit `ORDER BY`, CODECs untouched.
 - [ ] `main.sql` regenerated via pinned-CH Docker; diff is only your blocks.
-- [ ] Committed: migrations + siphon YAML + main.sql + schema_cache yml. Markers excluded; unrelated drift reverted.
+- [ ] Committed: migrations + siphon YAML + main.sql + schema_cache YAML. Markers excluded; unrelated drift reverted.
 - [ ] RuboCop + siphon spec green. Commit body ≤72 cols, full URLs (no `#123`/`!123`).
 
 Monolith, per new node:

@@ -96,7 +96,7 @@ mise run test:local                   # local integration tests, no Docker
 mise run test:integration:codegraph   # code-graph YAML suites, no Docker
 mise run ontology:validate            # validate ontology YAML changes
 mise run lint:code                    # clippy, warnings as errors
-mise run lint:docs                    # markdownlint + Vale + lychee
+mise run lint:docs                    # markdownlint + rumdl + Vale + lychee
 ```
 
 For every test layer and where to add a test, see
