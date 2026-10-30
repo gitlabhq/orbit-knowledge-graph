@@ -34,9 +34,8 @@ leaves out security entities, even from aggregate counts.
 Queries from administrators and auditors return data from each group where GitLab Orbit is on.
 If Admin Mode is on for the instance, the administrator must be in Admin Mode, and a personal access token needs the `admin_mode` scope.
 
-Queries through the [GitLab Duo Agent Platform](agents/duo.md) do not use Admin Mode.
-These queries return data only from groups where the administrator has a role,
-even when the administrator is in Admin Mode in the UI.
+If Admin Mode is on for the instance, queries through the [GitLab Duo Agent Platform](agents/duo.md) never use it, so they return data only from groups where the administrator has the required role.
+Auditors keep access to each group, except in flows that use a [composite identity](https://docs.gitlab.com/user/duo_agent_platform/composite_identity/).
 
 ## How GitLab Orbit enforces access
 
