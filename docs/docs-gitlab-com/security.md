@@ -62,6 +62,24 @@ It reads changes from GitLab and never writes back.
 Only direct members of an invited group get access to the shared group, in GitLab and in GitLab Orbit.
 For more information, see [sharing groups](https://docs.gitlab.com/user/project/members/sharing_projects_groups/#sharing-groups).
 
+## Data that GitLab Orbit stores
+
+GitLab Orbit stores the graph: the nodes, such as projects, users, merge requests, pipelines, and code definitions, and the relationships between them.
+For the code on the default branch, the graph holds files, directories, definitions, imports, and references, not the file contents.
+When a query asks for file contents or a diff, GitLab Orbit fetches them from GitLab at query time, and the permissions of the user who sent the query apply.
+For the list of these properties, see [Properties resolved at query time](schema.md#properties-resolved-at-query-time).
+A binary file gets only a `File` node.
+GitLab Orbit also stores the indexing progress of each group and project, which `glab orbit status` reports.
+For the two data sources and the index cycle, see [Indexing](how-it-works.md#indexing).
+
+GitLab Orbit runs no language model and sends no data to a model provider.
+GitLab Orbit validates each query, compiles it to SQL, and runs the SQL in the graph database.
+GitLab then removes the results that the user cannot access, and returns the rest to the client that sent the query.
+Your data reaches a model only when the agent or tool that sent the query puts the results in its context.
+For the steps, see [Query execution](how-it-works.md#query-execution).
+
+Classify GitLab Orbit at the level of the most sensitive data in the groups where GitLab Orbit is turned on, such as security findings, merge requests, work items, and code structure.
+
 ## Programmatic access
 
 Results include only what the token owner can see in GitLab.
