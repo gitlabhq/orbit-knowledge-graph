@@ -1,0 +1,18 @@
+name: A relationship property filter applies after the version dedup of the edge scan
+ontology_overlay: edge_properties
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"relationships":[{"type":"REVIEWED_BY","from":"u","to":"mr","filters":{"state":"reviewed"}}],"limit":10}
+  gql: |
+    MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) WHERE r.state = 'reviewed' RETURN u, mr LIMIT 10
+
+logical:
+  expect:
+    - (Filter e0.state = 'reviewed' (EdgeScan REVIEWED_BY u->mr AS e0))
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Filter _orbit_edge_0._deleted = false, _orbit_edge_0.state = 'reviewed' (Bind _orbit_edge_0 (Deduplicate LimitBy ... (_))))

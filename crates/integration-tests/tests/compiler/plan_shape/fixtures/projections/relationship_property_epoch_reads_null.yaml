@@ -1,0 +1,20 @@
+name: A nullable relationship time reads the epoch back as null
+ontology_overlay: edge_properties
+
+query:
+  gql: |
+    MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) WHERE r.approved_at IS NULL RETURN u.username, r.approved_at LIMIT 10
+
+missing_frontends:
+  json: the JSON frontend has no relationship variables, so it cannot name a relationship property
+
+logical:
+  expect:
+    - (Filter e0.approved_at IS NULL (EdgeScan REVIEWED_BY u->mr AS e0))
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Project NullIf(_orbit_edge_0.approved_at, '1970-01-01 00:00:00') AS _orbit_e0_approved_at, ... (_))
+        - (Filter _orbit_edge_0._deleted = false, _orbit_edge_0.approved_at = '1970-01-01 00:00:00' (_))

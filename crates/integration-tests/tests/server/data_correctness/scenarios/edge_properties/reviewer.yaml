@@ -283,3 +283,11 @@ cases:
           ids: [2000]
       edges:
         REVIEWED_BY: [[1, 2000]]
+
+  - name: group_on_a_relationship_property_alone_is_not_selective
+    description: A group key on a relationship property does not count as node selectivity
+    query:
+      gql: |
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest) RETURN r.state, count(u) AS n
+    expect:
+      compile_error_contains: [add filters or node_ids to at least one node]

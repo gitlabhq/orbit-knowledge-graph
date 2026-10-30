@@ -1,0 +1,19 @@
+name: A selective relationship time filter narrows the keyed edge scan through a candidate read
+ontology_overlay: edge_properties
+
+query:
+  gql: |
+    MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) WHERE r.created_at >= '2024-01-02 00:00:00' RETURN u, mr LIMIT 10
+
+missing_frontends:
+  json: the JSON frontend has no relationship variables, so it cannot name a relationship property
+
+logical:
+  expect:
+    - (Filter e0.created_at >= '2024-01-02 00:00:00' (EdgeScan REVIEWED_BY u->mr AS e0))
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Filter _orbit_edge_0._deleted = false, _orbit_edge_0.created_at >= '2024-01-02 00:00:00' (_))
