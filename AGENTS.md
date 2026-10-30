@@ -53,20 +53,4 @@ Before you create or edit a skill, follow the [`authoring-skills`](https://gitla
 
 ## Writing docs
 
-This repository has two kinds of docs. Check which kind you change before you start.
-
-| | User docs | Engineering docs |
-| --- | --- | --- |
-| Path | `docs/docs-gitlab-com/` | `docs/pages/` |
-| Publishes to | The [GitLab Orbit docs](https://docs.gitlab.com/orbit/) | The [engineering site](https://gitlab-org.gitlab.io/orbit/knowledge-graph/) |
-| Navigation | `docs/navigation.yaml`, and a matching MR to `data/en-us/navigation.yaml` in [`docs-gitlab-com`](https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com) | `order` in the page front matter |
-| Preview | `mise docs:serve` | `mise site:dev` |
-| Review | The Orbit team and Technical Writing | The Orbit team |
-
-For user docs:
-
-1. Write the change with [`gitlab-docs-change`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-change/SKILL.md), and open the MR as a Draft.
-1. Run [`gitlab-docs-review`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-review/SKILL.md) with `--silent` until no `blocker` or `major` findings remain. Keep the MR in Draft until then.
-1. If the MR adds, moves, or renames a page, update `docs/navigation.yaml`. Open the `docs-gitlab-com` navigation MR, and merge the two MRs together.
-1. Before you mark the MR ready, run one more review pass and start a pipeline. Mark it ready only when the pipeline passes.
-1. After the MR is ready, request a review from `@z_painter` (Technical Writing) if a `blocker` or `major` finding remains. Do the same if the MR adds, moves, or renames a page. A TW review never blocks a merge and can happen after it.
+For user docs (`docs/docs-gitlab-com/`), follow the [`gitlab-docs-change`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-change/SKILL.md) skill.
