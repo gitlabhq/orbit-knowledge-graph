@@ -72,8 +72,16 @@ pub(crate) fn insert_overrides(
     durability: WriteDurability,
 ) -> &'static [(&'static str, &'static str)] {
     match durability {
-        WriteDurability::Durable => &[("async_insert", "1"), ("wait_for_async_insert", "1")],
-        WriteDurability::FireAndForget => &[("async_insert", "1"), ("wait_for_async_insert", "0")],
+        WriteDurability::Durable => &[
+            ("async_insert", "1"),
+            ("wait_for_async_insert", "1"),
+            ("deduplicate_blocks_in_dependent_materialized_views", "1"),
+        ],
+        WriteDurability::FireAndForget => &[
+            ("async_insert", "1"),
+            ("wait_for_async_insert", "0"),
+            ("deduplicate_blocks_in_dependent_materialized_views", "1"),
+        ],
     }
 }
 
@@ -192,7 +200,11 @@ mod tests {
     fn durable_pins_async_insert_and_wait() {
         assert_eq!(
             insert_overrides(WriteDurability::Durable),
-            &[("async_insert", "1"), ("wait_for_async_insert", "1")]
+            &[
+                ("async_insert", "1"),
+                ("wait_for_async_insert", "1"),
+                ("deduplicate_blocks_in_dependent_materialized_views", "1"),
+            ]
         );
     }
 
@@ -209,14 +221,16 @@ mod tests {
         assert_eq!(
             durable_sql(&graph),
             "INSERT INTO t SETTINGS async_insert=1, async_insert_busy_timeout_max_ms=1000, \
-             async_insert_busy_timeout_min_ms=1000, optimize_on_insert=0, \
+             async_insert_busy_timeout_min_ms=1000, \
+             deduplicate_blocks_in_dependent_materialized_views=1, optimize_on_insert=0, \
              wait_for_async_insert=1 FORMAT ArrowStream"
         );
         graph.replicated = true;
         assert_eq!(
             durable_sql(&graph),
             "INSERT INTO t SETTINGS async_insert_busy_timeout_max_ms=1000, \
-             async_insert_busy_timeout_min_ms=1000, optimize_on_insert=0 FORMAT ArrowStream"
+             async_insert_busy_timeout_min_ms=1000, \
+             deduplicate_blocks_in_dependent_materialized_views=1, optimize_on_insert=0 FORMAT ArrowStream"
         );
     }
 
@@ -224,7 +238,11 @@ mod tests {
     fn fire_and_forget_pins_async_without_waiting() {
         assert_eq!(
             insert_overrides(WriteDurability::FireAndForget),
-            &[("async_insert", "1"), ("wait_for_async_insert", "0")]
+            &[
+                ("async_insert", "1"),
+                ("wait_for_async_insert", "0"),
+                ("deduplicate_blocks_in_dependent_materialized_views", "1"),
+            ]
         );
     }
 }

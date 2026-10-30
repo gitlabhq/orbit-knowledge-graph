@@ -126,7 +126,8 @@ fn list_graph_tables(
         query_data_model::implementations::clickhouse::layout::ClickHouse,
     >::derive(ontology)?;
     Ok(storage
-        .deployed_tables()
+        .tables()
+        .iter()
         .map(|table| prefixed_table_name(&table.name, *SCHEMA_VERSION))
         .collect())
 }
@@ -183,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn reordered_tables_are_not_included() {
+    fn reordered_tables_are_included() {
         let ontology = ontology::Ontology::load_embedded_with_overlay(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../config/seeds/overlays/reordered_edges"
@@ -191,7 +192,7 @@ mod tests {
         .unwrap();
         let tables = list_graph_tables(&ontology).unwrap();
         assert!(
-            !tables
+            tables
                 .iter()
                 .any(|table| table.ends_with("gl_code_edge_by_target"))
         );

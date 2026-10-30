@@ -18,6 +18,9 @@ pub fn build_views(storage: &Relational<ClickHouse>) -> Result<Vec<View>, DataMo
     for join in storage.joins() {
         views.extend(denormalized_feeding_views(join, storage)?);
     }
+    for copy in storage.copies() {
+        views.push(copy_feeding_view(copy, storage)?);
+    }
     Ok(views)
 }
 
@@ -177,6 +180,33 @@ fn view_from_catalog(definition: &layout::MaterializedView) -> View {
         populate: definition.populate,
         versioned: definition.versioned,
     }
+}
+
+fn copy_feeding_view(
+    copy: &layout::ReorderedCopy,
+    storage: &Relational<ClickHouse>,
+) -> Result<View, DataModelError> {
+    let table = storage
+        .table(&copy.table)
+        .ok_or_else(|| DataModelError::UnknownReference {
+            kind: "reordered table",
+            name: copy.table.clone(),
+        })?;
+    let columns = table
+        .columns
+        .iter()
+        .map(|column| column.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(View {
+        name: format!("{}__on_insert", copy.table),
+        to_table: Some(copy.table.clone()),
+        select_query: format!("SELECT {columns} FROM {{{}}}", copy.source),
+        engine: None,
+        order_by: vec![],
+        populate: false,
+        versioned: true,
+    })
 }
 
 fn denormalized_feeding_views(

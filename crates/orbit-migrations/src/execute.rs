@@ -96,7 +96,7 @@ pub async fn create_tables_with_selective_cloning(
     let target_entities = existing_entity_names(graph, target_version).await?;
     let seed = checkpoint_seed(ontology, &scope);
 
-    let mut cloned = 0;
+    let mut cloned = HashSet::new();
     let mut rebuilt = 0;
     let mut seeded = 0;
     for table in &schema.tables {
@@ -112,7 +112,7 @@ pub async fn create_tables_with_selective_cloning(
             seeded += 1;
         } else if should_clone(&table.name, &active_name, &table_actions, &active_entities) {
             clone_from_active(graph, &active_name, &target_name, &target_entities).await?;
-            cloned += 1;
+            cloned.insert(table.name.as_str());
         } else {
             orbit_log_fields::info!(safe(TABLE) = target_name.as_str(), "rebuilding table empty");
             run_ddl(graph, &target_name, table.to_create_sql(&target_prefix)).await?;
@@ -120,14 +120,65 @@ pub async fn create_tables_with_selective_cloning(
         }
     }
     orbit_log_fields::info!(
-        safe(CLONED_TABLE_COUNT) = cloned,
+        safe(CLONED_TABLE_COUNT) = cloned.len(),
         safe(REBUILT_TABLE_COUNT) = rebuilt,
         safe(SEEDED_TABLE_COUNT) = seeded,
         safe(TABLE_PREFIX) = target_prefix.as_str(),
         "clone-based migration tables prepared"
     );
+    fill_rebuilt_copies_of_cloned_sources(graph, schema, &cloned, &target_prefix).await?;
 
     create_dictionaries_and_views(graph, schema, credentials, &target_prefix).await
+}
+
+/// Attached partitions do not fire insert views, so a copy rebuilt next to a cloned source reads its rows once.
+async fn fill_rebuilt_copies_of_cloned_sources(
+    graph: &ArrowClickHouseClient,
+    schema: &GraphSchema,
+    cloned: &HashSet<&str>,
+    target_prefix: &str,
+) -> Result<(), MigrationError> {
+    let table_names = table_names(schema);
+    let fills = schema
+        .storage
+        .copies()
+        .iter()
+        .filter(|copy| {
+            !cloned.contains(copy.table.as_str()) && cloned.contains(copy.source.as_str())
+        })
+        .filter_map(|copy| {
+            let view = schema
+                .views
+                .iter()
+                .find(|view| view.to_table.as_deref() == Some(copy.table.as_str()))?;
+            Some((copy, view))
+        });
+    for (copy, view) in fills {
+        let view = view
+            .clone()
+            .with_schema_version_prefix(target_prefix, &table_names);
+        let target_name = format!("{target_prefix}{}", copy.table);
+        orbit_log_fields::info!(
+            safe(TABLE) = target_name.as_str(),
+            "filling reordered copy from its cloned source"
+        );
+        run_ddl(graph, &target_name, format!("TRUNCATE TABLE {target_name}")).await?;
+        run_ddl(
+            graph,
+            &target_name,
+            format!("INSERT INTO {target_name} {}", view.select_query),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+fn table_names(schema: &GraphSchema) -> Vec<String> {
+    schema
+        .tables
+        .iter()
+        .map(|table| table.name.clone())
+        .collect()
 }
 
 pub async fn create_unversioned_definitions(
@@ -400,11 +451,7 @@ async fn create_dictionaries_and_views(
         run_ddl(graph, &prefixed.name, prefixed.to_create_sql(credentials)).await?;
     }
 
-    let all_table_names: Vec<String> = schema
-        .tables
-        .iter()
-        .map(|table| table.name.clone())
-        .collect();
+    let all_table_names = table_names(schema);
     for view in schema.views.iter().filter(|view| view.versioned) {
         let prefixed = view
             .clone()

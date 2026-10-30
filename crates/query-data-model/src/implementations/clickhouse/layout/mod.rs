@@ -185,6 +185,7 @@ pub struct JoinRelationship {
 pub struct ReorderedCopy {
     pub table: String,
     pub source: String,
+    pub max_pinned_ids: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -222,11 +223,6 @@ impl crate::Relational<ClickHouse> {
     pub fn dependencies(&self) -> &BTreeMap<String, BTreeSet<String>> {
         &self.metadata.dependencies
     }
-    pub fn deployed_tables(&self) -> impl Iterator<Item = &Table> {
-        self.tables()
-            .iter()
-            .filter(|table| !self.copies().iter().any(|copy| copy.table == table.name))
-    }
     pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
         &self.metadata.auxiliary_tables
     }
@@ -253,7 +249,7 @@ impl crate::Relational<ClickHouse> {
             .iter()
             .filter(|table| table.versioned)
             .map(|table| &table.table)
-            .chain(self.deployed_tables())
+            .chain(self.tables().iter())
     }
 
     pub fn table_names(&self) -> impl Iterator<Item = &str> {
@@ -261,7 +257,7 @@ impl crate::Relational<ClickHouse> {
             .auxiliary_tables
             .iter()
             .map(|table| table.table.name.as_str())
-            .chain(self.deployed_tables().map(|table| table.name.as_str()))
+            .chain(self.tables().iter().map(|table| table.name.as_str()))
     }
     pub fn joins(&self) -> &[MaterializedJoin] {
         &self.metadata.joins

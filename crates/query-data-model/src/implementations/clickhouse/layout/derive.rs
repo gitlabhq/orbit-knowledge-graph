@@ -244,6 +244,7 @@ impl crate::Relational<ClickHouse> {
             copies.push(ReorderedCopy {
                 table: declaration.name.clone(),
                 source: declaration.source.clone(),
+                max_pinned_ids: declaration.max_pinned_ids,
             });
         }
         let edge_routes = ontology
