@@ -67,7 +67,6 @@ internal_name!(pub neighbor_id_column, "neighbor_node");
 internal_name!(pub neighbor_type_column, "neighbor_kind");
 internal_name!(pub relationship_type_column, "relationship_kind");
 internal_name!(pub neighbor_is_outgoing_column, "neighbor_is_outgoing");
-internal_name!(pub neighbor_traversal_path_column, "neighbor_traversal_path");
 internal_name!(pub hydration_node_alias, "hydrate");
 internal_name!(pub neighbor_properties_column, "neighbor_properties");
 internal_name!(pub neighbor_owner_column, "neighbor_owner");

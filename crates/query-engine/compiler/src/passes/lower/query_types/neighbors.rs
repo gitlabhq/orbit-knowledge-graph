@@ -68,8 +68,6 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         incoming_cross_scope,
         outgoing_scope_preserving,
         outgoing_cross_scope,
-        outgoing_neighbor_paths,
-        incoming_neighbor_paths,
         center_sort_key,
     } = &plan.operation;
     let direction = *direction;
@@ -226,15 +224,11 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             SelectExpr::new(Expr::int(is_outgoing), neighbor_is_outgoing_column()),
         ];
 
-        let (arm_tables, arm_neighbor_paths) = if dir == Direction::Outgoing {
-            (&edge.outgoing_tables, outgoing_neighbor_paths)
+        let arm_tables = if dir == Direction::Outgoing {
+            &edge.outgoing_tables
         } else {
-            (&edge.incoming_tables, incoming_neighbor_paths)
+            &edge.incoming_tables
         };
-        select.push(SelectExpr::new(
-            neighbor_path(edge_alias, neighbor_type, arm_neighbor_paths),
-            neighbor_traversal_path_column(),
-        ));
         let (mut from, outer_pushed) = edge_table_scan_filtered(arm_tables, edge_alias, arm_where);
         where_parts.extend(outer_pushed);
         let needs_center_table = !center_uses_default_pk;
@@ -416,29 +410,6 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         Node::Query(Box::new(query)),
         NodeBinding::Projected { role_identity },
     ))
-}
-
-fn neighbor_path(edge_alias: &str, neighbor_type: &str, owned: &[(String, String)]) -> Expr {
-    let owned_pair = |(relationship, entity): &(String, String)| {
-        Some(Expr::and(
-            Expr::eq(
-                Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
-                Expr::string(relationship),
-            ),
-            Expr::eq(Expr::col(edge_alias, neighbor_type), Expr::string(entity)),
-        ))
-    };
-    match Expr::or_all(owned.iter().map(owned_pair)) {
-        Some(owned) => Expr::func(
-            Function::If,
-            vec![
-                owned,
-                Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
-                Expr::string(""),
-            ],
-        ),
-        None => Expr::string(""),
-    }
 }
 
 /// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).

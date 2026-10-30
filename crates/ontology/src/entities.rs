@@ -428,13 +428,6 @@ impl EdgeVariantScope {
         self.is_scope_preserving() && !(relationship == "CONTAINS" && source == "Group")
     }
 
-    /// A `same_namespace` source can live in another namespace on prod
-    /// (parent Group of CONTAINS, Package of HAS_VULNERABILITY).
-    #[must_use]
-    pub fn edge_path_is_target_path(self) -> bool {
-        matches!(self, Self::SameNamespace | Self::PruneToTarget)
-    }
-
     #[must_use]
     pub fn edge_path_is_source_path(self) -> bool {
         matches!(self, Self::PruneToSource)

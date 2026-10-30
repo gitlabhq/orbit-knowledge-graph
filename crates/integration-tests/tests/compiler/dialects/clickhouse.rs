@@ -408,37 +408,6 @@ fn neighbors_query() {
 }
 
 #[test]
-fn neighbors_project_the_edge_path_only_when_it_is_the_neighbors_own() {
-    let ontology = crate::compiler::setup::embedded_ontology();
-    let render = |json: &str, orbit_query: &str| {
-        compile_pair(json, orbit_query, &ontology, &test_ctx())
-            .unwrap()
-            .base
-            .render()
-    };
-
-    let authored = render(
-        r#"{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["AUTHORED"]}}"#,
-        "MATCH (u:User {id: 1})-[:AUTHORED]-(n) RETURN u, n",
-    );
-    assert!(
-        authored
-            .contains("((_orbit_neighbor_edge.relationship_kind = 'AUTHORED') AND (_orbit_neighbor_edge.target_kind = 'MergeRequest'))")
-            && authored.contains("_orbit_neighbor_edge.traversal_path, '') AS _orbit_neighbor_traversal_path"),
-        "{authored}"
-    );
-
-    let in_project = render(
-        r#"{"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT"]}}"#,
-        "MATCH (p:Project {id: 1})-[:IN_PROJECT]-(n) RETURN p, n",
-    );
-    assert!(
-        in_project.contains("'' AS _orbit_neighbor_traversal_path"),
-        "{in_project}"
-    );
-}
-
-#[test]
 fn filter_operators() {
     let orbit_query = "MATCH (u:User) WHERE u.created_at >= '2024-01-01' AND u.state IN ['active', 'blocked'] AND u.username CONTAINS 'admin' RETURN u.username, u.state, u.created_at LIMIT 30";
     let json = r#"{

@@ -23,8 +23,6 @@ pub struct Neighbors {
     pub incoming_cross_scope: Vec<String>,
     pub outgoing_scope_preserving: Vec<String>,
     pub outgoing_cross_scope: Vec<String>,
-    pub outgoing_neighbor_paths: Vec<(String, String)>,
-    pub incoming_neighbor_paths: Vec<(String, String)>,
     pub center_sort_key: Vec<String>,
 }
 
@@ -88,38 +86,6 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
             true => config.rel_types.clone(),
             false => kinds,
         }
-    };
-    let neighbor_paths = |source: bool| {
-        let graph = model.graph();
-        let mut pairs = Vec::new();
-        for relationship in &relationships {
-            for route in model.relationship_routes(relationship) {
-                for variant in route.variants() {
-                    let (center, neighbor) = match source {
-                        true => (variant.source, variant.target),
-                        false => (variant.target, variant.source),
-                    };
-                    if center != center_entity_id {
-                        continue;
-                    }
-                    let source_name = &graph.entity(variant.source).name;
-                    let target_name = &graph.entity(variant.target).name;
-                    let owned = model
-                        .variant_scope(relationship, source_name, target_name)
-                        .is_some_and(|scope| match source {
-                            true => scope.edge_path_is_target_path(),
-                            false => scope.edge_path_is_source_path(),
-                        });
-                    if owned {
-                        pairs.push((
-                            relationship.to_string(),
-                            graph.entity(neighbor).name.clone(),
-                        ));
-                    }
-                }
-            }
-        }
-        pairs
     };
     let outgoing_relationships = relationship_ids(true);
     let incoming_relationships = relationship_ids(false);
@@ -260,8 +226,6 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         incoming_cross_scope,
         outgoing_scope_preserving,
         outgoing_cross_scope,
-        outgoing_neighbor_paths: neighbor_paths(true),
-        incoming_neighbor_paths: neighbor_paths(false),
         center_sort_key: match center.table.as_deref() {
             Some(table) => super::super::sort_key(model, table)?.to_vec(),
             None => Vec::new(),
