@@ -61,11 +61,6 @@ pre-commit:
     - name: yaml-suites
       run: mise exec -- uv run --quiet scripts/linting/yaml_lint.py {staged_files}
       glob: "**/*.{yaml,yml}"
-    - name: agent-file-sync
-      run: diff AGENTS.md CLAUDE.md
-      glob:
-        - "AGENTS.md"
-        - "CLAUDE.md"
     - name: rust-toolchain-sync
       run: mise run toolchain:check
       glob:

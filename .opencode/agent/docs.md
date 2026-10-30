@@ -17,8 +17,6 @@ Documentation lives in three tiers:
 2. **Architecture** — `docs/pages/engineering/architecture/` (overview, data model, security, querying, indexing, schema evolution) and the ADRs in `docs/pages/engineering/adr/`
 3. **Dev guides** — `docs/pages/engineering/development/` (local development, infrastructure, runbook)
 
-`AGENTS.md` and `CLAUDE.md` must be identical (CI enforces this).
-
 ## How to work through the MR
 
 1. Fetch changed files via glab (filenames only)
