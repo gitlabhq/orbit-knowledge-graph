@@ -6,9 +6,9 @@ use std::path::Path;
 use crate::OntologyError;
 use crate::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use crate::entities::{
-    DataType, EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
-    RedactionConfig, StorageIndex, StorageProjection, TraversalPathKind, TraversalPathLookupSpec,
-    VirtualSource,
+    DataType, EnumType, Field, FieldSelectivity, FieldSource, NgramFilter, NodeEntity, NodeStorage,
+    NodeStyle, RedactionConfig, StorageIndex, StorageProjection, TraversalPathKind,
+    TraversalPathLookupSpec, VirtualSource,
 };
 use crate::etl::{
     ClickHouseExtract, ClickHouseExtractLookup, DEFAULT_TRANSFORM, EdgeMapping, EtlScope, Extract,
@@ -168,7 +168,7 @@ enum EndpointKindYaml {
 }
 
 #[derive(Debug, Deserialize)]
-struct PropertyYaml {
+pub(crate) struct PropertyYaml {
     #[serde(rename = "type")]
     data_type: DataType,
     /// Source column name. Required for column-backed fields, absent for virtual fields.
@@ -228,6 +228,73 @@ impl PropertyYaml {
     fn default_mutable() -> bool {
         true
     }
+
+    pub(crate) fn into_field(self, name: String, owner: &str) -> Result<Field, OntologyError> {
+        let invalid = |reason: &str| {
+            OntologyError::Validation(format!("property '{name}' on {owner}: {reason}"))
+        };
+        let source = match (self.source, self.virtual_config) {
+            (Some(col), None) => FieldSource::DatabaseColumn(col),
+            (None, Some(v)) => {
+                let allowed_ops = if v.allowed_ops.is_empty() {
+                    VirtualSource::DEFAULT_ALLOWED_OPS
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect()
+                } else {
+                    v.allowed_ops
+                };
+                FieldSource::Virtual(VirtualSource {
+                    service: v.service,
+                    lookup: v.lookup,
+                    disabled: v.disabled,
+                    depends_on: v.depends_on,
+                    allowed_ops,
+                })
+            }
+            (Some(_), Some(_)) => return Err(invalid("use 'source' or 'virtual', not both")),
+            (None, None) => return Err(invalid("requires 'source' or 'virtual'")),
+        };
+        if self.binary && self.data_type != DataType::String {
+            return Err(invalid(&format!(
+                "'binary: true' is only valid for 'type: string', got {:?}",
+                self.data_type
+            )));
+        }
+        if self.nullable && self.data_type.is_list() {
+            return Err(invalid("a list type cannot be nullable; use an empty list"));
+        }
+        if self.data_type == DataType::Enum && self.values.as_ref().is_none_or(BTreeMap::is_empty) {
+            return Err(invalid("enum requires values"));
+        }
+        let selectivity = self
+            .selectivity
+            .unwrap_or_else(|| FieldSelectivity::from_data_type(self.data_type));
+        Ok(Field {
+            name,
+            source,
+            data_type: self.data_type,
+            nullable: self.nullable,
+            enum_values: self.values,
+            enum_type: self.enum_type,
+            like_allowed: self.like_allowed,
+            filterable: self.filterable,
+            admin_only: self.admin_only,
+            hidden: self.hidden,
+            selectivity,
+            unique: self.unique,
+            high_fan_out: self.high_fan_out,
+            description: self.description,
+            traversal_path_lookup: self.traversal_path_lookup.map(|l| TraversalPathLookupSpec {
+                kind: l.kind,
+                source_table: l.source_table,
+                key_column: l.key_column,
+            }),
+            mutable: self.mutable,
+            terminal_values: self.terminal_values,
+            binary: self.binary,
+        })
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -266,6 +333,31 @@ pub(crate) struct StorageIndexYaml {
     pub index_type: String,
     #[serde(default = "default_granularity")]
     pub granularity: u32,
+    #[serde(default)]
+    pub ngram: NgramYaml,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum NgramYaml {
+    Enabled(bool),
+    Tuned(NgramFilter),
+}
+
+impl Default for NgramYaml {
+    fn default() -> Self {
+        Self::Enabled(true)
+    }
+}
+
+impl NgramYaml {
+    fn filter(self) -> Option<NgramFilter> {
+        match self {
+            Self::Enabled(true) => Some(NgramFilter::default()),
+            Self::Enabled(false) => None,
+            Self::Tuned(filter) => Some(filter),
+        }
+    }
 }
 
 fn default_granularity() -> u32 {
@@ -326,6 +418,7 @@ impl NodeYaml {
     ) -> Result<NodeEntity, OntologyError> {
         let mut primary_keys = Vec::new();
 
+        let owner = format!("node '{name}'");
         let fields: Vec<Field> = self
             .properties
             .into_iter()
@@ -333,86 +426,7 @@ impl NodeYaml {
                 if prop_name == DEFAULT_PRIMARY_KEY {
                     primary_keys.push(prop_name.clone());
                 }
-
-                let source = match (prop_def.source, prop_def.virtual_config) {
-                    (Some(col), None) => FieldSource::DatabaseColumn(col),
-                    (None, Some(v)) => {
-                        let allowed_ops = if v.allowed_ops.is_empty() {
-                            VirtualSource::DEFAULT_ALLOWED_OPS
-                                .iter()
-                                .map(|s| (*s).to_string())
-                                .collect()
-                        } else {
-                            v.allowed_ops
-                        };
-                        FieldSource::Virtual(VirtualSource {
-                            service: v.service,
-                            lookup: v.lookup,
-                            disabled: v.disabled,
-                            depends_on: v.depends_on,
-                            allowed_ops,
-                        })
-                    }
-                    (Some(_), Some(_)) => {
-                        return Err(OntologyError::Validation(format!(
-                            "property '{prop_name}' on node '{name}': \
-                             use 'source' or 'virtual', not both"
-                        )));
-                    }
-                    (None, None) => {
-                        return Err(OntologyError::Validation(format!(
-                            "property '{prop_name}' on node '{name}': \
-                             requires 'source' or 'virtual'"
-                        )));
-                    }
-                };
-
-                if prop_def.binary && prop_def.data_type != DataType::String {
-                    return Err(OntologyError::Validation(format!(
-                        "property '{prop_name}' on node '{name}': \
-                         'binary: true' is only valid for 'type: string', got {:?}",
-                        prop_def.data_type
-                    )));
-                }
-
-                if prop_def.data_type == DataType::Enum
-                    && prop_def.values.as_ref().is_none_or(BTreeMap::is_empty)
-                {
-                    return Err(OntologyError::Validation(format!(
-                        "property '{prop_name}' on node '{name}': enum requires values"
-                    )));
-                }
-
-                let selectivity = prop_def
-                    .selectivity
-                    .unwrap_or_else(|| FieldSelectivity::from_data_type(prop_def.data_type));
-
-                Ok(Field {
-                    name: prop_name,
-                    source,
-                    data_type: prop_def.data_type,
-                    nullable: prop_def.nullable,
-                    enum_values: prop_def.values,
-                    enum_type: prop_def.enum_type,
-                    like_allowed: prop_def.like_allowed,
-                    filterable: prop_def.filterable,
-                    admin_only: prop_def.admin_only,
-                    hidden: prop_def.hidden,
-                    selectivity,
-                    unique: prop_def.unique,
-                    high_fan_out: prop_def.high_fan_out,
-                    description: prop_def.description,
-                    traversal_path_lookup: prop_def.traversal_path_lookup.map(|l| {
-                        TraversalPathLookupSpec {
-                            kind: l.kind,
-                            source_table: l.source_table,
-                            key_column: l.key_column,
-                        }
-                    }),
-                    mutable: prop_def.mutable,
-                    terminal_values: prop_def.terminal_values,
-                    binary: prop_def.binary,
-                })
+                prop_def.into_field(prop_name, &owner)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -988,6 +1002,7 @@ pub(crate) fn convert_storage_index(yaml: StorageIndexYaml) -> StorageIndex {
         column: yaml.column,
         index_type: yaml.index_type,
         granularity: yaml.granularity,
+        ngram: yaml.ngram.filter(),
     }
 }
 

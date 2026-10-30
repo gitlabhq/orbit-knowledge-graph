@@ -76,7 +76,7 @@ fn is_duckdb_compatible_default(default: &str) -> bool {
     if d.eq_ignore_ascii_case("false") || d.eq_ignore_ascii_case("true") {
         return true;
     }
-    if d.starts_with('\'') && d.ends_with('\'') {
+    if d == "[]" || (d.starts_with('\'') && d.ends_with('\'')) {
         return true;
     }
     d.parse::<f64>().is_ok()

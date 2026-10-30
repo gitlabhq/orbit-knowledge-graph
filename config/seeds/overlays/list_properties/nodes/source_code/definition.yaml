@@ -1,0 +1,24 @@
+properties:
+  tags:
+    type: string[]
+    enum_type: string
+    source: tags
+    nullable: false
+    description: "Tags from a closed set."
+    values:
+      0: async
+      1: static
+      2: final
+  marks:
+    type: int64[]
+    source: marks
+    nullable: false
+    description: "Marked lines."
+
+storage:
+  columns:
+    - {name: tags, type: "Array(LowCardinality(String))", default: "[]", codec: ["ZSTD(1)"]}
+    - {name: marks, type: "Array(Int64)", default: "[]", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_fqn_wide, column: fqn, type: text, ngram: {size: 4096, hashes: 4}}
+    - {name: idx_name_tokens, column: name, type: text, ngram: false}

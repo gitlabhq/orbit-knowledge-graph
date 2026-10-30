@@ -1131,8 +1131,8 @@ fn assert_property(
                 "{label}: {entity}/{id}.{prop} expected {b}",
             );
         }
-        serde_json::Value::Null => {
-            node.assert_prop(prop, &serde_json::Value::Null);
+        serde_json::Value::Null | serde_json::Value::Array(_) => {
+            node.assert_prop(prop, expected);
         }
         _ => panic!("{label}: unsupported property value type for {prop}"),
     }

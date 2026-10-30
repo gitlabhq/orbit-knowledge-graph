@@ -304,6 +304,7 @@ pub struct InputFilter {
     /// Format: `(node_alias, property_name)`. Mutually exclusive with `value`.
     pub rhs_column: Option<(String, String)>,
     pub from_temporal_literal: bool,
+    pub from_membership: bool,
 }
 
 impl InputFilter {

@@ -402,7 +402,12 @@
           "minItems": 1,
           "maxItems": 100
         },
-        "contains": { "$ref": "#/$defs/SearchPattern" },
+        "contains": {
+          "anyOf": [
+            { "$ref": "#/$defs/SearchPattern" },
+            { "type": "integer", "description": "One element of an int64[] list property." }
+          ]
+        },
         "starts_with": { "$ref": "#/$defs/SearchPattern" },
         "ends_with": { "$ref": "#/$defs/SearchPattern" },
         "is_null": {

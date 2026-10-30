@@ -288,15 +288,32 @@ impl QueryParser {
         let from_temporal_literal = has_temporal_literal(&input);
         let comparison = match_nodes!(input.into_children();
             [PropertyExpression(property), operator(op)] => Comparison {
-                span, property, op, value: None, from_temporal_literal, rhs_property: None,
+                span, property, op, value: None, from_temporal_literal, from_membership: false, rhs_property: None,
             },
             [PropertyExpression(property), operator(op), value(value)] => Comparison {
-                span, property, op, value: Some(value), from_temporal_literal, rhs_property: None,
+                span, property, op, value: Some(value), from_temporal_literal, from_membership: false, rhs_property: None,
             },
             [PropertyExpression(lhs), operator(op), PropertyExpression(rhs)] => Comparison {
-                span, property: lhs, op, value: None, from_temporal_literal, rhs_property: Some(rhs),
+                span, property: lhs, op, value: None, from_temporal_literal, from_membership: false, rhs_property: Some(rhs),
             },
             [PropertyExpression(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
+        );
+        Ok(leaf(comparison))
+    }
+
+    #[alias(predicate)]
+    fn MembershipExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
+        let span = input.as_span();
+        let comparison = match_nodes!(input.into_children();
+            [value(value), operator(_), PropertyExpression(property)] => Comparison {
+                span,
+                property,
+                op: FilterOp::Contains,
+                value: Some(value),
+                from_temporal_literal: false,
+                from_membership: true,
+                rhs_property: None,
+            },
         );
         Ok(leaf(comparison))
     }
@@ -340,7 +357,7 @@ impl QueryParser {
         let from_temporal_literal = has_temporal_literal(&input);
         let comparison = match_nodes!(input.into_children();
             [TokenFunction(op), PropertyExpression(property), value(value)] => Comparison {
-                span, property, op, value: Some(value), from_temporal_literal, rhs_property: None,
+                span, property, op, value: Some(value), from_temporal_literal, from_membership: false, rhs_property: None,
             },
         );
         Ok(leaf(comparison))

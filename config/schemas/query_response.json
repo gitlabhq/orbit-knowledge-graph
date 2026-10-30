@@ -62,8 +62,8 @@
         }
       },
       "additionalProperties": {
-        "description": "Entity properties selected by the query. Property names match ontology definitions.",
-        "type": ["string", "integer", "number", "boolean", "null"]
+        "description": "Entity properties selected by the query. Property names match ontology definitions. A list property is an array of scalars.",
+        "$ref": "#/$defs/property_value"
       }
     },
     "edge": {
@@ -170,6 +170,12 @@
         ]
       }
     },
+    "property_value": {
+      "oneOf": [
+        { "type": ["string", "integer", "number", "boolean", "null"] },
+        { "type": "array", "items": { "type": ["string", "integer", "number", "boolean", "null"] } }
+      ]
+    },
     "group_node": {
       "type": "object",
       "description": "Node-valued group key.",
@@ -187,9 +193,7 @@
         "properties": {
           "type": "object",
           "description": "Selected properties for the grouped node.",
-          "additionalProperties": {
-            "type": ["string", "integer", "number", "boolean", "null"]
-          }
+          "additionalProperties": { "$ref": "#/$defs/property_value" }
         }
       }
     },

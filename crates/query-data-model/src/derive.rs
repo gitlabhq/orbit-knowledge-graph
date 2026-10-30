@@ -57,6 +57,33 @@ mod tests {
     }
 
     #[test]
+    fn text_indexes_derive_the_declared_ngram_filter() {
+        let model = ClickHouseDataModel::derive(overlay_ontology("list_properties")).unwrap();
+        let table = model.layout().schema().table("gl_definition").unwrap();
+        let index_type = |name: &str| {
+            table
+                .options
+                .indexes
+                .iter()
+                .find(|index| index.name == name)
+                .map(|index| index.index_type.as_str())
+        };
+        assert_eq!(
+            index_type("idx_fqn_ngram"),
+            Some("ngrambf_v1(3, 512, 2, 0)")
+        );
+        assert_eq!(
+            index_type("idx_fqn_wide_ngram"),
+            Some("ngrambf_v1(3, 4096, 4, 0)")
+        );
+        assert_eq!(
+            index_type("idx_name_tokens"),
+            Some("text(tokenizer = splitByNonAlpha)")
+        );
+        assert_eq!(index_type("idx_name_tokens_ngram"), None);
+    }
+
+    #[test]
     fn catalog_routes_preserve_variant_endpoints_on_each_backend() {
         let ontology = overlay_ontology("variant_routes");
         let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();

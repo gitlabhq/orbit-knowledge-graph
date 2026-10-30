@@ -6,8 +6,6 @@ use serde_json::{Value, json};
 
 use types::{NodeRef, QueryResultRow};
 
-use super::column_value_to_json;
-
 pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
     let mut obj = serde_json::Map::new();
 
@@ -19,7 +17,7 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
         {
             continue;
         }
-        obj.insert(name.clone(), column_value_to_json(value));
+        obj.insert(name.clone(), value.to_json());
     }
 
     for node in ctx.nodes() {
@@ -47,7 +45,7 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
             Some(QueryType::Neighbors) => {
                 if let Some(neighbor) = dynamic_nodes.first() {
                     for (key, value) in &neighbor.properties {
-                        obj.insert(key.clone(), column_value_to_json(value));
+                        obj.insert(key.clone(), value.to_json());
                     }
                 }
             }
@@ -61,7 +59,7 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
 fn node_ref_to_json(node: &NodeRef) -> Value {
     let mut obj = serde_json::Map::new();
     for (key, value) in &node.properties {
-        obj.insert(key.clone(), column_value_to_json(value));
+        obj.insert(key.clone(), value.to_json());
     }
     obj.insert("id".to_string(), json!(node.id.to_string()));
     obj.insert("entity_type".to_string(), json!(node.entity_type));

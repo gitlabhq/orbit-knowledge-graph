@@ -316,6 +316,7 @@ impl Ontology {
             .map(|(name, data_type)| EdgeColumn {
                 name: name.into(),
                 data_type,
+                default: None,
             })
             .collect();
         if let Some(config) = self.edge_table_configs.get_mut(&self.default_edge_table) {
@@ -1388,7 +1389,7 @@ impl Ontology {
                 DataType::Int | DataType::Float | DataType::Date | DataType::DateTime => {
                     histogram.push(field.name.as_str());
                 }
-                DataType::Uuid => {} // skip: selectivity is always 1/row_count
+                DataType::Uuid | DataType::StringList | DataType::IntList => {}
             }
         }
 
@@ -2240,6 +2241,22 @@ mod tests {
         .unwrap();
         let err = Ontology::load_embedded_with_overlay(dir.path()).unwrap_err();
         assert!(err.to_string().contains("at least one hop"), "got: {err}");
+    }
+
+    #[test]
+    fn list_properties_reject_nullable() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("nodes/source_code")).unwrap();
+        std::fs::write(
+            dir.path().join("nodes/source_code/definition.yaml"),
+            "properties:\n  tags: {type: \"string[]\", source: tags, nullable: true, description: Tags.}\n",
+        )
+        .unwrap();
+        let err = Ontology::load_embedded_with_overlay(dir.path()).unwrap_err();
+        assert!(
+            err.to_string().contains("list type cannot be nullable"),
+            "got: {err}"
+        );
     }
 
     #[test]

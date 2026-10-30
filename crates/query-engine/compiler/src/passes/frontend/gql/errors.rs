@@ -79,6 +79,7 @@ fn rule_label(rule: &Rule) -> String {
         | Rule::NotExpression
         | Rule::ParenthesizedExpression
         | Rule::ComparisonExpression
+        | Rule::MembershipExpression
         | Rule::TokenPredicate
         | Rule::TypePredicate => "a condition",
         Rule::Negation => "NOT",

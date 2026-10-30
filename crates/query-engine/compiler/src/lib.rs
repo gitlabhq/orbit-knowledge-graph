@@ -270,6 +270,54 @@ mod tests {
             .render()
     }
 
+    static LIST_ONTOLOGY: LazyLock<Arc<Ontology>> = LazyLock::new(|| {
+        Arc::new(
+            Ontology::load_embedded_with_overlay(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../config/seeds/overlays/list_properties"
+            ))
+            .expect("list_properties overlay must load"),
+        )
+    });
+
+    fn compile_list_gql(query: &str) -> Result<String> {
+        compile(query, Frontend::Gql, &LIST_ONTOLOGY, &security_ctx())
+            .map(|compiled| compiled.base.render())
+    }
+
+    fn list_gql_error(query: &str) -> String {
+        compile_list_gql(query)
+            .expect_err("query must be rejected")
+            .to_string()
+    }
+
+    #[test]
+    fn list_membership_lowers_to_array_functions() {
+        let sql = compile_list_gql(
+            "MATCH (d:Definition) WHERE 'async' IN d.tags AND d.tags IN ['static', 'final'] AND 7 IN d.marks RETURN d.name",
+        )
+        .unwrap();
+        assert!(sql.contains("has(d.tags"), "{sql}");
+        assert!(sql.contains("hasAny(d.tags"), "{sql}");
+        assert!(sql.contains("has(d.marks"), "{sql}");
+    }
+
+    #[test]
+    fn list_filters_reject_unknown_elements_and_scalar_operators() {
+        assert!(
+            list_gql_error("MATCH (d:Definition) WHERE 'Async' IN d.tags RETURN d.name")
+                .contains("Valid values")
+        );
+        assert!(
+            list_gql_error("MATCH (d:Definition) WHERE d.tags = 'async' RETURN d.name")
+                .contains("a list field supports")
+        );
+        assert!(
+            list_gql_error("MATCH (d:Definition) WHERE 'abc' IN d.name RETURN d.name")
+                .contains("needs a list property")
+        );
+    }
+
     #[test]
     fn relationship_filter_keeps_edge_column_type() {
         let query = r#"{

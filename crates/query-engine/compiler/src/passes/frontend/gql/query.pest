@@ -73,9 +73,11 @@ NotExpression = { Negation{0,33} ~ Predicate }
 Negation = { ^"NOT" ~ !IdentifierPart ~ SP? }
 
 // Specialized predicates precede the generic function fallback because their prefixes overlap.
-Predicate = _{ ParenthesizedExpression | TokenPredicate | ComparisonExpression | TypePredicate | FunctionPredicate }
+Predicate = _{ ParenthesizedExpression | TokenPredicate | MembershipExpression | ComparisonExpression | TypePredicate | FunctionPredicate }
 ParenthesizedExpression = { "(" ~ SP? ~ AndExpression ~ SP? ~ ")" }
 ComparisonExpression = { PropertyExpression ~ Comparison }
+
+MembershipExpression = { (StringLiteral | NumberLiteral) ~ SP ~ InOperator ~ SP ~ PropertyExpression }
 TypePredicate = { RelationshipType ~ Comparison }
 
 // A bare or compared unknown function parses here so syntax.rs can list supported functions.
