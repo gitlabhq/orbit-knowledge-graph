@@ -1102,13 +1102,13 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 .table_property_columns(table)
                 .is_some_and(|columns| columns.contains(prop))
         });
-        if filters.is_empty() && !declared_here {
-            return Err(QueryError::Validation(format!(
-                "relationship[{index}] reads \"{prop}\", which no relationship type declares as a property"
-            )));
-        }
-        if declared_here {
+        if declared_here || filters.is_empty() {
             let declaring = model.graph().relationships_declaring(prop);
+            if declaring.is_empty() {
+                return Err(QueryError::Validation(format!(
+                    "relationship[{index}] reads \"{prop}\", which no relationship type declares as a property"
+                )));
+            }
             if relationship.is_untyped()
                 || relationship
                     .types
