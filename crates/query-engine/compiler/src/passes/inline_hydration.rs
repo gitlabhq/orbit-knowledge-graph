@@ -2,10 +2,10 @@
 //!
 //! ```sql
 //! WITH page AS MATERIALIZED (base),
-//!      page_nodes AS MATERIALIZED (SELECT node_ref, node_kind, node_path FROM page ...),
+//!      page_nodes AS MATERIALIZED (SELECT node_ref, node_kind FROM page ARRAY JOIN page node tuples),
 //!      node_properties AS MATERIALIZED (
 //!        SELECT latest row FROM (UNION ALL of one raw read per entity)
-//!        WHERE id IN (page refs) AND traversal_path IN (page paths)),
+//!        WHERE (node_kind, node_ref) IN (SELECT node_kind, node_ref FROM page_nodes)),
 //!      lookup AS (SELECT mapFromArrays(groupArray(node_key), groupArray(node_value)) FROM node_properties)
 //! SELECT page columns, owner and properties from lookup FROM page CROSS JOIN lookup
 //! ```
@@ -23,7 +23,7 @@ use crate::error::Result;
 use crate::input::{AggFunction, ColumnSelection, Direction, Input, InputNode, QueryType};
 use crate::passes::hydrate::DynamicEntityColumns;
 use crate::passes::lower::query_types::hydration::properties_json;
-use crate::passes::lower::sql::deleted_false;
+use crate::passes::lower::sql::{deleted_false, latest_row_dedup};
 use crate::passes::plan::query_types::hydration::{
     self as hydration_plan, HydrationCompileOptions, HydrationNodePlan,
 };
@@ -233,7 +233,10 @@ fn latest_page_rows(reads: Query) -> Query {
         )),
         query: Box::new(page_nodes_of(columns)),
     };
-    let keys = [node_kind_column(), node_row_column()];
+    let (order_by, limit_by) = latest_row_dedup(
+        node_reads_alias(),
+        &[node_kind_column().into(), node_row_column().into()],
+    );
     let latest = Query {
         select: [node_key_column(), node_value_column(), DELETED_COLUMN]
             .into_iter()
@@ -241,12 +244,8 @@ fn latest_page_rows(reads: Query) -> Query {
             .collect(),
         from: TableRef::subquery(reads, node_reads_alias()),
         where_clause: Some(on_page(&[node_kind_column(), node_ref_column()])),
-        order_by: keys
-            .iter()
-            .map(|key| OrderExpr::asc(read(key)))
-            .chain(std::iter::once(OrderExpr::desc(read(VERSION_COLUMN))))
-            .collect(),
-        limit_by: Some((1, keys.iter().map(|key| read(key)).collect())),
+        order_by,
+        limit_by,
         ..Default::default()
     };
     Query {

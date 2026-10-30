@@ -110,13 +110,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         hydrate_plan {
             reads_env: [security_ctx, data_model]
-            reads_state: [input, node]
-            mutates: [hydration_plan]
-        }
-        inline_hydration {
-            reads_env: [data_model]
-            reads_state: [input, hydration_plan]
-            mutates: [node]
+            reads_state: [input]
+            mutates: [node, hydration_plan]
         }
         settings {
             reads_state: [input, node]
@@ -145,13 +140,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, inline_hydration, settings, security, security_check, codegen]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, inline_hydration, settings, security, security_check, codegen]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
@@ -350,27 +345,17 @@ where
     C: CompilerCtx,
     C::Model: query_data_model::OrbitQueryModel,
 {
-    let input = require(ctx.input().as_ref(), "input")?;
-    let emitted = require(ctx.node().as_ref(), "node")?;
-    let plan =
-        hydrate::generate_hydration_plan(input, emitted, ctx.data_model(), ctx.security_ctx());
-    ctx.set_hydration_plan(plan);
-    Ok(())
-}
-
-fn inline_hydration<C>(ctx: &mut C) -> Result<()>
-where
-    C: CompilerCtx,
-    C::Model: query_data_model::OrbitQueryModel,
-{
     let node = require(ctx.take_node(), "node")?;
-    let node = match (ctx.hydration_plan(), ctx.input()) {
-        (Some(HydrationPlan::Dynamic(specs)), Some(input)) => {
+    let input = require(ctx.input().as_ref(), "input")?;
+    let plan = hydrate::generate_hydration_plan(input, &node, ctx.data_model(), ctx.security_ctx());
+    let node = match &plan {
+        HydrationPlan::Dynamic(specs) => {
             inline_hydration::inline(node, input, specs, ctx.data_model())?
         }
         _ => node,
     };
     ctx.set_node(node);
+    ctx.set_hydration_plan(plan);
     Ok(())
 }
 
