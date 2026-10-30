@@ -395,8 +395,9 @@ fn neighbors_query() {
         "bidirectional should include direction"
     );
     assert!(rendered.contains("gl_edge"));
+    let edge_scan = rendered.split("_orbit_page_nodes AS").next().unwrap();
     assert!(
-        rendered.contains("UNION ALL") && !rendered.contains("arrayJoin"),
+        edge_scan.contains("UNION ALL") && !edge_scan.contains("arrayJoin"),
         "pinned both should scan each direction on its own id column; a fused \
          source_id OR target_id scan stops the primary key and both bloom indexes"
     );

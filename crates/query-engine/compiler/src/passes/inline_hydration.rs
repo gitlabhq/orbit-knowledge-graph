@@ -185,7 +185,14 @@ fn node_properties(
         .iter()
         .map(|node| raw_read(node, model))
         .collect();
-    Ok(Some(latest_page_rows(union(reads))))
+    let pathless: Vec<&str> = plan
+        .operation
+        .nodes
+        .iter()
+        .filter(|node| !model.entity_has_traversal_path(&node.entity))
+        .map(|node| node.entity.as_str())
+        .collect();
+    Ok(Some(latest_page_rows(union(reads), &pathless)))
 }
 
 /// Never references the page: the analyzer re-resolves the page CTE at every reference.
@@ -229,15 +236,25 @@ fn raw_read(node: &HydrationNodePlan, model: &(impl OrbitQueryModel + ?Sized)) -
     }
 }
 
-fn latest_page_rows(reads: Query) -> Query {
+fn latest_page_rows(reads: Query, pathless: &[&str]) -> Query {
     let read = |name: &str| Expr::col(node_reads_alias(), name);
-    let on_page = |columns: &[&str], path: Option<Op>| Expr::InSelect {
-        expr: Box::new(match columns {
-            [column] => read(column),
-            _ => Expr::func(Function::Tuple, columns.iter().map(|c| read(c)).collect()),
-        }),
-        query: Box::new(page_nodes_of(columns, path)),
+    let on_page = |columns: &[&str], filter: Expr| Expr::InSelect {
+        expr: Box::new(Expr::func(
+            Function::Tuple,
+            columns.iter().map(|c| read(c)).collect(),
+        )),
+        query: Box::new(page_nodes_of(columns, filter)),
     };
+    let page_col = |name: &str| Expr::col(page_nodes_cte(), name);
+    let no_path = Expr::eq(page_col(node_path_column()), Expr::string(""));
+    let known_path = Expr::binary(Op::Ne, page_col(node_path_column()), Expr::string(""));
+    let unknown_path = pathless.iter().fold(no_path, |any, kind| {
+        Expr::binary(
+            Op::Or,
+            any,
+            Expr::eq(page_col(node_kind_column()), Expr::string(*kind)),
+        )
+    });
     let keys = [node_kind_column(), node_row_column()];
     let latest = Query {
         select: [node_key_column(), node_value_column(), DELETED_COLUMN]
@@ -245,18 +262,11 @@ fn latest_page_rows(reads: Query) -> Query {
             .map(|name| SelectExpr::new(read(name), name))
             .collect(),
         from: TableRef::subquery(reads, node_reads_alias()),
-        where_clause: Expr::conjoin(vec![
-            on_page(&[node_ref_column()], None),
-            Expr::binary(
-                Op::Or,
-                Expr::binary(
-                    Op::Or,
-                    on_page(&[node_path_column()], Some(Op::Ne)),
-                    Expr::eq(read(node_path_column()), Expr::string("")),
-                ),
-                on_page(&[node_kind_column(), node_ref_column()], Some(Op::Eq)),
-            ),
-        ]),
+        where_clause: Some(Expr::binary(
+            Op::Or,
+            on_page(&[node_path_column(), node_ref_column()], known_path),
+            on_page(&[node_kind_column(), node_ref_column()], unknown_path),
+        )),
         order_by: keys
             .iter()
             .map(|key| OrderExpr::asc(read(key)))
@@ -276,15 +286,14 @@ fn latest_page_rows(reads: Query) -> Query {
     }
 }
 
-fn page_nodes_of(columns: &[&str], path: Option<Op>) -> Query {
-    let col = |name: &str| Expr::col(page_nodes_cte(), name);
+fn page_nodes_of(columns: &[&str], filter: Expr) -> Query {
     Query {
         select: columns
             .iter()
-            .map(|column| SelectExpr::new(col(column), *column))
+            .map(|&column| SelectExpr::new(Expr::col(page_nodes_cte(), column), column))
             .collect(),
         from: TableRef::cte(page_nodes_cte(), page_nodes_cte()),
-        where_clause: path.map(|op| Expr::binary(op, col(node_path_column()), Expr::string(""))),
+        where_clause: Some(filter),
         ..Default::default()
     }
 }
@@ -352,49 +361,63 @@ fn page(base: Query, with_position: bool) -> Query {
 }
 
 fn page_nodes(query_type: QueryType, nodes: &[PageNode]) -> Query {
-    let row = |id: Expr, kind: Expr, path: Expr| {
-        vec![
-            SelectExpr::new(id, node_ref_column()),
-            SelectExpr::new(kind, node_kind_column()),
-            SelectExpr::new(path, node_path_column()),
-        ]
-    };
-    let from_page = |select| Query {
-        select,
-        from: TableRef::cte(page_cte(), page_cte()),
-        ..Default::default()
-    };
-    let mut arms: Vec<Query> = nodes
-        .iter()
-        .map(|node| {
-            from_page(row(
-                page_col(&node.id),
-                page_col(&node.kind),
-                node.path
-                    .as_deref()
-                    .map_or_else(|| Expr::string(""), page_col),
-            ))
-        })
-        .collect();
+    let triple =
+        |id: Expr, kind: Expr, path: Expr| Expr::func(Function::Tuple, vec![id, kind, path]);
+    let mut groups = vec![Expr::func(
+        Function::Array,
+        nodes
+            .iter()
+            .map(|node| {
+                triple(
+                    page_col(&node.id),
+                    page_col(&node.kind),
+                    node.path
+                        .as_deref()
+                        .map_or_else(|| Expr::string(""), page_col),
+                )
+            })
+            .collect(),
+    )];
     if query_type == QueryType::PathFinding {
-        let path_node = Expr::col(page_node_alias(), page_node_alias());
-        arms.push(Query {
-            select: row(
-                tuple_element(path_node.clone(), 1),
-                tuple_element(path_node, 2),
-                Expr::string(""),
-            ),
-            from: TableRef::subquery(
-                from_page(vec![SelectExpr::new(
-                    Expr::func(Function::Unnest, vec![page_col(path_column())]),
+        let path_node = Expr::ident(page_node_alias());
+        groups.push(Expr::func(
+            Function::ArrayMap,
+            vec![
+                Expr::lambda(
                     page_node_alias(),
-                )]),
-                page_node_alias(),
-            ),
-            ..Default::default()
-        });
+                    triple(
+                        tuple_element(path_node.clone(), 1),
+                        tuple_element(path_node, 2),
+                        Expr::string(""),
+                    ),
+                ),
+                page_col(path_column()),
+            ],
+        ));
     }
-    union(arms)
+    let node = Expr::col(page_node_alias(), page_node_alias());
+    Query {
+        select: [node_ref_column(), node_kind_column(), node_path_column()]
+            .into_iter()
+            .zip(1..)
+            .map(|(name, index)| SelectExpr::new(tuple_element(node.clone(), index), name))
+            .collect(),
+        from: TableRef::subquery(
+            Query {
+                select: vec![SelectExpr::new(
+                    Expr::func(
+                        Function::Unnest,
+                        vec![Expr::func(Function::ArrayConcat, groups)],
+                    ),
+                    page_node_alias(),
+                )],
+                from: TableRef::cte(page_cte(), page_cte()),
+                ..Default::default()
+            },
+            page_node_alias(),
+        ),
+        ..Default::default()
+    }
 }
 
 fn lookup() -> Query {
