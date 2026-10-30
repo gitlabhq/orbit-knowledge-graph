@@ -26,7 +26,7 @@ A range that ends with **and later** has no known upper limit.
 
 | GitLab Orbit version | GitLab version |
 |----------------------|----------------|
-| 1.0.0 | 19.4.6 and later 19.4 patch releases, 19.5.4 and later 19.5 patch releases, or 19.6.0 and later |
+| 1.0.0 | 19.6.0 and later |
 
 When you upgrade GitLab, confirm that your GitLab Orbit version supports the new GitLab version.
 If it does not, upgrade GitLab Orbit first.
