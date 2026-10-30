@@ -764,18 +764,19 @@ check_docs_markdown:
   needs: []
   extends:
     - .docs-mr-rules
-  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.24-vale-3.21.0-markdownlint2-0.23.2-lychee-0.24.2-rumdl-0.2.69
   script:
     # Lint prose
-    - vale --minAlertLevel error docs/docs-gitlab-com
-    - markdownlint-cli2 '*.md' 'docs/docs-gitlab-com/**/*.md' 'docs/pages/**/*.md'
+    - vale --minAlertLevel error *.md docs
+    - markdownlint-cli2 '*.md' 'docs/**/*.md'
+    - rumdl check --config docs/.rumdl/rumdl.toml docs
     # Check links
-    - lychee --offline --include-fragments '*.md' 'docs/docs-gitlab-com/**/*.md' 'docs/pages/**/*.md'
+    - lychee --offline --include-fragments --root-dir . '*.md' 'docs/**/*.md'
 
 check_docs_i18n_markdown:
   stage: docs
   needs: []
-  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.24-vale-3.21.0-markdownlint2-0.23.2-lychee-0.24.2-rumdl-0.2.69
   parallel:
     matrix:
       - LOCALE_CODE: ["fr-fr", "ja-jp", "ko-kr"]
