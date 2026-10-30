@@ -205,6 +205,10 @@ fn raw_read(node: &HydrationNodePlan, model: &(impl OrbitQueryModel + ?Sized)) -
                         node.sort_key
                             .iter()
                             .filter(|key| *key != TRAVERSAL_PATH_COLUMN)
+                            .chain(
+                                (!node.sort_key.contains(&node.id_property))
+                                    .then_some(&node.id_property),
+                            )
                             .map(|key| column(key))
                             .collect(),
                     )],
