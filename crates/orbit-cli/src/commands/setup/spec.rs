@@ -682,6 +682,13 @@ mod tests {
                 spec.name,
                 spec.instruction_file.project
             );
+            if let Some(fallback) = &spec.project_instruction_fallback {
+                assert!(
+                    ["AGENTS.md", "CLAUDE.md"].contains(&fallback.as_str()),
+                    "{}: unexpected instruction fallback {fallback}",
+                    spec.name
+                );
+            }
             for global in std::iter::once(&spec.instruction_file.global)
                 .chain(spec.json_merges.iter().map(|m| &m.file.global))
                 .chain(spec.template_files.iter().map(|t| &t.path.global))
