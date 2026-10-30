@@ -233,24 +233,23 @@ mod tests {
     }
 
     #[test]
-    fn embedded_defaults_resolve_per_query_type() {
+    fn embedded_defaults_apply_to_every_query_type() {
         let settings = crate::AppConfig::embedded_defaults().query;
         let traversal = settings
             .resolve("traversal")
             .to_clickhouse_settings()
             .unwrap();
-        assert!(traversal.contains(&("max_execution_time".into(), "30".into())));
+        assert!(traversal.contains(&("max_execution_time".into(), "15".into())));
         assert!(traversal.contains(&("max_memory_usage".into(), "4294967296".into())));
         assert!(traversal.contains(&(
             "query_cache_nondeterministic_function_handling".into(),
             "'ignore'".into()
         )));
-        let path_finding = settings
-            .resolve("path_finding")
-            .to_clickhouse_settings()
-            .unwrap();
-        assert!(path_finding.contains(&("max_execution_time".into(), "15".into())));
-        assert!(settings.validate_keys(&["path_finding"]).is_empty());
+        assert!(settings.overrides.is_empty());
+        assert_eq!(
+            settings.resolve("path_finding"),
+            settings.resolve("traversal")
+        );
     }
 
     #[test]

@@ -209,7 +209,7 @@ grpc:
 # depend on the query shape.
 query:
   default:
-    max_execution_time: 30
+    max_execution_time: 15
     max_memory_usage: 4294967296       # 4 GiB; deployments with larger ClickHouse nodes raise it
     max_ast_elements: 1000000          # 20x ClickHouse default, matches Siphon
     max_expanded_ast_elements: 10000000
@@ -218,8 +218,6 @@ query:
     query_cache_ttl: 10
     query_cache_nondeterministic_function_handling: ignore
     query_cache_system_table_handling: ignore
-  path_finding:
-    max_execution_time: 15
 
 metrics:
   # log_level: "info"
