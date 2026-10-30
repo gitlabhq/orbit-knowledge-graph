@@ -7,7 +7,9 @@ WITH
   WHERE id IN (SELECT
       id
     FROM namespace_traversal_paths
-    WHERE startsWith(traversal_path, {traversal_path:String})))
+    WHERE startsWith(traversal_path, {traversal_path:String}))
+    AND NOT {{deleted_column}}
+    AND type = 'Group')
 {% endif -%}
 SELECT
   namespace.id AS id,

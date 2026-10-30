@@ -805,4 +805,19 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn group_full_load_keys_are_live_groups() {
+        let plans = plans(&test_ontology(), 1000);
+        let plan = plans.namespaced.iter().find(|p| p.name == "Group").unwrap();
+        let keys = plan.extract_template.full();
+        let keys = &keys[..keys.find("SELECT\n  namespace.id").unwrap()];
+        assert!(keys.contains("AND NOT _siphon_deleted"), "{keys}");
+        assert!(keys.contains("AND type = 'Group'"), "{keys}");
+        assert!(
+            !plan
+                .extract_template
+                .incremental()
+                .contains("type = 'Group')")
+        );
+    }
 }
