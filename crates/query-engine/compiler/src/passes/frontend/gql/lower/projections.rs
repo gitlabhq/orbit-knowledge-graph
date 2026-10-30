@@ -411,7 +411,7 @@ impl Lowering {
                 return Err(invalid(
                     span,
                     &format!(
-                        "{written}: neighbors and path finding do not return relationship properties; match the relationship in a traversal to read {property}"
+                        "{written}: neighbors and path finding do not return relationship properties; give the far endpoint a label so the pattern is a traversal, then read {property}"
                     ),
                 ));
             }
