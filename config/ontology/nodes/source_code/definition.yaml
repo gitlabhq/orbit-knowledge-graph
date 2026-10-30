@@ -409,7 +409,7 @@ storage:
     - {name: idx_name, column: name, type: text, granularity: 1}
     - {name: idx_fqn, column: fqn, type: text, granularity: 1}
     - {name: idx_file_path, column: file_path, type: text, granularity: 1}
-    - {name: idx_signature, column: signature, type: text, granularity: 1, ngram: false}
+    - {name: idx_signature, column: signature, type: text, granularity: 1, ngram: {size: 4096, hashes: 4}}
     - {name: idx_doc_comment, column: doc_comment, type: text, granularity: 1, ngram: false}
     - {name: idx_kind, column: kind, type: "set(20)", granularity: 2}
     - {name: idx_category, column: category, type: "set(8)", granularity: 2}
