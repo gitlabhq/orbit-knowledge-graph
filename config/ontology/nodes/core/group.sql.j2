@@ -1,12 +1,12 @@
 WITH
   _keys AS (SELECT
-    namespace.id AS id,
-    namespace.{{version_column}} AS version
-  FROM siphon_namespaces namespace {{final}}
-  WHERE namespace.id IN (SELECT
+    id,
+    {{version_column}} AS version
+  FROM siphon_namespaces {{final}}
+  WHERE id IN (SELECT
       id
     FROM namespace_traversal_paths
-    WHERE startsWith(traversal_path, {traversal_path:String})) {{filters}})
+    WHERE startsWith(traversal_path, {traversal_path:String})))
 SELECT
   namespace.id AS id,
   namespace.name AS name,
@@ -49,6 +49,6 @@ WHERE startsWith(traversal_paths.current_path, {traversal_path:String})
   AND (namespace.id, namespace.{{version_column}}) IN (SELECT
       id,
       version
-    FROM _keys)
+    FROM _keys) {{filters}}
 ORDER BY traversal_path, id
 LIMIT {{batch_size}}
