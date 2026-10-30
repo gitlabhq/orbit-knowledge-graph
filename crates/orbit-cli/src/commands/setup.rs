@@ -249,7 +249,7 @@ fn ask_install_agent_plugins(ui_agents: &[&str]) -> Result<bool> {
         tui::Choice {
             key: SKIP_AGENT_PLUGINS.to_string(),
             label: "Skip the agent plugins".to_string(),
-            hint: format!("add them later with `{} setup`", spec::launcher()),
+            hint: String::new(),
             section: None,
         },
     ];
