@@ -34,6 +34,9 @@ leaves out security entities, even from aggregate counts.
 Queries from administrators and auditors return data from each group where GitLab Orbit is on.
 If Admin Mode is on for the instance, the administrator must be in Admin Mode, and a personal access token needs the `admin_mode` scope.
 
+If Admin Mode is on for the instance, queries through the [GitLab Duo Agent Platform](agents/duo.md) never use it, so they return data only from groups where the administrator has the required role.
+Auditors keep access to each group, except in flows that use a [composite identity](https://docs.gitlab.com/user/duo_agent_platform/composite_identity/).
+
 ## How GitLab Orbit enforces access
 
 GitLab authorizes every query.
@@ -53,6 +56,11 @@ GitLab Orbit enforces access in two layers:
 
 The graph is read-only.
 It reads changes from GitLab and never writes back.
+
+### Access through shared groups
+
+Only direct members of an invited group get access to the shared group, in GitLab and in GitLab Orbit.
+For more information, see [sharing groups](https://docs.gitlab.com/user/project/members/sharing_projects_groups/#sharing-groups).
 
 ## Programmatic access
 
@@ -89,7 +97,7 @@ The token keeps working after the SAML session of its owner expires.
 Use a [service account](https://docs.gitlab.com/user/profile/service_accounts/) for automation that runs
 without a personal account, such as a script, a scheduled report, or an agent.
 To see data from a group, the service account must be a direct member of the group,
-or a member of a group that is shared with the group.
+or a direct member of a group that is shared with the group.
 Project membership, and membership of groups where GitLab Orbit is off, do not give access.
 
 > [!warning]
