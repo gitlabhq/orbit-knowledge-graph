@@ -1313,7 +1313,6 @@ mod tests {
 
     #[test]
     fn final_settings_follow_final_scans() {
-        orbit_server_config::query::init_embedded_defaults();
         let sql = compile_sql(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":"active"}}],"limit":10}"#,
         );
@@ -1333,7 +1332,6 @@ mod tests {
 
     #[test]
     fn in_subquery_index_cap_follows_in_select() {
-        orbit_server_config::query::init_embedded_defaults();
         let sql = compile_sql(
             r#"{
                 "query_type": "aggregation",

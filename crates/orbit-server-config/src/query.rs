@@ -1,7 +1,7 @@
 //! ClickHouse settings for end-user and consumer read queries.
 //!
-//! `config/default.yaml` is the single source of truth: `query.default`, per-query-type
-//! overrides, and the `query.when` groups the compiler adds for matching query shapes.
+//! `config/default.yaml` is the single source of truth: `query.default` and per-query-type
+//! overrides. The compiler's settings pass adds only settings that depend on the query shape.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
@@ -20,6 +20,12 @@ pub enum SettingValue {
 impl From<bool> for SettingValue {
     fn from(value: bool) -> Self {
         Self::Bool(value)
+    }
+}
+
+impl From<&str> for SettingValue {
+    fn from(value: &str) -> Self {
+        Self::Text(value.to_string())
     }
 }
 
@@ -84,20 +90,7 @@ impl QueryConfig {
     }
 }
 
-/// Settings the compiler adds when a query has the matching shape.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
-pub struct ShapeSettings {
-    #[serde(default)]
-    pub final_scan: QueryConfig,
-    #[serde(default)]
-    pub with_ctes: QueryConfig,
-    #[serde(default)]
-    pub multi_join: QueryConfig,
-}
-
-/// `query.default`, `query.when`, and per-query-type overrides keyed by snake_case query type.
+/// `query.default` and per-query-type overrides keyed by snake_case query type.
 ///
 /// ```yaml
 /// query:
@@ -105,16 +98,10 @@ pub struct ShapeSettings {
 ///     max_execution_time: 30
 ///   path_finding:
 ///     max_execution_time: 15
-///   when:
-///     final_scan:
-///       use_skip_indexes_if_final: true
 /// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct QuerySettings {
     pub default: QueryConfig,
-
-    #[serde(default)]
-    pub when: ShapeSettings,
 
     /// Keys must match `QueryType` variant names. Validated at startup by the server.
     #[serde(flatten)]
@@ -160,13 +147,6 @@ pub fn for_query_type(query_type: &str) -> QueryConfig {
     QUERY_SETTINGS
         .get()
         .map(|settings| settings.resolve(query_type))
-        .unwrap_or_default()
-}
-
-pub fn shape_settings() -> ShapeSettings {
-    QUERY_SETTINGS
-        .get()
-        .map(|settings| settings.when.clone())
         .unwrap_or_default()
 }
 
@@ -243,14 +223,6 @@ mod tests {
             .to_clickhouse_settings()
             .unwrap();
         assert!(path_finding.contains(&("max_execution_time".into(), "15".into())));
-        assert!(
-            settings
-                .when
-                .final_scan
-                .to_clickhouse_settings()
-                .unwrap()
-                .contains(&("use_skip_indexes_if_final".into(), "1".into()))
-        );
         assert!(settings.validate_keys(&["path_finding"]).is_empty());
     }
 
@@ -262,9 +234,6 @@ default:
   use_query_cache: false
 aggregation:
   max_execution_time: 120
-when:
-  multi_join:
-    query_plan_optimize_join_order_algorithm: dpsize
 "#;
         let settings: QuerySettings = orbit_utils::yaml::from_str(yaml).unwrap();
         assert_eq!(settings.overrides.len(), 1);
@@ -275,13 +244,6 @@ when:
                 ("use_query_cache".into(), "0".into()),
             ])
         );
-        assert_eq!(
-            settings.when.multi_join.to_clickhouse_settings(),
-            Ok(vec![(
-                "query_plan_optimize_join_order_algorithm".into(),
-                "'dpsize'".into()
-            )])
-        );
     }
 
     #[test]
@@ -291,7 +253,6 @@ when:
         overrides.insert("bogus_type".to_string(), QueryConfig::default());
         let settings = QuerySettings {
             default: QueryConfig::default(),
-            when: ShapeSettings::default(),
             overrides,
         };
         assert_eq!(

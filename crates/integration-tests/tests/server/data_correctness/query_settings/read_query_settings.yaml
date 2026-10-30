@@ -1,4 +1,4 @@
-description: Read queries take their settings from config/default.yaml, and the compiler adds a query.when group only for the matching query shape
+description: Read queries take their defaults and per-type limits from config/default.yaml, and the settings pass adds only settings that depend on the query shape
 
 config:
   security: admin

@@ -47,7 +47,7 @@ pub use metrics::{ExpandedLogsConfig, MetricsConfig, OtelConfig, PrometheusConfi
 pub use nats::NatsConfiguration;
 pub use object_storage::{ObjectStorageAuth, ObjectStorageConfig, ObjectStorageProvider};
 pub use probe_server::{DEFAULT_PROBE_SERVER_PORT, ProbeServerConfig};
-pub use query::{QueryConfig, QuerySettings, SettingValue, ShapeSettings};
+pub use query::{QueryConfig, QuerySettings, SettingValue};
 pub use resources::{ContainerResources, MIN_DATALAKE_BATCH_SIZE, derive_concurrency_groups};
 pub use schema::{SchemaConfig, SchemaConfigError};
 pub use tls::TlsConfig;

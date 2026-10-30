@@ -1226,19 +1226,11 @@
       "additionalProperties": false
     },
     "QuerySettings": {
-      "description": "`query.default`, `query.when`, and per-query-type overrides keyed by snake_case query type.\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n  path_finding:\n    max_execution_time: 15\n  when:\n    final_scan:\n      use_skip_indexes_if_final: true\n```",
+      "description": "`query.default` and per-query-type overrides keyed by snake_case query type.\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n  path_finding:\n    max_execution_time: 15\n```",
       "type": "object",
       "properties": {
         "default": {
           "$ref": "#/$defs/QueryConfig"
-        },
-        "when": {
-          "$ref": "#/$defs/ShapeSettings",
-          "default": {
-            "final_scan": {},
-            "with_ctes": {},
-            "multi_join": {}
-          }
         }
       },
       "required": [
@@ -1269,25 +1261,6 @@
           "type": "string"
         }
       ]
-    },
-    "ShapeSettings": {
-      "description": "Settings the compiler adds when a query has the matching shape.",
-      "type": "object",
-      "properties": {
-        "final_scan": {
-          "$ref": "#/$defs/QueryConfig",
-          "default": {}
-        },
-        "with_ctes": {
-          "$ref": "#/$defs/QueryConfig",
-          "default": {}
-        },
-        "multi_join": {
-          "$ref": "#/$defs/QueryConfig",
-          "default": {}
-        }
-      },
-      "additionalProperties": false
     },
     "GrpcConfig": {
       "type": "object",

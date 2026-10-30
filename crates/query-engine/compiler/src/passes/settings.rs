@@ -9,7 +9,6 @@ use crate::passes::plan::QueryPlan;
 pub fn resolve(input: &Input, node: &Node, plan: &QueryPlan) -> Result<QueryConfig> {
     let query_type: &str = input.query_type.into();
     let mut config = orbit_server_config::query::for_query_type(query_type);
-    let when = orbit_server_config::query::shape_settings();
 
     let (mut materialized, mut final_scan, mut ctes) = (false, false, false);
     if let Node::Query(query) = node {
@@ -24,13 +23,15 @@ pub fn resolve(input: &Input, node: &Node, plan: &QueryPlan) -> Result<QueryConf
     }
 
     if final_scan {
-        config = config.merge(&when.final_scan);
+        config.set("optimize_move_to_prewhere_if_final", true);
+        config.set("use_skip_indexes_if_final", true);
+        config.set("use_skip_indexes_if_final_exact_mode", true);
     }
     if ctes {
-        config = config.merge(&when.with_ctes);
+        config.set("use_index_for_in_with_subqueries_max_values", 1_000_000u64);
     }
     if plan.relations().len() >= 3 {
-        config = config.merge(&when.multi_join);
+        config.set("query_plan_optimize_join_order_algorithm", "dpsize");
     }
     if materialized {
         config.set("enable_materialized_cte", true);

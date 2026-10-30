@@ -203,8 +203,8 @@ grpc:
   result_chunk_bytes: 524288
   max_result_bytes: 67108864
 
-# ClickHouse settings for end-user and consumer read queries. The compiler only decides when a
-# `when` group applies, and turns the query cache off for point lookups.
+# ClickHouse settings for end-user and consumer read queries. The compiler adds only settings that
+# depend on the query shape.
 query:
   default:
     max_execution_time: 30
@@ -218,15 +218,6 @@ query:
     query_cache_system_table_handling: ignore
   path_finding:
     max_execution_time: 15
-  when:
-    final_scan:
-      optimize_move_to_prewhere_if_final: true
-      use_skip_indexes_if_final: true
-      use_skip_indexes_if_final_exact_mode: true
-    with_ctes:
-      use_index_for_in_with_subqueries_max_values: 1000000
-    multi_join:
-      query_plan_optimize_join_order_algorithm: dpsize
 
 metrics:
   # log_level: "info"
