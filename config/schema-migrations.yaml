@@ -17,14 +17,11 @@
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
 - version: 119
-  scope: sdlc
-  entities:
-  - MEMBER_OF
-  - RELATED_TO
+  scope: none
   note: >-
-    Edge files declare properties with storage columns; MEMBER_OF and RELATED_TO
-    drop their ignored property blocks. No table changes until an edge declares a
-    property.
+    Edge files can declare properties. MEMBER_OF and RELATED_TO drop their ignored
+    property blocks; no writer ever extracted them, so no table and no indexed row
+    changes. The first edge that declares a property takes its own bump.
 - version: 118
   scope: none
   note: >-
