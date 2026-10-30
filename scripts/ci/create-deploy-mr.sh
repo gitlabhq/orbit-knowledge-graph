@@ -9,7 +9,7 @@
 # print the diff and MR body without pushing, creating the MR, or posting.
 #
 # After opening the MR it closes the bot's older open deploy MRs (lower
-# version, same branch pattern) with a "superseded" note. Their branches stay
+# version, same branch pattern) and adds a "superseded" note. Their branches stay
 # for rollback. Every step is fail-soft so the sweep never fails the release job.
 
 set -euo pipefail
@@ -48,10 +48,11 @@ close_obsolete_mrs() {
   local new_iid="$1" iid branch closed=()
   while read -r iid branch; do
     [[ -n "$iid" ]] || continue
-    if glab api -X POST "projects/${APPS_PROJECT_ID}/merge_requests/${iid}/notes" \
-        -f body="Superseded by !${new_iid} (${VERSION}). Closing automatically." >/dev/null 2>&1 \
-      && glab api -X PUT "projects/${APPS_PROJECT_ID}/merge_requests/${iid}" -f state_event=close >/dev/null 2>&1; then
+    if glab api -X PUT "projects/${APPS_PROJECT_ID}/merge_requests/${iid}" -f state_event=close >/dev/null 2>&1; then
       closed+=("!${iid}")
+      glab api -X POST "projects/${APPS_PROJECT_ID}/merge_requests/${iid}/notes" \
+        -f body="Superseded by !${new_iid} (${VERSION}). Closed automatically." >/dev/null 2>&1 \
+        || log "Closed !${iid} but could not post the superseded note"
     else
       log "Could not close obsolete deploy MR !${iid}; skipping"
     fi

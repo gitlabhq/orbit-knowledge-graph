@@ -51,7 +51,7 @@ Instrumentor rollback.
    > [!warning]
    > Merge a release that reindexes during working hours, and watch the reindex.
 
-2. An Orbit team member merges the MR. Close older deploy MRs that it replaces.
+2. An Orbit team member merges the MR. The next deploy MR closes older ones automatically; close any that remain.
 3. Done when all Deployments show the new tag (command in [rollback](#rollback)).
 
 Chart upgrades come as a `[non-prod]` and a `[prod]` Renovate MR. Merge `[non-prod]` first.
