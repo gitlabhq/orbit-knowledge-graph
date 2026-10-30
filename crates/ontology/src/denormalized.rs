@@ -13,6 +13,7 @@ pub struct ReorderedTable {
     pub name: String,
     pub source: String,
     pub sort_key: Vec<String>,
+    pub max_pinned_ids: Option<usize>,
 }
 
 #[must_use]

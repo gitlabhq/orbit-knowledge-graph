@@ -897,20 +897,40 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             )));
         };
         let unique: std::collections::BTreeSet<_> = copy.sort_key.iter().collect();
+        let path_position = copy
+            .sort_key
+            .iter()
+            .position(|column| column == crate::TRAVERSAL_PATH_COLUMN);
         let invalid_key = if copy.sort_key.is_empty() {
             Some("sort key must not be empty")
         } else if unique.len() != copy.sort_key.len() {
             Some("sort key contains duplicate columns")
         } else if unique != source_key.iter().collect() {
             Some("sort key must be a permutation of the source sort key")
-        } else if source_key
-            .iter()
-            .any(|column| column == crate::TRAVERSAL_PATH_COLUMN)
-            && copy.sort_key.first().map(String::as_str) != Some(crate::TRAVERSAL_PATH_COLUMN)
-        {
-            Some("scoped source requires traversal_path first in the sort key")
+        } else if copy.max_pinned_ids == Some(0) {
+            Some("max_pinned_ids must be at least 1")
         } else {
-            None
+            match (path_position, copy.max_pinned_ids) {
+                (Some(0) | None, Some(_)) => {
+                    Some("max_pinned_ids requires a pinned column before traversal_path")
+                }
+                (Some(1), None) => {
+                    Some("a pinned column before traversal_path requires max_pinned_ids")
+                }
+                (Some(position), _) if position > 1 => Some(
+                    "scoped source requires traversal_path first, or second after one pinned column",
+                ),
+                (_, Some(_))
+                    if ![
+                        crate::constants::SOURCE_ID_COLUMN,
+                        crate::constants::TARGET_ID_COLUMN,
+                    ]
+                    .contains(&copy.sort_key[0].as_str()) =>
+                {
+                    Some("the pinned column must be source_id or target_id")
+                }
+                _ => None,
+            }
         };
         if let Some(reason) = invalid_key {
             return Err(OntologyError::Validation(format!(
@@ -1703,52 +1723,109 @@ mod tests {
             "source_kind",
             "target_kind"
         ]);
-        for (name, source, sort_key, expected) in [
-            ("wrong_copy", "gl_edge", key.clone(), "table_prefix"),
-            ("gl_copy1", "gl_edge", key.clone(), "only a-z and _"),
-            ("gl_", "gl_edge", key.clone(), "nonempty suffix"),
-            ("gl_user", "gl_edge", key.clone(), "already exists"),
+        let pinned_key = |lead: &str, second: &str| {
+            let mut columns = vec![lead, second];
+            columns.extend(
+                [
+                    "traversal_path",
+                    "target_id",
+                    "source_id",
+                    "relationship_kind",
+                    "source_kind",
+                    "target_kind",
+                ]
+                .into_iter()
+                .filter(|column| *column != lead && *column != second),
+            );
+            json!(columns)
+        };
+        for (name, source, sort_key, max_pinned_ids, expected) in [
+            ("wrong_copy", "gl_edge", key.clone(), None, "table_prefix"),
+            ("gl_copy1", "gl_edge", key.clone(), None, "only a-z and _"),
+            ("gl_", "gl_edge", key.clone(), None, "nonempty suffix"),
+            ("gl_user", "gl_edge", key.clone(), None, "already exists"),
             (
                 "gl_project_traversal_paths_dict",
                 "gl_edge",
                 key.clone(),
+                None,
                 "already exists",
             ),
             (
                 "gl_copy",
                 "gl_missing",
                 key.clone(),
+                None,
                 "unknown base or joined source",
             ),
-            ("gl_copy", "gl_edge", json!([]), "must not be empty"),
+            ("gl_copy", "gl_edge", json!([]), None, "must not be empty"),
             (
                 "gl_copy",
                 "gl_edge",
                 json!(["source_id", "source_id"]),
+                None,
                 "duplicate columns",
             ),
-            ("gl_copy", "gl_edge", json!(["source_id"]), "permutation"),
             (
                 "gl_copy",
                 "gl_edge",
-                json!([
-                    "target_id",
-                    "traversal_path",
-                    "source_id",
-                    "relationship_kind",
-                    "source_kind",
-                    "target_kind"
-                ]),
-                "traversal_path first",
+                json!(["source_id"]),
+                None,
+                "permutation",
+            ),
+            (
+                "gl_copy",
+                "gl_edge",
+                pinned_key("target_id", "traversal_path"),
+                None,
+                "requires max_pinned_ids",
+            ),
+            (
+                "gl_copy",
+                "gl_edge",
+                pinned_key("target_id", "traversal_path"),
+                Some(0),
+                "at least 1",
+            ),
+            (
+                "gl_copy",
+                "gl_edge",
+                key.clone(),
+                Some(5),
+                "requires a pinned column before traversal_path",
+            ),
+            (
+                "gl_copy",
+                "gl_edge",
+                pinned_key("target_id", "source_id"),
+                Some(5),
+                "second after one pinned column",
+            ),
+            (
+                "gl_copy",
+                "gl_edge",
+                pinned_key("relationship_kind", "traversal_path"),
+                Some(5),
+                "must be source_id or target_id",
             ),
         ] {
             let error = load_modified_sources("schema.yaml", |schema| {
-                schema["settings"]["reordered_tables"] =
-                    json!([{"name": name, "source": source, "sort_key": sort_key}]);
+                let mut copy = json!({"name": name, "source": source, "sort_key": sort_key});
+                if let Some(limit) = max_pinned_ids {
+                    copy["max_pinned_ids"] = json!(limit);
+                }
+                schema["settings"]["reordered_tables"] = json!([copy]);
             })
             .unwrap_err();
             assert!(error.to_string().contains(expected), "{name}: {error}");
         }
+        let pinned = load_modified_sources("schema.yaml", |schema| {
+            schema["settings"]["reordered_tables"] = json!([{
+                "name": "gl_copy", "source": "gl_edge", "sort_key": pinned_key("source_id", "traversal_path"), "max_pinned_ids": 100
+            }]);
+        })
+        .unwrap();
+        assert_eq!(pinned.reordered_tables()[0].max_pinned_ids, Some(100));
         for (names, expected) in [
             (["gl_copy", "gl_copy"], "duplicate reordered table"),
             (["gl_copy", "gl_copy__on_insert"], "already exists"),
