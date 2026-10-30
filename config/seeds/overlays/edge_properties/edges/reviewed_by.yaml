@@ -28,6 +28,11 @@ properties:
     source: review_note
     nullable: true
     description: "Free text the reviewer left, when any."
+  approved_at:
+    type: datetime
+    source: approved_at
+    nullable: true
+    description: "When the reviewer approved, when they did."
 
 table: gl_prop_edge
 
@@ -44,7 +49,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_merge_request_reviewers]
-      fields: [user_id, merge_request_id, state, created_at, project_id, review_note]
+      fields: [user_id, merge_request_id, state, created_at, project_id, review_note, approved_at]
       order_by: [traversal_path, merge_request_id, id]
       query: generated
       lookups:

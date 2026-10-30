@@ -208,7 +208,13 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             let prefix = relation.column_prefix();
             self.outputs
                 .extend(relation.properties.iter().map(|property| {
-                    Projection::new(column(property), edge_property_column(&prefix, property))
+                    Projection::new(
+                        OutputValue::property(
+                            &relation.null_as_epoch,
+                            Column::new(alias, property),
+                        ),
+                        edge_property_column(&prefix, property),
+                    )
                 }));
         }
     }

@@ -50,7 +50,11 @@ impl Mapping<Relational<DuckDb>> for DuckDbBindings {
                 .iter()
                 .map(|column| column.name.clone())
                 .collect(),
-            edge_property_columns: edge.property_columns.iter().cloned().collect(),
+            edge_property_columns: edge
+                .property_columns
+                .iter()
+                .map(|(name, epoch)| (name.clone(), *epoch))
+                .collect(),
             edge_table: edge.name.clone(),
             edge_sort_key: edge.sort_key.clone(),
             edge_column_types: edge.column_types.clone(),

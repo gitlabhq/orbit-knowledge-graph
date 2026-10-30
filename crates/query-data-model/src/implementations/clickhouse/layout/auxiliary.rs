@@ -30,7 +30,7 @@ pub(super) fn table(source: &ontology::AuxiliaryTable) -> AuxiliaryTable {
             name: source.name.clone(),
             columns,
             column_types,
-            property_columns: vec![],
+            property_columns: Default::default(),
             sort_key: source.order_by.clone(),
             primary_key: None,
             options: TableOptions {

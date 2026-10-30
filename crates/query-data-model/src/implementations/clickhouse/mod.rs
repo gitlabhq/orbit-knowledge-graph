@@ -16,7 +16,7 @@ pub struct TableLayout {
     pub name: String,
     pub columns: HashSet<String>,
     pub column_types: HashMap<String, ontology::DataType>,
-    pub property_columns: HashSet<String>,
+    pub property_columns: HashMap<String, Option<ontology::DataType>>,
     pub sort_key: Vec<String>,
     pub entity: Option<EntityId>,
     pub path_columns: Vec<PathColumn>,
@@ -44,7 +44,11 @@ impl TableLayout {
                 .iter()
                 .map(|(name, data_type)| (name.clone(), *data_type))
                 .collect(),
-            property_columns: table.property_columns.iter().cloned().collect(),
+            property_columns: table
+                .property_columns
+                .iter()
+                .map(|(name, epoch)| (name.clone(), *epoch))
+                .collect(),
             sort_key: table.sort_key.clone(),
             entity,
             path_columns,
@@ -267,7 +271,10 @@ impl RelationalMapping for ClickHouseBindings {
         self.table(table).map(|layout| &layout.columns)
     }
 
-    fn table_property_columns(&self, table: &str) -> Option<&HashSet<String>> {
+    fn table_property_columns(
+        &self,
+        table: &str,
+    ) -> Option<&HashMap<String, Option<ontology::DataType>>> {
         self.table(table).map(|layout| &layout.property_columns)
     }
 

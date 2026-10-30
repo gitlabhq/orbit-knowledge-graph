@@ -10,7 +10,7 @@ use super::{EdgeRelation, Fk, NodePlan};
 use crate::constants::{EDGE_PATH_NODES_SUFFIX, edge_column_prefix, edge_relation_alias};
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use crate::passes::plan::filters::{FilterOwner, ordered_filters};
+use crate::passes::plan::filters::{FilterOwner, ordered_filters, tables_null_as_epoch};
 
 impl EdgeRelation {
     pub(super) fn reversed(&self) -> Self {
@@ -172,6 +172,13 @@ where
                 FilterOwner::Tables(&edge_tables),
                 model,
             );
+            let null_as_epoch = properties
+                .iter()
+                .filter_map(|property| {
+                    tables_null_as_epoch(model, &edge_tables, property)
+                        .map(|data_type| (property.clone(), data_type))
+                })
+                .collect();
             EdgeRelation {
                 input_index,
                 rel_types: relationship.types.clone(),
@@ -190,6 +197,7 @@ where
                 max_hops: relationship.hops.max,
                 filters,
                 properties,
+                null_as_epoch,
                 edge_tables,
                 fk,
             }

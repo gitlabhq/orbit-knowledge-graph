@@ -86,11 +86,7 @@ pub(crate) fn entity_facts(ontology: &ontology::Ontology, local: bool) -> Vec<En
                                 mutable: field.mutable,
                                 foreign_key: references.contains(field.name.as_str()),
                                 null_as_epoch: !local
-                                    && field.nullable
-                                    && matches!(
-                                        field.data_type,
-                                        ontology::DataType::DateTime | ontology::DataType::Date
-                                    )
+                                    && field.null_as_epoch()
                                     && non_nullable_storage.contains(field.name.as_str()),
                             },
                         )
