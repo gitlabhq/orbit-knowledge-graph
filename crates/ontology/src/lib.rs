@@ -2283,13 +2283,13 @@ mod tests {
 
     fn edge_property_overlay(
         calls: &str,
-        imports: Option<&str>,
+        resolves_to: Option<&str>,
     ) -> Result<Ontology, OntologyError> {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("edges")).unwrap();
         std::fs::write(dir.path().join("edges/calls.yaml"), calls).unwrap();
-        if let Some(imports) = imports {
-            std::fs::write(dir.path().join("edges/imports.yaml"), imports).unwrap();
+        if let Some(resolves_to) = resolves_to {
+            std::fs::write(dir.path().join("edges/resolves_to.yaml"), resolves_to).unwrap();
         }
         Ontology::load_embedded_with_overlay(dir.path())
     }
@@ -2299,9 +2299,12 @@ mod tests {
     #[test]
     fn edge_properties_become_columns_of_every_table_the_edge_routes_to() {
         let ontology = edge_property_overlay(ENUM_STATE, None).unwrap();
-        let fields = ontology.edge_properties("CALLS");
-        assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].name, "state");
+        assert!(
+            ontology
+                .edge_properties("CALLS")
+                .iter()
+                .any(|field| field.name == "state")
+        );
         let table = ontology.edge_table_config("gl_code_edge").unwrap();
         let state = table.columns.iter().find(|c| c.name == "state").unwrap();
         assert_eq!(state.data_type, DataType::Enum);
@@ -2317,7 +2320,7 @@ mod tests {
             ontology.get_edge_table_column_type("gl_code_edge", "state"),
             Some(DataType::Enum)
         );
-        assert!(ontology.edge_properties("IMPORTS").is_empty());
+        assert!(ontology.edge_properties("DEFINES").is_empty());
     }
 
     #[test]
@@ -2353,7 +2356,12 @@ mod tests {
     fn nullable_date_edge_properties_store_the_epoch() {
         let seen = "properties:\n  seen_at:\n    type: datetime\n    source: seen_at\n    nullable: true\n";
         let ontology = edge_property_overlay(seen, None).unwrap();
-        assert!(ontology.edge_properties("CALLS")[0].null_as_epoch());
+        assert!(
+            ontology
+                .edge_properties("CALLS")
+                .iter()
+                .any(|field| field.name == "seen_at" && field.null_as_epoch())
+        );
         let table = ontology.edge_table_config("gl_code_edge").unwrap();
         let stored = table
             .storage
@@ -3225,9 +3233,9 @@ properties:
                 "target_id",
                 "target_kind",
                 "traversal_path",
+                "access",
                 "lines",
                 "resolution",
-                "access",
                 "usage",
             ]
         );
