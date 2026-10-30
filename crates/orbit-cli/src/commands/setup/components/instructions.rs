@@ -22,11 +22,13 @@ impl Installer for Instructions {
     }
 
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
+        let stale = orbit_only_primaries(agents, target)?;
         for (path, label) in instruction_files(agents, target)? {
             upsert_block_in_file(&path, &label, report)?;
         }
-        for &agent in agents {
-            drop_orbit_only_primary(agent, target, report)?;
+        for (path, label) in stale {
+            remove_file_and_empty_parents(&path, target)?;
+            report.note(&label, "removed (was orbit-only)");
         }
         mcp::remove_retired(agents, target, report)
     }
@@ -55,11 +57,11 @@ fn fallback_file(agent: Agent, target: &Target) -> Option<(PathBuf, String)> {
     }
 }
 
-fn holds_only_block(path: &Path) -> bool {
+fn has_no_user_content(path: &Path) -> bool {
     let is_symlink = std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_symlink());
     !is_symlink
         && std::fs::read_to_string(path)
-            .is_ok_and(|text| strip_block(&text).is_some_and(|rest| rest.trim().is_empty()))
+            .is_ok_and(|text| strip_block(&text).unwrap_or(text).trim().is_empty())
 }
 
 /// The file that receives the block. With a fallback, the primary file is used
@@ -70,26 +72,44 @@ fn instruction_file(agent: Agent, target: &Target) -> Result<(PathBuf, String)> 
         return Ok(primary);
     };
     let primary_is_users =
-        std::fs::symlink_metadata(&primary.0).is_ok() && !holds_only_block(&primary.0);
+        std::fs::symlink_metadata(&primary.0).is_ok() && !has_no_user_content(&primary.0);
     Ok(if primary_is_users { primary } else { fallback })
 }
 
-/// Every file a block may live in, so removal finds it even if the user added a
-/// CLAUDE.md after setup.
+/// Where a block may live. The fallback counts only when the primary file holds
+/// no block, so removing one agent's block never strips another agent's.
 fn candidate_files(agent: Agent, target: &Target) -> Result<Vec<(PathBuf, String)>> {
-    let mut files = vec![target.resolve(&agent.instruction_file)?];
-    files.extend(fallback_file(agent, target));
+    let primary = target.resolve(&agent.instruction_file)?;
+    let primary_has_block = file_mentions(&primary.0, BLOCK_BEGIN);
+    let mut files = vec![primary];
+    if !primary_has_block {
+        files.extend(fallback_file(agent, target));
+    }
     Ok(files)
 }
 
-/// Older setups created a CLAUDE.md holding only the block, which hides AGENTS.md.
-fn drop_orbit_only_primary(agent: Agent, target: &Target, report: &mut Report) -> Result<()> {
-    let (primary, label) = target.resolve(&agent.instruction_file)?;
-    if instruction_file(agent, target)?.0 != primary && holds_only_block(&primary) {
-        remove_file_and_empty_parents(&primary, target)?;
-        report.note(&label, "removed (was orbit-only)");
+fn same_file(a: &Path, b: &Path) -> bool {
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    canonical(a) == canonical(b)
+}
+
+/// A CLAUDE.md that is blank or holds only the block (older setups made one) hides AGENTS.md.
+/// Decided before any write, so a file this run appends to is never mistaken for one.
+fn orbit_only_primaries(agents: &[Agent], target: &Target) -> Result<Vec<(PathBuf, String)>> {
+    let mut stale: Vec<(PathBuf, String)> = Vec::new();
+    for &agent in agents {
+        let (primary, label) = target.resolve(&agent.instruction_file)?;
+        let Some((fallback, _)) = fallback_file(agent, target) else {
+            continue;
+        };
+        if has_no_user_content(&primary)
+            && !same_file(&primary, &fallback)
+            && !stale.iter().any(|(path, _)| *path == primary)
+        {
+            stale.push((primary, label));
+        }
     }
-    Ok(())
+    Ok(stale)
 }
 
 fn removable_files(agents: &[Agent], target: &Target) -> Result<Vec<(PathBuf, String)>> {

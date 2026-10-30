@@ -1639,7 +1639,89 @@ mod tests {
         install_default(&["claude"], dir.path());
 
         assert!(!dir.path().join("CLAUDE.md").exists());
-        assert!(read(dir.path(), "AGENTS.md").contains(BLOCK_BEGIN));
+        let agents = read(dir.path(), "AGENTS.md");
+        assert!(agents.starts_with(SENTINEL), "{agents}");
+        assert_eq!(agents.matches(BLOCK_BEGIN).count(), 1);
+    }
+
+    #[test]
+    fn claude_setup_replaces_a_blank_claude_md_and_converges() {
+        for blank in ["", "\n", "  \n\n"] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("CLAUDE.md"), blank).unwrap();
+            std::fs::write(dir.path().join("AGENTS.md"), format!("{SENTINEL}\n")).unwrap();
+
+            install_default(&["claude"], dir.path());
+            let after_first = read(dir.path(), "AGENTS.md");
+            install_default(&["claude"], dir.path());
+
+            assert!(!dir.path().join("CLAUDE.md").exists(), "{blank:?}");
+            assert!(after_first.starts_with(SENTINEL), "{after_first}");
+            assert_eq!(after_first.matches(BLOCK_BEGIN).count(), 1, "{blank:?}");
+            assert_eq!(read(dir.path(), "AGENTS.md"), after_first, "{blank:?}");
+            assert!(!dir.path().join("CLAUDE.md.orbit-backup").exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_setup_keeps_an_orbit_only_claude_md_that_agents_md_points_to() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("CLAUDE.md"),
+            format!("{BLOCK_BEGIN}\nold text\n<!-- orbit:setup:end -->\n"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink("CLAUDE.md", dir.path().join("AGENTS.md")).unwrap();
+
+        install_default(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
+
+        assert!(dir.path().join("CLAUDE.md").is_file());
+        assert!(dir.path().join("AGENTS.md").is_symlink());
+        assert_eq!(
+            read(dir.path(), "CLAUDE.md").matches(BLOCK_BEGIN).count(),
+            1
+        );
+    }
+
+    #[test]
+    fn uninstalling_claude_leaves_another_agents_block_in_agents_md() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "# claude rules\n").unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), format!("{SENTINEL}\n")).unwrap();
+        install_default(&["claude", "codex"], dir.path());
+        assert_eq!(
+            read(dir.path(), "CLAUDE.md").matches(BLOCK_BEGIN).count(),
+            1
+        );
+        assert_eq!(
+            read(dir.path(), "AGENTS.md").matches(BLOCK_BEGIN).count(),
+            1
+        );
+
+        uninstall_named(&["claude"], dir.path());
+
+        assert_eq!(read(dir.path(), "CLAUDE.md"), "# claude rules\n");
+        assert_eq!(
+            read(dir.path(), "AGENTS.md").matches(BLOCK_BEGIN).count(),
+            1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn uninstall_with_a_symlinked_claude_md_restores_agents_md_and_drops_the_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), format!("{SENTINEL}\n")).unwrap();
+        std::os::unix::fs::symlink("AGENTS.md", dir.path().join("CLAUDE.md")).unwrap();
+        install_default(&["claude"], dir.path());
+
+        uninstall_named(&["claude"], dir.path());
+
+        assert_eq!(read(dir.path(), "AGENTS.md"), format!("{SENTINEL}\n"));
+        assert!(!dir.path().join("CLAUDE.md.orbit-backup").exists());
+        assert!(!dir.path().join("AGENTS.md.orbit-backup").exists());
     }
 
     #[test]
