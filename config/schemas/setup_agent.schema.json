@@ -30,6 +30,11 @@
       "$ref": "#/definitions/scopedPath",
       "description": "Instruction file receiving the managed guidance block."
     },
+    "project_instruction_fallback": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Project-relative file that receives the guidance block instead of the project instruction file when that file is missing or holds only the managed block. For Claude Code, a `CLAUDE.md` hides `AGENTS.md`, so setup must not create one."
+    },
     "json_merges": {
       "type": "array",
       "minItems": 1,

@@ -16,7 +16,7 @@ pub(super) struct Instructions;
 
 impl Installer for Instructions {
     fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>> {
-        let mut files = vec![target.resolve(&agent.instruction_file)?.1];
+        let mut files = vec![instruction_file(agent, target)?.1];
         files.extend(mcp::retired_label(agent, target)?);
         Ok(files)
     }
@@ -25,29 +25,90 @@ impl Installer for Instructions {
         for (path, label) in instruction_files(agents, target)? {
             upsert_block_in_file(&path, &label, report)?;
         }
+        for &agent in agents {
+            drop_orbit_only_primary(agent, target, report)?;
+        }
         mcp::remove_retired(agents, target, report)
     }
 
     fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
-        for (path, label) in instruction_files(agents, target)? {
+        for (path, label) in removable_files(agents, target)? {
             strip_block_from_file(&path, target, &label, report)?;
         }
         mcp::remove_retired(agents, target, report)
     }
 
     fn is_installed(&self, agent: Agent, target: &Target) -> bool {
-        target
-            .resolve(&agent.instruction_file)
-            .is_ok_and(|(path, _)| file_mentions(&path, BLOCK_BEGIN))
-            || mcp::retired_label(agent, target).is_ok_and(|label| label.is_some())
+        candidate_files(agent, target).is_ok_and(|files| {
+            files
+                .iter()
+                .any(|(path, _)| file_mentions(path, BLOCK_BEGIN))
+        }) || mcp::retired_label(agent, target).is_ok_and(|label| label.is_some())
     }
 }
 
+fn fallback_file(agent: Agent, target: &Target) -> Option<(PathBuf, String)> {
+    let name = agent.project_instruction_fallback.as_ref()?;
+    match target {
+        Target::Project(root) => Some((root.join(name), name.clone())),
+        Target::Global(_) => None,
+    }
+}
+
+fn holds_only_block(path: &Path) -> bool {
+    let is_symlink = std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_symlink());
+    !is_symlink
+        && std::fs::read_to_string(path)
+            .is_ok_and(|text| strip_block(&text).is_some_and(|rest| rest.trim().is_empty()))
+}
+
+/// The file that receives the block. With a fallback, the primary file is used
+/// only when it carries the user's own content; otherwise the fallback is.
+fn instruction_file(agent: Agent, target: &Target) -> Result<(PathBuf, String)> {
+    let primary = target.resolve(&agent.instruction_file)?;
+    let Some(fallback) = fallback_file(agent, target) else {
+        return Ok(primary);
+    };
+    let primary_is_users =
+        std::fs::symlink_metadata(&primary.0).is_ok() && !holds_only_block(&primary.0);
+    Ok(if primary_is_users { primary } else { fallback })
+}
+
+/// Every file a block may live in, so removal finds it even if the user added a
+/// CLAUDE.md after setup.
+fn candidate_files(agent: Agent, target: &Target) -> Result<Vec<(PathBuf, String)>> {
+    let mut files = vec![target.resolve(&agent.instruction_file)?];
+    files.extend(fallback_file(agent, target));
+    Ok(files)
+}
+
+/// Older setups created a CLAUDE.md holding only the block, which hides AGENTS.md.
+fn drop_orbit_only_primary(agent: Agent, target: &Target, report: &mut Report) -> Result<()> {
+    let (primary, label) = target.resolve(&agent.instruction_file)?;
+    if instruction_file(agent, target)?.0 != primary && holds_only_block(&primary) {
+        remove_file_and_empty_parents(&primary, target)?;
+        report.note(&label, "removed (was orbit-only)");
+    }
+    Ok(())
+}
+
+fn removable_files(agents: &[Agent], target: &Target) -> Result<Vec<(PathBuf, String)>> {
+    let mut all = Vec::new();
+    for &agent in agents {
+        all.extend(candidate_files(agent, target)?);
+    }
+    dedupe_files(all)
+}
+
 fn instruction_files(agents: &[Agent], target: &Target) -> Result<Vec<(PathBuf, String)>> {
-    let mut resolved: Vec<(PathBuf, String)> = agents
+    let resolved = agents
         .iter()
-        .map(|agent| target.resolve(&agent.instruction_file))
+        .map(|&agent| instruction_file(agent, target))
         .collect::<Result<_>>()?;
+    dedupe_files(resolved)
+}
+
+fn dedupe_files(mut resolved: Vec<(PathBuf, String)>) -> Result<Vec<(PathBuf, String)>> {
     resolved.sort_by(|a, b| a.0.cmp(&b.0));
     resolved.dedup_by(|a, b| a.0 == b.0);
 

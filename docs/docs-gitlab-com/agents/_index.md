@@ -105,7 +105,8 @@ Setup follows these rules:
 - Before setup changes a file for the first time, it saves a copy as `<name>.orbit-backup`.
 - Setup sets the `glab` option `orbit_cli_auto_run` to `true` for the repository where you run it, so the hooks run without a prompt.
   To set it for every repository, run `glab config set orbit_cli_auto_run true --global`.
-- With `--project` or `--dir`, setup writes files such as `CLAUDE.md` and `AGENTS.md` in the project.
+- With `--project` or `--dir`, setup writes files such as `AGENTS.md` and `.claude/settings.json` in the project.
+  For Claude Code, setup adds its text to `CLAUDE.md` only if you already have one. Otherwise it uses `AGENTS.md`, because Claude Code skips `AGENTS.md` when a `CLAUDE.md` exists.
   Teams usually commit these files, so the change can reach your teammates.
 
 ## Remove the setup

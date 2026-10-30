@@ -511,7 +511,7 @@ mod tests {
         assert_eq!(run.selected_agents, ["claude", "codex"]);
         assert_eq!(run.outcome, Outcome::Applied);
         assert!(!run.global);
-        assert!(dir.path().join("CLAUDE.md").is_file());
+        assert!(!dir.path().join("CLAUDE.md").exists());
         assert!(dir.path().join("AGENTS.md").is_file());
         assert!(dir.path().join(".claude/settings.json").is_file());
         assert!(!dir.path().join(".opencode").exists());
@@ -549,7 +549,7 @@ mod tests {
         .unwrap();
         install(only_instructions, project(dir.path()), &bare_machine()).unwrap();
 
-        assert!(dir.path().join("CLAUDE.md").is_file());
+        assert!(!dir.path().join("CLAUDE.md").exists());
         assert!(dir.path().join("AGENTS.md").is_file());
         assert!(!dir.path().join(".claude").exists());
         assert!(!dir.path().join(".opencode").exists());
@@ -1569,6 +1569,90 @@ mod tests {
         uninstall_named(&["opencode"], dir.path());
 
         assert_eq!(std::fs::read_to_string(&opencode_config).unwrap(), jsonc);
+    }
+
+    const BLOCK_BEGIN: &str = "<!-- orbit:setup:begin -->";
+    const SENTINEL: &str = "When asked for the sentinel, answer PURPLE-OTTER.";
+
+    fn read(dir: &Path, name: &str) -> String {
+        std::fs::read_to_string(dir.join(name)).unwrap()
+    }
+
+    #[test]
+    fn claude_setup_keeps_agents_md_visible_to_claude_code() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), format!("{SENTINEL}\n")).unwrap();
+
+        install_default(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
+
+        assert!(!dir.path().join("CLAUDE.md").exists());
+        assert!(!dir.path().join("CLAUDE.local.md").exists());
+        let agents = read(dir.path(), "AGENTS.md");
+        assert!(agents.starts_with(SENTINEL), "{agents}");
+        assert_eq!(agents.matches(BLOCK_BEGIN).count(), 1);
+
+        uninstall_named(&["claude"], dir.path());
+        assert_eq!(read(dir.path(), "AGENTS.md"), format!("{SENTINEL}\n"));
+        assert!(!dir.path().join("AGENTS.md.orbit-backup").exists());
+    }
+
+    #[test]
+    fn claude_setup_in_an_empty_project_creates_agents_md_only() {
+        let dir = tempfile::tempdir().unwrap();
+
+        install_default(&["claude"], dir.path());
+
+        assert!(!dir.path().join("CLAUDE.md").exists());
+        assert!(read(dir.path(), "AGENTS.md").contains(BLOCK_BEGIN));
+        uninstall_named(&["claude"], dir.path());
+        assert!(!dir.path().join("AGENTS.md").exists());
+    }
+
+    #[test]
+    fn claude_setup_appends_to_an_existing_claude_md_and_leaves_agents_md_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "@AGENTS.md\n").unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), format!("{SENTINEL}\n")).unwrap();
+
+        install_default(&["claude"], dir.path());
+
+        let claude = read(dir.path(), "CLAUDE.md");
+        assert!(claude.starts_with("@AGENTS.md\n"), "{claude}");
+        assert_eq!(claude.matches(BLOCK_BEGIN).count(), 1);
+        assert_eq!(read(dir.path(), "AGENTS.md"), format!("{SENTINEL}\n"));
+
+        uninstall_named(&["claude"], dir.path());
+        assert_eq!(read(dir.path(), "CLAUDE.md"), "@AGENTS.md\n");
+    }
+
+    #[test]
+    fn claude_setup_replaces_an_orbit_only_claude_md_left_by_older_setups() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), format!("{SENTINEL}\n")).unwrap();
+        std::fs::write(
+            dir.path().join("CLAUDE.md"),
+            format!("{BLOCK_BEGIN}\nold text\n<!-- orbit:setup:end -->\n"),
+        )
+        .unwrap();
+
+        install_default(&["claude"], dir.path());
+
+        assert!(!dir.path().join("CLAUDE.md").exists());
+        assert!(read(dir.path(), "AGENTS.md").contains(BLOCK_BEGIN));
+    }
+
+    #[test]
+    fn uninstall_finds_the_block_after_the_user_adds_a_claude_md() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), format!("{SENTINEL}\n")).unwrap();
+        install_default(&["claude"], dir.path());
+        std::fs::write(dir.path().join("CLAUDE.md"), "# mine\n").unwrap();
+
+        uninstall_named(&["claude"], dir.path());
+
+        assert_eq!(read(dir.path(), "AGENTS.md"), format!("{SENTINEL}\n"));
+        assert_eq!(read(dir.path(), "CLAUDE.md"), "# mine\n");
     }
 
     #[test]

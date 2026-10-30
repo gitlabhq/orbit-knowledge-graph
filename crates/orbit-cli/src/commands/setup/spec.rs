@@ -102,6 +102,8 @@ pub(super) struct AgentSpec {
     pub(super) detect: Vec<String>,
     pub(super) instruction_file: ScopedPath,
     #[serde(default)]
+    pub(super) project_instruction_fallback: Option<String>,
+    #[serde(default)]
     pub(super) json_merges: Vec<JsonMerge>,
     #[serde(default)]
     pub(super) template_files: Vec<TemplateFile>,

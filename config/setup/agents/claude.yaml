@@ -8,6 +8,9 @@ detect: ["$CLAUDE_CONFIG_DIR", "~/.claude", "~/.claude.json"]
 instruction_file:
   project: CLAUDE.md
   global: "${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md"
+# Claude Code reads AGENTS.md only when no CLAUDE.md exists, so setup never creates a
+# CLAUDE.md in a project; it writes the block to AGENTS.md unless the user has a CLAUDE.md.
+project_instruction_fallback: AGENTS.md
 json_merges:
   - file:
       project: .claude/settings.json
