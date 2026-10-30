@@ -45,7 +45,7 @@ impl crate::Relational<DuckDb> {
                 .collect(),
             property_columns: ontology
                 .local_edge_property_fields()
-                .map(|field| field.name.clone())
+                .map(|field| (field.name.clone(), None))
                 .collect(),
             sort_key: ontology
                 .sort_key_for_table(&edge_table)
@@ -85,7 +85,7 @@ impl crate::Relational<DuckDb> {
                     .iter()
                     .map(|field| (field.name.clone(), field.data_type))
                     .collect(),
-                property_columns: vec![],
+                property_columns: Default::default(),
                 sort_key: node.sort_key.clone(),
                 primary_key: None,
                 options: (),

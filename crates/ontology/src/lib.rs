@@ -1513,13 +1513,16 @@ impl Ontology {
             .flat_map(|(edge_name, _)| self.edge_properties(edge_name))
     }
 
-    pub fn edge_table_property_names(&self, table: &str) -> BTreeSet<&str> {
+    pub fn edge_table_property_fields<'a>(
+        &'a self,
+        table: &'a str,
+    ) -> impl Iterator<Item = &'a Field> {
         self.edges
             .iter()
-            .filter(|(_, variants)| variants.iter().any(|edge| edge.destination_table == table))
+            .filter(move |(_, variants)| {
+                variants.iter().any(|edge| edge.destination_table == table)
+            })
             .flat_map(|(edge_name, _)| self.edge_properties(edge_name))
-            .map(|field| field.name.as_str())
-            .collect()
     }
 
     /// Returns `Some` only for edges sourced from standalone pipelines.
@@ -2346,6 +2349,22 @@ mod tests {
         );
         let global = ontology.edge_table_config("gl_edge").unwrap();
         assert!(global.columns.iter().all(|c| c.name != "weight"));
+    }
+
+    #[test]
+    fn nullable_date_edge_properties_store_the_epoch() {
+        let seen = "properties:\n  seen_at:\n    type: datetime\n    source: seen_at\n    nullable: true\n";
+        let ontology = edge_property_overlay(seen, None).unwrap();
+        assert!(ontology.edge_properties("CALLS")[0].null_as_epoch());
+        let table = ontology.edge_table_config("gl_code_edge").unwrap();
+        let stored = table
+            .storage
+            .columns
+            .iter()
+            .find(|c| c.name == "seen_at")
+            .unwrap();
+        assert_eq!(stored.ch_type, "DateTime64(0, 'UTC')");
+        assert_eq!(stored.default.as_deref(), Some("'1970-01-01 00:00:00'"));
     }
 
     #[test]

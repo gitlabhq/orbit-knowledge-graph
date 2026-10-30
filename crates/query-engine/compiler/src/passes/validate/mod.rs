@@ -1100,7 +1100,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         let declared_here = edge_tables.iter().any(|table| {
             model
                 .table_property_columns(table)
-                .is_some_and(|columns| columns.contains(prop))
+                .is_some_and(|columns| columns.contains_key(prop))
         });
         if declared_here || filters.is_empty() {
             let declaring = model.graph().relationships_declaring(prop);

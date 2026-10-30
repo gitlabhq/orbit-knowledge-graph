@@ -178,7 +178,10 @@ pub trait OrbitQueryModel {
         self.query_backend().table_columns(table)
     }
 
-    fn table_property_columns(&self, table: &str) -> Option<&HashSet<String>> {
+    fn table_property_columns(
+        &self,
+        table: &str,
+    ) -> Option<&HashMap<String, Option<ontology::DataType>>> {
         self.query_backend().table_property_columns(table)
     }
 

@@ -88,7 +88,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             && relation.single_edge_table().is_some_and(|table| {
                 self.model
                     .table_property_columns(table)
-                    .is_none_or(|columns| !columns.contains(property))
+                    .is_none_or(|columns| !columns.contains_key(property))
                     && self
                         .model
                         .table_columns(table)

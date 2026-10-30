@@ -12,7 +12,7 @@ use crate::input::{
     AggExpr, AggFunction, Input, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
 };
 use crate::passes::plan::graph::{ExecutionPlan, RelationNode};
-use crate::passes::plan::pattern::Pattern;
+use crate::passes::plan::pattern::{EdgeRelation, Pattern};
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate};
 use crate::passes::plan::{NodePlan, Plan, property_value};
 
@@ -48,13 +48,14 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
 ) -> Result<Plan<Aggregation>> {
     let pattern = Pattern::new(input, model)?;
     let execution = pattern.execution()?;
-    let result = aggregation_plan(input, &pattern.nodes, &execution);
+    let result = aggregation_plan(input, &pattern.nodes, &pattern.relations, &execution);
     Ok(pattern.into_plan(execution, |execution| Aggregation { execution, result }))
 }
 
 fn aggregation_plan(
     input: &Input,
     nodes: &HashMap<String, NodePlan>,
+    relations: &[EdgeRelation],
     execution: &ExecutionPlan,
 ) -> AggregationPlan {
     let aggregation = &input.aggregation;
@@ -90,7 +91,7 @@ fn aggregation_plan(
                 ..
             } => {
                 let group = Group {
-                    value: OutputValue::Column(relationship_column(*relationship, property)),
+                    value: relationship_value(relations, *relationship, property),
                     truncate: None,
                 };
                 plan.group_outputs.push((group.clone(), alias));
@@ -139,9 +140,10 @@ fn aggregation_plan(
         if let Some(relationship) = metric.relationship {
             plan.measures.push(Measure {
                 function: metric.expr.function(),
-                argument: metric.expr.property().map(|property| {
-                    OutputValue::Column(relationship_column(relationship, property))
-                }),
+                argument: metric
+                    .expr
+                    .property()
+                    .map(|property| relationship_value(relations, relationship, property)),
                 distinct: metric.distinct,
                 name: metric.output_name(),
             });
@@ -187,11 +189,22 @@ fn aggregation_plan(
     plan
 }
 
-fn relationship_column(relationship: usize, property: &str) -> Column {
-    Column::new(
+fn relationship_value(
+    relations: &[EdgeRelation],
+    relationship: usize,
+    property: &str,
+) -> OutputValue {
+    let column = Column::new(
         crate::constants::edge_relation_alias(relationship),
         property,
-    )
+    );
+    match relations
+        .iter()
+        .find(|relation| relation.input_index == relationship)
+    {
+        Some(relation) => OutputValue::property(&relation.null_as_epoch, column),
+        None => OutputValue::Column(column),
+    }
 }
 
 fn add_group(groups: &mut Vec<Group>, group: Group) {

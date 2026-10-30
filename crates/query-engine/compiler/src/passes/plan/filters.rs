@@ -101,13 +101,31 @@ pub fn ordered_filters(
     bound
 }
 
+pub fn tables_null_as_epoch(
+    model: &(impl OrbitQueryModel + ?Sized),
+    tables: &[String],
+    property: &str,
+) -> Option<ontology::DataType> {
+    let mut types = tables.iter().map(|table| {
+        model
+            .table_property_columns(table)?
+            .get(property)
+            .copied()
+            .flatten()
+    });
+    let first = types.next()??;
+    types
+        .all(|data_type| data_type == Some(first))
+        .then_some(first)
+}
+
 pub fn bind_filter(
     property: &str,
     filter: InputFilter,
     owner: &FilterOwner<'_>,
     model: &(impl OrbitQueryModel + ?Sized),
 ) -> BoundFilter {
-    let (metadata, in_sort_key) = match owner {
+    let (metadata, in_sort_key, table_epoch) = match owner {
         FilterOwner::Entity(entity) => {
             let table = model.query_backend().entity_table(*entity);
             (
@@ -115,6 +133,7 @@ pub fn bind_filter(
                     .property_for_entity_id(*entity, property)
                     .map(|property| (Some(property.id), Some(property.data_type))),
                 table.is_some_and(|table| model.in_sort_key(table, property)),
+                None,
             )
         }
         FilterOwner::Tables(tables) => {
@@ -130,6 +149,7 @@ pub fn bind_filter(
                 tables
                     .iter()
                     .all(|table| model.in_sort_key(table, property)),
+                tables_null_as_epoch(model, tables, property),
             )
         }
     };
@@ -154,7 +174,8 @@ pub fn bind_filter(
         immutable: property_id.is_some_and(|property| !model.property_mutable(property)),
         null_as_epoch: NullAsEpoch {
             column: data_type
-                .filter(|_| property_id.is_some_and(|property| model.null_as_epoch(property))),
+                .filter(|_| property_id.is_some_and(|property| model.null_as_epoch(property)))
+                .or(table_epoch),
             rhs: None,
         },
     }

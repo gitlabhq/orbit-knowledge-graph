@@ -1,7 +1,7 @@
 pub mod layout;
 pub(crate) mod mapping;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::PropertyBackendFacts;
 use crate::{
@@ -25,7 +25,7 @@ pub struct DuckDbBindings {
     edge_sort_key: Vec<String>,
     edge_column_types: std::collections::BTreeMap<String, ontology::DataType>,
     edge_columns: HashSet<String>,
-    edge_property_columns: HashSet<String>,
+    edge_property_columns: HashMap<String, Option<ontology::DataType>>,
     entities: Vec<Option<DuckDbEntityLayout>>,
     property_facts: Vec<PropertyBackendFacts>,
     relationships: Vec<String>,
@@ -135,7 +135,10 @@ impl RelationalMapping for DuckDbBindings {
         (table == self.edge_table()).then(|| self.edge_columns())
     }
 
-    fn table_property_columns(&self, table: &str) -> Option<&HashSet<String>> {
+    fn table_property_columns(
+        &self,
+        table: &str,
+    ) -> Option<&HashMap<String, Option<ontology::DataType>>> {
         (table == self.edge_table()).then_some(&self.edge_property_columns)
     }
 

@@ -40,7 +40,7 @@ impl StorageColumn {
             DataType::IntList => ("Array(Int64)", "[]", &["ZSTD(1)"]),
             DataType::StringList => ("Array(String)", "[]", &["ZSTD(1)"]),
         };
-        let nullable = if field.nullable {
+        let nullable = if field.nullable && !field.null_as_epoch() {
             format!("Nullable({base})")
         } else {
             base.to_string()
@@ -53,7 +53,7 @@ impl StorageColumn {
         Self {
             name: field.name.clone(),
             ch_type,
-            default: (!field.nullable).then(|| default.to_string()),
+            default: (!field.nullable || field.null_as_epoch()).then(|| default.to_string()),
             codec: (!codec.is_empty()).then(|| codec.iter().map(|c| (*c).to_string()).collect()),
         }
     }
@@ -693,6 +693,10 @@ impl Field {
             FieldSource::DatabaseColumn(name) => Some(name),
             FieldSource::Virtual(_) => None,
         }
+    }
+
+    pub fn null_as_epoch(&self) -> bool {
+        self.nullable && matches!(self.data_type, DataType::Date | DataType::DateTime)
     }
 
     pub fn is_virtual(&self) -> bool {
