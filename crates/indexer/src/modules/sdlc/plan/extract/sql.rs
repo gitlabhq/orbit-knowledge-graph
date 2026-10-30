@@ -54,12 +54,20 @@ pub(in crate::modules::sdlc) fn compile_authored_extract(
 /// The SELECT-list expression written `AS {alias}`, so filters/cursors target the source expression.
 fn aliased_expression(sql: &str, alias: &str) -> Option<String> {
     let marker = format!(" AS {alias}");
-    let end = sql.find(&marker)?;
-    let prefix = &sql[..end];
-    let start = prefix
-        .rfind(',')
-        .map(|idx| idx + 1)
-        .or_else(|| prefix.rfind("SELECT ").map(|idx| idx + "SELECT ".len()))?;
+    let prefix = &sql[..sql.find(&marker)?];
+    let mut depth = 0usize;
+    let start = prefix.char_indices().rev().find_map(|(idx, ch)| {
+        match ch {
+            ')' => depth += 1,
+            '(' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => return Some(idx + 1),
+            _ if depth == 0 && ch.is_whitespace() && prefix[..idx].ends_with("SELECT") => {
+                return Some(idx);
+            }
+            _ => {}
+        }
+        None
+    })?;
     Some(prefix[start..].trim().to_string())
 }
 
@@ -110,6 +118,20 @@ mod tests {
             spec.deleted,
             "(namespace._siphon_deleted OR namespace.type != 'Group')"
         );
+    }
+
+    #[test]
+    fn deleted_expression_keeps_commas_inside_parentheses() {
+        let spec = compile_authored_extract(
+            &group_decl(),
+            "SELECT\n  id,\n  {{version_column}} AS _version,\n  ({{deleted_column}}\n    OR dictGetOrDefault('d', 'traversal_path', toUInt64(id), '0/') != traversal_path) AS _deleted\nFROM t {{final}} WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+        )
+        .expect("valid authored SQL");
+        assert_eq!(
+            spec.deleted,
+            "(_siphon_deleted\n    OR dictGetOrDefault('d', 'traversal_path', toUInt64(id), '0/') != traversal_path)"
+        );
+        assert_eq!(spec.watermark, "_siphon_watermark");
     }
 
     #[test]
