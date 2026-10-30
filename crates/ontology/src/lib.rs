@@ -2366,6 +2366,23 @@ mod tests {
     }
 
     #[test]
+    fn list_edge_properties_store_arrays_with_an_empty_default() {
+        let marks = "properties:\n  marks:\n    type: int64[]\n    source: marks\n";
+        let ontology = edge_property_overlay(marks, None).unwrap();
+        let table = ontology.edge_table_config("gl_code_edge").unwrap();
+        let column = table.columns.iter().find(|c| c.name == "marks").unwrap();
+        assert_eq!(column.data_type, DataType::IntList);
+        assert_eq!(column.default.as_deref(), Some("[]"));
+        let stored = table
+            .storage
+            .columns
+            .iter()
+            .find(|c| c.name == "marks")
+            .unwrap();
+        assert_eq!(stored.ch_type, "Array(Int64)");
+    }
+
+    #[test]
     fn two_edges_may_share_a_property_column_only_with_one_storage() {
         let same = edge_property_overlay(ENUM_STATE, Some(ENUM_STATE)).unwrap();
         assert_eq!(
