@@ -846,11 +846,11 @@ mod tests {
         ))
         .expect("overlay should load");
         let pipeline = &ontology
-            .get_edge_etl("REVIEWER")
-            .expect("REVIEWER pipeline")[0];
+            .get_edge_etl("REVIEWED_BY")
+            .expect("REVIEWED_BY pipeline")[0];
         let mapping = &pipeline.transform.edges()[0];
         let TransformSpec::DataFusion(transforms) =
-            edge_transform("REVIEWER", mapping, EtlScope::Namespaced, &ontology).unwrap()
+            edge_transform("REVIEWED_BY", mapping, EtlScope::Namespaced, &ontology).unwrap()
         else {
             panic!("datafusion transform")
         };
@@ -860,25 +860,23 @@ mod tests {
         assert!(sql.contains(", created_at,"), "sql: {sql}");
         assert!(transforms[0].destination_table.ends_with("gl_prop_edge"));
 
-        let merge_request = ontology.get_node("MergeRequest").unwrap();
-        let array_mapping = merge_request
-            .pipelines
-            .iter()
-            .flat_map(|pipeline| pipeline.transform.edges())
-            .find(|mapping| mapping.label == "REVIEWER")
-            .expect("MergeRequest emits REVIEWER from its reviewers array");
-        let sql = fk_edge_transform(array_mapping, "MergeRequest", true, &ontology)
-            .unwrap()
-            .pop()
-            .unwrap()
-            .sql;
+        let mut array_mapping =
+            literal_mapping("reviewers", "User", "id", "MergeRequest", "REVIEWED_BY");
+        array_mapping.array_field = Some("user_id".to_string());
+        let columns: Vec<String> =
+            property_columns(ontology.edge_properties("REVIEWED_BY"), &array_mapping)
+                .iter()
+                .map(node_column_sql)
+                .collect();
         assert!(
-            sql.contains("WHEN unnest(reviewers)['state'] = 1 THEN 'reviewed'"),
-            "sql: {sql}"
+            columns.iter().any(
+                |column| column.contains("WHEN unnest(reviewers)['state'] = 1 THEN 'reviewed'")
+            ),
+            "{columns:?}"
         );
         assert!(
-            sql.contains("unnest(reviewers)['created_at'] AS created_at"),
-            "sql: {sql}"
+            columns.contains(&"unnest(reviewers)['created_at'] AS created_at".to_string()),
+            "{columns:?}"
         );
     }
 

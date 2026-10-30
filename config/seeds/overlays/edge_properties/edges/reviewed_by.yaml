@@ -1,0 +1,58 @@
+description: Review assignment of a user on a merge request, with the review state (test overlay)
+
+properties:
+  state:
+    type: enum
+    source: state
+    nullable: false
+    description: "Review state of the reviewer on the merge request."
+    values:
+      0: unreviewed
+      1: reviewed
+      2: requested_changes
+      3: approved
+      4: unapproved
+      5: review_started
+  created_at:
+    type: datetime
+    source: created_at
+    nullable: false
+    description: "When the reviewer was requested."
+  project_id:
+    type: int
+    source: project_id
+    nullable: false
+    description: "Project of the merge request, a name that gl_code_edge also uses as a base column."
+  review_note:
+    type: string
+    source: review_note
+    nullable: true
+    description: "Free text the reviewer left, when any."
+
+table: gl_prop_edge
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: MergeRequest, id: id }
+    scope: prune_to_target
+    description: "User reviewed merge request."
+
+indexer:
+  reindex: [siphon_merge_request_reviewers]
+pipelines:
+  - name: REVIEWED_BY_siphon_merge_request_reviewers_MergeRequest
+    extract:
+      type: clickhouse
+      tables: [siphon_merge_request_reviewers]
+      fields: [user_id, merge_request_id, state, created_at, project_id, review_note]
+      order_by: [traversal_path, merge_request_id, id]
+      query: generated
+      lookups:
+        - { node: User, id: user_id }
+        - { node: MergeRequest, id: merge_request_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: user_id, kind: User, enrich: true }
+          to: { field: merge_request_id, kind: MergeRequest, enrich: true }
+          label: REVIEWED_BY

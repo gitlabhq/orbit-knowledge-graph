@@ -144,10 +144,12 @@ impl ClickHouseExtractDeclaration {
     pub(super) fn from_edge_pipeline(pipeline: &Pipeline, properties: &[Field]) -> Self {
         let Extract::ClickHouse(extract) = &pipeline.extract;
         let lookup_joins = PointLookupJoin::get_from_extract_declaration(extract, pipeline.scope);
-        let property_columns = SourceColumn::from_fields(properties);
         let mut source_columns = get_edge_source_columns(extract, lookup_joins.is_empty());
-        source_columns.retain(|column| !property_columns.iter().any(|p| p.name == column.name));
-        source_columns.extend(property_columns);
+        for typed in SourceColumn::from_fields(properties) {
+            if let Some(column) = source_columns.iter_mut().find(|c| c.name == typed.name) {
+                *column = typed;
+            }
+        }
         Self::from_pipeline_and_source_columns(pipeline, extract, source_columns, lookup_joins)
     }
 

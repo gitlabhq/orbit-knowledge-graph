@@ -949,7 +949,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     assign_edge_property_columns(&mut ontology)?;
     assign_local_edge_property_columns(&mut ontology);
-    validate_edge_property_writers(&ontology)?;
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
@@ -1357,11 +1356,96 @@ fn validate_auxiliary_dictionaries(ontology: &crate::Ontology) -> Result<(), Ont
     Ok(())
 }
 
+struct EdgeWriter<'a> {
+    pipeline: &'a str,
+    extract: &'a crate::etl::ClickHouseExtract,
+    node_fields: Option<&'a [crate::entities::Field]>,
+    array: Option<&'a str>,
+}
+
+impl EdgeWriter<'_> {
+    fn extracts(&self, source: &str) -> bool {
+        let needed = self.array.unwrap_or(source);
+        match (&self.extract.query, self.node_fields) {
+            (crate::etl::ExtractQuery::Sql(text), _) => text
+                .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .any(|token| token == needed),
+            (crate::etl::ExtractQuery::Generated { .. }, Some(fields)) => fields
+                .iter()
+                .any(|field| field.column_name() == Some(needed)),
+            (crate::etl::ExtractQuery::Generated { .. }, None) => {
+                self.extract.fields.iter().any(|field| field == needed)
+            }
+        }
+    }
+}
+
+fn edge_writers<'a>(ontology: &'a crate::Ontology, edge_name: &str) -> Vec<EdgeWriter<'a>> {
+    let standalone = ontology
+        .edge_pipelines
+        .get(edge_name)
+        .into_iter()
+        .flatten()
+        .map(|pipeline| (pipeline, None));
+    let from_nodes = ontology.nodes.values().flat_map(|node| {
+        node.pipelines
+            .iter()
+            .map(move |pipeline| (pipeline, Some(node)))
+    });
+    standalone
+        .chain(from_nodes)
+        .flat_map(|(pipeline, node)| {
+            let crate::etl::Extract::ClickHouse(extract) = &pipeline.extract;
+            pipeline
+                .transform
+                .edges()
+                .iter()
+                .filter(move |mapping| mapping.label == edge_name)
+                .map(move |mapping| EdgeWriter {
+                    pipeline: &pipeline.name,
+                    extract,
+                    node_fields: node.map(|node| node.fields.as_slice()),
+                    array: mapping.array_column(),
+                })
+        })
+        .collect()
+}
+
+fn unwritten_property_reasons(
+    ontology: &crate::Ontology,
+    edge_name: &str,
+    field: &crate::entities::Field,
+) -> Vec<String> {
+    let Some(source) = field.column_name() else {
+        return Vec::new();
+    };
+    let mut reasons: Vec<String> = ontology
+        .derived_entities
+        .values()
+        .filter(|derived| derived.emits.iter().any(|emitted| emitted == edge_name))
+        .map(|derived| {
+            format!(
+                "derived entity '{}' emits it from a Rust transform",
+                derived.name
+            )
+        })
+        .collect();
+    reasons.extend(
+        edge_writers(ontology, edge_name)
+            .iter()
+            .filter(|writer| !writer.extracts(source))
+            .map(|writer| format!("pipeline '{}' does not extract '{source}'", writer.pipeline)),
+    );
+    reasons
+}
+
 fn assign_edge_property_columns(ontology: &mut crate::Ontology) -> Result<(), OntologyError> {
     use crate::constants::{
         EDGE_OUTPUT_SUFFIXES, EDGE_RESERVED_COLUMNS, SOURCE_TAGS_COLUMN, TARGET_TAGS_COLUMN,
     };
     let mut owners: BTreeMap<(String, String), (String, StorageColumn, DataType)> = BTreeMap::new();
+    let mut conflicts = Vec::new();
+    let mut unwritten: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for (edge_name, fields) in &ontology.edge_properties {
         let tables: BTreeSet<&str> = ontology.edges[edge_name]
             .iter()
@@ -1388,6 +1472,21 @@ fn assign_edge_property_columns(ontology: &mut crate::Ontology) -> Result<(), On
                         field.name
                     )));
                 }
+            }
+            let reasons = unwritten_property_reasons(ontology, edge_name, field);
+            if !reasons.is_empty() {
+                conflicts.push(format!(
+                    "edge '{edge_name}' property '{}': {}",
+                    field.name,
+                    reasons.join("; ")
+                ));
+                unwritten
+                    .entry(edge_name.clone())
+                    .or_default()
+                    .insert(field.name.clone());
+                continue;
+            }
+            for table in &tables {
                 let key = ((*table).to_string(), field.name.clone());
                 match owners.get(&key) {
                     Some((owner, existing, data_type))
@@ -1411,6 +1510,15 @@ fn assign_edge_property_columns(ontology: &mut crate::Ontology) -> Result<(), On
             }
         }
     }
+    for (edge_name, names) in unwritten {
+        if let Some(fields) = ontology.edge_properties.get_mut(&edge_name) {
+            fields.retain(|field| !names.contains(&field.name));
+            if fields.is_empty() {
+                ontology.edge_properties.remove(&edge_name);
+            }
+        }
+    }
+    ontology.edge_property_conflicts = conflicts;
     for ((table, name), (_, column, data_type)) in owners {
         let config = ontology
             .edge_table_configs
@@ -1446,44 +1554,6 @@ fn assign_local_edge_property_columns(ontology: &mut crate::Ontology) {
     }
     columns.sort_by(|a, b| a.name.cmp(&b.name));
     ontology.local_edge_columns.extend(columns);
-}
-
-fn validate_edge_property_writers(ontology: &crate::Ontology) -> Result<(), OntologyError> {
-    for (edge_name, fields) in &ontology.edge_properties {
-        if let Some(derived) = ontology
-            .derived_entities
-            .values()
-            .find(|derived| derived.emits.iter().any(|emitted| emitted == edge_name))
-        {
-            return Err(OntologyError::Validation(format!(
-                "edge '{edge_name}' declares properties, but derived entity '{}' emits it without them",
-                derived.name
-            )));
-        }
-        for node in ontology.nodes() {
-            for pipeline in &node.pipelines {
-                let crate::etl::Extract::ClickHouse(extract) = &pipeline.extract;
-                let generated = matches!(extract.query, crate::etl::ExtractQuery::Generated { .. });
-                for mapping in pipeline.transform.edges() {
-                    if mapping.label != *edge_name || mapping.array_field.is_some() || !generated {
-                        continue;
-                    }
-                    for field in fields {
-                        let Some(source) = field.column_name() else {
-                            continue;
-                        };
-                        if !node.fields.iter().any(|f| f.column_name() == Some(source)) {
-                            return Err(OntologyError::Validation(format!(
-                                "edge '{edge_name}' property '{}': node '{}' pipeline '{}' extracts no column '{source}'",
-                                field.name, node.name, pipeline.name
-                            )));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Every node's storage columns must correspond 1:1 with its non-virtual

@@ -137,6 +137,7 @@ pub struct Ontology {
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
     pub(crate) edge_descriptions: BTreeMap<String, String>,
     pub(crate) edge_properties: BTreeMap<String, Vec<Field>>,
+    pub(crate) edge_property_conflicts: Vec<String>,
     pub(crate) edge_pipelines: BTreeMap<String, Vec<Pipeline>>,
     /// Reindex trigger tables per edge relationship kind, resolved from each
     /// edge's `indexer` block. Parallels `edge_pipelines`; the pipeline model
@@ -203,6 +204,7 @@ impl Ontology {
             edges: BTreeMap::new(),
             edge_descriptions: BTreeMap::new(),
             edge_properties: BTreeMap::new(),
+            edge_property_conflicts: Vec::new(),
             edge_pipelines: BTreeMap::new(),
             edge_reindex_sources: BTreeMap::new(),
             etl_settings: EtlSettings {
@@ -1495,6 +1497,10 @@ impl Ontology {
             .map_or(&[], Vec::as_slice)
     }
 
+    pub fn edge_property_conflicts(&self) -> &[String] {
+        &self.edge_property_conflicts
+    }
+
     pub fn local_edge_property_fields(&self) -> impl Iterator<Item = &Field> {
         self.edges
             .iter()
@@ -2273,27 +2279,27 @@ mod tests {
     }
 
     fn edge_property_overlay(
-        reviewer: &str,
-        approved: Option<&str>,
+        calls: &str,
+        imports: Option<&str>,
     ) -> Result<Ontology, OntologyError> {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("edges")).unwrap();
-        std::fs::write(dir.path().join("edges/reviewer.yaml"), reviewer).unwrap();
-        if let Some(approved) = approved {
-            std::fs::write(dir.path().join("edges/approved.yaml"), approved).unwrap();
+        std::fs::write(dir.path().join("edges/calls.yaml"), calls).unwrap();
+        if let Some(imports) = imports {
+            std::fs::write(dir.path().join("edges/imports.yaml"), imports).unwrap();
         }
         Ontology::load_embedded_with_overlay(dir.path())
     }
 
-    const REVIEWER_STATE: &str = "properties:\n  state:\n    type: enum\n    source: state\n    values: {0: unreviewed, 1: reviewed}\n";
+    const ENUM_STATE: &str = "properties:\n  state:\n    type: enum\n    source: state\n    values: {0: unreviewed, 1: reviewed}\n";
 
     #[test]
     fn edge_properties_become_columns_of_every_table_the_edge_routes_to() {
-        let ontology = edge_property_overlay(REVIEWER_STATE, None).unwrap();
-        let fields = ontology.edge_properties("REVIEWER");
+        let ontology = edge_property_overlay(ENUM_STATE, None).unwrap();
+        let fields = ontology.edge_properties("CALLS");
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].name, "state");
-        let table = ontology.edge_table_config("gl_edge").unwrap();
+        let table = ontology.edge_table_config("gl_code_edge").unwrap();
         let state = table.columns.iter().find(|c| c.name == "state").unwrap();
         assert_eq!(state.data_type, DataType::Enum);
         let stored = table
@@ -2305,10 +2311,12 @@ mod tests {
         assert_eq!(stored.ch_type, "LowCardinality(String)");
         assert_eq!(stored.default.as_deref(), Some("''"));
         assert_eq!(
-            ontology.get_edge_table_column_type("gl_edge", "state"),
+            ontology.get_edge_table_column_type("gl_code_edge", "state"),
             Some(DataType::Enum)
         );
-        assert!(ontology.edge_properties("APPROVED").is_empty());
+        assert!(ontology.edge_properties("IMPORTS").is_empty());
+        let global = ontology.edge_table_config("gl_edge").unwrap();
+        assert!(global.columns.iter().all(|c| c.name != "state"));
     }
 
     #[test]
@@ -2342,9 +2350,9 @@ mod tests {
 
     #[test]
     fn two_edges_may_share_a_property_column_only_with_one_storage() {
-        let same = edge_property_overlay(REVIEWER_STATE, Some(REVIEWER_STATE)).unwrap();
+        let same = edge_property_overlay(ENUM_STATE, Some(ENUM_STATE)).unwrap();
         assert_eq!(
-            same.edge_table_config("gl_edge")
+            same.edge_table_config("gl_code_edge")
                 .unwrap()
                 .columns
                 .iter()
@@ -2353,18 +2361,17 @@ mod tests {
             1
         );
         let other = "properties:\n  state:\n    type: string\n    source: state\n";
-        let err = edge_property_overlay(REVIEWER_STATE, Some(other)).unwrap_err();
+        let err = edge_property_overlay(ENUM_STATE, Some(other)).unwrap_err();
         assert!(err.to_string().contains("different types"), "got: {err}");
     }
 
     #[test]
     fn edge_properties_reject_admin_only_and_reserved_names() {
-        let admin =
-            REVIEWER_STATE.replace("source: state\n", "source: state\n    admin_only: true\n");
+        let admin = ENUM_STATE.replace("source: state\n", "source: state\n    admin_only: true\n");
         let err = edge_property_overlay(&admin, None).unwrap_err();
         assert!(err.to_string().contains("take type, source"), "got: {err}");
         for name in ["source_kind", "depth", "kind"] {
-            let reserved = REVIEWER_STATE.replace("state", name);
+            let reserved = ENUM_STATE.replace("state", name);
             let err = edge_property_overlay(&reserved, None).unwrap_err();
             assert!(
                 err.to_string().contains("reserved edge column"),
@@ -2374,22 +2381,49 @@ mod tests {
     }
 
     #[test]
-    fn edge_properties_need_a_writer_that_extracts_the_source_column() {
-        let mentions = "properties:\n  weight:\n    type: int\n    source: weight\n";
+    fn edge_properties_without_a_writer_for_the_source_record_a_conflict() {
+        let weight = "properties:\n  weight:\n    type: int\n    source: weight\n";
+        let created = "properties:\n  created_at:\n    type: datetime\n    source: created_at\n";
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("edges")).unwrap();
-        std::fs::write(dir.path().join("edges/mentions.yaml"), mentions).unwrap();
-        let err = Ontology::load_embedded_with_overlay(dir.path()).unwrap_err();
+        for (file, body) in [
+            ("mentions.yaml", weight),
+            ("scans.yaml", weight),
+            ("reviewer.yaml", weight),
+            ("has_note.yaml", created),
+        ] {
+            std::fs::write(dir.path().join("edges").join(file), body).unwrap();
+        }
+        let ontology = Ontology::load_embedded_with_overlay(dir.path()).unwrap();
+        let conflicts = ontology.edge_property_conflicts().join("\n");
         assert!(
-            err.to_string().contains("emits it without them"),
-            "got: {err}"
+            conflicts.contains("edge 'MENTIONS' property 'weight': derived entity"),
+            "{conflicts}"
         );
-        std::fs::remove_file(dir.path().join("edges/mentions.yaml")).unwrap();
-        std::fs::write(dir.path().join("edges/scans.yaml"), mentions).unwrap();
-        let err = Ontology::load_embedded_with_overlay(dir.path()).unwrap_err();
         assert!(
-            err.to_string().contains("extracts no column 'weight'"),
-            "got: {err}"
+            conflicts.contains("edge 'SCANS' property 'weight': pipeline"),
+            "{conflicts}"
+        );
+        assert!(
+            conflicts.contains("edge 'REVIEWER' property 'weight': pipeline"),
+            "{conflicts}"
+        );
+        for edge in ["MENTIONS", "SCANS", "REVIEWER"] {
+            assert!(ontology.edge_properties(edge).is_empty(), "{edge}");
+        }
+        let global = ontology.edge_table_config("gl_edge").unwrap();
+        assert!(global.columns.iter().all(|c| c.name != "weight"));
+        assert_eq!(ontology.edge_properties("HAS_NOTE").len(), 1);
+        assert!(global.columns.iter().any(|c| c.name == "created_at"));
+    }
+
+    #[test]
+    fn embedded_edges_declare_no_conflicting_properties() {
+        let ontology = Ontology::load_embedded().unwrap();
+        assert!(
+            ontology.edge_property_conflicts().is_empty(),
+            "{:?}",
+            ontology.edge_property_conflicts()
         );
     }
 
