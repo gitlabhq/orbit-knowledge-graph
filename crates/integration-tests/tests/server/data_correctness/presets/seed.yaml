@@ -166,6 +166,10 @@ data_correctness:
     - { traversal_path: "1/101/1001/", source_id: 8001, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1001, target_kind: Project, source_tags: ["severity:high", "state:detected"], target_tags: [] }
     - { traversal_path: "1/102/1004/", source_id: 8002, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1004, target_kind: Project, source_tags: ["severity:critical", "state:detected"], target_tags: [] }
 
+  gl_access_edge:
+    - { traversal_path: "1/101/1001/", source_id: 3, source_kind: User, relationship_kind: HAS_ACCESS, target_id: 1001, target_kind: Project, source_tags: [], target_tags: [] }
+    - { traversal_path: "1/101/1001/", source_id: 4, source_kind: User, relationship_kind: HAS_ACCESS, target_id: 1001, target_kind: Project, source_tags: [], target_tags: [] }
+
   gl_code_edge:
     - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
     - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12002, target_kind: Definition }

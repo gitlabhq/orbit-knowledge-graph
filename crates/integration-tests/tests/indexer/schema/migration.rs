@@ -167,7 +167,7 @@ async fn fresh_install_creates_tables_and_records_version() {
         .query(&format!(
             "SELECT toInt64(count()) AS cnt FROM system.tables \
                  WHERE database = '{}' AND name != 'gkg_schema_version' \
-                 AND engine != 'Dictionary'",
+                 AND engine NOT IN ('Dictionary', 'MaterializedView')",
             ctx.config.database
         ))
         .await;
@@ -240,7 +240,7 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
         .query(&format!(
             "SELECT name FROM system.tables \
                  WHERE database = '{}' AND name != 'gkg_schema_version' \
-                 AND engine != 'Dictionary' \
+                 AND engine NOT IN ('Dictionary', 'MaterializedView') \
                  ORDER BY name",
             ctx.config.database
         ))
@@ -556,7 +556,7 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
         .query(&format!(
             "SELECT name FROM system.tables \
                  WHERE database = '{}' AND name != 'gkg_schema_version' \
-                 AND engine != 'Dictionary' \
+                 AND engine NOT IN ('Dictionary', 'MaterializedView') \
                  ORDER BY name",
             ctx.config.database
         ))
@@ -630,7 +630,7 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
         .query(&format!(
             "SELECT name FROM system.tables \
              WHERE database = '{}' AND startsWith(name, '{prefix}') \
-             AND engine != 'Dictionary' \
+             AND engine NOT IN ('Dictionary', 'MaterializedView') \
              ORDER BY name",
             ctx.config.database
         ))

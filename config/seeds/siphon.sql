@@ -1262,6 +1262,24 @@ PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild', index_granularity = 8192;
 
+-- Siphon source table for project authorizations (mirrors db/click_house/migrate/main/20260109152712_create_siphon_project_authorizations.rb)
+CREATE TABLE IF NOT EXISTS siphon_project_authorizations
+(
+    `user_id` Int64,
+    `project_id` Int64,
+    `access_level` Int64,
+    `is_unique` Nullable(Bool),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC'),
+    `_siphon_deleted` Bool DEFAULT false,
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, user_id, project_id, access_level)
+ORDER BY (traversal_path, user_id, project_id, access_level)
+SETTINGS index_granularity = 2048;
+
 -- Siphon source table for CI runners (mirrors db/click_house/migrate/main/20260216174855_create_siphon_ci_runners.rb
 -- plus 20260227143636_add_token_rotation_deadline_to_siphon_ci_runners.rb)
 CREATE TABLE IF NOT EXISTS siphon_ci_runners

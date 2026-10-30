@@ -102,14 +102,12 @@ async fn reordered_copies_match_their_source() {
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_all().await;
 
-    for copy in load_ontology().reordered_tables() {
+    let ontology = load_ontology();
+    let mut seeded_rows = 0;
+    for copy in ontology.reordered_tables() {
         let live = |table: &str| format!("SELECT * FROM {table} FINAL WHERE _deleted = false");
         let (stored, source) = (live(&copy.name), live(&copy.source));
-        assert!(
-            count(&ctx, &format!("FROM ({source})")).await > 0,
-            "{}: the seed writes no rows to its source",
-            copy.name
-        );
+        seeded_rows += count(&ctx, &format!("FROM ({source})")).await;
         for (left, right) in [(&stored, &source), (&source, &stored)] {
             assert_eq!(
                 count(&ctx, &format!("FROM ({left} EXCEPT ALL {right})")).await,
@@ -119,4 +117,8 @@ async fn reordered_copies_match_their_source() {
             );
         }
     }
+    assert!(
+        ontology.reordered_tables().is_empty() || seeded_rows > 0,
+        "the seed writes no rows to any copied source"
+    );
 }

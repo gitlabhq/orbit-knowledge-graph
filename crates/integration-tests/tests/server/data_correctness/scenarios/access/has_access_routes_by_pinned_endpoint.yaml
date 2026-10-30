@@ -1,0 +1,49 @@
+config:
+  security: { org_id: 1, paths: ["1/100/", "1/101/"] }
+  unmerged_seed: true
+  extra_seed:
+    gl_access_edge:
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: HAS_ACCESS, target_id: 1000, target_kind: Project, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1002/", source_id: 1, source_kind: User, relationship_kind: HAS_ACCESS, target_id: 1002, target_kind: Project, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1002/", source_id: 1, source_kind: User, relationship_kind: HAS_ACCESS, target_id: 1002, target_kind: Project, _version: "2024-06-01 00:00:00", _deleted: true }
+      - { traversal_path: "1/101/1001/", source_id: 1, source_kind: User, relationship_kind: HAS_ACCESS, target_id: 1001, target_kind: Project, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "2/900/9000/", source_id: 1, source_kind: User, relationship_kind: HAS_ACCESS, target_id: 9000, target_kind: Project, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: HAS_ACCESS, target_id: 1000, target_kind: Project, _version: "2024-01-01 00:00:00", _deleted: false }
+
+cases:
+  - name: projects_of_a_pinned_user
+    description: A pinned user reads the user-first copy; the tombstoned grant and the grant outside the caller's paths stay hidden
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"HAS_ACCESS","from":"u","to":"p"}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-[:HAS_ACCESS]->(p:Project) RETURN u, p LIMIT 10
+    expect:
+      sql_contains: ["gl_access_edge_by_source"]
+      node_count: 3
+      nodes:
+        User:
+          ids: [1]
+        Project:
+          ids: [1000, 1001]
+          absent: [1002, 9000]
+      edges:
+        HAS_ACCESS: [[1, 1000], [1, 1001]]
+
+  - name: users_of_a_pinned_project
+    description: A pinned project reads the path-first table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"p","entity":"Project","node_ids":[1000]}],"relationships":[{"type":"HAS_ACCESS","from":"u","to":"p"}],"limit":10}
+      gql: |
+        MATCH (u:User)-[:HAS_ACCESS]->(p:Project {id: 1000}) RETURN u, p LIMIT 10
+    expect:
+      sql_not_contains: ["gl_access_edge_by_source"]
+      node_count: 3
+      nodes:
+        User:
+          ids: [1, 2]
+        Project:
+          ids: [1000]
+      edges:
+        HAS_ACCESS: [[1, 1000], [2, 1000]]

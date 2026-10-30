@@ -1,0 +1,50 @@
+description: Project authorizations at Reporter or higher become HAS_ACCESS edges in gl_access_edge and its user-first copy; Guest grants, grants under a stale project path, and tombstoned grants stay out
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+      siphon_project_authorizations:
+        - { user_id: 1, project_id: 1000, access_level: 30, traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+        - { user_id: 2, project_id: 1000, access_level: 10, traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+        - { user_id: 3, project_id: 1000, access_level: 40, traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+        - { user_id: 4, project_id: 1000, access_level: 30, traversal_path: "0/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+        - { user_id: 5, project_id: 1000, access_level: 30, traversal_path: "1/100/2000/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    targets: [HAS_ACCESS]
+    expect:
+      edges:
+        - kind: HAS_ACCESS
+          from: User
+          to: Project
+          traversal_path: "1/100/1000/"
+          count: 2
+          rows:
+            - { source_id: 1, target_id: 1000 }
+            - { source_id: 3, target_id: 1000 }
+      nodes:
+        gl_access_edge_by_source:
+          rows:
+            - { source_id: 1, target_id: 1000, traversal_path: "1/100/1000/" }
+            - { source_id: 3, target_id: 1000, traversal_path: "1/100/1000/" }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.HAS_ACCESS_siphon_project_authorizations, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      siphon_project_authorizations:
+        - { user_id: 3, project_id: 1000, access_level: 40, traversal_path: "1/100/1000/", _siphon_deleted: true, _siphon_replicated_at: "2024-01-20 18:00:00" }
+    targets: [HAS_ACCESS]
+    expect:
+      edges:
+        - kind: HAS_ACCESS
+          from: User
+          to: Project
+          count: 1
+          rows:
+            - { source_id: 1, target_id: 1000 }
+      nodes:
+        gl_access_edge_by_source:
+          rows:
+            - { source_id: 1, target_id: 1000 }

@@ -224,6 +224,10 @@ INSERT INTO gl_code_edge (traversal_path, project_id, branch, source_id, source_
     ('1/100/1000/', 1000, 'main', 12001, 'Definition', 'CALLS', 12002, 'Definition'),
     ('1/101/1001/', 1001, 'main', 12001, 'Definition', 'CALLS', 12102, 'Definition');
 
+INSERT INTO gl_access_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+    ('1/101/1001/', 3, 'User', 'HAS_ACCESS', 1001, 'Project', [], []),
+    ('1/101/1001/', 4, 'User', 'HAS_ACCESS', 1001, 'Project', [], []);
+
 INSERT INTO gl_work_item (id, iid, title, state, work_item_type, confidential, weight, created_at, updated_at, closed_at, project_id, author_id, namespace_id, milestone_id, closed_by_id, traversal_path) VALUES
     (4000, 1, 'Implement login page', 'opened', 'issue', false, 3, '2024-03-01 09:00:00', '2024-03-10 14:00:00', NULL, 1000, 1, 100, 6000, NULL, '1/100/'),
     (4001, 2, 'Fix auth bug', 'closed', 'incident', true, 8, '2024-03-05 11:30:00', '2024-03-15 16:00:00', '2024-03-15 16:00:00', 1000, 2, 100, 6000, 2, '1/100/'),
