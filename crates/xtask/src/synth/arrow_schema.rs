@@ -51,6 +51,8 @@ impl ToArrowType for DataType {
             DataType::Bool => ArrowDataType::Boolean,
             DataType::Date => ArrowDataType::Date32,
             DataType::DateTime => ArrowDataType::Int64, // Unix timestamp in millis
+            DataType::StringList => ArrowDataType::new_list(ArrowDataType::Utf8, true),
+            DataType::IntList => ArrowDataType::new_list(ArrowDataType::Int64, true),
         }
     }
 }

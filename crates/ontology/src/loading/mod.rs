@@ -202,6 +202,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     .map(|c| crate::entities::EdgeColumn {
                         name: c.name,
                         data_type: c.data_type,
+                        default: c.default,
                     })
                     .collect(),
                 storage: storage.unwrap_or_default(),
@@ -520,12 +521,14 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 column: "source_tags".to_string(),
                 index_type: "text(tokenizer = 'array')".to_string(),
                 granularity: 64,
+                ngram: None,
             },
             crate::entities::StorageIndex {
                 name: "target_tags_idx".to_string(),
                 column: "target_tags".to_string(),
                 index_type: "text(tokenizer = 'array')".to_string(),
                 granularity: 64,
+                ngram: None,
             },
         ]
     } else {
@@ -581,6 +584,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .map(|c| EdgeColumn {
                     name: c.name,
                     data_type: c.data_type,
+                    default: c.default,
                 })
                 .collect();
         }

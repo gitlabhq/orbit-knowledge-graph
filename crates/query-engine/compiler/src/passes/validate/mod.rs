@@ -109,6 +109,11 @@ pub(crate) fn collect_schema_errors(
 /// Returns `None` if compatible, or `Some(reason)` describing the mismatch.
 fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<String> {
     match expected {
+        DataType::StringList | DataType::IntList => {
+            return expected
+                .element()
+                .and_then(|element| check_value_type(value, element));
+        }
         DataType::String | DataType::Uuid => {
             if !value.is_string() {
                 return Some(format!("is {}, not a string", json_type_name(value)));
@@ -263,6 +268,34 @@ fn like_matches(op: FilterOp, text: &str, pattern: &str) -> bool {
         FilterOp::EndsWith => text.ends_with(pattern),
         _ => true,
     }
+}
+
+fn check_list_filter(
+    entity: &str,
+    prop: &str,
+    filter: &InputFilter,
+    op: FilterOp,
+    element: DataType,
+) -> Result<()> {
+    let invalid = |reason: String| {
+        QueryError::Validation(format!("filter on \"{prop}\" for {entity}: {reason}"))
+    };
+    let values = match (op, filter.value.as_ref()) {
+        (FilterOp::Contains, Some(value)) if !value.is_array() => std::slice::from_ref(value),
+        (FilterOp::In, Some(serde_json::Value::Array(values))) => values.as_slice(),
+        _ => {
+            return Err(invalid(
+                "a list field supports value IN field, field IN [...], IS NULL, and IS NOT NULL"
+                    .into(),
+            ));
+        }
+    };
+    for value in values {
+        if let Some(reason) = check_value_type(value, element) {
+            return Err(invalid(format!("value {reason}, expected {element}")));
+        }
+    }
+    Ok(())
 }
 
 fn filter_values(value: &serde_json::Value) -> &[serde_json::Value] {
@@ -859,16 +892,18 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         property: &query_data_model::Property,
     ) -> Result<()> {
         let op = filter.op.unwrap_or(FilterOp::Eq);
-        if property.data_type != DataType::Enum || op.is_token() {
+        if property.enum_values.is_none() || op.is_token() {
             return Ok(());
         }
         let Some(value) = filter.value.as_ref() else {
             return Ok(());
         };
+        let enum_scalar = property.data_type == DataType::Enum;
+        let like = enum_scalar && op.is_like();
         let declared = property.enum_values.iter().flatten();
-        let integer_keys = property.enum_type == ontology::EnumType::Int;
+        let integer_keys = enum_scalar && property.enum_type == ontology::EnumType::Int;
         let is_declared = |value: &serde_json::Value| match value {
-            serde_json::Value::String(text) if op.is_like() => declared
+            serde_json::Value::String(text) if like => declared
                 .clone()
                 .any(|(_, label)| like_matches(op, &label.to_lowercase(), &text.to_lowercase())),
             serde_json::Value::String(text) => declared.clone().any(|(_, label)| label == text),
@@ -886,7 +921,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         else {
             return Ok(());
         };
-        let problem = if op.is_like() {
+        let problem = if like {
             format!("no enum value {} {invalid}", op.as_ref().replace('_', " "))
         } else {
             format!("invalid enum value {invalid}")
@@ -1071,6 +1106,16 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: datetime() and date() compare only with date fields, but this field is {data_type}"
+            )));
+        }
+
+        if let Some(element) = data_type.element() {
+            return check_list_filter(entity, prop, filter, op, element);
+        }
+
+        if filter.from_membership {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: value IN property needs a list property, got {data_type}"
             )));
         }
 
@@ -1716,7 +1761,7 @@ fn check_filter_entries(property: &str, predicates: &[InputFilter]) -> Result<()
                 "IN requires 1-{MAX_IN_VALUES} values"
             )));
         }
-        if op.is_text() && !value.is_string() {
+        if op.is_text() && !(value.is_string() || op == FilterOp::Contains && value.is_i64()) {
             return Err(QueryError::Validation(
                 "text predicates require a string".into(),
             ));

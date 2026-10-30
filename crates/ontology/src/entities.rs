@@ -8,6 +8,7 @@ use serde::Deserialize;
 pub struct EdgeColumn {
     pub name: String,
     pub data_type: DataType,
+    pub default: Option<String>,
 }
 
 /// Fully explicit `CREATE TABLE` column: the YAML gives the exact ClickHouse
@@ -50,6 +51,23 @@ pub struct StorageIndex {
     /// e.g. `"minmax"`, `"set(10)"`, `"bloom_filter(0.01)"`
     pub index_type: String,
     pub granularity: u32,
+    pub ngram: Option<NgramFilter>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NgramFilter {
+    pub size: u32,
+    pub hashes: u32,
+}
+
+impl Default for NgramFilter {
+    fn default() -> Self {
+        Self {
+            size: 512,
+            hashes: 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -663,6 +681,22 @@ pub enum DataType {
     DateTime,
     Enum,
     Uuid,
+    StringList,
+    IntList,
+}
+
+impl DataType {
+    pub fn element(self) -> Option<Self> {
+        match self {
+            Self::StringList => Some(Self::String),
+            Self::IntList => Some(Self::Int),
+            _ => None,
+        }
+    }
+
+    pub fn is_list(self) -> bool {
+        self.element().is_some()
+    }
 }
 
 /// Filter selectivity hint for the query planner.
@@ -697,6 +731,8 @@ impl<'de> Deserialize<'de> for DataType {
             "timestamp" | "datetime" => Ok(Self::DateTime),
             "enum" => Ok(Self::Enum),
             "uuid" => Ok(Self::Uuid),
+            "string[]" => Ok(Self::StringList),
+            "int64[]" => Ok(Self::IntList),
             other => Err(serde::de::Error::unknown_variant(
                 other,
                 &[
@@ -714,6 +750,8 @@ impl<'de> Deserialize<'de> for DataType {
                     "datetime",
                     "enum",
                     "uuid",
+                    "string[]",
+                    "int64[]",
                 ],
             )),
         }
@@ -741,6 +779,8 @@ impl fmt::Display for DataType {
             DataType::DateTime => write!(f, "DateTime"),
             DataType::Enum => write!(f, "Enum"),
             DataType::Uuid => write!(f, "Uuid"),
+            DataType::StringList => write!(f, "String[]"),
+            DataType::IntList => write!(f, "Int[]"),
         }
     }
 }

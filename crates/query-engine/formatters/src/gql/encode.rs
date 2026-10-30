@@ -11,7 +11,6 @@ use serde_json::{Map, Value};
 use shared::{PaginationMeta, PipelineOutput};
 use types::{NodeRef, QueryResultRow};
 
-use crate::column_value_to_json;
 use crate::graph::{GraphFormatter, group_node_cell, is_reserved_node_key};
 use crate::text::{ordered_pairs, truncate, truncated_len};
 
@@ -237,7 +236,7 @@ fn json_properties(properties: &HashMap<String, ColumnValue>) -> Map<String, Val
     properties
         .iter()
         .filter(|(key, _)| !is_reserved_node_key(key))
-        .map(|(key, value)| (key.clone(), column_value_to_json(value)))
+        .map(|(key, value)| (key.clone(), value.to_json()))
         .collect()
 }
 

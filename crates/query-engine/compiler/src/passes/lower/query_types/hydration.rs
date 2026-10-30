@@ -49,9 +49,14 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
             .iter()
             .flat_map(|col| {
                 let value = OutputValue::property(&node.null_as_epoch, Column::new(alias, col));
+                let text = if node.list_columns.contains(col) {
+                    Function::ToJson
+                } else {
+                    Function::ToString
+                };
                 [
                     Expr::string(col),
-                    Expr::func(Function::ToString, vec![output_value(&value)]),
+                    Expr::func(text, vec![output_value(&value)]),
                 ]
             })
             .collect();

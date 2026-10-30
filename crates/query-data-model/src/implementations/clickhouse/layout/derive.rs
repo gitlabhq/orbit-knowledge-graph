@@ -375,16 +375,20 @@ fn index(source: &StorageIndex) -> Vec<Index> {
     if source.index_type != ontology::constants::TEXT_INDEX_TYPE {
         return vec![index];
     }
+    let text = Index {
+        lowercase: true,
+        index_type: "text(tokenizer = splitByNonAlpha)".into(),
+        ..index.clone()
+    };
+    let Some(ngram) = source.ngram else {
+        return vec![text];
+    };
     vec![
-        Index {
-            lowercase: true,
-            index_type: "text(tokenizer = splitByNonAlpha)".into(),
-            ..index.clone()
-        },
+        text,
         Index {
             name: format!("{}_ngram", index.name),
             lowercase: true,
-            index_type: "ngrambf_v1(3, 512, 2, 0)".into(),
+            index_type: format!("ngrambf_v1(3, {}, {}, 0)", ngram.size, ngram.hashes),
             ..index
         },
     ]

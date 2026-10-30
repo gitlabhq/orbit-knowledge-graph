@@ -7,9 +7,8 @@ mod toon;
 use std::sync::LazyLock;
 
 use semver::Version;
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use orbit_arrow::ColumnValue;
 use shared::PipelineOutput;
 
 pub use gql::{GQL_OUTPUT_FORMAT_VERSION, GqlFormatter};
@@ -51,17 +50,6 @@ pub trait ResultFormatter: Send + Sync {
             .map(|v| v.to_string())
             .unwrap_or_default();
         (formatted, version, self.format_name())
-    }
-}
-
-pub fn column_value_to_json(value: &ColumnValue) -> Value {
-    match value {
-        ColumnValue::Int64(v) => json!(v),
-        ColumnValue::Float64(v) if v.is_finite() => json!(v),
-        ColumnValue::Float64(_) => Value::Null,
-        ColumnValue::String(v) => json!(v),
-        ColumnValue::Bool(v) => json!(v),
-        ColumnValue::Null => Value::Null,
     }
 }
 

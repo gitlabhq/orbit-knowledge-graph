@@ -47,7 +47,9 @@
         "timestamp",
         "date",
         "enum",
-        "uuid"
+        "uuid",
+        "string[]",
+        "int64[]"
       ],
       "description": "Data type for a property field."
     },
@@ -223,7 +225,7 @@
             {
               "if": {
                 "not": {
-                  "properties": { "type": { "const": "enum" } },
+                  "properties": { "type": { "enum": ["enum", "string[]"] } },
                   "required": ["type"]
                 }
               },
@@ -769,10 +771,13 @@
                           "float64",
                           "boolean",
                           "date",
-                          "datetime"
+                          "datetime",
+                          "string[]",
+                          "int64[]"
                         ],
                         "description": "Column data type."
-                      }
+                      },
+                      "default": { "type": "string" }
                     },
                     "additionalProperties": false
                   },
@@ -1486,13 +1491,13 @@
         },
         "type": {
           "type": "string",
-          "pattern": "^(Int64|UInt64|Bool|String|Date32|DateTime64\\(|Nullable\\(|LowCardinality\\().*$",
+          "pattern": "^(Int64|UInt64|Bool|String|Date32|DateTime64\\(|Nullable\\(|LowCardinality\\(|Array\\().*$",
           "not": { "pattern": "^Nullable\\(Date" },
           "description": "Exact ClickHouse type. Must start with a known type name."
         },
         "default": {
           "type": "string",
-          "pattern": "^[a-zA-Z0-9_()',./_ {}-]+$",
+          "pattern": "^[a-zA-Z0-9_()',./_ {}\\[\\]-]+$",
           "description": "DEFAULT expression: literals, function calls, or quoted strings."
         },
         "codec": {
@@ -1523,12 +1528,22 @@
         "type": {
           "type": "string",
           "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\)|text)$",
-          "description": "Index type. Must be minmax, set(N), bloom_filter(N.NN), or text. text declares the Orbit text-search index pair (text + ngram over lower(column)) so string operators are indexed and case-insensitive."
+          "description": "Index type: minmax, set(N), bloom_filter(N.NN), or text. text indexes lower(column) with tokens and, unless ngram is false, ngrams."
         },
         "granularity": {
           "type": "integer",
           "minimum": 1,
           "default": 1
+        },
+        "ngram": {
+          "type": ["boolean", "object"],
+          "properties": {
+            "size": { "type": "integer", "minimum": 1 },
+            "hashes": { "type": "integer", "minimum": 1 }
+          },
+          "required": ["size", "hashes"],
+          "additionalProperties": false,
+          "description": "false, or the ngram filter size in bytes and hash count. Default 512 and 2."
         }
       },
       "required": [
