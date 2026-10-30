@@ -301,7 +301,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
     let table = np.table.as_deref().unwrap_or("");
     let has_tp = np.has_traversal_path;
 
-    if !force_cte && !np.owner_scoped && np.is_id_pinned_only() {
+    if !force_cte && !np.gated_rows && np.is_id_pinned_only() {
         return Anchor {
             edge_filter: Expr::col_in(
                 hop_alias(1),
@@ -314,10 +314,8 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
         };
     }
 
-    let has_conds = np.owner_scoped
-        || !np.node_ids.is_empty()
-        || !np.filters.is_empty()
-        || np.id_range.is_some();
+    let has_conds =
+        np.gated_rows || !np.node_ids.is_empty() || !np.filters.is_empty() || np.id_range.is_some();
     if !has_conds {
         return Anchor {
             edge_filter: None,
@@ -400,7 +398,7 @@ fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
 }
 
 fn endpoint_filter(np: &NodePlan, alias: &str, col: &str) -> Option<Expr> {
-    if !np.owner_scoped && np.is_id_pinned_only() {
+    if !np.gated_rows && np.is_id_pinned_only() {
         return Expr::col_in(
             alias,
             col,
@@ -408,7 +406,7 @@ fn endpoint_filter(np: &NodePlan, alias: &str, col: &str) -> Option<Expr> {
             np.node_ids.iter().map(|id| Value::from(*id)).collect(),
         );
     }
-    if np.owner_scoped || !np.filters.is_empty() || np.id_range.is_some() {
+    if np.gated_rows || !np.filters.is_empty() || np.id_range.is_some() {
         let cte_name = node_filter_cte(&np.alias);
         return Some(Expr::InSubquery {
             expr: Box::new(Expr::col(alias, col)),

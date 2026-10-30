@@ -200,7 +200,7 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
             })
     };
     let has_non_denorm = center.id_range.is_some()
-        || center.owner_scoped
+        || center.gated_rows
         || center.filters.iter().any(|(_, filter)| {
             (direction != Direction::Incoming
                 && !covered(

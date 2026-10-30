@@ -11,17 +11,55 @@ use serde_json::Value;
 use crate::ast::visit::{visit_queries, visit_relations};
 use crate::ast::{Expr, Function, Node, Op, Query, TableRef};
 use crate::error::{QueryError, Result};
+use crate::passes::result_contract::ResultContext;
 use crate::types::SecurityContext;
 
 pub fn verify(
     node: &Node,
     ctx: &SecurityContext,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    result_ctx: &ResultContext,
 ) -> Result<()> {
     match node {
-        Node::Query(q) => visit_queries(q, &mut |query| check_query(query, ctx, model)),
+        Node::Query(q) => {
+            visit_queries(q, &mut |query| check_query(query, ctx, model))?;
+            check_owner_scoped_nodes_read_their_table(q, ctx, model, result_ctx)
+        }
         Node::Insert(_) => Ok(()),
     }
+}
+
+fn check_owner_scoped_nodes_read_their_table(
+    q: &Query,
+    ctx: &SecurityContext,
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    result_ctx: &ResultContext,
+) -> Result<()> {
+    if ctx.admin {
+        return Ok(());
+    }
+    let mut scanned = std::collections::HashSet::new();
+    visit_queries(q, &mut |query| {
+        visit_relations(&query.from, &mut |relation| {
+            if let TableRef::Scan { table, .. } = relation {
+                scanned.insert(table.clone());
+            }
+        });
+        Ok(())
+    })?;
+    for node in result_ctx.nodes() {
+        if model.entity_owner_column(&node.entity_type).is_none() {
+            continue;
+        }
+        let table = model.entity_table(&node.entity_type).unwrap_or_default();
+        if !scanned.contains(table) {
+            return Err(QueryError::Security(format!(
+                "post-check failed: owner-scoped node '{}' never reads its table '{table}'",
+                node.alias
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn check_query(
@@ -186,7 +224,7 @@ mod tests {
     }
 
     fn check(node: &Node, context: &SecurityContext, model: &ClickHouseDataModel) -> Result<()> {
-        verify(node, context, model)
+        verify(node, context, model, &ResultContext::new())
     }
     fn project_query(where_clause: Option<Expr>) -> Node {
         Node::Query(Box::new(Query {
@@ -934,6 +972,61 @@ mod tests {
             ..Default::default()
         }));
         assert!(check(&node, &ctx, model()).is_ok());
+    }
+
+    #[test]
+    fn a_bound_owner_scoped_node_must_read_its_table() {
+        let model = derive_model(
+            ontology::Ontology::new()
+                .with_nodes(["Todo", "Project"])
+                .with_fields("Todo", [("user_id", ontology::DataType::Int)])
+                .with_redaction("Todo", "todo", "id")
+                .with_redaction_owner_column("Todo", "user_id"),
+        );
+        let ctx = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_user_id(Some(7));
+        let mut result_ctx = ResultContext::new();
+        result_ctx.add_node("t", "Todo");
+        let path_filter = |alias| {
+            Expr::func(
+                Function::StartsWith,
+                vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
+            )
+        };
+        let query = |table, alias, where_clause| {
+            Node::Query(Box::new(Query {
+                select: vec![SelectExpr::col(alias, "id")],
+                from: TableRef::scan(table, alias),
+                where_clause: Some(where_clause),
+                ..Default::default()
+            }))
+        };
+
+        let without_todo = query("gl_project", "p", path_filter("p"));
+        let error = verify(&without_todo, &ctx, &model, &result_ctx).unwrap_err();
+        assert!(
+            error.to_string().contains("never reads its table"),
+            "{error}"
+        );
+        assert!(
+            verify(
+                &without_todo,
+                &ctx.clone().with_role(true, None),
+                &model,
+                &result_ctx
+            )
+            .is_ok()
+        );
+        let with_todo = query(
+            "gl_todo",
+            "t",
+            Expr::and(
+                path_filter("t"),
+                Expr::eq(Expr::col("t", "user_id"), Expr::int(7)),
+            ),
+        );
+        assert!(verify(&with_todo, &ctx, &model, &result_ctx).is_ok());
     }
 
     #[test]

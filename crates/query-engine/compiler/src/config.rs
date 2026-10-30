@@ -123,7 +123,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         security_check {
             reads_env: [security_ctx, data_model]
-            reads_state: [node]
+            reads_state: [node, result_ctx]
         }
         codegen {
             reads_state: [input]
@@ -340,7 +340,8 @@ where
     C::Model: query_data_model::OrbitQueryModel,
 {
     let node = require(ctx.node().clone(), "node")?;
-    security_check::verify(&node, ctx.security_ctx(), ctx.data_model())
+    let result_ctx = require(ctx.result_ctx().as_ref(), "result_ctx")?;
+    security_check::verify(&node, ctx.security_ctx(), ctx.data_model(), result_ctx)
 }
 
 fn hydrate_plan<C>(ctx: &mut C) -> Result<()>
