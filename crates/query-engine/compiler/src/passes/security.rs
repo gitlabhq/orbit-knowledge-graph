@@ -4,7 +4,7 @@
 use serde_json::Value;
 
 use crate::ast::visit::{visit_queries_mut, visit_relations};
-use crate::ast::{Expr, Function, Node, TableRef};
+use crate::ast::{Expr, Function, Node, Op, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 pub use crate::types::SecurityContext;
@@ -66,7 +66,11 @@ pub fn apply_security_context(
 
 fn build_owner_filter(alias: &str, column: &str, user_id: Option<i64>) -> Expr {
     match user_id {
-        Some(user_id) => Expr::eq(Expr::col(alias, column), Expr::int(user_id)),
+        Some(user_id) => Expr::binary(
+            Op::Or,
+            Expr::eq(Expr::col(alias, column), Expr::int(user_id)),
+            Expr::col(alias, ontology::constants::DELETED_COLUMN),
+        ),
         None => Expr::Literal(Value::Bool(false)),
     }
 }

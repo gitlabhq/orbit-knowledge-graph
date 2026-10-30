@@ -1,0 +1,78 @@
+description: An unmerged tombstone of an owner-scoped row stays deleted for its owner on every read shape; the owner filter keeps the tombstone in the latest-row dedup
+
+config:
+  ontology_overlay: owner_scope
+  unmerged_seed: true
+  security: { paths: ["1/"], user_id: 2 }
+  redaction:
+    allow:
+      user: [1, 2]
+      merge_request: [2000, 2001]
+      note: [3000, 3001, 3002, 3003, 3100, 3101, 3102, 3105]
+  extra_seed:
+    gl_note:
+      - { id: 3100, note: Alice on feature A, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, author_id: 1, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 3101, note: Bob on feature A, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, author_id: 2, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 3102, note: Bob on bug B, noteable_type: MergeRequest, noteable_id: 2001, confidential: false, internal: false, author_id: 2, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 3105, note: Bob deleted this, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, author_id: 2, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 3105, note: "", noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: true }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3100, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3101, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 2001, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3102, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3105, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
+
+steps:
+  - query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3105]}], "limit": 20}
+      gql: |
+        MATCH (n:Note {id: 3105}) RETURN n LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: [node_ids]
+
+  - query:
+      json: |
+        {"query_type": "neighbors", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3105]}], "neighbors": {"direction": "incoming", "rel_types": ["HAS_NOTE"]}}
+      gql: |
+        MATCH (n:Note {id: 3105})<-[:HAS_NOTE]-(m) RETURN n, m
+    expect:
+      node_count: 0
+      edge_count: { HAS_NOTE: 0 }
+      skip_requirements: [node_ids]
+
+  - query:
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 3100, "end": 3199}}], "group_by": ["n.author_id"], "aggregations": [{"count": "n", "as": "notes"}], "limit": 10}
+      gql: |
+        MATCH (n:Note) WHERE n.id >= 3100 AND n.id <= 3199 RETURN n.author_id, count(n) AS notes LIMIT 10
+    expect:
+      row_count: 1
+      row_values:
+        - { n_author_id: 2, notes: 2 }
+
+  - query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}, {"id": "n", "entity": "Note"}], "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}], "limit": 20}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note) RETURN mr, n LIMIT 20
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequest: { ids: [2000] }
+        Note: { ids: [3101] }
+      edges:
+        HAS_NOTE: [[2000, 3101]]
+
+  - query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "filters": {"confidential": false}}], "limit": 20}
+      gql: |
+        MATCH (n:Note {confidential: false}) RETURN n LIMIT 20
+    expect:
+      sql_contains: ["AS n FINAL"]
+      skip_requirements: ["filter:confidential"]
+      node_count: 2
+      nodes:
+        Note: { ids: [3101, 3102] }

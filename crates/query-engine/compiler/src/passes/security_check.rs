@@ -130,7 +130,10 @@ fn gates_every_row(expr: Option<&Expr>, accepts: &impl Fn(&Expr) -> bool) -> boo
             op: Op::Or,
             left,
             right,
-        } => gates_every_row(Some(left), accepts) && gates_every_row(Some(right), accepts),
+        } => {
+            accepts(expr)
+                || gates_every_row(Some(left), accepts) && gates_every_row(Some(right), accepts)
+        }
         leaf => accepts(leaf),
     }
 }
@@ -148,17 +151,10 @@ fn is_path_filter(
     else {
         return false;
     };
-    let [
-        Expr::Column {
-            table,
-            column: actual,
-        },
-        path,
-    ] = args.as_slice()
-    else {
+    let [target, path] = args.as_slice() else {
         return false;
     };
-    if table != alias || actual != column {
+    if !is_column(target, alias, column) {
         return false;
     }
     match path {
@@ -175,27 +171,32 @@ fn is_path_filter(
 
 fn is_owner_filter(expr: &Expr, alias: &str, column: &str, user_id: Option<i64>) -> bool {
     let Expr::BinaryOp {
-        op: Op::Eq,
+        op: Op::Or,
         left,
-        right,
+        right: tombstone,
     } = expr
     else {
         return false;
     };
-    let Expr::Column {
-        table,
-        column: actual,
+    let Expr::BinaryOp {
+        op: Op::Eq,
+        left: owner,
+        right: caller,
     } = left.as_ref()
     else {
         return false;
     };
-    table == alias
-        && actual == column
+    is_column(owner, alias, column)
+        && is_column(tombstone, alias, ontology::constants::DELETED_COLUMN)
         && matches!(
-            right.as_ref(),
+            caller.as_ref(),
             Expr::Literal(Value::Number(value)) | Expr::Param { value: Value::Number(value), .. }
                 if user_id.is_some_and(|user_id| value.as_i64() == Some(user_id))
         )
+}
+
+fn is_column(expr: &Expr, alias: &str, column: &str) -> bool {
+    matches!(expr, Expr::Column { table, column: actual } if table == alias && actual == column)
 }
 
 #[cfg(test)]
@@ -1023,7 +1024,11 @@ mod tests {
             "t",
             Expr::and(
                 path_filter("t"),
-                Expr::eq(Expr::col("t", "user_id"), Expr::int(7)),
+                Expr::binary(
+                    Op::Or,
+                    Expr::eq(Expr::col("t", "user_id"), Expr::int(7)),
+                    Expr::col("t", "_deleted"),
+                ),
             ),
         );
         assert!(verify(&with_todo, &ctx, &model, &result_ctx).is_ok());
@@ -1045,7 +1050,13 @@ mod tests {
             Function::StartsWith,
             vec![Expr::col("t", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
         );
-        let owner_filter = |user_id| Expr::eq(Expr::col("t", "user_id"), Expr::int(user_id));
+        let owner_filter = |user_id| {
+            Expr::binary(
+                Op::Or,
+                Expr::eq(Expr::col("t", "user_id"), Expr::int(user_id)),
+                Expr::col("t", "_deleted"),
+            )
+        };
         let todo_query = |where_clause| {
             Node::Query(Box::new(Query {
                 select: vec![SelectExpr::col("t", "id")],
@@ -1071,6 +1082,17 @@ mod tests {
         assert!(
             check(
                 &todo_query(Expr::and(path_filter.clone(), owner_filter(8))),
+                &ctx,
+                &model
+            )
+            .is_err()
+        );
+        assert!(
+            check(
+                &todo_query(Expr::and(
+                    path_filter.clone(),
+                    Expr::eq(Expr::col("t", "user_id"), Expr::int(7))
+                )),
                 &ctx,
                 &model
             )
