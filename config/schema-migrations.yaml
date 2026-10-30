@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 120
+  scope: "*"
+  note: "Code graph contract: Definition kind, category, language_kind, scope, content columns, and list columns; ImportedSymbol becomes Import with import_kind, fqn, and is_external; File skip_reason and flags; Branch commit_sha and indexed_at; start_char and end_char become start_column and end_column; IMPORTS splits into DEFINES and RESOLVES_TO, ON_BRANCH goes, new code edges, and gl_code_edge lines, resolution, access, usage. The scope is * because schema.yaml changes; we keep it, so SDLC tables rebuild too."
 - version: 119
   scope: none
   note: >-
