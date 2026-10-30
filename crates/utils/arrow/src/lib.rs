@@ -434,6 +434,7 @@ impl Col {
                 }
             }
             Self::StrList(b, nullable) => b.append(!*nullable),
+            Self::IntList(b, nullable) => b.append(!*nullable),
             Self::DictStrList(b, nullable, _) => b.append(!*nullable),
         }
         Ok(())

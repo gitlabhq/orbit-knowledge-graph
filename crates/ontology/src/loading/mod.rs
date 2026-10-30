@@ -1549,6 +1549,7 @@ fn assign_local_edge_property_columns(ontology: &mut crate::Ontology) {
             columns.push(EdgeColumn {
                 name: field.name.clone(),
                 data_type: field.data_type,
+                default: StorageColumn::for_field(field).default,
             });
         }
     }
