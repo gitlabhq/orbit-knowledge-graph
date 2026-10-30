@@ -37,10 +37,11 @@ pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEntity, EdgeTableStorage, EdgeVariantScope, EnumType, Field, FieldSelectivity,
-    FieldSource, MaterializedViewDefinition, NodeEntity, NodeStorage, NodeStyle, PartitionConfig,
-    PartitionStrategy, RedactionConfig, RefreshableMaterializedViewDefinition, RequiredRole,
-    StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex, StorageProjection,
-    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
+    FieldSource, MaterializedViewDefinition, NodeEntity, NodeStorage, NodeStyle, OwnerBypass,
+    PartitionConfig, PartitionStrategy, RedactionConfig, RefreshableMaterializedViewDefinition,
+    RequiredRole, StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex,
+    StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
+    VirtualSource,
 };
 pub use etl::{
     ClickHouseExtract, ClickHouseExtractLookup, ClickHouseExtractLookupSource, DEFAULT_TRANSFORM,
@@ -547,34 +548,33 @@ impl Ontology {
             ability: "read".to_string(),
             required_role: RequiredRole::Reporter,
             owner_column: None,
+            owner_bypass: OwnerBypass::None,
         });
         self
     }
 
-    #[must_use]
-    pub fn with_redaction_owner_column(mut self, node_name: &str, column: &str) -> Self {
+    fn redaction_mut(&mut self, node_name: &str) -> &mut RedactionConfig {
         self.nodes
             .get_mut(node_name)
             .and_then(|node| node.redaction.as_mut())
             .unwrap_or_else(|| panic!("node \"{node_name}\" has no redaction config"))
-            .owner_column = Some(column.to_string());
+    }
+
+    #[must_use]
+    pub fn with_redaction_owner_column(mut self, node_name: &str, column: &str) -> Self {
+        self.redaction_mut(node_name).owner_column = Some(column.to_string());
         self
     }
 
-    /// Override the `required_role` on a node's existing redaction config.
-    /// Panics if the node is missing or has no redaction block. Builder-style
-    /// helper for ontologies constructed in tests; production ontologies
-    /// load the role directly from YAML.
+    #[must_use]
+    pub fn with_redaction_owner_bypass(mut self, node_name: &str, bypass: OwnerBypass) -> Self {
+        self.redaction_mut(node_name).owner_bypass = bypass;
+        self
+    }
+
     #[must_use]
     pub fn with_redaction_role(mut self, node_name: &str, role: RequiredRole) -> Self {
-        let redaction = self
-            .nodes
-            .get_mut(node_name)
-            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"))
-            .redaction
-            .as_mut()
-            .unwrap_or_else(|| panic!("node \"{node_name}\" has no redaction config"));
-        redaction.required_role = role;
+        self.redaction_mut(node_name).required_role = role;
         self
     }
 

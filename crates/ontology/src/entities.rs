@@ -307,6 +307,16 @@ pub struct RedactionConfig {
     pub required_role: RequiredRole,
     #[serde(default)]
     pub owner_column: Option<String>,
+    #[serde(default)]
+    pub owner_bypass: OwnerBypass,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OwnerBypass {
+    #[default]
+    None,
+    Admin,
 }
 
 impl RedactionConfig {

@@ -397,7 +397,12 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
                 "clickhouse" => {
                     if let Err(errors) =
                         check(&scenario, remote, backend, path, |input, options| {
-                            plan::plan_clickhouse(input, remote, options, true)
+                            plan::plan_clickhouse(
+                                input,
+                                remote,
+                                options,
+                                &remote.owner_gated_entities(false),
+                            )
                         })
                     {
                         failures.extend(errors);
@@ -814,7 +819,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
                 dynamic,
                 path_segment_budget: budget,
             },
-            true,
+            &model.owner_gated_entities(false),
         )
         .unwrap();
         let plan::QueryPlan::Hydration(hydration) = &plan else {

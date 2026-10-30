@@ -15,7 +15,19 @@ pub trait GitLabPolicy: Send + Sync {
     fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig>;
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str>;
     fn required_access_level(&self, entity: EntityId) -> Option<u32>;
-    fn owner_column(&self, entity: EntityId) -> Option<&str>;
+    fn owner_scope(&self, entity: EntityId) -> Option<OwnerScope<'_>>;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OwnerScope<'a> {
+    pub column: &'a str,
+    pub admin_bypass: bool,
+}
+
+impl OwnerScope<'_> {
+    pub fn gates(&self, admin: bool) -> bool {
+        !(admin && self.admin_bypass)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +47,7 @@ pub struct EntityAuthorization {
     pub owner_entity: Option<EntityId>,
     pub required_access_level: u32,
     pub owner_column: Option<String>,
+    pub owner_admin_bypass: bool,
 }
 
 #[derive(Debug)]
@@ -116,8 +129,12 @@ impl GitLabPolicy for GitLabAuthzCatalog {
             .map(|policy| policy.required_access_level)
     }
 
-    fn owner_column(&self, entity: EntityId) -> Option<&str> {
-        self.entity(entity)?.owner_column.as_deref()
+    fn owner_scope(&self, entity: EntityId) -> Option<OwnerScope<'_>> {
+        let authorization = self.entity(entity)?;
+        Some(OwnerScope {
+            column: authorization.owner_column.as_deref()?,
+            admin_bypass: authorization.owner_admin_bypass,
+        })
     }
 }
 
@@ -161,6 +178,7 @@ impl GitLabAuthzCatalog {
                         .flatten(),
                     required_access_level: redaction.required_role.as_access_level(),
                     owner_column: redaction.owner_column.clone(),
+                    owner_admin_bypass: redaction.owner_bypass == ontology::OwnerBypass::Admin,
                 });
                 entity_auth.insert(
                     node.name.clone(),

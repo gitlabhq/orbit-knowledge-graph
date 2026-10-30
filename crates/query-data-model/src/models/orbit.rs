@@ -17,7 +17,7 @@ use crate::layout::relational::{
 };
 use crate::{Entity, EntityId, GraphCatalog, Property, PropertyId};
 
-use crate::GitLabPolicy;
+use crate::{GitLabPolicy, OwnerScope};
 
 impl<B, M, A> OrbitQueryModel for crate::DataModel<crate::Relational<B>, M, A>
 where
@@ -221,20 +221,24 @@ pub trait OrbitQueryModel {
         self.query_authorization().required_access_level(entity)
     }
 
-    fn entity_owner_column(&self, entity: &str) -> Option<&str> {
+    fn entity_owner_scope(&self, entity: &str) -> Option<OwnerScope<'_>> {
         let entity = self.graph().entity_id(entity)?;
-        self.query_authorization().owner_column(entity)
+        self.query_authorization().owner_scope(entity)
     }
 
-    fn table_owner_column(&self, table: &str) -> Option<&str> {
+    fn table_owner_scope(&self, table: &str) -> Option<OwnerScope<'_>> {
         let entity = self.query_backend().table_entity(table)?;
-        self.query_authorization().owner_column(entity)
+        self.query_authorization().owner_scope(entity)
     }
 
-    fn owner_scoped_entities(&self) -> Vec<String> {
+    fn owner_gated_entities(&self, admin: bool) -> Vec<String> {
         self.graph()
             .entities()
-            .filter(|entity| self.query_authorization().owner_column(entity.id).is_some())
+            .filter(|entity| {
+                self.query_authorization()
+                    .owner_scope(entity.id)
+                    .is_some_and(|scope| scope.gates(admin))
+            })
             .map(|entity| entity.name.clone())
             .collect()
     }

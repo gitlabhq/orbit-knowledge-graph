@@ -330,7 +330,12 @@
         },
         "owner_column": {
           "type": "string",
-          "description": "Int column that holds the owning user ID. The compiler adds `<owner_column> = <caller user ID>` to every read of the entity table for a caller without the admin claim."
+          "description": "Int column that holds the owning user ID. Every read of the entity table is filtered to the caller's user ID."
+        },
+        "owner_bypass": {
+          "type": "string",
+          "enum": ["none", "admin"],
+          "description": "'admin' skips the owner filter for the admin claim. Default 'none'."
         }
       },
       "required": [

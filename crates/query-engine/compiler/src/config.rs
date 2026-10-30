@@ -3,6 +3,7 @@
 //! per-pipeline context structs, and runner functions.
 
 use orbit_server_config::QueryConfig;
+use query_data_model::OrbitQueryModel;
 
 use crate::ast::Node;
 use crate::error::{QueryError, Result};
@@ -243,9 +244,11 @@ where
 fn plan_clickhouse(
     ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
 ) -> Result<()> {
-    let gate_owner_kinds = !ctx.security_ctx().admin;
+    let owner_gates = ctx
+        .data_model()
+        .owner_gated_entities(ctx.security_ctx().admin);
     plan_with(ctx, |input, model, options| {
-        plan::plan_clickhouse(input, model, options, gate_owner_kinds)
+        plan::plan_clickhouse(input, model, options, &owner_gates)
     })
 }
 

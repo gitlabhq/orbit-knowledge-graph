@@ -35,9 +35,6 @@ fn check_owner_scoped_nodes_read_their_table(
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     result_ctx: &ResultContext,
 ) -> Result<()> {
-    if ctx.admin {
-        return Ok(());
-    }
     let mut scanned = std::collections::HashSet::new();
     visit_queries(q, &mut |query| {
         visit_relations(&query.from, &mut |relation| {
@@ -48,7 +45,10 @@ fn check_owner_scoped_nodes_read_their_table(
         Ok(())
     })?;
     for node in result_ctx.nodes() {
-        if model.entity_owner_column(&node.entity_type).is_none() {
+        if model
+            .entity_owner_scope(&node.entity_type)
+            .is_none_or(|scope| !scope.gates(ctx.admin))
+        {
             continue;
         }
         let table = model.entity_table(&node.entity_type).unwrap_or_default();
@@ -98,14 +98,16 @@ fn check_query(
                     return;
                 }
             }
-            if let Some(column) = model.table_owner_column(table)
-                && !ctx.admin
+            if let Some(scope) = model
+                .table_owner_scope(table)
+                .filter(|scope| scope.gates(ctx.admin))
                 && !gates_every_row(q.where_clause.as_ref(), &|expr| {
-                    is_owner_filter(expr, alias, column, ctx.user_id)
+                    is_owner_filter(expr, alias, scope.column, ctx.user_id)
                 })
             {
                 error = Some(QueryError::Security(format!(
-                    "post-check failed: column '{alias}.{column}' missing owner filter"
+                    "post-check failed: column '{alias}.{}' missing owner filter",
+                    scope.column
                 )));
             }
         }
@@ -975,15 +977,20 @@ mod tests {
         assert!(check(&node, &ctx, model()).is_ok());
     }
 
-    #[test]
-    fn a_bound_owner_scoped_node_must_read_its_table() {
-        let model = derive_model(
+    fn todo_model(bypass: ontology::OwnerBypass) -> ClickHouseDataModel {
+        derive_model(
             ontology::Ontology::new()
                 .with_nodes(["Todo", "Project"])
                 .with_fields("Todo", [("user_id", ontology::DataType::Int)])
                 .with_redaction("Todo", "todo", "id")
-                .with_redaction_owner_column("Todo", "user_id"),
-        );
+                .with_redaction_owner_column("Todo", "user_id")
+                .with_redaction_owner_bypass("Todo", bypass),
+        )
+    }
+
+    #[test]
+    fn a_bound_owner_scoped_node_must_read_its_table() {
+        let model = todo_model(ontology::OwnerBypass::Admin);
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_user_id(Some(7));
@@ -1019,6 +1026,15 @@ mod tests {
             )
             .is_ok()
         );
+        assert!(
+            verify(
+                &without_todo,
+                &ctx.clone().with_role(true, None),
+                &todo_model(ontology::OwnerBypass::None),
+                &result_ctx
+            )
+            .is_err()
+        );
         let with_todo = query(
             "gl_todo",
             "t",
@@ -1036,13 +1052,7 @@ mod tests {
 
     #[test]
     fn owner_scoped_alias_needs_the_caller_filter() {
-        let model = derive_model(
-            ontology::Ontology::new()
-                .with_nodes(["Todo"])
-                .with_fields("Todo", [("user_id", ontology::DataType::Int)])
-                .with_redaction("Todo", "todo", "id")
-                .with_redaction_owner_column("Todo", "user_id"),
-        );
+        let model = todo_model(ontology::OwnerBypass::Admin);
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_user_id(Some(7));
@@ -1103,6 +1113,14 @@ mod tests {
                 &todo_query(Expr::binary(Op::Or, owner_filter(7), Expr::lit(true))),
                 &ctx,
                 &model
+            )
+            .is_err()
+        );
+        assert!(
+            check(
+                &todo_query(path_filter.clone()),
+                &ctx.clone().with_role(true, None),
+                &todo_model(ontology::OwnerBypass::None)
             )
             .is_err()
         );

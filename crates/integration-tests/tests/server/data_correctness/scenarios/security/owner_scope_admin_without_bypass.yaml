@@ -1,0 +1,52 @@
+description: A caller with the admin claim gets no rows of an owner-scoped entity that declares no owner_bypass; the owner filter and the edge-read kind gates apply as for any caller
+
+config:
+  ontology_overlay: owner_scope_strict
+  security: admin
+  redaction:
+    allow:
+      user: [1, 2]
+      merge_request: [2000, 2001]
+      note: [3000, 3001, 3002, 3003, 3100, 3101, 3102]
+  extra_seed:
+    gl_note:
+      - { id: 3100, note: Alice on feature A, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, author_id: 1, traversal_path: "1/100/1000/" }
+      - { id: 3101, note: Bob on feature A, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, author_id: 2, traversal_path: "1/100/1000/" }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3100, target_kind: Note, source_tags: ["state:opened"], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3101, target_kind: Note, source_tags: ["state:opened"], target_tags: [] }
+
+steps:
+  - query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 3000, "end": 3999}}], "limit": 20}
+      gql: |
+        MATCH (n:Note) WHERE n.id >= 3000 AND n.id <= 3999 RETURN n LIMIT 20
+    expect:
+      node_count: 0
+
+  - query:
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 3000, "end": 3999}}], "group_by": ["n.author_id"], "aggregations": [{"count": "n", "as": "notes"}], "limit": 10}
+      gql: |
+        MATCH (n:Note) WHERE n.id >= 3000 AND n.id <= 3999 RETURN n.author_id, count(n) AS notes LIMIT 10
+    expect:
+      row_count: 0
+
+  - query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}, {"id": "n", "entity": "Note"}], "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}], "limit": 20}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note) RETURN mr, n LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: [node_ids, "relationship:HAS_NOTE"]
+
+  - query:
+      json: |
+        {"query_type": "neighbors", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}], "neighbors": {"direction": "outgoing", "rel_types": ["HAS_NOTE"]}}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n) RETURN mr, n
+    expect:
+      edge_count: { HAS_NOTE: 0 }
+      skip_requirements: [node_ids, node_count]

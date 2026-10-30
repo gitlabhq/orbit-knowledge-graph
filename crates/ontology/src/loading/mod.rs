@@ -282,6 +282,13 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     "node '{node_name}': redaction.owner_column '{owner_column}' must name an int column of the node"
                 )));
             }
+            if redaction.owner_bypass != crate::OwnerBypass::None
+                && redaction.owner_column.is_none()
+            {
+                return Err(OntologyError::Validation(format!(
+                    "node '{node_name}': redaction.owner_bypass needs redaction.owner_column"
+                )));
+            }
 
             if !entity.destination_table.starts_with(&ontology.table_prefix) {
                 return Err(OntologyError::Validation(format!(
@@ -1803,6 +1810,15 @@ mod tests {
                 assert!(error.to_string().contains("already exists"), "{error}");
             }
         }
+    }
+
+    #[test]
+    fn owner_bypass_needs_an_owner_column() {
+        let error = load_modified_sources("nodes/core/note.yaml", |node| {
+            node["redaction"]["owner_bypass"] = serde_json::json!("admin");
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("owner_bypass needs"), "{error}");
     }
 
     #[test]

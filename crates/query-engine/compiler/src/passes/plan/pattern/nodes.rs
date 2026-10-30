@@ -60,7 +60,7 @@ impl NodePlan {
             node_ids: node.node_ids.clone(),
             id_range: node.id_range.clone(),
             has_traversal_path: model.entity_has_traversal_path(entity),
-            gated_rows: model.entity_owner_column(entity).is_some()
+            gated_rows: model.entity_owner_scope(entity).is_some()
                 || model
                     .entity_minimum_access_level(entity)
                     .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL),

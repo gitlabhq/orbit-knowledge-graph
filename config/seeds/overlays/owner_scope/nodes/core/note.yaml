@@ -1,2 +1,3 @@
 redaction:
   owner_column: author_id
+  owner_bypass: admin

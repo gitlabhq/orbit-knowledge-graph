@@ -50,9 +50,9 @@ pub fn apply_security_context(
             }
             conditions.push(
                 model
-                    .table_owner_column(table)
-                    .filter(|_| !ctx.admin)
-                    .map(|column| build_owner_filter(alias, column, ctx.user_id)),
+                    .table_owner_scope(table)
+                    .filter(|scope| scope.gates(ctx.admin))
+                    .map(|scope| build_owner_filter(alias, scope.column, ctx.user_id)),
             );
         }
         query.where_clause = Expr::and_all(
@@ -573,7 +573,8 @@ mod tests {
                     .with_nodes(["Project", "Todo"])
                     .with_fields("Todo", [("user_id", ontology::DataType::Int)])
                     .with_redaction("Todo", "todo", "id")
-                    .with_redaction_owner_column("Todo", "user_id"),
+                    .with_redaction_owner_column("Todo", "user_id")
+                    .with_redaction_owner_bypass("Todo", ontology::OwnerBypass::Admin),
             ))
             .unwrap()
         });
@@ -665,6 +666,18 @@ mod tests {
         let mut node = todo_query();
         apply(&mut node, &ctx.clone().with_role(true, None), owner_model()).unwrap();
         assert!(!has_expr(where_clause(&node), &owner_filter));
+
+        let strict = ClickHouseDataModel::derive(Arc::new(
+            ontology::Ontology::new()
+                .with_nodes(["Todo"])
+                .with_fields("Todo", [("user_id", ontology::DataType::Int)])
+                .with_redaction("Todo", "todo", "id")
+                .with_redaction_owner_column("Todo", "user_id"),
+        ))
+        .unwrap();
+        let mut node = todo_query();
+        apply(&mut node, &ctx.clone().with_role(true, None), &strict).unwrap();
+        assert!(has_expr(where_clause(&node), &owner_filter));
 
         let mut node = todo_query();
         apply(&mut node, &ctx.with_user_id(None), owner_model()).unwrap();

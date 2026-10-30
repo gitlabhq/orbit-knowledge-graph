@@ -113,9 +113,9 @@ pub fn plan_clickhouse(
     input: &Input,
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
-    gate_owner_kinds: bool,
+    owner_gates: &[String],
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, gate_owner_kinds)
+    plan(input, model, hydration_options, owner_gates)
 }
 
 pub fn plan_duckdb(
@@ -123,34 +123,30 @@ pub fn plan_duckdb(
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, false)
+    plan(input, model, hydration_options, &[])
 }
 
 fn plan<M>(
     input: &Input,
     model: &M,
     hydration_options: HydrationCompileOptions,
-    gate_owner_kinds: bool,
+    owner_gates: &[String],
 ) -> Result<QueryPlan>
 where
     M: OrbitQueryModel + ?Sized,
 {
-    let gates = match gate_owner_kinds {
-        true => model.owner_scoped_entities(),
-        false => Vec::new(),
-    };
     Ok(match input.query_type {
         QueryType::Traversal => {
-            QueryPlan::Traversal(query_types::traversal::plan(input, model, &gates)?)
+            QueryPlan::Traversal(query_types::traversal::plan(input, model, owner_gates)?)
         }
         QueryType::Aggregation => {
-            QueryPlan::Aggregation(query_types::aggregation::plan(input, model, &gates)?)
+            QueryPlan::Aggregation(query_types::aggregation::plan(input, model, owner_gates)?)
         }
         QueryType::Neighbors => {
-            QueryPlan::Neighbors(query_types::neighbors::plan(input, model, &gates)?)
+            QueryPlan::Neighbors(query_types::neighbors::plan(input, model, owner_gates)?)
         }
         QueryType::PathFinding => {
-            QueryPlan::PathFinding(query_types::pathfinding::plan(input, model, &gates)?)
+            QueryPlan::PathFinding(query_types::pathfinding::plan(input, model, owner_gates)?)
         }
         QueryType::Hydration => QueryPlan::Hydration(query_types::hydration::plan(
             input,
