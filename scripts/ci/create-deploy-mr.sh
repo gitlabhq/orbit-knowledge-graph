@@ -32,9 +32,11 @@ log() { printf '%s\n' "$*" >&2; }
 # Prints "<iid> <branch>" for each open bot deploy MR whose version is lower
 # than VERSION, skipping the MR with IID $1 (empty when none was created).
 list_obsolete_mrs() {
-  local new_iid="$1" iid branch
-  glab api --paginate "projects/${APPS_PROJECT_ID}/merge_requests?state=opened&author_username=${BOT_AUTHOR}&per_page=100" 2>/dev/null \
-    | jq -r '.[] | "\(.iid) \(.source_branch)"' \
+  local new_iid="$1" iid branch open_mrs
+  open_mrs="$(glab api --paginate "projects/${APPS_PROJECT_ID}/merge_requests?state=opened&author_username=${BOT_AUTHOR}&per_page=100" \
+    | jq -r '.[] | "\(.iid) \(.source_branch)"')" \
+    || { log "Could not list open deploy MRs in ${APPS_PROJECT}; skipping the obsolete-MR sweep"; return 0; }
+  printf '%s\n' "$open_mrs" \
     | while read -r iid branch; do
         [[ "$iid" != "$new_iid" && "$branch" =~ ^gkg-release-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
         [[ "${branch#gkg-release-v}" != "$VERSION" ]] || continue
