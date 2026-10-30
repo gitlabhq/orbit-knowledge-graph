@@ -50,3 +50,7 @@ conventions. Read `CONTEXT.md` for domain terms.
 ## Writing or changing a skill
 
 Before you create or edit a skill, follow the [`authoring-skills`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/authoring-skills/SKILL.md) guide; shipped skills live in `skills/`, repo-only skills in `.agents/skills/`.
+
+## Writing docs
+
+For user docs (`docs/docs-gitlab-com/`), follow the [`gitlab-docs-change`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-change/SKILL.md) skill.
