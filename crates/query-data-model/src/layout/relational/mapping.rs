@@ -150,6 +150,7 @@ pub trait RelationalMapping: Send + Sync {
         target: EntityId,
     ) -> Option<ForeignKey>;
     fn table_columns(&self, table: &str) -> Option<&HashSet<String>>;
+    fn table_property_columns(&self, table: &str) -> Option<&HashSet<String>>;
     fn table_sort_key(&self, table: &str) -> Option<&[String]>;
     fn denormalized(&self) -> &DenormalizedCatalog;
     fn traversal_path_lookup(

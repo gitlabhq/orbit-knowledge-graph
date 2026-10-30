@@ -22,6 +22,7 @@ impl crate::Relational<ClickHouse> {
                     })
                     .chain(system_types())
                     .collect(),
+                property_columns: vec![],
                 sort_key: node.sort_key.clone(),
                 primary_key: node.storage.primary_key.clone(),
                 options: TableOptions {
@@ -59,6 +60,11 @@ impl crate::Relational<ClickHouse> {
                     .chain(&edge.property_columns)
                     .map(|column| (column.name.trim_matches('`').to_string(), column.data_type))
                     .chain(system_types())
+                    .collect(),
+                property_columns: edge
+                    .property_columns
+                    .iter()
+                    .map(|column| column.name.clone())
                     .collect(),
                 sort_key: edge.sort_key.clone(),
                 primary_key: edge.storage.primary_key.clone(),
@@ -174,6 +180,7 @@ impl crate::Relational<ClickHouse> {
                 name: declaration.table.clone(),
                 columns: join_columns,
                 column_types,
+                property_columns: vec![],
                 sort_key: declaration.sort_key(),
                 primary_key: None,
                 options: TableOptions {

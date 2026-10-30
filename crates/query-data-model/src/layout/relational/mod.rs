@@ -28,6 +28,7 @@ pub struct Table<B: RelationalBackend> {
     pub name: String,
     pub columns: Vec<Column<B>>,
     pub column_types: BTreeMap<String, ontology::DataType>,
+    pub property_columns: Vec<String>,
     pub sort_key: Vec<String>,
     pub primary_key: Option<Vec<String>>,
     pub options: B::TableOptions,

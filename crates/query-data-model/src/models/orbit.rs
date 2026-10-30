@@ -178,6 +178,10 @@ pub trait OrbitQueryModel {
         self.query_backend().table_columns(table)
     }
 
+    fn table_property_columns(&self, table: &str) -> Option<&HashSet<String>> {
+        self.query_backend().table_property_columns(table)
+    }
+
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {
         self.query_backend().table_sort_key(table)
     }

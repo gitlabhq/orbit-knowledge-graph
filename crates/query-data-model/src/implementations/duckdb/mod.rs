@@ -134,6 +134,10 @@ impl RelationalMapping for DuckDbBindings {
         (table == self.edge_table()).then(|| self.edge_columns())
     }
 
+    fn table_property_columns(&self, _table: &str) -> Option<&HashSet<String>> {
+        None
+    }
+
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {
         if table == self.edge_table() {
             return Some(&self.edge_sort_key);
