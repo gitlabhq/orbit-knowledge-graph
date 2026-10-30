@@ -50,3 +50,14 @@ conventions. Read `CONTEXT.md` for domain terms.
 ## Writing or changing a skill
 
 Before you create or edit a skill, follow the [`authoring-skills`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/authoring-skills/SKILL.md) guide; shipped skills live in `skills/`, repo-only skills in `.agents/skills/`.
+
+## Writing user docs
+
+User docs live in `docs/docs-gitlab-com/` and publish to the [GitLab Orbit docs](https://docs.gitlab.com/orbit/). Put them in their own MR, separate from the feature MR.
+
+The docs navigation is not in this repository. When an MR adds, moves, or renames a page, open a follow-up MR for `data/en-us/navigation.yaml` in [`docs-gitlab-com`](https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com), and merge it after the docs MR.
+
+1. Write the change with [`gitlab-docs-change`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-change/SKILL.md), and open the MR as a Draft.
+1. Run [`gitlab-docs-review`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-review/SKILL.md) with `--silent` until no `blocker` or `major` findings remain. Keep the MR in Draft until then.
+1. Before you mark the MR ready, run one more review pass and start a pipeline. Mark it ready only when the pipeline passes.
+1. After the MR is ready, request a review from `@z_painter` (Technical Writing) if a `blocker` or `major` finding remains. Do the same if the MR adds, moves, or renames a page. A TW review never blocks a merge and can happen after it.
