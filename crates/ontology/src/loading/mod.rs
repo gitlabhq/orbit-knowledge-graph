@@ -950,6 +950,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     }
 
     assign_edge_property_columns(&mut ontology)?;
+    assign_local_edge_property_columns(&mut ontology);
     validate_edge_property_writers(&ontology)?;
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;
@@ -1394,8 +1395,13 @@ fn assign_edge_property_columns(ontology: &mut crate::Ontology) -> Result<(), On
                     Some((owner, existing, data_type))
                         if *existing != column || *data_type != field.data_type =>
                     {
+                        let difference = if *data_type == field.data_type {
+                            "nullability"
+                        } else {
+                            "types"
+                        };
                         return Err(OntologyError::Validation(format!(
-                            "edge table '{table}': property '{}' is declared by '{owner}' and '{edge_name}' with different types",
+                            "edge table '{table}': property '{}' is declared by '{owner}' and '{edge_name}' with different {difference}",
                             field.name
                         )));
                     }
@@ -1420,6 +1426,37 @@ fn assign_edge_property_columns(ontology: &mut crate::Ontology) -> Result<(), On
         config.storage.property_columns.push(column);
     }
     Ok(())
+}
+
+fn assign_local_edge_property_columns(ontology: &mut crate::Ontology) {
+    if ontology.local_edge_table_name.is_none() {
+        return;
+    }
+    let local = |kind: &str| ontology.local_entities.contains_key(kind);
+    let mut columns: Vec<EdgeColumn> = Vec::new();
+    for (edge_name, fields) in &ontology.edge_properties {
+        let between_local = ontology.edges[edge_name]
+            .iter()
+            .any(|edge| local(&edge.source_kind) && local(&edge.target_kind));
+        if !between_local {
+            continue;
+        }
+        for field in fields {
+            if !columns.iter().any(|column| column.name == field.name)
+                && !ontology
+                    .local_edge_columns
+                    .iter()
+                    .any(|column| column.name == field.name)
+            {
+                columns.push(EdgeColumn {
+                    name: field.name.clone(),
+                    data_type: field.data_type,
+                });
+            }
+        }
+    }
+    columns.sort_by(|a, b| a.name.cmp(&b.name));
+    ontology.local_edge_columns.extend(columns);
 }
 
 fn validate_edge_property_writers(ontology: &crate::Ontology) -> Result<(), OntologyError> {

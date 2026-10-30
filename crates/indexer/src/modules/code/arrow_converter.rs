@@ -189,7 +189,7 @@ pub(super) fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
         .edge_tables()
         .iter()
         .filter_map(|t| ontology.edge_table_config(t))
-        .flat_map(|c| &c.storage.columns)
+        .flat_map(|c| c.storage.columns.iter().chain(&c.storage.property_columns))
         .filter(|col| col.ch_type.starts_with("LowCardinality"))
         .map(|col| col.name.clone())
         .collect();
@@ -201,12 +201,14 @@ pub(super) fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
     let mut specs: Vec<ColumnSpec> = Vec::new();
     for table_name in ontology.edge_tables() {
         if let Some(config) = ontology.edge_table_config(table_name) {
-            for c in &config.columns {
+            for c in config.columns.iter().chain(&config.property_columns) {
                 if seen_cols.insert(c.name.clone()) {
                     specs.push(ColumnSpec {
                         name: c.name.clone(),
                         col_type: column_type_for(&c.name, c.data_type, &dict_fields),
-                        nullable: false,
+                        nullable: config.storage.property_columns.iter().any(|column| {
+                            column.name == c.name && column.ch_type.contains("Nullable(")
+                        }),
                     });
                 }
             }
