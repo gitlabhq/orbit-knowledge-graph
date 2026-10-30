@@ -1,6 +1,10 @@
 //! Hydration plan: decides how the server fetches entity properties after
 //! the base query returns IDs.
 
+mod inline;
+
+pub(crate) use inline::inline;
+
 use std::collections::HashSet;
 
 use ontology::VirtualSource;

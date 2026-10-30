@@ -15,8 +15,8 @@ use crate::passes::plan::HydrationCompileOptions;
 use crate::passes::plan::QueryPlan;
 use crate::passes::result_contract::ResultContext;
 use crate::passes::{
-    codegen, hydrate, inline_hydration, lower, normalize, page, plan, relationships,
-    response_policy, restrict, result_contract, security, security_check, settings, validate,
+    codegen, hydrate, lower, normalize, page, plan, relationships, response_policy, restrict,
+    result_contract, security, security_check, settings, validate,
 };
 use crate::types::SecurityContext;
 
@@ -349,9 +349,7 @@ where
     let input = require(ctx.input().as_ref(), "input")?;
     let plan = hydrate::generate_hydration_plan(input, &node, ctx.data_model(), ctx.security_ctx());
     let node = match &plan {
-        HydrationPlan::Dynamic(specs) => {
-            inline_hydration::inline(node, input, specs, ctx.data_model())?
-        }
+        HydrationPlan::Dynamic(specs) => hydrate::inline(node, input, specs, ctx.data_model())?,
         _ => node,
     };
     ctx.set_node(node);
