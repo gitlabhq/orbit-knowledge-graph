@@ -1980,3 +1980,31 @@ CREATE TABLE IF NOT EXISTS siphon_namespace_bans
 ) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS siphon_todos
+(
+    `id` Int64,
+    `user_id` Int64,
+    `project_id` Nullable(Int64),
+    `target_id` Nullable(Int64),
+    `target_type` LowCardinality(String),
+    `author_id` Int64,
+    `action` Int64,
+    `state` LowCardinality(String),
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `commit_id` Nullable(String),
+    `group_id` Nullable(Int64),
+    `resolved_by_action` Nullable(Int16),
+    `note_id` Nullable(Int64),
+    `snoozed_until` Nullable(DateTime64(6, 'UTC')),
+    `organization_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC'),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, user_id, id)
+ORDER BY (traversal_path, user_id, id);

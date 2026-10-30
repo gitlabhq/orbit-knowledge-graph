@@ -1,0 +1,30 @@
+description: Todos index with mapped action, HAS_TODO edges from the owner, FOR edges to work items and merge requests, ON_NOTE and RAISED_BY edges; todos on User, Key, and Commit targets and todos with no namespace path (0/) are not indexed
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_todos:
+    - { id: 1, user_id: 7, author_id: 8, project_id: 1000, target_id: 10, target_type: MergeRequest, action: 9, state: pending, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 2, user_id: 7, author_id: 8, project_id: 1000, target_id: 20, note_id: 3000, target_type: Issue, action: 1, state: done, resolved_by_action: 4, created_at: "2024-01-16 10:00:00", updated_at: "2024-01-17 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 3, user_id: 9, author_id: 8, project_id: null, group_id: 100, target_id: 30, target_type: Epic, action: 2, state: pending, created_at: "2024-01-16 10:00:00", updated_at: "2024-01-16 10:00:00", traversal_path: "1/100/" }
+    - { id: 4, user_id: 7, author_id: 8, target_id: 7, target_type: User, action: 16, state: pending, created_at: "2024-01-16 10:00:00", updated_at: "2024-01-16 10:00:00", traversal_path: "1/100/" }
+    - { id: 6, user_id: 7, author_id: 8, project_id: 1000, target_id: null, commit_id: abc123, target_type: Commit, action: 2, state: pending, created_at: "2024-01-16 10:00:00", updated_at: "2024-01-16 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 7, user_id: 7, author_id: 8, project_id: null, target_id: 50, target_type: Issue, action: 1, state: pending, created_at: "2024-01-16 10:00:00", updated_at: "2024-01-16 10:00:00", traversal_path: "0/" }
+    - { id: 5, user_id: 7, author_id: 7, target_id: 40, target_type: Key, action: 14, state: pending, created_at: "2024-01-16 10:00:00", updated_at: "2024-01-16 10:00:00", traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_todo:
+      rows:
+        - { id: 1, user_id: 7, author_id: 8, action: review_requested, state: pending, target_type: MergeRequest, target_id: 10 }
+        - { id: 2, user_id: 7, action: assigned, state: done, target_type: Issue }
+        - { id: 3, user_id: 9, action: mentioned, target_type: Epic, group_id: 100 }
+  edges:
+    - { kind: HAS_TODO, from: User, to: Todo, count: 3, rows: [{ source_id: 7, target_id: 1, traversal_path: "1/100/1000/", _owner_id: 7 }, { source_id: 7, target_id: 2, traversal_path: "1/100/1000/", _owner_id: 7 }, { source_id: 9, target_id: 3, traversal_path: "1/100/", _owner_id: 9 }] }
+    - { kind: FOR, from: Todo, to: MergeRequest, count: 1, rows: [{ source_id: 1, target_id: 10, traversal_path: "1/100/1000/", _owner_id: 7 }] }
+    - { kind: FOR, from: Todo, to: WorkItem, count: 1, rows: [{ source_id: 2, target_id: 20, traversal_path: "1/100/1000/", _owner_id: 7 }] }
+    - { kind: ON_NOTE, from: Todo, to: Note, count: 1, rows: [{ source_id: 2, target_id: 3000, _owner_id: 7 }] }
+    - { kind: RAISED_BY, from: Todo, to: User, count: 3, rows: [{ source_id: 1, target_id: 8, _owner_id: 7 }, { source_id: 2, target_id: 8, _owner_id: 7 }, { source_id: 3, target_id: 8, _owner_id: 9 }] }

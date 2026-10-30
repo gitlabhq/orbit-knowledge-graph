@@ -1,0 +1,8 @@
+description: A user raised a to-do item for another user
+
+variants:
+  - from_node: { type: Todo, id: id }
+    to_node: { type: User, id: id }
+    table: gl_todo_edge
+    scope: prune_to_source
+    description: "To-do item was raised by the user."

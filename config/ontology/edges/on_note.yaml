@@ -1,0 +1,8 @@
+description: A to-do item was raised by a note
+
+variants:
+  - from_node: { type: Todo, id: id }
+    to_node: { type: Note, id: id }
+    table: gl_todo_edge
+    scope: prune_to_source
+    description: "To-do item was raised by the note."
