@@ -1,5 +1,6 @@
 //! Top-level application configuration.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -38,6 +39,9 @@ pub struct AppConfig {
     pub jwt_clock_skew_secs: u64,
     pub health_check_url: Option<String>,
     pub nats: NatsConfiguration,
+    /// Session settings every ClickHouse client starts from; `graph` and `datalake` add to them.
+    #[serde(default)]
+    pub clickhouse_session_settings: HashMap<String, String>,
     pub datalake: ClickHouseConfiguration,
     pub graph: ClickHouseConfiguration,
     pub clickhouse_setup: ClickHouseSetupConfig,
@@ -72,6 +76,7 @@ impl AppConfig {
             .add_source(embedded_defaults_source())
             .build()
             .and_then(config::Config::try_deserialize)
+            .map(Self::with_shared_session_settings)
             .expect("embedded config/default.yaml must deserialize into AppConfig")
     }
 
@@ -87,7 +92,19 @@ impl AppConfig {
             .build()
             .map_err(ConfigError::Config)?;
 
-        config.try_deserialize().map_err(ConfigError::Config)
+        config
+            .try_deserialize()
+            .map(Self::with_shared_session_settings)
+            .map_err(ConfigError::Config)
+    }
+
+    fn with_shared_session_settings(mut self) -> Self {
+        for client in [&mut self.graph, &mut self.datalake] {
+            let mut settings = self.clickhouse_session_settings.clone();
+            settings.extend(std::mem::take(&mut client.session_settings));
+            client.session_settings = settings;
+        }
+        self
     }
 
     pub fn jwt_secret(&self) -> Result<&str, ConfigError> {
@@ -145,6 +162,23 @@ pub enum ConfigError {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn clickhouse_clients_share_session_settings_and_keep_their_own() {
+        let config = AppConfig::embedded_defaults();
+        for client in [&config.graph, &config.datalake] {
+            assert_eq!(
+                client.session_settings.get("use_query_condition_cache"),
+                Some(&"1".to_string())
+            );
+        }
+        assert_eq!(
+            config.graph.session_settings.get("max_query_size"),
+            Some(&"10485760".to_string())
+        );
+        assert_eq!(config.datalake.session_settings.get("max_query_size"), None);
+    }
+
     use super::*;
     use crate::engine::EngineConfiguration;
 
