@@ -105,13 +105,7 @@ pub(crate) async fn install(
     if interactive
         && options.ask_agent_plugins
         && !ui_agents.is_empty()
-        && !tui::confirm(
-            &format!(
-                "Install the agent plugins for {}? They show each Orbit call.",
-                ui_agents.join(" and ")
-            ),
-            true,
-        )?
+        && !ask_install_agent_plugins(&ui_agents)?
     {
         selection.components.remove(&Component::AgentPlugins);
     }
@@ -238,6 +232,36 @@ fn ask_which_agents(
     let preselected = selection.selected_agent_names();
     let chosen = tui::multiselect(question, &choices, &preselected)?;
     selection.with_agents_named(&chosen)
+}
+
+const INSTALL_AGENT_PLUGINS: &str = "install";
+const SKIP_AGENT_PLUGINS: &str = "skip";
+
+/// Asks whether to install the agent plugins, starting on the recommended install.
+fn ask_install_agent_plugins(ui_agents: &[&str]) -> Result<bool> {
+    let choices = [
+        tui::Choice {
+            key: INSTALL_AGENT_PLUGINS.to_string(),
+            label: "Install the agent plugins".to_string(),
+            hint: "recommended".to_string(),
+            section: None,
+        },
+        tui::Choice {
+            key: SKIP_AGENT_PLUGINS.to_string(),
+            label: "Skip the agent plugins".to_string(),
+            hint: format!("add them later with `{} setup`", spec::launcher()),
+            section: None,
+        },
+    ];
+    let chosen = tui::select(
+        &format!(
+            "Agent plugins for {} show each Orbit call. Install them?",
+            ui_agents.join(" and ")
+        ),
+        &choices,
+        INSTALL_AGENT_PLUGINS,
+    )?;
+    Ok(chosen == INSTALL_AGENT_PLUGINS)
 }
 
 fn apply_and_report(
