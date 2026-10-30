@@ -396,6 +396,49 @@ impl Col {
         }
     }
 
+    fn push_default(&mut self) -> BatchResult<()> {
+        match self {
+            Self::Str(b, nullable) => {
+                if *nullable {
+                    b.append_null()
+                } else {
+                    b.append_value("")
+                }
+            }
+            Self::DictStr(b, nullable, distinct) => {
+                if *nullable {
+                    b.append_null()
+                } else {
+                    distinct.add(b.append("")?, "")
+                }
+            }
+            Self::Int(b, nullable) => {
+                if *nullable {
+                    b.append_null()
+                } else {
+                    b.append_value(0)
+                }
+            }
+            Self::Bool(b, nullable) => {
+                if *nullable {
+                    b.append_null()
+                } else {
+                    b.append_value(false)
+                }
+            }
+            Self::Timestamp(b, nullable) => {
+                if *nullable {
+                    b.append_null()
+                } else {
+                    b.append_value(0)
+                }
+            }
+            Self::StrList(b, nullable) => b.append(!*nullable),
+            Self::DictStrList(b, nullable, _) => b.append(!*nullable),
+        }
+        Ok(())
+    }
+
     fn offsets_used(&self) -> usize {
         match self {
             Self::Str(b, _) => b.values_slice().len(),
@@ -719,6 +762,16 @@ impl BatchBuilder {
             fill(item, &mut self)?;
         }
         self.finish()
+    }
+
+    pub fn fill_row_defaults(&mut self) -> BatchResult<()> {
+        let rows = self.cols.iter().map(Col::len).max().unwrap_or(0);
+        for col in &mut self.cols {
+            while col.len() < rows {
+                col.push_default()?;
+            }
+        }
+        Ok(())
     }
 
     pub fn take_if_over(&mut self, max_bytes: usize) -> BatchResult<Option<RecordBatch>> {

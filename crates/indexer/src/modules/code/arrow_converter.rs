@@ -501,7 +501,7 @@ impl AsRecordBatch for IndexerEdgeRow<'_> {
         b.col("_version")?
             .push_timestamp_micros(self.env.version_micros)?;
         b.col("_deleted")?.push_bool(false)?;
-        Ok(())
+        b.fill_row_defaults()
     }
 }
 
@@ -709,38 +709,44 @@ pub(super) fn route_graph(
     ];
 
     if data.edges.num_rows() > 0 {
-        let routing = EdgeRouting::resolve(&data.edges, table_names)?;
-
-        // Columns that only exist on gl_code_edge. Sub-batches going
-        // to other edge tables (gl_edge) must have them stripped.
-        let code_only_cols: &[&str] = &["project_id", "branch"];
-
-        // Every semantic edge kind usually routes to one table, and `take`
-        // would copy the whole batch while the original is still live.
-        match routing {
-            EdgeRouting::Single(table) => {
-                let batch = if table.contains("code_edge") {
-                    data.edges
-                } else {
-                    drop_columns(&data.edges, code_only_cols)
-                };
-                result.push((table.to_string(), batch));
-            }
-            EdgeRouting::Split(table_rows) => {
-                for (table, indices) in table_rows {
-                    let idx_array = arrow::array::UInt32Array::from(indices);
-                    let mut batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
-                        .map_err(|e| SinkError(format!("edge routing: {e}")))?;
-                    if !table.contains("code_edge") {
-                        batch = drop_columns(&batch, code_only_cols);
-                    }
-                    result.push((table.to_string(), batch));
-                }
-            }
-        }
+        result.extend(route_edges(data.edges, table_names)?);
     }
 
     Ok(result)
+}
+
+pub(super) fn route_edges(
+    edges: RecordBatch,
+    table_names: &super::config::CodeTableNames,
+) -> Result<Vec<(String, RecordBatch)>, SinkError> {
+    let routed = match EdgeRouting::resolve(&edges, table_names)? {
+        EdgeRouting::Single(table) => vec![(table, edges)],
+        EdgeRouting::Split(table_rows) => table_rows
+            .into_iter()
+            .map(|(table, indices)| {
+                let idx_array = arrow::array::UInt32Array::from(indices);
+                arrow::compute::take_record_batch(&edges, &idx_array)
+                    .map(|batch| (table, batch))
+                    .map_err(|e| SinkError(format!("edge routing: {e}")))
+            })
+            .collect::<Result<Vec<_>, SinkError>>()?,
+    };
+    routed
+        .into_iter()
+        .map(|(table, batch)| {
+            let columns = table_names
+                .edge_columns(table)
+                .ok_or_else(|| SinkError(format!("edge table {table} has no column list")))?;
+            let schema = batch.schema();
+            let extra: Vec<&str> = schema
+                .fields()
+                .iter()
+                .map(|field| field.name().as_str())
+                .filter(|name| !columns.contains(*name))
+                .collect();
+            Ok((table.to_string(), drop_columns(&batch, &extra)))
+        })
+        .collect()
 }
 
 enum EdgeRouting<'a> {
@@ -879,6 +885,68 @@ mod tests {
             .find(|spec| spec.name == "weight")
             .expect("declared property column");
         assert!(!weight.nullable);
+    }
+
+    #[test]
+    fn code_edge_batches_carry_only_the_columns_of_their_destination_table() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("edges")).unwrap();
+        std::fs::write(
+            dir.path().join("edges/has_note.yaml"),
+            "properties:\n  created_at:\n    type: datetime\n    source: created_at\nvariants:\n  - from_node: { type: File, id: id }\n    to_node: { type: Note, id: id }\n    description: \"File has note (test overlay).\"\n",
+        )
+        .unwrap();
+        let ontology = Ontology::load_embedded_with_overlay(dir.path()).unwrap();
+        let specs = edge_specs(&ontology);
+        assert!(specs.iter().any(|spec| spec.name == "created_at"));
+        let table_names = super::super::config::CodeTableNames::from_ontology(&ontology).unwrap();
+        let code_table = table_names
+            .edge_table_for("CONTAINS", "Project", "Branch")
+            .unwrap()
+            .to_string();
+        let env = IndexerEnvelope::new(
+            TraversalPath::new_unchecked("1/42/"),
+            42,
+            "main".to_string(),
+            "abc".to_string(),
+            Utc::now(),
+        );
+        let mut builder = BatchBuilder::new(&specs, 2).unwrap();
+        for (source_id, target_id, kind, source_kind, target_kind) in [
+            (42, 7, "CONTAINS", "Project", "Branch"),
+            (8, 9, "HAS_NOTE", "File", "Note"),
+        ] {
+            IndexerEdgeRow {
+                env: &env,
+                source_id,
+                target_id,
+                edge_kind: kind,
+                source_node_kind: source_kind,
+                target_node_kind: target_kind,
+                source_tags: &[],
+                target_tags: &[],
+            }
+            .write_row(&mut builder, &())
+            .unwrap();
+        }
+        let routed = route_edges(builder.finish().unwrap(), &table_names).unwrap();
+        assert_eq!(routed.len(), 2);
+        for (table, batch) in &routed {
+            assert_eq!(batch.num_rows(), 1, "{table}");
+            let schema = batch.schema();
+            let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+            if *table == code_table {
+                assert!(names.contains(&"project_id"), "{table}: {names:?}");
+                assert!(!names.contains(&"created_at"), "{table}: {names:?}");
+            } else {
+                assert!(!names.contains(&"project_id"), "{table}: {names:?}");
+                assert!(!names.contains(&"branch"), "{table}: {names:?}");
+                assert!(
+                    !batch.column_by_name("created_at").unwrap().is_null(0),
+                    "{table}"
+                );
+            }
+        }
     }
 
     #[test]

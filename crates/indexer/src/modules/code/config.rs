@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 use ontology::{Ontology, OntologyError};
 
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
@@ -13,6 +14,7 @@ pub struct CodeTableNames {
     pub definition: String,
     pub imported_symbol: String,
     edge_tables: HashMap<String, Vec<(String, String, String)>>,
+    edge_columns: HashMap<String, HashSet<String>>,
     node_columns: HashMap<String, Vec<String>>,
 }
 
@@ -53,6 +55,28 @@ impl CodeTableNames {
             }
         }
 
+        let edge_columns = ontology
+            .edge_tables()
+            .into_iter()
+            .filter_map(|table| {
+                let config = ontology.edge_table_config(table)?;
+                let columns = config
+                    .columns
+                    .iter()
+                    .map(|column| column.name.clone())
+                    .chain(
+                        config
+                            .storage
+                            .denormalized_columns
+                            .iter()
+                            .map(|column| column.name.clone()),
+                    )
+                    .chain([VERSION_COLUMN.to_string(), DELETED_COLUMN.to_string()])
+                    .collect();
+                Some((prefixed_table_name(table, *SCHEMA_VERSION), columns))
+            })
+            .collect();
+
         Ok(Self {
             branch: prefixed_table_name(ontology.table_name("Branch")?, *SCHEMA_VERSION),
             directory: prefixed_table_name(ontology.table_name("Directory")?, *SCHEMA_VERSION),
@@ -63,8 +87,13 @@ impl CodeTableNames {
                 *SCHEMA_VERSION,
             ),
             edge_tables,
+            edge_columns,
             node_columns,
         })
+    }
+
+    pub fn edge_columns(&self, table: &str) -> Option<&HashSet<String>> {
+        self.edge_columns.get(table)
     }
 
     /// Unchanging non-key columns a tombstone for `table` must carry.
