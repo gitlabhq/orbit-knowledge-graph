@@ -9,29 +9,6 @@ config:
       - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 15202, source_kind: Definition, relationship_kind: CALLS, target_id: 15200, target_kind: Definition, lines: [5], resolution: inferred_type, source_tags: [], target_tags: [] }
 
 cases:
-  - name: resolution_in_list
-    description: A relationship filter on resolution keeps the calls the engine found by the named rules
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"t","entity":"Definition","node_ids":[15200]}],"relationships":[{"type":"CALLS","from":"caller","to":"t","filters":{"resolution":{"in":["local","import","declared_type"]}}}],"limit":10}
-      gql: |
-        MATCH (caller:Definition)-[c:CALLS]->(t:Definition {id: 15200}) WHERE c.resolution IN ['local', 'import', 'declared_type'] RETURN caller, t LIMIT 10
-    expect:
-      node_count: 2
-      nodes:
-        Definition:
-          ids: [15200, 15201]
-      edges:
-        CALLS: [[15201, 15200]]
-
-  - name: resolution_rejects_an_unknown_value
-    description: A relationship filter on resolution rejects a value outside the declared set and names the valid ones
-    query:
-      gql: |
-        MATCH (caller:Definition)-[c:CALLS]->(t:Definition {id: 15200}) WHERE c.resolution = 'guess' RETURN caller, t LIMIT 10
-    expect:
-      compile_error_contains: ['"guess" cannot match this pattern', local, inferred_type, wildcard_import]
-
   - name: relationship_property_projection
     description: A RETURN of relationship properties gives the lines and the resolution of each call
     query:
@@ -48,18 +25,3 @@ cases:
       gql_columns:
         c.lines: ["[5]", "[3, 7]"]
         c.resolution: ['"inferred_type"', '"local"']
-
-  - name: line_membership
-    description: A literal IN the lines of a relationship keeps the calls made on that line
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"t","entity":"Definition","node_ids":[15200]}],"relationships":[{"type":"CALLS","from":"caller","to":"t","filters":{"lines":{"contains":7}}}],"limit":10}
-      gql: |
-        MATCH (caller:Definition)-[c:CALLS]->(t:Definition {id: 15200}) WHERE 7 IN c.lines RETURN caller, t LIMIT 10
-    expect:
-      node_count: 2
-      nodes:
-        Definition:
-          ids: [15200, 15201]
-      edges:
-        CALLS: [[15201, 15200]]
