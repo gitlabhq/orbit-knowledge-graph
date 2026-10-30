@@ -603,17 +603,8 @@
             "properties": {
               "name": {"type": "string", "pattern": "^[a-z_]+$"},
               "source": {"type": "string", "pattern": "^[a-z_]+$"},
-              "sort_key": {
-                "type": "array",
-                "minItems": 1,
-                "uniqueItems": true,
-                "items": {"type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"}
-              },
-              "max_pinned_ids": {
-                "type": "integer",
-                "minimum": 1,
-                "description": "Largest pinned id set for which the planner reads this copy. Required when the sort key starts with a pinned column before traversal_path."
-              }
+              "sort_key": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"}},
+              "max_pinned_ids": {"type": "integer", "minimum": 1}
             }
           }
         },
