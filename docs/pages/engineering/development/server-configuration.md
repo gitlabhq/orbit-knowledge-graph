@@ -54,12 +54,15 @@ The indexing stream is `GKG_INDEXER_V<release>`. To inspect it, see [NATS](../ru
 Orbit uses two connections. `datalake` reads the tables that Siphon replicates. `graph` holds the
 indexed graph. Both take the same keys.
 
+`global_clickhouse_session_settings` holds the session settings that both connections start from.
+These include the Arrow output formats that the client needs to read results.
+
 | Key | Effect |
 | --- | --- |
 | `<connection>.url` | HTTP endpoint |
 | `<connection>.database` | Database name |
 | `<connection>.username`, `<connection>.password` | Credentials |
-| `<connection>.session_settings` | ClickHouse settings for every query on the connection |
+| `<connection>.session_settings` | ClickHouse settings for every query on the connection. They add to `global_clickhouse_session_settings` and win on a conflict. |
 | `<connection>.insert_settings` | ClickHouse settings for inserts only |
 | `<connection>.replicated` | Self-hosted ClickHouse cluster with more than one replica |
 | `<connection>.profiling.*` | Debug only: EXPLAIN output, query log, processor statistics, instance health |
@@ -230,17 +233,32 @@ Check: the pods are ready and Prometheus scrapes `/-/metrics`.
 
 ### Query settings
 
-`query.default` applies to all queries. A query type key, for example `query.aggregation`,
-overrides it for that type.
+These settings apply to user queries and named queries, and to the hydration queries that follow
+them. `query.default` applies to every query type. A query type key, for example
+`query.path_finding`, overrides it for that type.
 
-| Key | Effect |
+A key under `query.<type>` is any ClickHouse setting name in lowercase. A value is a boolean, an
+integer, or a string. Orbit sends them with each query. Indexing status reads use `query.default`
+with the query cache off.
+
+| Default | Value |
 | --- | --- |
-| `query.<type>.max_execution_time` | ClickHouse `max_execution_time` in seconds |
-| `query.<type>.max_memory_usage`, `max_bytes_to_read`, `max_rows_to_read` | ClickHouse limits |
-| `query.<type>.max_rows_in_set` | Limit of an `IN` subquery |
-| `query.<type>.max_ast_elements`, `max_expanded_ast_elements`, `max_ast_depth` | ClickHouse query size limits |
-| `query.<type>.use_query_cache` | ClickHouse query cache. Indexing reads and queries that pin every node by ID skip it. |
-| `query.<type>.query_cache_ttl` | Maximum age of a cached result in seconds |
+| `max_execution_time` | 15 seconds |
+| `max_memory_usage` | 4 GiB. Raise it for ClickHouse nodes with more memory. |
+| `max_ast_elements`, `max_expanded_ast_elements`, `max_ast_depth` | Query size limits |
+| `use_query_cache`, `query_cache_ttl` | Query cache on, 10 seconds |
+| `query_cache_nondeterministic_function_handling`, `query_cache_system_table_handling` | `ignore`: such queries run without the cache |
+
+Orbit sets these settings from the query itself. Configuration cannot change them:
+
+| Setting | When |
+| --- | --- |
+| `optimize_move_to_prewhere_if_final`, `use_skip_indexes_if_final`, `use_skip_indexes_if_final_exact_mode` | The query reads a table with `FINAL` |
+| `use_index_for_in_with_subqueries_max_values` | The query has a CTE |
+| `query_plan_optimize_join_order_algorithm` | The query joins three or more relations |
+| `enable_materialized_cte` | The query materializes a CTE |
+| `transform_null_in` | The query has a negation |
+| `use_query_cache` off | Every node in the query is pinned by ID |
 
 ## Schema
 

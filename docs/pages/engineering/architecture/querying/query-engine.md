@@ -337,8 +337,9 @@ The plan becomes a SQL syntax tree. The engine asks for one row past the page,
 so it can tell whether more rows exist. It caps long text values, so a page
 fits in one response, and adds the ID and type columns that GitLab needs for
 redaction. Then it plans a second, small query for any properties that the
-main query didn't fetch. It also sets time and memory limits for the query
-type.
+main query didn't fetch. It also adds the ClickHouse settings from
+`config/default.yaml`, such as the time and memory limits, and the settings
+that depend on the shape of the query.
 
 ### 8. Add authorization filters, verify them, and render SQL
 

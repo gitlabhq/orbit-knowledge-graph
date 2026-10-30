@@ -33,7 +33,8 @@ On Dedicated, only the Dedicated EOC runs commands. Use `gkg-webserver` and no `
 | You see | Do this | Done when |
 | --- | --- | --- |
 | Started with a deploy | [Roll back](../maintenance.md#rollback). | The query in step 1 works. |
-| All query types slow, or errors with `TIMEOUT_EXCEEDED` | The graph ClickHouse is overloaded. High indexer writes: [stop one indexer pool](../README.md#emergency-actions). Else page Orbit tier-2. | p95 is below 5 seconds. |
+| All query types slow, or errors with `TIMEOUT_EXCEEDED` | The graph ClickHouse is overloaded. High indexer writes: [stop one indexer pool](../README.md#emergency-actions). Else page Orbit tier-2. A query stops after `query.default.max_execution_time`, 15 seconds by default. | p95 is below 5 seconds. |
+| Errors with `MEMORY_LIMIT_EXCEEDED` | A query used more than `query.default.max_memory_usage`. orbit-prd sets 16 GiB in `services/gkg/env/orbit-prd/values.yaml` in `gl-infra/argocd/apps`. One caller repeats it: page Orbit tier-2. | No `MEMORY_LIMIT_EXCEEDED` errors. |
 | Errors with `status="timeout"` | The query passed the stream timeout. Page Orbit tier-2. | No `timeout` errors. |
 | One query type slow | One caller sends heavy queries. Find it in the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5), filter `json.resource.labels.container_name: orbit-webserver`. Page Orbit tier-2. | p95 is below 5 seconds. |
 | Webserver pods show `OOMKilled` | Follow [OrbitContainerOOMKilled](OrbitContainerOOMKilled.md). | RESTARTS does not increase. |

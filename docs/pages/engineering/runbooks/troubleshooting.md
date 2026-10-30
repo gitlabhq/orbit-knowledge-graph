@@ -81,7 +81,8 @@ Confirm that Orbit is the cause: in the Gitaly logs, `GetArchive` requests from 
 | Signature | Likely cause | Action |
 | --- | --- | --- |
 | `query` fails, `status` works, webserver logs show `panic` | A bad release | [Roll back](maintenance.md#rollback). |
-| `TIMEOUT_EXCEEDED` in the webserver logs | A heavy query hits the ClickHouse timeout | One user repeats it: page Orbit tier-2. |
+| `TIMEOUT_EXCEEDED` in the webserver logs | A heavy query hits the ClickHouse timeout, `query.default.max_execution_time` (15 seconds by default) | One user repeats it: page Orbit tier-2. |
+| `MEMORY_LIMIT_EXCEEDED` in the webserver logs | A heavy query hits `query.default.max_memory_usage` (4 GiB by default, 16 GiB on orbit-prd) | One user repeats it: page Orbit tier-2. |
 | Dispatcher not ready after a deploy | A schema migration runs or its lock is held | Wait until the Schema migration row shows no migration. Still not ready: page Orbit tier-2. |
 | New webserver pods are not ready | No active schema in NATS, or NATS is down | Check NATS and the dispatcher. |
 | TLS or authentication errors between Rails and Orbit | Certificate or JWT key mismatch | See [secret rotation](secret_rotation.md#if-a-rotation-breaks-connections). |

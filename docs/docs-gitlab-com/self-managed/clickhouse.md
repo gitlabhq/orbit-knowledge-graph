@@ -91,6 +91,18 @@ These values suit a 32 GiB instance:
 </clickhouse>
 ```
 
+GitLab Orbit also sends its own limits with each query: 4 GiB of memory and 15 seconds.
+For GitLab Orbit queries, these values replace the `max_memory_usage` in the profile.
+To raise them on an instance with more memory, set them in `orbit-values.yaml`:
+
+```yaml
+webserver:
+  query:
+    default:
+      max_memory_usage: 8589934592
+      max_execution_time: 30
+```
+
 ## System log retention
 
 The ClickHouse system log tables have no time limit by default and can fill the disk.

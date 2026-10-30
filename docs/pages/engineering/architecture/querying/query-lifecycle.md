@@ -67,7 +67,7 @@ flowchart LR
 The engine writes one SQL statement for one relational backend, and the query
 service runs it on ClickHouse. The same engine can write SQL for DuckDB, and a
 PostgreSQL backend is a plan. Orbit runs the statement as a ClickHouse user
-that can only read, with time and memory limits for each query type. Every
+that can only read, with the time and memory limits from its configuration. Every
 read keeps only the latest version of each row, so old and deleted versions
 never match.
 
