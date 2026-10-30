@@ -3,7 +3,7 @@ ontology_overlay: edge_properties
 
 query:
   gql: |
-    MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) RETURN r.state, count(u) AS n
+    MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) RETURN r.state, count(u) AS n
 
 missing_frontends:
   json: the JSON frontend has no relationship variables, so it cannot name a relationship property

@@ -23,3 +23,5 @@ settings:
           - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
+edges:
+  REVIEWED_BY: edges/reviewed_by.yaml

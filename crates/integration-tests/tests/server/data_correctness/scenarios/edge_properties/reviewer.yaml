@@ -2,12 +2,12 @@ config:
   ontology_overlay: edge_properties
   extra_seed:
     gl_prop_edge:
-      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: REVIEWER, target_id: 2000, target_kind: MergeRequest, state: reviewed, created_at: "2024-01-02 00:00:00", project_id: 1000, review_note: "looks good" }
-      - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: REVIEWER, target_id: 2000, target_kind: MergeRequest, state: unreviewed, created_at: "2024-01-03 00:00:00" }
-      - { traversal_path: "1/100/1000/", source_id: 3, source_kind: User, relationship_kind: REVIEWER, target_id: 2000, target_kind: MergeRequest, state: reviewed, created_at: "2024-01-01 00:00:00" }
-      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: REVIEWER, target_id: 2001, target_kind: MergeRequest, state: requested_changes, created_at: "2024-01-04 00:00:00" }
-      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: REVIEWER, target_id: 2900, target_kind: MergeRequest, state: reviewed, created_at: "2024-02-01 00:00:00" }
-      - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: REVIEWER, target_id: 2900, target_kind: MergeRequest, state: reviewed, created_at: "2024-02-02 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: REVIEWED_BY, target_id: 2000, target_kind: MergeRequest, state: reviewed, created_at: "2024-01-02 00:00:00", project_id: 1000, review_note: "looks good" }
+      - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: REVIEWED_BY, target_id: 2000, target_kind: MergeRequest, state: unreviewed, created_at: "2024-01-03 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 3, source_kind: User, relationship_kind: REVIEWED_BY, target_id: 2000, target_kind: MergeRequest, state: reviewed, created_at: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: REVIEWED_BY, target_id: 2001, target_kind: MergeRequest, state: requested_changes, created_at: "2024-01-04 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: REVIEWED_BY, target_id: 2900, target_kind: MergeRequest, state: reviewed, created_at: "2024-02-01 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: REVIEWED_BY, target_id: 2900, target_kind: MergeRequest, state: reviewed, created_at: "2024-02-02 00:00:00" }
     gl_merge_request:
       - { id: 2900, iid: 90, title: "Old request", state: opened, source_branch: old, target_branch: main, project_id: 1000, author_id: 1, traversal_path: "1/100/1000/", created_at: "1999-06-01 00:00:00" }
 
@@ -16,7 +16,7 @@ cases:
     description: A RETURN of relationship properties gives the state and the request time of each review
     query:
       gql: |
-        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) RETURN u.username, r.state, r.created_at ORDER BY u.username LIMIT 10
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) RETURN u.username, r.state, r.created_at ORDER BY u.username LIMIT 10
     expect:
       node_count: 4
       nodes:
@@ -26,7 +26,7 @@ cases:
         MergeRequest:
           ids: [2000]
       edges:
-        REVIEWER: [[1, 2000], [2, 2000], [3, 2000]]
+        REVIEWED_BY: [[1, 2000], [2, 2000], [3, 2000]]
       gql_columns:
         r.state: ['"reviewed"', '"unreviewed"', '"reviewed"']
 
@@ -34,9 +34,9 @@ cases:
     description: A WHERE on a relationship enum keeps the reviews in that state
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr","filters":{"state":"reviewed"}}],"limit":10}
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"relationships":[{"type":"REVIEWED_BY","from":"u","to":"mr","filters":{"state":"reviewed"}}],"limit":10}
       gql: |
-        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) WHERE r.state = 'reviewed' RETURN u, mr LIMIT 10
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) WHERE r.state = 'reviewed' RETURN u, mr LIMIT 10
     expect:
       node_count: 3
       nodes:
@@ -45,13 +45,13 @@ cases:
         MergeRequest:
           ids: [2000]
       edges:
-        REVIEWER: [[1, 2000], [3, 2000]]
+        REVIEWED_BY: [[1, 2000], [3, 2000]]
 
   - name: filter_on_relationship_time
     description: A WHERE on a relationship time keeps the reviews requested after the date
     query:
       gql: |
-        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) WHERE r.created_at > datetime('2024-01-01T12:00:00Z') RETURN u, mr LIMIT 10
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) WHERE r.created_at > datetime('2024-01-01T12:00:00Z') RETURN u, mr LIMIT 10
     expect:
       node_count: 3
       nodes:
@@ -60,13 +60,13 @@ cases:
         MergeRequest:
           ids: [2000]
       edges:
-        REVIEWER: [[1, 2000], [2, 2000]]
+        REVIEWED_BY: [[1, 2000], [2, 2000]]
 
   - name: order_by_relationship_property
     description: An ORDER BY on a relationship time sorts the reviews by request time
     query:
       gql: |
-        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) RETURN u.username, r.state ORDER BY r.created_at DESC LIMIT 10
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) RETURN u.username, r.state ORDER BY r.created_at DESC LIMIT 10
     expect:
       node_count: 4
       nodes:
@@ -76,7 +76,7 @@ cases:
         MergeRequest:
           ids: [2000]
       edges:
-        REVIEWER: [[1, 2000], [2, 2000], [3, 2000]]
+        REVIEWED_BY: [[1, 2000], [2, 2000], [3, 2000]]
       gql_columns:
         r.state: ['"unreviewed"', '"reviewed"', '"reviewed"']
 
@@ -84,7 +84,7 @@ cases:
     description: A property that the query returns and sorts by is projected once
     query:
       gql: |
-        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) RETURN u.username, r.state ORDER BY r.state LIMIT 10
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) RETURN u.username, r.state ORDER BY r.state LIMIT 10
     expect:
       node_count: 4
       nodes:
@@ -93,7 +93,7 @@ cases:
         MergeRequest:
           ids: [2000]
       edges:
-        REVIEWER: [[1, 2000], [2, 2000], [3, 2000]]
+        REVIEWED_BY: [[1, 2000], [2, 2000], [3, 2000]]
       gql_columns:
         r.state: ['"reviewed"', '"reviewed"', '"unreviewed"']
 
@@ -103,7 +103,7 @@ cases:
       redaction: { allow: { user: [1, 2], merge_request: [2900] } }
     query:
       gql: |
-        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2900}) WHERE mr.created_at < datetime('2000-01-01T00:00:00Z') RETURN u, mr LIMIT 10
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2900}) WHERE mr.created_at < datetime('2000-01-01T00:00:00Z') RETURN u, mr LIMIT 10
     expect:
       skip_requirements: ["filter:created_at"]
       node_count: 3
@@ -113,13 +113,13 @@ cases:
         MergeRequest:
           ids: [2900]
       edges:
-        REVIEWER: [[1, 2900], [2, 2900]]
+        REVIEWED_BY: [[1, 2900], [2, 2900]]
 
   - name: unknown_enum_value_is_rejected
     description: A relationship enum filter rejects a value outside the declared set and names the valid ones
     query:
       gql: |
-        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) WHERE r.state = 'guess' RETURN u, mr LIMIT 10
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) WHERE r.state = 'guess' RETURN u, mr LIMIT 10
     expect:
       compile_error_contains: ['"guess" cannot match this pattern', reviewed, unreviewed]
 
@@ -129,7 +129,7 @@ cases:
       gql: |
         MATCH (u:User)-[r:APPROVED]->(mr:MergeRequest {id: 2000}) RETURN u.username, r.state LIMIT 10
     expect:
-      compile_error_contains: ['reads property "state"', REVIEWER]
+      compile_error_contains: ['reads property "state"', REVIEWED_BY]
 
   - name: untyped_relationship_is_rejected
     description: A property read needs a relationship type in the pattern
@@ -143,7 +143,7 @@ cases:
     description: An aggregation groups the reviews of a merge request by the review state
     query:
       gql: |
-        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) RETURN r.state, count(u) AS n ORDER BY n DESC
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) RETURN r.state, count(u) AS n ORDER BY n DESC
     expect:
       skip_requirements: [node_ids, aggregation_sort]
       row_count: 2
@@ -153,7 +153,7 @@ cases:
     description: An aggregation measures a relationship time per merge request
     query:
       gql: |
-        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest) WHERE mr.id IN [2000, 2001] RETURN mr.id, max(r.created_at) AS last_request, count(r) AS reviews ORDER BY reviews DESC
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest) WHERE mr.id IN [2000, 2001] RETURN mr.id, max(r.created_at) AS last_request, count(r) AS reviews ORDER BY reviews DESC
     expect:
       skip_requirements: [node_ids, "filter:id", aggregation_sort]
       row_count: 2
@@ -165,13 +165,13 @@ cases:
       gql: |
         MATCH (u:User)-[r:APPROVED]->(mr:MergeRequest {id: 2000}) RETURN r.state, count(u) AS n
     expect:
-      compile_error_contains: ['reads property "state"', REVIEWER]
+      compile_error_contains: ['reads property "state"', REVIEWED_BY]
 
   - name: aggregate_rejects_an_enum_measure
     description: A min or max over an enum relationship property is rejected and points to grouping
     query:
       gql: |
-        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) RETURN max(r.state) AS s
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) RETURN max(r.state) AS s
     expect:
       compile_error_contains: [does not apply to enum, group by it instead]
 
@@ -179,7 +179,7 @@ cases:
     description: A JSON relationship filter on a property works when the relationship has no direction
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr","direction":"both","filters":{"state":"reviewed"}}],"limit":10}
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"relationships":[{"type":"REVIEWED_BY","from":"u","to":"mr","direction":"both","filters":{"state":"reviewed"}}],"limit":10}
     expect:
       node_count: 3
       nodes:
@@ -188,13 +188,13 @@ cases:
         MergeRequest:
           ids: [2000]
       edges:
-        REVIEWER: [[1, 2000], [3, 2000]]
+        REVIEWED_BY: [[1, 2000], [3, 2000]]
 
   - name: json_filter_over_a_hop_range
     description: A JSON relationship filter on a property applies to every hop of a variable-length relationship
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr","hops":[1,2],"filters":{"state":"reviewed"}}],"limit":10}
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"relationships":[{"type":"REVIEWED_BY","from":"u","to":"mr","hops":[1,2],"filters":{"state":"reviewed"}}],"limit":10}
     expect:
       node_count: 3
       nodes:
@@ -203,13 +203,13 @@ cases:
         MergeRequest:
           ids: [2000]
       edges:
-        REVIEWER: [[1, 2000], [3, 2000]]
+        REVIEWED_BY: [[1, 2000], [3, 2000]]
 
   - name: nullable_property_renders_null
     description: A nullable relationship property without a value renders NULL
     query:
       gql: |
-        MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) RETURN u.username, r.review_note ORDER BY u.username LIMIT 10
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) RETURN u.username, r.review_note ORDER BY u.username LIMIT 10
     expect:
       node_count: 4
       nodes:
@@ -219,7 +219,7 @@ cases:
         MergeRequest:
           ids: [2000]
       edges:
-        REVIEWER: [[1, 2000], [2, 2000], [3, 2000]]
+        REVIEWED_BY: [[1, 2000], [2, 2000], [3, 2000]]
       gql_columns:
         r.review_note: ['"looks good"', "NULL", "NULL"]
 

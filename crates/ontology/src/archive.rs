@@ -267,6 +267,32 @@ mod tests {
     }
 
     #[test]
+    fn bundled_archives_derive_no_edge_property_columns_without_a_writer() {
+        for version in OntologyArchive::bundled_versions().unwrap() {
+            let ontology = OntologyArchive::bundled(version)
+                .unwrap()
+                .unwrap()
+                .load_ontology()
+                .unwrap();
+            let table = ontology.edge_table_config(ontology.edge_table()).unwrap();
+            assert_eq!(
+                table.columns.len(),
+                crate::constants::EDGE_RESERVED_COLUMNS.len(),
+                "v{version}: {:?}",
+                table.columns
+            );
+            assert!(
+                ontology.edge_properties("MEMBER_OF").is_empty(),
+                "v{version}"
+            );
+            assert!(
+                ontology.edge_properties("RELATED_TO").is_empty(),
+                "v{version}"
+            );
+        }
+    }
+
+    #[test]
     fn unsupported_versions_have_no_bundled_archive() {
         assert!(OntologyArchive::bundled(u32::MAX).unwrap().is_none());
     }
