@@ -1,0 +1,4 @@
+variants:
+  - from_node: { type: AgentSession, id: id }
+    to_node: { type: Note, id: id }
+    table: gl_note_edge
