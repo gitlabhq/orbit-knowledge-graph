@@ -240,7 +240,7 @@ mod tests {
             .to_clickhouse_settings()
             .unwrap();
         assert!(traversal.contains(&("max_execution_time".into(), "30".into())));
-        assert!(traversal.contains(&("max_memory_usage".into(), "17179869184".into())));
+        assert!(traversal.contains(&("max_memory_usage".into(), "4294967296".into())));
         assert!(traversal.contains(&(
             "query_cache_nondeterministic_function_handling".into(),
             "'ignore'".into()

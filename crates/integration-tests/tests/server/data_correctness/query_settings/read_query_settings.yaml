@@ -9,14 +9,14 @@ cases:
       gql: "MATCH (w:WorkItem) WHERE w.id >= 1 AND w.id <= 100000 RETURN w LIMIT 10"
     expect:
       compile_only: true
-      settings: { max_execution_time: 30, max_memory_usage: 17179869184, query_cache_nondeterministic_function_handling: ignore }
+      settings: { max_execution_time: 30, max_memory_usage: 4294967296, query_cache_nondeterministic_function_handling: ignore }
 
   - name: path_finding_time_limit
     query:
       gql: "MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(pr:Project {id: 1000}) RETURN p"
     expect:
       compile_only: true
-      settings: { max_execution_time: 15, max_memory_usage: 17179869184 }
+      settings: { max_execution_time: 15, max_memory_usage: 4294967296 }
 
   - name: final_scan_group
     query:

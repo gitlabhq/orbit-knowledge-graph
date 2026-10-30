@@ -702,7 +702,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(sql.contains("max_execution_time = 15"), "{sql}");
-        assert!(sql.contains("max_memory_usage = 17179869184"), "{sql}");
+        assert!(sql.contains("max_memory_usage = 4294967296"), "{sql}");
     }
 
     #[test]
