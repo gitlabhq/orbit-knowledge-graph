@@ -177,7 +177,7 @@ fn edge_transform(
     Ok(TransformSpec::DataFusion(edge_transformations(
         relationship_kind,
         mapping,
-        scope == EtlScope::Namespaced,
+        namespaced_emitter(scope == EtlScope::Namespaced, None),
         filters,
         denormalized,
         ontology,
@@ -202,20 +202,36 @@ fn fk_edge_transform(
         });
     }
     let denormalized = fk_denormalized_columns(mapping, node_name, ontology);
+    let owner_column = ontology
+        .get_node(node_name)
+        .and_then(|node| node.redaction.as_ref()?.owner_column.as_deref());
     edge_transformations(
         &mapping.label,
         mapping,
-        namespaced,
+        namespaced_emitter(namespaced, owner_column),
         filters,
         denormalized,
         ontology,
     )
 }
 
+#[derive(Clone, Copy)]
+struct Emitter<'a> {
+    namespaced: bool,
+    owner_column: Option<&'a str>,
+}
+
+fn namespaced_emitter(namespaced: bool, owner_column: Option<&str>) -> Emitter<'_> {
+    Emitter {
+        namespaced,
+        owner_column,
+    }
+}
+
 fn edge_transformations(
     relationship_kind: &str,
     mapping: &EdgeMapping,
-    namespaced: bool,
+    emitter: Emitter<'_>,
     mut filters: Vec<EdgeFilter>,
     denormalized: Vec<DenormalizedColumnProjection>,
     ontology: &Ontology,
@@ -259,6 +275,15 @@ fn edge_transformations(
                 });
             }
             let meta = edge_table_metadata(table, ontology);
+            let owner = match (&meta.owner_column, emitter.owner_column) {
+                (Some(column), Some(source)) => Some((column.as_str(), source)),
+                (Some(_), None) => {
+                    return Err(ontology::OntologyError::Validation(format!(
+                        "edge '{relationship_kind}' writes to '{table}', which declares redaction.owner_column, but its emitter has no redaction.owner_column"
+                    )));
+                }
+                (None, _) => None,
+            };
             Ok(Transformation {
                 sql: build_edge_transform_sql(
                     &edge_id_sql(&resolve_edge_id(
@@ -272,10 +297,11 @@ fn edge_transformations(
                         mapping.array_field.as_deref(),
                     )),
                     &target_kind_sql,
-                    namespaced,
+                    emitter.namespaced,
                     &denormalized,
                     &filters,
-                    &meta.sort_key,
+                    &meta,
+                    owner,
                 ),
                 destination_table: prefixed_table_name(table, *SCHEMA_VERSION),
                 dict_encode_columns: meta.dict_columns,
@@ -466,6 +492,7 @@ fn node_column_sql(column: &NodeColumn) -> String {
 struct EdgeTableMetadata {
     sort_key: Vec<String>,
     dict_columns: HashSet<String>,
+    owner_column: Option<String>,
 }
 
 fn edge_table_metadata(table: &str, ontology: &Ontology) -> EdgeTableMetadata {
@@ -473,13 +500,13 @@ fn edge_table_metadata(table: &str, ontology: &Ontology) -> EdgeTableMetadata {
         .sort_key_for_table(table)
         .map(|keys| keys.to_vec())
         .unwrap_or_default();
-    let dict_columns = ontology
-        .edge_table_config(table)
-        .map(|config| low_cardinality_columns(&config.storage.columns))
-        .unwrap_or_default();
+    let config = ontology.edge_table_config(table);
     EdgeTableMetadata {
         sort_key,
-        dict_columns,
+        dict_columns: config
+            .map(|config| low_cardinality_columns(&config.storage.columns))
+            .unwrap_or_default(),
+        owner_column: config.and_then(|config| Some(config.owner.as_ref()?.column.clone())),
     }
 }
 
@@ -567,9 +594,10 @@ fn build_edge_transform_sql(
     namespaced: bool,
     denormalized: &[DenormalizedColumnProjection],
     filters: &[EdgeFilter],
-    sort_key: &[String],
+    meta: &EdgeTableMetadata,
+    owner: Option<(&str, &str)>,
 ) -> String {
-    let select_list = edge_select_list(
+    let mut select_list = edge_select_list(
         source_id,
         source_kind,
         relationship_kind,
@@ -578,14 +606,17 @@ fn build_edge_transform_sql(
         namespaced,
         denormalized,
     );
+    if let Some((column, source)) = owner {
+        select_list.push(format!("{source} AS {column}"));
+    }
     let mut sql = format!("SELECT {} FROM {SOURCE_DATA_TABLE}", select_list.join(", "));
     if let Some(where_sql) = edge_filters_sql(filters) {
         sql.push_str(" WHERE ");
         sql.push_str(&where_sql);
     }
-    if !sort_key.is_empty() {
+    if !meta.sort_key.is_empty() {
         sql.push_str(" ORDER BY ");
-        sql.push_str(&sort_key.join(", "));
+        sql.push_str(&meta.sort_key.join(", "));
     }
     sql
 }
@@ -782,6 +813,44 @@ mod tests {
         assert!(
             sql.contains("concat('state:', CAST(user_state AS VARCHAR))"),
             "sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn owner_edge_table_takes_the_owner_id_from_the_emitting_node() {
+        let ontology = Ontology::new()
+            .with_nodes(["User", "Todo"])
+            .with_fields("Todo", [("user_id", ontology::DataType::Int)])
+            .with_redaction("Todo", "todo", "id")
+            .with_redaction_owner_column("Todo", "user_id")
+            .with_edges(["HAS_TODO"])
+            .with_edge_table("gl_todo_edge")
+            .with_edge_table_owner("gl_todo_edge", "_owner_id", ontology::OwnerBypass::None)
+            .with_edge_variant(ontology::EdgeEntity {
+                relationship_kind: "HAS_TODO".into(),
+                source: "user_id".into(),
+                source_kind: "User".into(),
+                target: "id".into(),
+                target_kind: "Todo".into(),
+                destination_table: "gl_todo_edge".into(),
+                fk_column: None,
+                scope: None,
+            });
+        let mapping = literal_mapping("user_id", "User", "id", "Todo", "HAS_TODO");
+
+        let sql = fk_edge_transform(&mapping, "Todo", true, &ontology)
+            .unwrap()
+            .pop()
+            .unwrap()
+            .sql;
+        assert!(sql.contains("user_id AS _owner_id"), "sql: {sql}");
+
+        let error = fk_edge_transform(&mapping, "User", true, &ontology).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("emitter has no redaction.owner_column"),
+            "{error}"
         );
     }
 
