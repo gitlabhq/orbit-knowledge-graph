@@ -40,7 +40,7 @@ test('other tool calls keep Claude Code row', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeDefined()
 })
 
-test('the status line counts finished Orbit queries and passes every call through', async ($, on) => {
+test('the status line counts finished Orbit calls and passes every call through', async ($, on) => {
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
   on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\nedges[2]:\n' } }))
   const answer = await $.tool.call({ tool: 'Bash', command: QUERY })
@@ -49,12 +49,24 @@ test('the status line counts finished Orbit queries and passes every call throug
 
   const ui = await $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
   expect(await ui.find({ type: 'Text', text: '1' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ' query' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ call$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' nodes' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' edges' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '  ◎ GitLab Orbit' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '~1' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' API call replaced' })).toBeDefined()
+})
+
+test('the status line counts every Orbit call, not only queries', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'ok\n' } }))
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit status' })
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit schema' })
+
+  const ui = await $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
+  expect(await ui.find({ type: 'Text', text: '2' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ calls$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /quer/ })).toBeUndefined()
 })
 
 function graphOf(total: number) {
@@ -283,12 +295,12 @@ test('the status line starts over when the session ends, and counts only what fo
   expect(await ui.find({ type: 'Text', text: '3 / 1,000' })).toBeDefined()
 
   await $.session.end({ reason: 'clear', sessionId: 'old', resume: { id: 'old' } } as never)
-  expect(await ui.find({ type: 'Text', text: /quer/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /call/ })).toBeUndefined()
 
   await $.tool.call({ tool: 'Bash', command: QUERY })
   for (let i = 0; i < 10; i++) await Promise.resolve()
   expect(await ui.find({ type: 'Text', text: '3' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ' query' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ call$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /\//})).toBeUndefined()
   expect(runs.length).toBe(2)
 })
