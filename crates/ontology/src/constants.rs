@@ -109,21 +109,14 @@ pub fn validate_ontology_constants(ontology: &crate::Ontology) {
         ontology.edge_table(),
     );
 
-    for (i, col) in ontology.edge_columns().iter().enumerate() {
+    let columns = ontology.edge_columns();
+    for (i, reserved) in EDGE_RESERVED_COLUMNS.iter().enumerate() {
         assert_eq!(
-            col.name, EDGE_RESERVED_COLUMNS[i],
-            "edge_columns[{i}].name in YAML (\"{}\") doesn't match \
-             EDGE_RESERVED_COLUMNS[{i}] (\"{}\") — update YAML or constants.rs",
-            col.name, EDGE_RESERVED_COLUMNS[i],
+            columns.get(i).map(|col| col.name.as_str()),
+            Some(*reserved),
+            "edge_columns[{i}] in YAML doesn't match EDGE_RESERVED_COLUMNS[{i}] (\"{reserved}\") — update YAML or constants.rs",
         );
     }
-    assert_eq!(
-        ontology.edge_columns().len(),
-        EDGE_RESERVED_COLUMNS.len(),
-        "edge_columns count {} doesn't match EDGE_RESERVED_COLUMNS length {}",
-        ontology.edge_columns().len(),
-        EDGE_RESERVED_COLUMNS.len(),
-    );
 }
 
 #[cfg(test)]
