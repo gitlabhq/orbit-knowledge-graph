@@ -15,7 +15,7 @@ WITH
     traversal_path,
     {{version_column}},
     {{deleted_column}}
-  FROM siphon_sbom_occurrences AS o
+  FROM siphon_sbom_occurrences AS o {{final}}
   WHERE startsWith(o.traversal_path, {traversal_path:String}) {{filters}}
   ORDER BY traversal_path, id
   LIMIT {{batch_size}})

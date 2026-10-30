@@ -7,7 +7,7 @@ WITH
     traversal_path,
     {{version_column}} AS _version,
     {{deleted_column}} AS _deleted
-  FROM siphon_duo_workflows_workflow_work_items
+  FROM siphon_duo_workflows_workflow_work_items {{final}}
   WHERE startsWith(traversal_path, {traversal_path:String})
     AND (project_id IS NOT NULL OR {{deleted_column}}) {{filters}}
   ORDER BY traversal_path, workflow_id, id

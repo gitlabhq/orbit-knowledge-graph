@@ -32,7 +32,7 @@ WITH
     partition_id,
     {{version_column}} AS _version,
     {{deleted_column}} AS _deleted
-  FROM siphon_p_ci_pipelines
+  FROM siphon_p_ci_pipelines {{final}}
   WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
   ORDER BY traversal_path, id, partition_id
   LIMIT {{batch_size}}),

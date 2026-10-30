@@ -18,7 +18,7 @@ SELECT
   p.project_path AS traversal_path,
   i.{{version_column}} AS _version,
   (i.{{deleted_column}} OR i.deleted_at IS NOT NULL) AS _deleted
-FROM siphon_ai_catalog_items AS i
+FROM siphon_ai_catalog_items AS i {{final}}
 INNER JOIN _paths AS p ON p.id = i.id
 WHERE startsWith(p.project_path, {traversal_path:String}) {{filters}}
 ORDER BY traversal_path, id

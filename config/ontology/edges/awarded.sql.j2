@@ -7,7 +7,7 @@ WITH
     traversal_path,
     {{version_column}} AS _version,
     {{deleted_column}} AS _deleted
-  FROM siphon_award_emoji
+  FROM siphon_award_emoji {{final}}
   WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
   ORDER BY traversal_path, awardable_type, awardable_id, id
   LIMIT {{batch_size}}),
