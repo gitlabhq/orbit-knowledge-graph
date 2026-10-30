@@ -198,7 +198,7 @@ export const register: Register = (on) => {
     const dim = (text: string) => Text({ dimColor: true, children: [text] })
     const graphTotal = countedTotal([...projectTotals].flatMap(([key, total]) => (total ? [{ key, total, identity: scopeIdentities.get(key) }] : [])))
     const words: [string, string][] = [
-      [compact(stats.calls), stats.calls === 1 ? ' query' : ' queries'],
+      [compact(stats.calls), stats.calls === 1 ? ' call' : ' calls'],
       ['~' + compact(stats.apiCalls), stats.apiCalls === 1 ? ' API call replaced' : ' API calls replaced'],
       graphTotal
         ? [compact(stats.nodes) + ' / ' + grouped(graphTotal), ' nodes']
