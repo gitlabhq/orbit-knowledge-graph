@@ -1,0 +1,15 @@
+-- A row whose path is not its project's current path (deleted or moved project) is written deleted.
+SELECT
+  user_id,
+  project_id,
+  access_level,
+  traversal_path,
+  {{version_column}} AS _version,
+  ({{deleted_column}}
+    OR dictGetOrDefault('project_traversal_paths_dict', 'traversal_path', toUInt64(project_id), '0/') != traversal_path) AS _deleted
+FROM siphon_project_authorizations {{final}}
+WHERE startsWith(traversal_path, {traversal_path:String})
+  AND traversal_path != '0/'
+  AND access_level >= 20 {{filters}}
+ORDER BY traversal_path, user_id, project_id, access_level
+LIMIT {{batch_size}}

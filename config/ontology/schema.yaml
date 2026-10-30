@@ -136,6 +136,34 @@ settings:
           - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
+    gl_access_edge:
+      sort_key: [traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind]
+      columns:
+        - {name: traversal_path, type: string}
+        - {name: relationship_kind, type: string}
+        - {name: source_id, type: int64}
+        - {name: source_kind, type: string}
+        - {name: target_id, type: int64}
+        - {name: target_kind, type: string}
+      storage:
+        index_granularity: 1024
+        primary_key: [traversal_path, relationship_kind, source_id]
+        columns:
+          - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+          - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+          - {name: source_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+          - {name: relationship_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+          - {name: target_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+          - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+        indexes:
+          - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
+          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
+  reordered_tables:
+    - name: gl_access_edge_by_source
+      source: gl_access_edge
+      sort_key: [source_id, traversal_path, relationship_kind, target_id, source_kind, target_kind]
+      max_pinned_ids: 100
   denormalization:
     # --- Branch ---
     - {node: Branch, property: is_default}
@@ -415,6 +443,7 @@ edges:
   CONTAINS: edges/contains.yaml
   HAS_DIFF: edges/has_diff.yaml
   MEMBER_OF: edges/member_of.yaml
+  HAS_ACCESS: edges/has_access.yaml
   CREATOR: edges/creator.yaml
   OWNER: edges/owner.yaml
   AUTHORED: edges/authored.yaml

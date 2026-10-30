@@ -148,6 +148,7 @@ mod tests {
                 "DECLARES_DEPENDENCY_siphon_packages_dependency_links_Dependency",
                 "DEPLOYED_TO_siphon_deployment_merge_requests_Deployment",
                 "FIXES_siphon_vulnerability_merge_request_links_Vulnerability",
+                "HAS_ACCESS_siphon_project_authorizations",
                 "HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_VulnerabilityIdentifier",
                 "HAS_LABEL_siphon_label_links_Label",
                 "HAS_VULNERABILITY_siphon_sbom_occurrences_vulnerabilities_Vulnerability",
