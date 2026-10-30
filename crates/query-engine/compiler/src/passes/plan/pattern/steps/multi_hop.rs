@@ -31,7 +31,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         select_edge_layouts(
             pattern.model,
             &mut expansion.edge_tables,
-            &[expansion.direction.edge_columns().0],
+            &[(expansion.direction.edge_columns().0, None)],
         );
         multi_hop(
             &mut self.graph,

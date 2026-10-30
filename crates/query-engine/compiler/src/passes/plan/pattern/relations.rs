@@ -106,13 +106,13 @@ where
                 edge_tables.push(model.default_edge_table().to_string());
             }
             let (start, end) = relationship.direction.edge_columns();
-            let pinned: Vec<&str> = [(&relationship.from, start), (&relationship.to, end)]
+            let pinned: Vec<PinnedColumn> = [(&relationship.from, start), (&relationship.to, end)]
                 .into_iter()
-                .filter(|(node, _)| {
-                    relationship.hops.max == 1
-                        && nodes.get(node.as_str()).is_some_and(NodePlan::is_pinned)
+                .filter(|_| relationship.hops.max == 1)
+                .filter_map(|(node, column)| {
+                    let plan = nodes.get(node.as_str()).filter(|plan| plan.is_pinned())?;
+                    Some((column, plan.max_ids()))
                 })
-                .map(|(_, column)| column)
                 .collect();
             select_edge_layouts(model, &mut edge_tables, &pinned);
             let fk = (relationship.hops.max == 1
@@ -160,11 +160,13 @@ where
         .collect()
 }
 
+pub(super) type PinnedColumn<'a> = (&'a str, Option<usize>);
+
 /// Swaps each table for the equivalent layout whose sort key reaches a pinned endpoint column soonest.
 pub(super) fn select_edge_layouts(
     model: &(impl OrbitQueryModel + ?Sized),
     tables: &mut [String],
-    endpoints: &[&str],
+    endpoints: &[PinnedColumn],
 ) {
     if endpoints.is_empty() {
         return;
@@ -172,11 +174,14 @@ pub(super) fn select_edge_layouts(
     for table in tables {
         let selected = std::iter::once(table.as_str())
             .chain(model.equivalent_layouts(table))
+            .filter(|layout| pin_fits(model, layout, endpoints))
             .min_by_key(|layout| {
                 model.table_sort_key(layout).map_or(usize::MAX, |key| {
                     endpoints
                         .iter()
-                        .filter_map(|endpoint| key.iter().position(|column| column == endpoint))
+                        .filter_map(|(endpoint, _)| {
+                            key.iter().position(|column| column == endpoint)
+                        })
                         .min()
                         .unwrap_or(usize::MAX)
                 })
@@ -185,6 +190,22 @@ pub(super) fn select_edge_layouts(
             *table = selected.to_string();
         }
     }
+}
+
+fn pin_fits(
+    model: &(impl OrbitQueryModel + ?Sized),
+    layout: &str,
+    endpoints: &[PinnedColumn],
+) -> bool {
+    let Some(limit) = model.pinned_layout_limit(layout) else {
+        return true;
+    };
+    let Some(lead) = model.table_sort_key(layout).and_then(<[String]>::first) else {
+        return false;
+    };
+    endpoints
+        .iter()
+        .any(|(column, ids)| column == lead && ids.is_some_and(|count| count <= limit))
 }
 
 /// Orders relations most selective first while keeping each one connected to the ones before it.

@@ -116,6 +116,9 @@ pub trait RelationalMapping: Send + Sync {
     fn equivalent_layouts(&self, _table: &str) -> Vec<&str> {
         Vec::new()
     }
+    fn pinned_layout_limit(&self, _table: &str) -> Option<usize> {
+        None
+    }
     fn materialized_joins(&self) -> &[MaterializedJoin] {
         &[]
     }

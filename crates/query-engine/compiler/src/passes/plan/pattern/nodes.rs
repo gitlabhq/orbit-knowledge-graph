@@ -100,6 +100,24 @@ impl NodePlan {
         !self.node_ids.is_empty() || self.id_range.is_some()
     }
 
+    pub(crate) fn max_ids(&self) -> Option<usize> {
+        if !self.node_ids.is_empty() {
+            return Some(self.node_ids.len());
+        }
+        self.filters
+            .iter()
+            .filter(|(_, bound)| bound.unique && bound.filter.rhs_column.is_none())
+            .filter_map(|(_, bound)| match (bound.filter.op, &bound.filter.value) {
+                (
+                    None | Some(FilterOp::Eq | FilterOp::In),
+                    Some(serde_json::Value::Array(values)),
+                ) => Some(values.len()),
+                (None | Some(FilterOp::Eq), Some(_)) => Some(1),
+                _ => None,
+            })
+            .min()
+    }
+
     pub(crate) fn id_predicates(&self, column: Column) -> Vec<Predicate> {
         let mut predicates = Vec::new();
         if !self.node_ids.is_empty() {

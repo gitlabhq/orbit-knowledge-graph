@@ -4,7 +4,7 @@
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
 
-use super::super::relations::select_edge_layouts;
+use super::super::relations::{PinnedColumn, select_edge_layouts};
 use super::super::{EdgeRelation, Pattern};
 use super::{IdSet, RelationBuilder};
 use crate::constants::*;
@@ -29,9 +29,15 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             .collect();
         let mut physical = relation.clone();
         if relation.max_hops == 1 {
-            let narrowed: Vec<&str> = endpoint_ids
+            let narrowed: Vec<PinnedColumn> = endpoint_ids
                 .iter()
-                .filter_map(|(node, _)| relation.endpoint_column(node))
+                .filter_map(|(node, _)| {
+                    let bound = pattern
+                        .endpoint_is_selective(node)
+                        .then(|| pattern.nodes[*node].max_ids())
+                        .flatten();
+                    Some((relation.endpoint_column(node)?, bound))
+                })
                 .collect();
             select_edge_layouts(pattern.model, &mut physical.edge_tables, &narrowed);
         }

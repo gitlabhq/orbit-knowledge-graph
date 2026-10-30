@@ -143,6 +143,12 @@ impl RelationalMapping for ClickHouseBindings {
             .map(|copy| copy.table.as_str())
             .collect()
     }
+    fn pinned_layout_limit(&self, table: &str) -> Option<usize> {
+        self.reordered_layouts
+            .iter()
+            .find(|copy| copy.table == table)?
+            .max_pinned_ids
+    }
     fn materialized_joins(&self) -> &[MaterializedJoin] {
         &self.materialized_joins
     }
