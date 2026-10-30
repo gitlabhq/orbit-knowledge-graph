@@ -54,13 +54,13 @@ gitlab_lanes:
     ref: "a274a64c03a89372a6fdf2d16d9f77d5579affa1"
     images:
       webservice:
-        digest: "sha256:52645c59726c2367b6d2621fcb638a18702a8a59eb42f57f6cc7bb9eee4fae84"
+        digest: "sha256:d1191b97982ac27fb52dd46f820b365a4a7b84e8540723dccd95722b48f343ce"
       workhorse:
-        digest: "sha256:67812cb9c6e01781e0767c092ffa1b3e790f72877784d1a5419f435c5ac10ea1"
+        digest: "sha256:cd7c9d7ff426bb0038d9a1e1fa7a0ed16cb03f21fcca8815ce847717a5f750ab"
       sidekiq:
-        digest: "sha256:eb86278242fe761440a8a420abd58e9ccff734419a7df12fd633860adf632bab"
+        digest: "sha256:fed1b9340b8fad5a266bd2310be65aba6f64988a75cb7e32c3b040ead21d60c3"
       toolbox:
-        digest: "sha256:15bb326d9d4fb893c84761b4e524de20d29323d22e3997adaa9b2e6693d6932a"
+        digest: "sha256:c1728610319252888c2e665c3676fa5f4f3fa156c05e534540cfa169f3ae0918"
     repository: registry.gitlab.com/gitlab-org/build/cng-mirror
 gkg:
   chart: "4.1.0"
