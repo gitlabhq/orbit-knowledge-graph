@@ -18,6 +18,11 @@
     }
   ],
   "definitions": {
+    "columnName": {
+      "type": "string",
+      "pattern": "^[a-z_][a-z0-9_]*$",
+      "description": "Column name. Lowercase with underscores."
+    },
     "domainName": {
       "type": "string",
       "enum": [
@@ -92,7 +97,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Column-backed properties this virtual field needs in the property map for resolution. The compiler ensures these are fetched during hydration even if the user didn't request them."
+          "description": "Column-backed properties that hydration fetches for this virtual field, also when not requested."
         },
         "allowed_ops": {
           "type": "array",
@@ -107,7 +112,7 @@
               "is_not_null"
             ]
           },
-          "description": "Filter operators allowed on this virtual column. Applied in-memory after hydration. Defaults to [eq, contains, starts_with, ends_with, is_null, is_not_null] when omitted.",
+          "description": "Filter operators on this virtual column, after hydration. Default: eq, contains, starts_with, ends_with, is_null, is_not_null.",
           "default": []
         }
       },
@@ -151,7 +156,7 @@
             },
             "like_allowed": {
               "type": "boolean",
-              "description": "Whether LIKE-based operators (contains, starts_with, ends_with) are permitted on this field. Defaults to true. Set to false for sensitive columns to prevent probing.",
+              "description": "Allow contains, starts_with, and ends_with. Set false on sensitive columns to prevent probing.",
               "default": true
             },
             "filterable": {
@@ -166,7 +171,7 @@
             },
             "hidden": {
               "type": "boolean",
-              "description": "Whether to leave this field out of every client-facing listing: schemas, wildcard columns, and error candidates. Defaults to false. Explicit requests for the field still work.",
+              "description": "Leave the field out of schemas, wildcard columns, and error candidates. Explicit requests still work.",
               "default": false
             },
             "selectivity": {
@@ -302,11 +307,11 @@
     },
     "redactionConfig": {
       "type": "object",
-      "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. The query engine includes id/type columns in results, and orbit-server validates these against the user's permissions before returning data.",
+      "description": "Access rules of the entity: the Rails redaction check on returned rows, and the row filters the compiler adds to every read.",
       "properties": {
         "resource_type": {
           "type": "string",
-          "description": "Rails resource type identifier used by RedactionService (e.g., 'projects', 'merge_requests', 'groups', 'users'). Maps to keys in Authz::RedactionService::RESOURCE_CLASSES."
+          "description": "RedactionService resource type, a key of Authz::RedactionService::RESOURCE_CLASSES (e.g. 'projects')."
         },
         "id_column": {
           "type": "string",
@@ -326,7 +331,7 @@
             "maintainer",
             "owner"
           ],
-          "description": "Minimum GitLab role a user must hold on a traversal path for this entity's rows to be visible. Applied by the compiler security pass: traversal paths where the user holds a lower role are dropped from the startsWith() predicate for this entity's table, closing the aggregation-query bypass where target nodes (e.g. Vulnerability) were never redacted. Defaults to 'reporter' for entities that do not opt in."
+          "description": "Minimum GitLab role on a traversal path for rows of this entity to be visible. The compiler drops paths with a lower role from the entity's path filter. Defaults to 'reporter'."
         }
       },
       "required": [
@@ -505,7 +510,7 @@
         },
         "statistics": {
           "type": "object",
-          "description": "Column statistics via AggregatingMergeTree MVs over every filterable property, by type: boolean/enum/selectivity:low -> stats_table, string -> token_table, int64/timestamp/date/float -> histogram_table, uuid -> skipped.",
+          "description": "Statistics MVs over filterable properties: stats_table, token_table, or histogram_table by type.",
           "properties": {
             "stats_table": {
               "type": "string",
@@ -651,7 +656,7 @@
         },
         "partition": {
           "type": "object",
-          "description": "Partitioning for tables whose storage columns include the strategy's source column; others stay unpartitioned. Both the DDL and the query-compiler pushdown derive the partition expression from the strategy.",
+          "description": "Partitioning for tables that have the source column of the strategy.",
           "properties": {
             "strategy": {
               "type": "object",
@@ -862,7 +867,7 @@
               },
               "to_table": {
                 "type": "string",
-                "description": "Target table for the TO clause. The table must be an ontology-tracked table (auxiliary, node, or edge) so it is created and dropped alongside other graph tables during schema migration. Receives the schema-version prefix during migration unless versioned is false, in which case it must be an unversioned auxiliary table."
+                "description": "Ontology-tracked target table of the TO clause. It gets the version prefix unless versioned is false."
               },
               "select_query": {
                 "type": "string",
@@ -1041,7 +1046,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Regex patterns for versioned objects (matched against the base name after stripping the v<N>_ prefix) that the dead-version GC sweep must never drop. Empty by default: everything outside the keep-set is dropped.",
+          "description": "Regexes on unprefixed names of versioned objects that the GC sweep must keep.",
           "default": []
         }
       },
@@ -1291,7 +1296,7 @@
         "prune_to_source",
         "prune_to_target"
       ],
-      "description": "How traversal_path scope crosses an edge. namespace_anchor uses a Project or Group FK. same_namespace propagates within one subtree. prune_to_source and prune_to_target scope only the edge scan to that path-scopable endpoint. An omitted value does not scope or propagate."
+      "description": "How traversal_path scope crosses the edge: namespace_anchor, same_namespace, prune_to_source, or prune_to_target. Omit for no scope."
     },
     "edgeVariant": {
       "type": "object",
@@ -1310,7 +1315,7 @@
         },
         "fk_column": {
           "type": "string",
-          "description": "Foreign key column on one of the two node tables that encodes this relationship (e.g. 'project_id', 'author_id'). The loader resolves which node has the column. When present, the compiler can join node tables directly instead of scanning the edge table."
+          "description": "FK column on one endpoint table (e.g. 'project_id'). The compiler then joins the node tables directly."
         },
         "scope": {
           "$ref": "#/definitions/edgeVariantScope",
@@ -1514,11 +1519,7 @@
           "pattern": "^idx_[a-z_][a-z0-9_]*$",
           "description": "Index name. Must start with idx_."
         },
-        "column": {
-          "type": "string",
-          "pattern": "^[a-z_][a-z0-9_]*$",
-          "description": "Column name. Lowercase with underscores."
-        },
+        "column": { "$ref": "#/definitions/columnName" },
         "type": {
           "type": "string",
           "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\)|text)$",
@@ -1557,11 +1558,7 @@
         },
         "order_by": {
           "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[a-z_][a-z0-9_]*$",
-            "description": "Column name. Lowercase with underscores."
-          },
+          "items": { "$ref": "#/definitions/columnName" },
           "description": "ORDER BY columns (for reorder projections)."
         },
         "select": {
@@ -1575,20 +1572,12 @@
         },
         "group_by": {
           "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[a-z_][a-z0-9_]*$",
-            "description": "Column name. Lowercase with underscores."
-          },
+          "items": { "$ref": "#/definitions/columnName" },
           "description": "GROUP BY columns (for aggregate projections)."
         },
         "versioned_sort_key": {
           "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[a-z_][a-z0-9_]*$",
-            "description": "Column name. Lowercase with underscores."
-          },
+          "items": { "$ref": "#/definitions/columnName" },
           "description": "Prefix columns for a dedup-compatible lightweight projection. The table sort key and _version are appended automatically."
         }
       },
@@ -1819,11 +1808,11 @@
               "pattern": "^[A-Za-z0-9_]+\\.sql\\.j2$"
             }
           ],
-          "description": "'generated' builds the extract SQL from the pipeline declaration, including declared lookups; otherwise references a neighboring MiniJinja .sql.j2 template. Derived pipelines require authored SQL."
+          "description": "'generated' builds the SQL from the pipeline; else a .sql.j2 template. Derived pipelines need SQL."
         },
         "filter": {
           "type": "string",
-          "description": "Extra WHERE predicate appended to the traversal-path scope of the _batch (e.g. 'state = 5'). May use {{version_column}}/{{deleted_column}} markers. Used by 'generated' queries."
+          "description": "Extra WHERE predicate of a 'generated' query (e.g. 'state = 5'). Takes {{version_column}}/{{deleted_column}}."
         },
         "lookups": {
           "type": "array",
