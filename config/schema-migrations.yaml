@@ -19,9 +19,9 @@ migrations:
 - version: 118
   scope: none
   note: >-
-    Full-load extracts read the paged source table with FINAL so the deleted filter
-    runs on the newest version of each row; indexed rows are byte-identical, nothing
-    re-indexes.
+    Full-load extracts read the paged source table with FINAL, so a tombstone in an
+    unmerged part no longer loses to the old live version. DDL unchanged; rows that an
+    earlier full load resurrected remain until the next full rebuild.
 - version: 117
   scope: "*"
   note: >-
