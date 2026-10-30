@@ -348,6 +348,7 @@ impl PreparedQuery {
         QuerySettings {
             max_block_size,
             max_final_threads: self.needs_final.then_some(self.final_read_threads),
+            vertical_final: self.needs_final,
             lazy_materialization_limit: (!self.needs_final).then_some(self.batch_size),
         }
     }
@@ -703,6 +704,7 @@ mod tests {
         assert!(sql.contains("FROM source_table FINAL"), "sql: {sql}");
         assert!(sql.contains("_siphon_deleted = false"), "sql: {sql}");
         assert_eq!(prepared.settings(Some(500)).max_final_threads, Some(4));
+        assert!(prepared.settings(Some(500)).vertical_final);
         assert_eq!(prepared.settings(Some(500)).max_block_size, Some(500));
         assert_eq!(
             prepared.settings(Some(500)).lazy_materialization_limit,

@@ -54,6 +54,7 @@ pub(crate) struct ScanStats {
 pub(crate) struct QuerySettings {
     pub max_block_size: Option<u64>,
     pub max_final_threads: Option<u64>,
+    pub vertical_final: bool,
     pub lazy_materialization_limit: Option<u64>,
 }
 
@@ -121,6 +122,9 @@ impl Datalake {
         }
         if let Some(threads) = settings.max_final_threads {
             query = query.with_setting("max_final_threads", threads.to_string());
+        }
+        if settings.vertical_final {
+            query = query.with_setting("enable_vertical_final", "1");
         }
         if let Some(limit) = settings.lazy_materialization_limit {
             query = query
