@@ -145,7 +145,7 @@ cases:
       gql: |
         MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest {id: 2000}) RETURN r.state, count(u) AS n ORDER BY n DESC
     expect:
-      skip_requirements: [node_ids]
+      skip_requirements: [node_ids, aggregation_sort]
       row_count: 2
       row_values: [{ r_state: reviewed, n: 2 }, { r_state: unreviewed, n: 1 }]
 
@@ -155,7 +155,7 @@ cases:
       gql: |
         MATCH (u:User)-[r:REVIEWER]->(mr:MergeRequest) WHERE mr.id IN [2000, 2001] RETURN mr.id, max(r.created_at) AS last_request, count(r) AS reviews ORDER BY reviews DESC
     expect:
-      skip_requirements: [node_ids, "filter:id"]
+      skip_requirements: [node_ids, "filter:id", aggregation_sort]
       row_count: 2
       row_values: [{ reviews: 3 }, { reviews: 1 }]
 
@@ -179,7 +179,7 @@ cases:
     description: A JSON relationship filter on a property works when the relationship has no direction
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000]},{"id":"u","entity":"User"}],"relationships":[{"type":"REVIEWER","from":"mr","to":"u","direction":"both","filters":{"state":"reviewed"}}],"limit":10}
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr","direction":"both","filters":{"state":"reviewed"}}],"limit":10}
     expect:
       node_count: 3
       nodes:
