@@ -60,17 +60,8 @@ It reads changes from GitLab and never writes back.
 
 ### Access through shared groups
 
-When a group is shared with another group, only direct members of the invited group get access to the shared group.
-Inherited members of the invited group do not get access, in GitLab or in GitLab Orbit.
-The same rule applies to members of shared groups and subgroups of the invited group.
-
-For example, the `platform/developers` group is shared with the `products` group:
-
-- A direct member of `platform/developers` can query `products`.
-- A member of `platform` who is not a direct member of `platform/developers` cannot query `products`.
-
-To give a user access, add the user as a direct member of the invited group.
-For more information, see [share a group with another group](https://docs.gitlab.com/user/project/members/sharing_projects_groups/).
+Only direct members of an invited group get access to the shared group, in GitLab and in GitLab Orbit.
+For more information, see [sharing groups](https://docs.gitlab.com/user/project/members/sharing_projects_groups/#sharing-groups).
 
 ## Programmatic access
 
