@@ -31,7 +31,6 @@ use crate::passes::plan::query_types::hydration::{
 struct PageNode {
     id: String,
     kind: String,
-    path: Option<String>,
     owner_output: Option<String>,
     properties_output: String,
 }
@@ -112,7 +111,6 @@ fn page_node_columns(input: &Input, base: &Query) -> Vec<PageNode> {
                 id: selected(primary_key_column(&node.id))
                     .or_else(|| selected(redaction_id_column(&node.id)))?,
                 kind: selected(redaction_type_column(&node.id))?,
-                path: selected(traversal_path_column(&node.id)),
                 owner_output: None,
                 properties_output: properties_column(&node.id),
             })
@@ -122,7 +120,6 @@ fn page_node_columns(input: &Input, base: &Query) -> Vec<PageNode> {
         nodes.push(PageNode {
             id: neighbor_id_column().into(),
             kind: neighbor_type_column().into(),
-            path: selected(neighbor_traversal_path_column().into()),
             owner_output: Some(neighbor_owner_column().into()),
             properties_output: neighbor_properties_column().into(),
         });
@@ -185,14 +182,7 @@ fn node_properties(
         .iter()
         .map(|node| raw_read(node, model))
         .collect();
-    let pathless: Vec<&str> = plan
-        .operation
-        .nodes
-        .iter()
-        .filter(|node| !model.entity_has_traversal_path(&node.entity))
-        .map(|node| node.entity.as_str())
-        .collect();
-    Ok(Some(latest_page_rows(union(reads), &pathless)))
+    Ok(Some(latest_page_rows(union(reads))))
 }
 
 /// Never references the page: the analyzer re-resolves the page CTE at every reference.
@@ -202,23 +192,21 @@ fn raw_read(node: &HydrationNodePlan, model: &(impl OrbitQueryModel + ?Sized)) -
     let owner = model
         .redaction_id_column_named(&node.entity)
         .unwrap_or(DEFAULT_PRIMARY_KEY);
-    let path = if model.entity_has_traversal_path(&node.entity) {
-        column(TRAVERSAL_PATH_COLUMN)
-    } else {
-        Expr::string("")
-    };
     let id = column(&node.id_property);
     Query {
         select: vec![
             SelectExpr::new(Expr::string(&node.entity), node_kind_column()),
-            SelectExpr::new(path, node_path_column()),
             SelectExpr::new(id.clone(), node_ref_column()),
             SelectExpr::new(
                 Expr::func(
                     Function::ToString,
                     vec![Expr::func(
                         Function::Tuple,
-                        node.sort_key.iter().map(|key| column(key)).collect(),
+                        node.sort_key
+                            .iter()
+                            .filter(|key| *key != TRAVERSAL_PATH_COLUMN)
+                            .map(|key| column(key))
+                            .collect(),
                     )],
                 ),
                 node_row_column(),
@@ -236,25 +224,15 @@ fn raw_read(node: &HydrationNodePlan, model: &(impl OrbitQueryModel + ?Sized)) -
     }
 }
 
-fn latest_page_rows(reads: Query, pathless: &[&str]) -> Query {
+fn latest_page_rows(reads: Query) -> Query {
     let read = |name: &str| Expr::col(node_reads_alias(), name);
-    let on_page = |columns: &[&str], filter: Expr| Expr::InSelect {
+    let on_page = |columns: &[&str]| Expr::InSelect {
         expr: Box::new(Expr::func(
             Function::Tuple,
             columns.iter().map(|c| read(c)).collect(),
         )),
-        query: Box::new(page_nodes_of(columns, filter)),
+        query: Box::new(page_nodes_of(columns)),
     };
-    let page_col = |name: &str| Expr::col(page_nodes_cte(), name);
-    let no_path = Expr::eq(page_col(node_path_column()), Expr::string(""));
-    let known_path = Expr::binary(Op::Ne, page_col(node_path_column()), Expr::string(""));
-    let unknown_path = pathless.iter().fold(no_path, |any, kind| {
-        Expr::binary(
-            Op::Or,
-            any,
-            Expr::eq(page_col(node_kind_column()), Expr::string(*kind)),
-        )
-    });
     let keys = [node_kind_column(), node_row_column()];
     let latest = Query {
         select: [node_key_column(), node_value_column(), DELETED_COLUMN]
@@ -262,11 +240,7 @@ fn latest_page_rows(reads: Query, pathless: &[&str]) -> Query {
             .map(|name| SelectExpr::new(read(name), name))
             .collect(),
         from: TableRef::subquery(reads, node_reads_alias()),
-        where_clause: Some(Expr::binary(
-            Op::Or,
-            on_page(&[node_path_column(), node_ref_column()], known_path),
-            on_page(&[node_kind_column(), node_ref_column()], unknown_path),
-        )),
+        where_clause: Some(on_page(&[node_kind_column(), node_ref_column()])),
         order_by: keys
             .iter()
             .map(|key| OrderExpr::asc(read(key)))
@@ -286,14 +260,13 @@ fn latest_page_rows(reads: Query, pathless: &[&str]) -> Query {
     }
 }
 
-fn page_nodes_of(columns: &[&str], filter: Expr) -> Query {
+fn page_nodes_of(columns: &[&str]) -> Query {
     Query {
         select: columns
             .iter()
             .map(|&column| SelectExpr::new(Expr::col(page_nodes_cte(), column), column))
             .collect(),
         from: TableRef::cte(page_nodes_cte(), page_nodes_cte()),
-        where_clause: Some(filter),
         ..Default::default()
     }
 }
@@ -361,21 +334,12 @@ fn page(base: Query, with_position: bool) -> Query {
 }
 
 fn page_nodes(query_type: QueryType, nodes: &[PageNode]) -> Query {
-    let triple =
-        |id: Expr, kind: Expr, path: Expr| Expr::func(Function::Tuple, vec![id, kind, path]);
+    let pair = |id: Expr, kind: Expr| Expr::func(Function::Tuple, vec![id, kind]);
     let mut groups = vec![Expr::func(
         Function::Array,
         nodes
             .iter()
-            .map(|node| {
-                triple(
-                    page_col(&node.id),
-                    page_col(&node.kind),
-                    node.path
-                        .as_deref()
-                        .map_or_else(|| Expr::string(""), page_col),
-                )
-            })
+            .map(|node| pair(page_col(&node.id), page_col(&node.kind)))
             .collect(),
     )];
     if query_type == QueryType::PathFinding {
@@ -385,10 +349,9 @@ fn page_nodes(query_type: QueryType, nodes: &[PageNode]) -> Query {
             vec![
                 Expr::lambda(
                     page_node_alias(),
-                    triple(
+                    pair(
                         tuple_element(path_node.clone(), 1),
                         tuple_element(path_node, 2),
-                        Expr::string(""),
                     ),
                 ),
                 page_col(path_column()),
@@ -397,7 +360,7 @@ fn page_nodes(query_type: QueryType, nodes: &[PageNode]) -> Query {
     }
     let node = Expr::col(page_node_alias(), page_node_alias());
     Query {
-        select: [node_ref_column(), node_kind_column(), node_path_column()]
+        select: [node_ref_column(), node_kind_column()]
             .into_iter()
             .zip(1..)
             .map(|(name, index)| SelectExpr::new(tuple_element(node.clone(), index), name))
