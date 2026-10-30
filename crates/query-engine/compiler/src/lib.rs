@@ -194,10 +194,6 @@ pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Inp
 
 /// Compile a pre-built hydration `Input` into ClickHouse SQL.
 ///
-/// Runs the hydration pipeline: condition validation, restrict, plan, bounds, lower,
-/// response policy, result contract, settings, security, security check, and codegen.
-/// It skips schema validation, normalization, and the hydrate plan pass.
-/// Codegen defaults to `HydrationPlan::None`.
 pub fn compile_input(
     input: Input,
     options: HydrationCompileOptions,
