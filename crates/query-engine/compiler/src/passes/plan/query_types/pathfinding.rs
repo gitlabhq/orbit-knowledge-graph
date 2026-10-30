@@ -21,6 +21,7 @@ pub struct PathFinding {
 pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
     input: &Input,
     model: &M,
+    owner_gates: &[String],
 ) -> Result<Plan<PathFinding>> {
     let path = input
         .path
@@ -37,15 +38,18 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
     let end = NodePlan::resolve(end_node, model)?;
 
     let max_depth = path.max_depth;
-    let mut plan = Plan::new(PathFinding {
-        start: start.alias.clone(),
-        end: end.alias.clone(),
-        max_depth,
-        forward_depth: max_depth / 2 + max_depth % 2,
-        backward_depth: if max_depth >= 2 { max_depth / 2 } else { 0 },
-        edge: EdgeTableConfig::from_model(model, &path.rel_types),
-        scoped_by_tp: start.has_traversal_path && end.has_traversal_path,
-    });
+    let mut plan = Plan::new(
+        PathFinding {
+            start: start.alias.clone(),
+            end: end.alias.clone(),
+            max_depth,
+            forward_depth: max_depth / 2 + max_depth % 2,
+            backward_depth: if max_depth >= 2 { max_depth / 2 } else { 0 },
+            edge: EdgeTableConfig::from_model(model, &path.rel_types),
+            scoped_by_tp: start.has_traversal_path && end.has_traversal_path,
+        },
+        owner_gates,
+    );
     plan.nodes.insert(start.alias.clone(), start);
     plan.nodes.insert(end.alias.clone(), end);
     Ok(plan)

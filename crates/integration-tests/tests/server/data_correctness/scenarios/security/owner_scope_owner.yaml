@@ -7,6 +7,7 @@ config:
     allow:
       user: [1, 2]
       merge_request: [2000, 2001]
+      project: [1000, 1001]
       note: [3000, 3001, 3002, 3003, 3100, 3101, 3102]
   extra_seed:
     gl_note:
@@ -20,6 +21,7 @@ config:
       - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 3100, target_kind: Note, source_tags: [], target_tags: [] }
       - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 3101, target_kind: Note, source_tags: [], target_tags: [] }
       - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 3102, target_kind: Note, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 3101, source_kind: Note, relationship_kind: IN_PROJECT, target_id: 1001, target_kind: Project, source_tags: [], target_tags: [] }
 
 steps:
   - query:
@@ -72,3 +74,29 @@ steps:
       path_count: 1
       path_edges:
         - [{ from: MergeRequest, from_id: 2000, type: HAS_NOTE, to: Note, to_id: 3101 }]
+
+  - query:
+      json: |
+        {"query_type": "neighbors", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}], "neighbors": {"direction": "outgoing", "rel_types": ["HAS_NOTE"]}}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n) RETURN mr, n
+    expect:
+      edge_count: { HAS_NOTE: 0 }
+      skip_requirements: [node_ids, node_count]
+
+  - query:
+      json: |
+        {"query_type": "path_finding", "nodes": [{"id": "start", "entity": "MergeRequest", "node_ids": [2000]}, {"id": "end", "entity": "Project", "node_ids": [1001]}], "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["HAS_NOTE", "IN_PROJECT"]}}
+      gql: |
+        MATCH p = ANY SHORTEST (start:MergeRequest {id: 2000})-[:HAS_NOTE|IN_PROJECT*1..2]->(`end`:Project {id: 1001}) RETURN p
+    expect:
+      path_count: 0
+
+  - query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}, {"id": "p", "entity": "Project"}], "relationships": [{"type": ["HAS_NOTE", "IN_PROJECT"], "from": "mr", "to": "p", "hops": [2, 2]}], "limit": 20}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE|IN_PROJECT*2..2]->(p:Project) RETURN mr, p LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: [node_ids, "relationship:HAS_NOTE", "relationship:IN_PROJECT"]

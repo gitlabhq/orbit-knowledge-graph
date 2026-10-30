@@ -231,6 +231,14 @@ pub trait OrbitQueryModel {
         self.query_authorization().owner_column(entity)
     }
 
+    fn owner_scoped_entities(&self) -> Vec<String> {
+        self.graph()
+            .entities()
+            .filter(|entity| self.query_authorization().owner_column(entity.id).is_some())
+            .map(|entity| entity.name.clone())
+            .collect()
+    }
+
     fn property_is_admin_only(&self, property: PropertyId) -> bool {
         self.query_authorization().is_admin_only(property)
     }

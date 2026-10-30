@@ -106,19 +106,18 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
     for depth in 2..=relation.max_hops {
         let previous_alias = reached_depth_alias(depth - 1);
         let current_alias = hop_alias(depth);
-        let current = hop_rows(
-            graph,
-            pattern,
-            relation,
-            &current_alias,
-            vec![
-                live(&current_alias),
-                membership(
-                    Column::new(&current_alias, start_id),
-                    (previous, end_id.to_string()),
-                ),
-            ],
-        )?;
+        let mut current_predicates = vec![
+            live(&current_alias),
+            membership(
+                Column::new(&current_alias, start_id),
+                (previous, end_id.to_string()),
+            ),
+        ];
+        current_predicates.extend(entity_kind_not_in(
+            Column::new(&current_alias, kind_column(start_id)),
+            &pattern.owner_gates,
+        ));
+        let current = hop_rows(graph, pattern, relation, &current_alias, current_predicates)?;
         let joined = graph.join(
             previous.alias(&previous_alias),
             current.alias(&current_alias),

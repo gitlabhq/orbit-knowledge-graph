@@ -15,7 +15,7 @@ use crate::input::*;
 use super::Emitted;
 use crate::passes::lower::sql::{
     dedup_query, deleted_false, denorm_tag_expr, filter_to_expr, final_edge_table_scan,
-    id_list_predicate, id_range_predicate, rel_kind_filter,
+    id_list_predicate, id_range_predicate, kind_not_in, rel_kind_filter,
 };
 use crate::passes::plan::{NodePlan, PathFinding, Plan};
 
@@ -71,6 +71,12 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
         scope_cte: path_scope.as_ref().map(|c| c.name.as_str()),
         include_tp: pf.scoped_by_tp,
         anchor_denorm_tags: start_denorm,
+        owner_gates: &plan.owner_gates,
+        gated_anchor_ctes: [(start_entity, &start_anchor), (end_entity, &end_anchor)]
+            .into_iter()
+            .filter(|(entity, _)| plan.owner_gates.iter().any(|kind| kind == entity))
+            .filter_map(|(_, anchor)| anchor.cte_name.clone())
+            .collect(),
     };
 
     let forward_frontier = Cte::new(
@@ -435,6 +441,23 @@ struct FrontierOpts<'a> {
     scope_cte: Option<&'a str>,
     include_tp: bool,
     anchor_denorm_tags: Vec<Expr>,
+    owner_gates: &'a [String],
+    gated_anchor_ctes: Vec<String>,
+}
+
+fn owner_gate(alias: &str, id_col: &str, kind_col: &str, opts: &FrontierOpts<'_>) -> Option<Expr> {
+    let gate = kind_not_in(alias, kind_col, opts.owner_gates)?;
+    Some(opts.gated_anchor_ctes.iter().fold(gate, |gate, cte| {
+        Expr::binary(
+            Op::Or,
+            gate,
+            Expr::InSubquery {
+                expr: Box::new(Expr::col(alias, id_col)),
+                cte_name: cte.clone(),
+                columns: vec![DEFAULT_PRIMARY_KEY.into()],
+            },
+        )
+    }))
 }
 
 fn build_frontier(
@@ -507,6 +530,9 @@ fn build_frontier_arm(
         if let Some(sc) = opts.scope_cte {
             join_cond = Expr::and(join_cond, scope_filter(&curr, sc));
         }
+        if let Some(gate) = owner_gate(&curr, next_col, next_kind_col, opts) {
+            join_cond = Expr::and(join_cond, gate);
+        }
         from = TableRef::join(JoinType::Inner, from, edge_tbl, join_cond);
     }
 
@@ -562,6 +588,7 @@ fn build_frontier_arm(
         first_type_cond.take(),
         anchor_kind_cond,
         scope_cond,
+        owner_gate(&first, next_col, next_kind_col, opts),
     ];
     all_conds.extend(opts.anchor_denorm_tags.iter().cloned().map(Some));
 

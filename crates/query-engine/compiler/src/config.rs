@@ -76,7 +76,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [input]
         }
         plan_clickhouse {
-            reads_env: [data_model]
+            reads_env: [data_model, security_ctx]
             reads_state: [hydration_options]
             mutates: [input, query_plan]
         }
@@ -243,7 +243,10 @@ where
 fn plan_clickhouse(
     ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
 ) -> Result<()> {
-    plan_with(ctx, plan::plan_clickhouse)
+    let gate_owner_kinds = !ctx.security_ctx().admin;
+    plan_with(ctx, |input, model, options| {
+        plan::plan_clickhouse(input, model, options, gate_owner_kinds)
+    })
 }
 
 fn plan_duckdb(

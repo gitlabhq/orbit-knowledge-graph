@@ -1,0 +1,19 @@
+name: Neighbors read only from the edge table skip owner-scoped kinds for a caller without the admin claim
+ontology_overlay: owner_scope
+
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"neighbors":{"direction":"outgoing","rel_types":["HAS_NOTE"]}}
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n) RETURN mr, n
+
+logical:
+  expect: ["(Filter mr.id IN [2000] (NodeScan MergeRequest AS mr))"]
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Filter _orbit_neighbor_edge.source_kind = 'MergeRequest', _orbit_neighbor_edge.source_id = 2000, _orbit_neighbor_edge.relationship_kind = 'HAS_NOTE', NOT(_orbit_neighbor_edge.target_kind = 'Note'), ... (Scan Table(gl_edge) AS _orbit_neighbor_edge))
+      reject:
+        - (Scan Table(gl_note) ...)

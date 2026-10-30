@@ -16,7 +16,7 @@ use crate::passes::lower::predicates::output_value;
 
 use crate::passes::lower::sql::{
     dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
-    id_list_predicate, id_range_predicate, latest_row_dedup, rel_kind_filter,
+    id_list_predicate, id_range_predicate, kind_not_in, latest_row_dedup, rel_kind_filter,
 };
 use crate::passes::plan::predicates::Column;
 use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan, property_value};
@@ -185,6 +185,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             if let Some(f) = rel_kind_filter(a, arm_kinds) {
                 wp.push(f);
             }
+            wp.extend(kind_not_in(a, neighbor_type, &plan.owner_gates));
             match bound {
                 Some(CenterBound::Path) => wp.push(path_lookup(a)),
                 Some(CenterBound::Id) => wp.push(center_lookup(a, center_edge_col)),

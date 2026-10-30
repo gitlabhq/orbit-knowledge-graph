@@ -1,0 +1,18 @@
+name: Path frontiers skip owner-scoped kinds that are not an endpoint for a caller without the admin claim
+ontology_overlay: owner_scope
+
+query:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000]},{"id":"p","entity":"Project","node_ids":[1001]}],"path":{"type":"shortest","from":"mr","to":"p","max_depth":2,"rel_types":["HAS_NOTE","IN_PROJECT"]}}
+  gql: |
+    MATCH p0 = ANY SHORTEST (mr:MergeRequest {id: 2000})-[:HAS_NOTE|IN_PROJECT*1..2]->(p:Project {id: 1001}) RETURN p0
+
+logical:
+  expect: ["(Input path_finding (...))"]
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Filter ..., NOT(_orbit_e1.target_kind = 'Note') (_))
+        - (Filter ..., NOT(_orbit_e1.source_kind = 'Note') (_))
