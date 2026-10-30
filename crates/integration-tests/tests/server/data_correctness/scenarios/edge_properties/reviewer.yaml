@@ -2,7 +2,7 @@ config:
   ontology_overlay: edge_properties
   extra_seed:
     gl_prop_edge:
-      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: REVIEWED_BY, target_id: 2000, target_kind: MergeRequest, state: reviewed, created_at: "2024-01-02 00:00:00", project_id: 1000, review_note: "looks good", approved_at: "2024-01-05 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: REVIEWED_BY, target_id: 2000, target_kind: MergeRequest, state: reviewed, created_at: "2024-01-02 00:00:00", project_id: 1000, review_note: "looks good", approved_at: "2024-01-05 00:00:00", labels: [design, backend] }
       - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: REVIEWED_BY, target_id: 2000, target_kind: MergeRequest, state: unreviewed, created_at: "2024-01-03 00:00:00" }
       - { traversal_path: "1/100/1000/", source_id: 3, source_kind: User, relationship_kind: REVIEWED_BY, target_id: 2000, target_kind: MergeRequest, state: reviewed, created_at: "2024-01-01 00:00:00" }
       - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: REVIEWED_BY, target_id: 2001, target_kind: MergeRequest, state: requested_changes, created_at: "2024-01-04 00:00:00" }
@@ -291,3 +291,37 @@ cases:
         MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest) RETURN r.state, count(u) AS n
     expect:
       compile_error_contains: [add filters or node_ids to at least one node]
+
+  - name: list_property_membership_filter
+    description: value IN r.prop filters a list relationship property with has
+    query:
+      gql: |
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) WHERE 'design' IN r.labels RETURN u.username LIMIT 10
+    expect:
+      sql_contains: ["has(_orbit_edge_0.labels"]
+      node_count: 2
+      nodes:
+        User:
+          ids: [1]
+        MergeRequest:
+          ids: [2000]
+      edges:
+        REVIEWED_BY: [[1, 2000]]
+
+  - name: list_property_renders_a_list
+    description: A list relationship property renders as a list cell, empty when the row stores none
+    query:
+      gql: |
+        MATCH (u:User)-[r:REVIEWED_BY]->(mr:MergeRequest {id: 2000}) RETURN u.username, r.labels ORDER BY u.username LIMIT 10
+    expect:
+      node_count: 4
+      nodes:
+        User:
+          ids: [1, 2, 3]
+          order: [1, 2, 3]
+        MergeRequest:
+          ids: [2000]
+      edges:
+        REVIEWED_BY: [[1, 2000], [2, 2000], [3, 2000]]
+      gql_columns:
+        r.labels: ['["design", "backend"]', "[]", "[]"]

@@ -33,6 +33,11 @@ properties:
     source: approved_at
     nullable: true
     description: "When the reviewer approved, when they did."
+  labels:
+    type: string[]
+    source: labels
+    nullable: false
+    description: "Labels the reviewer set (test overlay)."
 
 table: gl_prop_edge
 
@@ -49,7 +54,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_merge_request_reviewers]
-      fields: [user_id, merge_request_id, state, created_at, project_id, review_note, approved_at]
+      fields: [user_id, merge_request_id, state, created_at, project_id, review_note, approved_at, labels]
       order_by: [traversal_path, merge_request_id, id]
       query: generated
       lookups:
