@@ -445,8 +445,20 @@ fn build_frontier(
     opts: &FrontierOpts<'_>,
     reach_ctes: &mut Vec<Cte>,
 ) -> Query {
-    reach_ctes
-        .extend((1..max_depth).map(|depth| reach_cte(anchor_cond.clone(), depth, direction, opts)));
+    reach_ctes.extend((1..max_depth).map(|depth| {
+        let arm = build_frontier_arm(anchor_cond.clone(), depth, direction, opts);
+        Cte {
+            materialized: true,
+            ..Cte::new(
+                reach_cte(direction, depth),
+                Query {
+                    select: vec![SelectExpr::col(reach_alias(), end_node_column())],
+                    from: TableRef::subquery(arm, reach_alias()),
+                    ..Default::default()
+                },
+            )
+        }
+    }));
     let arms: Vec<Query> = (1..=max_depth)
         .map(|depth| build_frontier_arm(anchor_cond.clone(), depth, direction, opts))
         .collect();
@@ -477,6 +489,7 @@ fn build_frontier_arm(
     let last = hop_alias(depth);
 
     let mut from = final_edge_table_scan(opts.edge_tables, &first);
+    let mut first_type_cond = type_cond_for(&first, opts.rel_type_filter);
     for i in 2..=depth {
         let prev = hop_alias(i - 1);
         let curr = hop_alias(i);
@@ -510,7 +523,14 @@ fn build_frontier_arm(
         if let Some(sc) = opts.scope_cte {
             join_cond = Expr::and(join_cond, scope_filter(&curr, sc));
         }
-        join_cond = Expr::and(join_cond, reached_by(&curr, i - 1, direction));
+        join_cond = Expr::and(
+            join_cond,
+            Expr::InSubquery {
+                expr: Box::new(Expr::col(&curr, anchor_col)),
+                cte_name: reach_cte(direction, i - 1),
+                columns: vec![end_node_column().to_string()],
+            },
+        );
         from = TableRef::join(JoinType::Inner, from, edge_tbl, join_cond);
     }
 
@@ -540,6 +560,15 @@ fn build_frontier_arm(
             .collect(),
     );
 
+    let anchor_kind_col = match direction {
+        FDir::Forward => SOURCE_KIND_COLUMN,
+        FDir::Backward => TARGET_KIND_COLUMN,
+    };
+    let anchor_kind_cond = opts
+        .anchor_entity
+        .map(|e| Expr::eq(Expr::col(&first, anchor_kind_col), Expr::string(e)));
+    let scope_cond = opts.scope_cte.map(|sc| scope_filter(&first, sc));
+
     let mut select = vec![
         SelectExpr::new(Expr::col(&first, anchor_col), anchor_node_column()),
         SelectExpr::new(Expr::col(&last, next_col), end_node_column()),
@@ -552,91 +581,29 @@ fn build_frontier_arm(
         select.push(SelectExpr::col(&first, TRAVERSAL_PATH_COLUMN));
     }
 
+    let mut all_conds = vec![
+        anchor_cond,
+        first_type_cond.take(),
+        anchor_kind_cond,
+        scope_cond,
+    ];
+    all_conds.extend(opts.anchor_denorm_tags.iter().cloned().map(Some));
+
     Query {
         select,
         from,
-        where_clause: Expr::and_all(first_hop_conds(anchor_cond, direction, opts)),
+        where_clause: Expr::and_all(all_conds),
         ..Default::default()
     }
 }
 
-fn first_hop_conds(
-    anchor_cond: Option<Expr>,
-    direction: FDir,
-    opts: &FrontierOpts<'_>,
-) -> Vec<Option<Expr>> {
-    let first = hop_alias(1);
-    let anchor_kind_col = match direction {
-        FDir::Forward => SOURCE_KIND_COLUMN,
-        FDir::Backward => TARGET_KIND_COLUMN,
+/// Node ids the frontier reached after `depth` hops; the next hop reads only edges from them.
+fn reach_cte(direction: FDir, depth: u32) -> String {
+    let frontier = match direction {
+        FDir::Forward => forward_cte(),
+        FDir::Backward => backward_cte(),
     };
-    let mut conds = vec![
-        anchor_cond,
-        type_cond_for(&first, opts.rel_type_filter),
-        opts.anchor_entity
-            .map(|e| Expr::eq(Expr::col(&first, anchor_kind_col), Expr::string(e))),
-        opts.scope_cte.map(|sc| scope_filter(&first, sc)),
-    ];
-    conds.extend(opts.anchor_denorm_tags.iter().cloned().map(Some));
-    conds
-}
-
-fn direction_name(direction: FDir) -> &'static str {
-    match direction {
-        FDir::Forward => "forward",
-        FDir::Backward => "backward",
-    }
-}
-
-/// Lets the edge primary key prune a later hop to the nodes the previous hop reached.
-fn reached_by(alias: &str, depth: u32, direction: FDir) -> Expr {
-    let anchor_col = match direction {
-        FDir::Forward => SOURCE_ID_COLUMN,
-        FDir::Backward => TARGET_ID_COLUMN,
-    };
-    Expr::InSubquery {
-        expr: Box::new(Expr::col(alias, anchor_col)),
-        cte_name: frontier_reach_cte(direction_name(direction), depth),
-        columns: vec![end_node_column().to_string()],
-    }
-}
-
-fn reach_cte(
-    anchor_cond: Option<Expr>,
-    depth: u32,
-    direction: FDir,
-    opts: &FrontierOpts<'_>,
-) -> Cte {
-    let alias = hop_alias(depth);
-    let next_col = match direction {
-        FDir::Forward => TARGET_ID_COLUMN,
-        FDir::Backward => SOURCE_ID_COLUMN,
-    };
-    let conds = if depth == 1 {
-        first_hop_conds(anchor_cond, direction, opts)
-    } else {
-        vec![
-            Some(reached_by(&alias, depth - 1, direction)),
-            type_cond_for(&alias, opts.rel_type_filter),
-            opts.scope_cte.map(|sc| scope_filter(&alias, sc)),
-        ]
-    };
-    Cte {
-        materialized: true,
-        ..Cte::new(
-            frontier_reach_cte(direction_name(direction), depth),
-            Query {
-                distinct: true,
-                select: vec![SelectExpr::new(
-                    Expr::col(&alias, next_col),
-                    end_node_column(),
-                )],
-                from: final_edge_table_scan(opts.edge_tables, &alias),
-                where_clause: Expr::and_all(conds),
-                ..Default::default()
-            },
-        )
-    }
+    format!("{frontier}_reach_{depth}")
 }
 
 fn type_cond_for(alias: &str, type_filter: &Option<Vec<String>>) -> Option<Expr> {

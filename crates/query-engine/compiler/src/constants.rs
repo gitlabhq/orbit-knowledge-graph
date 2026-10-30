@@ -82,6 +82,7 @@ internal_name!(pub(crate) path_end_column, "path_end");
 internal_name!(pub(crate) forward_cte, "forward");
 internal_name!(pub(crate) backward_cte, "backward");
 internal_name!(pub(crate) paths_alias, "paths");
+internal_name!(pub(crate) reach_alias, "reach");
 internal_name!(pub(crate) path_scope_cte, "path_scope");
 internal_name!(pub(crate) path_scope_start_alias, "path_scope_start");
 internal_name!(pub(crate) path_scope_end_alias, "path_scope_end");
@@ -138,11 +139,6 @@ pub(crate) fn edge_column_prefix(index: usize, variable_length: bool) -> String 
 /// Table alias of one hop in a multi-hop expansion; the first hop is depth 1.
 pub(crate) fn hop_alias(depth: u32) -> String {
     format!("{}e{depth}", internal_column_prefix())
-}
-
-/// Node ids a path frontier reaches after `depth` hops, in one direction.
-pub(crate) fn frontier_reach_cte(direction: &str, depth: u32) -> String {
-    format!("{}{direction}_reach_{depth}", internal_column_prefix())
 }
 
 pub(crate) fn reached_depth_alias(depth: u32) -> String {
