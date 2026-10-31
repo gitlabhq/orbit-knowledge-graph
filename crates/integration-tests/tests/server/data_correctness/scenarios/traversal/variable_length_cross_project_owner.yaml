@@ -1,0 +1,58 @@
+description: Variable-length CALLS hops resolve the owning project per hop node across projects
+
+config:
+  extra_seed:
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12102, target_kind: Definition }
+
+cases:
+  - name: both_projects_allowed
+    description: Hop nodes owned by either allowed project are returned
+    config:
+      redaction:
+        allow:
+          project: [1000, 1001]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "start", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}},
+            {"id": "callee", "entity": "Definition"}
+          ],
+          "relationships": [{"type": "CALLS", "from": "start", "to": "callee", "hops": [1, 2]}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (start:Definition)-[:CALLS*1..2]->(callee:Definition) WHERE start.id >= 12000 AND start.id <= 12999 RETURN start, callee LIMIT 10
+    expect:
+      skip_requirements: ["node_ids", "node_count", "relationship:CALLS"]
+      nodes:
+        Definition:
+          ids: [12000, 12001, 12002, 12102]
+
+  - name: second_project_denied
+    description: Hop nodes owned by the denied project are dropped while the allowed project's stay
+    config:
+      redaction:
+        allow:
+          project: [1000]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "start", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}},
+            {"id": "callee", "entity": "Definition"}
+          ],
+          "relationships": [{"type": "CALLS", "from": "start", "to": "callee", "hops": [1, 2]}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (start:Definition)-[:CALLS*1..2]->(callee:Definition) WHERE start.id >= 12000 AND start.id <= 12999 RETURN start, callee LIMIT 10
+    expect:
+      skip_requirements: ["node_ids", "node_count", "relationship:CALLS"]
+      nodes:
+        Definition:
+          ids: [12000, 12001, 12002]
+          absent: [12102]
