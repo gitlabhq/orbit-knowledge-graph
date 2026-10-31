@@ -322,12 +322,10 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             Tree::node(
                 Operator::PathFinding,
                 format!(
-                    "{}->{} depth={} forward={} backward={} scoped={} tables=[{}] relationships=[{}]",
+                    "{}->{} depth={} scoped={} tables=[{}] relationships=[{}]",
                     operation.start,
                     operation.end,
                     operation.max_depth,
-                    operation.forward_depth,
-                    operation.backward_depth,
                     operation.scoped_by_tp,
                     operation.edge.tables.join(", "),
                     operation

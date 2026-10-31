@@ -15,7 +15,7 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (PathFinding a->b depth=2 forward=1 backward=1 scoped=true tables=[gl_ci_edge] relationships=[CHILD_OF, AUTO_CANCELED_BY] ... (_) (_))
+        - (PathFinding a->b depth=2 scoped=true tables=[gl_ci_edge] relationships=[CHILD_OF, AUTO_CANCELED_BY] ... (_) (_))
     emitted:
       expect:
         - (Deduplicate Final (Scan Table(gl_ci_edge) AS _orbit_e1))

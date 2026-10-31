@@ -15,5 +15,5 @@ physical:
       expect: ["(Filter b.id >= 100, b.id <= 200, ... (_))"]
     emitted:
       ctes:
-        exact_order: [_orbit_nf_b, _orbit_forward, _orbit_backward]
+        exact_order: [_orbit_nf_b, _orbit_forward_reach_1, _orbit_forward]
       expect: ["(CTE _orbit_nf_b (Limit 500 (_)))", "(Filter b.id >= 100, b.id <= 200 (_))"]

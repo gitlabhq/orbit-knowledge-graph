@@ -307,8 +307,8 @@ fn path_finding_query() {
         "should have forward CTE"
     );
     assert!(
-        rendered.contains("_orbit_backward AS"),
-        "should have backward CTE"
+        !rendered.contains("_orbit_backward"),
+        "the search runs forward only"
     );
     assert!(rendered.contains("UNION ALL"));
     assert!(
@@ -320,9 +320,12 @@ fn path_finding_query() {
         "path nodes should be typed tuples"
     );
     assert!(
-        rendered.contains("_orbit_forward._orbit_end_node")
-            && rendered.contains("_orbit_backward._orbit_end_node"),
-        "should join forward and backward on end_id"
+        rendered.contains(
+            "_orbit_e2.source_id IN (SELECT _orbit_end_node FROM _orbit_forward_reach_1)"
+        ) && rendered.contains(
+            "_orbit_e3.source_id IN (SELECT _orbit_end_node FROM _orbit_forward_reach_2)"
+        ),
+        "each later hop reads only edges from the nodes the previous hop reached"
     );
 }
 
@@ -362,16 +365,16 @@ fn path_finding_depth_control() {
         "shallow should have forward CTE"
     );
     assert!(
-        !shallow_sql.contains("backward AS"),
-        "shallow (max_depth=1) should not have backward CTE"
+        !shallow_sql.contains("_orbit_forward_reach_1"),
+        "shallow (max_depth=1) has no later hop to narrow"
     );
     assert!(
         deep_sql.contains("forward AS"),
         "deep should have forward CTE"
     );
     assert!(
-        deep_sql.contains("backward AS"),
-        "deep (max_depth=3) should have backward CTE"
+        deep_sql.contains("_orbit_forward_reach_2 AS"),
+        "deep (max_depth=3) narrows its second and third hops"
     );
 }
 

@@ -107,7 +107,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (PathFinding pipeline->branch depth=2 forward=1 backward=1 scoped=true tables=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] relationships=[IN_PROJECT, CONTAINS] ... (_) (_))
+            - (PathFinding pipeline->branch depth=2 scoped=true tables=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] relationships=[IN_PROJECT, CONTAINS] ... (_) (_))
         emitted:
           expect:
             - (CTE _orbit_path_scope (Union ALL (_) (_)))

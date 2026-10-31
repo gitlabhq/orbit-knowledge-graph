@@ -575,10 +575,6 @@ mod tests {
             "code edge self-joins should stay within one traversal_path, got:\n{sql}"
         );
         assert!(
-            sql.contains("_orbit_forward.traversal_path = _orbit_backward.traversal_path"),
-            "frontier intersection should stay within one traversal_path, got:\n{sql}"
-        );
-        assert!(
             sql.contains("_orbit_forward") && sql.contains("FROM _orbit_nf_start"),
             "forward CTE should seed from _orbit_nf_start, got:\n{sql}"
         );

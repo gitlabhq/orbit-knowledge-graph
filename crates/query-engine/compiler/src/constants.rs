@@ -80,7 +80,6 @@ internal_name!(pub(crate) end_kind_column, "end_kind");
 internal_name!(pub(crate) path_start_column, "path_start");
 internal_name!(pub(crate) path_end_column, "path_end");
 internal_name!(pub(crate) forward_cte, "forward");
-internal_name!(pub(crate) backward_cte, "backward");
 internal_name!(pub(crate) paths_alias, "paths");
 internal_name!(pub(crate) reach_alias, "reach");
 internal_name!(pub(crate) path_scope_cte, "path_scope");

@@ -12,7 +12,7 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(PathFinding a->b depth=1 forward=1 backward=0 scoped=false ... (_) (_))"]
+      expect: ["(PathFinding a->b depth=1 scoped=false ... (_) (_))"]
     emitted:
       ctes:
         exact_order: [_orbit_forward]

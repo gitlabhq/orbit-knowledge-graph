@@ -23,23 +23,20 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (PathFinding a->b depth=2 forward=1 backward=1 scoped=true tables=[gl_code_edge] relationships=[CALLS] ... (_) (_))
+        - (PathFinding a->b depth=2 scoped=true tables=[gl_code_edge] relationships=[CALLS] ... (_) (_))
         - (Filter a.id = 1, ... (NodeScan Definition AS a))
         - (Filter b.id = 2, ... (NodeScan Definition AS b))
     emitted:
       ctes:
-        exact_order: [_orbit_nf_a, _orbit_nf_b, _orbit_path_scope, _orbit_forward, _orbit_backward]
+        exact_order: [_orbit_nf_a, _orbit_nf_b, _orbit_path_scope, _orbit_forward_reach_1, _orbit_forward]
       expect:
         - (CTE _orbit_path_scope (Union ALL (_) (_)))
         - (Filter _orbit_e1.traversal_path IN _orbit_path_scope.traversal_path, _orbit_e1.source_id IN _orbit_nf_a.id, ... (_))
-        - (Filter _orbit_e1.traversal_path IN _orbit_path_scope.traversal_path, _orbit_e1.target_id IN _orbit_nf_b.id, ... (_))
-        - (Join ON (_orbit_forward._orbit_end_node = _orbit_backward._orbit_end_node) AND (_orbit_forward._orbit_end_kind = _orbit_backward._orbit_end_kind) AND (_orbit_forward.traversal_path = _orbit_backward.traversal_path) (_) (_))
   duckdb:
     planned:
       expect:
-        - (PathFinding a->b depth=2 forward=1 backward=1 scoped=true tables=[gl_edge] relationships=[CALLS] ... (_) (_))
+        - (PathFinding a->b depth=2 scoped=true tables=[gl_edge] relationships=[CALLS] ... (_) (_))
     emitted:
       expect:
         - (CTE _ (_))
         - (Scan Table(gl_edge) ...)
-        - (Join ON (_orbit_forward._orbit_end_node = _orbit_backward._orbit_end_node) AND (_orbit_forward._orbit_end_kind = _orbit_backward._orbit_end_kind) AND (_orbit_forward.traversal_path = _orbit_backward.traversal_path) (_) (_))

@@ -1,4 +1,4 @@
-name: Global path endpoints avoid traversal-path scope on frontier intersections
+name: Global path endpoints avoid traversal-path scope on the frontier
 
 query:
   json: |
@@ -12,9 +12,8 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(PathFinding a->b depth=3 forward=2 backward=1 scoped=false ... (_) (_))"]
+      expect: ["(PathFinding a->b depth=3 scoped=false ... (_) (_))"]
     emitted:
       ctes:
-        exact_order: [_orbit_forward_reach_1, _orbit_forward, _orbit_backward]
-      expect: ["(Join ON (_orbit_forward._orbit_end_node = _orbit_backward._orbit_end_node) AND (_orbit_forward._orbit_end_kind = _orbit_backward._orbit_end_kind) (_) (_))"]
+        exact_order: [_orbit_forward_reach_1, _orbit_forward_reach_2, _orbit_forward]
       reject: ["(CTE _orbit_path_scope (_))"]

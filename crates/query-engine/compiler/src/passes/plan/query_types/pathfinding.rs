@@ -12,8 +12,6 @@ pub struct PathFinding {
     pub start: String,
     pub end: String,
     pub max_depth: u32,
-    pub forward_depth: u32,
-    pub backward_depth: u32,
     pub edge: EdgeTableConfig,
     pub scoped_by_tp: bool,
 }
@@ -41,8 +39,6 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         start: start.alias.clone(),
         end: end.alias.clone(),
         max_depth,
-        forward_depth: max_depth / 2 + max_depth % 2,
-        backward_depth: if max_depth >= 2 { max_depth / 2 } else { 0 },
         edge: EdgeTableConfig::from_model(model, &path.rel_types),
         scoped_by_tp: start.has_traversal_path && end.has_traversal_path,
     });
