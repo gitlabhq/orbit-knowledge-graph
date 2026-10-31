@@ -635,27 +635,25 @@ function entitiesOf(text, known = NO_ENTITIES) {
     }
   }
   const paths = [];
-  for (const segment of text.split(/\bMATCH\b/i).slice(1)) {
-    const pattern = segment.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0] ?? "";
-    for (const part of splitTopLevel(pattern)) {
-      const nodes = [];
-      const pins = [];
-      const hops = [];
-      for (const m of part.matchAll(/\(([^)]*)\)|(<)?-(?:\[[^\]]*\])?-(>)?/g)) {
-        if (m[1] !== undefined) {
-          const [, name = "", label] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? [];
-          const node = label || labels[name] || "any";
-          const inline = [...(m[1].match(/\{([^}]*)\}/)?.[1] ?? "").matchAll(/(\w+)\s*:/g)].map((k) => k[1] ?? "");
-          const where = name ? whereKeys[name] ?? [] : [];
-          const equals = name ? whereEquals[name] ?? [] : [];
-          nodes.push(node);
-          pins.push(pinOf([...inline, ...where], [...inline, ...equals], node, known));
-        } else
-          hops.push(m[2] ? "left" : m[3] ? "right" : "none");
+  for (const elements of patternsOf(text)) {
+    const nodes = [];
+    const pins = [];
+    const hops = [];
+    for (const element of elements) {
+      if (element.kind === "hop") {
+        hops.push(element.hop);
+        continue;
       }
-      const typed = nodes.map((type, i) => ({ type, one: pins[i]?.one ?? false }));
-      paths.push(...readFromPin(typed, pins) ?? readForward(typed, hops));
+      const { name, label, body } = element;
+      const node = label || labels[name] || "any";
+      const inline = [...(body.match(/\{([^}]*)\}/)?.[1] ?? "").matchAll(/(\w+)\s*:/g)].map((k) => k[1] ?? "");
+      const where = name ? whereKeys[name] ?? [] : [];
+      const equals = name ? whereEquals[name] ?? [] : [];
+      nodes.push(node);
+      pins.push(pinOf([...inline, ...where], [...inline, ...equals], node, known));
     }
+    const typed = nodes.map((type, i) => ({ type, one: pins[i]?.one ?? false }));
+    paths.push(...readFromPin(typed, pins) ?? readForward(typed, hops));
   }
   const unique = e(paths, (p) => p.text);
   const walks = unique.filter((p) => p.nodes.length > 1);
@@ -695,6 +693,28 @@ function readForward(nodes, hops) {
     start = i;
   }
   return paths;
+}
+function relationshipTypes(inside) {
+  const bare = inside.replace(/\{[^}]*\}/g, "");
+  const colon = bare.indexOf(":");
+  if (colon < 0)
+    return [];
+  return bare.slice(colon + 1).split("|").flatMap((type) => type.replace(/^\s*:?\s*/, "").match(/^\w+/)?.[0] ?? []);
+}
+function patternsOf(text) {
+  const patterns = [];
+  for (const segment of text.split(/\bMATCH\b/i).slice(1)) {
+    const pattern = segment.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0] ?? "";
+    for (const part of splitTopLevel(pattern)) {
+      patterns.push([...part.matchAll(/\(([^)]*)\)|(<)?-(?:\[([^\]]*)\])?-(>)?/g)].map((m) => {
+        if (m[1] === undefined)
+          return { kind: "hop", hop: m[2] ? "left" : m[4] ? "right" : "none", types: relationshipTypes(m[3] ?? "") };
+        const [, name = "", label = ""] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? [];
+        return { kind: "node", name, label, body: m[1] };
+      }));
+    }
+  }
+  return patterns;
 }
 function splitTopLevel(text) {
   const parts = [""];
@@ -856,7 +876,7 @@ function describeOrbitCall(tool, input, known = NO_ENTITIES) {
 }
 
 function parseResponse(text) {
-  const out = { nodes: 0, edges: 0, byEntity: {}, aggregated: 0, kind: "other", grouped: false };
+  const out = { nodes: 0, edges: 0, byEntity: {}, aggregated: 0, kind: "other", grouped: false, counted: [] };
   const raw = text.trim().startsWith("{") ? tryJson(text) : null;
   if (raw) {
     const r = raw["result"] ?? raw;
@@ -871,7 +891,7 @@ function parseResponse(text) {
   if (/^query_type:\s*aggregation/m.test(text)) {
     out.kind = "aggregation";
     out.grouped = /^group_columns\[[1-9]\d*\]/m.test(text);
-    const counts = plainCountNames(text);
+    const counts = plainCounts(text);
     const header = text.match(/^rows\[\d+\]\{([^}]*)\}:\s*$/m);
     if (!header || header.index === undefined || counts.length === 0)
       return out;
@@ -880,8 +900,11 @@ function parseResponse(text) {
     const lines = rows.split(`
 `).map((line) => line.trim().split(","));
     const cellValue = (cells, i) => /^\d+$/.test(cells[i] ?? "") ? Number(cells[i]) : 0;
-    const totals = names.flatMap((name, i) => counts.includes(name) ? [s(lines, (cells) => cellValue(cells, i))] : []);
-    out.aggregated = Math.max(0, ...totals);
+    out.counted = counts.flatMap(({ name = "", target = "" }) => {
+      const i = names.indexOf(name);
+      return i < 0 ? [] : [{ target, total: s(lines, (cells) => cellValue(cells, i)) }];
+    });
+    out.aggregated = Math.max(0, ...out.counted.map((count) => count.total));
     return out;
   }
   if (/^query_type:\s*traversal/m.test(text))
@@ -908,9 +931,10 @@ function columnFields(text) {
   }
   return body.split(/^\s+- /m).slice(1).map((item) => Object.fromEntries([...item.matchAll(/^\s*(?:- )?(\w+):\s*(.*)$/gm)].map((m) => [m[1] ?? "", m[2]?.trim()])));
 }
-function plainCountNames(text) {
-  return columnFields(text).filter(({ function: fn, name, target = "", property }) => fn === "count" && name && (!property || name === `count_${target}_${property}`)).map((column) => column["name"] ?? "");
+function plainCounts(text) {
+  return columnFields(text).filter(({ function: fn, name, target = "", property }) => fn === "count" && name && (!property || name === `count_${target}_${property}`));
 }
+var COUNTABLE_LISTS = new Set(["MergeRequest", "WorkItem", "Pipeline", "Job", "Runner", "Project", "Group", "Label", "Note", "Package", "User", "Vulnerability"]);
 function tryJson(text) {
   try {
     const value = JSON.parse(text);

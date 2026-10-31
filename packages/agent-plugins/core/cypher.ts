@@ -105,26 +105,25 @@ export function entitiesOf(text: string, known: ReadonlySet<string> = NO_ENTITIE
     }
   }
   const paths: Path[] = []
-  for (const segment of text.split(/\bMATCH\b/i).slice(1)) {
-    const pattern = segment.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0] ?? ''
-    for (const part of splitTopLevel(pattern)) {
-      const nodes: string[] = []
-      const pins: Pin[] = []
-      const hops: Hop[] = []
-      for (const m of part.matchAll(/\(([^)]*)\)|(<)?-(?:\[[^\]]*\])?-(>)?/g)) {
-        if (m[1] !== undefined) {
-          const [, name = '', label] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? []
-          const node = label || labels[name] || 'any'
-          const inline = [...(m[1].match(/\{([^}]*)\}/)?.[1] ?? '').matchAll(/(\w+)\s*:/g)].map((k) => k[1] ?? '')
-          const where = name ? (whereKeys[name] ?? []) : []
-          const equals = name ? (whereEquals[name] ?? []) : []
-          nodes.push(node)
-          pins.push(pinOf([...inline, ...where], [...inline, ...equals], node, known))
-        } else hops.push(m[2] ? 'left' : m[3] ? 'right' : 'none')
+  for (const elements of patternsOf(text)) {
+    const nodes: string[] = []
+    const pins: Pin[] = []
+    const hops: Hop[] = []
+    for (const element of elements) {
+      if (element.kind === 'hop') {
+        hops.push(element.hop)
+        continue
       }
-      const typed = nodes.map((type, i) => ({ type, one: pins[i]?.one ?? false }))
-      paths.push(...(readFromPin(typed, pins) ?? readForward(typed, hops)))
+      const { name, label, body } = element
+      const node = label || labels[name] || 'any'
+      const inline = [...(body.match(/\{([^}]*)\}/)?.[1] ?? '').matchAll(/(\w+)\s*:/g)].map((k) => k[1] ?? '')
+      const where = name ? (whereKeys[name] ?? []) : []
+      const equals = name ? (whereEquals[name] ?? []) : []
+      nodes.push(node)
+      pins.push(pinOf([...inline, ...where], [...inline, ...equals], node, known))
     }
+    const typed = nodes.map((type, i) => ({ type, one: pins[i]?.one ?? false }))
+    paths.push(...(readFromPin(typed, pins) ?? readForward(typed, hops)))
   }
   const unique = uniqBy(paths, (p) => p.text)
   const walks = unique.filter((p) => p.nodes.length > 1)
@@ -158,6 +157,53 @@ function readForward(nodes: readonly PathNode[], hops: Hop[]): Path[] {
     start = i
   }
   return paths
+}
+
+type PatternElement = { kind: 'node'; name: string; label: string; body: string } | { kind: 'hop'; hop: Hop; types: string[] }
+
+function relationshipTypes(inside: string): string[] {
+  const bare = inside.replace(/\{[^}]*\}/g, '')
+  const colon = bare.indexOf(':')
+  if (colon < 0) return []
+  return bare
+    .slice(colon + 1)
+    .split('|')
+    .flatMap((type) => type.replace(/^\s*:?\s*/, '').match(/^\w+/)?.[0] ?? [])
+}
+
+function patternsOf(text: string): PatternElement[][] {
+  const patterns: PatternElement[][] = []
+  for (const segment of text.split(/\bMATCH\b/i).slice(1)) {
+    const pattern = segment.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0] ?? ''
+    for (const part of splitTopLevel(pattern)) {
+      patterns.push(
+        [...part.matchAll(/\(([^)]*)\)|(<)?-(?:\[([^\]]*)\])?-(>)?/g)].map((m): PatternElement => {
+          if (m[1] === undefined) return { kind: 'hop', hop: m[2] ? 'left' : m[4] ? 'right' : 'none', types: relationshipTypes(m[3] ?? '') }
+          const [, name = '', label = ''] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? []
+          return { kind: 'node', name, label, body: m[1] }
+        }),
+      )
+    }
+  }
+  return patterns
+}
+
+export type PatternVariable = { label: string; relationships: Set<string> }
+
+export function variablesOf(query: string): Map<string, PatternVariable> {
+  const variables = new Map<string, PatternVariable>()
+  for (const elements of patternsOf(query)) {
+    elements.forEach((element, i) => {
+      if (element.kind !== 'node' || !element.name) return
+      const variable = variables.get(element.name) ?? { label: '', relationships: new Set<string>() }
+      variable.label ||= element.label
+      for (const next of [elements[i - 1], elements[i + 1]]) {
+        if (next?.kind === 'hop') for (const type of next.types) variable.relationships.add(type)
+      }
+      variables.set(element.name, variable)
+    })
+  }
+  return variables
 }
 
 function splitTopLevel(text: string): string[] {
