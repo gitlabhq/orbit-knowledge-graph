@@ -1,3 +1,4 @@
+import { variablesOf } from './cypher.ts'
 import { countBy, sumBy } from './lib.js'
 
 export type ResponseCounts = {
@@ -78,12 +79,10 @@ function plainCounts(text: string): ColumnFields[] {
 const COUNTABLE_LISTS = new Set(['MergeRequest', 'WorkItem', 'Pipeline', 'Job', 'Runner', 'Project', 'Group', 'Label', 'Note', 'Package', 'User', 'Vulnerability'])
 
 function hasGraphqlCount(query: string, variable: string): boolean {
-  if (!/^\w+$/.test(variable)) return true
-  const label = query.match(new RegExp(`\\(\\s*${variable}\\s*:\\s*(\\w+)`))?.[1]
-  if (!label) return true
-  if (!COUNTABLE_LISTS.has(label)) return false
-  const membership = new RegExp(`\\(\\s*${variable}\\b[^)]*\\)\\s*-\\[[^\\]]*:MEMBER_OF\\b|:MEMBER_OF\\b[^\\]]*\\]-\\s*\\(\\s*${variable}\\b`)
-  return !membership.test(query)
+  const found = variablesOf(query).get(variable)
+  if (!found?.label) return true
+  if (found.label === 'User' && found.relationships.has('MEMBER_OF')) return false
+  return COUNTABLE_LISTS.has(found.label)
 }
 
 export function apiCallsFor(counts: ResponseCounts, query = ''): number {
