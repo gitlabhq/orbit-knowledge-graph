@@ -503,6 +503,21 @@ class GuardTest(DashboardTestCase):
         self.assertEqual(api.writes(), [])
 
 
+class BotDetectionTest(DashboardTestCase):
+    def test_only_anchored_bot_names_are_bots(self):
+        for name in ("project_12_bot_ab12cd", "group_7_bot_ab12cd", "service_account_group_1_x", "renovate-bot",
+                     "gitlab-infra-mgmt-bot", "ci_bot"):
+            self.assertTrue(dashboard.is_bot_username(name), name)
+        for name in ("robert", "abbott", "talbot", "botany", "bottom"):
+            self.assertFalse(dashboard.is_bot_username(name), name)
+
+    def test_humans_with_bot_in_their_name_stay_in_the_team_scan(self):
+        api = FakeApi({("GET", "groups/gitlab-org%2Forbit%2Fteam/members"): [
+            {"username": name, "state": "active"}
+            for name in ("robert", "abbott", "project_1_bot_ab", "group_2_bot_cd", "service_account_x")]})
+        self.assertEqual(dashboard.team_usernames(api, "gitlab-org/orbit/team"), ["abbott", "robert"])
+
+
 class TeamScanTest(DashboardTestCase):
     def test_empty_team_group_skips_the_team_scan(self):
         api = FakeApi({("GET", f"{SOURCE_PATH}/merge_requests?state"): [listed(1)]})

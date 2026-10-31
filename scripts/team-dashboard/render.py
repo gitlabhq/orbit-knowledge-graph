@@ -58,10 +58,9 @@ UPDATED_RE = re.compile(r"Updated (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC\.")
 PRIORITY_REFERENCE_RE = re.compile(r"((?:[\w.-]+/)+[\w.-]+)?!(\d+)")
 PAGE_SIZE = 100
 GRAPHQL_USER_BATCH = 50
-REVIEW_LIST_LIMIT = 10
 TEAM_WIDE_MIN_ASSIGNEES = 3
 TEAM_WIDE_WINDOW = timedelta(days=7)
-BOT_RE = re.compile(r"^service_account_|bot")
+BOT_RE = re.compile(r"(-|_)bot(_|$)|^service_account_")
 BLOCK_RE = re.compile(r"\{\{#(\w+)(?: limit=(\d+))?\}\}\n(.*?)\{\{/\1\}\}\n?", re.DOTALL)
 MIN_WRITE_INTERVAL = timedelta(minutes=15)
 
@@ -183,8 +182,12 @@ def oldest_first(candidates: Sequence[Candidate]) -> List[Candidate]:
     return sorted(candidates, key=lambda c: (str(c.mr.get("created_at")), str(c.mr.get("web_url"))))
 
 
+def is_bot_username(username: str) -> bool:
+    return bool(BOT_RE.search(username))
+
+
 def is_bot(candidate: Candidate) -> bool:
-    return bool(BOT_RE.search(str((candidate.mr.get("author") or {}).get("username", ""))))
+    return is_bot_username(str((candidate.mr.get("author") or {}).get("username", "")))
 
 
 def read_pinned(path: Path) -> List[Tuple[Optional[str], int]]:
@@ -260,7 +263,7 @@ def team_usernames(api: Api, group: str) -> List[str]:
     members = api.get_all(f"groups/{project_path(group)}/members")
     return sorted(
         str(member["username"]) for member in members
-        if member.get("state") == "active" and "bot" not in str(member["username"])
+        if member.get("state") == "active" and not is_bot_username(str(member["username"]))
     )
 
 
