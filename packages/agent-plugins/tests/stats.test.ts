@@ -187,6 +187,19 @@ test('API calls replaced follow the GraphQL minimum: pages of 100, joins nested'
   expect(apiCallsFor(parseResponse(JSON.stringify({ result: { nodes: [{ type: 'User' }], edges: [] } })))).toBe(1)
 })
 
+test('a total costs one call only when its GraphQL list has a count field, otherwise pages of 100', () => {
+  const total = (target: string, n: number) =>
+    parseResponse(`query_type: aggregation\ncolumns[1]{name,function,target}:\n  n,count,${target}\nrows[1]{n}:\n  ${n}\npagination:\n  has_more: false\n`)
+  const members = 'MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 9970}) RETURN count(DISTINCT u) AS n'
+  expect(total('u', 3357).counted).toEqual([{ target: 'u', total: 3357 }])
+  expect(apiCallsFor(total('u', 3357), members)).toBe(34)
+  expect(apiCallsFor(total('u', 3357), 'MATCH (g:Group {id: 9970})<-[:MEMBER_OF]-(u:User) RETURN count(u) AS n')).toBe(34)
+  expect(apiCallsFor(total('u', 3357), 'MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN count(DISTINCT u) AS n')).toBe(1)
+  expect(apiCallsFor(total('mr', 27), 'MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest) RETURN count(mr) AS n')).toBe(1)
+  expect(apiCallsFor(total('c', 1250), 'MATCH (c:Commit)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN count(c) AS n')).toBe(13)
+  expect(apiCallsFor(total('u', 3357))).toBe(1)
+})
+
 const group = (key: string, total: number, id: string, path: string): ScopeTotal => ({ key, total, identity: { kind: 'group', id, path } })
 const project = (key: string, total: number, id: string, path: string): ScopeTotal => ({ key, total, identity: { kind: 'project', id, path } })
 

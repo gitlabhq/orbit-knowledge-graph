@@ -7,10 +7,11 @@ export type ResponseCounts = {
   aggregated: number
   kind: 'traversal' | 'aggregation' | 'other'
   grouped: boolean
+  counted: { target: string; total: number }[]
 }
 
 export function parseResponse(text: string): ResponseCounts {
-  const out: ResponseCounts = { nodes: 0, edges: 0, byEntity: {}, aggregated: 0, kind: 'other', grouped: false }
+  const out: ResponseCounts = { nodes: 0, edges: 0, byEntity: {}, aggregated: 0, kind: 'other', grouped: false, counted: [] }
   const raw = text.trim().startsWith('{') ? tryJson(text) : null
   if (raw) {
     const r = (raw['result'] ?? raw) as { nodes?: unknown; edges?: unknown }
@@ -24,15 +25,18 @@ export function parseResponse(text: string): ResponseCounts {
   if (/^query_type:\s*aggregation/m.test(text)) {
     out.kind = 'aggregation'
     out.grouped = /^group_columns\[[1-9]\d*\]/m.test(text)
-    const counts = plainCountNames(text)
+    const counts = plainCounts(text)
     const header = text.match(/^rows\[\d+\]\{([^}]*)\}:\s*$/m)
     if (!header || header.index === undefined || counts.length === 0) return out
     const names = (header[1] ?? '').split(',')
     const rows = text.slice(header.index + header[0].length).split(/^\S/m)[0] ?? ''
     const lines = rows.split('\n').map((line) => line.trim().split(','))
     const cellValue = (cells: string[], i: number) => (/^\d+$/.test(cells[i] ?? '') ? Number(cells[i]) : 0)
-    const totals = names.flatMap((name, i) => (counts.includes(name) ? [sumBy(lines, (cells) => cellValue(cells, i))] : []))
-    out.aggregated = Math.max(0, ...totals)
+    out.counted = counts.flatMap(({ name = '', target = '' }) => {
+      const i = names.indexOf(name)
+      return i < 0 ? [] : [{ target, total: sumBy(lines, (cells) => cellValue(cells, i)) }]
+    })
+    out.aggregated = Math.max(0, ...out.counted.map((count) => count.total))
     return out
   }
   if (/^query_type:\s*traversal/m.test(text)) out.kind = 'traversal'
@@ -65,17 +69,30 @@ function columnFields(text: string): ColumnFields[] {
 }
 
 // The response has no DISTINCT flag: a property count is plain only under its derived name; any other name reads as DISTINCT.
-function plainCountNames(text: string): string[] {
-  return columnFields(text)
-    .filter(({ function: fn, name, target = '', property }) => fn === 'count' && name && (!property || name === `count_${target}_${property}`))
-    .map((column) => column['name'] ?? '')
+function plainCounts(text: string): ColumnFields[] {
+  return columnFields(text).filter(
+    ({ function: fn, name, target = '', property }) => fn === 'count' && name && (!property || name === `count_${target}_${property}`),
+  )
 }
 
-export function apiCallsFor(counts: ResponseCounts): number {
+const COUNTABLE_LISTS = new Set(['MergeRequest', 'WorkItem', 'Pipeline', 'Job', 'Runner', 'Project', 'Group', 'Label', 'Note', 'Package', 'User', 'Vulnerability'])
+
+function hasGraphqlCount(query: string, variable: string): boolean {
+  if (!/^\w+$/.test(variable)) return true
+  const label = query.match(new RegExp(`\\(\\s*${variable}\\s*:\\s*(\\w+)`))?.[1]
+  if (!label) return true
+  if (!COUNTABLE_LISTS.has(label)) return false
+  const membership = new RegExp(`\\(\\s*${variable}\\b[^)]*\\)\\s*-\\[[^\\]]*:MEMBER_OF\\b|:MEMBER_OF\\b[^\\]]*\\]-\\s*\\(\\s*${variable}\\b`)
+  return !membership.test(query)
+}
+
+export function apiCallsFor(counts: ResponseCounts, query = ''): number {
   const pages = (records: number) => Math.max(1, Math.ceil(records / 100))
   if (counts.kind === 'traversal') return pages(Math.max(0, ...Object.values(counts.byEntity)))
-  if (counts.kind === 'aggregation') return counts.grouped ? pages(counts.aggregated) : 1
-  return 0
+  if (counts.kind !== 'aggregation') return 0
+  if (counts.grouped) return pages(counts.aggregated)
+  const listed = counts.counted.filter(({ target }) => !hasGraphqlCount(query, target))
+  return pages(Math.max(0, ...listed.map((count) => count.total)))
 }
 
 function tryJson(text: string): Record<string, unknown> | null {
