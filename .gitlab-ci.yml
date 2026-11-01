@@ -407,10 +407,14 @@ agent-plugins:
   needs: []
   variables:
     CLAUDE_BIN: bun x @anthropic-ai/claude-code@2.1.308
+    CODEX_BIN: /opt/codex/node_modules/.bin/codex
     DISABLE_GROWTHBOOK: "1"
   before_script:
-    - apt-get update -qq && apt-get install -y -qq git > /dev/null
+    # The Codex plugin hook runs on Node; without it, bun run would stand in for node.
+    - apt-get update -qq && apt-get install -y -qq git nodejs > /dev/null
     - bun install --frozen-lockfile --ignore-scripts
+    # The Codex e2e cuts Codex off from the network, so Codex is installed here instead of run with bun x.
+    - (mkdir -p /opt/codex && cd /opt/codex && bun add --ignore-scripts @openai/codex@0.166.0)
   script:
     - cd packages/agent-plugins
     - bun run typecheck
@@ -418,8 +422,9 @@ agent-plugins:
     - bun run test:claude
     - bun run test:differential --count 100
     - bun run build
-    - git add --intent-to-add ../../config/setup/agents/opencode_ui
-    - git diff --exit-code -- ../../config/setup/agents/opencode_ui core/lib.js
+    - bun run test:codex
+    - git add --intent-to-add ../../config/setup/agents/opencode_ui ../../config/setup/agents/codex_plugin
+    - git diff --exit-code -- ../../config/setup/agents/opencode_ui ../../config/setup/agents/codex_plugin core/lib.js
 
 generate-config-schema:
   stage: lint

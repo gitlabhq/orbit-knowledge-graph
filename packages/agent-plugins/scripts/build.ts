@@ -7,6 +7,7 @@ const root = join(import.meta.dir, '..')
 const NOTICE = '/*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */\n'
 
 const OPENCODE_UI = '../../config/setup/agents/opencode_ui'
+const CODEX_PLUGIN = '../../config/setup/agents/codex_plugin'
 
 // OpenCode resolves @opencode/plugin at runtime, and the server and TUI parts share rpc.ts as
 // installed, so the bundle imports them instead of inlining them.
@@ -18,8 +19,8 @@ const keepExternal: BunPlugin = {
   },
 }
 
-async function bundle(entry: string, out: string, minify: boolean, plugins: BunPlugin[] = []): Promise<void> {
-  const result = await Bun.build({ entrypoints: [join(root, entry)], target: 'bun', minify, plugins })
+async function bundle(entry: string, out: string, minify: boolean, plugins: BunPlugin[] = [], target: 'bun' | 'node' = 'bun'): Promise<void> {
+  const result = await Bun.build({ entrypoints: [join(root, entry)], target, minify, plugins })
   const [output] = result.outputs
   if (!result.success || !output) throw new AggregateError(result.logs, entry + ' did not build')
   const lines = (await output.text()).split('\n').filter((line) => !/^\/\/ (@bun|\S+\.[jt]s)$/.test(line))
@@ -33,4 +34,13 @@ await bundle('opencode/index.ts', join(OPENCODE_UI, 'index.js'), false, [keepExt
 // The TUI part ships as source: OpenCode compiles TUI JSX with its own OpenTUI.
 for (const file of ['rpc.ts', 'tui.tsx']) {
   await copyFile(join(root, 'opencode', file), join(root, OPENCODE_UI, file))
+}
+
+// Codex runs plugin hooks as shell commands, so the hook ships as one Node script behind orbit.sh.
+await mkdir(join(root, CODEX_PLUGIN, '.codex-plugin'), { recursive: true })
+await mkdir(join(root, CODEX_PLUGIN, 'hooks'), { recursive: true })
+await bundle('codex/orbit.ts', join(CODEX_PLUGIN, 'hooks/orbit.mjs'), false, [], 'node')
+await copyFile(join(root, 'codex/plugin.json'), join(root, CODEX_PLUGIN, '.codex-plugin/plugin.json'))
+for (const file of ['hooks.json', 'orbit.sh']) {
+  await copyFile(join(root, 'codex', file), join(root, CODEX_PLUGIN, 'hooks', file))
 }

@@ -1,0 +1,10 @@
+{
+  "name": "gitlab-orbit",
+  "version": "0.0.0",
+  "description": "Counts GitLab Orbit calls in Codex and shows the API calls they replaced",
+  "author": { "name": "GitLab" },
+  "homepage": "https://docs.gitlab.com/orbit/",
+  "repository": "https://gitlab.com/gitlab-org/orbit/knowledge-graph",
+  "license": "MIT",
+  "hooks": "./hooks/hooks.json"
+}

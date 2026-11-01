@@ -4,8 +4,9 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test ./opencode",
+    "test": "bun test ./opencode ./codex",
     "test:claude": "${CLAUDE_BIN:-claude} plugin validate --strict . && ${CLAUDE_BIN:-claude} plugin test .",
+    "test:codex": "bun test ./codex/codex.e2e.ts",
     "test:differential": "bun scripts/differential.ts",
     "build": "bun scripts/build.ts"
   },

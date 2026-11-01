@@ -1,0 +1,49 @@
+{
+  "description": "Shows each GitLab Orbit call and the session total after each turn that used Orbit",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^(Bash|mcp__.+)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${PLUGIN_ROOT}/hooks/orbit.sh\" calls",
+            "timeout": 10,
+            "statusMessage": "Counting GitLab Orbit calls"
+          },
+          {
+            "type": "command",
+            "command": "/bin/sh \"${PLUGIN_ROOT}/hooks/orbit.sh\" lookups",
+            "timeout": 120,
+            "async": true,
+            "statusMessage": "Looking up GitLab Orbit graph totals"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${PLUGIN_ROOT}/hooks/orbit.sh\"",
+            "timeout": 10,
+            "statusMessage": "Totaling GitLab Orbit calls"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${PLUGIN_ROOT}/hooks/orbit.sh\"",
+            "timeout": 3,
+            "statusMessage": "Clearing the GitLab Orbit count"
+          }
+        ]
+      }
+    ]
+  }
+}

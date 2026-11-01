@@ -15,5 +15,5 @@
     "jsxImportSource": "@opentui/solid",
     "types": ["bun"]
   },
-  "include": ["core", "hooks", "opencode", "scripts", "tests", "types", "vendor"]
+  "include": ["codex", "core", "hooks", "opencode", "scripts", "tests", "types", "vendor"]
 }
