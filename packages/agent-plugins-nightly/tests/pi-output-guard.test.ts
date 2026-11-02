@@ -147,3 +147,9 @@ test("shrinkOutput cuts at line boundaries and returns nothing when the text fit
   const shrunk = shrinkOutput(lines(1000), 200, "/x") ?? "";
   for (const line of shrunk.split("\n").filter((line) => line.startsWith("line "))) assert.match(line, /^line \d+$/);
 });
+
+test("output another guard already cut is left alone", () => {
+  const once = guard(undefined)?.(event("bash", lines(5000)))?.content[0].text ?? "";
+  assert.match(once, /bytes omitted/);
+  assert.equal(guard("500")?.(event("bash", once)), undefined);
+});

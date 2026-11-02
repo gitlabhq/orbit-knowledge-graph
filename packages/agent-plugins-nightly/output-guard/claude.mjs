@@ -5,8 +5,8 @@
  * output stays on disk: Claude Code's own persisted file when it already
  * truncated the result (`persistedOutputPath`), otherwise a file written here.
  *
- * ORBIT_OUTPUT_GUARD sets the limit in characters (default 10000, at most 29000 here), or `off`
- *. Any failure passes the result through.
+ * ORBIT_OUTPUT_GUARD sets the limit in characters (default 10000, at most 29000 here), or `off`.
+ * Any failure passes the result through.
  */
 
 import { randomUUID } from "node:crypto";
@@ -14,14 +14,14 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseOutputLimit, readEnds, shrinkEnds, shrinkOutput } from "./core.mjs";
+import { alreadyGuarded, parseOutputLimit, readEnds, shrinkEnds, shrinkOutput } from "./core.mjs";
 
 // Claude Code re-persists a replaced result over about 30,000 characters and shows only a 2 KB preview of it
 // (observed on 2.1.312), so the limit stops below that: a larger one would show the model less.
 const MAX_LIMIT = 29_000;
 
 function shrinkField(text, limit, persistedPath) {
-  if (typeof text !== "string") return undefined;
+  if (typeof text !== "string" || alreadyGuarded(text)) return undefined;
   if (persistedPath) {
     return shrinkEnds(readEnds(persistedPath, limit), limit, persistedPath);
   }

@@ -138,6 +138,9 @@ pub(super) struct PluginSpec {
     pub(super) name: String,
     pub(super) min_version: String,
     pub(super) version_command: Vec<String>,
+    /// Whether `ORBIT_NIGHTLY` adds the nightly Claude Code hooks to this plugin.
+    #[serde(default)]
+    pub(super) nightly_hooks: bool,
 }
 
 impl PluginSpec {
@@ -183,7 +186,7 @@ impl PluginSpec {
             )))
             .chain(plugin)
             .collect();
-        if nightly {
+        if nightly && self.nightly_hooks {
             self.add_nightly(&mut files);
         }
         files
@@ -340,7 +343,11 @@ impl Agent {
         self.ui_files_in(ui, nightly_enabled())
     }
 
-    fn ui_files_in(self, ui: bool, nightly: bool) -> impl Iterator<Item = &'static TemplateFile> {
+    pub(super) fn ui_files_in(
+        self,
+        ui: bool,
+        nightly: bool,
+    ) -> impl Iterator<Item = &'static TemplateFile> {
         self.0
             .template_files
             .iter()
@@ -412,7 +419,7 @@ const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
 
 impl TemplateFile {
     pub(super) fn render(&self) -> String {
-        let mut body = read_embedded_text(&self.template);
+        let mut body = read_embedded_text(&self.template, self.nightly);
         for (name, value) in &TEXTS.template_vars {
             body = body.replace(&format!("{{{{{name}}}}}"), value);
         }
@@ -427,10 +434,13 @@ impl TemplateFile {
     }
 }
 
-fn read_embedded_text(name: &str) -> String {
-    let file = SetupAssets::get(name)
-        .or_else(|| NightlyAssets::get(name))
-        .unwrap_or_else(|| panic!("{name} is not embedded"));
+fn read_embedded_text(name: &str, nightly: bool) -> String {
+    let file = if nightly {
+        NightlyAssets::get(name)
+    } else {
+        SetupAssets::get(name)
+    }
+    .unwrap_or_else(|| panic!("{name} is not embedded"));
     String::from_utf8(file.data.into_owned()).unwrap_or_else(|e| panic!("{name} is not UTF-8: {e}"))
 }
 
@@ -724,7 +734,7 @@ mod tests {
 
     #[test]
     fn opencode_plugins_are_shell_safe() {
-        let template = read_embedded_text("opencode_plugin.js");
+        let template = read_embedded_text("opencode_plugin.js", false);
         assert_eq!(
             template.matches("{{").count(),
             1,
@@ -753,7 +763,7 @@ mod tests {
             "agents/opencode_ui/index.js",
             "agents/opencode_ui/tui.tsx",
         ] {
-            let text = read_embedded_text(template);
+            let text = read_embedded_text(template, false);
             assert!(
                 text.contains("export default") || text.contains(" as default"),
                 "{template}"

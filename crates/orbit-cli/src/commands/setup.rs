@@ -1517,6 +1517,28 @@ mod tests {
     }
 
     #[test]
+    fn nightly_pi_files_count_as_installed_and_are_removed_without_the_variable() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = project(dir.path());
+        let pi = spec::agent_named("pi").unwrap();
+        let installer = components::installer_for(Component::AgentPlugins);
+        let extension = dir.path().join(".pi/extensions/orbit-nightly");
+        assert!(!installer.is_installed(pi, &target));
+
+        std::fs::create_dir_all(&extension).unwrap();
+        for file in pi.ui_files_in(true, true) {
+            let (path, _) = target.resolve(&file.path).unwrap();
+            std::fs::write(path, file.render()).unwrap();
+        }
+        assert!(installer.is_installed(pi, &target));
+
+        installer
+            .remove(&[pi], &target, &mut Report::default())
+            .unwrap();
+        assert!(!extension.exists());
+    }
+
+    #[test]
     fn the_plan_lists_the_retired_cleanup_only_while_something_is_left() {
         let dir = tempfile::tempdir().unwrap();
         let target = project(dir.path());

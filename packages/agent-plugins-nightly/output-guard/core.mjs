@@ -23,6 +23,14 @@ export function parseOutputLimit(value, warn = console.warn) {
 }
 
 /**
+ * Whether a guard (this one, or the same guard from another plugin) already cut the text, so it is not cut twice.
+ * @param {string} text
+ */
+export function alreadyGuarded(text) {
+  return /\[\.\.\. \d+ of \d+ bytes omitted\. Full output: /.test(text);
+}
+
+/**
  * Output to shorten: all of it in `head` (`complete`), or its first and last bytes with the size of the whole.
  * @typedef {{ head: string; tail: string; totalBytes: number; complete: boolean }} OutputEnds
  */

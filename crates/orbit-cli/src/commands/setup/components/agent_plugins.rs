@@ -73,7 +73,7 @@ impl Installer for AgentPlugins {
                 .is_ok_and(|(dir, _)| dir.join(MANIFEST).is_file())
         });
         plugin
-            || agent.ui_files(true).any(|file| {
+            || agent.ui_files_in(true, true).any(|file| {
                 target
                     .resolve(&file.path)
                     .is_ok_and(|(path, _)| path.exists())

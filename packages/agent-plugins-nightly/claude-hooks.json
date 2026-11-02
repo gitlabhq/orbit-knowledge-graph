@@ -6,7 +6,7 @@
         {
           "type": "command",
           "command": "node \"${CLAUDE_PLUGIN_ROOT}/nightly/output-guard/claude.mjs\"",
-          "timeout": 10
+          "timeout": 5
         }
       ]
     }

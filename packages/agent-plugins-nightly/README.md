@@ -16,6 +16,10 @@ nightly files again, unless you edited them.
 `ORBIT_OUTPUT_GUARD` sets the limit in characters (default 10000, for example
 `20k`) or `off`.
 
+The Claude Code hook runs with `node`, so `node` must be on your `PATH`. The
+guard leaves output that another guard already cut, such as the orbitcode one,
+alone, so the two can run side by side.
+
 ## Adding a feature
 
 Put the sources in this package and embed them from
@@ -27,4 +31,5 @@ Put the sources in this package and embed them from
 
 To promote a feature, port it into the stable plugin in `packages/agent-plugins`
 (for Claude Code, its hooks module) and delete it here. To revert one, delete
-it here. Commits scoped `agent-plugins-nightly` never cut a release.
+it here. Commits scoped `agent-plugins-nightly` never cut a release, but the
+release notes of the next release still list them.

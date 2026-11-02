@@ -142,6 +142,10 @@
           "minItems": 1,
           "items": { "type": "string", "minLength": 1 },
           "description": "Command whose output starts with the assistant's version, such as `claude --version`."
+        },
+        "nightly_hooks": {
+          "type": "boolean",
+          "description": "Under ORBIT_NIGHTLY=1, merge the nightly Claude Code hooks into the plugin's hooks/hooks.json."
         }
       }
     },
@@ -193,7 +197,7 @@
         "template": {
           "type": "string",
           "minLength": 1,
-          "description": "Template location under config/setup/ or packages/agent-plugins-nightly/, e.g. opencode_plugin.js."
+          "description": "Template location under config/setup/ (or packages/agent-plugins-nightly/ when `nightly` is set), e.g. opencode_plugin.js."
         }
       }
     },

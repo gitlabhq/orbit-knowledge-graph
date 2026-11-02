@@ -50,3 +50,4 @@ plugin:
   name: gitlab-orbit
   min_version: "2.1.287"
   version_command: [claude, --version]
+  nightly_hooks: true

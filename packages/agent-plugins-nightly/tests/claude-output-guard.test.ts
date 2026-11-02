@@ -102,3 +102,8 @@ test("the hook reads stdin and prints the JSON output", () => {
   assert.match(JSON.parse(stdout).hookSpecificOutput.updatedToolOutput.stdout, /bytes omitted/);
   assert.equal(spawnSync("node", [new URL("../output-guard/claude.mjs", import.meta.url).pathname], { input: "not json", encoding: "utf8" }).stdout, "");
 });
+
+test("output another guard already cut is left alone", () => {
+  const once = updated(run(bash({ stdout: lines(5000) }), {})).stdout as string;
+  assert.equal(run(bash({ stdout: once }), { ORBIT_OUTPUT_GUARD: "500" }), null);
+});

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseOutputLimit, readEnds, shrinkEnds, wholeOutput } from "./core.mjs";
+import { alreadyGuarded, parseOutputLimit, readEnds, shrinkEnds, wholeOutput } from "./core.mjs";
 
 const GUARDED_TOOLS = new Set(["bash", "codemode"]);
 
@@ -48,6 +48,7 @@ export function registerOutputGuard(pi) {
       const details = /** @type {{ fullOutputPath?: unknown } | undefined} */ (event.details);
       const sizeLimit = Math.max(limit, scriptOutputLimit(event.toolName, event.input));
       const original = event.content.map((part) => (part.type === "text" ? part.text : "")).join("");
+      if (alreadyGuarded(original)) return;
       /** @type {string | undefined} */
       let fullOutputPath = typeof details?.fullOutputPath === "string" ? details.fullOutputPath : undefined;
       if (!fullOutputPath && original.length <= sizeLimit) return;
