@@ -116,6 +116,9 @@ pub(super) fn remove_retired(
     for file in agent.retired_files(ui) {
         remove_file(file, KEPT_RETIRED, target, report)?;
     }
+    for file in agent.switched_off_files(ui) {
+        remove_file(file, KEPT_NIGHTLY, target, report)?;
+    }
     for registration in agent.retired_registrations(ui) {
         let (path, _) = target.resolve(&registration.file)?;
         let value = target.registration_value(&registration.value)?;
@@ -134,7 +137,7 @@ pub(super) fn remove_retired(
 /// The labels of the retired files and config files that setup would touch to clean up.
 pub(super) fn retired_labels(agent: Agent, ui: bool, target: &Target) -> Result<Vec<String>> {
     let mut labels = Vec::new();
-    for file in agent.retired_files(ui) {
+    for file in agent.retired_files(ui).chain(agent.switched_off_files(ui)) {
         let (path, label) = target.resolve(file)?;
         if path.exists() {
             labels.push(label);
@@ -183,6 +186,7 @@ pub(super) fn install_files<'a>(
 
 pub(in crate::commands::setup) const KEPT_RETIRED: &str =
     "kept (no longer used by Orbit; delete it by hand)";
+pub(in crate::commands::setup) const KEPT_NIGHTLY: &str = "kept (nightly file, edited; `ORBIT_NIGHTLY=1 orbit setup` reinstalls it, or delete it by hand)";
 const KEPT_EDITED: &str = "kept (edited since install; delete it by hand)";
 
 fn remove_file(
@@ -273,5 +277,21 @@ mod tests {
         assert!(retired.is_file());
         assert_eq!(report.outcomes.len(), 1);
         assert_eq!(report.outcomes[0].action, KEPT_RETIRED);
+    }
+
+    #[test]
+    fn an_edited_nightly_file_is_kept_with_the_nightly_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
+        let extension = dir.path().join(".pi/extensions/orbit-nightly/index.js");
+        std::fs::create_dir_all(extension.parent().unwrap()).unwrap();
+        std::fs::write(&extension, "// my own edit\n").unwrap();
+        let mut report = Report::default();
+
+        remove_retired(spec::agent_named("pi").unwrap(), true, &target, &mut report).unwrap();
+
+        assert!(extension.is_file());
+        assert_eq!(report.outcomes.len(), 1);
+        assert_eq!(report.outcomes[0].action, KEPT_NIGHTLY);
     }
 }

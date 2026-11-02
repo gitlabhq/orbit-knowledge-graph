@@ -361,30 +361,30 @@ impl Agent {
             .filter(move |entry| entry.ui == ui)
     }
 
-    /// Retired files, and the nightly ones while nightly is off.
     pub(super) fn retired_files(self, ui: bool) -> impl Iterator<Item = &'static ScopedPath> {
-        self.retired_files_in(ui, nightly_enabled())
-    }
-
-    fn retired_files_in(
-        self,
-        ui: bool,
-        nightly: bool,
-    ) -> impl Iterator<Item = &'static ScopedPath> {
-        let retired = self
-            .0
+        self.0
             .retired
             .template_files
             .iter()
             .filter(move |file| file.ui == ui)
-            .map(|file| &file.path);
-        let switched_off = self
-            .0
+            .map(|file| &file.path)
+    }
+
+    /// Nightly files that a stable setup removes again.
+    pub(super) fn switched_off_files(self, ui: bool) -> impl Iterator<Item = &'static ScopedPath> {
+        self.switched_off_files_in(ui, nightly_enabled())
+    }
+
+    fn switched_off_files_in(
+        self,
+        ui: bool,
+        nightly: bool,
+    ) -> impl Iterator<Item = &'static ScopedPath> {
+        self.0
             .template_files
             .iter()
             .filter(move |file| file.ui == ui && file.nightly && !nightly)
-            .map(|file| &file.path);
-        retired.chain(switched_off)
+            .map(|file| &file.path)
     }
 
     pub(super) fn retired_registrations(
@@ -723,8 +723,9 @@ mod tests {
                 ".pi/extensions/orbit-nightly/core.mjs"
             ]
         );
-        assert_eq!(pi.retired_files_in(true, true).count(), 0);
-        assert_eq!(pi.retired_files_in(true, false).count(), 2);
+        assert_eq!(pi.switched_off_files_in(true, true).count(), 0);
+        assert_eq!(pi.switched_off_files_in(true, false).count(), 2);
+        assert_eq!(pi.retired_files(true).count(), 0);
         for file in pi.ui_files_in(true, true) {
             let rendered = file.render();
             assert!(rendered.starts_with(TEMPLATE_CHECKSUM_PREFIX));
