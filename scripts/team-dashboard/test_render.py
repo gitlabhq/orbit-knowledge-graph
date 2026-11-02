@@ -273,6 +273,7 @@ class RenderTest(DashboardTestCase):
         script = (Path(__file__).resolve().parents[2] / "scripts/ci/close-stale-mrs.sh").read_text()
         for label in (dashboard.STALE_KEEP_LABEL, dashboard.STALE_SCHEDULED_LABEL):
             prefix, suffix = label.split("::")
+            self.assertIn(f'STALE_LABEL_PREFIX: "{prefix}"', config)
             self.assertIn(f'="${{PREFIX}}::{suffix}"', script)
 
     def test_bot_mrs_go_to_their_own_spoiler_with_status_and_nowhere_else(self):
