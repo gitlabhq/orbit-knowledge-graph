@@ -10,9 +10,11 @@ of truth. Always present results with their coverage caveats. See
    historical file coverage (`HAS_LATEST_DIFF` vs `HAS_DIFF`) and time-bounded
    aggregates. When a query falls into one, append a one-line caveat to the
    answer, not a buried footnote.
-2. **Treat CI recency as a coverage gap.** CI data lags by a few hours, so a
-   pipeline or job from the last few hours may be missing or partly populated.
-   Say it is not indexed yet. Never report it as 0 job-minutes.
+2. **Treat CI recency as a coverage gap.** `Pipeline` rows arrive within
+   minutes, but `Job` rows can trail by many hours, so a recent pipeline can
+   have a row and no jobs. Check the newest indexed job for the project
+   (`max(j.created_at)`), and say pipelines newer than that are not indexed
+   yet. Never report them as 0 job-minutes.
 3. **Drop rows Orbit lacks.** When a row has no data in the graph, leave it out
    of totals and averages and name it as a coverage gap. Do not count it as 0.
 4. **Name what shaped the result.** Say in one clause which filter or
