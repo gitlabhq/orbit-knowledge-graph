@@ -107,3 +107,9 @@ test("output another guard already cut is left alone", () => {
   const once = updated(run(bash({ stdout: lines(5000) }), {})).stdout as string;
   assert.equal(run(bash({ stdout: once }), { ORBIT_OUTPUT_GUARD: "500" }), null);
 });
+
+test("a large result that only quotes a marker is still cut", () => {
+  const quoted = `${lines(5000)}\n[... 5 of 90 bytes omitted. Full output: /x (read a range of it or rg it; do not cat it) ...]\n${lines(5000)}`;
+  assert.match(updated(run(bash({ stdout: quoted }), {})).stdout as string, /bytes omitted/);
+  assert.equal((updated(run(bash({ stdout: quoted }), {})).stdout as string).length < 10_500, true);
+});

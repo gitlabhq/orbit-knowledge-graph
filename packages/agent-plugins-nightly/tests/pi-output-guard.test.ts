@@ -153,3 +153,10 @@ test("output another guard already cut is left alone", () => {
   assert.match(once, /bytes omitted/);
   assert.equal(guard("500")?.(event("bash", once)), undefined);
 });
+
+test("a large result that only quotes a marker is still cut", () => {
+  const quoted = `${lines(5000)}\n[... 5 of 90 bytes omitted. Full output: /x (read a range of it or rg it; do not cat it) ...]\n${lines(5000)}`;
+  const shrunk = guard(undefined)?.(event("bash", quoted))?.content[0].text ?? "";
+  assert.ok(shrunk.length < 10_500, `${shrunk.length}`);
+  assert.ok(shrunk.endsWith("line 5000"));
+});

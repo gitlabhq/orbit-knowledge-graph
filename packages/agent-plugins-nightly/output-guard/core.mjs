@@ -22,12 +22,23 @@ export function parseOutputLimit(value, warn = console.warn) {
   return DEFAULT_OUTPUT_LIMIT;
 }
 
+const MAX_FRAMING_BYTES = 300;
+const GUARD_MARKER = /\n\[\.\.\. (\d+) of (\d+) bytes omitted\. Full output: [^\n]*\]\n/g;
+
 /**
  * Whether a guard (this one, or the same guard from another plugin) already cut the text, so it is not cut twice.
+ * Quoting a marker is not enough: the kept head and tail and the omitted count must add up to the full size,
+ * give or take the framing a Pi guard adds around them.
  * @param {string} text
  */
 export function alreadyGuarded(text) {
-  return /\[\.\.\. \d+ of \d+ bytes omitted\. Full output: /.test(text);
+  const markers = [...text.matchAll(GUARD_MARKER)];
+  if (markers.length !== 1) return false;
+  const [marker, omitted, total] = markers[0];
+  const index = markers[0].index ?? 0;
+  const kept = Buffer.byteLength(text.slice(0, index)) + Buffer.byteLength(text.slice(index + marker.length));
+  const surplus = kept + Number(omitted) - Number(total);
+  return surplus >= 0 && surplus <= MAX_FRAMING_BYTES;
 }
 
 /**
