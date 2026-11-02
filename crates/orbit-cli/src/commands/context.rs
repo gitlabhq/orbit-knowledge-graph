@@ -255,7 +255,7 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
     if text.contains("failed_jobs[") {
         bytes.extend(
             format!(
-                "\n`{} context job:N` prints a job's full log.\n",
+                "\n`{} context job:N` reads a failed job's log.\n",
                 crate::commands::setup::spec::launcher()
             )
             .into_bytes(),
