@@ -212,7 +212,7 @@ LIMIT 100
 
 ### How fresh is Job data
 
-`Pipeline` rows arrive within minutes, but `Job` rows can trail by many hours.
+`Pipeline` rows arrive in minutes, but `Job` rows can trail by many hours.
 Pipelines newer than the newest indexed job have a row but no jobs, so their
 job counts and durations are not indexed yet, not zero.
 

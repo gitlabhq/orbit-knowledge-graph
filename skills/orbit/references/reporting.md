@@ -10,7 +10,7 @@ of truth. Always present results with their coverage caveats. See
    historical file coverage (`HAS_LATEST_DIFF` vs `HAS_DIFF`) and time-bounded
    aggregates. When a query falls into one, append a one-line caveat to the
    answer, not a buried footnote.
-2. **Treat CI recency as a coverage gap.** `Pipeline` rows arrive within
+2. **Treat CI recency as a coverage gap.** `Pipeline` rows arrive in
    minutes, but `Job` rows can trail by many hours, so a recent pipeline can
    have a row and no jobs. Check the newest indexed job for the project
    (`max(j.created_at)`), and say pipelines newer than that are not indexed
