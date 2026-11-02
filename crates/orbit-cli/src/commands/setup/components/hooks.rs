@@ -116,9 +116,7 @@ pub(super) fn remove_retired(
     for file in agent.retired_files(ui) {
         remove_file(file, KEPT_RETIRED, target, report)?;
     }
-    for file in agent.switched_off_files(ui) {
-        remove_file(file, KEPT_NIGHTLY, target, report)?;
-    }
+    remove_switched_off(agent, ui, spec::nightly_enabled(), target, report)?;
     for registration in agent.retired_registrations(ui) {
         let (path, _) = target.resolve(&registration.file)?;
         let value = target.registration_value(&registration.value)?;
@@ -129,6 +127,35 @@ pub(super) fn remove_retired(
                 target,
                 report,
             )?;
+        }
+    }
+    Ok(())
+}
+
+/// Removes the nightly files together or not at all: an edited file kept without its siblings, such
+/// as an extension entry point without the module it imports, would stop working.
+fn remove_switched_off(
+    agent: Agent,
+    ui: bool,
+    nightly: bool,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    let mut edited = false;
+    for file in agent.switched_off_files_in(ui, nightly) {
+        let (path, _) = target.resolve(file)?;
+        if let Ok(current) = std::fs::read_to_string(&path) {
+            edited |= !TemplateFile::is_unmodified(&current);
+        }
+    }
+    for file in agent.switched_off_files_in(ui, nightly) {
+        if edited {
+            let (path, label) = target.resolve(file)?;
+            if path.exists() {
+                report.note(&label, KEPT_NIGHTLY);
+            }
+        } else {
+            remove_file(file, KEPT_NIGHTLY, target, report)?;
         }
     }
     Ok(())
@@ -186,7 +213,7 @@ pub(super) fn install_files<'a>(
 
 pub(in crate::commands::setup) const KEPT_RETIRED: &str =
     "kept (no longer used by Orbit; delete it by hand)";
-pub(in crate::commands::setup) const KEPT_NIGHTLY: &str = "kept (nightly file, edited; `ORBIT_NIGHTLY=1 orbit setup` reinstalls it, or delete it by hand)";
+pub(in crate::commands::setup) const KEPT_NIGHTLY: &str = "kept (nightly file, edited or next to an edited one; `ORBIT_NIGHTLY=1 orbit setup` reinstalls it, or delete it by hand)";
 const KEPT_EDITED: &str = "kept (edited since install; delete it by hand)";
 
 fn remove_file(
@@ -280,18 +307,24 @@ mod tests {
     }
 
     #[test]
-    fn an_edited_nightly_file_is_kept_with_the_nightly_note() {
+    fn an_edited_nightly_file_keeps_its_siblings_with_the_nightly_note() {
         let dir = tempfile::tempdir().unwrap();
         let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
-        let extension = dir.path().join(".pi/extensions/orbit-nightly/index.js");
-        std::fs::create_dir_all(extension.parent().unwrap()).unwrap();
-        std::fs::write(&extension, "// my own edit\n").unwrap();
+        let pi = spec::agent_named("pi").unwrap();
+        let mut paths = Vec::new();
+        for file in pi.ui_files_in(true, true) {
+            let (path, _) = target.resolve(&file.path).unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, file.render()).unwrap();
+            paths.push(path);
+        }
+        std::fs::write(&paths[0], "// my own edit\n").unwrap();
         let mut report = Report::default();
 
-        remove_retired(spec::agent_named("pi").unwrap(), true, &target, &mut report).unwrap();
+        remove_switched_off(pi, true, false, &target, &mut report).unwrap();
 
-        assert!(extension.is_file());
-        assert_eq!(report.outcomes.len(), 1);
-        assert_eq!(report.outcomes[0].action, KEPT_NIGHTLY);
+        assert!(paths.iter().all(|path| path.is_file()));
+        assert_eq!(report.outcomes.len(), paths.len());
+        assert!(report.outcomes.iter().all(|o| o.action == KEPT_NIGHTLY));
     }
 }

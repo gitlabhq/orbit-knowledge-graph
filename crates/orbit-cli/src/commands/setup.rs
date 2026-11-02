@@ -250,7 +250,9 @@ fn apply_and_report(
         show_outcomes_per_component(&report)?;
     } else {
         for outcome in &report.outcomes {
-            if outcome.action == components::KEPT_RETIRED {
+            if [components::KEPT_RETIRED, components::KEPT_NIGHTLY]
+                .contains(&outcome.action.as_str())
+            {
                 tui::warning(format!("{}: {}", outcome.label, outcome.action));
             }
         }

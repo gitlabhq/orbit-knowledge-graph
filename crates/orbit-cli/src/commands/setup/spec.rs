@@ -375,7 +375,7 @@ impl Agent {
         self.switched_off_files_in(ui, nightly_enabled())
     }
 
-    fn switched_off_files_in(
+    pub(super) fn switched_off_files_in(
         self,
         ui: bool,
         nightly: bool,
