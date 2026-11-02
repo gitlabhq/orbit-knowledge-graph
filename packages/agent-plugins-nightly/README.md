@@ -35,7 +35,7 @@ later.
 
 To promote a feature, set `stable: true`. Nightly replaces stable, so a feature
 that is on for stable must be on for nightly: `stable: true` with
-`nightly: false` fails the build. To revert a feature, set both flags to
+`nightly: false` fails the tests. To revert a feature, set both flags to
 `false`; setup then removes its unedited files from every install. Delete the
 entry only after a release that shipped with both flags `false`, because setup
 learns a feature's file paths from its entry. Each Pi feature installs as its

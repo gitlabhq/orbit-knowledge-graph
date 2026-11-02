@@ -48,7 +48,7 @@ impl Installer for Hooks {
                 .resolve(&merge.file)
                 .is_ok_and(|(path, _)| file_mentions(&path, &merge.marker))
         });
-        let templated = agent.ui_files(false).any(|template_file| {
+        let templated = agent.all_ui_files(false).any(|template_file| {
             target
                 .resolve(&template_file.path)
                 .is_ok_and(|(path, _)| path.exists())
@@ -240,7 +240,8 @@ pub(super) fn install_files<'a>(
 
 pub(in crate::commands::setup) const KEPT_RETIRED: &str =
     "kept (no longer used by Orbit; delete it by hand)";
-pub(in crate::commands::setup) const KEPT_FEATURE: &str = "kept (feature file, edited or next to an edited one; `ORBIT_NIGHTLY=1 orbit setup` reinstalls it while the feature is on, or delete it by hand)";
+pub(in crate::commands::setup) const KEPT_FEATURE: &str =
+    "kept (feature file, edited or next to an edited one; delete it by hand)";
 const KEPT_EDITED: &str = "kept (edited since install; delete it by hand)";
 
 fn remove_file(
@@ -366,5 +367,6 @@ mod tests {
         assert!(exists(&files[0]) && exists(&files[1]) && !exists(&files[2]));
         let kept = report.outcomes.iter().filter(|o| o.action == KEPT_FEATURE);
         assert_eq!(kept.count(), 2);
+        assert!(!KEPT_FEATURE.contains("ORBIT_NIGHTLY"));
     }
 }
