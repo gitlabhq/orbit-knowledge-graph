@@ -123,9 +123,9 @@ pub fn apply(
     ctx.entity_auth.clone_from(model.entity_auth());
     if input.query_type == QueryType::Neighbors
         && let Some(node) = input.nodes.first()
-        && let (Some(entity), Some(&id)) = (&node.entity, node.node_ids.first())
+        && let (Some(entity), [id]) = (&node.entity, node.node_ids.as_slice())
     {
-        ctx.neighbors_center = Some((entity.clone(), id));
+        ctx.neighbors_center = Some((entity.clone(), *id));
         ctx.labels = model
             .graph()
             .entities()
