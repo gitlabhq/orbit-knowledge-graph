@@ -15,8 +15,6 @@ of truth. Always present results with their coverage caveats. See
 3. **Do not invent a "Methodology" header that implies rigor the data
    lacks.** Use one only when the query itself is non-obvious. It is not a
    substitute for coverage caveats.
-4. **Drop rows Orbit lacks.** Leave them out of totals and name the gap, for
-   example pipelines newer than the newest indexed `Job`. Never count them as 0.
 
 ## Example
 
