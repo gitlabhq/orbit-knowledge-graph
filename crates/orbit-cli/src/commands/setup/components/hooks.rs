@@ -97,11 +97,15 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
     }
 
     remove_files(
-        agent.ui_files(false).map(|file| &file.path),
+        agent
+            .ui_files(false)
+            .filter(|file| !file.nightly)
+            .map(|file| &file.path),
         agent.ui_registrations(false),
         target,
         report,
     )?;
+    remove_nightly_files(agent, false, target, report)?;
     remove_retired(agent, false, target, report)
 }
 
@@ -134,6 +138,19 @@ pub(super) fn remove_retired(
 
 /// Removes the nightly files together or not at all: an edited file kept without its siblings, such
 /// as an extension entry point without the module it imports, would stop working.
+/// Uninstall takes the nightly files out together whether or not `ORBIT_NIGHTLY` is set.
+pub(super) fn remove_nightly_files(
+    agent: Agent,
+    ui: bool,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    if spec::nightly_enabled() {
+        remove_switched_off(agent, ui, false, target, report)?;
+    }
+    Ok(())
+}
+
 fn remove_switched_off(
     agent: Agent,
     ui: bool,
@@ -326,5 +343,34 @@ mod tests {
         assert!(paths.iter().all(|path| path.is_file()));
         assert_eq!(report.outcomes.len(), paths.len());
         assert!(report.outcomes.iter().all(|o| o.action == KEPT_NIGHTLY));
+    }
+
+    #[test]
+    fn uninstall_keeps_edited_nightly_files_together_even_when_nightly_is_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
+        let pi = spec::agent_named("pi").unwrap();
+        let mut paths = Vec::new();
+        for file in pi.ui_files_in(true, true) {
+            let (path, _) = target.resolve(&file.path).unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, file.render()).unwrap();
+            paths.push(path);
+        }
+        std::fs::write(&paths[0], "// my own edit\n").unwrap();
+        let mut report = Report::default();
+
+        remove_files(
+            pi.ui_files_in(true, true)
+                .filter(|file| !file.nightly)
+                .map(|file| &file.path),
+            std::iter::empty(),
+            &target,
+            &mut report,
+        )
+        .unwrap();
+        remove_switched_off(pi, true, false, &target, &mut report).unwrap();
+
+        assert!(paths.iter().all(|path| path.is_file()));
     }
 }
