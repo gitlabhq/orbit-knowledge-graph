@@ -686,6 +686,29 @@ mod tests {
     }
 
     #[test]
+    fn neighbors_records_a_center_only_for_one_id() {
+        let center = |ids: &str| {
+            let query = format!(
+                r#"{{"query_type": "neighbors", "nodes": [{{"id": "u", "entity": "User", "node_ids": {ids}}}],
+                    "neighbors": {{"direction": "outgoing"}}, "limit": 10}}"#
+            );
+            let compiled = compile(&query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).unwrap();
+            let context = &compiled.base.result_context;
+            (
+                context
+                    .neighbors_center()
+                    .map(|(entity, id)| (entity.to_string(), id)),
+                context.label("User").map(str::to_string),
+            )
+        };
+        assert_eq!(
+            center("[1]"),
+            (Some(("User".into(), 1)), Some("username".into()))
+        );
+        assert_eq!(center("[1, 2]"), (None, None));
+    }
+
+    #[test]
     fn path_finding_clamps_settings_to_safety_ceiling() {
         let query = r#"{
             "query_type": "path_finding",
