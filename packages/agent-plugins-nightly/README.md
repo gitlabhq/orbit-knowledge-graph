@@ -18,7 +18,9 @@ of features that are off, unless you edited them.
 | Output guard: cuts a large Bash result to its head and tail and keeps the full output in a file | `output-guard/claude.mjs` | `output-guard/pi.mjs` (also guards `codemode`) |
 
 `ORBIT_OUTPUT_GUARD` sets the limit in characters (default 10000, for example
-`20k`) or `off`.
+`20k`) or `off`. The Claude Code hook caps the limit at 29000 characters,
+because Claude Code shows only a short preview of a replaced result over about
+30,000.
 
 The Claude Code hook runs with `node`, so `node` must be on your `PATH`. The
 guard leaves output that another guard already cut, such as the orbitcode one,

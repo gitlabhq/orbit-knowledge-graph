@@ -1,6 +1,7 @@
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 
 export const DEFAULT_OUTPUT_LIMIT = 10_000;
+const MAX_UTF8_BYTES_PER_CHAR = 4;
 
 export function parseOutputLimit(value, warn = console.warn) {
   if (value === undefined) return DEFAULT_OUTPUT_LIMIT;
@@ -32,10 +33,6 @@ export function alreadyGuarded(text) {
   const surplus = kept + Number(omitted) - Number(total);
   return surplus >= 0 && surplus <= MAX_FRAMING_BYTES;
 }
-
-/**
- * @typedef {{ head: string; tail: string; totalBytes: number; complete: boolean }} OutputEnds
- */
 
 export function wholeOutput(text) {
   return { head: text, tail: "", totalBytes: Buffer.byteLength(text), complete: true };
@@ -82,7 +79,7 @@ export function readEnds(path, limit) {
       readSync(fd, buffer, 0, length, position);
       return buffer.toString("utf8");
     };
-    if (size <= 4 * limit) return { head: read(size, 0), tail: "", totalBytes: size, complete: true };
+    if (size <= MAX_UTF8_BYTES_PER_CHAR * limit) return { head: read(size, 0), tail: "", totalBytes: size, complete: true };
     return {
       head: wholeLines(read(limit, 0), "head"),
       tail: wholeLines(read(limit, size - limit), "tail"),
