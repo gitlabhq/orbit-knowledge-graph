@@ -194,32 +194,21 @@ ORDER BY pl.created_at DESC
 LIMIT 10
 ```
 
-### Downstream pipelines of a pipeline
+### CI freshness and downstream pipelines
 
-`CHILD_OF` points from a child pipeline to its parent. A one-hop query returns
-only direct children and misses grandchild pipelines. Use a bounded
-variable-length hop. Traversals are capped at three hops, so deeper chains need
-a second query anchored on the last pipeline found. Every returned edge points
-at the anchor, so use an explicit `(gc)-[:CHILD_OF]->(c)-[:CHILD_OF]->(root)`
-chain when you need the intermediate parent. For pipeline 3016186778, one hop
-returns 2 children and the bounded hop returns 10.
-
-```gql orbit-query
-MATCH (child:Pipeline)-[:CHILD_OF*1..3]->(root:Pipeline {id: 3016186778})
-RETURN child.id, child.status, child.source
-LIMIT 100
-```
-
-### How fresh is Job data
-
-`Pipeline` rows arrive in minutes, but `Job` rows can trail by many hours.
-Pipelines newer than the newest indexed job have a row but no jobs, so their
-job counts and durations are not indexed yet, not zero.
+`Job` rows lag `Pipeline` rows by hours. Pipelines newer than the newest job
+have no jobs indexed yet. `CHILD_OF` points from child to parent.
 
 ```gql orbit-query
 MATCH (j:Job {project_id: 278964})
 RETURN max(j.created_at) AS newest_job
 LIMIT 1
+```
+
+```gql orbit-query
+MATCH (child:Pipeline)-[:CHILD_OF*1..3]->(root:Pipeline {id: 3016186778})
+RETURN child.id, child.status, child.source
+LIMIT 100
 ```
 
 ### Open work items in a project

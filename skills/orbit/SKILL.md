@@ -69,8 +69,9 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - At least one node needs an ID or a property filter. `LIMIT` does not bound the scan, so `MATCH (p:Project) RETURN p LIMIT 5` rejects.
 - Write relationship types after a colon: `-[:AUTHORED]->`. `-[AUTHORED]->` declares a variable and rejects.
 - Pipelines for a merge request need the `source: 'merge_request_event'` filter.
-- Downstream pipelines hang off `CHILD_OF` edges, and a one-hop query misses grandchildren. Use [a multi-hop traversal](references/gql.md#downstream-pipelines-of-a-pipeline).
-- CI data lags unevenly: `Pipeline` rows arrive in minutes, but `Job` rows can trail by many hours. A recent pipeline can exist with 0 jobs. Check the [newest indexed job](references/gql.md#how-fresh-is-job-data) before totalling recent job data. Never report unindexed jobs as 0 job-minutes.
+- `Job` rows lag `Pipeline` rows by hours, so [check `max(j.created_at)`](references/gql.md#ci-freshness-and-downstream-pipelines) before treating 0 jobs as real.
+- Downstream pipelines need `-[:CHILD_OF*1..3]->`, because one hop misses grandchildren.
+- Drop rows Orbit lacks and report the gap. Never count them as 0.
 - Prefer a single anchored node when you can bound the target directly. Extra anchor nodes can change the row shape and skew aggregate counts.
 - To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
