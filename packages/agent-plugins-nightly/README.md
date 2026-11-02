@@ -33,7 +33,14 @@ later.
 
 ## Promoting or reverting
 
-To promote a feature, set `stable: true`. To revert it, set `nightly: false` or
-delete the entry. Commits scoped `agent-plugins-nightly` never cut a release,
-but the release notes of the next release still list them. A promotion that
-changes stable behavior is a normal `feat(agent-plugins)` commit.
+To promote a feature, set `stable: true`. Nightly replaces stable, so a feature
+that is on for stable must be on for nightly: `stable: true` with
+`nightly: false` fails the build. To revert a feature, set both flags to
+`false`; setup then removes its unedited files from every install. Delete the
+entry only after a release that shipped with both flags `false`, because setup
+learns a feature's file paths from its entry. Each Pi feature installs as its
+own extension, `orbit-<feature>`, so features never share files.
+
+Commits scoped `agent-plugins-nightly` never cut a release, but the release
+notes of the next release still list them. A promotion that changes stable
+behavior is a normal `feat(agent-plugins)` commit.

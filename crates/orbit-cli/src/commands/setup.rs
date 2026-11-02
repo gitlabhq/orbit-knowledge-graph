@@ -1519,25 +1519,33 @@ mod tests {
     }
 
     #[test]
-    fn nightly_pi_files_count_as_installed_and_are_removed_without_the_variable() {
+    fn feature_pi_files_count_as_installed_and_are_removed_together() {
         let dir = tempfile::tempdir().unwrap();
         let target = project(dir.path());
         let pi = spec::agent_named("pi").unwrap();
         let installer = components::installer_for(Component::AgentPlugins);
-        let extension = dir.path().join(".pi/extensions/orbit-features");
         assert!(!installer.is_installed(pi, &target));
 
-        std::fs::create_dir_all(&extension).unwrap();
-        for file in pi.ui_files_in(true, true) {
+        let mut paths = Vec::new();
+        for file in pi.feature_files(true) {
             let (path, _) = target.resolve(&file.path).unwrap();
-            std::fs::write(path, file.render()).unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, file.render()).unwrap();
+            paths.push(path);
         }
         assert!(installer.is_installed(pi, &target));
 
+        std::fs::write(&paths[0], "// my own edit\n").unwrap();
         installer
             .remove(&[pi], &target, &mut Report::default())
             .unwrap();
-        assert!(!extension.exists());
+        assert!(paths.iter().all(|path| path.is_file()));
+
+        std::fs::write(&paths[0], pi.feature_files(true).next().unwrap().render()).unwrap();
+        installer
+            .remove(&[pi], &target, &mut Report::default())
+            .unwrap();
+        assert!(paths.iter().all(|path| !path.exists()));
     }
 
     #[test]

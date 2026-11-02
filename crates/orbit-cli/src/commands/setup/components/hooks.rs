@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -105,11 +105,7 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
         target,
         report,
     )?;
-    remove_group(
-        agent.feature_files(false).map(|file| &file.path),
-        target,
-        report,
-    )?;
+    remove_by_feature(agent.feature_files(false), target, report)?;
     remove_retired_only(agent, false, target, report)
 }
 
@@ -121,7 +117,7 @@ pub(super) fn remove_retired(
     target: &Target,
     report: &mut Report,
 ) -> Result<()> {
-    remove_group(agent.switched_off_files(ui), target, report)?;
+    remove_by_feature(agent.switched_off_files(ui), target, report)?;
     remove_retired_only(agent, ui, target, report)
 }
 
@@ -152,12 +148,25 @@ pub(super) fn remove_retired_only(
 
 /// Removes feature files together or not at all: an edited file kept without its siblings, such
 /// as an extension entry point without the module it imports, would stop working.
-pub(super) fn remove_group<'a>(
-    files: impl Iterator<Item = &'a ScopedPath>,
+pub(super) fn remove_by_feature<'a>(
+    files: impl Iterator<Item = &'a TemplateFile>,
     target: &Target,
     report: &mut Report,
 ) -> Result<()> {
-    let files: Vec<_> = files.collect();
+    let mut by_feature: BTreeMap<&str, Vec<&ScopedPath>> = BTreeMap::new();
+    for file in files {
+        by_feature
+            .entry(file.feature.as_deref().unwrap_or_default())
+            .or_default()
+            .push(&file.path);
+    }
+    for group in by_feature.into_values() {
+        remove_group(group, target, report)?;
+    }
+    Ok(())
+}
+
+fn remove_group(files: Vec<&ScopedPath>, target: &Target, report: &mut Report) -> Result<()> {
     let mut edited = false;
     for file in &files {
         let (path, _) = target.resolve(file)?;
@@ -181,7 +190,8 @@ pub(super) fn remove_group<'a>(
 /// The labels of the retired files and config files that setup would touch to clean up.
 pub(super) fn retired_labels(agent: Agent, ui: bool, target: &Target) -> Result<Vec<String>> {
     let mut labels = Vec::new();
-    for file in agent.retired_files(ui).chain(agent.switched_off_files(ui)) {
+    let switched_off = agent.switched_off_files(ui).map(|file| &file.path);
+    for file in agent.retired_files(ui).chain(switched_off) {
         let (path, label) = target.resolve(file)?;
         if path.exists() {
             labels.push(label);
@@ -230,7 +240,7 @@ pub(super) fn install_files<'a>(
 
 pub(in crate::commands::setup) const KEPT_RETIRED: &str =
     "kept (no longer used by Orbit; delete it by hand)";
-pub(in crate::commands::setup) const KEPT_FEATURE: &str = "kept (feature file, edited or next to an edited one; setup reinstalls it while the feature is on, or delete it by hand)";
+pub(in crate::commands::setup) const KEPT_FEATURE: &str = "kept (feature file, edited or next to an edited one; `ORBIT_NIGHTLY=1 orbit setup` reinstalls it while the feature is on, or delete it by hand)";
 const KEPT_EDITED: &str = "kept (edited since install; delete it by hand)";
 
 fn remove_file(
@@ -324,53 +334,37 @@ mod tests {
     }
 
     #[test]
-    fn an_edited_nightly_file_keeps_its_siblings_with_the_nightly_note() {
+    fn an_edited_feature_file_keeps_its_siblings_but_not_other_features() {
         let dir = tempfile::tempdir().unwrap();
         let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
-        let pi = spec::agent_named("pi").unwrap();
-        let mut paths = Vec::new();
-        for file in pi.ui_files_in(true, true) {
+        let file = |feature: &str, name: &str| TemplateFile {
+            path: ScopedPath {
+                project: format!(".pi/extensions/orbit-{feature}/{name}"),
+                global: format!("unused/{feature}/{name}"),
+            },
+            template: "output-guard/core.mjs".to_string(),
+            ui: true,
+            feature: Some(feature.to_string()),
+        };
+        let files = [
+            file("a", "index.js"),
+            file("a", "core.mjs"),
+            file("b", "index.js"),
+        ];
+        for file in &files {
             let (path, _) = target.resolve(&file.path).unwrap();
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(&path, file.render()).unwrap();
-            paths.push(path);
+            std::fs::write(path, file.render()).unwrap();
         }
-        std::fs::write(&paths[0], "// my own edit\n").unwrap();
+        let (edited, _) = target.resolve(&files[0].path).unwrap();
+        std::fs::write(&edited, "// my own edit\n").unwrap();
         let mut report = Report::default();
 
-        remove_group(pi.switched_off_files_in(true, false), &target, &mut report).unwrap();
+        remove_by_feature(files.iter(), &target, &mut report).unwrap();
 
-        assert!(paths.iter().all(|path| path.is_file()));
-        assert_eq!(report.outcomes.len(), paths.len());
-        assert!(report.outcomes.iter().all(|o| o.action == KEPT_FEATURE));
-    }
-
-    #[test]
-    fn uninstall_keeps_edited_nightly_files_together_even_when_nightly_is_on() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
-        let pi = spec::agent_named("pi").unwrap();
-        let mut paths = Vec::new();
-        for file in pi.ui_files_in(true, true) {
-            let (path, _) = target.resolve(&file.path).unwrap();
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(&path, file.render()).unwrap();
-            paths.push(path);
-        }
-        std::fs::write(&paths[0], "// my own edit\n").unwrap();
-        let mut report = Report::default();
-
-        remove_files(
-            pi.ui_files_in(true, true)
-                .filter(|file| file.feature.is_none())
-                .map(|file| &file.path),
-            std::iter::empty(),
-            &target,
-            &mut report,
-        )
-        .unwrap();
-        remove_group(pi.switched_off_files_in(true, false), &target, &mut report).unwrap();
-
-        assert!(paths.iter().all(|path| path.is_file()));
+        let exists = |file: &TemplateFile| target.resolve(&file.path).unwrap().0.exists();
+        assert!(exists(&files[0]) && exists(&files[1]) && !exists(&files[2]));
+        let kept = report.outcomes.iter().filter(|o| o.action == KEPT_FEATURE);
+        assert_eq!(kept.count(), 2);
     }
 }

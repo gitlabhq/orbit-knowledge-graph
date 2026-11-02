@@ -56,14 +56,24 @@ struct ClaudeFeature {
 
 pub(super) type Features = BTreeMap<String, Feature>;
 
-fn parse_features(yaml: &[u8]) -> Features {
-    orbit_utils::yaml::from_slice(yaml)
-        .expect("packages/agent-plugins-nightly/features.yaml is invalid")
+/// Nightly replaces stable, so every feature that is on for stable must be on for nightly too.
+fn parse_features(yaml: &[u8]) -> Result<Features, String> {
+    let features: Features = orbit_utils::yaml::from_slice(yaml).map_err(|e| e.to_string())?;
+    match features
+        .iter()
+        .find(|(_, feature)| feature.stable && !feature.nightly)
+    {
+        Some((name, _)) => Err(format!(
+            "feature {name}: `stable: true` needs `nightly: true`, because nightly installs everything stable does; set both to false to turn it off"
+        )),
+        None => Ok(features),
+    }
 }
 
 static FEATURES: LazyLock<Features> = LazyLock::new(|| {
     let file = NightlyAssets::get("features.yaml").expect("features.yaml is embedded");
     parse_features(&file.data)
+        .unwrap_or_else(|e| panic!("packages/agent-plugins-nightly/features.yaml is invalid: {e}"))
 });
 
 fn feature_on(features: &Features, name: &str, nightly: bool) -> bool {
@@ -405,8 +415,8 @@ fn feature_template_files(spec: &AgentSpec, features: &Features) -> Vec<Template
         for (destination, source) in section.iter().flat_map(|section| &section.files) {
             files.push(TemplateFile {
                 path: ScopedPath {
-                    project: format!("{}/{destination}", dir.project),
-                    global: format!("{}/{destination}", dir.global),
+                    project: format!("{}/orbit-{name}/{destination}", dir.project),
+                    global: format!("{}/orbit-{name}/{destination}", dir.global),
                 },
                 template: source.clone(),
                 ui: true,
@@ -454,15 +464,7 @@ impl std::ops::Deref for Agent {
 
 impl Agent {
     pub(super) fn ui_files(self, ui: bool) -> impl Iterator<Item = &'static TemplateFile> {
-        self.ui_files_in(ui, nightly_enabled())
-    }
-
-    pub(super) fn ui_files_in(
-        self,
-        ui: bool,
-        nightly: bool,
-    ) -> impl Iterator<Item = &'static TemplateFile> {
-        self.ui_files_with(&FEATURES, ui, nightly)
+        self.ui_files_with(&FEATURES, ui, nightly_enabled())
     }
 
     fn ui_files_with(
@@ -497,16 +499,11 @@ impl Agent {
     }
 
     /// Feature files that setup for the current channel removes again.
-    pub(super) fn switched_off_files(self, ui: bool) -> impl Iterator<Item = &'static ScopedPath> {
-        self.switched_off_files_in(ui, nightly_enabled())
-    }
-
-    pub(super) fn switched_off_files_in(
+    pub(super) fn switched_off_files(
         self,
         ui: bool,
-        nightly: bool,
-    ) -> impl Iterator<Item = &'static ScopedPath> {
-        self.switched_off_files_with(&FEATURES, ui, nightly)
+    ) -> impl Iterator<Item = &'static TemplateFile> {
+        self.switched_off_files_with(&FEATURES, ui, nightly_enabled())
     }
 
     fn switched_off_files_with(
@@ -514,14 +511,20 @@ impl Agent {
         features: &'static Features,
         ui: bool,
         nightly: bool,
-    ) -> impl Iterator<Item = &'static ScopedPath> {
-        self.feature_files(ui)
-            .filter(move |file| {
-                file.feature
-                    .as_deref()
-                    .is_some_and(|name| !feature_on(features, name, nightly))
-            })
-            .map(|file| &file.path)
+    ) -> impl Iterator<Item = &'static TemplateFile> {
+        self.feature_files(ui).filter(move |file| {
+            file.feature
+                .as_deref()
+                .is_some_and(|name| !feature_on(features, name, nightly))
+        })
+    }
+
+    /// Every template file of the UI kind, whatever the channel.
+    pub(super) fn all_ui_files(self, ui: bool) -> impl Iterator<Item = &'static TemplateFile> {
+        self.0
+            .template_files
+            .iter()
+            .filter(move |file| file.ui == ui)
     }
 
     /// Every feature file, whatever the channel.
@@ -763,6 +766,7 @@ mod tests {
             .files(&plugin.marketplace, false)
             .into_iter()
             .map(|(path, _)| path)
+            .filter(|path| !path.contains("/features/"))
             .collect();
         files.sort();
         let shipped = [
@@ -815,19 +819,18 @@ mod tests {
         );
     }
 
-    fn registry(stable: bool) -> &'static Features {
-        let yaml = String::from_utf8(
-            NightlyAssets::get("features.yaml")
-                .unwrap()
-                .data
-                .into_owned(),
-        )
-        .unwrap()
-        .replace("stable: false", &format!("stable: {stable}"));
-        Box::leak(Box::new(parse_features(yaml.as_bytes())))
+    /// The shipped registry with every feature set to the given channels, so tests do not depend on its flags.
+    fn registry(nightly: bool, stable: bool) -> &'static Features {
+        let file = NightlyAssets::get("features.yaml").unwrap();
+        let mut features = parse_features(&file.data).unwrap();
+        for feature in features.values_mut() {
+            feature.nightly = nightly;
+            feature.stable = stable;
+        }
+        Box::leak(Box::new(features))
     }
 
-    fn claude_paths(features: &Features, nightly: bool) -> Vec<String> {
+    fn claude_feature_paths(features: &Features, nightly: bool) -> Vec<String> {
         let claude = agent_named("claude").unwrap();
         let plugin = claude.plugin.as_ref().unwrap();
         plugin
@@ -838,68 +841,68 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn the_registry_decides_which_channel_gets_the_claude_hooks() {
-        let guard = [
-            "gitlab-orbit/features/output-guard/claude.mjs",
-            "gitlab-orbit/features/output-guard/core.mjs",
-        ];
-        assert!(claude_paths(registry(false), false).is_empty());
-        assert_eq!(claude_paths(registry(false), true), guard);
-        assert_eq!(claude_paths(registry(true), false), guard);
-
+    fn claude_hooks(features: &Features, nightly: bool) -> Value {
         let claude = agent_named("claude").unwrap();
         let plugin = claude.plugin.as_ref().unwrap();
-        let hooks = |features: &Features, nightly: bool| -> Value {
-            let files = plugin.files_with(features, &plugin.marketplace, nightly);
-            let (_, data) = files
-                .iter()
-                .find(|(path, _)| path == "gitlab-orbit/hooks/hooks.json")
-                .unwrap();
-            serde_json::from_slice(data).unwrap()
-        };
-        let stable = hooks(registry(false), false);
-        let nightly = hooks(registry(false), true);
-        assert!(stable.get("hooks").is_none());
-        assert_eq!(nightly["modules"], stable["modules"]);
-        let command = nightly["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
-            .as_str()
+        let files = plugin.files_with(features, &plugin.marketplace, nightly);
+        let (_, data) = files
+            .iter()
+            .find(|(path, _)| path == "gitlab-orbit/hooks/hooks.json")
             .unwrap();
-        assert!(command.contains("${CLAUDE_PLUGIN_ROOT}/features/output-guard/claude.mjs"));
-        assert_eq!(hooks(registry(true), false), nightly);
+        serde_json::from_slice(data).unwrap()
     }
 
     #[test]
-    fn the_registry_decides_which_channel_gets_the_pi_extension() {
+    fn the_registry_decides_which_channel_gets_the_claude_files_and_hooks() {
+        let (off, nightly_only, both) = (
+            registry(false, false),
+            registry(true, false),
+            registry(true, true),
+        );
+        assert!(claude_feature_paths(off, false).is_empty());
+        assert!(claude_feature_paths(off, true).is_empty());
+        assert!(claude_feature_paths(nightly_only, false).is_empty());
+        let nightly_paths = claude_feature_paths(nightly_only, true);
+        assert!(!nightly_paths.is_empty());
+        assert_eq!(claude_feature_paths(both, false), nightly_paths);
+
+        let stable = claude_hooks(off, false);
+        assert!(stable.get("hooks").is_none());
+        let nightly = claude_hooks(nightly_only, true);
+        assert_eq!(nightly["modules"], stable["modules"]);
+        assert!(nightly["hooks"].is_object());
+        assert_eq!(claude_hooks(both, false), nightly);
+        assert_eq!(claude_hooks(nightly_only, false), stable);
+    }
+
+    #[test]
+    fn the_registry_decides_which_channel_gets_the_pi_extensions() {
         let pi = agent_named("pi").unwrap();
-        let paths = |features: &'static Features, nightly: bool| -> Vec<String> {
+        let installed = |features: &'static Features, nightly: bool| -> Vec<String> {
             pi.ui_files_with(features, true, nightly)
+                .filter(|file| file.feature.is_some())
                 .map(|file| file.path.project.clone())
                 .collect()
         };
-        let extension = [
-            ".pi/extensions/orbit-features/core.mjs",
-            ".pi/extensions/orbit-features/index.js",
-        ];
-        assert!(paths(registry(false), false).is_empty());
-        assert_eq!(paths(registry(false), true), extension);
-        assert_eq!(paths(registry(true), false), extension);
-        assert_eq!(
-            pi.switched_off_files_with(registry(false), true, false)
-                .count(),
-            2
+        let switched_off = |features: &'static Features, nightly: bool| {
+            pi.switched_off_files_with(features, true, nightly).count()
+        };
+        let (off, nightly_only, both) = (
+            registry(false, false),
+            registry(true, false),
+            registry(true, true),
         );
-        assert_eq!(
-            pi.switched_off_files_with(registry(false), true, true)
-                .count(),
-            0
-        );
-        assert_eq!(
-            pi.switched_off_files_with(registry(true), true, false)
-                .count(),
-            0
-        );
-        for file in pi.ui_files_with(registry(false), true, true) {
+        let every_file = pi.feature_files(true).count();
+        assert!(every_file > 0);
+        assert!(installed(off, false).is_empty() && installed(off, true).is_empty());
+        assert!(installed(nightly_only, false).is_empty());
+        assert_eq!(installed(nightly_only, true).len(), every_file);
+        assert_eq!(installed(both, false), installed(nightly_only, true));
+        assert_eq!(switched_off(off, false), every_file);
+        assert_eq!(switched_off(nightly_only, false), every_file);
+        assert_eq!(switched_off(nightly_only, true), 0);
+        assert_eq!(switched_off(both, false), 0);
+        for file in pi.ui_files_with(nightly_only, true, true) {
             let rendered = file.render();
             assert!(rendered.starts_with(TEMPLATE_CHECKSUM_PREFIX));
             assert!(TemplateFile::is_unmodified(&rendered));
@@ -907,9 +910,20 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_registry_matches_the_plan() {
-        let guard = &FEATURES["output-guard"];
-        assert!(guard.nightly && !guard.stable);
+    fn a_stable_feature_must_also_be_on_for_nightly() {
+        let error = parse_features(b"a:\n  nightly: false\n  stable: true\n").unwrap_err();
+        assert!(error.contains("feature a") && error.contains("needs `nightly: true`"));
+        assert!(
+            parse_features(
+                b"a:\n  nightly: true\n  stable: true\nb:\n  nightly: false\n  stable: false\n"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn the_shipped_registry_is_consistent() {
+        let mut destinations = std::collections::BTreeSet::new();
         for spec in agents() {
             for file in &spec.template_files {
                 if let Some(name) = &file.feature {
@@ -918,7 +932,41 @@ mod tests {
                         "{name} is not in features.yaml"
                     );
                 }
+                assert!(
+                    destinations.insert((spec.name.clone(), file.path.project.clone())),
+                    "{}: {} is installed twice",
+                    spec.name,
+                    file.path.project
+                );
             }
+        }
+        for (name, feature) in FEATURES.iter() {
+            let sources = feature
+                .claude
+                .iter()
+                .flat_map(|claude| claude.files.iter().chain([&claude.hooks]))
+                .chain(feature.pi.iter().flat_map(|pi| pi.files.values()));
+            for source in sources {
+                assert!(
+                    NightlyAssets::get(source).is_some(),
+                    "{name}: {source} is not embedded"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_feature_installs_as_its_own_pi_extension() {
+        let pi = agent_named("pi").unwrap();
+        for file in pi.feature_files(true) {
+            let name = file.feature.as_deref().unwrap();
+            assert!(
+                file.path
+                    .project
+                    .starts_with(&format!(".pi/extensions/orbit-{name}/")),
+                "{}",
+                file.path.project
+            );
         }
     }
 

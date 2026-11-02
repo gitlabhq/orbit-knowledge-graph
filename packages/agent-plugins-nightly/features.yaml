@@ -1,6 +1,6 @@
 # Each feature is on or off per channel. `ORBIT_NIGHTLY=1 orbit setup` installs the features with
 # `nightly: true`; a plain `orbit setup` installs the ones with `stable: true`. Promote a feature by
-# setting `stable: true`; revert it by setting `nightly: false`. Setup builds both channels from
+# setting `stable: true` (it must stay `nightly: true` too); revert it by setting both to `false`. Setup builds both channels from
 # this file, so a flag is the only edit.
 #
 # Per assistant, a feature lists what it ships: `claude` merges hooks into the Claude Code plugin

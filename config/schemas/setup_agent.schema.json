@@ -38,7 +38,7 @@
     },
     "feature_dir": {
       "$ref": "#/definitions/scopedPath",
-      "description": "Where the features that are on for the channel put this assistant's files, as listed in packages/agent-plugins-nightly/features.yaml."
+      "description": "Directory that holds one orbit-<feature> extension for each feature that is on for the channel (packages/agent-plugins-nightly/features.yaml)."
     },
     "template_files": {
       "type": "array",

@@ -64,11 +64,7 @@ impl Installer for AgentPlugins {
                 target,
                 report,
             )?;
-            hooks::remove_group(
-                agent.feature_files(true).map(|file| &file.path),
-                target,
-                report,
-            )?;
+            hooks::remove_by_feature(agent.feature_files(true), target, report)?;
             hooks::remove_retired_only(*agent, true, target, report)?;
         }
         Ok(())
@@ -81,7 +77,7 @@ impl Installer for AgentPlugins {
                 .is_ok_and(|(dir, _)| dir.join(MANIFEST).is_file())
         });
         plugin
-            || agent.ui_files_in(true, true).any(|file| {
+            || agent.all_ui_files(true).any(|file| {
                 target
                     .resolve(&file.path)
                     .is_ok_and(|(path, _)| path.exists())
