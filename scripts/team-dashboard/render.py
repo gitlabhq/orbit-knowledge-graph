@@ -181,8 +181,12 @@ def merge_request_line(candidate: Candidate, now: datetime, suffix: str = "") ->
     return item_line(str(candidate.mr["web_url"]), str(candidate.mr.get("created_at")), now, suffix)
 
 
+def oldest_key(mr: dict) -> Tuple[str, str]:
+    return str(mr.get("created_at")), str(mr.get("web_url"))
+
+
 def oldest_first(candidates: Sequence[Candidate]) -> List[Candidate]:
-    return sorted(candidates, key=lambda c: (str(c.mr.get("created_at")), str(c.mr.get("web_url"))))
+    return sorted(candidates, key=lambda c: oldest_key(c.mr))
 
 
 def is_bot_username(username: str) -> bool:
@@ -436,8 +440,7 @@ def render_region(api: Api, args: argparse.Namespace, now: datetime) -> str:
         and c.mr.get("detailed_merge_status") in REVIEW_STATUSES
         and (c.reviewers or READY_LABEL in c.mr.get("labels", []))
     ]
-    scheduled = sorted(stale_merge_requests(api, args.source_project, STALE_SCHEDULED_LABEL),
-                       key=lambda mr: (str(mr.get("created_at")), str(mr.get("web_url"))))
+    scheduled = sorted(stale_merge_requests(api, args.source_project, STALE_SCHEDULED_LABEL), key=oldest_key)
     kept = stale_merge_requests(api, args.source_project, STALE_KEEP_LABEL)
     pinned = read_pinned(TEMPLATES / "dashboard-priority.txt")
     team_wide = team_wide_issues(api, args.source_project, args.team_group, args.issue, now)
