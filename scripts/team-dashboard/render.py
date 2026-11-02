@@ -39,6 +39,9 @@ DEFAULT_SOURCE_PROJECT = "gitlab-org/orbit/knowledge-graph"
 DEFAULT_ISSUE = 1470
 DEFAULT_TEAM_GROUP = "gitlab-org/orbit/team"
 READY_LABEL = "workflow::ready for review"
+STALE_SCHEDULED_LABEL = "stale::scheduled_for_closing"
+STALE_KEEP_LABEL = "stale::keep"
+STALE_EXCLUDE_LABEL = "Community contribution"
 MERGEABLE_STATUSES = ("mergeable", "unchecked")
 # "mergeable" without a human approval still needs review: projects without approval rules report it,
 # and the MR list endpoint can return it for MRs the single-MR endpoint calls not_approved.
@@ -344,6 +347,12 @@ def candidate_merge_requests(api: Api, source: str, group: str) -> List[dict]:
     return list(found.values())
 
 
+def stale_merge_requests(api: Api, source: str, label: str) -> List[dict]:
+    """Open source-project MRs, drafts included, with the stale-sweep label; the sweep skips the excluded label."""
+    query = f"state=opened&labels={quote(label)}&not[labels]={quote(STALE_EXCLUDE_LABEL)}"
+    return api.get_all(f"projects/{project_path(source)}/merge_requests?{query}")
+
+
 def pinned_lines(api: Api, visibility: Visibility, source: str, pinned, now: datetime) -> List[str]:
     lines = []
     for project, iid in pinned:
@@ -427,6 +436,9 @@ def render_region(api: Api, args: argparse.Namespace, now: datetime) -> str:
         and c.mr.get("detailed_merge_status") in REVIEW_STATUSES
         and (c.reviewers or READY_LABEL in c.mr.get("labels", []))
     ]
+    scheduled = sorted(stale_merge_requests(api, args.source_project, STALE_SCHEDULED_LABEL),
+                       key=lambda mr: (str(mr.get("created_at")), str(mr.get("web_url"))))
+    kept = stale_merge_requests(api, args.source_project, STALE_KEEP_LABEL)
     pinned = read_pinned(TEMPLATES / "dashboard-priority.txt")
     team_wide = team_wide_issues(api, args.source_project, args.team_group, args.issue, now)
     blocks: Dict[str, List[str]] = {
@@ -435,12 +447,14 @@ def render_region(api: Api, args: argparse.Namespace, now: datetime) -> str:
         "ready": [merge_request_line(c, now) for c in mergeable],
         "blocked": [merge_request_line(c, now, status_text(c.mr)) for c in blocked],
         "teamwide": [f"- {issue['web_url']}+" for issue in team_wide],
+        "stale": [item_line(str(mr["web_url"]), str(mr.get("created_at")), now) for mr in scheduled],
         "bots": [merge_request_line(c, now, status_text(c.mr)) for c in candidates if is_bot(c)],
     }
     body = render_blocks((TEMPLATES / "dashboard.md").read_text(), blocks)
     values = {
         "updated": f"Updated {now.strftime('%Y-%m-%d %H:%M')} UTC.",
         "counts": f"{len(review)} ready for review · {len(mergeable)} ready to merge · {len(blocked)} approved but blocked",
+        "stale_counts": f"{len(scheduled)} scheduled for closing · {len(kept)} kept open with `{STALE_KEEP_LABEL}`",
     }
     for name, text in values.items():
         body = body.replace("{{" + name + "}}", text)

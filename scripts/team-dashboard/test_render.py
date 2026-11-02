@@ -81,6 +81,7 @@ class FakeApi:
             ("GET", "groups/gitlab-org%2Forbit%2Fteam/members"): [],
             ("POST", "graphql"): lambda variables: {"users": {"nodes": []}},
             ("GET", f"{SOURCE_PATH}/merge_requests?state"): [],
+            ("GET", f"{SOURCE_PATH}/merge_requests?state=opened&labels=stale%3A%3A"): [],
             ("GET", f"projects/{KG_ID}"): project(KG_PATH),
             ("GET", f"projects/{PUBLIC_ID}"): project("gitlab-org/docs"),
             ("GET", f"projects/{PRIVATE_ID}"): project("someone/secret", "private"),
@@ -245,6 +246,30 @@ class RenderTest(DashboardTestCase):
         for iid in (1, 2, 4):
             self.assertNotIn(url(iid), ready)
         self.assertIn(url(4), block(text, "Approved, but blocked"))
+
+    def test_stale_section_counts_labelled_mrs_and_lists_the_scheduled_ones_oldest_first(self):
+        def stale_route(label, *mrs):
+            query = f"labels={label.replace(':', '%3A')}&not[labels]=Community%20contribution"
+            return ("GET", f"{SOURCE_PATH}/merge_requests?state=opened&{query}"), list(mrs)
+        scheduled_key, scheduled = stale_route(
+            dashboard.STALE_SCHEDULED_LABEL, merge_request(8, created="2026-10-05T00:00:00Z"),
+            merge_request(7, created="2026-10-02T00:00:00Z"))
+        keep_key, kept = stale_route(dashboard.STALE_KEEP_LABEL, merge_request(9))
+        text = self.region(FakeApi({scheduled_key: scheduled, keep_key: kept}))
+        stale = block(text, "## Stale MRs")
+        self.assertIn("2 scheduled for closing · 1 kept open with `stale::keep`", stale)
+        self.assertLess(stale.index(url(7)), stale.index(url(8)))
+        self.assertNotIn(url(9), stale)
+
+    def test_stale_section_with_nothing_stale_shows_zero_counts_only(self):
+        stale = block(self.region(self.kg()), "## Stale MRs")
+        self.assertIn("0 scheduled for closing · 0 kept open", stale)
+        self.assertNotIn("<details>", stale)
+
+    def test_stale_constants_match_the_sweep_job(self):
+        config = (Path(__file__).resolve().parents[2] / ".gitlab/ci/stale-mr.yml").read_text()
+        self.assertIn('STALE_LABEL_PREFIX: "stale"', config)
+        self.assertIn(f'STALE_EXCLUDE_LABEL: "{dashboard.STALE_EXCLUDE_LABEL}"', config)
 
     def test_bot_mrs_go_to_their_own_spoiler_with_status_and_nowhere_else(self):
         bot = "service_account_project_1_abc"
@@ -678,9 +703,9 @@ class TemplateTest(unittest.TestCase):
         for path in [*dashboard.TEMPLATES.glob("*.md"), *dashboard.TEMPLATES.glob("*.txt")]:
             self.assertNotIn("@", path.read_text(), path.name)
         text = (dashboard.TEMPLATES / "dashboard.md").read_text()
-        for name in ("updated", "counts"):
+        for name in ("updated", "counts", "stale_counts"):
             self.assertIn("{{" + name + "}}", text)
-        for name in ("priority", "review", "ready", "blocked", "teamwide", "bots"):
+        for name in ("priority", "review", "ready", "blocked", "teamwide", "bots", "stale"):
             self.assertIn("{{#" + name, text)
         dashboard.guidance_block()
 
