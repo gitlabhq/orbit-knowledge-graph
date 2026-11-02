@@ -28,7 +28,6 @@ struct AgentPluginAssets;
 #[exclude = "README.md"]
 struct NightlyAssets;
 
-/// A feature in `packages/agent-plugins-nightly/features.yaml`, on or off for each channel.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Feature {
@@ -38,7 +37,6 @@ pub(super) struct Feature {
     pi: Option<FeatureFiles>,
 }
 
-/// Files a feature installs into an assistant's `feature_dir`, as destination name to source file.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FeatureFiles {
@@ -48,15 +46,12 @@ struct FeatureFiles {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ClaudeFeature {
-    /// Hooks merged into the plugin's `hooks/hooks.json`.
     hooks: String,
-    /// Files copied into the plugin under `features/`.
     files: Vec<String>,
 }
 
 pub(super) type Features = BTreeMap<String, Feature>;
 
-/// Nightly replaces stable, so every feature that is on for stable must be on for nightly too.
 fn parse_features(yaml: &[u8]) -> Result<Features, String> {
     let features: Features = orbit_utils::yaml::from_slice(yaml).map_err(|e| e.to_string())?;
     match features
@@ -87,7 +82,6 @@ fn feature_on(features: &Features, name: &str, nightly: bool) -> bool {
     }
 }
 
-/// `ORBIT_NIGHTLY=1 orbit setup` installs the nightly plugins instead of the stable ones.
 pub(super) fn nightly_enabled() -> bool {
     std::env::var("ORBIT_NIGHTLY").is_ok_and(|value| {
         !matches!(
@@ -200,7 +194,6 @@ pub(super) struct PluginSpec {
     pub(super) name: String,
     pub(super) min_version: String,
     pub(super) version_command: Vec<String>,
-    /// Whether the features that are on for the channel add their files and hooks to this plugin.
     #[serde(default)]
     pub(super) features: bool,
 }
@@ -263,8 +256,6 @@ impl PluginSpec {
         files
     }
 
-    /// Merges the hooks of the features that are on for the channel into the stable plugin's
-    /// hooks.json and ships their files.
     fn add_features(&self, files: &mut Vec<(String, Vec<u8>)>, features: &Features, nightly: bool) {
         let hooks_path = format!("{}/hooks/hooks.json", self.name);
         let mut merged = serde_json::Map::new();
@@ -366,7 +357,6 @@ pub(super) struct TemplateFile {
     pub(super) template: String,
     #[serde(default)]
     pub(super) ui: bool,
-    /// Installed only while this feature is on for the channel; setup for the other channel removes it.
     pub(super) feature: Option<String>,
 }
 
@@ -401,7 +391,6 @@ pub(super) struct RetiredFile {
     pub(super) ui: bool,
 }
 
-/// The template files of the features that have files for this assistant, whichever channel they are on.
 fn feature_template_files(spec: &AgentSpec, features: &Features) -> Vec<TemplateFile> {
     let Some(dir) = &spec.feature_dir else {
         return Vec::new();
@@ -498,7 +487,6 @@ impl Agent {
             .map(|file| &file.path)
     }
 
-    /// Feature files that setup for the current channel removes again.
     pub(super) fn switched_off_files(
         self,
         ui: bool,
@@ -519,7 +507,6 @@ impl Agent {
         })
     }
 
-    /// Every template file of the UI kind, whatever the channel.
     pub(super) fn all_ui_files(self, ui: bool) -> impl Iterator<Item = &'static TemplateFile> {
         self.0
             .template_files
@@ -527,7 +514,6 @@ impl Agent {
             .filter(move |file| file.ui == ui)
     }
 
-    /// Every feature file, whatever the channel.
     pub(super) fn feature_files(self, ui: bool) -> impl Iterator<Item = &'static TemplateFile> {
         self.0
             .template_files
@@ -819,7 +805,6 @@ mod tests {
         );
     }
 
-    /// The shipped registry with every feature set to the given channels, so tests do not depend on its flags.
     fn registry(nightly: bool, stable: bool) -> &'static Features {
         let file = NightlyAssets::get("features.yaml").unwrap();
         let mut features = parse_features(&file.data).unwrap();

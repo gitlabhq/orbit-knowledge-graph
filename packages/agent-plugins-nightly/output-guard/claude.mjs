@@ -1,13 +1,4 @@
 #!/usr/bin/env node
-/**
- * PostToolUse hook: cut a large Bash result down to its head and tail with
- * `updatedToolOutput`, so a noisy command does not fill the context. The full
- * output stays on disk: Claude Code's own persisted file when it already
- * truncated the result (`persistedOutputPath`), otherwise a file written here.
- *
- * ORBIT_OUTPUT_GUARD sets the limit in characters (default 10000, at most 29000 here), or `off`.
- * Any failure passes the result through.
- */
 
 import { randomUUID } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -31,7 +22,6 @@ function shrinkField(text, limit, persistedPath) {
   return shrinkOutput(text, limit, path);
 }
 
-/** Pure entry point: returns the hook's JSON output, or null to pass through. */
 export function run(input, env = process.env) {
   const configured = parseOutputLimit(env.ORBIT_OUTPUT_GUARD, () => {});
   const limit = configured === undefined ? undefined : Math.min(configured, MAX_LIMIT);

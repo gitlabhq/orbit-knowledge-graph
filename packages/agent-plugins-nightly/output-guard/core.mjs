@@ -2,12 +2,6 @@ import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 
 export const DEFAULT_OUTPUT_LIMIT = 10_000;
 
-/**
- * `ORBIT_OUTPUT_GUARD`: unset uses the default limit, `off` disables, `20k` or `20000` sets it in characters.
- * @param {string | undefined} value
- * @param {(message: string) => void} [warn]
- * @returns {number | undefined}
- */
 export function parseOutputLimit(value, warn = console.warn) {
   if (value === undefined) return DEFAULT_OUTPUT_LIMIT;
 
@@ -26,10 +20,8 @@ const MAX_FRAMING_BYTES = 300;
 const GUARD_MARKER = /\n\[\.\.\. (\d+) of (\d+) bytes omitted\. Full output: [^\n]*\]\n/g;
 
 /**
- * Whether a guard (this one, or the same guard from another plugin) already cut the text, so it is not cut twice.
  * Quoting a marker is not enough: the kept head and tail and the omitted count must add up to the full size,
  * give or take the framing a Pi guard adds around them.
- * @param {string} text
  */
 export function alreadyGuarded(text) {
   const markers = [...text.matchAll(GUARD_MARKER)];
@@ -42,24 +34,13 @@ export function alreadyGuarded(text) {
 }
 
 /**
- * Output to shorten: all of it in `head` (`complete`), or its first and last bytes with the size of the whole.
  * @typedef {{ head: string; tail: string; totalBytes: number; complete: boolean }} OutputEnds
  */
 
-/** @param {string} text @returns {OutputEnds} */
 export function wholeOutput(text) {
   return { head: text, tail: "", totalBytes: Buffer.byteLength(text), complete: true };
 }
 
-/**
- * The first and last part of the output, about `limit` characters in all, cut at line boundaries,
- * with a marker that names where the full output is and how many bytes it leaves out.
- * Undefined when the output fits.
- * @param {OutputEnds} ends
- * @param {number} limit
- * @param {string} fullOutputPath
- * @returns {string | undefined}
- */
 export function shrinkEnds(ends, limit, fullOutputPath) {
   if (ends.complete && ends.head.length <= limit) return undefined;
 
@@ -79,16 +60,10 @@ export function shrinkEnds(ends, limit, fullOutputPath) {
   return `${head}\n${marker}\n${tail}`;
 }
 
-/** @param {string} text @param {number} limit @param {string} fullOutputPath */
 export function shrinkOutput(text, limit, fullOutputPath) {
   return shrinkEnds(wholeOutput(text), limit, fullOutputPath);
 }
 
-/**
- * Drops the line a read cut in two (and with it any half character): the last of a head, the first of a tail.
- * @param {string} text
- * @param {"head" | "tail"} end
- */
 function wholeLines(text, end) {
   if (end === "head") {
     const cut = text.lastIndexOf("\n");
@@ -98,19 +73,11 @@ function wholeLines(text, end) {
   return cut === -1 ? text.replace(/^\uFFFD+/, "") : text.slice(cut + 1);
 }
 
-/**
- * A file's first and last `limit` bytes, so a huge file is never read whole. A line cut by
- * either read is dropped. A file of up to four times the limit is read whole, because it may
- * still fit.
- * @param {string} path
- * @param {number} limit
- * @returns {OutputEnds}
- */
 export function readEnds(path, limit) {
   const fd = openSync(path, "r");
   try {
     const size = fstatSync(fd).size;
-    const read = (/** @type {number} */ length, /** @type {number} */ position) => {
+    const read = (length, position) => {
       const buffer = Buffer.alloc(length);
       readSync(fd, buffer, 0, length, position);
       return buffer.toString("utf8");

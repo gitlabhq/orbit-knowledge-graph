@@ -121,7 +121,6 @@ pub(super) fn remove_retired(
     remove_retired_only(agent, ui, target, report)
 }
 
-/// `remove_retired` without the feature files that the other channel switched off.
 pub(super) fn remove_retired_only(
     agent: Agent,
     ui: bool,

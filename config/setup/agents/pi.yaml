@@ -7,7 +7,6 @@ detect: ["~/.pi/agent"]
 instruction_file:
   project: AGENTS.md
   global: "~/.pi/agent/AGENTS.md"
-# Each feature that is on for the channel (packages/agent-plugins-nightly/features.yaml) installs as its own extension, orbit-<feature>, here.
 feature_dir:
   project: .pi/extensions
   global: "~/.pi/agent/extensions"

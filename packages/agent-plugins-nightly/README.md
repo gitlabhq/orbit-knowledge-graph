@@ -22,7 +22,14 @@ of features that are off, unless you edited them.
 
 The Claude Code hook runs with `node`, so `node` must be on your `PATH`. The
 guard leaves output that another guard already cut, such as the orbitcode one,
-alone, so the two can run side by side.
+alone, so the two can run side by side. Any guard failure passes the result
+through, and the Pi guard leaves nested calls made by a `codemode` script
+alone because the script needs their full output. A script that raises
+`max_output_tokens` raises the limit with it.
+
+Per assistant, a feature lists what it ships in `features.yaml`: `claude` merges
+hooks into the Claude Code plugin and copies files under `features/`; `pi`
+copies files into `orbit-<feature>` under the Pi extension directory.
 
 ## Adding a feature
 
