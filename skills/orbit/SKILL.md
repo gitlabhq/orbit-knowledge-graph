@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.15
+version: 0.35.16
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
@@ -69,6 +69,8 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - At least one node needs an ID or a property filter. `LIMIT` does not bound the scan, so `MATCH (p:Project) RETURN p LIMIT 5` rejects.
 - Write relationship types after a colon: `-[:AUTHORED]->`. `-[AUTHORED]->` declares a variable and rejects.
 - Pipelines for a merge request need the `source: 'merge_request_event'` filter.
+- Downstream pipelines hang off `CHILD_OF` edges, and a one-hop query misses grandchildren. Use [a multi-hop traversal](references/gql.md#downstream-pipelines-of-a-pipeline).
+- CI data lags by a few hours. A recent pipeline or job that is missing or zero-valued is probably not indexed yet, so do not report it as 0 job-minutes.
 - Prefer a single anchored node when you can bound the target directly. Extra anchor nodes can change the row shape and skew aggregate counts.
 - To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.

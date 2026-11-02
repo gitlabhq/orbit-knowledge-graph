@@ -194,6 +194,19 @@ ORDER BY pl.created_at DESC
 LIMIT 10
 ```
 
+### Downstream pipelines of a pipeline
+
+`CHILD_OF` points from a child pipeline to its parent. A one-hop query returns
+only direct children and misses grandchild pipelines. Use a bounded
+variable-length hop. Traversals are capped at three hops, so deeper chains need
+a second query anchored on the last pipeline found.
+
+```gql orbit-query
+MATCH (child:Pipeline)-[:CHILD_OF*1..3]->(root:Pipeline {id: 2481733521})
+RETURN child.id, child.status, child.source
+LIMIT 100
+```
+
 ### Open work items in a project
 
 ```gql orbit-query
