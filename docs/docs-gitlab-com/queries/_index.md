@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query the GitLab Orbit graph with GQL.
+description: Run a query from the CLI, the API, or an MCP client, and get exact rows instead of many API calls.
 title: GitLab Orbit queries
 ---
 
