@@ -37,8 +37,12 @@ test:team-dashboard:
       changes:
         - scripts/team-dashboard/**/*
         - .gitlab/ci/team-dashboard.yml
+        - .gitlab/ci/stale-mr.yml
+        - scripts/ci/close-stale-mrs.sh
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
         - scripts/team-dashboard/**/*
+        - .gitlab/ci/stale-mr.yml
+        - scripts/ci/close-stale-mrs.sh
   script:
     - python3 -m unittest discover -s scripts/team-dashboard -p 'test_render.py'

@@ -50,7 +50,7 @@ Open issues in this project assigned to three or more team members, updated in t
 
 ## Stale MRs
 
-Open merge requests in this project, drafts included, labelled by the daily stale sweep. Merge requests labelled `Community contribution` are not counted.
+Open merge requests in this project, drafts included, labelled `stale::scheduled_for_closing` by the daily stale sweep or `stale::keep` by an author. Merge requests labelled `Community contribution` are not counted.
 
 {{stale_counts}}
 

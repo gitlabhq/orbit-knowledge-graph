@@ -270,6 +270,10 @@ class RenderTest(DashboardTestCase):
         config = (Path(__file__).resolve().parents[2] / ".gitlab/ci/stale-mr.yml").read_text()
         self.assertIn('STALE_LABEL_PREFIX: "stale"', config)
         self.assertIn(f'STALE_EXCLUDE_LABEL: "{dashboard.STALE_EXCLUDE_LABEL}"', config)
+        script = (Path(__file__).resolve().parents[2] / "scripts/ci/close-stale-mrs.sh").read_text()
+        for label in (dashboard.STALE_KEEP_LABEL, dashboard.STALE_SCHEDULED_LABEL):
+            prefix, suffix = label.split("::")
+            self.assertIn(f'="${{PREFIX}}::{suffix}"', script)
 
     def test_bot_mrs_go_to_their_own_spoiler_with_status_and_nowhere_else(self):
         bot = "service_account_project_1_abc"
