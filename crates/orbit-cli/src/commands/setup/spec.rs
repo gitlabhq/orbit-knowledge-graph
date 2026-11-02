@@ -20,6 +20,22 @@ struct SetupAssets;
 #[exclude = "*.d.ts"]
 struct AgentPluginAssets;
 
+#[derive(Embed)]
+#[folder = "$CARGO_MANIFEST_DIR/../../packages/agent-plugins-nightly"]
+#[include = "claude-hooks.json"]
+#[include = "output-guard/*"]
+struct NightlyAssets;
+
+/// `ORBIT_NIGHTLY=1 orbit setup` installs the nightly plugins instead of the stable ones.
+pub(super) fn nightly_enabled() -> bool {
+    std::env::var("ORBIT_NIGHTLY").is_ok_and(|value| {
+        !matches!(
+            value.trim().to_lowercase().as_str(),
+            "" | "0" | "false" | "off" | "no"
+        )
+    })
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SetupTexts {
@@ -142,7 +158,7 @@ impl PluginSpec {
         format!("{}@{marketplace}", self.name)
     }
 
-    pub(super) fn files(&self, marketplace: &str) -> Vec<(String, Vec<u8>)> {
+    pub(super) fn files(&self, marketplace: &str, nightly: bool) -> Vec<(String, Vec<u8>)> {
         let marketplace = serde_json::json!({
             "name": marketplace,
             "owner": { "name": "GitLab" },
@@ -159,14 +175,41 @@ impl PluginSpec {
             }
             (format!("{}/{path}", self.name), data)
         });
-        [(".gitignore".to_string(), b"*\n".to_vec())]
+        let mut files: Vec<_> = [(".gitignore".to_string(), b"*\n".to_vec())]
             .into_iter()
             .chain(std::iter::once((
                 ".claude-plugin/marketplace.json".to_string(),
                 serde_json::to_vec_pretty(&marketplace).unwrap(),
             )))
             .chain(plugin)
-            .collect()
+            .collect();
+        if nightly {
+            self.add_nightly(&mut files);
+        }
+        files
+    }
+
+    /// The nightly plugin is the stable one plus the nightly hooks, merged into its hooks.json.
+    fn add_nightly(&self, files: &mut Vec<(String, Vec<u8>)>) {
+        let hooks_path = format!("{}/hooks/hooks.json", self.name);
+        let (_, stable) = files
+            .iter_mut()
+            .find(|(path, _)| *path == hooks_path)
+            .expect("the stable plugin ships hooks/hooks.json");
+        let mut manifest: Value = serde_json::from_slice(stable).expect("hooks.json is JSON");
+        let nightly =
+            NightlyAssets::get("claude-hooks.json").expect("claude-hooks.json is embedded");
+        manifest["hooks"] =
+            serde_json::from_slice(&nightly.data).expect("claude-hooks.json is JSON");
+        *stable = serde_json::to_vec_pretty(&manifest).unwrap();
+
+        for path in ["output-guard/claude.mjs", "output-guard/core.mjs"] {
+            let file = NightlyAssets::get(path).expect("nightly file is embedded");
+            files.push((
+                format!("{}/nightly/{path}", self.name),
+                file.data.into_owned(),
+            ));
+        }
     }
 }
 
@@ -226,6 +269,9 @@ pub(super) struct TemplateFile {
     pub(super) template: String,
     #[serde(default)]
     pub(super) ui: bool,
+    /// Installed only under `ORBIT_NIGHTLY`; stable setup removes it again.
+    #[serde(default)]
+    pub(super) nightly: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -291,10 +337,14 @@ impl std::ops::Deref for Agent {
 
 impl Agent {
     pub(super) fn ui_files(self, ui: bool) -> impl Iterator<Item = &'static TemplateFile> {
+        self.ui_files_in(ui, nightly_enabled())
+    }
+
+    fn ui_files_in(self, ui: bool, nightly: bool) -> impl Iterator<Item = &'static TemplateFile> {
         self.0
             .template_files
             .iter()
-            .filter(move |file| file.ui == ui)
+            .filter(move |file| file.ui == ui && (nightly || !file.nightly))
     }
 
     pub(super) fn ui_registrations(self, ui: bool) -> impl Iterator<Item = &'static Registration> {
@@ -304,13 +354,30 @@ impl Agent {
             .filter(move |entry| entry.ui == ui)
     }
 
+    /// Retired files, and the nightly ones while nightly is off.
     pub(super) fn retired_files(self, ui: bool) -> impl Iterator<Item = &'static ScopedPath> {
-        self.0
+        self.retired_files_in(ui, nightly_enabled())
+    }
+
+    fn retired_files_in(
+        self,
+        ui: bool,
+        nightly: bool,
+    ) -> impl Iterator<Item = &'static ScopedPath> {
+        let retired = self
+            .0
             .retired
             .template_files
             .iter()
             .filter(move |file| file.ui == ui)
-            .map(|file| &file.path)
+            .map(|file| &file.path);
+        let switched_off = self
+            .0
+            .template_files
+            .iter()
+            .filter(move |file| file.ui == ui && file.nightly && !nightly)
+            .map(|file| &file.path);
+        retired.chain(switched_off)
     }
 
     pub(super) fn retired_registrations(
@@ -361,10 +428,10 @@ impl TemplateFile {
 }
 
 fn read_embedded_text(name: &str) -> String {
-    let file =
-        SetupAssets::get(name).unwrap_or_else(|| panic!("config/setup/{name} is not embedded"));
-    String::from_utf8(file.data.into_owned())
-        .unwrap_or_else(|e| panic!("config/setup/{name} is not UTF-8: {e}"))
+    let file = SetupAssets::get(name)
+        .or_else(|| NightlyAssets::get(name))
+        .unwrap_or_else(|| panic!("{name} is not embedded"));
+    String::from_utf8(file.data.into_owned()).unwrap_or_else(|e| panic!("{name} is not UTF-8: {e}"))
 }
 
 #[cfg(test)]
@@ -538,7 +605,7 @@ mod tests {
         let claude = agent_named("claude").unwrap();
         let plugin = claude.plugin.as_ref().unwrap();
         let mut files: Vec<String> = plugin
-            .files(&plugin.marketplace)
+            .files(&plugin.marketplace, false)
             .into_iter()
             .map(|(path, _)| path)
             .collect();
@@ -567,7 +634,7 @@ mod tests {
         expected.extend(shipped.iter().map(|path| format!("gitlab-orbit/{path}")));
         assert_eq!(files, expected);
         let manifest = plugin
-            .files(&plugin.marketplace)
+            .files(&plugin.marketplace, false)
             .into_iter()
             .find(|(path, _)| path.ends_with("plugin.json"))
             .unwrap()
@@ -576,7 +643,7 @@ mod tests {
         assert_eq!(manifest["version"], env!("ORBIT_VERSION"));
         let marketplace: Value = serde_json::from_slice(
             &plugin
-                .files(&plugin.marketplace)
+                .files(&plugin.marketplace, false)
                 .into_iter()
                 .find(|(path, _)| path == ".claude-plugin/marketplace.json")
                 .unwrap()
@@ -591,6 +658,68 @@ mod tests {
                 .is_some_and(|source| source.starts_with("./")),
             "the plugin needs a relative source so it loads without an install step"
         );
+    }
+
+    #[test]
+    fn nightly_adds_the_output_guard_to_the_claude_plugin_and_keeps_stable() {
+        let claude = agent_named("claude").unwrap();
+        let plugin = claude.plugin.as_ref().unwrap();
+        let stable = plugin.files(&plugin.marketplace, false);
+        let nightly = plugin.files(&plugin.marketplace, true);
+        let paths = |files: &[(String, Vec<u8>)]| -> Vec<String> {
+            files.iter().map(|(path, _)| path.clone()).collect()
+        };
+        let added: Vec<_> = paths(&nightly)
+            .into_iter()
+            .filter(|path| !paths(&stable).contains(path))
+            .collect();
+        assert_eq!(
+            added,
+            [
+                "gitlab-orbit/nightly/output-guard/claude.mjs",
+                "gitlab-orbit/nightly/output-guard/core.mjs",
+            ]
+        );
+        let hooks = |files: &[(String, Vec<u8>)]| -> Value {
+            let (_, data) = files
+                .iter()
+                .find(|(path, _)| path == "gitlab-orbit/hooks/hooks.json")
+                .unwrap();
+            serde_json::from_slice(data).unwrap()
+        };
+        let (stable, nightly) = (hooks(&stable), hooks(&nightly));
+        assert!(stable.get("hooks").is_none());
+        assert_eq!(nightly["modules"], stable["modules"]);
+        let command = nightly["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert!(command.contains("${CLAUDE_PLUGIN_ROOT}/nightly/output-guard/claude.mjs"));
+    }
+
+    #[test]
+    fn the_pi_output_guard_is_nightly_only() {
+        let pi = agent_named("pi").unwrap();
+        let paths = |ui_files: Vec<&TemplateFile>| -> Vec<String> {
+            ui_files
+                .iter()
+                .map(|file| file.path.project.clone())
+                .collect()
+        };
+        assert!(paths(pi.ui_files_in(true, false).collect()).is_empty());
+        assert_eq!(
+            paths(pi.ui_files_in(true, true).collect()),
+            [
+                ".pi/extensions/orbit-nightly/index.js",
+                ".pi/extensions/orbit-nightly/core.mjs"
+            ]
+        );
+        assert_eq!(pi.retired_files_in(true, true).count(), 0);
+        assert_eq!(pi.retired_files_in(true, false).count(), 2);
+        for file in pi.ui_files_in(true, true) {
+            let rendered = file.render();
+            assert!(rendered.starts_with(TEMPLATE_CHECKSUM_PREFIX));
+            assert!(TemplateFile::is_unmodified(&rendered));
+        }
     }
 
     #[test]

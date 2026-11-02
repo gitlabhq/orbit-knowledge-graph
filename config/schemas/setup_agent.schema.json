@@ -188,11 +188,12 @@
       "additionalProperties": false,
       "properties": {
         "ui": { "type": "boolean", "description": "Installed with the agent-plugins component instead of hooks." },
+        "nightly": { "type": "boolean", "description": "Installed only under ORBIT_NIGHTLY=1; a stable setup removes it while it is unedited." },
         "path": { "$ref": "#/definitions/scopedPath" },
         "template": {
           "type": "string",
           "minLength": 1,
-          "description": "Template location under config/setup/, e.g. opencode_plugin.js."
+          "description": "Template location under config/setup/ or packages/agent-plugins-nightly/, e.g. opencode_plugin.js."
         }
       }
     },

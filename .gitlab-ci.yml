@@ -411,6 +411,20 @@ agent-plugins:
     - git add --intent-to-add ../../config/setup/agents/opencode_ui
     - git diff --exit-code -- ../../config/setup/agents/opencode_ui core/lib.js
 
+agent-plugins-nightly:
+  stage: lint
+  image: oven/bun:1.4.4
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  before_script:
+    - bun install --frozen-lockfile --ignore-scripts
+  script:
+    - cd packages/agent-plugins-nightly
+    - bun run test
+
 generate-config-schema:
   stage: lint
   extends:

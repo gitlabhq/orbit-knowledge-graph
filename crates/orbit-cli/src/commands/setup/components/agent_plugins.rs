@@ -10,7 +10,7 @@ use super::{
 };
 use super::{hooks, json};
 use crate::commands::setup::plan::Plan;
-use crate::commands::setup::spec::{Agent, PluginSpec};
+use crate::commands::setup::spec::{Agent, PluginSpec, nightly_enabled};
 use crate::commands::setup::{Component, Target};
 
 const MANIFEST: &str = ".orbit-setup.json";
@@ -147,7 +147,7 @@ fn install_plugin(
     let mut manifest = BTreeMap::new();
     let mut written = 0;
     let name = plugin.marketplace_for(target);
-    for (relative, contents) in plugin.files(&name) {
+    for (relative, contents) in plugin.files(&name, nightly_enabled()) {
         let path = dir.join(&relative);
         if !inside(&dir, &path) {
             bail!(
