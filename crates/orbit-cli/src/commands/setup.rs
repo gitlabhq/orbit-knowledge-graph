@@ -250,7 +250,7 @@ fn apply_and_report(
         show_outcomes_per_component(&report)?;
     } else {
         for outcome in &report.outcomes {
-            if [components::KEPT_RETIRED, components::KEPT_NIGHTLY]
+            if [components::KEPT_RETIRED, components::KEPT_FEATURE]
                 .contains(&outcome.action.as_str())
             {
                 tui::warning(format!("{}: {}", outcome.label, outcome.action));
@@ -1524,7 +1524,7 @@ mod tests {
         let target = project(dir.path());
         let pi = spec::agent_named("pi").unwrap();
         let installer = components::installer_for(Component::AgentPlugins);
-        let extension = dir.path().join(".pi/extensions/orbit-nightly");
+        let extension = dir.path().join(".pi/extensions/orbit-features");
         assert!(!installer.is_installed(pi, &target));
 
         std::fs::create_dir_all(&extension).unwrap();

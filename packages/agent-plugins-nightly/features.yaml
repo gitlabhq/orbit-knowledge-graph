@@ -1,0 +1,17 @@
+# Each feature is on or off per channel. `ORBIT_NIGHTLY=1 orbit setup` installs the features with
+# `nightly: true`; a plain `orbit setup` installs the ones with `stable: true`. Promote a feature by
+# setting `stable: true`; revert it by setting `nightly: false`. Setup builds both channels from
+# this file, so a flag is the only edit.
+#
+# Per assistant, a feature lists what it ships: `claude` merges hooks into the Claude Code plugin
+# and copies files under `features/`; `pi` copies files into the Pi extension directory.
+output-guard:
+  nightly: true
+  stable: false
+  claude:
+    hooks: output-guard/claude-hooks.json
+    files: [output-guard/claude.mjs, output-guard/core.mjs]
+  pi:
+    files:
+      index.js: output-guard/pi.mjs
+      core.mjs: output-guard/core.mjs

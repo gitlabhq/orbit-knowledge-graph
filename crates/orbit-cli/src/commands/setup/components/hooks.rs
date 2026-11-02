@@ -99,14 +99,18 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
     remove_files(
         agent
             .ui_files(false)
-            .filter(|file| !file.nightly)
+            .filter(|file| file.feature.is_none())
             .map(|file| &file.path),
         agent.ui_registrations(false),
         target,
         report,
     )?;
-    remove_nightly_files(agent, false, target, report)?;
-    remove_retired(agent, false, target, report)
+    remove_group(
+        agent.feature_files(false).map(|file| &file.path),
+        target,
+        report,
+    )?;
+    remove_retired_only(agent, false, target, report)
 }
 
 /// Removes what an earlier release installed. A config file is read only when it names a retired
@@ -117,10 +121,20 @@ pub(super) fn remove_retired(
     target: &Target,
     report: &mut Report,
 ) -> Result<()> {
+    remove_group(agent.switched_off_files(ui), target, report)?;
+    remove_retired_only(agent, ui, target, report)
+}
+
+/// `remove_retired` without the feature files that the other channel switched off.
+pub(super) fn remove_retired_only(
+    agent: Agent,
+    ui: bool,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
     for file in agent.retired_files(ui) {
         remove_file(file, KEPT_RETIRED, target, report)?;
     }
-    remove_switched_off(agent, ui, spec::nightly_enabled(), target, report)?;
     for registration in agent.retired_registrations(ui) {
         let (path, _) = target.resolve(&registration.file)?;
         let value = target.registration_value(&registration.value)?;
@@ -136,43 +150,29 @@ pub(super) fn remove_retired(
     Ok(())
 }
 
-/// Removes the nightly files together or not at all: an edited file kept without its siblings, such
+/// Removes feature files together or not at all: an edited file kept without its siblings, such
 /// as an extension entry point without the module it imports, would stop working.
-/// Uninstall takes the nightly files out together whether or not `ORBIT_NIGHTLY` is set.
-pub(super) fn remove_nightly_files(
-    agent: Agent,
-    ui: bool,
+pub(super) fn remove_group<'a>(
+    files: impl Iterator<Item = &'a ScopedPath>,
     target: &Target,
     report: &mut Report,
 ) -> Result<()> {
-    if spec::nightly_enabled() {
-        remove_switched_off(agent, ui, false, target, report)?;
-    }
-    Ok(())
-}
-
-fn remove_switched_off(
-    agent: Agent,
-    ui: bool,
-    nightly: bool,
-    target: &Target,
-    report: &mut Report,
-) -> Result<()> {
+    let files: Vec<_> = files.collect();
     let mut edited = false;
-    for file in agent.switched_off_files_in(ui, nightly) {
+    for file in &files {
         let (path, _) = target.resolve(file)?;
         if let Ok(current) = std::fs::read_to_string(&path) {
             edited |= !TemplateFile::is_unmodified(&current);
         }
     }
-    for file in agent.switched_off_files_in(ui, nightly) {
+    for file in files {
         if edited {
             let (path, label) = target.resolve(file)?;
             if path.exists() {
-                report.note(&label, KEPT_NIGHTLY);
+                report.note(&label, KEPT_FEATURE);
             }
         } else {
-            remove_file(file, KEPT_NIGHTLY, target, report)?;
+            remove_file(file, KEPT_FEATURE, target, report)?;
         }
     }
     Ok(())
@@ -230,7 +230,7 @@ pub(super) fn install_files<'a>(
 
 pub(in crate::commands::setup) const KEPT_RETIRED: &str =
     "kept (no longer used by Orbit; delete it by hand)";
-pub(in crate::commands::setup) const KEPT_NIGHTLY: &str = "kept (nightly file, edited or next to an edited one; `ORBIT_NIGHTLY=1 orbit setup` reinstalls it, or delete it by hand)";
+pub(in crate::commands::setup) const KEPT_FEATURE: &str = "kept (feature file, edited or next to an edited one; setup reinstalls it while the feature is on, or delete it by hand)";
 const KEPT_EDITED: &str = "kept (edited since install; delete it by hand)";
 
 fn remove_file(
@@ -338,11 +338,11 @@ mod tests {
         std::fs::write(&paths[0], "// my own edit\n").unwrap();
         let mut report = Report::default();
 
-        remove_switched_off(pi, true, false, &target, &mut report).unwrap();
+        remove_group(pi.switched_off_files_in(true, false), &target, &mut report).unwrap();
 
         assert!(paths.iter().all(|path| path.is_file()));
         assert_eq!(report.outcomes.len(), paths.len());
-        assert!(report.outcomes.iter().all(|o| o.action == KEPT_NIGHTLY));
+        assert!(report.outcomes.iter().all(|o| o.action == KEPT_FEATURE));
     }
 
     #[test]
@@ -362,14 +362,14 @@ mod tests {
 
         remove_files(
             pi.ui_files_in(true, true)
-                .filter(|file| !file.nightly)
+                .filter(|file| file.feature.is_none())
                 .map(|file| &file.path),
             std::iter::empty(),
             &target,
             &mut report,
         )
         .unwrap();
-        remove_switched_off(pi, true, false, &target, &mut report).unwrap();
+        remove_group(pi.switched_off_files_in(true, false), &target, &mut report).unwrap();
 
         assert!(paths.iter().all(|path| path.is_file()));
     }

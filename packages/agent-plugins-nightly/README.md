@@ -3,11 +3,15 @@
 Features the team tries first, with no guarantees. They can change or disappear
 between releases. The stable plugins live in `packages/agent-plugins`.
 
-`ORBIT_NIGHTLY=1 orbit setup` installs the nightly plugins instead of the stable
-ones. Nightly never runs next to stable: Claude Code gets the stable plugin plus
-the nightly hooks in the same `gitlab-orbit` plugin, and Pi gets the nightly
-extension. Run `orbit setup` without the variable to go back; it removes the
-nightly files again, unless you edited them.
+`features.yaml` is the one switch. It lists each feature and turns it on or off
+per channel. `ORBIT_NIGHTLY=1 orbit setup` installs the features with
+`nightly: true` instead of the stable set; a plain `orbit setup` installs the
+features with `stable: true` on top of what stable ships. Setup embeds this
+package and builds each channel from the registry, so a flag is the only edit.
+Nightly never runs next to stable: Claude Code gets the stable plugin plus the
+feature hooks in the same `gitlab-orbit` plugin, and Pi gets the extension.
+Switching channels, or running `orbit setup` again after a flip, removes files
+of features that are off, unless you edited them.
 
 | Feature | Claude Code | Pi |
 | --- | --- | --- |
@@ -22,14 +26,14 @@ alone, so the two can run side by side.
 
 ## Adding a feature
 
-Put the sources in this package and embed them from
-`crates/orbit-cli/src/commands/setup/spec.rs`. Claude Code hooks go into
-`claude-hooks.json`. Pi files go into `config/setup/agents/pi.yaml` with
-`nightly: true`.
+Put the sources in this package and add an entry to `features.yaml` with its
+channels and, per assistant, the files and Claude Code hooks it ships. Nothing
+else lists features. Existing stable features can become entries the same way
+later.
 
 ## Promoting or reverting
 
-To promote a feature, port it into the stable plugin in `packages/agent-plugins`
-(for Claude Code, its hooks module) and delete it here. To revert one, delete
-it here. Commits scoped `agent-plugins-nightly` never cut a release, but the
-release notes of the next release still list them.
+To promote a feature, set `stable: true`. To revert it, set `nightly: false` or
+delete the entry. Commits scoped `agent-plugins-nightly` never cut a release,
+but the release notes of the next release still list them. A promotion that
+changes stable behavior is a normal `feat(agent-plugins)` commit.

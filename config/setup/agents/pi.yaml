@@ -7,16 +7,7 @@ detect: ["~/.pi/agent"]
 instruction_file:
   project: AGENTS.md
   global: "~/.pi/agent/AGENTS.md"
-template_files:
-  - path:
-      project: .pi/extensions/orbit-nightly/index.js
-      global: "~/.pi/agent/extensions/orbit-nightly/index.js"
-    template: output-guard/pi.mjs
-    ui: true
-    nightly: true
-  - path:
-      project: .pi/extensions/orbit-nightly/core.mjs
-      global: "~/.pi/agent/extensions/orbit-nightly/core.mjs"
-    template: output-guard/core.mjs
-    ui: true
-    nightly: true
+# Features that are on for the channel (packages/agent-plugins-nightly/features.yaml) install here.
+feature_dir:
+  project: .pi/extensions/orbit-features
+  global: "~/.pi/agent/extensions/orbit-features"

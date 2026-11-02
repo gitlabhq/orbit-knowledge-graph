@@ -58,14 +58,18 @@ impl Installer for AgentPlugins {
             hooks::remove_files(
                 agent
                     .ui_files(true)
-                    .filter(|file| !file.nightly)
+                    .filter(|file| file.feature.is_none())
                     .map(|file| &file.path),
                 agent.ui_registrations(true),
                 target,
                 report,
             )?;
-            hooks::remove_nightly_files(*agent, true, target, report)?;
-            hooks::remove_retired(*agent, true, target, report)?;
+            hooks::remove_group(
+                agent.feature_files(true).map(|file| &file.path),
+                target,
+                report,
+            )?;
+            hooks::remove_retired_only(*agent, true, target, report)?;
         }
         Ok(())
     }

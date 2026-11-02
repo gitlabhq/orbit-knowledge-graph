@@ -22,9 +22,60 @@ struct AgentPluginAssets;
 
 #[derive(Embed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../packages/agent-plugins-nightly"]
-#[include = "claude-hooks.json"]
-#[include = "output-guard/*"]
+#[exclude = "tests/*"]
+#[exclude = "node_modules/*"]
+#[exclude = "package.json"]
+#[exclude = "README.md"]
 struct NightlyAssets;
+
+/// A feature in `packages/agent-plugins-nightly/features.yaml`, on or off for each channel.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Feature {
+    nightly: bool,
+    stable: bool,
+    claude: Option<ClaudeFeature>,
+    pi: Option<FeatureFiles>,
+}
+
+/// Files a feature installs into an assistant's `feature_dir`, as destination name to source file.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeatureFiles {
+    files: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClaudeFeature {
+    /// Hooks merged into the plugin's `hooks/hooks.json`.
+    hooks: String,
+    /// Files copied into the plugin under `features/`.
+    files: Vec<String>,
+}
+
+pub(super) type Features = BTreeMap<String, Feature>;
+
+fn parse_features(yaml: &[u8]) -> Features {
+    orbit_utils::yaml::from_slice(yaml)
+        .expect("packages/agent-plugins-nightly/features.yaml is invalid")
+}
+
+static FEATURES: LazyLock<Features> = LazyLock::new(|| {
+    let file = NightlyAssets::get("features.yaml").expect("features.yaml is embedded");
+    parse_features(&file.data)
+});
+
+fn feature_on(features: &Features, name: &str, nightly: bool) -> bool {
+    let feature = features
+        .get(name)
+        .unwrap_or_else(|| panic!("feature {name} is not in features.yaml"));
+    if nightly {
+        feature.nightly
+    } else {
+        feature.stable
+    }
+}
 
 /// `ORBIT_NIGHTLY=1 orbit setup` installs the nightly plugins instead of the stable ones.
 pub(super) fn nightly_enabled() -> bool {
@@ -126,6 +177,7 @@ pub(super) struct AgentSpec {
     #[serde(default)]
     pub(super) retired: Retired,
     pub(super) skills: Option<SkillDirs>,
+    pub(super) feature_dir: Option<ScopedPath>,
     pub(super) plugin: Option<PluginSpec>,
 }
 
@@ -138,9 +190,9 @@ pub(super) struct PluginSpec {
     pub(super) name: String,
     pub(super) min_version: String,
     pub(super) version_command: Vec<String>,
-    /// Whether `ORBIT_NIGHTLY` adds the nightly Claude Code hooks to this plugin.
+    /// Whether the features that are on for the channel add their files and hooks to this plugin.
     #[serde(default)]
-    pub(super) nightly_hooks: bool,
+    pub(super) features: bool,
 }
 
 impl PluginSpec {
@@ -162,6 +214,15 @@ impl PluginSpec {
     }
 
     pub(super) fn files(&self, marketplace: &str, nightly: bool) -> Vec<(String, Vec<u8>)> {
+        self.files_with(&FEATURES, marketplace, nightly)
+    }
+
+    fn files_with(
+        &self,
+        features: &Features,
+        marketplace: &str,
+        nightly: bool,
+    ) -> Vec<(String, Vec<u8>)> {
         let marketplace = serde_json::json!({
             "name": marketplace,
             "owner": { "name": "GitLab" },
@@ -186,33 +247,56 @@ impl PluginSpec {
             )))
             .chain(plugin)
             .collect();
-        if nightly && self.nightly_hooks {
-            self.add_nightly(&mut files);
+        if self.features {
+            self.add_features(&mut files, features, nightly);
         }
         files
     }
 
-    /// The nightly plugin is the stable one plus the nightly hooks, merged into its hooks.json.
-    fn add_nightly(&self, files: &mut Vec<(String, Vec<u8>)>) {
+    /// Merges the hooks of the features that are on for the channel into the stable plugin's
+    /// hooks.json and ships their files.
+    fn add_features(&self, files: &mut Vec<(String, Vec<u8>)>, features: &Features, nightly: bool) {
         let hooks_path = format!("{}/hooks/hooks.json", self.name);
+        let mut merged = serde_json::Map::new();
+        for (name, claude) in features
+            .iter()
+            .filter(|(name, _)| feature_on(features, name, nightly))
+            .filter_map(|(name, feature)| Some((name, feature.claude.as_ref()?)))
+        {
+            let hooks = NightlyAssets::get(&claude.hooks)
+                .unwrap_or_else(|| panic!("{} is not embedded", claude.hooks));
+            let hooks: serde_json::Map<String, Value> = serde_json::from_slice(&hooks.data)
+                .unwrap_or_else(|e| panic!("{} is invalid: {e}", claude.hooks));
+            for (event, entries) in hooks {
+                let Value::Array(entries) = entries else {
+                    panic!("{name}: hooks for {event} must be an array");
+                };
+                let slot = merged
+                    .entry(event)
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                slot.as_array_mut()
+                    .expect("merged hooks are arrays")
+                    .extend(entries);
+            }
+            for path in &claude.files {
+                let file =
+                    NightlyAssets::get(path).unwrap_or_else(|| panic!("{path} is not embedded"));
+                files.push((
+                    format!("{}/features/{path}", self.name),
+                    file.data.into_owned(),
+                ));
+            }
+        }
+        if merged.is_empty() {
+            return;
+        }
         let (_, stable) = files
             .iter_mut()
             .find(|(path, _)| *path == hooks_path)
             .expect("the stable plugin ships hooks/hooks.json");
         let mut manifest: Value = serde_json::from_slice(stable).expect("hooks.json is JSON");
-        let nightly =
-            NightlyAssets::get("claude-hooks.json").expect("claude-hooks.json is embedded");
-        manifest["hooks"] =
-            serde_json::from_slice(&nightly.data).expect("claude-hooks.json is JSON");
+        manifest["hooks"] = Value::Object(merged);
         *stable = serde_json::to_vec_pretty(&manifest).unwrap();
-
-        for path in ["output-guard/claude.mjs", "output-guard/core.mjs"] {
-            let file = NightlyAssets::get(path).expect("nightly file is embedded");
-            files.push((
-                format!("{}/nightly/{path}", self.name),
-                file.data.into_owned(),
-            ));
-        }
     }
 }
 
@@ -272,9 +356,8 @@ pub(super) struct TemplateFile {
     pub(super) template: String,
     #[serde(default)]
     pub(super) ui: bool,
-    /// Installed only under `ORBIT_NIGHTLY`; stable setup removes it again.
-    #[serde(default)]
-    pub(super) nightly: bool,
+    /// Installed only while this feature is on for the channel; setup for the other channel removes it.
+    pub(super) feature: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -308,6 +391,32 @@ pub(super) struct RetiredFile {
     pub(super) ui: bool,
 }
 
+/// The template files of the features that have files for this assistant, whichever channel they are on.
+fn feature_template_files(spec: &AgentSpec, features: &Features) -> Vec<TemplateFile> {
+    let Some(dir) = &spec.feature_dir else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    for (name, feature) in features {
+        let section = match spec.name.as_str() {
+            "pi" => feature.pi.as_ref(),
+            _ => None,
+        };
+        for (destination, source) in section.iter().flat_map(|section| &section.files) {
+            files.push(TemplateFile {
+                path: ScopedPath {
+                    project: format!("{}/{destination}", dir.project),
+                    global: format!("{}/{destination}", dir.global),
+                },
+                template: source.clone(),
+                ui: true,
+                feature: Some(name.clone()),
+            });
+        }
+    }
+    files
+}
+
 static AGENT_SPECS: LazyLock<Vec<AgentSpec>> = LazyLock::new(|| {
     let mut specs: Vec<AgentSpec> = SetupAssets::iter()
         .filter_map(|path| {
@@ -320,6 +429,11 @@ static AGENT_SPECS: LazyLock<Vec<AgentSpec>> = LazyLock::new(|| {
                 "config/setup/{path}: name must match the file stem"
             );
             Some(spec)
+        })
+        .map(|mut spec| {
+            spec.template_files
+                .extend(feature_template_files(&spec, &FEATURES));
+            spec
         })
         .collect();
     specs.sort_by(|a, b| a.name.cmp(&b.name));
@@ -348,10 +462,22 @@ impl Agent {
         ui: bool,
         nightly: bool,
     ) -> impl Iterator<Item = &'static TemplateFile> {
-        self.0
-            .template_files
-            .iter()
-            .filter(move |file| file.ui == ui && (nightly || !file.nightly))
+        self.ui_files_with(&FEATURES, ui, nightly)
+    }
+
+    fn ui_files_with(
+        self,
+        features: &'static Features,
+        ui: bool,
+        nightly: bool,
+    ) -> impl Iterator<Item = &'static TemplateFile> {
+        self.0.template_files.iter().filter(move |file| {
+            file.ui == ui
+                && file
+                    .feature
+                    .as_deref()
+                    .is_none_or(|name| feature_on(features, name, nightly))
+        })
     }
 
     pub(super) fn ui_registrations(self, ui: bool) -> impl Iterator<Item = &'static Registration> {
@@ -370,7 +496,7 @@ impl Agent {
             .map(|file| &file.path)
     }
 
-    /// Nightly files that a stable setup removes again.
+    /// Feature files that setup for the current channel removes again.
     pub(super) fn switched_off_files(self, ui: bool) -> impl Iterator<Item = &'static ScopedPath> {
         self.switched_off_files_in(ui, nightly_enabled())
     }
@@ -380,11 +506,30 @@ impl Agent {
         ui: bool,
         nightly: bool,
     ) -> impl Iterator<Item = &'static ScopedPath> {
+        self.switched_off_files_with(&FEATURES, ui, nightly)
+    }
+
+    fn switched_off_files_with(
+        self,
+        features: &'static Features,
+        ui: bool,
+        nightly: bool,
+    ) -> impl Iterator<Item = &'static ScopedPath> {
+        self.feature_files(ui)
+            .filter(move |file| {
+                file.feature
+                    .as_deref()
+                    .is_some_and(|name| !feature_on(features, name, nightly))
+            })
+            .map(|file| &file.path)
+    }
+
+    /// Every feature file, whatever the channel.
+    pub(super) fn feature_files(self, ui: bool) -> impl Iterator<Item = &'static TemplateFile> {
         self.0
             .template_files
             .iter()
-            .filter(move |file| file.ui == ui && file.nightly && !nightly)
-            .map(|file| &file.path)
+            .filter(move |file| file.ui == ui && file.feature.is_some())
     }
 
     pub(super) fn retired_registrations(
@@ -419,7 +564,7 @@ const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
 
 impl TemplateFile {
     pub(super) fn render(&self) -> String {
-        let mut body = read_embedded_text(&self.template, self.nightly);
+        let mut body = read_embedded_text(&self.template, self.feature.is_some());
         for (name, value) in &TEXTS.template_vars {
             body = body.replace(&format!("{{{{{name}}}}}"), value);
         }
@@ -670,66 +815,110 @@ mod tests {
         );
     }
 
-    #[test]
-    fn nightly_adds_the_output_guard_to_the_claude_plugin_and_keeps_stable() {
+    fn registry(stable: bool) -> &'static Features {
+        let yaml = String::from_utf8(
+            NightlyAssets::get("features.yaml")
+                .unwrap()
+                .data
+                .into_owned(),
+        )
+        .unwrap()
+        .replace("stable: false", &format!("stable: {stable}"));
+        Box::leak(Box::new(parse_features(yaml.as_bytes())))
+    }
+
+    fn claude_paths(features: &Features, nightly: bool) -> Vec<String> {
         let claude = agent_named("claude").unwrap();
         let plugin = claude.plugin.as_ref().unwrap();
-        let stable = plugin.files(&plugin.marketplace, false);
-        let nightly = plugin.files(&plugin.marketplace, true);
-        let paths = |files: &[(String, Vec<u8>)]| -> Vec<String> {
-            files.iter().map(|(path, _)| path.clone()).collect()
-        };
-        let added: Vec<_> = paths(&nightly)
+        plugin
+            .files_with(features, &plugin.marketplace, nightly)
             .into_iter()
-            .filter(|path| !paths(&stable).contains(path))
-            .collect();
-        assert_eq!(
-            added,
-            [
-                "gitlab-orbit/nightly/output-guard/claude.mjs",
-                "gitlab-orbit/nightly/output-guard/core.mjs",
-            ]
-        );
-        let hooks = |files: &[(String, Vec<u8>)]| -> Value {
+            .map(|(path, _)| path)
+            .filter(|path| path.contains("/features/"))
+            .collect()
+    }
+
+    #[test]
+    fn the_registry_decides_which_channel_gets_the_claude_hooks() {
+        let guard = [
+            "gitlab-orbit/features/output-guard/claude.mjs",
+            "gitlab-orbit/features/output-guard/core.mjs",
+        ];
+        assert!(claude_paths(registry(false), false).is_empty());
+        assert_eq!(claude_paths(registry(false), true), guard);
+        assert_eq!(claude_paths(registry(true), false), guard);
+
+        let claude = agent_named("claude").unwrap();
+        let plugin = claude.plugin.as_ref().unwrap();
+        let hooks = |features: &Features, nightly: bool| -> Value {
+            let files = plugin.files_with(features, &plugin.marketplace, nightly);
             let (_, data) = files
                 .iter()
                 .find(|(path, _)| path == "gitlab-orbit/hooks/hooks.json")
                 .unwrap();
             serde_json::from_slice(data).unwrap()
         };
-        let (stable, nightly) = (hooks(&stable), hooks(&nightly));
+        let stable = hooks(registry(false), false);
+        let nightly = hooks(registry(false), true);
         assert!(stable.get("hooks").is_none());
         assert_eq!(nightly["modules"], stable["modules"]);
         let command = nightly["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();
-        assert!(command.contains("${CLAUDE_PLUGIN_ROOT}/nightly/output-guard/claude.mjs"));
+        assert!(command.contains("${CLAUDE_PLUGIN_ROOT}/features/output-guard/claude.mjs"));
+        assert_eq!(hooks(registry(true), false), nightly);
     }
 
     #[test]
-    fn the_pi_output_guard_is_nightly_only() {
+    fn the_registry_decides_which_channel_gets_the_pi_extension() {
         let pi = agent_named("pi").unwrap();
-        let paths = |ui_files: Vec<&TemplateFile>| -> Vec<String> {
-            ui_files
-                .iter()
+        let paths = |features: &'static Features, nightly: bool| -> Vec<String> {
+            pi.ui_files_with(features, true, nightly)
                 .map(|file| file.path.project.clone())
                 .collect()
         };
-        assert!(paths(pi.ui_files_in(true, false).collect()).is_empty());
+        let extension = [
+            ".pi/extensions/orbit-features/core.mjs",
+            ".pi/extensions/orbit-features/index.js",
+        ];
+        assert!(paths(registry(false), false).is_empty());
+        assert_eq!(paths(registry(false), true), extension);
+        assert_eq!(paths(registry(true), false), extension);
         assert_eq!(
-            paths(pi.ui_files_in(true, true).collect()),
-            [
-                ".pi/extensions/orbit-nightly/index.js",
-                ".pi/extensions/orbit-nightly/core.mjs"
-            ]
+            pi.switched_off_files_with(registry(false), true, false)
+                .count(),
+            2
         );
-        assert_eq!(pi.switched_off_files_in(true, true).count(), 0);
-        assert_eq!(pi.switched_off_files_in(true, false).count(), 2);
-        assert_eq!(pi.retired_files(true).count(), 0);
-        for file in pi.ui_files_in(true, true) {
+        assert_eq!(
+            pi.switched_off_files_with(registry(false), true, true)
+                .count(),
+            0
+        );
+        assert_eq!(
+            pi.switched_off_files_with(registry(true), true, false)
+                .count(),
+            0
+        );
+        for file in pi.ui_files_with(registry(false), true, true) {
             let rendered = file.render();
             assert!(rendered.starts_with(TEMPLATE_CHECKSUM_PREFIX));
             assert!(TemplateFile::is_unmodified(&rendered));
+        }
+    }
+
+    #[test]
+    fn the_shipped_registry_matches_the_plan() {
+        let guard = &FEATURES["output-guard"];
+        assert!(guard.nightly && !guard.stable);
+        for spec in agents() {
+            for file in &spec.template_files {
+                if let Some(name) = &file.feature {
+                    assert!(
+                        FEATURES.contains_key(name),
+                        "{name} is not in features.yaml"
+                    );
+                }
+            }
         }
     }
 
