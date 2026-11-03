@@ -31,7 +31,7 @@ Prerequisites:
 
 - The Owner role for the top-level group.
 - A top-level group that is eligible for a trial and does not already have GitLab Orbit.
-  If the group is not eligible, see [the option to turn on GitLab Orbit is not available](troubleshooting.md#the-option-to-turn-on-gitlab-orbit-is-not-available).
+  If the group is not eligible, [contact sales](https://about.gitlab.com/sales/).
 
 To start a trial:
 
