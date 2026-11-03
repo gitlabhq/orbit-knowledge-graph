@@ -39,19 +39,6 @@ and answers with proof, not guesses.
 
 For more examples, see [prompt examples](prompt-examples.md).
 
-## Reference
-
-{{< cards >}}
-
-- [Connect your agent](agents/_index.md)
-- [Indexed data](schema.md)
-- [Queries](queries/_index.md)
-- [Security](security.md)
-- [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/ "Install GitLab Orbit on Kubernetes and connect it to GitLab.")
-- [Troubleshooting](troubleshooting.md)
-
-{{< /cards >}}
-
 ## About GitLab Orbit
 
 - <img src="img/orbit-video-how-it-works-v19_6.png" alt="Thumbnail of the GitLab Orbit architecture video." width="640" height="360">[How GitLab Orbit works](https://www.youtube.com/watch?v=YtPc8kOmyi0)<br>The architecture of GitLab Orbit, from indexing to queries.
@@ -63,6 +50,16 @@ For more examples, see [prompt examples](prompt-examples.md).
 - [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
 - [See the roadmap](https://gitlab-org.gitlab.io/orbit/knowledge-graph/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
 {.product-cards .product-cards-2}
+
+## Reference
+
+- [Connect your agent](agents/_index.md)<br>Use GitLab Orbit in GitLab Duo, or connect any agent with the CLI or MCP.
+- [Indexed data](schema.md)<br>See which GitLab data and code GitLab Orbit indexes.
+- [Queries](queries/_index.md)<br>Query the GitLab Orbit graph with GQL.
+- [Security](security.md)<br>See how GitLab Orbit protects your data, and which roles you need.
+- [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/)<br>Install GitLab Orbit on Kubernetes and connect it to GitLab.
+- [Troubleshooting](troubleshooting.md)<br>Fix common errors in queries, the CLI, and the local graph.
+{.product-cards}
 
 <style>
 /* Product landing page. Visual wrappers only, with GitLab UI design tokens; the content above is Markdown. */
