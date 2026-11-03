@@ -196,7 +196,6 @@ impl TestContext {
                 Some(PASSWORD),
                 &std::collections::HashMap::new(),
                 &std::collections::HashMap::new(),
-                None,
                 "graph",
             );
 
@@ -234,7 +233,6 @@ impl TestContext {
                 url: self.clickhouse_endpoint.clone(),
                 username: USERNAME.to_string(),
                 password: Some(PASSWORD.to_string()),
-                read_timeout_secs: 900,
                 session_settings: std::collections::HashMap::new(),
                 replicated: false,
                 insert_settings: std::collections::HashMap::new(),
@@ -267,7 +265,6 @@ impl TestContext {
             Some(PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
-            None,
             "graph",
         );
 

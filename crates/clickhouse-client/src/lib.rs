@@ -2,7 +2,6 @@ mod arrow_client;
 mod configuration;
 mod error;
 mod extract;
-mod http_client;
 mod profiling;
 pub mod stats;
 #[cfg(test)]

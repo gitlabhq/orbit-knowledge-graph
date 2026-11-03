@@ -25,7 +25,6 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             self.password.as_deref(),
             &build_session_settings_with_quorum_defaults(self),
             &self.insert_settings,
-            Some(self.read_timeout()),
             service,
         )
         .with_replicated(self.replicated)
@@ -54,8 +53,6 @@ fn build_session_settings_with_quorum_defaults(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
-
     use crate::error::ClickHouseError;
     use orbit_server_config::{AppConfig, ConfigurationError};
 
@@ -65,7 +62,6 @@ mod tests {
             "database": "test",
             "url": "http://127.0.0.1:8123",
             "username": "default",
-            "read_timeout_secs": 900,
             "password": "secret",
             "replicated": false,
             "profiling": {
@@ -85,7 +81,6 @@ mod tests {
             "database": "test",
             "url": "http://127.0.0.1:8123",
             "username": "default",
-            "read_timeout_secs": 900,
             "replicated": false,
             "profiling": {
                 "enabled": false, "explain": false, "query_log": false,
@@ -104,7 +99,6 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
-            read_timeout_secs: 900,
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
@@ -121,7 +115,6 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
-            read_timeout_secs: 900,
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
@@ -139,7 +132,6 @@ mod tests {
             url: "".to_string(),
             username: "default".to_string(),
             password: None,
-            read_timeout_secs: 900,
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
@@ -157,7 +149,6 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "".to_string(),
             password: None,
-            read_timeout_secs: 900,
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
@@ -244,29 +235,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn built_client_gives_up_on_a_server_that_never_replies() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        tokio::spawn(async move {
-            let mut silent_connections = Vec::new();
-            while let Ok((connection, _)) = listener.accept().await {
-                silent_connections.push(connection);
-            }
-        });
-        let config = ClickHouseConfiguration {
-            url,
-            read_timeout_secs: 1,
-            ..AppConfig::embedded_defaults().graph
-        };
-        let client = config.build_client("graph");
-
-        let outcome =
-            tokio::time::timeout(Duration::from_secs(10), client.query_arrow("SELECT 1")).await;
-
-        assert!(matches!(outcome, Ok(Err(_))), "got {outcome:?}");
-    }
-
-    #[tokio::test]
     async fn built_client_opens_its_circuit_after_repeated_network_failures() {
         let config = ClickHouseConfiguration {
             url: crate::testing::UNREACHABLE_URL.to_string(),
@@ -318,7 +286,6 @@ mod tests {
             url: "https://localhost:1".to_string(),
             username: "default".to_string(),
             password: None,
-            read_timeout_secs: 900,
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),

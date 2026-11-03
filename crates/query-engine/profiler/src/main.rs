@@ -474,7 +474,6 @@ async fn main() -> Result<()> {
         cli.ch_password.as_deref(),
         &custom_settings,
         &std::collections::HashMap::new(),
-        None,
         "graph",
     ));
 

@@ -1,7 +1,6 @@
 //! ClickHouse connection configuration.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -13,8 +12,6 @@ pub struct ClickHouseConfiguration {
     pub url: String,
     pub username: String,
     pub password: Option<String>,
-    /// Longest wait for the next bytes of a response before the request fails.
-    pub read_timeout_secs: u64,
     #[serde(default)]
     pub session_settings: HashMap<String, String>,
     pub replicated: bool,
@@ -39,10 +36,6 @@ pub struct ProfilingConfig {
 }
 
 impl ClickHouseConfiguration {
-    pub fn read_timeout(&self) -> Duration {
-        Duration::from_secs(self.read_timeout_secs)
-    }
-
     pub fn validate(&self) -> Result<(), ConfigurationError> {
         if self.database.is_empty() {
             return Err(ConfigurationError::EmptyDatabase);

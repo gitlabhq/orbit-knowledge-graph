@@ -272,12 +272,6 @@
             "null"
           ]
         },
-        "read_timeout_secs": {
-          "description": "Longest wait for the next bytes of a response before the request fails.",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        },
         "session_settings": {
           "type": "object",
           "additionalProperties": {
@@ -305,7 +299,6 @@
         "database",
         "url",
         "username",
-        "read_timeout_secs",
         "replicated",
         "profiling"
       ]
@@ -891,7 +884,6 @@
           "$ref": "#/$defs/CronSchedule"
         },
         "run_timeout_secs": {
-          "description": "Longest a single run may take before the scheduler abandons it and waits for the next tick.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -914,7 +906,6 @@
           "$ref": "#/$defs/CronSchedule"
         },
         "run_timeout_secs": {
-          "description": "Longest a single run may take before the scheduler abandons it and waits for the next tick.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -957,7 +948,6 @@
           "$ref": "#/$defs/CronSchedule"
         },
         "run_timeout_secs": {
-          "description": "Longest a single run may take before the scheduler abandons it and waits for the next tick.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -988,7 +978,6 @@
           "$ref": "#/$defs/CronSchedule"
         },
         "run_timeout_secs": {
-          "description": "Longest a single run may take before the scheduler abandons it and waits for the next tick.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -1007,7 +996,6 @@
           "$ref": "#/$defs/CronSchedule"
         },
         "run_timeout_secs": {
-          "description": "Longest a single run may take before the scheduler abandons it and waits for the next tick.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -1026,7 +1014,6 @@
           "$ref": "#/$defs/CronSchedule"
         },
         "run_timeout_secs": {
-          "description": "Longest a single run may take before the scheduler abandons it and waits for the next tick.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -1045,7 +1032,6 @@
           "$ref": "#/$defs/CronSchedule"
         },
         "run_timeout_secs": {
-          "description": "Longest a single run may take before the scheduler abandons it and waits for the next tick.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -1071,7 +1057,6 @@
           "$ref": "#/$defs/CronSchedule"
         },
         "run_timeout_secs": {
-          "description": "Longest a single run may take before the scheduler abandons it and waits for the next tick.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0

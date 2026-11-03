@@ -348,7 +348,6 @@ mod tests {
             None,
             &Default::default(),
             &Default::default(),
-            None,
             "graph",
         );
         let store = Arc::new(crate::checkpoint::ClickHouseCheckpointStore::new(Arc::new(

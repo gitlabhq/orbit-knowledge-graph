@@ -129,7 +129,6 @@ impl From<CronSchedule> for String {
 #[schemars(deny_unknown_fields)]
 pub struct ScheduleConfiguration {
     pub cron: CronSchedule,
-    /// Longest a single run may take before the scheduler abandons it and waits for the next tick.
     pub run_timeout_secs: u64,
 }
 

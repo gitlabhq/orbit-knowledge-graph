@@ -93,7 +93,6 @@ pub struct ArrowClickHouseClient {
 }
 
 impl ArrowClickHouseClient {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         url: &str,
         database: &str,
@@ -101,10 +100,9 @@ impl ArrowClickHouseClient {
         password: Option<&str>,
         session_settings: &std::collections::HashMap<String, String>,
         insert_settings: &std::collections::HashMap<String, String>,
-        read_timeout: Option<Duration>,
         service: &'static str,
     ) -> Self {
-        let mut client = crate::http_client::clickhouse_client(read_timeout)
+        let mut client = Client::default()
             .with_url(url)
             .with_database(database)
             .with_user(username)
@@ -748,7 +746,6 @@ mod tests {
             None,
             &session_settings,
             &insert_settings,
-            None,
             "test",
         )
     }
@@ -906,7 +903,6 @@ mod tests {
             None,
             &HashMap::new(),
             &HashMap::new(),
-            None,
             "test",
         )
         .with_circuit_breaker(breaker.clone())

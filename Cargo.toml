@@ -203,9 +203,6 @@ tonic-prost = "0.14.2"
 tonic-prost-build = "0.14.2"
 tonic-types = "0.14.2"
 tower = "0.5.3"
-hyper-rustls = { version = "0.27.10", default-features = false, features = ["http1", "tls12", "native-tokio", "aws-lc-rs"] }
-hyper-timeout = "0.5.2"
-hyper-util = { version = "0.1.21", features = ["client-legacy", "http1", "tokio"] }
 triomphe = "0.1.15"
 base64 = "0.22.1"
 moka = { version = "0.12", features = ["future"] }

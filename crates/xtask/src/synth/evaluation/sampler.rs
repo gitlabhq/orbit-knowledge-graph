@@ -267,7 +267,6 @@ mod tests {
             None,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
-            None,
             "graph",
         );
         let sampler = ParameterSampler::new(client, 100);

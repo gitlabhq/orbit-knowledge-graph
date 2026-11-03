@@ -46,8 +46,6 @@ datalake:
   url: "http://127.0.0.1:8123"
   database: default
   username: default
-  # A replica that stops answering would otherwise hold a request forever.
-  read_timeout_secs: 900
   # password: ""
   replicated: false
   session_settings: {}
@@ -63,7 +61,6 @@ graph:
   url: "http://127.0.0.1:8123"
   database: default
   username: default
-  read_timeout_secs: 900
   # password: ""
   replicated: false
   # Universal graph defaults, also set by the Helm chart in production.
@@ -153,8 +150,6 @@ engine:
 
 # Six-field cron expressions: sec min hour dom mon dow.
 schedule:
-  # run_timeout_secs stops one hung run from stopping its task for good. Each value is at least
-  # twice the longest run seen in production.
   tasks:
     global:
       cron: "0 */1 * * * *"

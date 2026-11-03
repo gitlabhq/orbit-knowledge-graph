@@ -81,7 +81,6 @@ impl ClickHouseConfig {
             self.password.as_deref(),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
-            None,
             "graph",
         )
     }
