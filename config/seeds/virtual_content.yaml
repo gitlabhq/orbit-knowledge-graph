@@ -66,3 +66,26 @@ mr_raw_patch:
     value: |-
       @@ -20,1 +20,2 @@
       +ship feature F
+pipeline_trace_id:
+  - match: {id: 3000}
+    value: 4bf92f3577b34da6a3ce929d0e0e4736
+  - match: {id: 3001}
+    value: null
+pipeline_trace_duration:
+  - match: {id: 3000}
+    value: "412000000"
+pipeline_trace_error_count:
+  - match: {id: 3000}
+    value: "2"
+job_span_id:
+  - match: {id: 4000}
+    value: 00f067aa0ba902b7
+job_span_duration:
+  - match: {id: 4000}
+    value: "118000000"
+job_log_tail:
+  - match: {id: 4000}
+    value: |-
+      $ bundle exec rspec
+      Failures:
+        1) Widget#total returns the sum
