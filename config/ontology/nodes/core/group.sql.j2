@@ -28,6 +28,7 @@ SELECT
   (namespace.{{deleted_column}} OR namespace.type != 'Group' OR namespace.state = 2 OR namespace.state = 4) AS _deleted
 FROM (
   SELECT * FROM siphon_namespaces
+  WHERE id NOT IN (SELECT id FROM late)
   UNION ALL
   SELECT ns.* REPLACE (
     greatest(ns.{{version_column}}, late.version) AS {{version_column}},
