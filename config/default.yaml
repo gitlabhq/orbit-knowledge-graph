@@ -257,3 +257,13 @@ object_storage:
   # secret_access_key: ""       # s3 static
   # session_token: ""           # s3 static
   # service_account_key: ""     # gcs static, JSON key content
+
+# Unset credentials disable resolution; the virtual columns then return null.
+observability:
+  # provisioner_url: ""         # owns the group to ClickHouse host map
+  # provisioner_api_key: ""
+  # clickhouse_username: ""     # needs SELECT on each tenant's traces and logs databases
+  # clickhouse_password: ""
+  host_map_refresh_seconds: 300
+  request_timeout_seconds: 10
+  max_log_lines: 50

@@ -19,6 +19,7 @@ use crate::health_check::HealthCheckConfig;
 use crate::metrics::MetricsConfig;
 use crate::nats::NatsConfiguration;
 use crate::object_storage::ObjectStorageConfig;
+use crate::observability::ObservabilityConfig;
 use crate::probe_server::{ProbeServerConfig, bind_address_for_port, default_bind_address};
 use crate::query::QuerySettings;
 use crate::schema::SchemaConfig;
@@ -55,6 +56,8 @@ pub struct AppConfig {
     pub billing: BillingConfig,
     pub features: FeaturesConfig,
     pub object_storage: ObjectStorageConfig,
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
 }
 
 impl AppConfig {
