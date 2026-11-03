@@ -1,5 +1,3 @@
-# GitLab sets namespaces.state to 2 (deletion_scheduled) and renames the path
-# when a group is marked for deletion. State 4 is deletion_in_progress.
 description: A group that is scheduled for deletion or being deleted is tombstoned on the next incremental run
 scope: { namespace: 100 }
 

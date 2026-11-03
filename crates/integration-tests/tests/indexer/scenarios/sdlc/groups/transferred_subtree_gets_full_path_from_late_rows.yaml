@@ -1,8 +1,3 @@
-# Group 200 and its subgroups move from top-level group 100, which Orbit does
-# not index, into top-level group 300. Their namespace rows arrive first, so the
-# transfer run falls back to the slug. The route rows and a description edit
-# arrive later, without a new namespace row. Each late row must re-extract the
-# group on an incremental run.
 description: A group subtree moved between top-level groups gets each full path and description from rows that arrive after the transfer
 scope: { namespace: 300 }
 

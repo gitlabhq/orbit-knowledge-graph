@@ -1,5 +1,3 @@
-# The second run gets a new route row and no new siphon_projects row, as after
-# a transfer whose route rows arrive later than the project row.
 description: A route change without a project row change re-extracts the project full_path
 scope: { namespace: 100 }
 
