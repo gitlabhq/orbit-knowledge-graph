@@ -100,7 +100,7 @@ fn seed_revision(data_dir: &std::path::Path, name: &str, ddl: &str) -> std::path
         duckdb_client::DuckDbClient::open(&data_dir.join("local/manifest.duckdb")).unwrap();
     manifest
         .initialize_schema(include_str!(concat!(
-            env!("CONFIG_DIR"),
+            env!("ORBIT_CONFIG_DIR"),
             "/orbit_cli/manifest.sql"
         )))
         .unwrap();

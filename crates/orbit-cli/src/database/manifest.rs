@@ -8,7 +8,8 @@ use strum::{AsRefStr, Display};
 use super::lock_database;
 use crate::workspace::{GitInfo, project_id_from_path};
 
-pub const MANIFEST_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/orbit_cli/manifest.sql"));
+pub const MANIFEST_DDL: &str =
+    include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/orbit_cli/manifest.sql"));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
