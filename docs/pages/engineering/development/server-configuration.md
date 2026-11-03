@@ -154,6 +154,7 @@ KV lock makes sure that only one dispatcher runs a task per interval.
 
 | Key | Effect |
 | --- | --- |
+| `schedule.tasks.<task>.run_timeout_secs` | Longest time for one run. After it, the scheduler stops the run and the task starts again on its next tick. `0` removes the limit. |
 | `schedule.tasks.namespace.sweep_interval_secs` | Age of the last full sweep before the next one |
 | `schedule.tasks.stale-edge-reconciliation.lookback_secs` | Time window that each run scans again |
 | `schedule.tasks.code-backfill.publish_window` | Projects per publish batch and per run |
