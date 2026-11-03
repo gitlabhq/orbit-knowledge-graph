@@ -4,7 +4,7 @@ WITH late AS (
   WHERE startsWith(traversal_path, {traversal_path:String})
     AND source_type = 'Project'
     AND {{watermark_column}} > {last_watermark:String} AND {{watermark_column}} <= {watermark:String}
-    AND {last_watermark:String} > '1970-01-01 00:00:00.000000'
+    AND {is_incremental:Bool}
   GROUP BY source_id )
 SELECT
   project.id AS id,

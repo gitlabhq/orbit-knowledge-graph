@@ -268,7 +268,7 @@ mod tests {
         plan.prepare()
             .with(WatermarkFilter {
                 column: &plan.watermark_column,
-                last: Utc::now(),
+                floor: Some(Utc::now()),
                 current: Utc::now(),
             })
             .with(TraversalPathFilter { path })
@@ -280,7 +280,7 @@ mod tests {
         plan.prepare()
             .with(WatermarkFilter {
                 column: &plan.watermark_column,
-                last: Utc::now(),
+                floor: Some(Utc::now()),
                 current: Utc::now(),
             })
             .to_sql()
@@ -689,7 +689,7 @@ mod tests {
             .prepare()
             .with(WatermarkFilter {
                 column: &user.watermark_column,
-                last: Utc::now(),
+                floor: Some(Utc::now()),
                 current: Utc::now(),
             })
             .with(CursorFilter {

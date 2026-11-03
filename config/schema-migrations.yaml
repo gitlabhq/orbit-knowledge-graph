@@ -21,10 +21,11 @@ migrations:
   note: >-
     Group and Project extracts add a late branch for ids whose route or
     namespace_details row changed without a new namespace or project row, so those changes
-    re-extract the node. Group also tombstones namespaces in state 2 (deletion_scheduled)
-    or 4 (deletion_in_progress). The rebuild recomputes full_path and description for
-    groups and projects whose route rows arrived after their last extract, as after
-    a transfer between top-level groups.
+    re-extract the node. The indexer binds is_incremental so a full load skips that
+    branch. Group also tombstones namespaces in state 2 (deletion_scheduled) or 4
+    (deletion_in_progress). The rebuild recomputes full_path and description for groups and
+    projects whose route rows arrived after their last extract, as after a transfer
+    between top-level groups.
 - version: 117
   scope: "*"
   note: >-
