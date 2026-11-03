@@ -453,6 +453,14 @@ fn compile_resolve(section: &ResolveSection, lang: &Lang) -> Result<Vec<ResolveS
 }
 
 fn compile_stage(stage: &Stage, lang: &Lang) -> Result<RewriteStage, LoadError> {
+    // An append never removes its target, so a repeat stage would stop after
+    // one pass however much the append changed.
+    if stage.repeat && stage.rules.iter().any(|rule| rule.append.is_some()) {
+        return Err(LoadError(format!(
+            "repeat stage {:?} cannot contain append rules",
+            stage.name
+        )));
+    }
     let rules = stage
         .rules
         .iter()
@@ -593,6 +601,22 @@ stages:
         let stages = load_rules(yaml, &lang).unwrap();
         assert_eq!(stages.len(), 1);
         assert_eq!(stages[0].rules.len(), 1);
+    }
+
+    #[test]
+    fn repeat_stage_rejects_append_rules() {
+        let yaml = r#"
+stages:
+  - name: grow
+    repeat: true
+    rules:
+      - match: '(identifier $A)'
+        append: ['(identifier $A)']
+"#;
+        let err = load_rules(yaml, &Lang::new())
+            .err()
+            .expect("must be rejected");
+        assert!(err.to_string().contains("repeat stage"), "{err}");
     }
 
     #[test]
