@@ -1,6 +1,7 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     export_current_ontology_archive_path();
+    emit_build_version();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
 }
@@ -22,6 +23,44 @@ fn export_current_ontology_archive_path() {
         "cargo:rustc-env=ONTOLOGY_ARCHIVE_PATH={}",
         resolved.display()
     );
+}
+
+fn emit_build_version() {
+    let git_dir = std::path::Path::new("../../.git");
+
+    if git_dir.is_dir() {
+        println!("cargo:rerun-if-changed=../../.git/HEAD");
+        if let Ok(head) = std::fs::read_to_string(git_dir.join("HEAD"))
+            && let Some(refpath) = head.strip_prefix("ref: ")
+        {
+            let refpath = refpath.trim();
+            println!("cargo:rerun-if-changed=../../.git/{refpath}");
+        }
+        println!("cargo:rerun-if-changed=../../.git/packed-refs");
+    }
+
+    if let Some(version) = git_describe() {
+        println!("cargo:rustc-env=GKG_BUILD_VERSION={version}");
+    }
+}
+
+fn git_describe() -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["describe", "--tags", "--match", "v*", "--always"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let raw = String::from_utf8(output.stdout).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    Some(trimmed.strip_prefix('v').unwrap_or(trimmed).to_string())
 }
 
 #[cfg(feature = "regenerate-protos")]
