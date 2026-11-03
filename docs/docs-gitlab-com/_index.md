@@ -200,7 +200,8 @@ body:has(.product-landing) .docs-content .language-plaintext {
   padding: 0;
   list-style: none;
 }
-.docs-content ul.product-cards-2 { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+/* Two-card grids: at most two per row, one per row when the content area is narrow. */
+.docs-content ul.product-cards-2 { grid-template-columns: repeat(auto-fit, minmax(max(16rem, calc((100% - 1.25rem) / 2)), 1fr)); }
 .docs-content ul.product-cards > li {
   position: relative;
   margin: 0;
