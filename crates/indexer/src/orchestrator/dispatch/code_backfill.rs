@@ -371,6 +371,7 @@ mod tests {
             None,
             empty,
             empty,
+            None,
             "graph",
         );
         let datalake = ArrowClickHouseClient::new(
@@ -380,6 +381,7 @@ mod tests {
             None,
             empty,
             empty,
+            None,
             "graph",
         );
         CodeBackfill::new(

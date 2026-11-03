@@ -222,6 +222,7 @@ async fn connection_failure_returns_error() {
         url: "http://127.0.0.1:19000".to_string(),
         username: "default".to_string(),
         password: None,
+        read_timeout_secs: 900,
         session_settings: std::collections::HashMap::new(),
         replicated: false,
         insert_settings: std::collections::HashMap::new(),

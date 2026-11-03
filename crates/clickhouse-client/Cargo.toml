@@ -16,6 +16,10 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 clickhouse = { workspace = true }
 futures = { workspace = true }
+hyper-rustls = { workspace = true }
+hyper-timeout = { workspace = true }
+hyper-util = { workspace = true }
+rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

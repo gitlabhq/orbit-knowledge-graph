@@ -257,6 +257,7 @@ impl TestContext {
                 Some(TEST_PASSWORD),
                 &settings,
                 &std::collections::HashMap::new(),
+                None,
                 "graph",
             );
             if client.execute("SELECT 1").await.is_ok() {
@@ -365,6 +366,7 @@ fn test_client(url: &str, database: &str) -> ArrowClickHouseClient {
         Some(TEST_PASSWORD),
         &test_settings(),
         &HashMap::new(),
+        None,
         "graph",
     )
 }
@@ -375,6 +377,7 @@ fn test_configuration(url: &str, database: &str) -> ClickHouseConfiguration {
         url: url.to_string(),
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),
+        read_timeout_secs: 900,
         session_settings: test_settings(),
         replicated: false,
         insert_settings: HashMap::new(),

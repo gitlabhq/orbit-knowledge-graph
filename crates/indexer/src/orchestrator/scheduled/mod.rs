@@ -156,16 +156,25 @@ async fn run_task_loop(
             }
         }
 
-        match task.run().await {
-            Ok(()) => {
+        let run_timeout = task.schedule().run_timeout();
+        match tokio::time::timeout(run_timeout, task.run()).await {
+            Ok(Ok(())) => {
                 debug!(safe(TASK) = task_name.as_str(), "task completed");
             }
-            Err(error) => {
+            Ok(Err(error)) => {
                 warn!(
                     safe(TASK) = task_name.as_str(),
                     safe(ERROR_TYPE) = "task_failed",
                     expanded(ERROR_MESSAGE) = %error,
                     "task failed"
+                );
+            }
+            Err(_) => {
+                warn!(
+                    safe(TASK) = task_name.as_str(),
+                    safe(ERROR_TYPE) = "task_timed_out",
+                    safe(TIMEOUT_S) = run_timeout.as_secs_f64(),
+                    "task run timed out and was abandoned"
                 );
             }
         }
@@ -220,6 +229,15 @@ mod tests {
     /// Yearly cron: delay is always months, safe for "should not fire" assertions.
     const YEARLY: &str = "0 0 0 1 1 *";
 
+    const RUN_TIMEOUT_SECS: u64 = 10;
+
+    fn schedule(cron: &str) -> ScheduleConfiguration {
+        ScheduleConfiguration {
+            cron: CronSchedule::try_from(cron.to_owned()).unwrap(),
+            run_timeout_secs: RUN_TIMEOUT_SECS,
+        }
+    }
+
     struct StubTask {
         name: &'static str,
         config: ScheduleConfiguration,
@@ -230,9 +248,7 @@ mod tests {
         fn new(name: &'static str, cron: &str) -> Self {
             Self {
                 name,
-                config: ScheduleConfiguration {
-                    cron: CronSchedule::try_from(cron.to_owned()).unwrap(),
-                },
+                config: schedule(cron),
                 run_count: AtomicUsize::new(0),
             }
         }
@@ -255,6 +271,27 @@ mod tests {
         async fn run(&self) -> Result<(), TaskError> {
             self.run_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
+        }
+    }
+
+    struct HangingTask {
+        config: ScheduleConfiguration,
+        run_count: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ScheduledTask for Arc<HangingTask> {
+        fn name(&self) -> &str {
+            "hanging"
+        }
+
+        fn schedule(&self) -> &ScheduleConfiguration {
+            &self.config
+        }
+
+        async fn run(&self) -> Result<(), TaskError> {
+            self.run_count.fetch_add(1, Ordering::SeqCst);
+            std::future::pending().await
         }
     }
 
@@ -334,10 +371,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn lines_inside_a_task_carry_the_task_name() {
         let (logs, _capture) = crate::testkit::logs::capture_logs();
-        let schedule = ScheduleConfiguration {
-            cron: CronSchedule::try_from(EVERY_5S.to_owned()).unwrap(),
-        };
-        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(LoggingTask(schedule))];
+        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(LoggingTask(schedule(EVERY_5S)))];
         let shutdown = CancellationToken::new();
 
         let handle = tokio::spawn(run_loop(
@@ -415,5 +449,28 @@ mod tests {
         assert_eq!(slow.run_count(), 0, "yearly task should not have fired");
 
         shutdown.cancel();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hanging_run_is_abandoned_and_the_task_runs_again() {
+        let task = Arc::new(HangingTask {
+            config: schedule(EVERY_5S),
+            run_count: AtomicUsize::new(0),
+        });
+        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(Arc::clone(&task))];
+        let shutdown = CancellationToken::new();
+        tokio::spawn(run_loop(
+            tasks,
+            Arc::new(AlwaysGrantLockService),
+            shutdown.clone(),
+        ));
+
+        for _ in 0..(RUN_TIMEOUT_SECS + 12) {
+            tokio::time::advance(Duration::from_secs(1)).await;
+            settle().await;
+        }
+        shutdown.cancel();
+
+        assert_eq!(task.run_count.load(Ordering::SeqCst), 2);
     }
 }
