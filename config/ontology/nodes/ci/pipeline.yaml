@@ -217,7 +217,6 @@ properties:
     virtual:
       service: observability
       lookup: pipeline_trace_id
-      disabled: true
       depends_on: [id, traversal_path]
       allowed_ops: [is_null, is_not_null]
     description: "Trace ID for this pipeline run in GitLab Observability, resolved at query time. Null when the group has no Observability instance, the pipeline predates it, or the trace has aged out."
@@ -228,7 +227,6 @@ properties:
     virtual:
       service: observability
       lookup: pipeline_trace_duration
-      disabled: true
       depends_on: [id, traversal_path]
       allowed_ops: [is_null, is_not_null]
     description: "Wall-clock duration of the pipeline trace in nanoseconds, resolved from GitLab Observability at query time. Measures the exported trace, which may differ from duration."
@@ -239,7 +237,6 @@ properties:
     virtual:
       service: observability
       lookup: pipeline_trace_error_count
-      disabled: true
       depends_on: [id, traversal_path]
       allowed_ops: [is_null, is_not_null]
     description: "Number of spans with an error status in this pipeline's trace, resolved from GitLab Observability at query time."

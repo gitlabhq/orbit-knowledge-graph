@@ -295,7 +295,6 @@ properties:
     virtual:
       service: observability
       lookup: job_span_id
-      disabled: true
       depends_on: [id, traversal_path]
       allowed_ops: [is_null, is_not_null]
     description: "Span ID for this job in GitLab Observability, resolved at query time. Null when the group has no Observability instance, the job predates it, or the trace has aged out."
@@ -306,7 +305,6 @@ properties:
     virtual:
       service: observability
       lookup: job_span_duration
-      disabled: true
       depends_on: [id, traversal_path]
       allowed_ops: [is_null, is_not_null]
     description: "Wall-clock duration of this job's span in nanoseconds, resolved from GitLab Observability at query time. Measures the exported span, which may differ from duration."
@@ -317,7 +315,6 @@ properties:
     virtual:
       service: observability
       lookup: job_log_tail
-      disabled: true
       depends_on: [id, traversal_path]
       allowed_ops: [is_null, is_not_null]
     description: "Most recent log lines emitted during this job, newline-joined, resolved from GitLab Observability at query time. Truncated to a fixed number of lines."
