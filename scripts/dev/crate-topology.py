@@ -25,17 +25,44 @@ def run(args, **kwargs):
     return subprocess.run(args, cwd=REPO, capture_output=True, text=True, **kwargs)
 
 
+def default_enabled_dependencies(package):
+    features = package["features"]
+    enabled, seen, pending = set(), set(), ["default"]
+    while pending:
+        feature = pending.pop()
+        if feature in seen or feature not in features:
+            continue
+        seen.add(feature)
+        for item in features[feature]:
+            if item.startswith("dep:"):
+                enabled.add(item.removeprefix("dep:"))
+            elif "?/" in item:
+                continue
+            elif "/" in item:
+                enabled.add(item.split("/")[0])
+            elif item in features:
+                pending.append(item)
+            else:
+                enabled.add(item)
+    return enabled
+
+
+def is_build_edge(dependency, packages, enabled):
+    return (
+        dependency.get("path")
+        and dependency["name"] in packages
+        and dependency["kind"] in BUILD_EDGE_KINDS
+        and (not dependency["optional"] or (dependency.get("rename") or dependency["name"]) in enabled)
+    )
+
+
 def load_workspace(excluded):
     metadata = json.loads(run(["cargo", "metadata", "--format-version", "1", "--no-deps"], check=True).stdout)
     packages = {p["name"]: p for p in metadata["packages"] if p["name"] not in excluded}
-    dependencies = {
-        name: {
-            d["name"]
-            for d in package["dependencies"]
-            if d.get("path") and d["name"] in packages and d["kind"] in BUILD_EDGE_KINDS and not d.get("optional")
-        }
-        for name, package in packages.items()
-    }
+    dependencies = {}
+    for name, package in packages.items():
+        enabled = default_enabled_dependencies(package)
+        dependencies[name] = {d["name"] for d in package["dependencies"] if is_build_edge(d, packages, enabled)}
     return packages, dependencies
 
 
@@ -127,6 +154,9 @@ def check(top_crates, packages):
 
 
 def measure_report(packages, dependencies, extra_touches):
+    missing = [path for path in extra_touches if not (REPO / path).is_file()]
+    if missing:
+        raise SystemExit(f"--touch files not found: {', '.join(missing)}")
     dependents = reverse(dependencies)
     touches = [(name, entry) for name, package in packages.items() if (entry := entry_file(package))]
     top_crates = sorted(name for name, _ in touches if not dependents[name])
