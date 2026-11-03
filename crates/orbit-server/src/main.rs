@@ -191,6 +191,19 @@ async fn run_webserver(
     );
     info!("Content resolution enabled (GitlabClient configured)");
 
+    match config
+        .observability
+        .resolver_settings()
+        .as_ref()
+        .and_then(content::observability::build)
+    {
+        Some(service) => {
+            resolver_registry.register(content::observability::SERVICE_NAME, service);
+            info!("Observability column resolution enabled");
+        }
+        None => info!("Observability column resolution disabled (not configured)"),
+    }
+
     info!("initializing NATS connection");
     let nats = Arc::new(
         nats_client::NatsClient::connect(&config.nats)
