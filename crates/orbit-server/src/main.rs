@@ -28,9 +28,6 @@ use tokio_util::sync::CancellationToken;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    if let Some(version) = option_env!("GKG_BUILD_VERSION") {
-        orbit_utils::version::set_build_version(version);
-    }
     let aws_lc_version = orbit_server::fips::install_crypto_provider()?;
 
     let args = Args::parse();
