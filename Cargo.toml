@@ -29,7 +29,6 @@ members = [
   "crates/orbit-search",
   "crates/orbit-migrations",
   "crates/orbit-server-config",
-  "crates/object-storage",
   "crates/orbit-server",
   "crates/ontology",
   "crates/query-data-model",
@@ -104,8 +103,6 @@ typed-path = "0.12.3"
 
 # Indexer dependencies
 anyhow = "1.0.100"
-# Keep this a different major than DataFusion's object_store so the cloud features stay off its build path.
-object_store = { version = "0.14.2", features = ["aws", "gcp"] }
 config = { version = "0.15", default-features = false, features = ["yaml"] }
 parquet = { version = "60", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
 tokio = { version = "1.49.0", features = ["full"] }
