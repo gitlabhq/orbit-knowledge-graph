@@ -351,6 +351,14 @@ impl Tf {
                 .count();
                 lang.syms.intern(&index.to_string())
             }
+            Tf::Default(value) => {
+                let s = t.text_at(id, lang);
+                if s.is_empty() {
+                    lang.syms.intern(value)
+                } else {
+                    lang.syms.intern(s)
+                }
+            }
             Tf::Pipeline(steps) => {
                 let mut s = t.text_at(id, lang).to_string();
                 for step in steps {
