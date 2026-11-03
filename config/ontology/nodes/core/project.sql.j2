@@ -1,5 +1,5 @@
 WITH late AS (
-  SELECT source_id AS id, max({{version_column}}) AS version, max({{watermark_column}}) AS watermark
+  SELECT source_id AS id, max({{watermark_column}}) AS watermark
   FROM siphon_routes
   WHERE startsWith(traversal_path, {traversal_path:String})
     AND source_type = 'Project'
@@ -26,14 +26,12 @@ FROM (
   SELECT * FROM siphon_projects
   WHERE id NOT IN (SELECT id FROM late)
   UNION ALL
-  SELECT p.* REPLACE (
-    greatest(p.{{version_column}}, late.version) AS {{version_column}},
-    late.watermark AS {{watermark_column}})
+  (SELECT p.* REPLACE (late.watermark AS {{watermark_column}})
   FROM siphon_projects p
   INNER JOIN late ON p.id = late.id
   WHERE p.id IN (SELECT id FROM late)
   ORDER BY p.id, p.{{version_column}} DESC
-  LIMIT 1 BY p.id ) project
+  LIMIT 1 BY p.id) ) project
 INNER JOIN (
   SELECT
     id,

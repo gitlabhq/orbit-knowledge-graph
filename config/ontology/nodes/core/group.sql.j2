@@ -1,12 +1,12 @@
 WITH late AS (
-  SELECT id, max({{version_column}}) AS version, max({{watermark_column}}) AS watermark
+  SELECT id, max({{watermark_column}}) AS watermark
   FROM (
-    SELECT namespace_id AS id, {{version_column}}, {{watermark_column}}
+    SELECT namespace_id AS id, {{watermark_column}}
     FROM siphon_namespace_details
     WHERE startsWith(traversal_path, {traversal_path:String})
       AND {{watermark_column}} > {last_watermark:String} AND {{watermark_column}} <= {watermark:String}
     UNION ALL
-    SELECT source_id AS id, {{version_column}}, {{watermark_column}}
+    SELECT source_id AS id, {{watermark_column}}
     FROM siphon_routes
     WHERE startsWith(traversal_path, {traversal_path:String})
       AND source_type = 'Namespace'
@@ -30,14 +30,12 @@ FROM (
   SELECT * FROM siphon_namespaces
   WHERE id NOT IN (SELECT id FROM late)
   UNION ALL
-  SELECT ns.* REPLACE (
-    greatest(ns.{{version_column}}, late.version) AS {{version_column}},
-    late.watermark AS {{watermark_column}})
+  (SELECT ns.* REPLACE (late.watermark AS {{watermark_column}})
   FROM siphon_namespaces ns
   INNER JOIN late ON ns.id = late.id
   WHERE ns.id IN (SELECT id FROM late)
   ORDER BY ns.id, ns.{{version_column}} DESC
-  LIMIT 1 BY ns.id ) namespace
+  LIMIT 1 BY ns.id) ) namespace
 INNER JOIN (
   SELECT
     id,
