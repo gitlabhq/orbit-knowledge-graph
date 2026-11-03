@@ -311,17 +311,6 @@ properties:
       allowed_ops: [is_null, is_not_null]
     description: "Wall-clock duration of this job's span in nanoseconds, resolved from GitLab Observability at query time. Measures the exported span, which may differ from duration."
 
-  observability_log_tail:
-    type: string
-    nullable: true
-    virtual:
-      service: observability
-      lookup: job_log_tail
-      disabled: true
-      depends_on: [id, traversal_path]
-      allowed_ops: [is_null, is_not_null]
-    description: "Most recent log lines emitted during this job, newline-joined, resolved from GitLab Observability at query time. Truncated to a fixed number of lines."
-
   traversal_path:
     type: string
     source: traversal_path
