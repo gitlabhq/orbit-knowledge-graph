@@ -6028,6 +6028,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "circuit-breaker",
+ "compiler",
  "gitlab-client",
  "labkit",
  "labkit-events",
@@ -6038,7 +6039,7 @@ dependencies = [
  "orbit-server-config",
  "orbit-utils",
  "parking_lot",
- "query-engine",
+ "pipeline",
  "rand 0.10.2",
  "reqwest 0.13.4",
  "rustls",
