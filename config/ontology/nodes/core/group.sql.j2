@@ -1,8 +1,5 @@
--- Route and details rows can land after the namespace row, as after a transfer.
--- The late branch re-extracts those ids. A full load reads every row, so it skips the branch.
--- State 2 is deletion_scheduled and state 4 is deletion_in_progress.
 WITH late AS (
-  SELECT id, max({{version_column}}) AS late_version, max({{watermark_column}}) AS late_watermark
+  SELECT id, max({{version_column}}) AS version, max({{watermark_column}}) AS watermark
   FROM (
     SELECT namespace_id AS id, {{version_column}}, {{watermark_column}}
     FROM siphon_namespace_details
@@ -11,11 +8,11 @@ WITH late AS (
     UNION ALL
     SELECT source_id AS id, {{version_column}}, {{watermark_column}}
     FROM siphon_routes
-    WHERE startsWith(traversal_path, {traversal_path:String}) AND source_type = 'Namespace'
+    WHERE startsWith(traversal_path, {traversal_path:String})
+      AND source_type = 'Namespace'
       AND {{watermark_column}} > {last_watermark:String} AND {{watermark_column}} <= {watermark:String} )
   WHERE {last_watermark:String} > '1970-01-01 00:00:00.000000'
-  GROUP BY id
-)
+  GROUP BY id )
 SELECT
   namespace.id AS id,
   namespace.name AS name,
@@ -30,18 +27,16 @@ SELECT
   namespace.{{version_column}} AS _version,
   (namespace.{{deleted_column}} OR namespace.type != 'Group' OR namespace.state = 2 OR namespace.state = 4) AS _deleted
 FROM (
-  SELECT id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, type, state,
-    {{version_column}}, {{watermark_column}}, {{deleted_column}}
-  FROM siphon_namespaces
+  SELECT * FROM siphon_namespaces
   UNION ALL
-  SELECT ns.id, ns.name, ns.path, ns.visibility_level, ns.parent_id, ns.owner_id, ns.created_at, ns.updated_at, ns.type, ns.state,
-    greatest(ns.{{version_column}}, late.late_version), late.late_watermark, ns.{{deleted_column}}
-  FROM (
-    SELECT * FROM siphon_namespaces
-    WHERE id IN (SELECT id FROM late)
-    ORDER BY id, {{version_column}} DESC
-    LIMIT 1 BY id ) ns
-  INNER JOIN late ON ns.id = late.id ) namespace
+  SELECT ns.* REPLACE (
+    greatest(ns.{{version_column}}, late.version) AS {{version_column}},
+    late.watermark AS {{watermark_column}})
+  FROM siphon_namespaces ns
+  INNER JOIN late ON ns.id = late.id
+  WHERE ns.id IN (SELECT id FROM late)
+  ORDER BY ns.id, ns.{{version_column}} DESC
+  LIMIT 1 BY ns.id ) namespace
 INNER JOIN (
   SELECT
     id,

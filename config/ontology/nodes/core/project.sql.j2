@@ -1,13 +1,11 @@
--- Route rows can land after the project row, as after a transfer.
--- The late branch re-extracts those ids. A full load reads every row, so it skips the branch.
 WITH late AS (
-  SELECT source_id AS id, max({{version_column}}) AS late_version, max({{watermark_column}}) AS late_watermark
+  SELECT source_id AS id, max({{version_column}}) AS version, max({{watermark_column}}) AS watermark
   FROM siphon_routes
-  WHERE startsWith(traversal_path, {traversal_path:String}) AND source_type = 'Project'
+  WHERE startsWith(traversal_path, {traversal_path:String})
+    AND source_type = 'Project'
     AND {{watermark_column}} > {last_watermark:String} AND {{watermark_column}} <= {watermark:String}
     AND {last_watermark:String} > '1970-01-01 00:00:00.000000'
-  GROUP BY source_id
-)
+  GROUP BY source_id )
 SELECT
   project.id AS id,
   project.name AS name,
@@ -25,19 +23,16 @@ SELECT
   project.{{version_column}} AS _version,
   project.{{deleted_column}} AS _deleted
 FROM (
-  SELECT id, name, path, description, visibility_level, namespace_id, creator_id, created_at, updated_at,
-    archived, star_count, last_activity_at, {{version_column}}, {{watermark_column}}, {{deleted_column}}
-  FROM siphon_projects
+  SELECT * FROM siphon_projects
   UNION ALL
-  SELECT p.id, p.name, p.path, p.description, p.visibility_level, p.namespace_id, p.creator_id, p.created_at, p.updated_at,
-    p.archived, p.star_count, p.last_activity_at,
-    greatest(p.{{version_column}}, late.late_version), late.late_watermark, p.{{deleted_column}}
-  FROM (
-    SELECT * FROM siphon_projects
-    WHERE id IN (SELECT id FROM late)
-    ORDER BY id, {{version_column}} DESC
-    LIMIT 1 BY id ) p
-  INNER JOIN late ON p.id = late.id ) project
+  SELECT p.* REPLACE (
+    greatest(p.{{version_column}}, late.version) AS {{version_column}},
+    late.watermark AS {{watermark_column}})
+  FROM siphon_projects p
+  INNER JOIN late ON p.id = late.id
+  WHERE p.id IN (SELECT id FROM late)
+  ORDER BY p.id, p.{{version_column}} DESC
+  LIMIT 1 BY p.id ) project
 INNER JOIN (
   SELECT
     id,
