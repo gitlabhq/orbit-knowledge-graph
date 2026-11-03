@@ -14,7 +14,7 @@ pub fn get() -> &'static str {
         .as_str()
 }
 
-/// `git describe` of the source checkout this binary was built from, without the leading `v`.
+/// `git describe` of the source checkout at the build path when called, without the leading `v`.
 pub fn describe_checkout() -> Option<String> {
     let output = Command::new("git")
         .args(["describe", "--tags", "--match", "v[0-9]*", "--always"])
