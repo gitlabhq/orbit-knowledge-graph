@@ -9,9 +9,9 @@ extraResources:
   - apiVersion: cert-manager.io/v1
     kind: Certificate
     metadata:
-      name: gkg-grpc-tls
+      name: orbit-webserver-tls
     spec:
-      secretName: gkg-grpc-tls
+      secretName: orbit-webserver-tls
       duration: 8760h
       issuerRef:
         name: e2e-ca
@@ -157,7 +157,7 @@ gitlab:
 
 tls:
   enabled: true
-  existingSecret: "gkg-grpc-tls"
+  existingSecret: "orbit-webserver-tls"
 
 metrics:
   prometheus:
