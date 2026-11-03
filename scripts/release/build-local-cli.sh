@@ -85,9 +85,18 @@ if [ "$PLATFORM" = "linux" ]; then
     }
     ZIG_TARGET="$TARGET"
     [ "$LIBC" = "gnu" ] && ZIG_TARGET="${TARGET}.2.28"
-    rustup run "$TOOLCHAIN" cargo zigbuild --release --locked -p orbit-cli --bin orbit --target "$ZIG_TARGET" --features duckdb-client/bundled
+    BUILD=(rustup run "$TOOLCHAIN" cargo zigbuild --release --locked -p orbit-cli --bin orbit --target "$ZIG_TARGET" --features duckdb-client/bundled)
 else
-    rustup run "$TOOLCHAIN" cargo build --release --locked -p orbit-cli --bin orbit --target "$TARGET" --features duckdb-client/bundled
+    BUILD=(rustup run "$TOOLCHAIN" cargo build --release --locked -p orbit-cli --bin orbit --target "$TARGET" --features duckdb-client/bundled)
+fi
+"${BUILD[@]}"
+
+if [ -n "${CI_COMMIT_TAG:-}" ]; then
+    expected="[\"ORBIT_RELEASE_VERSION\",\"${CI_COMMIT_TAG#v}\"]"
+    if ! "${BUILD[@]}" --message-format=json 2>/dev/null | grep -F "$expected" >/dev/null; then
+        echo "error: orbit was not built with release version ${CI_COMMIT_TAG#v}" >&2
+        exit 1
+    fi
 fi
 
 BIN_DIR="target/${TARGET}/release"

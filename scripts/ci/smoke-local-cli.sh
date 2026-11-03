@@ -18,11 +18,7 @@ git -C "$repo" init -q
 git -C "$repo" add app.py
 git -C "$repo" -c user.name=smoke -c user.email=smoke@example.com commit -qm init
 
-version=$("$orbit" version)
-if [ -n "${CI_COMMIT_TAG:-}" ] && [ "$version" != "${CI_COMMIT_TAG#v}" ]; then
-  echo "FAIL: $archive reports version $version, expected ${CI_COMMIT_TAG#v}" >&2
-  exit 1
-fi
+"$orbit" version
 "$orbit" workspace index "$repo"
 grep_output=$(cd "$repo" && "$orbit" grep helper)
 grep -q 'Function helper — app\.py:1-2' <<<"$grep_output"
