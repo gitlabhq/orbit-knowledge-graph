@@ -93,7 +93,7 @@ fi
 
 if [ -n "${CI_COMMIT_TAG:-}" ]; then
     expected="[\"ORBIT_RELEASE_VERSION\",\"${CI_COMMIT_TAG#v}\"]"
-    if ! "${BUILD[@]}" --message-format=json 2>/dev/null | grep -F "$expected" >/dev/null; then
+    if ! "${BUILD[@]}" --message-format=json | grep -F "$expected" >/dev/null; then
         echo "error: orbit was not built with release version ${CI_COMMIT_TAG#v}" >&2
         exit 1
     fi
