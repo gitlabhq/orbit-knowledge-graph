@@ -1,6 +1,7 @@
 siphonPassword: {{ requiredEnv "E2E_PG_SIPHON_PASS" | quote }}
 {{- if env "E2E_EXTERNAL_GITLAB_NS" }}
 pgHost: {{ requiredEnv "E2E_PG_HOST" }}
-pgUser: gitlab
-pgPasswordKey: postgresql-password
+pgPasswordSecret: orbit-pg-admin
+pgPasswordKey: password
+tableOwner: gitlab
 {{- end }}
