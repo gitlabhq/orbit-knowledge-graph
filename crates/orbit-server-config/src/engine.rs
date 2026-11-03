@@ -133,8 +133,9 @@ pub struct ScheduleConfiguration {
 }
 
 impl ScheduleConfiguration {
-    pub fn run_timeout(&self) -> Duration {
-        Duration::from_secs(self.run_timeout_secs)
+    /// Per-run limit, or `None` when disabled (`run_timeout_secs == 0`).
+    pub fn run_timeout(&self) -> Option<Duration> {
+        (self.run_timeout_secs > 0).then(|| Duration::from_secs(self.run_timeout_secs))
     }
 
     /// Duration until the next fire time after `now`.
@@ -672,6 +673,15 @@ mod tests {
             orbit_utils::yaml::from_str("cron: \"0 0 3 * * 0\"\nrun_timeout_secs: 60").unwrap();
         let json = serde_json::to_string(&cfg).unwrap();
         assert_eq!(json, r#"{"cron":"0 0 3 * * 0","run_timeout_secs":60}"#);
+    }
+
+    #[test]
+    fn run_timeout_is_disabled_at_zero() {
+        let schedule = ScheduleConfiguration {
+            cron: cron("0 */1 * * * *"),
+            run_timeout_secs: 0,
+        };
+        assert_eq!(schedule.run_timeout(), None);
     }
 
     #[test]
