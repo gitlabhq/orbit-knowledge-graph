@@ -7,6 +7,7 @@
 
 pub mod client_pool;
 pub mod host_map;
+pub mod logs;
 pub mod rows;
 pub mod traces;
 
@@ -25,11 +26,34 @@ use client_pool::TenantClientPool;
 use host_map::{TenantHostMap, TenantRoute};
 use traces::TraceLookup;
 
+#[derive(Clone, Copy)]
+enum Lookup {
+    Trace(TraceLookup),
+    JobLogTail,
+}
+
+impl Lookup {
+    fn from_name(lookup: &str) -> Option<Self> {
+        if lookup == logs::JOB_LOG_TAIL {
+            return Some(Self::JobLogTail);
+        }
+        TraceLookup::from_name(lookup).map(Self::Trace)
+    }
+
+    fn column_value(self, raw: String) -> Option<ColumnValue> {
+        match self {
+            Self::Trace(lookup) => lookup.column_value(raw),
+            Self::JobLogTail => logs::column_value(raw),
+        }
+    }
+}
+
 pub const SERVICE_NAME: &str = "observability";
 
 pub struct ObservabilityService {
     host_map: TenantHostMap,
     pool: TenantClientPool,
+    max_log_lines: u32,
 }
 
 impl ObservabilityService {
@@ -49,6 +73,7 @@ impl ObservabilityService {
                 settings.clickhouse_username.clone(),
                 settings.clickhouse_password.clone(),
             ),
+            max_log_lines: settings.max_log_lines,
         })
     }
 
@@ -86,7 +111,7 @@ impl ColumnResolver for ObservabilityService {
         rows: &[&PropertyRow],
         _ctx: &ResolverContext,
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError> {
-        let Some(trace_lookup) = TraceLookup::from_name(lookup) else {
+        let Some(resolved_lookup) = Lookup::from_name(lookup) else {
             warn!(
                 safe(QUERY_NAME) = lookup,
                 "unknown observability lookup, resolving to null"
@@ -121,7 +146,16 @@ impl ColumnResolver for ObservabilityService {
         let futures = ids_by_tenant.iter().map(|(traversal_path, ids)| {
             let route = routes.get(*traversal_path).expect("route present");
             async move {
-                let values = match traces::fetch(&self.pool, route, trace_lookup, ids).await {
+                let fetched = match resolved_lookup {
+                    Lookup::Trace(trace_lookup) => {
+                        traces::fetch(&self.pool, route, trace_lookup, ids).await
+                    }
+                    Lookup::JobLogTail => {
+                        logs::fetch(&self.pool, route, ids, self.max_log_lines).await
+                    }
+                };
+
+                let values = match fetched {
                     Ok(values) => values,
                     Err(e) => {
                         warn!(
@@ -147,7 +181,7 @@ impl ColumnResolver for ObservabilityService {
             .map(|key| {
                 let (traversal_path, entity_id) = key.as_ref()?;
                 let raw = resolved.get(traversal_path)?.get(entity_id)?;
-                trace_lookup.column_value(raw.clone())
+                resolved_lookup.column_value(raw.clone())
             })
             .collect())
     }
