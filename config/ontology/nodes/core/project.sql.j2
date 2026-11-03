@@ -1,9 +1,11 @@
+-- The watermark and version of a Project row are the newest of its project and
+-- route rows, so a route change alone re-extracts the project.
 SELECT
   project.id AS id,
   project.name AS name,
   project.description AS description,
   project.visibility_level AS visibility_level,
-  if(isNotNull(route.source_id), route.path, project.path) AS full_path,
+  project.full_path AS full_path,
   project.namespace_id AS namespace_id,
   project.creator_id AS creator_id,
   project.created_at AS created_at,
@@ -11,30 +13,55 @@ SELECT
   project.archived AS archived,
   project.star_count AS star_count,
   project.last_activity_at AS last_activity_at,
-  traversal_paths.current_path AS traversal_path,
+  project.traversal_path AS traversal_path,
   project.{{version_column}} AS _version,
   project.{{deleted_column}} AS _deleted
-FROM siphon_projects project
-INNER JOIN (
+FROM (
   SELECT
-    id,
-    argMax(traversal_path, version) AS current_path
-  FROM project_namespace_traversal_paths
-  WHERE startsWith(traversal_path, {traversal_path:String})
-  GROUP BY id ) traversal_paths ON project.id = traversal_paths.id
-LEFT JOIN (
-  SELECT
-    toNullable(source_id) AS source_id,
-    argMax(path, {{version_column}}) AS path
-  FROM siphon_routes
-  WHERE startsWith(traversal_path, {traversal_path:String})
-    AND source_type = 'Project'
-  GROUP BY source_id
-  HAVING argMax({{deleted_column}}, {{version_column}}) = false ) route ON project.id = route.source_id
-WHERE startsWith(traversal_paths.current_path, {traversal_path:String})
-  AND (project.id IN (SELECT
-      id
+    p.id AS id,
+    p.name AS name,
+    p.description AS description,
+    p.visibility_level AS visibility_level,
+    ifNull(route.route_path, p.path) AS full_path,
+    p.namespace_id AS namespace_id,
+    p.creator_id AS creator_id,
+    p.created_at AS created_at,
+    p.updated_at AS updated_at,
+    p.archived AS archived,
+    p.star_count AS star_count,
+    p.last_activity_at AS last_activity_at,
+    traversal_paths.current_path AS traversal_path,
+    greatest(p.{{version_column}}, ifNull(route.route_version, p.{{version_column}})) AS {{version_column}},
+    greatest(p.{{watermark_column}}, ifNull(route.route_watermark, p.{{watermark_column}})) AS {{watermark_column}},
+    p.{{deleted_column}} AS {{deleted_column}}
+  FROM (
+    SELECT
+      *
+    FROM siphon_projects
+    WHERE id IN (SELECT
+        id
+      FROM project_namespace_traversal_paths
+      WHERE startsWith(traversal_path, {traversal_path:String}))
+    ORDER BY id, {{version_column}} DESC
+    LIMIT 1 BY id ) p
+  INNER JOIN (
+    SELECT
+      id,
+      argMax(traversal_path, version) AS current_path
     FROM project_namespace_traversal_paths
-    WHERE startsWith(traversal_path, {traversal_path:String}))) {{filters}}
+    WHERE startsWith(traversal_path, {traversal_path:String})
+    GROUP BY id ) traversal_paths ON p.id = traversal_paths.id
+  LEFT JOIN (
+    SELECT
+      source_id,
+      if(argMax({{deleted_column}}, {{version_column}}), NULL, toNullable(argMax(path, {{version_column}}))) AS route_path,
+      toNullable(max({{version_column}})) AS route_version,
+      toNullable(max({{watermark_column}})) AS route_watermark
+    FROM siphon_routes
+    WHERE startsWith(traversal_path, {traversal_path:String})
+      AND source_type = 'Project'
+    GROUP BY source_id ) route ON p.id = route.source_id
+  WHERE startsWith(traversal_paths.current_path, {traversal_path:String}) ) project
+WHERE 1=1 {{filters}}
 ORDER BY traversal_path, id
 LIMIT {{batch_size}}

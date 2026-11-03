@@ -16,6 +16,15 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 118
+  scope: "*"
+  note: >-
+    Group and Project extracts take their version and watermark from the newest
+    namespace, namespace_details and route row, so a route or description change alone
+    re-extracts the node. Group also tombstones namespaces in state 2
+    (deletion_scheduled) or 4 (deletion_in_progress). The rebuild recomputes full_path and
+    description for groups and projects whose route rows arrived after their last extract, as
+    after a transfer between top-level groups.
 - version: 117
   scope: "*"
   note: >-
