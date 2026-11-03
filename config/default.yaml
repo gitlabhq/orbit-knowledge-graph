@@ -153,27 +153,35 @@ schedule:
   tasks:
     global:
       cron: "0 */1 * * * *"
+      run_timeout_secs: 300
     namespace:
       cron: "*/30 * * * * *"
+      run_timeout_secs: 600
       sweep_interval_secs: 3600
     siphon:
       events_stream_name: "siphon_stream_main_db"
       batch_size: 100
     code-backfill:
       cron: "0 */1 * * * *"
+      run_timeout_secs: 3600
       publish_window: 200000
       stale_sweeps_per_tick: 10
     table-cleanup:
       cron: "0 0 3 * * 0"
+      run_timeout_secs: 7200
     namespace-deletion:
       cron: "0 0 3 * * *"
+      run_timeout_secs: 43200
     migration-completion:
       cron: "0 */1 * * * *"
+      run_timeout_secs: 3600
     stale-edge-reconciliation:
       cron: "0 */30 * * * *"
+      run_timeout_secs: 3600
       lookback_secs: 3600
     namespace-freshness:
       cron: "0 */5 * * * *"
+      run_timeout_secs: 1800
 
 health_check:
   bind_address: "0.0.0.0:4201"

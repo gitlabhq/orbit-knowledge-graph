@@ -882,10 +882,16 @@
       "properties": {
         "cron": {
           "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         }
       },
       "required": [
-        "cron"
+        "cron",
+        "run_timeout_secs"
       ]
     },
     "CronSchedule": {
@@ -899,6 +905,11 @@
         "cron": {
           "$ref": "#/$defs/CronSchedule"
         },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
         "sweep_interval_secs": {
           "type": "integer",
           "format": "uint64",
@@ -907,6 +918,7 @@
       },
       "required": [
         "cron",
+        "run_timeout_secs",
         "sweep_interval_secs"
       ]
     },
@@ -935,6 +947,11 @@
         "cron": {
           "$ref": "#/$defs/CronSchedule"
         },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
         "publish_window": {
           "type": "integer",
           "format": "uint",
@@ -948,6 +965,7 @@
       },
       "required": [
         "cron",
+        "run_timeout_secs",
         "publish_window",
         "stale_sweeps_per_tick"
       ]
@@ -958,10 +976,16 @@
       "properties": {
         "cron": {
           "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         }
       },
       "required": [
-        "cron"
+        "cron",
+        "run_timeout_secs"
       ]
     },
     "NamespaceDeletionSchedulerConfig": {
@@ -970,10 +994,16 @@
       "properties": {
         "cron": {
           "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         }
       },
       "required": [
-        "cron"
+        "cron",
+        "run_timeout_secs"
       ]
     },
     "MigrationCompletionConfig": {
@@ -982,10 +1012,16 @@
       "properties": {
         "cron": {
           "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         }
       },
       "required": [
-        "cron"
+        "cron",
+        "run_timeout_secs"
       ]
     },
     "StaleEdgeReconciliationConfig": {
@@ -994,6 +1030,11 @@
       "properties": {
         "cron": {
           "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         },
         "lookback_secs": {
           "type": "integer",
@@ -1004,6 +1045,7 @@
       "additionalProperties": false,
       "required": [
         "cron",
+        "run_timeout_secs",
         "lookback_secs"
       ]
     },
@@ -1013,11 +1055,17 @@
       "properties": {
         "cron": {
           "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         }
       },
       "additionalProperties": false,
       "required": [
-        "cron"
+        "cron",
+        "run_timeout_secs"
       ]
     },
     "HealthCheckConfig": {
