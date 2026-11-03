@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Embed)]
-#[folder = "$CONFIG_DIR/setup"]
+#[folder = "$ORBIT_CONFIG_DIR/setup"]
 struct SetupAssets;
 
 #[derive(Embed)]
