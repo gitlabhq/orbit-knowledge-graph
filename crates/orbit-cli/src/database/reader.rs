@@ -65,18 +65,16 @@ impl GraphReader {
     }
 
     fn open_workspace() -> Result<Self> {
-        let manifest = workspace::Workspace::open_default()?.manifest_path();
+        let data_root = workspace::Workspace::default_root()?;
+        let manifest = workspace::Workspace::open(data_root.clone())?.manifest_path();
         if !manifest.exists() {
             anyhow::bail!(
                 "no local graph found. Run `{} workspace index` first.",
                 spec::launcher()
             );
         }
-        let data_dir = manifest
-            .parent()
-            .context("manifest path has a parent directory")?;
         let mut reader = Self {
-            client: DuckDbClient::open_in_memory_attaching(data_dir)?,
+            client: DuckDbClient::open_in_memory_attaching(&data_root)?,
             _locks: Vec::new(),
         };
         let client = &reader.client;

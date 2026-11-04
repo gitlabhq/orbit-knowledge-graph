@@ -85,6 +85,7 @@ impl DuckDbClient {
             .and_then(|config| config.enable_autoload_extension(false))
             .and_then(|config| config.with("autoinstall_known_extensions", "false"))
             .and_then(|config| config.with("allow_community_extensions", "false"))
+            .and_then(|config| config.with("allow_persistent_secrets", "false"))
             .map_err(|e| DuckDbError::Schema(e.to_string()))?;
         let conn = duckdb::Connection::open_with_flags(path, config)?;
         let allowed = attachable_dir
