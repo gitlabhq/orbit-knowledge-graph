@@ -92,7 +92,6 @@ impl ColumnResolver for GitalyContentService {
 
         timer.set_outcome(if had_errors { "error" } else { "gitaly_direct" });
 
-        // Non-UTF-8 blobs and keys without a blob keep a None cache entry.
         Ok(requests
             .iter()
             .map(|entry| {
@@ -106,16 +105,10 @@ impl ColumnResolver for GitalyContentService {
     }
 }
 
-/// Most single-file fetches one project may run at once.
 const MAX_CONCURRENT_SINGLE_FETCHES: usize = 8;
 
-/// Fetches the blobs of one project and pairs each blob with its key.
-///
-/// `ListBlobs` reads `git rev-list --objects`, which lists each object once.
-/// Two paths with identical content share one blob, so the response can hold
-/// fewer blobs than keys. Pairing by position then shifts every later key onto
-/// another file's content. Blobs are paired by path instead, and each key left
-/// without a blob is fetched alone, where no other path can share its blob.
+/// `ListBlobs` lists a blob shared by several paths once, so the response can
+/// hold fewer blobs than keys. A key left without a blob is fetched alone.
 async fn fetch_project_blobs(
     client: &GitlabClient,
     project_id: i64,
@@ -155,8 +148,6 @@ async fn fetch_project_blobs(
     (matched, had_error)
 }
 
-/// Returns `None` when the request fails, else the decoded blobs and whether
-/// the stream ended with a decode error.
 async fn list_blobs(
     client: &GitlabClient,
     project_id: i64,
@@ -194,13 +185,8 @@ async fn list_blobs(
     Some((blobs, had_error))
 }
 
-/// Pairs blobs with the keys they were fetched for. Returns the pairs and the
-/// keys left without a blob.
-///
-/// A blob with a path goes to the one key with that path. A path shared by
-/// keys of different revisions is ambiguous, so those keys stay unmatched.
-/// Without paths, pairing by position is safe only when nothing was dropped,
-/// which holds when there are as many blobs as keys.
+/// A path requested under two revisions is ambiguous, so its keys stay
+/// unmatched. Pairing by position is safe only when no blob was dropped.
 fn match_blobs(
     keys: Vec<FileKey>,
     blobs: Vec<ResolvedBlob>,
@@ -412,7 +398,6 @@ mod tests {
 
     #[test]
     fn match_blobs_pairs_by_path_when_a_duplicate_blob_is_dropped() {
-        // Gitaly lists the blob shared by a/same.txt and b/same.txt once.
         let keys = vec![
             key("main", "a/same.txt"),
             key("main", "b/same.txt"),

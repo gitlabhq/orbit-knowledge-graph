@@ -137,9 +137,7 @@ fn multi_blob_response(blobs: &[(String, Vec<u8>)]) -> Vec<u8> {
     buf
 }
 
-/// Answers like Gitaly `ListBlobs` with `with_paths`: one blob per distinct
-/// content, in request order, named by the path after `<revision>:`. Paths
-/// with identical content share a blob, so only the first one is listed.
+/// Like Gitaly, lists a blob shared by several paths only once.
 fn gitaly_like_response(
     revisions: &[String],
     content_of: impl Fn(&str) -> Vec<u8>,
@@ -169,8 +167,6 @@ fn gitaly_like_response(
     buf
 }
 
-/// The content of the repository in issue #1440: unique Java files, two
-/// identical text files, and two empty files.
 fn content_with_duplicates(path: &str) -> Vec<u8> {
     match path {
         "a/same.txt" | "b/same.txt" => b"identical content\n".to_vec(),

@@ -11,8 +11,7 @@ use tokio_util::io::StreamReader;
 #[derive(Debug)]
 pub struct ResolvedBlob {
     pub oid: String,
-    /// Set only when the request asked for paths and Gitaly reached the blob
-    /// through a tree or a `<revision>:<path>` name. Empty otherwise.
+    /// Empty unless the request asked for paths.
     pub path: Vec<u8>,
     pub data: Vec<u8>,
 }
