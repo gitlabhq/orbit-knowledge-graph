@@ -19,6 +19,10 @@ title: Start a GitLab Orbit trial
 
 {{< /history >}}
 
+> [!note]
+> GitLab Orbit is available to Premium and Ultimate customers as a separate purchase.
+> Eligible customers can [start a trial](#start-a-free-trial) before purchasing.
+
 On GitLab.com, you can start a free GitLab Orbit trial yourself in a top-level group.
 The trial turns on GitLab Orbit for the group, its subgroups, and its projects, through every [access method](agents/_index.md).
 On GitLab Self-Managed and GitLab Dedicated, [contact sales](https://about.gitlab.com/sales/).
@@ -50,7 +54,7 @@ To connect your agent, continue with the [quickstart](quickstart.md#step-2-conne
 At the end of the trial, GitLab turns off GitLab Orbit for the group, and queries fail with the
 [`GitLab credits exhausted`](troubleshooting.md#error-gitlab-credits-exhausted) error.
 To continue with GitLab Orbit, contact sales.
-For information about GitLab Orbit pricing and usage, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
+For information about GitLab Orbit pricing and usage, see [GitLab Orbit credit usage](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/).
 
 GitLab keeps the indexed data for a limited time.
 For more information, see [data retention and deletion](how-it-works.md#data-retention-and-deletion).
