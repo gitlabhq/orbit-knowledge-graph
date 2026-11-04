@@ -40,12 +40,12 @@ and answers with proof, not guesses.
 
 </section>
 
-- {{< icon name="connected" >}}[Browse prompt examples](prompt-examples.md)<br>One graph connects your GitLab data and code, so one question can cross both.
+- {{< icon name="connected" >}}[Connect your agent](agents/_index.md)<br>Use GitLab Orbit in GitLab Duo, or connect any agent with the CLI or MCP.
 - {{< icon name="search" >}}[Run a graph query](queries/_index.md)<br>Send one graph query in place of many API calls, and get back rows, not pages of JSON to filter.
 - {{< icon name="lock" >}}[Review access and permissions](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions.
 {.product-cards .product-cards-icons}
 
-## Example questions
+## Prompt examples
 
 - {{< icon name="merge-request" >}}[Review a merge request with proof](prompt-examples.md#review-a-merge-request-with-proof)<br>Which code and projects does this merge request affect? Each finding comes with the graph result that shows it.
 - {{< icon name="shield" >}}[Fix a vulnerability across projects](prompt-examples.md#fix-a-vulnerability-across-every-affected-project)<br>Which projects in my group does this CVE affect, and which fixes reached production?
@@ -69,10 +69,7 @@ For more examples, see [prompt examples](prompt-examples.md).
 
 ## Reference
 
-- [Connect your agent](agents/_index.md)<br>Use GitLab Orbit in GitLab Duo, or connect any agent with the CLI or MCP.
 - [Indexed data](schema.md)<br>See which GitLab data and code GitLab Orbit indexes.
-- [Queries](queries/_index.md)<br>Query the GitLab Orbit graph with GQL.
-- [Security](security.md)<br>See how GitLab Orbit protects your data, and which roles you need.
 - [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/)<br>Install GitLab Orbit on Kubernetes and connect it to GitLab.
 - [Troubleshooting](troubleshooting.md)<br>Fix common errors in queries, the CLI, and the local graph.
 {.product-cards}
