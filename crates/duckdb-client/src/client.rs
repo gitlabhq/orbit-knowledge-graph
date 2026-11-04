@@ -9,6 +9,8 @@ use crate::helpers::sql_lit;
 
 const MAX_OPEN_RETRIES: u32 = 10;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(100);
+const READ_ONLY_RETRIES: u32 = 5;
+const READ_ONLY_BACKOFF: Duration = Duration::from_millis(50);
 
 pub struct DuckDbClient {
     conn: duckdb::Connection,
@@ -21,65 +23,60 @@ fn is_lock_error(e: &impl std::fmt::Display) -> bool {
     msg.contains("could not set lock") || msg.contains("lock on file")
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OpenOptions<'a> {
+    /// `None` opens an in-memory database.
+    pub path: Option<&'a Path>,
+    pub read_only: bool,
+    /// The only directory whose database files SQL may `ATTACH`.
+    pub attachable_dir: Option<&'a Path>,
+}
+
+impl<'a, P: AsRef<Path> + ?Sized> From<&'a P> for OpenOptions<'a> {
+    fn from(path: &'a P) -> Self {
+        Self {
+            path: Some(path.as_ref()),
+            ..Self::default()
+        }
+    }
+}
+
 impl DuckDbClient {
-    /// Retries with exponential backoff (capped at 5s per attempt, ~26s
-    /// total) if another process holds the write lock.
-    pub fn open(path: &Path) -> Result<Self> {
+    /// A file open retries while another process holds the lock: briefly
+    /// when read-only, with backoff up to ~26 s when read-write.
+    pub fn open<'a>(options: impl Into<OpenOptions<'a>>) -> Result<Self> {
+        let options = options.into();
+        let Some(path) = options.path else {
+            return Self::connect(Path::new(":memory:"), options);
+        };
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
         }
-
-        let mut backoff = INITIAL_BACKOFF;
-        for attempt in 0..=MAX_OPEN_RETRIES {
-            match Self::open_locked(path, duckdb::AccessMode::ReadWrite, None) {
-                Ok(client) => return Ok(client),
-                Err(e) if attempt < MAX_OPEN_RETRIES && is_lock_error(&e) => {
+        let (retries, mut backoff) = if options.read_only {
+            (READ_ONLY_RETRIES, READ_ONLY_BACKOFF)
+        } else {
+            (MAX_OPEN_RETRIES, INITIAL_BACKOFF)
+        };
+        for attempt in 0..=retries {
+            match Self::connect(path, options) {
+                Err(e) if attempt < retries && is_lock_error(&e) => {
                     std::thread::sleep(backoff);
-                    backoff = (backoff * 2).min(Duration::from_secs(5));
+                    if !options.read_only {
+                        backoff = (backoff * 2).min(Duration::from_secs(5));
+                    }
                 }
-                Err(e) => return Err(e),
+                result => return result,
             }
         }
         unreachable!()
     }
 
-    /// Retries briefly (50ms intervals, ~250ms total) if a writer holds
-    /// the lock.
-    pub fn open_read_only(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
-        }
-
-        for attempt in 0..=5 {
-            match Self::open_locked(path, duckdb::AccessMode::ReadOnly, None) {
-                Ok(client) => return Ok(client),
-                Err(e) if attempt < 5 && is_lock_error(&e) => {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => return Err(e),
-            }
-        }
-        unreachable!()
-    }
-
-    pub fn open_in_memory() -> Result<Self> {
-        Self::open_locked(Path::new(":memory:"), duckdb::AccessMode::ReadWrite, None)
-    }
-
-    /// An in-memory database that may `ATTACH` database files under `dir` and nothing else.
-    pub fn open_in_memory_attaching(dir: &Path) -> Result<Self> {
-        Self::open_locked(
-            Path::new(":memory:"),
-            duckdb::AccessMode::ReadWrite,
-            Some(dir),
-        )
-    }
-
-    fn open_locked(
-        path: &Path,
-        access_mode: duckdb::AccessMode,
-        attachable_dir: Option<&Path>,
-    ) -> Result<Self> {
+    fn connect(path: &Path, options: OpenOptions) -> Result<Self> {
+        let access_mode = if options.read_only {
+            duckdb::AccessMode::ReadOnly
+        } else {
+            duckdb::AccessMode::ReadWrite
+        };
         let config = duckdb::Config::default()
             .access_mode(access_mode)
             .and_then(|config| config.enable_autoload_extension(false))
@@ -88,7 +85,8 @@ impl DuckDbClient {
             .and_then(|config| config.with("allow_persistent_secrets", "false"))
             .map_err(|e| DuckDbError::Schema(e.to_string()))?;
         let conn = duckdb::Connection::open_with_flags(path, config)?;
-        let allowed = attachable_dir
+        let allowed = options
+            .attachable_dir
             .map(|dir| {
                 format!(
                     "SET allowed_directories = [{}];",
@@ -281,7 +279,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn schema_creation_and_sql_roundtrip() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenOptions::default()).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         client
@@ -316,7 +314,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn appender_insert_and_query() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenOptions::default()).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         let batch = make_file_batch(&[10, 11], &["a.rs", "b.rs"]);
@@ -339,7 +337,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn large_batch_appender() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenOptions::default()).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         let n = 5000;
@@ -363,7 +361,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn delete_all_data_truncates() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenOptions::default()).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         client
@@ -426,7 +424,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn insert_arrow_rejects_unknown_table() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenOptions::default()).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         let batch = make_file_batch(&[1], &["a.rs"]);
@@ -438,7 +436,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn insert_empty_batch_is_noop() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenOptions::default()).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         let batch = make_file_batch(&[], &[]);
@@ -460,7 +458,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("secret.txt");
         std::fs::write(&file, "secret").unwrap();
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenOptions::default()).unwrap();
 
         for sql in [
             format!(
@@ -486,7 +484,11 @@ CREATE TABLE IF NOT EXISTS gl_edge (
                 .initialize_schema("CREATE TABLE t AS SELECT 1::BIGINT AS x")
                 .unwrap();
         }
-        let client = DuckDbClient::open_in_memory_attaching(allowed.path()).unwrap();
+        let client = DuckDbClient::open(OpenOptions {
+            attachable_dir: Some(allowed.path()),
+            ..OpenOptions::default()
+        })
+        .unwrap();
         let attach = |dir: &tempfile::TempDir, name: &str| {
             let path = dir.path().join("graph.duckdb").display().to_string();
             client.execute(

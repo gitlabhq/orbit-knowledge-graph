@@ -309,9 +309,12 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
         String::from_utf8_lossy(&mismatch.stderr).contains("does not match the checkout revision")
     );
 
-    let manifest_db =
-        duckdb_client::DuckDbClient::open_read_only(&data_dir.path().join("local/manifest.duckdb"))
-            .unwrap();
+    let manifest_db = duckdb_client::DuckDbClient::open(duckdb_client::OpenOptions {
+        path: Some(&data_dir.path().join("local/manifest.duckdb")),
+        read_only: true,
+        ..duckdb_client::OpenOptions::default()
+    })
+    .unwrap();
     assert!(manifest_db.query_arrow("SELECT * FROM gl_file").is_err());
     drop(manifest_db);
     let all = orbit_sql("SELECT DISTINCT commit_sha FROM gl_file", data_dir.path());
