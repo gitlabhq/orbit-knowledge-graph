@@ -571,8 +571,8 @@ async fn files_with_identical_content_each_get_their_own_content() {
     calls.sort();
     assert_eq!(
         calls,
-        vec![1, 1, rows.len()],
-        "one batch call, then one call per file whose blob the batch listed under another path"
+        vec![2, rows.len()],
+        "one batch, then one batch of the files whose blob was listed under another path"
     );
 }
 
@@ -620,4 +620,30 @@ async fn same_path_at_two_revisions_gets_each_revision_content() {
             Some(ColumnValue::String("sha2:lib.rs".into())),
         ]
     );
+}
+
+#[tokio::test]
+async fn three_identical_files_take_one_batch_each() {
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let tracker = calls.clone();
+    let mock = mock_gitlab_server(move |_project_id, revisions| {
+        tracker.lock().unwrap().push(revisions.len());
+        gitaly_like_response(&revisions, |_| b"same".to_vec())
+    })
+    .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let rows: Vec<PropertyRow> = ["a.txt", "b.txt", "c.txt"]
+        .iter()
+        .map(|p| file_row(1, "main", p))
+        .collect();
+    let row_refs: Vec<&PropertyRow> = rows.iter().collect();
+
+    let results = service
+        .resolve_batch("blob_content", &row_refs, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(results, vec![Some(ColumnValue::String("same".into())); 3]);
+    assert_eq!(*calls.lock().unwrap(), vec![3, 2, 1]);
 }

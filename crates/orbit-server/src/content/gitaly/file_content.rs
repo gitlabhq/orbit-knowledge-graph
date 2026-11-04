@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use gitlab_client::GitlabClient;
 use indexer::modules::code::repository::blob_stream::BlobStream;
 use orbit_arrow::ColumnValue;
@@ -107,40 +106,28 @@ impl ColumnResolver for GitalyContentService {
     }
 }
 
-const MAX_CONCURRENT_SINGLE_FETCHES: usize = 8;
-
 struct FetchedContents {
     contents: HashMap<FileKey, Vec<u8>>,
     had_error: bool,
 }
 
-/// Gitaly lists a shared blob once, so each file the batch misses is fetched alone.
-async fn fetch_contents(client: &GitlabClient, keys: Vec<FileKey>) -> FetchedContents {
-    let Some(mut fetched) = list_contents(client, &keys).await else {
-        return FetchedContents {
-            contents: HashMap::new(),
-            had_error: true,
-        };
+/// Gitaly lists a shared blob once per request, so the files a batch misses go in the next batch.
+async fn fetch_contents(client: &GitlabClient, mut missed: Vec<FileKey>) -> FetchedContents {
+    let mut fetched = FetchedContents {
+        contents: HashMap::new(),
+        had_error: false,
     };
-
-    let missed: Vec<FileKey> = keys
-        .into_iter()
-        .filter(|key| !fetched.contents.contains_key(key))
-        .collect();
-    let singles: Vec<_> = futures::stream::iter(missed)
-        .map(|key| async move { list_contents(client, &[key]).await })
-        .buffer_unordered(MAX_CONCURRENT_SINGLE_FETCHES)
-        .collect()
-        .await;
-
-    for single in singles {
-        match single {
-            Some(single) => {
-                fetched.contents.extend(single.contents);
-                fetched.had_error |= single.had_error;
-            }
-            None => fetched.had_error = true,
+    while !missed.is_empty() {
+        let Some(batch) = list_contents(client, &missed).await else {
+            fetched.had_error = true;
+            break;
+        };
+        fetched.had_error |= batch.had_error;
+        if batch.contents.is_empty() {
+            break;
         }
+        missed.retain(|key| !batch.contents.contains_key(key));
+        fetched.contents.extend(batch.contents);
     }
     fetched
 }
