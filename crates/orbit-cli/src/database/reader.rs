@@ -2,7 +2,7 @@ use super::{lock_database, read_lock_database, schema};
 use crate::commands::setup::spec;
 use crate::workspace;
 use anyhow::{Context, Result};
-use duckdb_client::{DuckDbClient, OpenOptions, sql_lit, string_column};
+use duckdb_client::{DuckDbClient, OpenMode, sql_lit, string_column};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -51,12 +51,8 @@ impl GraphReader {
                 spec::launcher()
             );
         };
-        let client = DuckDbClient::open(OpenOptions {
-            path: Some(&db_path),
-            read_only: true,
-            ..OpenOptions::default()
-        })
-        .with_context(|| format!("failed to open {}", db_path.display()))?;
+        let client = DuckDbClient::open(OpenMode::ReadOnly(&db_path))
+            .with_context(|| format!("failed to open {}", db_path.display()))?;
         if schema::stored_meta(&client, "revision")?.is_some()
             && schema::stored_meta(&client, "indexed_commit")?.is_none()
         {
@@ -78,10 +74,7 @@ impl GraphReader {
             );
         }
         let mut reader = Self {
-            client: DuckDbClient::open(OpenOptions {
-                attachable_dir: Some(&data_root),
-                ..OpenOptions::default()
-            })?,
+            client: DuckDbClient::open(OpenMode::InMemoryAttaching(&data_root))?,
             _locks: Vec::new(),
         };
         let client = &reader.client;

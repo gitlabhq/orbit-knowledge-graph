@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use duckdb_client::{DuckDbClient, OpenOptions};
+use duckdb_client::{DuckDbClient, OpenMode};
 use serde_json::json;
 
 use super::read_lock_database;
@@ -14,11 +14,7 @@ pub fn graph_lacks_commit(db: &Path, commit_sha: &str) -> Result<bool> {
     let Some(_lock) = read_lock_database(db)? else {
         return Ok(true);
     };
-    let client = DuckDbClient::open(OpenOptions {
-        path: Some(db),
-        read_only: true,
-        ..OpenOptions::default()
-    })?;
+    let client = DuckDbClient::open(OpenMode::ReadOnly(db))?;
     if stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() != Some(CODE_INDEX_REVISION) {
         return Ok(true);
     }
