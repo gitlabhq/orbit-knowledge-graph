@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use duckdb_client::DuckDbClient;
+use duckdb_client::{DuckDbClient, OpenMode};
 use serde_json::json;
 use strum::{AsRefStr, Display};
 
@@ -101,7 +101,7 @@ pub fn read(path: &Path, query: &str) -> Result<Vec<arrow::record_batch::RecordB
         return Ok(Vec::new());
     }
     let _lock = lock_database(path)?;
-    let client = DuckDbClient::open_read_only(path)
+    let client = DuckDbClient::open(OpenMode::ReadOnly(path))
         .with_context(|| format!("failed to open {}", path.display()))?;
     if !super::schema::table_exists(&client, "_orbit_manifest")? {
         return Ok(Vec::new());
