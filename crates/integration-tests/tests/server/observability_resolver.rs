@@ -27,6 +27,49 @@ fn bucket(unix: i64) -> u64 {
     (unix / 1_800 * 1_800) as u64
 }
 
+/// Mirrors the user, profile, quota and grants o11y_provisioner creates in
+/// ClickhouseMigrationRunner#grant_orbit_reader_script. A client that sends a
+/// session setting outside this profile is rejected with code 164, so this is
+/// what makes the test able to catch that.
+const ORBIT_READER_USER: &str = "orbit_reader";
+const ORBIT_READER_PASSWORD: &str = "orbit-test-secret";
+const ORBIT_READER_PROFILE: &str = "orbit_reader_profile";
+
+async fn create_orbit_reader(ctx: &TestContext) {
+    ctx.execute(&format!("DROP USER IF EXISTS {ORBIT_READER_USER}"))
+        .await;
+    ctx.execute(&format!("DROP QUOTA IF EXISTS {ORBIT_READER_PROFILE}"))
+        .await;
+    ctx.execute(&format!(
+        "DROP SETTINGS PROFILE IF EXISTS {ORBIT_READER_PROFILE}"
+    ))
+    .await;
+    ctx.execute(&format!(
+        "CREATE SETTINGS PROFILE {ORBIT_READER_PROFILE} SETTINGS \
+         readonly = 2 READONLY, \
+         max_execution_time = 30 READONLY, \
+         max_result_rows = 10000 READONLY, \
+         max_bytes_to_read = 5000000000 READONLY, \
+         max_memory_usage = 2000000000 READONLY"
+    ))
+    .await;
+    ctx.execute(&format!(
+        "CREATE USER {ORBIT_READER_USER} IDENTIFIED BY '{ORBIT_READER_PASSWORD}' \
+         HOST ANY SETTINGS PROFILE {ORBIT_READER_PROFILE}"
+    ))
+    .await;
+    ctx.execute(&format!(
+        "CREATE QUOTA {ORBIT_READER_PROFILE} \
+         FOR INTERVAL 1 HOUR MAX queries = 10000 TO {ORBIT_READER_USER}"
+    ))
+    .await;
+    ctx.execute(&format!(
+        "GRANT SELECT ON {}.* TO {ORBIT_READER_USER}",
+        ctx.config.database
+    ))
+    .await;
+}
+
 fn settings() -> ObservabilityResolverSettings {
     ObservabilityResolverSettings {
         provisioner_url: "https://provisioner.invalid".to_string(),
@@ -55,8 +98,8 @@ fn route(ctx: &TestContext) -> TenantRoute {
         scheme: scheme.to_string(),
         host: host.to_string(),
         port: port.to_string(),
-        username: ctx.config.username.clone(),
-        password: ctx.config.password.clone().unwrap_or_default(),
+        username: ORBIT_READER_USER.to_string(),
+        password: ORBIT_READER_PASSWORD.to_string(),
         traces_db: ctx.config.database.clone(),
         logs_db: ctx.config.database.clone(),
     }
@@ -97,6 +140,7 @@ async fn seed_span(
 
 async fn seeded_pipeline() -> TestContext {
     let ctx = TestContext::new(&[SIGNOZ_INDEX_DDL]).await;
+    create_orbit_reader(&ctx).await;
 
     seed_span(
         &ctx,
@@ -130,14 +174,9 @@ async fn fetch(
     lookup: TraceLookup,
     keys: &[traces::TraceKey],
 ) -> HashMap<String, String> {
-    traces::fetch(
-        &TenantClientPool::new(&settings()),
-        &route(ctx),
-        lookup,
-        keys,
-    )
-    .await
-    .expect("lookup should succeed against a real ClickHouse")
+    traces::fetch(&TenantClientPool::new(), &route(ctx), lookup, keys)
+        .await
+        .expect("lookup should succeed against a real ClickHouse")
 }
 
 #[tokio::test]
@@ -224,6 +263,25 @@ async fn a_span_outside_the_time_window_is_not_returned() {
     let rows = fetch(&ctx, TraceLookup::PipelineTraceId, &[stale]).await;
 
     assert!(rows.is_empty());
+}
+
+/// The reader runs under a READONLY settings profile, so a client that sends
+/// any setting outside it is rejected with code 164 and the lookup resolves to
+/// null for every row.
+#[tokio::test]
+async fn a_lookup_succeeds_under_the_readonly_settings_profile() {
+    let ctx = seeded_pipeline().await;
+
+    let rows = traces::fetch(
+        &TenantClientPool::new(),
+        &route(&ctx),
+        TraceLookup::PipelineTraceId,
+        &[key("3000")],
+    )
+    .await
+    .expect("a query as orbit_reader must not be rejected by its own profile");
+
+    assert!(!rows.is_empty(), "the profile rejected the query");
 }
 
 #[tokio::test]
