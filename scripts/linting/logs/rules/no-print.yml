@@ -33,8 +33,6 @@ ignores:
   - crates/orbit-cli/**
   - crates/xtask/**
   - crates/query-engine/profiler/**
-  # Build-script helper: Cargo reads its stdout.
-  - crates/utils/duckdb-link/**
   - crates/code-graph/treesitter-visit/src/bin/**
   # Debug tracer that only integration tests turn on.
   - crates/code-graph/src/v2/trace.rs

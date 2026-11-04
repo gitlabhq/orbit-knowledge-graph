@@ -78,7 +78,6 @@ uuid = { workspace = true, features = ["v4"] }
 toon-format = { workspace = true }
 
 [build-dependencies]
-orbit-duckdb-link = { path = "../utils/duckdb-link" }
 orbit-versions = { path = "../orbit-versions" }
 tonic-prost-build = { workspace = true, optional = true }
 

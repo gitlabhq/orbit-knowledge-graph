@@ -5092,7 +5092,6 @@ dependencies = [
  "orbit-analytics",
  "orbit-arrow",
  "orbit-cli-graphql",
- "orbit-duckdb-link",
  "orbit-log-fields",
  "orbit-prompts",
  "orbit-search",
@@ -5127,10 +5126,6 @@ dependencies = [
  "serde",
  "syn 2.0.118",
 ]
-
-[[package]]
-name = "orbit-duckdb-link"
-version = "0.1.0"
 
 [[package]]
 name = "orbit-fuzz"
@@ -5238,7 +5233,6 @@ dependencies = [
  "orbit-analytics",
  "orbit-arrow",
  "orbit-billing",
- "orbit-duckdb-link",
  "orbit-log-fields",
  "orbit-migrations",
  "orbit-observability",

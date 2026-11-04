@@ -44,7 +44,6 @@ members = [
   "crates/nats-client",
   "crates/utils",
   "crates/utils/arrow",
-  "crates/utils/duckdb-link",
   "crates/orbit-versions",
   "crates/integration-tests",
   "crates/duckdb-client",
