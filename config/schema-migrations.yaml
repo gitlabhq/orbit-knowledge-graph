@@ -16,6 +16,13 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 118
+  scope: none
+  note: >-
+    Observability virtual properties on Pipeline and Job. The fingerprint hashes the
+    node YAML, so declaring them reads as drift, but every one is disabled and
+    resolved at query time: no stored column, no DDL, no extract SQL, and every
+    indexed row is byte-identical.
 - version: 117
   scope: "*"
   note: >-
