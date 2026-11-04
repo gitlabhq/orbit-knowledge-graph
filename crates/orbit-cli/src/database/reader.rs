@@ -72,8 +72,11 @@ impl GraphReader {
                 spec::launcher()
             );
         }
+        let data_dir = manifest
+            .parent()
+            .context("manifest path has a parent directory")?;
         let mut reader = Self {
-            client: DuckDbClient::open_in_memory()?,
+            client: DuckDbClient::open_in_memory_attaching(data_dir)?,
             _locks: Vec::new(),
         };
         let client = &reader.client;

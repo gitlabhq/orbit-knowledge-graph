@@ -5,6 +5,7 @@ use arrow::record_batch::RecordBatch;
 use duckdb::params;
 
 use crate::error::{DuckDbError, Result};
+use crate::helpers::sql_lit;
 
 const MAX_OPEN_RETRIES: u32 = 10;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(100);
@@ -30,7 +31,7 @@ impl DuckDbClient {
 
         let mut backoff = INITIAL_BACKOFF;
         for attempt in 0..=MAX_OPEN_RETRIES {
-            match Self::open_once(path, duckdb::AccessMode::ReadWrite) {
+            match Self::open_locked(path, duckdb::AccessMode::ReadWrite, None) {
                 Ok(client) => return Ok(client),
                 Err(e) if attempt < MAX_OPEN_RETRIES && is_lock_error(&e) => {
                     std::thread::sleep(backoff);
@@ -50,7 +51,7 @@ impl DuckDbClient {
         }
 
         for attempt in 0..=5 {
-            match Self::open_once(path, duckdb::AccessMode::ReadOnly) {
+            match Self::open_locked(path, duckdb::AccessMode::ReadOnly, None) {
                 Ok(client) => return Ok(client),
                 Err(e) if attempt < 5 && is_lock_error(&e) => {
                     std::thread::sleep(Duration::from_millis(50));
@@ -61,16 +62,44 @@ impl DuckDbClient {
         unreachable!()
     }
 
-    fn open_once(path: &Path, access_mode: duckdb::AccessMode) -> Result<Self> {
-        let config = duckdb::Config::default()
-            .access_mode(access_mode)
-            .map_err(|e| DuckDbError::Schema(e.to_string()))?;
-        let conn = duckdb::Connection::open_with_flags(path, config)?;
-        Ok(Self { conn })
+    pub fn open_in_memory() -> Result<Self> {
+        Self::open_locked(Path::new(":memory:"), duckdb::AccessMode::ReadWrite, None)
     }
 
-    pub fn open_in_memory() -> Result<Self> {
-        Self::open_once(Path::new(":memory:"), duckdb::AccessMode::ReadWrite)
+    /// An in-memory database that may `ATTACH` database files under `dir` and nothing else.
+    pub fn open_in_memory_attaching(dir: &Path) -> Result<Self> {
+        Self::open_locked(
+            Path::new(":memory:"),
+            duckdb::AccessMode::ReadWrite,
+            Some(dir),
+        )
+    }
+
+    fn open_locked(
+        path: &Path,
+        access_mode: duckdb::AccessMode,
+        attachable_dir: Option<&Path>,
+    ) -> Result<Self> {
+        let config = duckdb::Config::default()
+            .access_mode(access_mode)
+            .and_then(|config| config.enable_autoload_extension(false))
+            .and_then(|config| config.with("autoinstall_known_extensions", "false"))
+            .and_then(|config| config.with("allow_community_extensions", "false"))
+            .map_err(|e| DuckDbError::Schema(e.to_string()))?;
+        let conn = duckdb::Connection::open_with_flags(path, config)?;
+        let allowed = attachable_dir
+            .map(|dir| {
+                format!(
+                    "SET allowed_directories = [{}];",
+                    sql_lit(&format!("{}/", dir.display()))
+                )
+            })
+            .unwrap_or_default();
+        conn.execute_batch(&format!(
+            "{allowed} SET enable_external_access = false; SET lock_configuration = true;"
+        ))
+        .map_err(|e| DuckDbError::Schema(e.to_string()))?;
+        Ok(Self { conn })
     }
 
     pub fn initialize_schema(&self, ddl: &str) -> Result<()> {
@@ -423,5 +452,53 @@ CREATE TABLE IF NOT EXISTS gl_edge (
             .downcast_ref::<Int64Array>()
             .unwrap();
         assert_eq!(count.value(0), 0);
+    }
+
+    #[test]
+    fn sql_cannot_read_files_install_extensions_or_unlock_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("secret.txt");
+        std::fs::write(&file, "secret").unwrap();
+        let client = DuckDbClient::open_in_memory().unwrap();
+
+        for sql in [
+            format!(
+                "SELECT * FROM read_text({})",
+                sql_lit(&file.display().to_string())
+            ),
+            "INSTALL spatial".to_string(),
+            "SET enable_external_access = true".to_string(),
+            "SET autoload_known_extensions = true".to_string(),
+        ] {
+            assert!(client.execute(&sql, &[]).is_err(), "allowed: {sql}");
+        }
+        client.query_arrow("SELECT to_json({'a': 1})").unwrap();
+    }
+
+    #[test]
+    fn attaching_client_reaches_only_its_directory() {
+        let allowed = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        for dir in [&allowed, &elsewhere] {
+            DuckDbClient::open(&dir.path().join("graph.duckdb"))
+                .unwrap()
+                .initialize_schema("CREATE TABLE t AS SELECT 1::BIGINT AS x")
+                .unwrap();
+        }
+        let client = DuckDbClient::open_in_memory_attaching(allowed.path()).unwrap();
+        let attach = |dir: &tempfile::TempDir, name: &str| {
+            let path = dir.path().join("graph.duckdb").display().to_string();
+            client.execute(
+                &format!("ATTACH {} AS {name} (READ_ONLY)", sql_lit(&path)),
+                &[],
+            )
+        };
+
+        attach(&allowed, "inside").unwrap();
+        assert_eq!(
+            crate::scalar_i64(&client.query_arrow("SELECT x FROM inside.t").unwrap()),
+            1
+        );
+        assert!(attach(&elsewhere, "outside").is_err());
     }
 }
