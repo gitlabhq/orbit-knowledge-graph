@@ -41,7 +41,7 @@ impl ObservabilityService {
                 Duration::from_secs(settings.host_map_refresh_seconds),
                 Duration::from_secs(settings.host_map_retry_after_seconds),
             ),
-            pool: TenantClientPool::new(settings),
+            pool: TenantClientPool::new(),
         })
     }
 
@@ -51,6 +51,11 @@ impl ObservabilityService {
             .and_then(|value| value.coerce::<String>())?;
 
         self.host_map.route_for(&traversal_path).await
+    }
+
+    async fn evict_departed_tenants(&self) {
+        self.pool
+            .retain_databases(&self.host_map.live_databases().await);
     }
 }
 
@@ -122,6 +127,8 @@ impl ColumnResolver for ObservabilityService {
             .await
             .into_iter()
             .collect();
+
+        self.evict_departed_tenants().await;
 
         Ok(row_keys
             .iter()
