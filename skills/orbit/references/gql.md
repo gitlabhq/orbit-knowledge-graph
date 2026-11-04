@@ -312,8 +312,10 @@ LIMIT 10
 
 #### Projects in a group that publish the most packages
 
+To count one format, add a type filter, such as `(p:Package {package_type: 'npm'})`.
+
 ```gql orbit-query
-MATCH (p:Package {package_type: 'npm'})-[:IN_PROJECT]->(pr:Project)
+MATCH (p:Package)-[:IN_PROJECT]->(pr:Project)
 WHERE pr.full_path STARTS WITH 'gitlab-org/'
 RETURN pr.full_path, count(p) AS packages
 ORDER BY packages DESC
@@ -364,6 +366,9 @@ LIMIT 50
 
 The link comes from SBOM data, matched by package name and version. A missing
 link is not proof that a package is safe. Say so with every result.
+Reading vulnerabilities also needs the Security Manager, Developer, Maintainer,
+or Owner role on the project. Without it, the query returns no rows, which
+looks the same as no known vulnerabilities.
 
 ```gql orbit-query
 MATCH (p:Package)-[:HAS_VULNERABILITY]->(v:Vulnerability), (p)-[:IN_PROJECT]->(pr:Project)

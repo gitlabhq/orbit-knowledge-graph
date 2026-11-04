@@ -74,7 +74,7 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
 - There is no `OR`, `XOR`, `RETURN DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`. `DISTINCT` works only inside `count()`: `count(DISTINCT pl)`.
 - Package and container questions use `Package`, `PackageFile`, `Dependency`, and `ContainerRepository`. This is the free-tier Package Registry and Container Registry. Artifact Registry data is not in Orbit. See [the recipes](references/gql.md#package-registry-and-container-registry).
-- A missing `HAS_VULNERABILITY` link is not proof a package is safe. The link comes from SBOM data, matched by package name and version.
+- A missing `HAS_VULNERABILITY` link is not proof a package is safe. The link comes from SBOM data, matched by package name and version. No rows can also mean the caller lacks the Security Manager role or higher on the project.
 - Vulnerabilities in a package's project are not that package's vulnerabilities. Only a `HAS_VULNERABILITY` link ties a vulnerability to a package version.
 - `ContainerRepository` has no tags. Read the tag count from the Container Registry API with the repository `id`, and no `/api/v4/` prefix: `glab api "registry/repositories/<id>?tags_count=true"`.
 - To scope packages to a group, join to the project and filter its path: `MATCH (p:Package)-[:IN_PROJECT]->(pr:Project) WHERE pr.full_path STARTS WITH 'gitlab-org/'`. Walking `Group` and `CONTAINS` to a fixed depth misses deeper subgroups.
