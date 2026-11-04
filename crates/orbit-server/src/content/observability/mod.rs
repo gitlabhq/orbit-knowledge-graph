@@ -20,6 +20,19 @@ use traces::{TraceKey, TraceLookup};
 
 pub const SERVICE_NAME: &str = "observability";
 
+/// Checked per row rather than once at startup, so the flag's namespace
+/// allowlist can gate a rollout to one root namespace at a time.
+fn enabled_for_path(traversal_path: &str) -> bool {
+    let root = host_map::namespace_ids_nearest_first(traversal_path)
+        .last()
+        .and_then(|id| id.parse::<i64>().ok());
+
+    orbit_server_config::features::enabled_for(
+        orbit_server_config::Feature::ObservabilityColumns,
+        root,
+    )
+}
+
 pub struct ObservabilityService {
     host_map: TenantHostMap,
     pool: TenantClientPool,
@@ -49,6 +62,10 @@ impl ObservabilityService {
         let traversal_path = props
             .get("traversal_path")
             .and_then(|value| value.coerce::<String>())?;
+
+        if !enabled_for_path(&traversal_path) {
+            return None;
+        }
 
         self.host_map.route_for(&traversal_path).await
     }
