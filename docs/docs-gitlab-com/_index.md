@@ -25,6 +25,10 @@ Software lifecycle context graph for AI agents
 
 {{< /history >}}
 
+> [!note]
+> GitLab Orbit is available to Premium and Ultimate customers as a separate purchase.
+> Eligible customers can [start a trial](trial.md#start-a-free-trial) before purchasing.
+
 <section class="product-landing product-hero">
 
 GitLab Orbit gives your agent a graph of your GitLab data and code.
