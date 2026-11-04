@@ -4,6 +4,7 @@ use std::time::Duration;
 use arrow::record_batch::RecordBatch;
 use duckdb::params;
 use duckdb::vtab::arrow::{ArrowBatchRegistration, ArrowVTab};
+use orbit_utils::strings::quote_ident;
 
 use crate::error::{DuckDbError, Result};
 use crate::helpers::sql_lit;
@@ -121,7 +122,10 @@ impl DuckDbClient {
     pub fn create_temp_table(&self, table: &str, batch: RecordBatch) -> Result<()> {
         let batch = ArrowBatchRegistration::new(batch);
         self.conn.execute(
-            &format!("CREATE TEMP TABLE {table} AS SELECT * FROM arrow(?)"),
+            &format!(
+                "CREATE TEMP TABLE {} AS SELECT * FROM arrow(?)",
+                quote_ident(table)
+            ),
             [&batch],
         )?;
         Ok(())
@@ -477,5 +481,19 @@ CREATE TABLE IF NOT EXISTS gl_edge (
             .downcast_ref::<Int64Array>()
             .unwrap();
         assert_eq!(count.value(0), 0);
+    }
+
+    #[test]
+    fn create_temp_table_quotes_the_table_name() {
+        let client = DuckDbClient::open(OpenMode::InMemoryArrow).unwrap();
+        let batch = make_file_batch(&[1, 2], &["a.rs", "b.rs"]);
+        client
+            .create_temp_table("source data; DROP TABLE x", batch)
+            .unwrap();
+
+        let result = client
+            .query_arrow(r#"SELECT count(*) AS cnt FROM "source data; DROP TABLE x""#)
+            .unwrap();
+        assert_eq!(crate::helpers::scalar_i64(&result), 2);
     }
 }
