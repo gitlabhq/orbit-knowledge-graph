@@ -1,0 +1,44 @@
+# Scheduled renderer for the team dashboard issue. Setup: a masked + protected
+# TEAM_DASHBOARD_GITLAB_TOKEN and a schedule with SCHEDULE_ONLY=team-dashboard.
+team-dashboard-render:
+  stage: review
+  image: python:3.12-alpine
+  tags:
+    - saas-linux-small-amd64
+  needs: []
+  variables:
+    DRY_RUN: "false"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "team-dashboard"
+  before_script:
+    - test -n "${TEAM_DASHBOARD_GITLAB_TOKEN}" || (echo "Missing TEAM_DASHBOARD_GITLAB_TOKEN" && exit 1)
+    - export GITLAB_TOKEN="$TEAM_DASHBOARD_GITLAB_TOKEN"
+  script:
+    # Dry-run stdout is the whole confidential description; keep it out of the public log.
+    - python3 scripts/team-dashboard/render.py render > dashboard-output.md
+  artifacts:
+    when: always
+    access: developer
+    paths:
+      - dashboard-output.md
+    expire_in: 1 day
+
+test:team-dashboard:
+  stage: test
+  image: python:3.12-alpine
+  tags:
+    - saas-linux-small-amd64
+  needs: []
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - scripts/team-dashboard/**/*
+        - .gitlab/ci/team-dashboard.yml
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - scripts/team-dashboard/**/*
+  script:
+    - python3 -m unittest discover -s scripts/team-dashboard -p 'test_render.py'

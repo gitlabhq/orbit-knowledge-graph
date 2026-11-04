@@ -39,6 +39,8 @@ pub struct ResultContext {
     nodes: HashMap<String, RedactionNode>,
     entity_auth: HashMap<String, EntityAuthConfig>,
     edges: Vec<EdgeMeta>,
+    neighbors_center: Option<(String, i64)>,
+    labels: HashMap<String, String>,
 }
 
 impl ResultContext {
@@ -99,6 +101,16 @@ impl ResultContext {
     pub fn edges(&self) -> &[EdgeMeta] {
         &self.edges
     }
+
+    pub fn neighbors_center(&self) -> Option<(&str, i64)> {
+        self.neighbors_center
+            .as_ref()
+            .map(|(entity, id)| (entity.as_str(), *id))
+    }
+
+    pub fn label(&self, entity: &str) -> Option<&str> {
+        self.labels.get(entity).map(String::as_str)
+    }
 }
 
 pub fn apply(
@@ -109,6 +121,17 @@ pub fn apply(
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth.clone_from(model.entity_auth());
+    if input.query_type == QueryType::Neighbors
+        && let Some(node) = input.nodes.first()
+        && let (Some(entity), [id]) = (&node.entity, node.node_ids.as_slice())
+    {
+        ctx.neighbors_center = Some((entity.clone(), *id));
+        ctx.labels = model
+            .graph()
+            .entities()
+            .map(|entity| (entity.name.clone(), entity.label.clone()))
+            .collect();
+    }
     apply_with(node, input, metadata, model, &mut ctx, |entity| {
         model
             .redaction_id_column(entity)

@@ -86,3 +86,7 @@ packages/site/public/
 packages/site/src/routeTree.gen.ts
 .tanstack/
 .bun-cache/
+
+# Team dashboard rehearsal output is the whole confidential description
+dashboard-output.md
+dashboard-dry-run.md

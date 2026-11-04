@@ -1,3 +1,5 @@
+externalGitlab: false
+
 namespaces:
   nats: ""
   clickhouse: ""

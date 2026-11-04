@@ -146,6 +146,7 @@ pub(crate) fn shorten(text: &str, project: &str) -> String {
 const COMPACT_DESCRIPTION_LINES: usize = 30;
 const COMPACT_NOTES: usize = 15;
 const COMPACT_NOTE_LINES: usize = 10;
+const CUT: &str = "... (trimmed)";
 
 pub(crate) fn compact(text: &str) -> (String, bool) {
     #[derive(PartialEq)]
@@ -153,9 +154,11 @@ pub(crate) fn compact(text: &str) -> (String, bool) {
         Other,
         Description,
         Discussions,
+        ChangedFiles,
     }
     let mut out = String::with_capacity(text.len());
     let (mut block, mut kept, mut notes, mut trimmed) = (Block::Other, 0, 0, false);
+    let mut last_kept = true;
     for line in text.lines() {
         let indent = line.len() - line.trim_start().len();
         let header = indent <= 2 && !line.trim().is_empty();
@@ -163,6 +166,7 @@ pub(crate) fn compact(text: &str) -> (String, bool) {
             block = match line.trim_start() {
                 "description:" => Block::Description,
                 rest if rest.starts_with("discussions[") => Block::Discussions,
+                rest if rest.starts_with("changed_files[") => Block::ChangedFiles,
                 _ => Block::Other,
             };
             (kept, notes) = (0, 0);
@@ -173,6 +177,7 @@ pub(crate) fn compact(text: &str) -> (String, bool) {
         let keep = match block {
             _ if header => true,
             Block::Other => true,
+            Block::ChangedFiles => indent <= 4,
             Block::Description => {
                 kept += 1;
                 kept <= COMPACT_DESCRIPTION_LINES
@@ -187,7 +192,10 @@ pub(crate) fn compact(text: &str) -> (String, bool) {
         if keep {
             out.push_str(line);
             out.push('\n');
+        } else if last_kept && block != Block::ChangedFiles {
+            out.push_str(&format!("{:indent$}{CUT}\n", ""));
         }
+        last_kept = keep;
     }
     (out, trimmed)
 }
@@ -212,6 +220,35 @@ mod tests {
             tidy(text, false),
             "  description:\n    Fixes a crash.\n\n    * Issue: gh-1  done\n    ```html\n    <!-- kept -->\n    ```\n"
         );
+    }
+
+    #[test]
+    fn compact_marks_each_cut_where_it_happens() {
+        let mut text = String::from(
+            "- g/p!1 found=true\n  changed_files[1]:\n    M a.rs @ 2\n      | @@ -2 +2 @@\n      | -x\n",
+        );
+        text.push_str("  discussions[17]:\n    @ann 2026-10-01:\n");
+        for line in 0..12 {
+            text.push_str(&format!("      line {line}\n"));
+        }
+        for note in 1..17 {
+            text.push_str(&format!(
+                "    @bo 2026-10-0{}:\n      short\n",
+                note % 9 + 1
+            ));
+        }
+        let (out, trimmed) = compact(&text);
+        assert!(trimmed);
+        assert!(
+            out.contains("    M a.rs @ 2\n  discussions[17]:\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("      line 9\n      ... (trimmed)\n    @bo"),
+            "{out}"
+        );
+        assert!(out.ends_with("      short\n    ... (trimmed)\n"), "{out}");
+        assert_eq!(out.matches("... (trimmed)").count(), 2, "{out}");
     }
 
     #[test]

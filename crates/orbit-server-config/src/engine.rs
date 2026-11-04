@@ -129,9 +129,15 @@ impl From<CronSchedule> for String {
 #[schemars(deny_unknown_fields)]
 pub struct ScheduleConfiguration {
     pub cron: CronSchedule,
+    pub run_timeout_secs: u64,
 }
 
 impl ScheduleConfiguration {
+    /// Per-run limit, or `None` when disabled (`run_timeout_secs == 0`).
+    pub fn run_timeout(&self) -> Option<Duration> {
+        (self.run_timeout_secs > 0).then(|| Duration::from_secs(self.run_timeout_secs))
+    }
+
     /// Duration until the next fire time after `now`.
     pub fn next_delay(&self, now: DateTime<Utc>) -> Duration {
         // croner 3.0.1 preserves the sub-second fraction of `now` in the
@@ -663,9 +669,19 @@ mod tests {
 
     #[test]
     fn cron_round_trips_through_serialization() {
-        let cfg: TableCleanupConfig = orbit_utils::yaml::from_str("cron: \"0 0 3 * * 0\"").unwrap();
+        let cfg: TableCleanupConfig =
+            orbit_utils::yaml::from_str("cron: \"0 0 3 * * 0\"\nrun_timeout_secs: 60").unwrap();
         let json = serde_json::to_string(&cfg).unwrap();
-        assert_eq!(json, r#"{"cron":"0 0 3 * * 0"}"#);
+        assert_eq!(json, r#"{"cron":"0 0 3 * * 0","run_timeout_secs":60}"#);
+    }
+
+    #[test]
+    fn run_timeout_is_disabled_at_zero() {
+        let schedule = ScheduleConfiguration {
+            cron: cron("0 */1 * * * *"),
+            run_timeout_secs: 0,
+        };
+        assert_eq!(schedule.run_timeout(), None);
     }
 
     #[test]
@@ -759,6 +775,7 @@ mod tests {
     fn interval_hint_returns_exact_period() {
         let sched = ScheduleConfiguration {
             cron: cron("0 */1 * * * *"),
+            run_timeout_secs: 60,
         };
 
         let hint = sched.interval_hint();
@@ -777,6 +794,7 @@ mod tests {
 
         let sched = ScheduleConfiguration {
             cron: cron("0 */1 * * * *"),
+            run_timeout_secs: 60,
         };
 
         // 2026-01-15 10:05:00.700 UTC — 700ms into a matching second.
