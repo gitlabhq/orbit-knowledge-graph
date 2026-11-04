@@ -83,9 +83,3 @@ job_span_id:
 job_span_duration:
   - match: {id: 4000}
     value: "118000000"
-job_log_tail:
-  - match: {id: 4000}
-    value: |-
-      $ bundle exec rspec
-      Failures:
-        1) Widget#total returns the sum

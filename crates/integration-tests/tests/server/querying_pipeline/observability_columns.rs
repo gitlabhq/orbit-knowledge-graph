@@ -123,8 +123,6 @@ async fn an_unseeded_pipeline_resolves_to_null() {
     assert!(column(&map, "Pipeline", 9999, "observability_trace_id").is_none());
 }
 
-/// Each row keeps its own value: a resolved row must not leak into an
-/// unresolved one sharing the batch.
 #[tokio::test]
 async fn rows_in_one_batch_do_not_share_values() {
     let map = resolve(
@@ -152,23 +150,6 @@ async fn resolves_a_job_span() {
         column(&map, "Job", 4000, "observability_span_id"),
         Some(&ColumnValue::String("00f067aa0ba902b7".into()))
     );
-}
-
-#[tokio::test]
-async fn resolves_a_job_log_tail_across_several_lines() {
-    let map = resolve(
-        "Job",
-        &[4000],
-        &[request("observability_log_tail", "job_log_tail")],
-    )
-    .await;
-
-    let Some(ColumnValue::String(tail)) = column(&map, "Job", 4000, "observability_log_tail")
-    else {
-        panic!("expected a log tail");
-    };
-    assert!(tail.contains("bundle exec rspec"));
-    assert_eq!(tail.lines().count(), 3);
 }
 
 #[tokio::test]

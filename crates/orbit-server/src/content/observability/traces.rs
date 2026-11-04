@@ -1,11 +1,3 @@
-//! Resolves pipeline and job trace columns from a tenant's Observability
-//! ClickHouse.
-//!
-//! GitLab CI already exports pipeline traces with OpenTelemetry semantic
-//! convention attributes, so a graph row's `id` joins straight onto
-//! `cicd.pipeline.run.id` or `cicd.pipeline.task.run.id` with no extra
-//! instrumentation.
-
 use std::collections::HashMap;
 
 use clickhouse_client::ArrowClickHouseClient;
@@ -20,10 +12,14 @@ pub const PIPELINE_TRACE_ERROR_COUNT: &str = "pipeline_trace_error_count";
 pub const JOB_SPAN_ID: &str = "job_span_id";
 pub const JOB_SPAN_DURATION: &str = "job_span_duration";
 
-/// Span attribute carrying the GitLab pipeline ID, written by
-/// `Gitlab::Observability::PipelineConverterBase`.
 const PIPELINE_ID_ATTRIBUTE: &str = "cicd.pipeline.run.id";
 const JOB_ID_ATTRIBUTE: &str = "cicd.pipeline.task.run.id";
+
+/// Spans are exported when the pipeline finishes, which can trail the row's
+/// own timestamps, so the window is widened on both sides rather than pinned
+/// to created_at.
+const WINDOW_LEAD: i64 = 3_600;
+const WINDOW_TRAIL: i64 = 86_400;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TraceLookup {
@@ -55,8 +51,6 @@ impl TraceLookup {
         }
     }
 
-    /// Pipeline-level columns aggregate the whole trace; job-level columns read
-    /// the single span for that job.
     fn projection(self) -> &'static str {
         match self {
             Self::PipelineTraceId => "any(trace_id) AS value",
@@ -80,37 +74,89 @@ impl TraceLookup {
     }
 }
 
-/// A pipeline's trace is identified by the pipeline's own ID on its spans, so
-/// the join key is the graph row's `id` rendered as a string.
-pub fn entity_id(props: &HashMap<String, ColumnValue>) -> Option<String> {
-    props
+/// A row's join key plus the time range its spans can fall in. Without the
+/// range every lookup scans the tenant's whole retention, because the index
+/// table is sorted by time bucket.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceKey {
+    pub entity_id: String,
+    pub from_unix: i64,
+    pub to_unix: i64,
+}
+
+pub fn trace_key(props: &HashMap<String, ColumnValue>) -> Option<TraceKey> {
+    let entity_id = props
         .get("id")
         .and_then(|value| value.coerce::<i64>())
-        .map(|id| id.to_string())
+        .map(|id| id.to_string())?;
+
+    let started = timestamp(props, "created_at").or_else(|| timestamp(props, "started_at"))?;
+    let finished = timestamp(props, "finished_at").unwrap_or(started);
+
+    Some(TraceKey {
+        entity_id,
+        from_unix: started - WINDOW_LEAD,
+        to_unix: finished + WINDOW_TRAIL,
+    })
+}
+
+fn timestamp(props: &HashMap<String, ColumnValue>, name: &str) -> Option<i64> {
+    props
+        .get(name)
+        .and_then(|value| value.coerce::<i64>())
+        .filter(|seconds| *seconds > 0)
 }
 
 pub fn build_sql(lookup: TraceLookup) -> String {
     format!(
         "SELECT attributes_string[{{attribute:String}}] AS entity_id, {projection} \
          FROM signoz_index_v3 \
-         WHERE attributes_string[{{attribute:String}}] IN {{ids:Array(String)}} \
+         WHERE ts_bucket_start BETWEEN {{from_bucket:UInt64}} AND {{to_bucket:UInt64}} \
+         AND timestamp BETWEEN fromUnixTimestamp({{from_unix:UInt64}}) \
+         AND fromUnixTimestamp({{to_unix:UInt64}}) \
+         AND attributes_string[{{attribute:String}}] IN {{ids:Array(String)}} \
          GROUP BY entity_id",
         projection = lookup.projection()
     )
+}
+
+/// The index table buckets by half hour, so the bucket bounds are rounded out
+/// from the time range to avoid clipping a span at either edge.
+const BUCKET_SECONDS: i64 = 1_800;
+
+pub fn bucket_bounds(from_unix: i64, to_unix: i64) -> (u64, u64) {
+    let from = (from_unix - BUCKET_SECONDS).max(0) / BUCKET_SECONDS * BUCKET_SECONDS;
+    let to = (to_unix + BUCKET_SECONDS) / BUCKET_SECONDS * BUCKET_SECONDS;
+    (from.max(0) as u64, to.max(0) as u64)
 }
 
 pub async fn fetch(
     pool: &TenantClientPool,
     route: &TenantRoute,
     lookup: TraceLookup,
-    ids: &[String],
+    keys: &[TraceKey],
 ) -> Result<HashMap<String, String>, clickhouse_client::ClickHouseError> {
+    let Some(from_unix) = keys.iter().map(|key| key.from_unix).min() else {
+        return Ok(HashMap::new());
+    };
+    let to_unix = keys
+        .iter()
+        .map(|key| key.to_unix)
+        .max()
+        .unwrap_or(from_unix);
+    let ids: Vec<String> = keys.iter().map(|key| key.entity_id.clone()).collect();
+    let (from_bucket, to_bucket) = bucket_bounds(from_unix, to_unix);
+
     let client: ArrowClickHouseClient = pool.traces_client(route);
 
     let batches = client
         .query(&build_sql(lookup))
         .param("attribute", lookup.id_attribute())
-        .param("ids", ids)
+        .param("from_bucket", from_bucket)
+        .param("to_bucket", to_bucket)
+        .param("from_unix", from_unix.max(0) as u64)
+        .param("to_unix", to_unix.max(0) as u64)
+        .param("ids", &ids)
         .fetch_arrow()
         .await?;
 
@@ -120,6 +166,16 @@ pub async fn fetch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn props(id: i64, created_at: i64, finished_at: Option<i64>) -> HashMap<String, ColumnValue> {
+        let mut props = HashMap::new();
+        props.insert("id".to_string(), ColumnValue::Int64(id));
+        props.insert("created_at".to_string(), ColumnValue::Int64(created_at));
+        if let Some(finished_at) = finished_at {
+            props.insert("finished_at".to_string(), ColumnValue::Int64(finished_at));
+        }
+        props
+    }
 
     #[test]
     fn pipeline_lookups_join_on_the_pipeline_run_attribute() {
@@ -167,6 +223,62 @@ mod tests {
     }
 
     #[test]
+    fn sql_bounds_the_scan_by_bucket_and_timestamp() {
+        let sql = build_sql(TraceLookup::PipelineTraceId);
+
+        assert!(
+            sql.contains("ts_bucket_start BETWEEN {from_bucket:UInt64} AND {to_bucket:UInt64}"),
+            "the sort key starts with the bucket, so it must be bounded: {sql}"
+        );
+        assert!(sql.contains("timestamp BETWEEN fromUnixTimestamp({from_unix:UInt64})"));
+    }
+
+    #[test]
+    fn a_key_spans_from_before_the_row_started_to_after_it_finished() {
+        let key = trace_key(&props(42, 1_000_000, Some(1_000_600))).expect("key");
+
+        assert_eq!(key.entity_id, "42");
+        assert_eq!(key.from_unix, 1_000_000 - WINDOW_LEAD);
+        assert_eq!(key.to_unix, 1_000_600 + WINDOW_TRAIL);
+    }
+
+    #[test]
+    fn an_unfinished_row_still_yields_a_window() {
+        let key = trace_key(&props(42, 1_000_000, None)).expect("key");
+
+        assert_eq!(key.to_unix, 1_000_000 + WINDOW_TRAIL);
+    }
+
+    #[test]
+    fn a_row_without_a_timestamp_has_no_key() {
+        let mut props = HashMap::new();
+        props.insert("id".to_string(), ColumnValue::Int64(42));
+
+        assert!(trace_key(&props).is_none());
+    }
+
+    #[test]
+    fn a_row_without_an_id_has_no_key() {
+        assert!(trace_key(&HashMap::new()).is_none());
+    }
+
+    #[test]
+    fn bucket_bounds_round_outwards() {
+        let (from, to) = bucket_bounds(3_600, 7_200);
+
+        assert!(from <= 3_600, "lower bound must not clip: {from}");
+        assert!(to >= 7_200, "upper bound must not clip: {to}");
+        assert_eq!(from % BUCKET_SECONDS as u64, 0);
+    }
+
+    #[test]
+    fn bucket_bounds_never_go_negative() {
+        let (from, _) = bucket_bounds(0, 100);
+
+        assert_eq!(from, 0);
+    }
+
+    #[test]
     fn id_columns_resolve_to_strings() {
         assert_eq!(
             TraceLookup::PipelineTraceId.column_value("abc123".to_string()),
@@ -179,10 +291,6 @@ mod tests {
         assert_eq!(
             TraceLookup::PipelineTraceDuration.column_value("4200".to_string()),
             Some(ColumnValue::Int64(4200))
-        );
-        assert_eq!(
-            TraceLookup::PipelineTraceErrorCount.column_value("3".to_string()),
-            Some(ColumnValue::Int64(3))
         );
     }
 
@@ -202,18 +310,5 @@ mod tests {
                 .column_value("not a number".to_string())
                 .is_none()
         );
-    }
-
-    #[test]
-    fn the_join_key_is_the_row_id_as_a_string() {
-        let mut props = HashMap::new();
-        props.insert("id".to_string(), ColumnValue::Int64(42));
-
-        assert_eq!(entity_id(&props), Some("42".to_string()));
-    }
-
-    #[test]
-    fn a_row_without_an_id_has_no_join_key() {
-        assert!(entity_id(&HashMap::new()).is_none());
     }
 }

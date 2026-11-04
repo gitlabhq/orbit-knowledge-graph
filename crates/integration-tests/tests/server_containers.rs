@@ -18,6 +18,7 @@ mod server {
     pub mod graph_formatter;
     pub mod grpc_tls;
     pub mod http_tls;
+    pub mod observability_resolver;
     pub mod performance;
     pub mod query_cache;
     pub mod redaction;

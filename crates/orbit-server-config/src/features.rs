@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum Feature {
     CodeGraphIncremental,
+    ObservabilityColumns,
 }
 
 /// A feature flag scoped to root namespaces: `enabled` toggles it, an empty
