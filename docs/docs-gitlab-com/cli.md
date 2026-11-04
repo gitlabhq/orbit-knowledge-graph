@@ -218,10 +218,6 @@ The parser and [supported languages](schema.md#supported-languages) are the same
 - After you switch branches or commit, `grep` and `context` index the new commit for you.
 - To list the indexed repositories, run `glab orbit workspace list`.
 
-`workspace sql` and `workspace schema` index the current repository the first time you use them in it,
-even when you indexed other repositories.
-They don't index a new commit of a repository that is already indexed. `grep`, `context`, or `workspace index` do.
-
 #### Index in the background
 
 By default, `workspace index` runs in the foreground.
