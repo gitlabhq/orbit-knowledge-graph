@@ -11,26 +11,18 @@ use super::host_map::TenantRoute;
 type ClientKey = (String, String);
 
 pub struct TenantClientPool {
-    query_timeout_seconds: u64,
-    max_result_rows: u64,
     clients: RwLock<HashMap<ClientKey, Arc<ArrowClickHouseClient>>>,
 }
 
 impl TenantClientPool {
-    pub fn new(settings: &ObservabilityResolverSettings) -> Self {
+    pub fn new() -> Self {
         Self {
-            query_timeout_seconds: settings.query_timeout_seconds,
-            max_result_rows: settings.max_result_rows,
             clients: RwLock::new(HashMap::new()),
         }
     }
 
     pub fn traces_client(&self, route: &TenantRoute) -> ArrowClickHouseClient {
         self.client_for(route, &route.traces_db)
-    }
-
-    pub fn logs_client(&self, route: &TenantRoute) -> ArrowClickHouseClient {
-        self.client_for(route, &route.logs_db)
     }
 
     /// Drops clients whose tenant no longer appears in the host map, so a
@@ -64,12 +56,19 @@ impl TenantClientPool {
     }
 
     fn build_client(&self, route: &TenantRoute, database: &str) -> ArrowClickHouseClient {
+        self.configuration_for(route, database)
+            .build_client("observability")
+    }
+
+    /// No session settings: the tenant user carries a READONLY settings
+    /// profile, and ClickHouse rejects any setting it does not already fix.
+    fn configuration_for(&self, route: &TenantRoute, database: &str) -> ClickHouseConfiguration {
         ClickHouseConfiguration {
             database: database.to_string(),
             url: route.url(),
             username: route.username.clone(),
             password: Some(route.password.clone()),
-            session_settings: self.session_settings(),
+            session_settings: HashMap::new(),
             replicated: false,
             insert_settings: HashMap::new(),
             profiling: ProfilingConfig {
@@ -80,43 +79,12 @@ impl TenantClientPool {
                 instance_health: false,
             },
         }
-        .build_client("observability")
-    }
-
-    /// Tenant servers are shared between tenants, so every query is bounded
-    /// server-side as well as by the client timeout.
-    fn session_settings(&self) -> HashMap<String, String> {
-        HashMap::from([
-            ("readonly".to_string(), "1".to_string()),
-            (
-                "max_execution_time".to_string(),
-                self.query_timeout_seconds.to_string(),
-            ),
-            (
-                "max_result_rows".to_string(),
-                self.max_result_rows.to_string(),
-            ),
-            ("result_overflow_mode".to_string(), "break".to_string()),
-            ("timeout_overflow_mode".to_string(), "throw".to_string()),
-        ])
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn settings() -> ObservabilityResolverSettings {
-        ObservabilityResolverSettings {
-            provisioner_url: "https://provisioner.internal".to_string(),
-            provisioner_api_key: "key".to_string(),
-            host_map_refresh_seconds: 300,
-            host_map_retry_after_seconds: 30,
-            request_timeout_seconds: 10,
-            query_timeout_seconds: 15,
-            max_result_rows: 10_000,
-        }
-    }
 
     fn route(group_id: &str, host: &str) -> TenantRoute {
         TenantRoute {
@@ -133,7 +101,7 @@ mod tests {
 
     #[test]
     fn a_tenant_client_is_cached_and_reused() {
-        let pool = TenantClientPool::new(&settings());
+        let pool = TenantClientPool::new();
         let route = route("12345", "10.0.1.5");
 
         pool.traces_client(&route);
@@ -143,19 +111,8 @@ mod tests {
     }
 
     #[test]
-    fn traces_and_logs_are_separate_clients_on_one_host() {
-        let pool = TenantClientPool::new(&settings());
-        let route = route("12345", "10.0.1.5");
-
-        pool.traces_client(&route);
-        pool.logs_client(&route);
-
-        assert_eq!(pool.clients.read().unwrap().len(), 2);
-    }
-
-    #[test]
     fn tenants_sharing_a_host_do_not_share_a_client() {
-        let pool = TenantClientPool::new(&settings());
+        let pool = TenantClientPool::new();
 
         pool.traces_client(&route("12345", "10.0.1.5"));
         pool.traces_client(&route("67890", "10.0.1.5"));
@@ -165,7 +122,7 @@ mod tests {
 
     #[test]
     fn a_tenant_that_leaves_the_host_map_is_evicted() {
-        let pool = TenantClientPool::new(&settings());
+        let pool = TenantClientPool::new();
         let staying = route("12345", "10.0.1.5");
         let leaving = route("67890", "10.0.1.5");
         pool.traces_client(&staying);
@@ -176,14 +133,18 @@ mod tests {
         assert_eq!(pool.clients.read().unwrap().len(), 1);
     }
 
+    /// The tenant user carries a READONLY settings profile, so any session
+    /// setting outside it is rejected with code 164 and the query never runs.
     #[test]
-    fn every_tenant_query_is_bounded_server_side() {
-        let pool = TenantClientPool::new(&settings());
+    fn no_session_settings_are_sent_to_a_tenant() {
+        let pool = TenantClientPool::new();
 
-        let applied = pool.session_settings();
+        let config = pool.configuration_for(&route("12345", "10.0.1.5"), "12345_signoz_traces");
 
-        assert_eq!(applied.get("readonly"), Some(&"1".to_string()));
-        assert_eq!(applied.get("max_execution_time"), Some(&"15".to_string()));
-        assert_eq!(applied.get("max_result_rows"), Some(&"10000".to_string()));
+        assert!(
+            config.session_settings.is_empty(),
+            "the server profile owns the limits: {:?}",
+            config.session_settings
+        );
     }
 }
