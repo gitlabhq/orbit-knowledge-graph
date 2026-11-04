@@ -57,8 +57,8 @@ For more examples, see [prompt examples](prompt-examples.md).
 
 ## About GitLab Orbit
 
-- <img src="img/orbit-video-how-it-works-v19_6.png" alt="Thumbnail of the GitLab Orbit architecture video." width="640" height="360">[How GitLab Orbit works](https://www.youtube.com/watch?v=YtPc8kOmyi0)<br>The architecture of GitLab Orbit, from indexing to queries.
-- <img src="img/orbit-video-deep-dive-v19_6.png" alt="Thumbnail of the GitLab Orbit technical deep dive video." width="640" height="360">[How we built GitLab Orbit](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>A technical deep dive into the context graph.
+- <img src="img/orbit-video-how-it-works-v19_6.png" alt="Thumbnail of the GitLab Orbit How It Works video, an architecture overview." width="640" height="360">[GitLab Orbit How It Works](https://www.youtube.com/watch?v=YtPc8kOmyi0)<br>An architecture overview of GitLab Orbit: how it indexes your GitLab data and code, and answers queries with your permissions.
+- <img src="img/orbit-video-deep-dive-v19_6.png" alt="Thumbnail of the GitLab Orbit Technical Deep Dive video." width="640" height="360">[GitLab Orbit Technical Deep Dive](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>A technical deep dive into the GitLab Orbit context graph: the schema, indexing, and query engine.
 {.product-cards .product-cards-2 .product-video-cards}
 
 <!-- Videos published on 2026-07-06 and 2026-06-26 -->
