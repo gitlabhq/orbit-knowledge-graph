@@ -26,9 +26,7 @@ pub struct GitalyBlobRequest {
 
 type FileKey = (i64, String, String); // (project_id, revision, file_path)
 
-/// Requests are grouped by `project_id` and deduplicated by file identity.
-/// Multiple definitions in the same file share the fetched content and
-/// only receive their byte-range slice.
+/// Fetches each file once per project and revision, then slices it for each definition.
 pub struct GitalyContentService {
     client: Arc<GitlabClient>,
 }
