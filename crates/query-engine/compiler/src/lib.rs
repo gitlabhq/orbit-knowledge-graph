@@ -536,10 +536,9 @@ mod tests {
     fn neighbors_records_a_center_only_for_one_id() {
         let center = |ids: &str| {
             let query = format!(
-                r#"{{"query_type": "neighbors", "nodes": [{{"id": "u", "entity": "User", "node_ids": {ids}}}],
-                    "neighbors": {{"direction": "outgoing"}}, "limit": 10}}"#
+                "MATCH (u:User)-->(neighbor) WHERE u.id IN {ids} RETURN u, neighbor LIMIT 10"
             );
-            let compiled = compile(&query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).unwrap();
+            let compiled = compile(&query, Frontend::Gql, &ONTOLOGY, &security_ctx()).unwrap();
             let context = &compiled.base.result_context;
             (
                 context
