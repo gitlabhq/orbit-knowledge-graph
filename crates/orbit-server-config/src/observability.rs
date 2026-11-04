@@ -41,10 +41,24 @@ pub struct ObservabilityConfig {
     pub max_result_rows: u64,
 }
 
+/// The host map carries every tenant's ClickHouse password, so plain HTTP is
+/// only accepted for a loopback provisioner.
+fn transport_is_protected(url: &str) -> bool {
+    url.starts_with("https://")
+        || url.starts_with("http://127.0.0.1")
+        || url.starts_with("http://localhost")
+        || url.starts_with("http://[::1]")
+}
+
 impl ObservabilityConfig {
     pub fn resolver_settings(&self) -> Option<ObservabilityResolverSettings> {
+        let provisioner_url = non_empty(self.provisioner_url.as_deref())?;
+        if !transport_is_protected(&provisioner_url) {
+            return None;
+        }
+
         Some(ObservabilityResolverSettings {
-            provisioner_url: non_empty(self.provisioner_url.as_deref())?,
+            provisioner_url,
             provisioner_api_key: non_empty(self.provisioner_api_key.as_deref())?,
             host_map_refresh_seconds: self.host_map_refresh_seconds,
             host_map_retry_after_seconds: self.host_map_retry_after_seconds,
@@ -110,6 +124,30 @@ mod tests {
             let mut config = complete();
             mutate(&mut config);
             assert!(config.resolver_settings().is_none());
+        }
+    }
+
+    #[test]
+    fn a_plaintext_provisioner_url_disables_resolution() {
+        let mut config = complete();
+        config.provisioner_url = Some("http://provisioner.internal".to_string());
+
+        assert!(
+            config.resolver_settings().is_none(),
+            "the host map carries tenant ClickHouse passwords"
+        );
+    }
+
+    #[test]
+    fn a_loopback_provisioner_may_use_plain_http() {
+        for url in [
+            "http://127.0.0.1:3000",
+            "http://localhost:3000",
+            "http://[::1]:3000",
+        ] {
+            let mut config = complete();
+            config.provisioner_url = Some(url.to_string());
+            assert!(config.resolver_settings().is_some(), "{url}");
         }
     }
 
