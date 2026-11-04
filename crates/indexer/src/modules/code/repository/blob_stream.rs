@@ -11,7 +11,6 @@ use tokio_util::io::StreamReader;
 #[derive(Debug)]
 pub struct ResolvedBlob {
     pub oid: String,
-    /// Empty unless the request asked for paths.
     pub path: Vec<u8>,
     pub data: Vec<u8>,
 }
