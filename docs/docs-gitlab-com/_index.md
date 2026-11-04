@@ -10,22 +10,6 @@ layout: landing
 Software lifecycle context graph for AI agents
 {.product-hero-title}
 
-{{< details >}}
-
-- Tier: Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-
-{{< /details >}}
-
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
-- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.2.2.
-- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-
-{{< /history >}}
-
 <section class="product-landing product-hero">
 
 GitLab Orbit gives your agent a graph of your GitLab data and code.
@@ -57,22 +41,15 @@ For more examples, see [prompt examples](prompt-examples.md).
 
 ## About GitLab Orbit
 
-- <img src="img/orbit-video-how-it-works-v19_6.png" alt="Thumbnail of the GitLab Orbit How It Works video, an architecture overview." width="640" height="360">[GitLab Orbit How It Works](https://www.youtube.com/watch?v=YtPc8kOmyi0)<br>An architecture overview of GitLab Orbit: how it indexes your GitLab data and code, and answers queries with your permissions.
-- <img src="img/orbit-video-deep-dive-v19_6.png" alt="Thumbnail of the GitLab Orbit Technical Deep Dive video." width="640" height="360">[GitLab Orbit Technical Deep Dive](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>A technical deep dive into the GitLab Orbit context graph: the schema, indexing, and query engine.
+- <img src="img/orbit-video-how-it-works-v19_6.png" alt="Thumbnail of the GitLab Orbit How It Works video, an architecture overview." width="640" height="360">[How GitLab Orbit Works](https://www.youtube.com/watch?v=YtPc8kOmyi0)<br>An architecture overview of GitLab Orbit: how it indexes your GitLab data and code, and answers queries with your permissions.
+- <img src="img/orbit-video-deep-dive-v19_6.png" alt="Thumbnail of the GitLab Orbit Technical Deep Dive video." width="640" height="360">[Technical Deep Dive](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>A technical deep dive into the GitLab Orbit context graph: the schema, indexing, and query engine.
 {.product-cards .product-cards-2 .product-video-cards}
 
 <!-- Videos published on 2026-07-06 and 2026-06-26 -->
 
-- [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
+- [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/)<br>Install GitLab Orbit on Kubernetes and connect it to GitLab.
 - [See the roadmap](https://gitlab-org.gitlab.io/orbit/knowledge-graph/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
 {.product-cards .product-cards-2}
-
-## Reference
-
-- [Indexed data](schema.md)<br>See which GitLab data and code GitLab Orbit indexes.
-- [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/)<br>Install GitLab Orbit on Kubernetes and connect it to GitLab.
-- [Troubleshooting](troubleshooting.md)<br>Fix common errors in queries, the CLI, and the local graph.
-{.product-cards}
 
 <style>
 /* Product landing page. Visual wrappers only, with GitLab UI design tokens; the content above is Markdown. */
@@ -158,6 +135,8 @@ body:has(.product-landing) .docs-content .language-plaintext {
   height: 1rem;
   fill: currentColor;
 }
+/* The site nudges its external-link icon down for inline text; the button already centers it. */
+.docs-content .product-hero-actions a::after { top: 0 !important; }
 
 /* Value cards: a GitLab icon in a tinted badge above the title. */
 .docs-content ul.product-cards-icons > li > span:first-child {
@@ -230,24 +209,26 @@ body:has(.product-landing) .docs-content .language-plaintext {
 }
 /* Capitalised CSS function on purpose: markdownlint MD044 reads the lowercase form as the proper name URL. */
 .docs-content ul.product-cards > li > a::after {
-  content: "";
+  /* A word joiner, with the arrow drawn in the inline padding, so the arrow never wraps away from the last word. */
+  content: "\2060";
   position: relative;
-  top: 0.15rem;
-  left: 0.25rem;
-  display: inline-block;
-  width: 1rem;
-  height: 1rem;
+  left: -0.25rem;
+  padding-left: 1rem;
+  margin-left: 0.25rem;
   mask: URL("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M10.159%2010.72a.75.75%200%201%200%201.06%201.06l3.25-3.25L15%208l-.53-.53-3.25-3.25a.75.75%200%200%200-1.061%201.06l1.97%201.97H1.75a.75.75%200%201%200%200%201.5h10.379l-1.97%201.97z'/%3E%3C/svg%3E") center no-repeat;
+  mask-size: 1rem 1rem;
   background-color: transparent;
-  translate: -50% 0;
   transition: all 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .docs-content ul.product-cards > li:hover > a::after {
+  left: 0.25rem;
   background-color: var(--gl-text-color-default);
-  translate: 0 0;
 }
 /* Links outside GitLab.com get the site's external-link icon instead of the arrow. A larger offset keeps a gap while the icon sits half a width to the left; it still slides right on hover. */
 .docs-content ul.product-cards > li > a[href^="http"]:not([href*="GitLab.com" i])::after {
+  left: 0;
+}
+.docs-content ul.product-cards > li:hover > a[href^="http"]:not([href*="GitLab.com" i])::after {
   left: var(--gl-spacing-scale-3);
 }
 </style>
