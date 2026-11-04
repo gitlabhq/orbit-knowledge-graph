@@ -395,7 +395,7 @@ To install Siphon:
 
    Replace the following values:
 
-   - `<gitlab_version>`: Your GitLab version, for example `19.5.0`.
+   - `<gitlab_version>`: Your GitLab version, for example `19.6.0`.
    - `<siphon_version>`: The Siphon release tag.
    - `<bucket_name>`: The bucket for Siphon. For bucket types and credentials, see [Object storage for large rows](#object-storage-for-large-rows).
    - `<clickhouse_host>`: The ClickHouse host name.
