@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 use gitlab_client::GitlabClient;
-use indexer::modules::code::repository::blob_stream::{BlobStream, ResolvedBlob};
+use indexer::modules::code::repository::blob_stream::BlobStream;
 use orbit_arrow::ColumnValue;
 use orbit_log_fields::{debug, warn};
 use query_engine::pipeline::PipelineError;
@@ -60,32 +60,36 @@ impl ColumnResolver for GitalyContentService {
 
         let mut file_cache: HashMap<FileKey, Option<String>> = HashMap::new();
 
-        let mut by_project: HashMap<i64, Vec<FileKey>> = HashMap::new();
-        for (req, key) in requests.iter().flatten() {
+        let mut batches: HashMap<(i64, String), Vec<FileKey>> = HashMap::new();
+        for (_, key) in requests.iter().flatten() {
             if !file_cache.contains_key(key) {
                 file_cache.insert(key.clone(), None);
-                by_project
-                    .entry(req.project_id)
+                batches
+                    .entry((key.0, key.1.clone()))
                     .or_default()
                     .push(key.clone());
             }
         }
 
-        let futures = by_project.into_iter().map(|(project_id, keys)| {
+        let futures = batches.into_values().map(|keys| {
             let client = Arc::clone(&self.client);
-            async move { fetch_project_blobs(&client, project_id, keys).await }
+            async move { fetch_contents(&client, keys).await }
         });
 
         let mut had_errors = false;
-        for fetch in futures::future::join_all(futures).await {
-            had_errors |= fetch.had_error;
-            for FileBlob { key, data } in fetch.files {
+        for fetched in futures::future::join_all(futures).await {
+            had_errors |= fetched.had_error;
+            for (key, data) in fetched.contents {
                 match String::from_utf8(data) {
                     Ok(text) => {
                         metrics::record_blob_bytes(text.len() as u64);
                         file_cache.insert(key, Some(text));
                     }
-                    Err(_) => debug!(expanded(FILE_PATH) = key.2.as_str(), "skipping binary blob"),
+                    Err(_) => debug!(
+                        safe(GL_PROJECT_ID) = key.0,
+                        expanded(FILE_PATH) = key.2.as_str(),
+                        "skipping binary blob"
+                    ),
                 }
             }
         }
@@ -107,51 +111,47 @@ impl ColumnResolver for GitalyContentService {
 
 const MAX_CONCURRENT_SINGLE_FETCHES: usize = 8;
 
-#[derive(Debug)]
-struct FileBlob {
-    key: FileKey,
-    data: Vec<u8>,
-}
-
-#[derive(Debug, Default)]
-struct BlobFetch {
-    files: Vec<FileBlob>,
-    unmatched: Vec<FileKey>,
+struct FetchedContents {
+    contents: HashMap<FileKey, Vec<u8>>,
     had_error: bool,
 }
 
-/// `ListBlobs` lists a blob shared by several paths once, so the response can
-/// hold fewer blobs than keys. A key left without a blob is fetched alone.
-async fn fetch_project_blobs(
-    client: &GitlabClient,
-    project_id: i64,
-    keys: Vec<FileKey>,
-) -> BlobFetch {
-    let mut fetch = fetch_blobs(client, project_id, keys).await;
-    if fetch.unmatched.is_empty() {
-        return fetch;
-    }
+/// Gitaly lists a blob shared by several paths once, so the batch misses the
+/// other paths. Alone in a request, each missed file gets its blob back.
+async fn fetch_contents(client: &GitlabClient, keys: Vec<FileKey>) -> FetchedContents {
+    let Some(mut fetched) = list_contents(client, &keys).await else {
+        return FetchedContents {
+            contents: HashMap::new(),
+            had_error: true,
+        };
+    };
 
-    debug!(
-        safe(GL_PROJECT_ID) = project_id,
-        safe(COUNT) = fetch.unmatched.len(),
-        "fetching blobs one by one for keys the batch did not match"
-    );
-    let singles: Vec<BlobFetch> = futures::stream::iter(std::mem::take(&mut fetch.unmatched))
-        .map(|key| fetch_blobs(client, project_id, vec![key]))
+    let missed: Vec<FileKey> = keys
+        .into_iter()
+        .filter(|key| !fetched.contents.contains_key(key))
+        .collect();
+    let singles: Vec<_> = futures::stream::iter(missed)
+        .map(|key| async move { list_contents(client, &[key]).await })
         .buffer_unordered(MAX_CONCURRENT_SINGLE_FETCHES)
         .collect()
         .await;
 
     for single in singles {
-        fetch.files.extend(single.files);
-        fetch.unmatched.extend(single.unmatched);
-        fetch.had_error |= single.had_error;
+        match single {
+            Some(single) => {
+                fetched.contents.extend(single.contents);
+                fetched.had_error |= single.had_error;
+            }
+            None => fetched.had_error = true,
+        }
     }
-    fetch
+    fetched
 }
 
-async fn fetch_blobs(client: &GitlabClient, project_id: i64, keys: Vec<FileKey>) -> BlobFetch {
+/// All keys share one project and revision, so a blob path names one key, and
+/// a lone key takes its blob. Returns `None` when the request fails.
+async fn list_contents(client: &GitlabClient, keys: &[FileKey]) -> Option<FetchedContents> {
+    let project_id = keys[0].0;
     let revisions: Vec<String> = keys
         .iter()
         .map(|(_, revision, path)| format!("{revision}:{path}"))
@@ -167,16 +167,12 @@ async fn fetch_blobs(client: &GitlabClient, project_id: i64, keys: Vec<FileKey>)
                 safe(ERROR_TYPE) = <&str>::from(&e),
                 "list_blobs failed, content will be missing for this project"
             );
-            return BlobFetch {
-                had_error: true,
-                ..BlobFetch::default()
-            };
+            return None;
         }
     };
 
     let (blobs, err) = BlobStream::new(stream).drain().await;
-    let had_error = err.is_some();
-    if let Some(e) = err {
+    if let Some(e) = &err {
         warn!(
             safe(GL_PROJECT_ID) = project_id,
             safe(ERROR_TYPE) = "blob_decode",
@@ -184,57 +180,21 @@ async fn fetch_blobs(client: &GitlabClient, project_id: i64, keys: Vec<FileKey>)
             "blob stream decode error"
         );
     }
-    BlobFetch {
-        had_error,
-        ..match_blobs(keys, blobs)
-    }
-}
 
-/// A path requested under two revisions is ambiguous, so its keys stay
-/// unmatched. Pairing by position is safe only when no blob was dropped.
-fn match_blobs(keys: Vec<FileKey>, blobs: Vec<ResolvedBlob>) -> BlobFetch {
-    let all_have_paths = !blobs.is_empty() && blobs.iter().all(|b| !b.path.is_empty());
-
-    if !all_have_paths {
-        if blobs.len() == keys.len() {
-            let files = keys
-                .into_iter()
-                .zip(blobs)
-                .map(|(key, blob)| FileBlob {
-                    key,
-                    data: blob.data,
-                })
-                .collect();
-            return BlobFetch {
-                files,
-                ..BlobFetch::default()
+    let contents = blobs
+        .into_iter()
+        .filter_map(|blob| {
+            let key = match keys {
+                [only] => only,
+                _ => keys.iter().find(|key| key.2.as_bytes() == blob.path)?,
             };
-        }
-        return BlobFetch {
-            unmatched: keys,
-            ..BlobFetch::default()
-        };
-    }
-
-    let mut key_count_by_path: HashMap<&[u8], usize> = HashMap::new();
-    for (_, _, path) in &keys {
-        *key_count_by_path.entry(path.as_bytes()).or_default() += 1;
-    }
-    let mut data_by_path: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
-    for blob in blobs {
-        if key_count_by_path.get(blob.path.as_slice()) == Some(&1) {
-            data_by_path.entry(blob.path).or_insert(blob.data);
-        }
-    }
-
-    let mut fetch = BlobFetch::default();
-    for key in keys {
-        match data_by_path.remove(key.2.as_bytes()) {
-            Some(data) => fetch.files.push(FileBlob { key, data }),
-            None => fetch.unmatched.push(key),
-        }
-    }
-    fetch
+            Some((key.clone(), blob.data))
+        })
+        .collect();
+    Some(FetchedContents {
+        contents,
+        had_error: err.is_some(),
+    })
 }
 
 impl GitalyContentService {
@@ -385,106 +345,6 @@ mod tests {
     fn slice_empty_on_utf8_boundary() {
         // 'é' is 2 bytes (0xC3 0xA9). Slicing at byte 1 lands mid-character.
         assert_eq!(slice_content("é", Some(0), Some(1)), "");
-    }
-
-    fn key(revision: &str, path: &str) -> FileKey {
-        (1, revision.into(), path.into())
-    }
-
-    fn blob(oid: &str, path: &str, data: &str) -> ResolvedBlob {
-        ResolvedBlob {
-            oid: oid.into(),
-            path: path.as_bytes().to_vec(),
-            data: data.as_bytes().to_vec(),
-        }
-    }
-
-    fn data_of(fetch: &BlobFetch, path: &str) -> Option<String> {
-        fetch
-            .files
-            .iter()
-            .find(|file| file.key.2 == path)
-            .map(|file| String::from_utf8(file.data.clone()).unwrap())
-    }
-
-    #[test]
-    fn match_blobs_pairs_by_path_when_a_duplicate_blob_is_dropped() {
-        let keys = vec![
-            key("main", "a/same.txt"),
-            key("main", "b/same.txt"),
-            key("main", "src/One.java"),
-            key("main", "src/Two.java"),
-        ];
-        let blobs = vec![
-            blob("s", "a/same.txt", "same"),
-            blob("1", "src/One.java", "one"),
-            blob("2", "src/Two.java", "two"),
-        ];
-
-        let fetch = match_blobs(keys, blobs);
-
-        assert_eq!(data_of(&fetch, "a/same.txt").as_deref(), Some("same"));
-        assert_eq!(data_of(&fetch, "src/One.java").as_deref(), Some("one"));
-        assert_eq!(data_of(&fetch, "src/Two.java").as_deref(), Some("two"));
-        assert_eq!(fetch.unmatched, vec![key("main", "b/same.txt")]);
-    }
-
-    #[test]
-    fn match_blobs_pairs_by_path_in_any_order() {
-        let keys = vec![key("main", "a.rs"), key("main", "b.rs")];
-        let blobs = vec![blob("b", "b.rs", "bee"), blob("a", "a.rs", "ay")];
-
-        let fetch = match_blobs(keys, blobs);
-
-        assert_eq!(data_of(&fetch, "a.rs").as_deref(), Some("ay"));
-        assert_eq!(data_of(&fetch, "b.rs").as_deref(), Some("bee"));
-        assert!(fetch.unmatched.is_empty());
-    }
-
-    #[test]
-    fn match_blobs_leaves_a_path_shared_by_two_revisions_unmatched() {
-        let keys = vec![key("sha1", "lib.rs"), key("sha2", "lib.rs")];
-        let blobs = vec![blob("x", "lib.rs", "v1"), blob("y", "lib.rs", "v2")];
-
-        let fetch = match_blobs(keys.clone(), blobs);
-
-        assert!(fetch.files.is_empty());
-        assert_eq!(fetch.unmatched, keys);
-    }
-
-    #[test]
-    fn match_blobs_pairs_by_position_without_paths_when_counts_match() {
-        let keys = vec![key("main", "a.rs"), key("main", "b.rs")];
-        let blobs = vec![blob("a", "", "ay"), blob("b", "", "bee")];
-
-        let fetch = match_blobs(keys, blobs);
-
-        assert_eq!(data_of(&fetch, "a.rs").as_deref(), Some("ay"));
-        assert_eq!(data_of(&fetch, "b.rs").as_deref(), Some("bee"));
-        assert!(fetch.unmatched.is_empty());
-    }
-
-    #[test]
-    fn match_blobs_refuses_position_without_paths_when_counts_differ() {
-        let keys = vec![key("main", "a.rs"), key("main", "b.rs")];
-        let blobs = vec![blob("a", "", "ay")];
-
-        let fetch = match_blobs(keys.clone(), blobs);
-
-        assert!(fetch.files.is_empty());
-        assert_eq!(fetch.unmatched, keys);
-    }
-
-    #[test]
-    fn match_blobs_ignores_blobs_for_other_paths() {
-        // A key that names a directory lists the blobs inside it.
-        let keys = vec![key("main", "src")];
-        let blobs = vec![blob("a", "src/a.rs", "ay"), blob("b", "src/b.rs", "bee")];
-
-        let fetch = match_blobs(keys.clone(), blobs);
-
-        assert!(fetch.files.is_empty());
-        assert_eq!(fetch.unmatched, keys);
     }
 
     // resolve_batch is covered in the integration-tests crate (needs a live GitlabClient).
