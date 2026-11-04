@@ -592,7 +592,11 @@ fn build_edge_transform_sql(
     }
     if !sort_key.is_empty() {
         sql.push_str(" ORDER BY ");
-        let sort_key: Vec<String> = sort_key.iter().map(|key| quote_ident(key)).collect();
+        let sort_key: Vec<String> = sort_key
+            .iter()
+            .map(String::as_str)
+            .map(quote_ident)
+            .collect();
         sql.push_str(&sort_key.join(", "));
     }
     sql

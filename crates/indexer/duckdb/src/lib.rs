@@ -8,15 +8,22 @@ use indexer::handler::HandlerError;
 use indexer::modules::sdlc::{
     BlockTransform, SOURCE_DATA_TABLE, SqlTransformFactory, TableBatch, Transformation,
 };
-use orbit_arrow::prepare_batches;
+use orbit_arrow::prepare_batch;
 
 /// Every transform shares one in-memory database, so the process runs one DuckDB thread pool.
 pub fn sql_transform() -> duckdb_client::Result<SqlTransformFactory> {
-    let database = DuckDbClient::open(OpenMode::InMemory)?;
-    database.register_arrow_scan()?;
-    let database = Arc::new(Mutex::new(database));
+    let database = Arc::new(Mutex::new(DuckDbClient::open(OpenMode::InMemoryArrow)?));
     Ok(Arc::new(move |name, transforms| {
-        Arc::new(DuckDbTransform::new(name, transforms, database.clone()))
+        let outputs = transforms
+            .iter()
+            .map(|t| t.destination_table.clone())
+            .collect();
+        Arc::new(DuckDbTransform {
+            name,
+            outputs,
+            transforms: transforms.into(),
+            database: database.clone(),
+        })
     }))
 }
 
@@ -28,74 +35,38 @@ struct DuckDbTransform {
     database: Arc<Mutex<DuckDbClient>>,
 }
 
-impl DuckDbTransform {
-    fn new(
-        name: String,
-        transforms: Vec<Transformation>,
-        database: Arc<Mutex<DuckDbClient>>,
-    ) -> Self {
-        let outputs = transforms
-            .iter()
-            .map(|t| t.destination_table.clone())
-            .collect();
-        Self {
-            name,
-            outputs,
-            transforms: transforms.into(),
-            database,
-        }
-    }
-
-    fn connect(&self) -> Result<DuckDbClient, HandlerError> {
-        self.database
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .try_clone()
-            .map_err(|err| {
-                HandlerError::Processing(format!(
-                    "failed to connect {} to DuckDB: {err}",
-                    self.name
-                ))
-            })
-    }
-}
-
 fn project_block(
-    name: &str,
     connection: &DuckDbClient,
     transforms: &[Transformation],
     block: RecordBatch,
-) -> Result<Vec<TableBatch>, HandlerError> {
+) -> Result<Vec<TableBatch>, String> {
     connection
         .create_temp_table(SOURCE_DATA_TABLE, block)
-        .map_err(|err| {
-            HandlerError::Processing(format!("failed to load block for {name}: {err}"))
-        })?;
+        .map_err(|err| err.to_string())?;
     let mut outputs = Vec::new();
     for (output_index, transform) in transforms.iter().enumerate() {
-        let failed = |err: &dyn std::fmt::Display| {
-            HandlerError::Processing(format!(
-                "failed to transform {name} for {}: {err}",
-                transform.destination_table
-            ))
-        };
-        let batches = connection
-            .query_arrow(&transform.sql)
-            .map_err(|err| failed(&err))?;
-        let Some(first) = batches.first() else {
-            continue;
-        };
-        let mut batch = concat_batches(&first.schema(), &batches).map_err(|err| failed(&err))?;
-        prepare_batches(
-            std::slice::from_mut(&mut batch),
-            &transform.dict_encode_columns,
-        );
-        outputs.push(TableBatch {
-            output_index,
-            batch,
-        });
+        let batch = project(connection, transform)
+            .map_err(|err| format!("{}: {err}", transform.destination_table))?;
+        if let Some(batch) = batch {
+            outputs.push(TableBatch {
+                output_index,
+                batch,
+            });
+        }
     }
     Ok(outputs)
+}
+
+fn project(
+    connection: &DuckDbClient,
+    transform: &Transformation,
+) -> duckdb_client::Result<Option<RecordBatch>> {
+    let batches = connection.query_arrow(&transform.sql)?;
+    let Some(first) = batches.first() else {
+        return Ok(None);
+    };
+    let batch = concat_batches(&first.schema(), &batches)?;
+    Ok(Some(prepare_batch(&batch, &transform.dict_encode_columns)))
 }
 
 #[async_trait]
@@ -109,14 +80,18 @@ impl BlockTransform for DuckDbTransform {
     }
 
     async fn transform(&self, block: &RecordBatch) -> Result<Vec<TableBatch>, HandlerError> {
-        let connection = self.connect()?;
-        let name = self.name.clone();
+        let connection = {
+            let database = self.database.lock().unwrap_or_else(PoisonError::into_inner);
+            DuckDbClient::open(OpenMode::Connection(&database)).map_err(|err| err.to_string())
+        };
         let transforms = self.transforms.clone();
         let block = block.clone();
-        tokio::task::spawn_blocking(move || project_block(&name, &connection, &transforms, block))
+        tokio::task::spawn_blocking(move || project_block(&connection?, &transforms, block))
             .await
+            .map_err(|err| err.to_string())
+            .and_then(|projected| projected)
             .map_err(|err| {
-                HandlerError::Processing(format!("transform {} did not finish: {err}", self.name))
-            })?
+                HandlerError::Processing(format!("failed to transform {}: {err}", self.name))
+            })
     }
 }

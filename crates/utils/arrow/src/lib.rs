@@ -765,56 +765,33 @@ pub fn batch_slice_bytes(batch: &RecordBatch) -> u64 {
         .sum()
 }
 
-/// Single-pass column type fixup for RecordBatches before ClickHouse insertion.
-/// Mutates the vector in place.
+/// Column type fixup for a RecordBatch before ClickHouse insertion.
 /// - Dictionary-encodes `Utf8` columns named in `dict_columns` to
 ///   `Dictionary<Int32, Utf8>` for smaller IPC payloads.
 /// - Zeroes the null slots of temporal columns, since ClickHouse range-checks them
 ///   before it applies the column default.
-pub fn prepare_batches(batches: &mut [RecordBatch], dict_columns: &HashSet<String>) {
+pub fn prepare_batch(batch: &RecordBatch, dict_columns: &HashSet<String>) -> RecordBatch {
     let dict_type = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
-
-    for batch in batches.iter_mut() {
-        let schema = batch.schema();
-        let num_columns = schema.fields().len();
-        let mut new_fields = Vec::with_capacity(num_columns);
-        let mut new_columns: Vec<ArrayRef> = Vec::with_capacity(num_columns);
-        let mut changed = false;
-
-        for (i, field) in schema.fields().iter().enumerate() {
-            let col = batch.column(i);
-
-            if *field.data_type() == DataType::Utf8 && dict_columns.contains(field.name().as_str())
-            {
-                new_fields.push(Field::new(
-                    field.name(),
-                    dict_type.clone(),
-                    field.is_nullable(),
-                ));
-                new_columns.push(
-                    compute::cast(col, &dict_type)
-                        .expect("Utf8 -> Dictionary cast should not fail"),
-                );
-                changed = true;
-                continue;
+    let (fields, columns): (Vec<Field>, Vec<ArrayRef>) = batch
+        .schema()
+        .fields()
+        .iter()
+        .zip(batch.columns())
+        .map(|(field, column)| {
+            let field = field.as_ref().clone();
+            if *field.data_type() == DataType::Utf8 && dict_columns.contains(field.name()) {
+                let column = compute::cast(column, &dict_type)
+                    .expect("Utf8 -> Dictionary cast should not fail");
+                (field.with_data_type(dict_type.clone()), column)
+            } else if field.data_type().is_temporal() && column.null_count() > 0 {
+                (field, zero_null_slots(column))
+            } else {
+                (field, Arc::clone(column))
             }
-
-            if field.data_type().is_temporal() && col.null_count() > 0 {
-                new_fields.push(field.as_ref().clone());
-                new_columns.push(zero_null_slots(col));
-                changed = true;
-                continue;
-            }
-
-            new_fields.push(field.as_ref().clone());
-            new_columns.push(Arc::clone(col));
-        }
-
-        if changed {
-            *batch = RecordBatch::try_new(Arc::new(Schema::new(new_fields)), new_columns)
-                .expect("schema/column mismatch in prepare_batches");
-        }
-    }
+        })
+        .unzip();
+    RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)
+        .expect("schema/column mismatch in prepare_batch")
 }
 
 fn zero_null_slots(col: &ArrayRef) -> ArrayRef {
@@ -1480,17 +1457,16 @@ mod tests {
     }
 
     #[test]
-    fn prepare_batches_zeroes_null_slots_of_temporal_columns() {
+    fn prepare_batch_zeroes_null_slots_of_temporal_columns() {
         let undefined = arrow::buffer::Buffer::from_slice_ref([19_000_i32, 1_094_866_510]);
         let nulls = arrow::buffer::NullBuffer::from(vec![true, false]);
         let dates = Date32Array::new(undefined.into(), Some(nulls));
         let schema = Schema::new(vec![Field::new("due_date", DataType::Date32, true)]);
-        let mut batches =
-            vec![RecordBatch::try_new(Arc::new(schema), vec![Arc::new(dates)]).unwrap()];
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(dates)]).unwrap();
 
-        prepare_batches(&mut batches, &HashSet::new());
+        let batch = prepare_batch(&batch, &HashSet::new());
 
-        let dates = batches[0]
+        let dates = batch
             .column(0)
             .as_any()
             .downcast_ref::<Date32Array>()

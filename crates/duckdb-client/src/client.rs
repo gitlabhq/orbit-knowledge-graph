@@ -13,6 +13,7 @@ const INITIAL_BACKOFF: Duration = Duration::from_millis(100);
 const READ_ONLY_RETRIES: u32 = 5;
 const READ_ONLY_BACKOFF: Duration = Duration::from_millis(50);
 
+#[derive(Debug)]
 pub struct DuckDbClient {
     conn: duckdb::Connection,
 }
@@ -31,6 +32,10 @@ pub enum OpenMode<'a> {
     InMemory,
     /// In memory, where SQL may `ATTACH` database files under this directory only.
     InMemoryAttaching(&'a Path),
+    /// In memory, where [`DuckDbClient::create_temp_table`] can load Arrow batches.
+    InMemoryArrow,
+    /// Another connection to an open database, sharing its settings and thread pool.
+    Connection(&'a DuckDbClient),
 }
 
 impl<'a, P: AsRef<Path> + ?Sized> From<&'a P> for OpenMode<'a> {
@@ -47,6 +52,14 @@ impl DuckDbClient {
             OpenMode::ReadOnly(path) => Self::open_file(path, true),
             OpenMode::InMemory => Self::connect(in_memory, false, None),
             OpenMode::InMemoryAttaching(dir) => Self::connect(in_memory, false, Some(dir)),
+            OpenMode::InMemoryArrow => {
+                let client = Self::connect(in_memory, false, None)?;
+                client.conn.register_table_function::<ArrowVTab>("arrow")?;
+                Ok(client)
+            }
+            OpenMode::Connection(database) => Ok(Self {
+                conn: database.conn.try_clone()?,
+            }),
         }
     }
 
@@ -102,18 +115,6 @@ impl DuckDbClient {
         ))
         .map_err(|e| DuckDbError::Schema(e.to_string()))?;
         Ok(Self { conn })
-    }
-
-    /// Opens another connection to the same database, which shares its settings and thread pool.
-    pub fn try_clone(&self) -> Result<Self> {
-        Ok(Self {
-            conn: self.conn.try_clone()?,
-        })
-    }
-
-    /// Needed once per database before [`Self::create_temp_table`].
-    pub fn register_arrow_scan(&self) -> Result<()> {
-        Ok(self.conn.register_table_function::<ArrowVTab>("arrow")?)
     }
 
     /// The table lives until this connection closes.
