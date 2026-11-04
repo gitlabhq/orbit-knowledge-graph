@@ -116,8 +116,7 @@ struct FetchedContents {
     had_error: bool,
 }
 
-/// Gitaly lists a blob shared by several paths once, so the batch misses the
-/// other paths. Alone in a request, each missed file gets its blob back.
+/// Gitaly lists a shared blob once, so each file the batch misses is fetched alone.
 async fn fetch_contents(client: &GitlabClient, keys: Vec<FileKey>) -> FetchedContents {
     let Some(mut fetched) = list_contents(client, &keys).await else {
         return FetchedContents {
@@ -148,8 +147,7 @@ async fn fetch_contents(client: &GitlabClient, keys: Vec<FileKey>) -> FetchedCon
     fetched
 }
 
-/// All keys share one project and revision, so a blob path names one key, and
-/// a lone key takes its blob. Returns `None` when the request fails.
+/// Keys share one revision, so a path names one key. `None` when the request fails.
 async fn list_contents(client: &GitlabClient, keys: &[FileKey]) -> Option<FetchedContents> {
     let project_id = keys[0].0;
     let revisions: Vec<String> = keys
