@@ -171,7 +171,7 @@ mod tests {
         pool.traces_client(&staying);
         pool.traces_client(&leaving);
 
-        pool.retain_databases(&[staying.traces_db.clone()]);
+        pool.retain_databases(std::slice::from_ref(&staying.traces_db));
 
         assert_eq!(pool.clients.read().unwrap().len(), 1);
     }
