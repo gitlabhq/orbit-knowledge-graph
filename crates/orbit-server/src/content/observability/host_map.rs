@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,7 +8,7 @@ use serde::Deserialize;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Instant;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 pub struct TenantRoute {
     pub group_id: String,
     pub scheme: String,
@@ -17,6 +18,21 @@ pub struct TenantRoute {
     pub password: String,
     pub traces_db: String,
     pub logs_db: String,
+}
+
+impl fmt::Debug for TenantRoute {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TenantRoute")
+            .field("group_id", &self.group_id)
+            .field("scheme", &self.scheme)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("password", &"[redacted]")
+            .field("traces_db", &self.traces_db)
+            .field("logs_db", &self.logs_db)
+            .finish()
+    }
 }
 
 impl TenantRoute {
@@ -133,11 +149,34 @@ impl TenantHostMap {
         (cached.is_fresh(now) || !cached.may_retry(now)).then(|| Arc::clone(&cached.routes))
     }
 
+    /// Records the retry even with no cache, so a cold start against a down
+    /// provisioner does not make every query wait out the request timeout.
     async fn defer_retry(&self) -> Option<TenantRoutes> {
+        let now = Instant::now();
         let mut cache = self.cache.write().await;
-        let cached = cache.as_mut()?;
-        cached.retry_fetch_at = Instant::now() + self.retry_after;
+
+        let cached = cache.get_or_insert_with(|| CachedRoutes {
+            routes: Arc::new(HashMap::new()),
+            usable_until: now,
+            retry_fetch_at: now,
+        });
+        cached.retry_fetch_at = now + self.retry_after;
+
         Some(Arc::clone(&cached.routes))
+    }
+
+    /// Database names across every tenant in the current map.
+    pub async fn live_databases(&self) -> Vec<String> {
+        let cache = self.cache.read().await;
+        let Some(cached) = cache.as_ref() else {
+            return Vec::new();
+        };
+
+        cached
+            .routes
+            .values()
+            .map(|route| route.traces_db.clone())
+            .collect()
     }
 
     async fn store(&self, routes: TenantRoutes, refresh_after: Duration) {
@@ -227,6 +266,14 @@ mod tests {
     }
 
     #[test]
+    fn debug_output_never_carries_the_password() {
+        let rendered = format!("{:?}", route("12345"));
+
+        assert!(!rendered.contains("secret"), "{rendered}");
+        assert!(rendered.contains("[redacted]"));
+    }
+
+    #[test]
     fn route_url_is_built_from_the_advertised_scheme_and_port() {
         assert_eq!(route("12345").url(), "http://10.0.1.5:8123");
 
@@ -258,6 +305,38 @@ mod tests {
         .await;
 
         assert!(map.usable_cached().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_cold_start_against_a_down_provisioner_defers_the_retry() {
+        let map = host_map();
+
+        assert!(
+            map.defer_retry().await.is_some(),
+            "an empty map is still a map"
+        );
+        assert!(
+            map.usable_cached().await.is_some(),
+            "without a recorded retry every query would wait out the request timeout"
+        );
+    }
+
+    #[tokio::test]
+    async fn live_databases_lists_every_tenant_in_the_map() {
+        let map = host_map();
+        map.store(
+            Arc::new(HashMap::from([
+                ("9970".to_string(), route("9970")),
+                ("12345".to_string(), route("12345")),
+            ])),
+            Duration::from_secs(300),
+        )
+        .await;
+
+        let mut databases = map.live_databases().await;
+        databases.sort();
+
+        assert_eq!(databases, vec!["12345_signoz_traces", "9970_signoz_traces"]);
     }
 
     #[tokio::test]

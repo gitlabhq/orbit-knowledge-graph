@@ -100,11 +100,37 @@ pub fn trace_key(props: &HashMap<String, ColumnValue>) -> Option<TraceKey> {
     })
 }
 
+/// Hydration renders a `type: timestamp` property as an ISO-8601 string, not
+/// an epoch, so coercing straight to i64 yields nothing.
 fn timestamp(props: &HashMap<String, ColumnValue>, name: &str) -> Option<i64> {
-    props
-        .get(name)
-        .and_then(|value| value.coerce::<i64>())
-        .filter(|seconds| *seconds > 0)
+    let value = props.get(name)?;
+
+    let seconds = match value {
+        ColumnValue::Int64(seconds) => Some(*seconds),
+        ColumnValue::String(text) => parse_epoch_seconds(text),
+        _ => value.coerce::<i64>(),
+    }?;
+
+    (seconds > 0).then_some(seconds)
+}
+
+const HYDRATED_FORMATS: [&str; 4] = [
+    "%Y-%m-%dT%H:%M:%S%.fZ",
+    "%Y-%m-%dT%H:%M:%S%.f",
+    "%Y-%m-%d %H:%M:%S%.f",
+    "%Y-%m-%d %H:%M:%S",
+];
+
+fn parse_epoch_seconds(text: &str) -> Option<i64> {
+    if let Ok(seconds) = text.parse::<i64>() {
+        return Some(seconds);
+    }
+
+    HYDRATED_FORMATS.iter().find_map(|format| {
+        chrono::NaiveDateTime::parse_from_str(text, format)
+            .ok()
+            .map(|parsed| parsed.and_utc().timestamp())
+    })
 }
 
 pub fn build_sql(lookup: TraceLookup) -> String {
@@ -247,6 +273,54 @@ mod tests {
         let key = trace_key(&props(42, 1_000_000, None)).expect("key");
 
         assert_eq!(key.to_unix, 1_000_000 + WINDOW_TRAIL);
+    }
+
+    /// The value hydration actually produces for a `type: timestamp` property.
+    fn hydrated(seconds: i64) -> ColumnValue {
+        ColumnValue::datetime(chrono::DateTime::from_timestamp(seconds, 0).map(|dt| dt.naive_utc()))
+    }
+
+    #[test]
+    fn a_key_builds_from_the_timestamps_hydration_produces() {
+        let mut props = HashMap::new();
+        props.insert("id".to_string(), ColumnValue::Int64(42));
+        props.insert("created_at".to_string(), hydrated(1_000_000));
+        props.insert("finished_at".to_string(), hydrated(1_000_600));
+
+        let key = trace_key(&props).expect("hydrated timestamps must build a key");
+
+        assert_eq!(key.from_unix, 1_000_000 - WINDOW_LEAD);
+        assert_eq!(key.to_unix, 1_000_600 + WINDOW_TRAIL);
+    }
+
+    #[test]
+    fn every_hydrated_timestamp_shape_parses() {
+        for text in [
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00:00.123456Z",
+            "2024-01-01T00:00:00",
+            "2024-01-01 00:00:00",
+            "2024-01-01 00:00:00.123456",
+            "1704067200",
+        ] {
+            assert_eq!(
+                parse_epoch_seconds(text),
+                Some(1_704_067_200),
+                "failed to parse {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unparseable_timestamp_has_no_key() {
+        let mut props = HashMap::new();
+        props.insert("id".to_string(), ColumnValue::Int64(42));
+        props.insert(
+            "created_at".to_string(),
+            ColumnValue::String("not a time".to_string()),
+        );
+
+        assert!(trace_key(&props).is_none());
     }
 
     #[test]
