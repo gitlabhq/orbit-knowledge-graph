@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
-use duckdb_client::DuckDbClient;
+use duckdb_client::{DuckDbClient, OpenMode};
 use ontology::Ontology;
 
 use super::{locks::lock_database_waiting, schema};
@@ -22,7 +22,7 @@ impl GraphWriter {
         let lock = lock_database_waiting(path, wait)?;
         let revision = format!("{}:{}", git.project_id, git.commit_sha);
         if path.exists() {
-            let client = DuckDbClient::open_read_only(path)?;
+            let client = DuckDbClient::open(OpenMode::ReadOnly(path))?;
             if let Some(owner) = schema::stored_meta(&client, "revision")? {
                 anyhow::ensure!(
                     owner == revision,

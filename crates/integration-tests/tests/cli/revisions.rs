@@ -76,6 +76,46 @@ fn checkout_revision_journey_through_cli() {
     }
 }
 
+#[test]
+fn workspace_sql_cannot_escape_the_data_directory() {
+    let data = tempfile::TempDir::new().unwrap();
+    seed_revision(
+        data.path(),
+        "a",
+        "CREATE TABLE gl_probe(id BIGINT); INSERT INTO gl_probe VALUES (7)",
+    );
+    let outside = tempfile::TempDir::new().unwrap();
+    let secret = outside.path().join("secret.txt");
+    std::fs::write(&secret, "secret").unwrap();
+    let other = outside.path().join("other.duckdb");
+    duckdb_client::DuckDbClient::open(&other).unwrap();
+
+    for sql in [
+        format!("SELECT * FROM read_text('{}')", secret.display()),
+        format!("ATTACH '{}' AS other", other.display()),
+        "INSTALL spatial".to_string(),
+        "SET enable_external_access = true".to_string(),
+    ] {
+        let (_, error, ok) = run_cmd(&["workspace", "sql", &sql], data.path());
+        assert!(!ok, "allowed: {sql}");
+        assert!(
+            error.contains("disabled by configuration")
+                || error.contains("configuration has been locked"),
+            "{sql}: {error}"
+        );
+    }
+
+    let (output, error, ok) = run_cmd(
+        &["workspace", "sql", "-F", "json", "SELECT id FROM gl_probe"],
+        data.path(),
+    );
+    assert!(ok, "{error}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&output).unwrap(),
+        json!([{"id": 7}])
+    );
+}
+
 fn seed_revision(data_dir: &std::path::Path, name: &str, ddl: &str) -> std::path::PathBuf {
     let path = data_dir.join(format!("{name}.duckdb"));
     let graph = duckdb_client::DuckDbClient::open(&path).unwrap();
@@ -309,9 +349,10 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
         String::from_utf8_lossy(&mismatch.stderr).contains("does not match the checkout revision")
     );
 
-    let manifest_db =
-        duckdb_client::DuckDbClient::open_read_only(&data_dir.path().join("local/manifest.duckdb"))
-            .unwrap();
+    let manifest_db = duckdb_client::DuckDbClient::open(duckdb_client::OpenMode::ReadOnly(
+        &data_dir.path().join("local/manifest.duckdb"),
+    ))
+    .unwrap();
     assert!(manifest_db.query_arrow("SELECT * FROM gl_file").is_err());
     drop(manifest_db);
     let all = orbit_sql("SELECT DISTINCT commit_sha FROM gl_file", data_dir.path());
