@@ -18,7 +18,7 @@ RUN --mount=type=secret,id=sccache_gcs_key \
     fi && \
     export RUSTC_WRAPPER="$SCCACHE_BIN" ORBIT_BILLING_ENFORCED="${ORBIT_BILLING_ENFORCED}" && \
     "$SCCACHE_BIN" --start-server || true && \
-    cargo build --release -p orbit-server --locked && \
+    cargo build --release -p orbit-server --locked --features libduckdb-sys/bundled && \
     "$SCCACHE_BIN" --show-stats || true && \
     ./scripts/checks/fips/check-binary.sh target/release/gkg-server && \
     cp target/release/gkg-server /gkg-server

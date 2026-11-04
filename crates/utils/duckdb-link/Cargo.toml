@@ -1,0 +1,8 @@
+[package]
+name = "orbit-duckdb-link"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[lints]
+workspace = true

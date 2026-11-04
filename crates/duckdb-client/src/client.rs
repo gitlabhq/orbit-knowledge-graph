@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
 use duckdb::params;
+use duckdb::vtab::arrow::{ArrowBatchRegistration, ArrowVTab};
 
 use crate::error::{DuckDbError, Result};
 use crate::helpers::sql_lit;
@@ -103,6 +104,28 @@ impl DuckDbClient {
         Ok(Self { conn })
     }
 
+    /// Opens another connection to the same database, which shares its settings and thread pool.
+    pub fn try_clone(&self) -> Result<Self> {
+        Ok(Self {
+            conn: self.conn.try_clone()?,
+        })
+    }
+
+    /// Needed once per database before [`Self::create_temp_table`].
+    pub fn register_arrow_scan(&self) -> Result<()> {
+        Ok(self.conn.register_table_function::<ArrowVTab>("arrow")?)
+    }
+
+    /// The table lives until this connection closes.
+    pub fn create_temp_table(&self, table: &str, batch: RecordBatch) -> Result<()> {
+        let batch = ArrowBatchRegistration::new(batch);
+        self.conn.execute(
+            &format!("CREATE TEMP TABLE {table} AS SELECT * FROM arrow(?)"),
+            [&batch],
+        )?;
+        Ok(())
+    }
+
     pub fn initialize_schema(&self, ddl: &str) -> Result<()> {
         self.conn
             .execute_batch(ddl)
@@ -131,9 +154,7 @@ impl DuckDbClient {
     }
 
     pub fn query_arrow(&self, sql: &str) -> Result<Vec<RecordBatch>> {
-        let mut stmt = self.conn.prepare(sql)?;
-        let batches = stmt.query_arrow([])?.collect();
-        Ok(batches)
+        self.query_arrow_params(sql, &[])
     }
 
     pub fn query_arrow_params(
@@ -142,9 +163,11 @@ impl DuckDbClient {
         params: &[Box<dyn duckdb::ToSql>],
     ) -> Result<Vec<RecordBatch>> {
         let mut stmt = self.conn.prepare(sql)?;
-        let batches = stmt
-            .query_arrow(duckdb::params_from_iter(params.iter()))?
-            .collect();
+        stmt.execute(duckdb::params_from_iter(params.iter()))?;
+        let mut batches = Vec::new();
+        while let Some(chunk) = stmt.step()? {
+            batches.push(RecordBatch::from(&chunk));
+        }
         Ok(batches)
     }
 

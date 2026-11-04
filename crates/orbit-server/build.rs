@@ -1,5 +1,6 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    orbit_duckdb_link::link_downloaded_duckdb("gkg-server");
     export_current_ontology_archive_path();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();

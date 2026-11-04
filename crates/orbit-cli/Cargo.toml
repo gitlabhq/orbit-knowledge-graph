@@ -68,6 +68,7 @@ rustix = { workspace = true }
 mimalloc = { workspace = true, features = ["override"] }
 
 [build-dependencies]
+orbit-duckdb-link = { path = "../utils/duckdb-link" }
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 
 [dev-dependencies]

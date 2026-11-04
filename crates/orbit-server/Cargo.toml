@@ -13,6 +13,11 @@ default = []
 regenerate-protos = ["dep:tonic-prost-build"]
 testkit = ["orbit-analytics/testkit"]
 
+# libduckdb-sys is used only by build.rs, which reads the download directory it publishes as
+# DEP_DUCKDB_INCLUDE. cargo-shear does not see build-script use of links metadata.
+[package.metadata.cargo-shear]
+ignored = ["libduckdb-sys"]
+
 [dependencies]
 mimalloc = { workspace = true }
 anyhow = { workspace = true }
@@ -32,7 +37,8 @@ orbit-arrow = { path = "../utils/arrow" }
 orbit-versions = { path = "../orbit-versions" }
 health-check = { workspace = true }
 indexer = { path = "../indexer" }
-indexer-datafusion = { path = "../indexer/datafusion" }
+indexer-duckdb = { path = "../indexer/duckdb" }
+libduckdb-sys = { workspace = true }
 orbit-migrations = { path = "../orbit-migrations" }
 minijinja = { workspace = true }
 named-queries = { path = "../named-queries" }
@@ -72,6 +78,7 @@ uuid = { workspace = true, features = ["v4"] }
 toon-format = { workspace = true }
 
 [build-dependencies]
+orbit-duckdb-link = { path = "../utils/duckdb-link" }
 orbit-versions = { path = "../orbit-versions" }
 tonic-prost-build = { workspace = true, optional = true }
 

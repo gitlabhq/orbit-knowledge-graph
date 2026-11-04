@@ -454,11 +454,11 @@ mod tests {
             .expect("HAS_NOTE transform on Note plan");
 
         assert!(
-            sql.contains("WHEN noteable_type = 'Issue' THEN 'WorkItem'"),
+            sql.contains(r#"WHEN "noteable_type" = 'Issue' THEN 'WorkItem'"#),
             "sql: {sql}"
         );
         assert!(
-            sql.contains("WHEN noteable_type = 'Epic' THEN 'WorkItem'"),
+            sql.contains(r#"WHEN "noteable_type" = 'Epic' THEN 'WorkItem'"#),
             "sql: {sql}"
         );
         assert!(sql.contains("'MergeRequest'"), "sql: {sql}");
@@ -495,7 +495,7 @@ mod tests {
         };
         let sql = &transforms[0].sql;
         assert!(
-            sql.contains("target_type IN (") && sql.contains("'Issue'"),
+            sql.contains(r#""target_type" IN ("#) && sql.contains("'Issue'"),
             "filter must include the raw Rails value that maps to WorkItem: {sql}"
         );
         assert!(
