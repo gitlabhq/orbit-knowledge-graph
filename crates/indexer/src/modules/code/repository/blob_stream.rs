@@ -11,11 +11,15 @@ use tokio_util::io::StreamReader;
 #[derive(Debug)]
 pub struct ResolvedBlob {
     pub oid: String,
+    /// Set only when the request asked for paths and Gitaly reached the blob
+    /// through a tree or a `<revision>:<path>` name. Empty otherwise.
+    pub path: Vec<u8>,
     pub data: Vec<u8>,
 }
 
 struct InProgressBlob {
     oid: String,
+    path: Vec<u8>,
     data: Vec<u8>,
 }
 
@@ -23,6 +27,7 @@ impl InProgressBlob {
     fn into_resolved(self) -> ResolvedBlob {
         ResolvedBlob {
             oid: self.oid,
+            path: self.path,
             data: self.data,
         }
     }
@@ -87,6 +92,7 @@ impl BlobStream {
                     if !chunk.oid.is_empty() {
                         let prev = self.current.replace(InProgressBlob {
                             oid: chunk.oid,
+                            path: chunk.path,
                             data: chunk.data,
                         });
                         if let Some(blob) = prev {
@@ -162,6 +168,7 @@ mod tests {
 
         assert_eq!(blobs.len(), 1);
         assert_eq!(blobs[0].oid, "abc123");
+        assert_eq!(blobs[0].path, b"src/main.rs");
         assert_eq!(blobs[0].data, b"hello");
     }
 
@@ -190,6 +197,7 @@ mod tests {
 
         assert_eq!(blobs.len(), 1);
         assert_eq!(blobs[0].oid, "abc123");
+        assert_eq!(blobs[0].path, b"file.rs", "path comes from the first chunk");
         assert_eq!(blobs[0].data, b"helloworld");
     }
 

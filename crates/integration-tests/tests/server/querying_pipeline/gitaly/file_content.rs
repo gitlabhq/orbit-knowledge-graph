@@ -137,6 +137,72 @@ fn multi_blob_response(blobs: &[(String, Vec<u8>)]) -> Vec<u8> {
     buf
 }
 
+/// Answers like Gitaly `ListBlobs` with `with_paths`: one blob per distinct
+/// content, in request order, named by the path after `<revision>:`. Paths
+/// with identical content share a blob, so only the first one is listed.
+fn gitaly_like_response(
+    revisions: &[String],
+    content_of: impl Fn(&str) -> Vec<u8>,
+    with_paths: bool,
+) -> Vec<u8> {
+    let mut seen = std::collections::HashSet::new();
+    let mut buf = Vec::new();
+    for revision in revisions {
+        let path = revision.split_once(':').map_or("", |(_, p)| p);
+        let content = content_of(path);
+        if !seen.insert(content.clone()) {
+            continue;
+        }
+        buf.extend(encode_frame(&ListBlobsResponse {
+            blobs: vec![BlobChunk {
+                oid: format!("oid-{}", seen.len()),
+                size: content.len() as i64,
+                data: content,
+                path: if with_paths {
+                    path.as_bytes().to_vec()
+                } else {
+                    Vec::new()
+                },
+            }],
+        }));
+    }
+    buf
+}
+
+/// The content of the repository in issue #1440: unique Java files, two
+/// identical text files, and two empty files.
+fn content_with_duplicates(path: &str) -> Vec<u8> {
+    match path {
+        "a/same.txt" | "b/same.txt" => b"identical content\n".to_vec(),
+        "pkg/__init__.py" | "tests/__init__.py" => Vec::new(),
+        other => format!("// content of {other}\n").into_bytes(),
+    }
+}
+
+fn duplicate_rows() -> Vec<PropertyRow> {
+    let mut paths: Vec<String> = (1..=40).map(|i| format!("src/File{i:02}.java")).collect();
+    paths.insert(7, "b/same.txt".into());
+    paths.insert(3, "a/same.txt".into());
+    paths.push("pkg/__init__.py".into());
+    paths.insert(20, "tests/__init__.py".into());
+    paths.iter().map(|p| file_row(1, "main", p)).collect()
+}
+
+fn assert_each_row_has_its_own_content(rows: &[PropertyRow], results: &[Option<ColumnValue>]) {
+    assert_eq!(results.len(), rows.len());
+    for (row, result) in rows.iter().zip(results) {
+        let Some(ColumnValue::String(path)) = row.get("path") else {
+            panic!("row without path");
+        };
+        let expected = String::from_utf8(content_with_duplicates(path)).unwrap();
+        assert_eq!(
+            result,
+            &Some(ColumnValue::String(expected)),
+            "wrong content for {path}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn resolves_single_file() {
     let mock =
@@ -234,9 +300,9 @@ async fn groups_by_project_id() {
     let projects_called = Arc::new(std::sync::Mutex::new(Vec::new()));
     let tracker = projects_called.clone();
 
-    let mock = mock_gitlab_server(move |project_id, _revisions| {
+    let mock = mock_gitlab_server(move |project_id, revisions| {
         tracker.lock().unwrap().push(project_id);
-        single_blob_response("abc", b"content")
+        gitaly_like_response(&revisions, |p| p.as_bytes().to_vec(), true)
     })
     .await;
 
@@ -491,4 +557,73 @@ async fn same_path_different_projects_fetched_separately() {
     let mut called = projects_called.lock().unwrap().clone();
     called.sort();
     assert_eq!(called, vec![1, 2]);
+}
+
+#[tokio::test]
+async fn files_with_identical_content_each_get_their_own_content() {
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let tracker = calls.clone();
+    let mock = mock_gitlab_server(move |_project_id, revisions| {
+        tracker.lock().unwrap().push(revisions.len());
+        gitaly_like_response(&revisions, content_with_duplicates, true)
+    })
+    .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let rows = duplicate_rows();
+    let row_refs: Vec<&PropertyRow> = rows.iter().collect();
+
+    let results = service
+        .resolve_batch("blob_content", &row_refs, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_each_row_has_its_own_content(&rows, &results);
+    let mut calls = calls.lock().unwrap().clone();
+    calls.sort();
+    assert_eq!(
+        calls,
+        vec![1, 1, rows.len()],
+        "one batch call, then one call per file whose blob the batch listed under another path"
+    );
+}
+
+#[tokio::test]
+async fn files_with_identical_content_resolve_without_paths_in_the_response() {
+    let mock = mock_gitlab_server(|_project_id, revisions| {
+        gitaly_like_response(&revisions, content_with_duplicates, false)
+    })
+    .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let rows = duplicate_rows();
+    let row_refs: Vec<&PropertyRow> = rows.iter().collect();
+
+    let results = service
+        .resolve_batch("blob_content", &row_refs, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_each_row_has_its_own_content(&rows, &results);
+}
+
+#[tokio::test]
+async fn files_resolve_by_path_when_blobs_arrive_out_of_order() {
+    let mock = mock_gitlab_server(|_project_id, revisions| {
+        let mut reversed = revisions.clone();
+        reversed.reverse();
+        gitaly_like_response(&reversed, content_with_duplicates, true)
+    })
+    .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let rows = duplicate_rows();
+    let row_refs: Vec<&PropertyRow> = rows.iter().collect();
+
+    let results = service
+        .resolve_batch("blob_content", &row_refs, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_each_row_has_its_own_content(&rows, &results);
 }

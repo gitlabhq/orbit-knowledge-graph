@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use gitlab_client::GitlabClient;
-use indexer::modules::code::repository::blob_stream::BlobStream;
+use indexer::modules::code::repository::blob_stream::{BlobStream, ResolvedBlob};
 use orbit_arrow::ColumnValue;
 use orbit_log_fields::{debug, warn};
 use query_engine::pipeline::PipelineError;
@@ -70,74 +71,28 @@ impl ColumnResolver for GitalyContentService {
             }
         }
 
-        let futures = by_project.iter().map(|(&project_id, keys)| {
+        let futures = by_project.into_iter().map(|(project_id, keys)| {
             let client = Arc::clone(&self.client);
-            let revisions: Vec<String> = keys
-                .iter()
-                .map(|(_, revision, path)| format!("{revision}:{path}"))
-                .collect();
-            let keys = keys.clone();
-            async move {
-                metrics::record_gitaly_call();
-                let stream = match client.list_blobs(project_id, &revisions).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        warn!(
-                            safe(GL_PROJECT_ID) = project_id,
-                            expanded(ERROR_MESSAGE) = %e,
-                            safe(ERROR_TYPE) = <&str>::from(&e),
-                            "list_blobs failed, content will be missing for this project"
-                        );
-                        return (vec![], true);
-                    }
-                };
-
-                let (blobs, err) = BlobStream::new(stream).drain().await;
-
-                let had_error = err.is_some();
-                if let Some(e) = err {
-                    warn!(
-                        safe(GL_PROJECT_ID) = project_id,
-                        safe(ERROR_TYPE) = "blob_decode",
-                        expanded(ERROR_MESSAGE) = %e,
-                        "blob stream decode error"
-                    );
-                }
-
-                let results = blobs
-                    .into_iter()
-                    .zip(keys.iter())
-                    .filter_map(|(blob, key)| match String::from_utf8(blob.data) {
-                        Ok(text) => {
-                            metrics::record_blob_bytes(text.len() as u64);
-                            Some((key.clone(), text))
-                        }
-                        Err(_) => {
-                            debug!(
-                                safe(GL_PROJECT_ID) = project_id,
-                                expanded(FILE_PATH) = key.2.as_str(),
-                                "skipping binary blob"
-                            );
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                (results, had_error)
-            }
+            async move { fetch_project_blobs(&client, project_id, keys).await }
         });
 
         let mut had_errors = false;
         for (blobs, errored) in futures::future::join_all(futures).await {
             had_errors |= errored;
-            for (key, text) in blobs {
-                file_cache.insert(key, Some(text));
+            for (key, data) in blobs {
+                match String::from_utf8(data) {
+                    Ok(text) => {
+                        metrics::record_blob_bytes(text.len() as u64);
+                        file_cache.insert(key, Some(text));
+                    }
+                    Err(_) => debug!(expanded(FILE_PATH) = key.2.as_str(), "skipping binary blob"),
+                }
             }
         }
 
         timer.set_outcome(if had_errors { "error" } else { "gitaly_direct" });
 
-        // Non-UTF-8 blobs were filtered during fetch, so their cache entries
-        // remain None and resolve to None here.
+        // Non-UTF-8 blobs and keys without a blob keep a None cache entry.
         Ok(requests
             .iter()
             .map(|entry| {
@@ -149,6 +104,141 @@ impl ColumnResolver for GitalyContentService {
             })
             .collect())
     }
+}
+
+/// Most single-file fetches one project may run at once.
+const MAX_CONCURRENT_SINGLE_FETCHES: usize = 8;
+
+/// Fetches the blobs of one project and pairs each blob with its key.
+///
+/// `ListBlobs` reads `git rev-list --objects`, which lists each object once.
+/// Two paths with identical content share one blob, so the response can hold
+/// fewer blobs than keys. Pairing by position then shifts every later key onto
+/// another file's content. Blobs are paired by path instead, and each key left
+/// without a blob is fetched alone, where no other path can share its blob.
+async fn fetch_project_blobs(
+    client: &GitlabClient,
+    project_id: i64,
+    keys: Vec<FileKey>,
+) -> (Vec<(FileKey, Vec<u8>)>, bool) {
+    let Some((blobs, mut had_error)) = list_blobs(client, project_id, &keys).await else {
+        return (vec![], true);
+    };
+    let (mut matched, unmatched) = match_blobs(keys, blobs);
+
+    if !unmatched.is_empty() {
+        debug!(
+            safe(GL_PROJECT_ID) = project_id,
+            safe(COUNT) = unmatched.len(),
+            "fetching blobs one by one for keys the batch did not match"
+        );
+        let singles: Vec<_> = futures::stream::iter(unmatched)
+            .map(|key| async move {
+                let keys = vec![key];
+                let fetched = list_blobs(client, project_id, &keys).await;
+                (keys, fetched)
+            })
+            .buffer_unordered(MAX_CONCURRENT_SINGLE_FETCHES)
+            .collect()
+            .await;
+
+        for (keys, fetched) in singles {
+            let Some((blobs, errored)) = fetched else {
+                had_error = true;
+                continue;
+            };
+            had_error |= errored;
+            matched.extend(match_blobs(keys, blobs).0);
+        }
+    }
+
+    (matched, had_error)
+}
+
+/// Returns `None` when the request fails, else the decoded blobs and whether
+/// the stream ended with a decode error.
+async fn list_blobs(
+    client: &GitlabClient,
+    project_id: i64,
+    keys: &[FileKey],
+) -> Option<(Vec<ResolvedBlob>, bool)> {
+    let revisions: Vec<String> = keys
+        .iter()
+        .map(|(_, revision, path)| format!("{revision}:{path}"))
+        .collect();
+
+    metrics::record_gitaly_call();
+    let stream = match client.list_blobs(project_id, &revisions).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(
+                safe(GL_PROJECT_ID) = project_id,
+                expanded(ERROR_MESSAGE) = %e,
+                safe(ERROR_TYPE) = <&str>::from(&e),
+                "list_blobs failed, content will be missing for this project"
+            );
+            return None;
+        }
+    };
+
+    let (blobs, err) = BlobStream::new(stream).drain().await;
+    let had_error = err.is_some();
+    if let Some(e) = err {
+        warn!(
+            safe(GL_PROJECT_ID) = project_id,
+            safe(ERROR_TYPE) = "blob_decode",
+            expanded(ERROR_MESSAGE) = %e,
+            "blob stream decode error"
+        );
+    }
+    Some((blobs, had_error))
+}
+
+/// Pairs blobs with the keys they were fetched for. Returns the pairs and the
+/// keys left without a blob.
+///
+/// A blob with a path goes to the one key with that path. A path shared by
+/// keys of different revisions is ambiguous, so those keys stay unmatched.
+/// Without paths, pairing by position is safe only when nothing was dropped,
+/// which holds when there are as many blobs as keys.
+fn match_blobs(
+    keys: Vec<FileKey>,
+    blobs: Vec<ResolvedBlob>,
+) -> (Vec<(FileKey, Vec<u8>)>, Vec<FileKey>) {
+    let all_have_paths = !blobs.is_empty() && blobs.iter().all(|b| !b.path.is_empty());
+
+    if !all_have_paths {
+        if blobs.len() == keys.len() {
+            let matched = keys
+                .into_iter()
+                .zip(blobs)
+                .map(|(k, b)| (k, b.data))
+                .collect();
+            return (matched, vec![]);
+        }
+        return (vec![], keys);
+    }
+
+    let mut key_count_by_path: HashMap<&[u8], usize> = HashMap::new();
+    for (_, _, path) in &keys {
+        *key_count_by_path.entry(path.as_bytes()).or_default() += 1;
+    }
+    let mut data_by_path: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+    for blob in blobs {
+        if key_count_by_path.get(blob.path.as_slice()) == Some(&1) {
+            data_by_path.entry(blob.path).or_insert(blob.data);
+        }
+    }
+
+    let mut matched = Vec::with_capacity(keys.len());
+    let mut unmatched = Vec::new();
+    for key in keys {
+        match data_by_path.remove(key.2.as_bytes()) {
+            Some(data) => matched.push((key, data)),
+            None => unmatched.push(key),
+        }
+    }
+    (matched, unmatched)
 }
 
 impl GitalyContentService {
@@ -299,6 +389,106 @@ mod tests {
     fn slice_empty_on_utf8_boundary() {
         // 'é' is 2 bytes (0xC3 0xA9). Slicing at byte 1 lands mid-character.
         assert_eq!(slice_content("é", Some(0), Some(1)), "");
+    }
+
+    fn key(revision: &str, path: &str) -> FileKey {
+        (1, revision.into(), path.into())
+    }
+
+    fn blob(oid: &str, path: &str, data: &str) -> ResolvedBlob {
+        ResolvedBlob {
+            oid: oid.into(),
+            path: path.as_bytes().to_vec(),
+            data: data.as_bytes().to_vec(),
+        }
+    }
+
+    fn data_of(matched: &[(FileKey, Vec<u8>)], path: &str) -> Option<String> {
+        matched
+            .iter()
+            .find(|(k, _)| k.2 == path)
+            .map(|(_, d)| String::from_utf8(d.clone()).unwrap())
+    }
+
+    #[test]
+    fn match_blobs_pairs_by_path_when_a_duplicate_blob_is_dropped() {
+        // Gitaly lists the blob shared by a/same.txt and b/same.txt once.
+        let keys = vec![
+            key("main", "a/same.txt"),
+            key("main", "b/same.txt"),
+            key("main", "src/One.java"),
+            key("main", "src/Two.java"),
+        ];
+        let blobs = vec![
+            blob("s", "a/same.txt", "same"),
+            blob("1", "src/One.java", "one"),
+            blob("2", "src/Two.java", "two"),
+        ];
+
+        let (matched, unmatched) = match_blobs(keys, blobs);
+
+        assert_eq!(data_of(&matched, "a/same.txt").as_deref(), Some("same"));
+        assert_eq!(data_of(&matched, "src/One.java").as_deref(), Some("one"));
+        assert_eq!(data_of(&matched, "src/Two.java").as_deref(), Some("two"));
+        assert_eq!(unmatched, vec![key("main", "b/same.txt")]);
+    }
+
+    #[test]
+    fn match_blobs_pairs_by_path_in_any_order() {
+        let keys = vec![key("main", "a.rs"), key("main", "b.rs")];
+        let blobs = vec![blob("b", "b.rs", "bee"), blob("a", "a.rs", "ay")];
+
+        let (matched, unmatched) = match_blobs(keys, blobs);
+
+        assert_eq!(data_of(&matched, "a.rs").as_deref(), Some("ay"));
+        assert_eq!(data_of(&matched, "b.rs").as_deref(), Some("bee"));
+        assert!(unmatched.is_empty());
+    }
+
+    #[test]
+    fn match_blobs_leaves_a_path_shared_by_two_revisions_unmatched() {
+        let keys = vec![key("sha1", "lib.rs"), key("sha2", "lib.rs")];
+        let blobs = vec![blob("x", "lib.rs", "v1"), blob("y", "lib.rs", "v2")];
+
+        let (matched, unmatched) = match_blobs(keys.clone(), blobs);
+
+        assert!(matched.is_empty());
+        assert_eq!(unmatched, keys);
+    }
+
+    #[test]
+    fn match_blobs_pairs_by_position_without_paths_when_counts_match() {
+        let keys = vec![key("main", "a.rs"), key("main", "b.rs")];
+        let blobs = vec![blob("a", "", "ay"), blob("b", "", "bee")];
+
+        let (matched, unmatched) = match_blobs(keys, blobs);
+
+        assert_eq!(data_of(&matched, "a.rs").as_deref(), Some("ay"));
+        assert_eq!(data_of(&matched, "b.rs").as_deref(), Some("bee"));
+        assert!(unmatched.is_empty());
+    }
+
+    #[test]
+    fn match_blobs_refuses_position_without_paths_when_counts_differ() {
+        let keys = vec![key("main", "a.rs"), key("main", "b.rs")];
+        let blobs = vec![blob("a", "", "ay")];
+
+        let (matched, unmatched) = match_blobs(keys.clone(), blobs);
+
+        assert!(matched.is_empty());
+        assert_eq!(unmatched, keys);
+    }
+
+    #[test]
+    fn match_blobs_ignores_blobs_for_other_paths() {
+        // A key that names a directory lists the blobs inside it.
+        let keys = vec![key("main", "src")];
+        let blobs = vec![blob("a", "src/a.rs", "ay"), blob("b", "src/b.rs", "bee")];
+
+        let (matched, unmatched) = match_blobs(keys.clone(), blobs);
+
+        assert!(matched.is_empty());
+        assert_eq!(unmatched, keys);
     }
 
     // resolve_batch is covered in the integration-tests crate (needs a live GitlabClient).
