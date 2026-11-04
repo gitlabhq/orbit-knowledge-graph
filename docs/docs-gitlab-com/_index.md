@@ -47,7 +47,7 @@ For more examples, see [prompt examples](prompt-examples.md).
 
 <!-- Videos published on 2026-07-06 and 2026-06-26 -->
 
-- [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/)<br>Install GitLab Orbit on Kubernetes and connect it to GitLab.
+- [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/)<br>Install GitLab Orbit on Kubernetes, connect GitLab to it, and index your first group.
 - [See the roadmap](https://gitlab-org.gitlab.io/orbit/knowledge-graph/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
 {.product-cards .product-cards-2}
 
