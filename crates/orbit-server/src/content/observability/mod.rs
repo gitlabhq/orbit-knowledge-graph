@@ -23,9 +23,8 @@ pub const SERVICE_NAME: &str = "observability";
 /// Checked per row rather than once at startup, so the flag's namespace
 /// allowlist can gate a rollout to one root namespace at a time.
 fn enabled_for_path(traversal_path: &str) -> bool {
-    let root = host_map::namespace_ids_nearest_first(traversal_path)
-        .last()
-        .and_then(|id| id.parse::<i64>().ok());
+    let root = orbit_utils::traversal_path::TraversalPath::new_unchecked(traversal_path)
+        .top_level_namespace_id();
 
     orbit_server_config::features::enabled_for(
         orbit_server_config::Feature::ObservabilityColumns,
@@ -169,5 +168,34 @@ pub fn build(settings: &ObservabilityResolverSettings) -> Option<Arc<Observabili
             );
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    fn root_namespace_of(traversal_path: &str) -> Option<i64> {
+        orbit_utils::traversal_path::TraversalPath::new_unchecked(traversal_path)
+            .top_level_namespace_id()
+    }
+
+    /// The first segment is the organization, so reading it would both miss
+    /// every allowlisted namespace and match other tenants in that org.
+    #[test]
+    fn the_gate_reads_the_root_namespace_not_the_organization() {
+        assert_eq!(root_namespace_of("9970/12345/67890/"), Some(12345));
+        assert_eq!(root_namespace_of("9970/12345/"), Some(12345));
+    }
+
+    #[test]
+    fn a_path_without_a_root_namespace_has_none() {
+        assert_eq!(root_namespace_of("9970/"), None);
+        assert_eq!(root_namespace_of(""), None);
+    }
+
+    /// Off until features::init runs, so an unconfigured server resolves
+    /// nothing rather than resolving for everyone.
+    #[test]
+    fn the_gate_is_closed_before_the_flag_is_installed() {
+        assert!(!super::enabled_for_path("9970/12345/"));
     }
 }
