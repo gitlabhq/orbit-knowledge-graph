@@ -169,18 +169,14 @@ impl TenantHostMap {
         Some(Arc::clone(&cached.routes))
     }
 
-    /// Database names across every tenant in the current map.
-    pub async fn live_databases(&self) -> Vec<String> {
+    /// Every tenant in the current map.
+    pub async fn live_routes(&self) -> Vec<TenantRoute> {
         let cache = self.cache.read().await;
         let Some(cached) = cache.as_ref() else {
             return Vec::new();
         };
 
-        cached
-            .routes
-            .values()
-            .map(|route| route.traces_db.clone())
-            .collect()
+        cached.routes.values().cloned().collect()
     }
 
     async fn store(&self, routes: TenantRoutes, refresh_after: Duration) {
@@ -335,7 +331,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_databases_lists_every_tenant_in_the_map() {
+    async fn live_routes_lists_every_tenant_in_the_map() {
         let map = host_map();
         map.store(
             Arc::new(HashMap::from([
@@ -346,10 +342,15 @@ mod tests {
         )
         .await;
 
-        let mut databases = map.live_databases().await;
-        databases.sort();
+        let mut group_ids: Vec<String> = map
+            .live_routes()
+            .await
+            .into_iter()
+            .map(|route| route.group_id)
+            .collect();
+        group_ids.sort();
 
-        assert_eq!(databases, vec!["12345_signoz_traces", "9970_signoz_traces"]);
+        assert_eq!(group_ids, vec!["12345", "9970"]);
     }
 
     #[tokio::test]
