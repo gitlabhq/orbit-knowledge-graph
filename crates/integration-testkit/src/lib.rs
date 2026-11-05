@@ -78,6 +78,23 @@ pub fn versioned_data_model(
     )
 }
 
+pub fn graph_schema(
+    fragments: &[query_data_model::spec::Fragment],
+) -> orbit_migrations::schema::GraphSchema {
+    let physical = orbit_migrations::schema::Schema::from_model(&load_model(fragments))
+        .expect("test model should resolve a ClickHouse schema");
+    orbit_migrations::schema::GraphSchema::new(physical, false)
+}
+
+pub fn embedded_schema() -> orbit_migrations::schema::Schema {
+    orbit_migrations::schema::Schema::from_model(
+        &query_data_model::Packages::embedded()
+            .load()
+            .expect("embedded packages should load"),
+    )
+    .expect("embedded packages should resolve a ClickHouse schema")
+}
+
 pub fn load_data_model() -> std::sync::Arc<query_data_model::ClickHouseDataModel> {
     versioned_data_model(unprefixed_fragments())
 }
@@ -102,11 +119,10 @@ pub fn t(table: &str) -> String {
     format!("{}{}", *TABLE_PREFIX, table)
 }
 
-/// Generated from the ontology so integration tests create the same prefixed
+/// Generated from the model so integration tests create the same prefixed
 /// tables and materialized views the indexer writes to at runtime.
 pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
-    let ontology = load_unprefixed_ontology();
-    let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
+    let schema = graph_schema(&unprefixed_fragments());
 
     let mut stmts: Vec<String> = schema
         .tables
@@ -245,4 +261,38 @@ macro_rules! run_subtests_shared {
 
         $crate::collect_subtest_results(_handles).await;
     }};
+}
+
+pub fn release(
+    version: u32,
+    sources: &std::collections::BTreeMap<String, String>,
+    packages: &query_data_model::Packages,
+) -> orbit_migrations::archive::Release {
+    orbit_migrations::archive::Release::new(
+        ontology::archive::OntologyArchive::from_sources(version, sources)
+            .expect("test ontology archive should build"),
+        orbit_migrations::archive::ModelArchive::from_packages(version, packages)
+            .expect("test model archive should build"),
+    )
+    .expect("test archives should form one release")
+}
+
+pub fn embedded_release(version: u32) -> orbit_migrations::archive::Release {
+    release(
+        version,
+        &ontology::migrations::embedded_sources(),
+        &query_data_model::Packages::embedded(),
+    )
+}
+
+pub fn derived_release(
+    version: u32,
+    sources: &std::collections::BTreeMap<String, String>,
+) -> orbit_migrations::archive::Release {
+    let ontology = ontology::archive::OntologyArchive::from_sources(version, sources)
+        .and_then(|archive| archive.load_ontology())
+        .expect("test ontology should load");
+    let packages = query_data_model::from_ontology::packages(&ontology)
+        .expect("test ontology should convert to packages");
+    release(version, sources, &packages)
 }

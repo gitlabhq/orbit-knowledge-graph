@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use ontology::Ontology;
-use orbit_migrations::schema::{DictionaryCredentials, GraphSchema};
+use orbit_migrations::schema::{DictionaryCredentials, GraphSchema, Schema};
+use query_data_model::Packages;
 
 fn load_ontology(path: Option<&PathBuf>) -> Result<Ontology> {
     match path {
@@ -20,13 +21,23 @@ fn local_dictionary_credentials() -> DictionaryCredentials {
     }
 }
 
+fn load_schema(model_path: Option<&PathBuf>) -> Result<GraphSchema> {
+    let packages = match model_path {
+        Some(path) => Packages::read_dir(path).context("failed to read model packages")?,
+        None => Packages::embedded(),
+    };
+    Ok(GraphSchema::new(
+        Schema::from_model(&packages.load()?)?,
+        false,
+    ))
+}
+
 pub fn run_remote(
-    ontology_path: Option<PathBuf>,
+    model_path: Option<PathBuf>,
     prefix: String,
     diff: Option<PathBuf>,
 ) -> Result<()> {
-    let ontology = load_ontology(ontology_path.as_ref())?;
-    let schema = GraphSchema::from_ontology(&ontology)?;
+    let schema = load_schema(model_path.as_ref())?;
     let credentials = local_dictionary_credentials();
 
     let mut generated: Vec<String> = schema
@@ -86,9 +97,8 @@ pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-pub fn run_persistent(ontology_path: Option<PathBuf>, diff: Option<PathBuf>) -> Result<()> {
-    let ontology = load_ontology(ontology_path.as_ref())?;
-    let schema = GraphSchema::from_ontology(&ontology)?;
+pub fn run_persistent(model_path: Option<PathBuf>, diff: Option<PathBuf>) -> Result<()> {
+    let schema = load_schema(model_path.as_ref())?;
 
     let generated: Vec<String> = schema
         .unversioned_definitions
@@ -269,16 +279,14 @@ mod tests {
 
     #[test]
     fn remote_ddl_contains_create_table() {
-        let ontology = ontology::Ontology::load_embedded().unwrap();
-        let schema = GraphSchema::from_ontology(&ontology).unwrap();
+        let schema = load_schema(None).unwrap();
         assert!(!schema.tables.is_empty());
         assert!(schema.tables[0].to_create_sql("").contains("CREATE TABLE"));
     }
 
     #[test]
     fn persistent_ddl_contains_unversioned_table_without_prefix() {
-        let ontology = ontology::Ontology::load_embedded().unwrap();
-        let schema = GraphSchema::from_ontology(&ontology).unwrap();
+        let schema = load_schema(None).unwrap();
         let table = schema
             .unversioned_definitions
             .iter()

@@ -6,6 +6,9 @@ use ontology::migrations::{
     self, FINGERPRINT_FILE, Fingerprints, LEDGER_FILE, MigrationLedger, embedded_sources,
 };
 
+use query_data_model::Packages;
+
+use crate::archive::ModelArchive;
 use crate::fingerprint::current_fingerprints;
 
 const REMEDIATION: &str = "Run `mise schema:bump` to record the change and re-snapshot.";
@@ -17,13 +20,13 @@ pub struct VerifiedSnapshot {
 }
 
 /// Verifies the committed fingerprint snapshot, migration ledger and current
-/// ontology archive in `config_dir` against the embedded ontology.
+/// ontology and model archives in `config_dir` against the embedded sources.
 pub fn verify_committed_snapshot(
     ontology: &Ontology,
     config_dir: &Path,
     schema_version: u32,
 ) -> Result<VerifiedSnapshot, String> {
-    let current = current_fingerprints(ontology).map_err(|error| error.to_string())?;
+    let current = current_fingerprints().map_err(|error| error.to_string())?;
 
     let fingerprint_path = config_dir.join(FINGERPRINT_FILE);
     let committed_text = std::fs::read_to_string(&fingerprint_path).map_err(|error| {
@@ -52,6 +55,19 @@ pub fn verify_committed_snapshot(
         .map_err(|error| error.to_string())?;
     if !archive.matches_sources(&embedded_sources()) {
         return Err(format!("ontology archive is stale. {REMEDIATION}"));
+    }
+
+    let model_path = ModelArchive::path(config_dir, schema_version);
+    let model_bytes = std::fs::read(&model_path).map_err(|error| {
+        format!(
+            "reading {}: {error}. Run `mise schema:snapshot` to recreate a missing archive.",
+            model_path.display()
+        )
+    })?;
+    let model = ModelArchive::from_bytes(schema_version, &model_bytes)
+        .map_err(|error| error.to_string())?;
+    if !model.matches(&Packages::embedded()) {
+        return Err(format!("model archive is stale. {REMEDIATION}"));
     }
 
     Ok(VerifiedSnapshot { committed, ledger })

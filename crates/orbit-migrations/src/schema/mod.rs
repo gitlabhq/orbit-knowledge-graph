@@ -1,7 +1,5 @@
 mod refreshable;
 
-use ontology::Ontology;
-use query_data_model::DataModelError;
 pub use query_data_model::implementations::clickhouse::schema::{
     Dictionary, DictionaryCredentials, Engine, MaterializedView, RefreshableView, Schema, Table,
 };
@@ -26,17 +24,9 @@ pub struct UnversionedDefinition {
 }
 
 impl GraphSchema {
-    pub fn from_ontology(ontology: &Ontology) -> Result<Self, DataModelError> {
-        Self::from_ontology_replicated(ontology, false)
-    }
-
     /// `replicated` renders every MergeTree engine as its `Replicated*` variant for a
     /// self-managed cluster; a `Replicated` database replicates DDL only.
-    pub fn from_ontology_replicated(
-        ontology: &Ontology,
-        replicated: bool,
-    ) -> Result<Self, DataModelError> {
-        let physical = query_data_model::from_ontology::schema(ontology)?;
+    pub fn new(physical: Schema, replicated: bool) -> Self {
         let engine = |engine: Engine| {
             if replicated {
                 engine.replicated()
@@ -76,14 +66,14 @@ impl GraphSchema {
                     create_statement: prefixed.to_create_sql(),
                 }
             });
-        Ok(Self {
+        Self {
             tables: physical.versioned_tables().map(table).collect(),
             views: physical.views().iter().map(view).collect(),
             dictionaries: physical.dictionaries().to_vec(),
             refreshable_views: physical.refreshable_views().to_vec(),
             unversioned_definitions: unversioned_tables.chain(unversioned_views).collect(),
             physical,
-        })
+        }
     }
 
     pub fn table_names(&self) -> Vec<&str> {
@@ -148,9 +138,10 @@ mod tests {
 
     #[test]
     fn replicated_schema_renders_replicated_engines_everywhere() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let plain = GraphSchema::from_ontology(&ontology).unwrap();
-        let replicated = GraphSchema::from_ontology_replicated(&ontology, true).unwrap();
+        let physical =
+            Schema::from_model(&query_data_model::Packages::embedded().load().unwrap()).unwrap();
+        let plain = GraphSchema::new(physical.clone(), false);
+        let replicated = GraphSchema::new(physical, true);
 
         assert!(!merge_tree_engines(&plain).is_empty());
         assert!(

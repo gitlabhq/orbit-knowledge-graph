@@ -25,16 +25,22 @@ impl GraphCatalog {
     ) -> Self {
         let mut graph = Self::default();
         let mut pending = Vec::new();
+        let mut entities = Vec::new();
         let mut relationships = Vec::new();
         for fragment in fragments {
-            graph.declare_entities(
-                &fragment.package,
-                fragment.domain,
-                fragment.entities,
-                &mut pending,
-                diagnostics,
-            );
+            for (name, spec) in fragment.entities {
+                entities.push((
+                    fragment.package.clone(),
+                    fragment.domain.clone(),
+                    name,
+                    spec,
+                ));
+            }
             relationships.push((fragment.package, fragment.relationships));
+        }
+        entities.sort_by(|left, right| left.2.cmp(&right.2));
+        for (package, domain, name, spec) in entities {
+            graph.declare_entity(&package, domain, name, spec, &mut pending, diagnostics);
         }
         graph.resolve_references(pending, diagnostics);
         for (package, relationships) in relationships {
@@ -44,74 +50,73 @@ impl GraphCatalog {
         graph
     }
 
-    fn declare_entities(
+    fn declare_entity(
         &mut self,
         package: &str,
         domain: Option<String>,
-        entities: IndexMap<String, EntitySpec>,
+        name: String,
+        spec: EntitySpec,
         pending: &mut Vec<PendingReference>,
         diagnostics: &mut Diagnostics,
     ) {
-        for (name, spec) in entities {
-            let id = EntityId(self.entities.len());
-            if let Some(existing) = self.entity_ids.get(&name) {
-                let owner = &self.entity(*existing).package;
-                diagnostics.error(
-                    package,
-                    format!("entity {name} is already declared by {owner}"),
-                );
-                continue;
-            }
-            if !spec.properties.contains_key(KEY) {
-                diagnostics.error(package, format!("entity {name} has no `{KEY}` property"));
-            }
-            self.entity_ids.insert(name.clone(), id);
-            let mut names = HashMap::with_capacity(spec.properties.len());
-            let mut properties = Vec::with_capacity(spec.properties.len());
-            for (property, spec) in spec.properties {
-                let property_id = PropertyId(self.properties.len());
-                let Some((declared, targets)) =
-                    declare_property(id, property_id, property, spec, package, diagnostics)
-                else {
-                    continue;
-                };
-                if !targets.is_empty() {
-                    pending.push(PendingReference {
-                        property: property_id,
-                        package: package.to_string(),
-                        targets,
-                    });
-                }
-                names.insert(declared.name.clone(), property_id);
-                properties.push(property_id);
-                self.properties.push(declared);
-            }
-            let defaults = spec
-                .defaults
-                .iter()
-                .filter_map(|default| {
-                    diagnostics.require(names.get(default).copied(), package, || {
-                        format!("{name} default {default} is not a property")
-                    })
-                })
-                .collect();
-            if let Some(label) = &spec.label
-                && !names.contains_key(label)
-            {
-                diagnostics.error(package, format!("{name} label {label} is not a property"));
-            }
-            self.property_ids.push(names);
-            self.entities.push(Entity {
-                id,
-                name,
-                package: package.to_string(),
-                domain: domain.clone(),
-                description: spec.description,
-                label: spec.label.unwrap_or_default(),
-                properties,
-                defaults,
-            });
+        let id = EntityId(self.entities.len());
+        if let Some(existing) = self.entity_ids.get(&name) {
+            let owner = &self.entity(*existing).package;
+            diagnostics.error(
+                package,
+                format!("entity {name} is already declared by {owner}"),
+            );
+            return;
         }
+        if !spec.properties.contains_key(KEY) {
+            diagnostics.error(package, format!("entity {name} has no `{KEY}` property"));
+        }
+        self.entity_ids.insert(name.clone(), id);
+        let mut names = HashMap::with_capacity(spec.properties.len());
+        let mut properties = Vec::with_capacity(spec.properties.len());
+        for (property, spec) in spec.properties {
+            let property_id = PropertyId(self.properties.len());
+            let Some((declared, targets)) =
+                declare_property(id, property_id, property, spec, package, diagnostics)
+            else {
+                continue;
+            };
+            if !targets.is_empty() {
+                pending.push(PendingReference {
+                    property: property_id,
+                    package: package.to_string(),
+                    targets,
+                });
+            }
+            names.insert(declared.name.clone(), property_id);
+            properties.push(property_id);
+            self.properties.push(declared);
+        }
+        let defaults = spec
+            .defaults
+            .iter()
+            .filter_map(|default| {
+                diagnostics.require(names.get(default).copied(), package, || {
+                    format!("{name} default {default} is not a property")
+                })
+            })
+            .collect();
+        if let Some(label) = &spec.label
+            && !names.contains_key(label)
+        {
+            diagnostics.error(package, format!("{name} label {label} is not a property"));
+        }
+        self.property_ids.push(names);
+        self.entities.push(Entity {
+            id,
+            name,
+            package: package.to_string(),
+            domain,
+            description: spec.description,
+            label: spec.label.unwrap_or_default(),
+            properties,
+            defaults,
+        });
     }
 
     fn resolve_references(

@@ -5,7 +5,7 @@ use clickhouse_client::ArrowClickHouseClient;
 use orbit_arrow::ArrowUtils;
 use thiserror::Error;
 
-use crate::schema::{self, DictionaryCredentials, GraphSchema};
+use crate::schema::{self, DictionaryCredentials, GraphSchema, Schema};
 use crate::scope::{
     InvalidatedPipelines, MigrationScope, TableMigrationAction, classify_tables_for_scope,
     find_invalidated_pipelines, widen_scope_for_shared_table_writers,
@@ -142,11 +142,10 @@ pub async fn create_unversioned_definitions(
 
 pub async fn replace_refreshable_views(
     graph: &ArrowClickHouseClient,
-    ontology: &ontology::Ontology,
+    physical: &Schema,
     version: u32,
 ) -> Result<(), MigrationError> {
     let prefix = table_prefix(version);
-    let physical = query_data_model::from_ontology::schema(ontology)?;
     for view in physical.refreshable_views() {
         let view_name = if view.versioned {
             format!("{prefix}{}", view.name)
@@ -154,7 +153,7 @@ pub async fn replace_refreshable_views(
             view.name.clone()
         };
         let rendered_select =
-            schema::render_refreshable_view_select(&view.select_query, &physical, version, &prefix)
+            schema::render_refreshable_view_select(&view.select_query, physical, version, &prefix)
                 .map_err(|error| MigrationError::Ddl {
                     entity_name: view_name.clone(),
                     reason: error.to_string(),
@@ -178,11 +177,11 @@ pub async fn replace_refreshable_views(
 
 pub async fn drop_versioned_refreshable_views(
     graph: &ArrowClickHouseClient,
-    ontology: &ontology::Ontology,
+    physical: &Schema,
     version: u32,
 ) -> Result<(), MigrationError> {
     let prefix = table_prefix(version);
-    for view in query_data_model::from_ontology::schema(ontology)?
+    for view in physical
         .refreshable_views()
         .iter()
         .filter(|view| view.versioned)

@@ -229,24 +229,24 @@ pub async fn run(
 
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
-    archive: &ontology::archive::OntologyArchive,
+    release: &orbit_migrations::archive::Release,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
-    let candidate = archive
-        .load_ontology()
-        .map_err(orbit_migrations::catalog::CatalogError::from)?;
+    let candidate = release.load_ontology()?;
     let code_tables = modules::code::config::CodeTableNames::from_ontology(&candidate)?;
     let clients = ClickHouseClients::new(&config.graph, &config.datalake);
 
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
     let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
-    let ontology = catalog.publish(archive).await?;
+    let orbit_migrations::archive::LoadedRelease { ontology, model } =
+        catalog.publish(release).await?;
+    let physical = orbit_migrations::schema::Schema::from_model(&model)?;
 
     let graph = clients.graph.clone();
     if let Some(active_version) = orbit_migrations::version::read_active_version(&graph).await?
-        && active_version != archive.schema_version()
+        && active_version != release.schema_version()
     {
         catalog.ensure_archive(active_version).await?;
     }
@@ -282,6 +282,7 @@ pub async fn run_dispatcher(
         &dictionary_credentials,
         &lock_service,
         &ontology,
+        &physical,
         &migration_metrics,
         &campaign,
     )
@@ -298,10 +299,10 @@ pub async fn run_dispatcher(
     match schema::version::read_active_version(&graph).await {
         Ok(Some(active_version)) if active_version == *schema::version::SCHEMA_VERSION => {
             {
-                let graph_schema = orbit_migrations::schema::GraphSchema::from_ontology_replicated(
-                    &ontology,
+                let graph_schema = orbit_migrations::schema::GraphSchema::new(
+                    physical.clone(),
                     graph.is_replicated(),
-                )?;
+                );
                 if let Err(error) =
                     orbit_migrations::execute::create_unversioned_definitions(&graph, &graph_schema)
                         .await
@@ -313,7 +314,7 @@ pub async fn run_dispatcher(
                     );
                 }
             }
-            orbit_migrations::execute::replace_refreshable_views(&graph, &ontology, active_version)
+            orbit_migrations::execute::replace_refreshable_views(&graph, &physical, active_version)
                 .await
                 .map_err(schema::migration::DispatcherMigrationError::from)?;
         }
@@ -376,10 +377,10 @@ pub async fn run_dispatcher(
         )),
         Box::new(TableCleanup::new(
             graph,
-            &ontology,
+            &physical,
             metrics.clone(),
             config.schedule.tasks.table_cleanup.clone(),
-        )?),
+        )),
         Box::new(NamespaceDeletionScheduler::new(
             deletion_store,
             checkpoint_store,
@@ -408,6 +409,7 @@ pub async fn run_dispatcher(
             clients.datalake.clone(),
             lock_service.clone(),
             Arc::new(ontology),
+            physical,
             config.schema.clone(),
             config.schedule.tasks.migration_completion.clone(),
             metrics.clone(),

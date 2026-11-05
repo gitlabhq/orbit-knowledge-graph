@@ -6079,6 +6079,7 @@ dependencies = [
  "orbit-versions",
  "query-data-model",
  "regex",
+ "rust-embed",
  "serde",
  "strum 0.28.0",
  "thiserror 2.0.18",

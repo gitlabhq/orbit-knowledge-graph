@@ -42,8 +42,13 @@ mod tests {
 
     #[test]
     fn every_ontology_column_type_has_byte_counting_coverage() {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
+        let schema = orbit_migrations::schema::GraphSchema::new(
+            orbit_migrations::schema::Schema::from_model(
+                &query_data_model::Packages::embedded().load().unwrap(),
+            )
+            .unwrap(),
+            false,
+        );
         for table in &schema.tables {
             for column in &table.columns {
                 let arrow_type = clickhouse_type_string_to_arrow(&column.storage_type);

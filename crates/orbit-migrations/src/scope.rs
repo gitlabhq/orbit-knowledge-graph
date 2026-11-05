@@ -360,11 +360,11 @@ mod tests {
 
     fn classify(scope: MigrationScope) -> BTreeMap<String, TableMigrationAction> {
         let ontology = Ontology::load_embedded().expect("ontology must load");
-        classify_tables_for_scope(
-            &ontology,
-            &query_data_model::from_ontology::schema(&ontology).unwrap(),
-            &scope,
-        )
+        classify_tables_for_scope(&ontology, &embedded_schema(), &scope)
+    }
+
+    fn embedded_schema() -> Schema {
+        Schema::from_model(&query_data_model::Packages::embedded().load().unwrap()).unwrap()
     }
 
     fn action(map: &BTreeMap<String, TableMigrationAction>, table: &str) -> TableMigrationAction {
@@ -375,7 +375,7 @@ mod tests {
     #[test]
     fn shared_edge_writers_force_scope_widening() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
-        let layout = query_data_model::from_ontology::schema(&ontology).unwrap();
+        let layout = embedded_schema();
 
         assert_eq!(
             widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&["User"])),

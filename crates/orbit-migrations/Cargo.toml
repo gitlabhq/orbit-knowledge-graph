@@ -18,6 +18,7 @@ orbit-versions = { path = "../orbit-versions" }
 orbit-utils = { path = "../utils" }
 orbit-arrow = { path = "../utils/arrow" }
 regex = { workspace = true }
+rust-embed = { workspace = true, features = ["include-exclude"] }
 serde = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }

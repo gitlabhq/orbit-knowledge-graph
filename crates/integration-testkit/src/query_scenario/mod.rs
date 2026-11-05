@@ -209,8 +209,7 @@ async fn run_case(
     let ctx = if let Some(database) = database {
         let forked = ctx.fork(database).await;
         if let Some(overlay) = &cfg.ontology_overlay {
-            let ontology = crate::load_ontology_overlay(overlay);
-            let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
+            let schema = crate::graph_schema(&crate::overlay_fragments(overlay));
             let credentials = orbit_migrations::schema::DictionaryCredentials {
                 database: forked.config.database.clone(),
                 user: forked.config.username.clone(),

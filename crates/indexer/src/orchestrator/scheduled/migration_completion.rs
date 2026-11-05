@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use orbit_arrow::ArrowUtils;
 use orbit_log_fields::{info, warn};
 use orbit_migrations::catalog::OntologyCatalog;
+use orbit_migrations::schema::Schema;
 use orbit_migrations::scope::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
 use orbit_migrations::version::{
     SCHEMA_VERSION, promote_version, read_migrating_version, table_prefix,
@@ -54,6 +55,7 @@ pub struct MigrationCompletionChecker {
     datalake: ArrowClickHouseClient,
     lock_service: Arc<dyn LockService>,
     ontology: Arc<ontology::Ontology>,
+    physical: Schema,
     schema_config: SchemaConfig,
     config: MigrationCompletionConfig,
     metrics: CompletionMetrics,
@@ -73,6 +75,7 @@ impl MigrationCompletionChecker {
         datalake: ArrowClickHouseClient,
         lock_service: Arc<dyn LockService>,
         ontology: Arc<ontology::Ontology>,
+        physical: Schema,
         schema_config: SchemaConfig,
         config: MigrationCompletionConfig,
         task_metrics: ScheduledTaskMetrics,
@@ -85,6 +88,7 @@ impl MigrationCompletionChecker {
             datalake,
             lock_service,
             ontology,
+            physical,
             schema_config,
             config,
             metrics: CompletionMetrics::new(),
@@ -187,11 +191,10 @@ impl MigrationCompletionChecker {
             })?;
 
         {
-            let schema = orbit_migrations::schema::GraphSchema::from_ontology_replicated(
-                &self.ontology,
+            let schema = orbit_migrations::schema::GraphSchema::new(
+                self.physical.clone(),
                 self.graph.is_replicated(),
-            )
-            .map_err(TaskError::new)?;
+            );
             orbit_migrations::execute::create_unversioned_definitions(&self.graph, &schema)
                 .await
                 .map_err(|error| {
@@ -202,7 +205,7 @@ impl MigrationCompletionChecker {
         }
         orbit_migrations::execute::replace_refreshable_views(
             &self.graph,
-            &self.ontology,
+            &self.physical,
             migrating_version,
         )
         .await
@@ -230,7 +233,7 @@ impl MigrationCompletionChecker {
         for version in retired_versions {
             if let Err(error) = orbit_migrations::execute::drop_versioned_refreshable_views(
                 &self.graph,
-                &self.ontology,
+                &self.physical,
                 version,
             )
             .await
@@ -331,6 +334,7 @@ impl MigrationCompletionChecker {
         orbit_migrations::completion::resolve_migration_scope(
             &self.graph,
             &self.ontology,
+            &self.physical,
             migrating_version,
         )
         .await
@@ -419,11 +423,10 @@ impl MigrationCompletionChecker {
     }
 
     async fn reconcile_dead_versions(&self) -> Result<(), TaskError> {
-        let schema = orbit_migrations::schema::GraphSchema::from_ontology_replicated(
-            &self.ontology,
+        let schema = orbit_migrations::schema::GraphSchema::new(
+            self.physical.clone(),
             self.graph.is_replicated(),
-        )
-        .map_err(TaskError::new)?;
+        );
 
         let entities = orbit_migrations::garbage_collection::find_droppable_entities(
             &self.graph,

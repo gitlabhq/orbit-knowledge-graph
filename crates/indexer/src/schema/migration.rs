@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use orbit_log_fields::{info, warn};
 use orbit_migrations::execute::{self, MigrationError};
-use orbit_migrations::schema::{DictionaryCredentials, GraphSchema};
+use orbit_migrations::schema::{DictionaryCredentials, GraphSchema, Schema};
 use thiserror::Error;
 
 use super::metrics::MigrationMetrics;
@@ -43,12 +43,12 @@ pub async fn run_if_needed(
     credentials: &DictionaryCredentials,
     lock_service: &Arc<dyn LockService>,
     ontology: &ontology::Ontology,
+    physical: &Schema,
     metrics: &MigrationMetrics,
     campaign: &CampaignState,
 ) -> Result<(), DispatcherMigrationError> {
     let active = read_active_version(graph).await?;
-    let schema = GraphSchema::from_ontology_replicated(ontology, graph.is_replicated())
-        .map_err(MigrationError::from)?;
+    let schema = GraphSchema::new(physical.clone(), graph.is_replicated());
 
     match active {
         None => {

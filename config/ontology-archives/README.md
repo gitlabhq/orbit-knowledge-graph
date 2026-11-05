@@ -28,3 +28,12 @@ Each was produced with `OntologyArchive::from_sources(N, sources)` over that com
 To support another legacy starting schema, recover its sources from the exact
 release, generate and commit its archive, document its provenance here, and test
 the direct upgrade. Never relabel the current ontology as a historical version.
+
+## Model archives
+
+Every ontology archive has a model archive with the same name in
+`config/model-archives/`. It holds the data model packages (`config/model/`) of
+that schema version, and the server loads queries from it. Bumps and snapshots
+write both. Versions before the packages were checked in were converted once with
+`cargo xtask migration-ledger legacy-model-archives`; run it again after adding a
+legacy ontology archive.

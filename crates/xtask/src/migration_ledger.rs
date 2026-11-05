@@ -13,7 +13,9 @@ use ontology::migrations::{
     self, EdgeRows, Fingerprints, LedgerScope, MigrationEntry, MigrationLedger, MigrationScope,
     derive_edge_rows, derive_scope,
 };
+use orbit_migrations::archive::{ModelArchive, Release};
 use orbit_migrations::snapshot_check::{VerifiedSnapshot, verify_committed_snapshot};
+use query_data_model::Packages;
 
 const DEFAULT_BASE: &str = "origin/main";
 
@@ -259,7 +261,7 @@ pub fn bump(
     }
 
     let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
-    let current = orbit_migrations::fingerprint::current_fingerprints(&ontology)?;
+    let current = orbit_migrations::fingerprint::current_fingerprints()?;
 
     let Some(committed) = read_committed_fingerprints()? else {
         return write_initial_snapshot(&ontology, &current);
@@ -367,24 +369,7 @@ pub fn bump(
         .validate(&ontology, final_version)
         .map_err(|e| anyhow!(e))?;
 
-    let archive = OntologyArchive::from_sources(final_version, &source_contents)?;
-    archive.load_ontology()?;
-
-    let archive_path = OntologyArchive::path(&config_dir(), final_version);
-
-    if is_new && archive_path.exists() {
-        let existing_bytes = fs::read(&archive_path)
-            .with_context(|| format!("reading {}", archive_path.display()))?;
-
-        if existing_bytes != archive.bytes() {
-            bail!(
-                "ontology archive already exists with different contents: {}",
-                archive_path.display()
-            );
-        }
-    }
-
-    archive.write_atomic(&archive_path)?;
+    write_release(&embedded_release(final_version)?, !is_new)?;
 
     if is_new {
         write_schema_version(final_version)?;
@@ -402,8 +387,7 @@ pub fn bump(
 }
 
 pub fn snapshot() -> Result<()> {
-    let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
-    let current = orbit_migrations::fingerprint::current_fingerprints(&ontology)?;
+    let current = orbit_migrations::fingerprint::current_fingerprints()?;
     let committed = read_committed_fingerprints()?.ok_or_else(|| {
         anyhow!(
             "fingerprint snapshot {} is missing. Run `mise schema:bump` to create it.",
@@ -418,12 +402,7 @@ pub fn snapshot() -> Result<()> {
             format_set(&changed_tables),
         );
     }
-    let version = orbit_versions::VERSIONS.schema;
-    let archive_path = OntologyArchive::path(&config_dir(), version);
-    if !archive_path.exists() {
-        OntologyArchive::from_sources(version, &migrations::embedded_sources())?
-            .write_atomic(&archive_path)?;
-    }
+    write_release(&embedded_release(orbit_versions::VERSIONS.schema)?, false)?;
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!(
         "regenerated fingerprint snapshot at {}",
@@ -445,11 +424,76 @@ fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result
     let version = orbit_versions::VERSIONS.schema;
     let ledger = read_ledger()?;
     ledger.validate(ontology, version).map_err(|e| anyhow!(e))?;
-    OntologyArchive::from_sources(version, &migrations::embedded_sources())?
-        .write_atomic(&OntologyArchive::path(&config_dir(), version))?;
+    write_release(&embedded_release(version)?, true)?;
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!("wrote initial fingerprint snapshot for version {version}");
     Ok(())
+}
+
+pub fn legacy_model_archives() -> Result<()> {
+    let current = orbit_versions::VERSIONS.schema;
+    for version in OntologyArchive::bundled_versions()? {
+        let packages = if version == current {
+            Packages::embedded()
+        } else {
+            let archive = OntologyArchive::bundled(version)?
+                .ok_or_else(|| anyhow!("v{version} ontology archive is not bundled"))?;
+            query_data_model::from_ontology::packages(&archive.load_ontology()?)?
+        };
+        packages
+            .load()
+            .with_context(|| format!("v{version} packages do not load"))?;
+        let archive = ModelArchive::from_packages(version, &packages)?;
+        write_archive(
+            &ModelArchive::path(&config_dir(), version),
+            archive.bytes(),
+            false,
+        )?;
+    }
+    println!(
+        "model archives cover every bundled schema version under {}",
+        config_dir().display()
+    );
+    Ok(())
+}
+
+fn embedded_release(version: u32) -> Result<Release> {
+    let release = Release::new(
+        OntologyArchive::from_sources(version, &migrations::embedded_sources())?,
+        ModelArchive::from_packages(version, &Packages::embedded())?,
+    )?;
+    release.load()?;
+    Ok(release)
+}
+
+fn write_release(release: &Release, replace: bool) -> Result<()> {
+    let version = release.schema_version();
+    write_archive(
+        &OntologyArchive::path(&config_dir(), version),
+        release.ontology_archive().bytes(),
+        replace,
+    )?;
+    write_archive(
+        &ModelArchive::path(&config_dir(), version),
+        release.model_archive().bytes(),
+        replace,
+    )
+}
+
+fn write_archive(path: &std::path::Path, bytes: &[u8], replace: bool) -> Result<()> {
+    if path.exists() {
+        let existing = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        if existing == bytes {
+            return Ok(());
+        }
+        if !replace {
+            bail!(
+                "archive already exists with different contents: {}",
+                path.display()
+            );
+        }
+    }
+    fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))
 }
 
 #[cfg(test)]
