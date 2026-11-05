@@ -130,6 +130,7 @@ toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
 # Build-time fetch over plain HTTP; integrity comes from pinned checksums.
+url = "2.5.8"
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
 # Drop transitive crypto providers; hint aws-lc usage so orbit-server's `fips` feature
 # resolves it implicitly. Do not add `fips` here: it would leak into build scripts,
