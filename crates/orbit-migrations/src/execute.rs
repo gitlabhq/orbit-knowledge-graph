@@ -5,7 +5,7 @@ use clickhouse_client::ArrowClickHouseClient;
 use orbit_arrow::ArrowUtils;
 use thiserror::Error;
 
-use crate::schema::{self, DictionaryCredentials, GraphSchema};
+use crate::schema::{self, DictionaryCredentials, GraphSchema, Schema};
 use crate::scope::{
     InvalidatedPipelines, MigrationScope, TableMigrationAction, classify_tables_for_scope,
     find_invalidated_pipelines, widen_scope_for_shared_table_writers,
@@ -74,7 +74,7 @@ pub async fn create_tables_with_selective_cloning(
     active_version: u32,
     target_version: u32,
 ) -> Result<(), MigrationError> {
-    let scope = widen_scope_for_shared_table_writers(ontology, &schema.storage, requested_scope);
+    let scope = widen_scope_for_shared_table_writers(ontology, &schema.physical, requested_scope);
     if &scope != requested_scope {
         orbit_log_fields::warn!(
             safe(REQUESTED_MIGRATION_SCOPE) = requested_scope.as_str(),
@@ -91,7 +91,7 @@ pub async fn create_tables_with_selective_cloning(
     }
 
     let active_prefix = table_prefix(active_version);
-    let table_actions = classify_tables_for_scope(ontology, &schema.storage, &scope);
+    let table_actions = classify_tables_for_scope(ontology, &schema.physical, &scope);
     let active_entities = existing_entity_names(graph, active_version).await?;
     let target_entities = existing_entity_names(graph, target_version).await?;
     let seed = checkpoint_seed(ontology, &scope);
@@ -146,17 +146,15 @@ pub async fn replace_refreshable_views(
     version: u32,
 ) -> Result<(), MigrationError> {
     let prefix = table_prefix(version);
-    let storage = query_data_model::Relational::<
-        query_data_model::implementations::clickhouse::layout::ClickHouse,
-    >::derive(ontology)?;
-    for view in storage.refreshable_views() {
+    let physical = Schema::derive(ontology)?;
+    for view in physical.refreshable_views() {
         let view_name = if view.versioned {
             format!("{prefix}{}", view.name)
         } else {
             view.name.clone()
         };
         let rendered_select =
-            schema::render_refreshable_view_select(&view.select_query, &storage, version, &prefix)
+            schema::render_refreshable_view_select(&view.select_query, &physical, version, &prefix)
                 .map_err(|error| MigrationError::Ddl {
                     entity_name: view_name.clone(),
                     reason: error.to_string(),
@@ -171,11 +169,7 @@ pub async fn replace_refreshable_views(
         run_ddl(
             graph,
             &view_name,
-            format!(
-                "CREATE MATERIALIZED VIEW IF NOT EXISTS {view_name}\n\
-             REFRESH {} APPEND TO {}\nAS {rendered_select}",
-                view.refresh, view.append_to,
-            ),
+            view.to_create_sql(&view_name, &rendered_select),
         )
         .await?;
     }
@@ -188,10 +182,7 @@ pub async fn drop_versioned_refreshable_views(
     version: u32,
 ) -> Result<(), MigrationError> {
     let prefix = table_prefix(version);
-    let storage = query_data_model::Relational::<
-        query_data_model::implementations::clickhouse::layout::ClickHouse,
-    >::derive(ontology)?;
-    for view in storage
+    for view in Schema::derive(ontology)?
         .refreshable_views()
         .iter()
         .filter(|view| view.versioned)
@@ -413,7 +404,7 @@ async fn create_dictionaries_and_views(
             safe(TABLE) = prefixed.name.as_str(),
             "creating materialized view"
         );
-        run_ddl(graph, &prefixed.name, prefixed.to_create_sql()?).await?;
+        run_ddl(graph, &prefixed.name, prefixed.to_create_sql()).await?;
     }
     orbit_log_fields::info!(
         safe(TABLE_PREFIX) = version_prefix,

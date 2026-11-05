@@ -49,7 +49,7 @@ pub fn run_remote(
         let prefixed = view
             .clone()
             .with_schema_version_prefix(&prefix, &all_table_names);
-        generated.push(format!("{};\n", prefixed.to_create_sql()?));
+        generated.push(format!("{};\n", prefixed.to_create_sql()));
     }
 
     let schema_version = orbit_versions::VERSIONS.schema;

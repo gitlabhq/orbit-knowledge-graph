@@ -6,7 +6,7 @@ use ontology::migrations::{
 };
 use query_data_model::DataModelError;
 
-use crate::schema::{GraphSchema, translate};
+use crate::schema::{GraphSchema, render_refreshable_view_select};
 
 pub fn current_fingerprints(ontology: &Ontology) -> Result<Fingerprints, DataModelError> {
     fingerprints_for(ontology, &embedded_sources())
@@ -39,7 +39,7 @@ pub fn ddl_fingerprints(ontology: &Ontology) -> Result<BTreeMap<String, String>,
             .with_schema_version_prefix("", &all_table_names);
         fingerprints.insert(
             format!("materialized_view/{}", view.name),
-            sha256_hex(&resolved.to_create_sql()?),
+            sha256_hex(&resolved.to_create_sql()),
         );
     }
 
@@ -65,28 +65,19 @@ pub fn auxiliary_schema_fingerprints(
 
     let prefix = "v1_";
     for view in &schema.refreshable_views {
-        let rendered_select = translate::render_refreshable_view_select(
-            &view.select_query,
-            &schema.storage,
-            1,
-            prefix,
-        )
-        .map_err(|error| {
-            DataModelError::Invalid(format!("refreshable view '{}': {error}", view.name))
-        })?;
+        let rendered_select =
+            render_refreshable_view_select(&view.select_query, &schema.physical, 1, prefix)
+                .map_err(|error| {
+                    DataModelError::Invalid(format!("refreshable view '{}': {error}", view.name))
+                })?;
         let view_name = if view.versioned {
             format!("{prefix}{}", view.name)
         } else {
             view.name.clone()
         };
-        let create_sql = format!(
-            "CREATE MATERIALIZED VIEW IF NOT EXISTS {view_name}\n\
-                 REFRESH {} APPEND TO {}\nAS {rendered_select}",
-            view.refresh, view.append_to
-        );
         fingerprints.insert(
             format!("materialized_view/{}", view.name),
-            sha256_hex(&create_sql),
+            sha256_hex(&view.to_create_sql(&view_name, &rendered_select)),
         );
     }
 

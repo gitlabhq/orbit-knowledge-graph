@@ -86,7 +86,7 @@ pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::Lazy
         let prefixed = view
             .clone()
             .with_schema_version_prefix(&TABLE_PREFIX, &all_table_names);
-        stmts.push(format!("{};", prefixed.to_create_sql().unwrap()));
+        stmts.push(format!("{};", prefixed.to_create_sql()));
     }
 
     let sql = stmts.join("\n");

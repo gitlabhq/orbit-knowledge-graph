@@ -64,13 +64,13 @@ pub fn prefixed_table_name(table: &str, schema_version: u32) -> String {
 pub async fn ensure_version_table(graph: &ArrowClickHouseClient) -> Result<(), SchemaVersionError> {
     let mut engine = Engine {
         name: "ReplacingMergeTree".into(),
-        args: vec!["created_at".into()],
+        arguments: vec!["created_at".into()],
     };
     if graph.is_replicated() {
         engine = engine.replicated();
     }
     graph
-        .execute(&CREATE_VERSION_TABLE.replace("{engine}", &engine.to_engine_sql()))
+        .execute(&CREATE_VERSION_TABLE.replace("{engine}", &engine.to_sql()))
         .await?;
     Ok(())
 }
