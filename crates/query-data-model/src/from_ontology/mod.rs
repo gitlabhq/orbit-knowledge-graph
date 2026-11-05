@@ -1,3 +1,5 @@
+mod clickhouse;
+
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
@@ -9,18 +11,13 @@ use ontology::{
 use serde::Serialize;
 
 use crate::DataModelError;
-use crate::implementations::clickhouse::backend::{
-    ClickHouseOptions, ClickHouseSource, CopySpec, DenormalizedSpec, IndexKinds, JoinNodeSpec,
-    JoinRelationshipSpec, JoinSourceSpec, JoinSpec, PathLookupSpec,
-};
-use crate::implementations::clickhouse::layout::ClickHouse;
 use crate::implementations::duckdb::backend::DuckDbSource;
-use crate::implementations::relational::{EdgeTableSpec, RelationalOptions, RelationalRoute};
+use crate::implementations::relational::{EdgeTableSpec, RelationalOptions};
 use crate::spec::{
     AuthorizationFragment, BackendOptions, EngineSpec, EntityAccessSpec, EntitySpec, Fragment,
     GraphFragment, LookupSpec, PropertyAccessSpec, PropertyDetail, PropertySpec, RedactionSpec,
-    RelationshipSpec, RouteSpec, ScopeSpec, ScopeVariants, ServiceFragment, SourceSpec,
-    StorageFragment, format_variant, snake_case,
+    RelationshipSpec, ScopeSpec, ScopeVariants, ServiceFragment, SourceSpec, StorageFragment,
+    encode_options, format_variant,
 };
 
 const PLATFORM: &str = "gitlab";
@@ -31,7 +28,9 @@ pub fn from_ontology(ontology: &Ontology) -> Result<Vec<Fragment>, DataModelErro
         .map(Fragment::Graph)
         .collect();
     fragments.push(Fragment::Authorization(authorization(ontology)));
-    fragments.push(Fragment::Storage(Box::new(graph_store(ontology)?)));
+    fragments.push(Fragment::Storage(Box::new(clickhouse::graph_store(
+        ontology,
+    )?)));
     fragments.push(Fragment::Storage(Box::new(local_store(ontology)?)));
     fragments.extend(services(ontology).into_iter().map(Fragment::Service));
     Ok(fragments)
@@ -299,13 +298,7 @@ fn scope_word(scope: EdgeVariantScope) -> &'static str {
 }
 
 fn options(value: impl Serialize) -> Result<BackendOptions, DataModelError> {
-    match serde_json::to_value(value) {
-        Ok(serde_json::Value::Object(map)) => Ok(map),
-        Ok(other) => Err(DataModelError::Invalid(format!(
-            "backend options must be a map, got {other}"
-        ))),
-        Err(error) => Err(DataModelError::Invalid(error.to_string())),
-    }
+    encode_options(value).map_err(|error| DataModelError::Invalid(error.to_string()))
 }
 
 fn edge_columns(columns: &[ontology::EdgeColumn]) -> IndexMap<String, String> {
@@ -315,237 +308,6 @@ fn edge_columns(columns: &[ontology::EdgeColumn]) -> IndexMap<String, String> {
             let name = column.name.trim_matches('`').to_string();
             (name, type_word(column.data_type).to_string())
         })
-        .collect()
-}
-
-fn graph_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
-    let layout = (!ontology.denormalized_joins().is_empty())
-        .then(|| crate::Relational::<ClickHouse>::derive(ontology))
-        .transpose()?;
-    let relational = ClickHouseOptions {
-        version_column: Some(ontology::VERSION_COLUMN.to_string()),
-        deleted_column: Some(ontology::DELETED_COLUMN.to_string()),
-        sort_key: ontology.default_entity_sort_key().to_vec(),
-        edge_tables: ontology
-            .edge_tables()
-            .into_iter()
-            .filter_map(|name| {
-                let config = ontology.edge_table_config(name)?;
-                let spec = EdgeTableSpec {
-                    default: name == ontology.edge_table(),
-                    domains: config.domains.iter().cloned().collect(),
-                    sort_key: config.sort_key.clone(),
-                    columns: edge_columns(&config.columns),
-                };
-                Some((name.to_string(), spec))
-            })
-            .collect(),
-        denormalized: ontology
-            .denormalized_properties()
-            .iter()
-            .map(|property| DenormalizedSpec {
-                entity: property.node_kind.clone(),
-                property: property.property_name.clone(),
-                relationship: property.relationship_kind.clone(),
-                side: match property.direction {
-                    ontology::DenormDirection::Source => "source",
-                    ontology::DenormDirection::Target => "target",
-                }
-                .to_string(),
-                column: property.edge_column.clone(),
-                tag: property.tag_key.clone(),
-                nullable: property.nullable,
-            })
-            .collect(),
-        copies: ontology
-            .reordered_tables()
-            .iter()
-            .map(|copy| {
-                let spec = CopySpec {
-                    source: copy.source.clone(),
-                    sort_key: copy.sort_key.clone(),
-                };
-                (copy.name.clone(), spec)
-            })
-            .collect(),
-        joins: layout
-            .iter()
-            .flat_map(|layout| layout.joins().iter().map(move |join| (layout, join)))
-            .map(|(layout, join)| {
-                let spec = JoinSpec {
-                    sort_key: layout
-                        .table(&join.table)
-                        .map(|table| table.sort_key.clone())
-                        .unwrap_or_default(),
-                    sources: join
-                        .sources
-                        .iter()
-                        .map(|source| JoinSourceSpec {
-                            table: source.table.clone(),
-                            path_column: source.path_column.clone(),
-                            columns: source.columns.clone(),
-                        })
-                        .collect(),
-                    nodes: join
-                        .nodes
-                        .iter()
-                        .map(|node| JoinNodeSpec {
-                            entity: node.entity.clone(),
-                            source: node.source_occurrence,
-                            key: node.identity_column.clone(),
-                        })
-                        .collect(),
-                    relationships: join
-                        .relationships
-                        .iter()
-                        .map(|relationship| JoinRelationshipSpec {
-                            relationship: relationship.kind.clone(),
-                            source: relationship.source_slot,
-                            target: relationship.target_slot,
-                            edge: relationship.edge_occurrence,
-                        })
-                        .collect(),
-                };
-                (join.table.clone(), spec)
-            })
-            .collect(),
-    };
-    let routing = relational.relational();
-    let domain_of = |entity: &str| ontology.get_node(entity).map(|node| node.domain.as_str());
-    let relationships = ontology
-        .edge_names()
-        .filter_map(|name| {
-            let variants: IndexMap<String, RouteSpec> = ontology
-                .get_edge(name)
-                .unwrap_or_default()
-                .iter()
-                .filter(|edge| !edge.source_kind.is_empty() && !edge.target_kind.is_empty())
-                .filter_map(|edge| {
-                    let expected = routing
-                        .edge_table_for(domain_of(&edge.source_kind), domain_of(&edge.target_kind));
-                    let table = (Some(edge.destination_table.as_str()) != expected)
-                        .then(|| edge.destination_table.clone());
-                    let route = RouteSpec {
-                        fk: edge.fk_column.clone(),
-                        backend: options(RelationalRoute { table }).ok()?,
-                        variants: IndexMap::new(),
-                    };
-                    (route != RouteSpec::default())
-                        .then(|| (format_variant(&edge.source_kind, &edge.target_kind), route))
-                })
-                .collect();
-            let route = RouteSpec {
-                variants,
-                ..RouteSpec::default()
-            };
-            (!route.variants.is_empty()).then(|| (name.to_string(), route))
-        })
-        .collect();
-    let default_sort_key = relational.sort_key.clone();
-    let entities = ontology
-        .nodes()
-        .map(|node| {
-            Ok((
-                node.name.clone(),
-                graph_source(ontology, node, &default_sort_key)?,
-            ))
-        })
-        .collect::<Result<_, DataModelError>>()?;
-    Ok(StorageFragment {
-        package: PLATFORM.to_string(),
-        store: "graph".to_string(),
-        engine: Some(EngineSpec {
-            kind: "clickhouse".to_string(),
-            connection: Some("main".to_string()),
-            trusted: false,
-            table: Some(format!("{}{{entity}}", ontology.table_prefix())),
-            path_column: Some(ontology::constants::TRAVERSAL_PATH_COLUMN.to_string()),
-            backend: options(relational)?,
-        }),
-        entities,
-        relationships,
-    })
-}
-
-fn graph_source(
-    ontology: &Ontology,
-    node: &ontology::NodeEntity,
-    default_sort_key: &[String],
-) -> Result<SourceSpec, DataModelError> {
-    let pattern = format!("{}{}", ontology.table_prefix(), snake_case(&node.name));
-    let mut indexes = IndexMap::<String, Vec<String>>::new();
-    for index in &node.storage.indexes {
-        if node.fields.iter().any(|field| field.name == index.column) {
-            indexes
-                .entry(index.column.clone())
-                .or_default()
-                .push(index.index_type.clone());
-        }
-    }
-    let backend = ClickHouseSource {
-        sort_key: if node.sort_key == default_sort_key {
-            Vec::new()
-        } else {
-            node.sort_key.clone()
-        },
-        indexes: indexes
-            .into_iter()
-            .map(|(column, mut kinds)| {
-                let kinds = match kinds.len() {
-                    1 => IndexKinds::One(kinds.remove(0)),
-                    _ => IndexKinds::Many(kinds),
-                };
-                (column, kinds)
-            })
-            .collect(),
-        high_fan_out: node
-            .fields
-            .iter()
-            .filter(|field| field.high_fan_out)
-            .map(|field| field.name.clone())
-            .collect(),
-        epoch_nulls: epoch_nulls(node),
-        path_lookups: ontology
-            .traversal_path_lookups()
-            .iter()
-            .filter(|lookup| lookup.entity == node.name)
-            .map(|lookup| {
-                let kind = match lookup.kind {
-                    ontology::TraversalPathKind::Id => "id",
-                    ontology::TraversalPathKind::FullPath => "full_path",
-                };
-                let spec = PathLookupSpec {
-                    table: lookup.source_table.clone(),
-                    key: lookup.key_column.clone(),
-                };
-                (kind.to_string(), spec)
-            })
-            .collect(),
-    };
-    Ok(SourceSpec {
-        table: (node.destination_table != pattern).then(|| node.destination_table.clone()),
-        path_column: (node.global || !node.has_traversal_path).then_some(None),
-        backend: options(backend)?,
-        ..SourceSpec::default()
-    })
-}
-
-fn epoch_nulls(node: &ontology::NodeEntity) -> Vec<String> {
-    let non_nullable: std::collections::HashSet<&str> = node
-        .storage
-        .columns
-        .iter()
-        .filter(|column| !column.ch_type.starts_with("Nullable("))
-        .map(|column| column.name.trim_matches('`'))
-        .collect();
-    node.fields
-        .iter()
-        .filter(|field| {
-            field.nullable
-                && matches!(field.data_type, DataType::DateTime | DataType::Date)
-                && non_nullable.contains(field.name.as_str())
-        })
-        .map(|field| field.name.clone())
         .collect()
 }
 

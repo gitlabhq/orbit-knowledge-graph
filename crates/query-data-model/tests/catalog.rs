@@ -579,6 +579,110 @@ fn backend_annotations_need_a_stored_column() {
     let errors = spec_errors(model.physical::<ClickHouse>("main"));
     assert_eq!(
         errors,
-        ["gitlab: store graph does not store MergeRequest.diff"]
+        ["gitlab: store graph MergeRequest indexes unknown column diff"]
+    );
+}
+
+const MANAGED_STORE: &str = r#"    sort_key: [traversal_path, id]
+    engine: ReplacingMergeTree(_version, _deleted)
+    columns:
+      _version: { type: "DateTime64(6, 'UTC')", default: now64(6), codec: [Delta(8), ZSTD(1)] }
+      _deleted: { type: Bool, default: "false" }
+    settings: { index_granularity: "1024" }
+"#;
+
+fn managed(extra: &'static str) -> impl Fn(&str, String) -> String {
+    move |name, yaml| {
+        if name == "gitlab/storage.yaml" {
+            yaml.replace(
+                "    sort_key: [traversal_path, id]\n",
+                &format!("{MANAGED_STORE}{extra}"),
+            )
+        } else {
+            yaml
+        }
+    }
+}
+
+#[test]
+fn a_managed_store_resolves_its_physical_schema() {
+    let model = load_with(&["gitlab"], managed("")).unwrap();
+    let catalog = model.physical::<ClickHouse>("main").unwrap();
+    let schema = catalog.backend("graph").unwrap().schema().unwrap();
+    let requests = schema.table("gl_merge_request").unwrap();
+    let columns: Vec<_> = requests
+        .columns
+        .iter()
+        .map(|column| format!("{} {}", column.name, column.storage_type))
+        .collect();
+    assert_eq!(
+        columns,
+        [
+            "id Int64",
+            "iid Int64",
+            "title String",
+            "state LowCardinality(String)",
+            "project_id Int64",
+            "author_id Nullable(Int64)",
+            "traversal_path String",
+            "_version DateTime64(6, 'UTC')",
+            "_deleted Bool",
+        ]
+    );
+    let indexes: Vec<_> = requests
+        .indexes
+        .iter()
+        .map(|index| index.name.as_str())
+        .collect();
+    assert_eq!(
+        indexes,
+        [
+            "idx_title",
+            "idx_title_ngram",
+            "idx_state",
+            "idx_project_id",
+            "idx_id",
+            "idx_id_minmax"
+        ]
+    );
+    let sql = requests.to_create_sql("v1_");
+    assert!(sql.contains("INDEX idx_title lower(title) TYPE text(tokenizer = splitByNonAlpha)"));
+    assert!(sql.contains("ENGINE = ReplacingMergeTree(_version, _deleted)"));
+    assert!(sql.ends_with("ORDER BY (traversal_path, id)\nSETTINGS index_granularity = 1024"));
+    assert_eq!(
+        schema
+            .writers("gl_merge_request")
+            .unwrap()
+            .iter()
+            .collect::<Vec<_>>(),
+        ["MergeRequest"]
+    );
+}
+
+#[test]
+fn a_managed_store_rejects_unknown_physical_references() {
+    let model = load_with(
+        &["gitlab"],
+        managed(
+            r#"    copies: { gl_note_by_id: { source: gl_missing, sort_key: [id] } }
+    tables:
+      audit: { engine: MergeTree, columns: { at: {} }, indexes: { actor: minmax } }
+    views:
+      broken: { select: "SELECT 1" }
+      misrouted: { select: "SELECT 1", to: gl_missing }
+"#,
+        ),
+    )
+    .unwrap();
+    let errors = spec_errors(model.physical::<ClickHouse>("main"));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: copy gl_note_by_id names unknown table gl_missing",
+            "gitlab: store graph table audit column at declares no type",
+            "gitlab: store graph table audit indexes unknown column actor",
+            "gitlab: store graph view broken names neither a destination table nor an engine",
+            "gitlab: store graph view misrouted writes unknown table gl_missing",
+        ]
     );
 }

@@ -1,9 +1,31 @@
 use indexmap::IndexMap;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use super::{explicit_null, is_false};
 
-pub type BackendOptions = serde_json::Map<String, serde_json::Value>;
+pub type BackendOptions = IndexMap<String, OptionValue>;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OptionValue {
+    Null,
+    Bool(bool),
+    Number(serde_json::Number),
+    String(String),
+    List(Vec<OptionValue>),
+    Map(IndexMap<String, OptionValue>),
+}
+
+pub fn encode_options(value: impl Serialize) -> Result<BackendOptions, serde_json::Error> {
+    serde_json::from_str(&serde_json::to_string(&value)?)
+}
+
+pub fn decode_options<T: DeserializeOwned>(
+    options: &BackendOptions,
+) -> Result<T, serde_json::Error> {
+    serde_json::from_str(&serde_json::to_string(options)?)
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

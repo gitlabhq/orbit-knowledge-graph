@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use crate::catalog::Model;
 use crate::from_ontology::from_ontology;
+use crate::implementations::clickhouse::ClickHouse;
+use crate::implementations::clickhouse::schema::Schema;
 use crate::{ClickHouseDataModel, DataModelError, DuckDbDataModel, QueryModel};
 
 fn model(ontology: &ontology::Ontology) -> Result<Arc<Model>, DataModelError> {
@@ -17,6 +19,17 @@ impl ClickHouseDataModel {
 impl DuckDbDataModel {
     pub fn derive(ontology: Arc<ontology::Ontology>) -> Result<Self, DataModelError> {
         QueryModel::new(&model(&ontology)?, "local")
+    }
+}
+
+impl Schema {
+    pub fn derive(ontology: &ontology::Ontology) -> Result<Self, DataModelError> {
+        let catalog = model(ontology)?.physical::<ClickHouse>("main")?;
+        catalog
+            .stores()
+            .find_map(|(_, store)| store.schema())
+            .cloned()
+            .ok_or_else(|| DataModelError::Invalid("connection main has no schema".into()))
     }
 }
 

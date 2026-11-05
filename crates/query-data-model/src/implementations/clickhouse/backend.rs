@@ -1,13 +1,13 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
-use indexmap::IndexMap;
 use ontology::{DataType, FieldSelectivity, TraversalPathKind};
-use serde::{Deserialize, Serialize};
 
-use super::layout::ClickHouse;
+use super::ClickHouse;
+use super::schema::{self, Schema};
+use super::spec::{ClickHouseOptions, ClickHouseSource};
 use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
 use crate::implementations::relational::{
-    EdgeTableSpec, RelationalFacts, RelationalOptions, RelationalRoute, RelationalStore, TableFacts,
+    RelationalFacts, RelationalRoute, RelationalStore, TableFacts,
 };
 use crate::spec::parse_word;
 use crate::{
@@ -16,147 +16,25 @@ use crate::{
     TraversalPathLookup,
 };
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ClickHouseOptions {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version_column: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub deleted_column: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sort_key: Vec<String>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub edge_tables: IndexMap<String, EdgeTableSpec>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub denormalized: Vec<DenormalizedSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub copies: IndexMap<String, CopySpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub joins: IndexMap<String, JoinSpec>,
-}
-
-impl ClickHouseOptions {
-    pub fn relational(&self) -> RelationalOptions {
-        RelationalOptions {
-            version_column: self.version_column.clone(),
-            deleted_column: self.deleted_column.clone(),
-            sort_key: self.sort_key.clone(),
-            edge_tables: self.edge_tables.clone(),
-            route_all_variants: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DenormalizedSpec {
-    pub entity: String,
-    pub property: String,
-    pub relationship: String,
-    pub side: String,
-    pub column: String,
-    pub tag: String,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub nullable: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CopySpec {
-    pub source: String,
-    pub sort_key: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct JoinSpec {
-    pub sort_key: Vec<String>,
-    pub sources: Vec<JoinSourceSpec>,
-    pub nodes: Vec<JoinNodeSpec>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub relationships: Vec<JoinRelationshipSpec>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct JoinSourceSpec {
-    pub table: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path_column: Option<String>,
-    pub columns: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct JoinNodeSpec {
-    pub entity: String,
-    pub source: usize,
-    pub key: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct JoinRelationshipSpec {
-    pub relationship: String,
-    pub source: usize,
-    pub target: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub edge: Option<usize>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ClickHouseSource {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sort_key: Vec<String>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub indexes: IndexMap<String, IndexKinds>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub high_fan_out: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub epoch_nulls: Vec<String>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub path_lookups: IndexMap<String, PathLookupSpec>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PathLookupSpec {
-    pub table: String,
-    pub key: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum IndexKinds {
-    One(String),
-    Many(Vec<String>),
-}
-
-impl IndexKinds {
-    pub fn kinds(&self) -> &[String] {
-        match self {
-            Self::One(kind) => std::slice::from_ref(kind),
-            Self::Many(kinds) => kinds,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexKind {
     Text,
     Bloom,
     Set,
     MinMax,
+    NGram,
+    Token,
 }
 
 impl IndexKind {
-    fn parse(word: &str) -> Option<Self> {
-        match word.split('(').next()? {
+    pub fn parse(word: &str) -> Option<Self> {
+        match word.split('(').next()?.trim() {
             "text" => Some(Self::Text),
-            "bloom" | "bloom_filter" => Some(Self::Bloom),
+            "bloom_filter" => Some(Self::Bloom),
             "set" => Some(Self::Set),
             "minmax" => Some(Self::MinMax),
+            "ngrambf_v1" => Some(Self::NGram),
+            "tokenbf_v1" => Some(Self::Token),
             _ => None,
         }
     }
@@ -179,9 +57,14 @@ pub struct ClickHouseStore {
     path_lookups: HashMap<(EntityId, TraversalPathKind), TraversalPathLookup>,
     copies: Vec<(String, String)>,
     tables: HashMap<String, TableFacts>,
+    schema: Option<Schema>,
 }
 
 impl ClickHouseStore {
+    pub fn schema(&self) -> Option<&Schema> {
+        self.schema.as_ref()
+    }
+
     pub fn column(&self, property: PropertyId) -> Option<&ClickHouseColumn> {
         self.columns[property.index()].as_ref()
     }
@@ -235,13 +118,15 @@ impl StorageBackend for ClickHouse {
             path_lookups: HashMap::new(),
             copies: Vec::new(),
             tables: HashMap::new(),
+            schema: None,
         };
         store.annotate_sources(&input, diagnostics);
         store.register_entity_tables(&input);
-        store.register_edge_tables(&input, diagnostics);
+        store.register_edge_tables(&input);
         store.resolve_denormalized(&input, diagnostics);
         store.resolve_joins(&input, diagnostics);
         store.resolve_copies(&input, diagnostics);
+        store.schema = schema::resolve(&input, &store.relational, diagnostics);
         store
     }
 }
@@ -275,20 +160,26 @@ impl ClickHouseStore {
                 })
             };
             let options = &source.options;
-            for (property, kinds) in &options.indexes {
-                let Some(id) = stored(property, diagnostics) else {
-                    continue;
-                };
-                for kind in kinds.kinds() {
-                    let parsed =
-                        diagnostics.require(IndexKind::parse(kind), source.package, || {
-                            format!("{name}.{property} has unknown index kind `{kind}`")
-                        });
-                    if let (Some(parsed), Some(column)) =
-                        (parsed, self.columns[id.index()].as_mut())
-                    {
-                        column.indexes.push(parsed);
-                    }
+            let shared = &input.options.columns;
+            schema::check_indexes(
+                source.package,
+                &format!("store {} {name}", store.name),
+                &options.indexes,
+                |target| {
+                    shared.contains_key(target)
+                        || graph
+                            .property_id(entity, target)
+                            .is_some_and(|id| store.column(id).is_some())
+                },
+                diagnostics,
+            );
+            for (property, specs) in &options.indexes {
+                let column = graph
+                    .property_id(entity, property)
+                    .and_then(|id| self.columns[id.index()].as_mut());
+                if let Some(column) = column {
+                    let kinds = specs.specs().iter().map(|spec| spec.kind());
+                    column.indexes.extend(kinds.filter_map(IndexKind::parse));
                 }
             }
             for property in &options.epoch_nulls {
@@ -373,18 +264,21 @@ impl ClickHouseStore {
         }
     }
 
-    fn register_edge_tables(
-        &mut self,
-        input: &StoreInput<'_, ClickHouse>,
-        diagnostics: &mut Diagnostics,
-    ) {
+    fn register_edge_tables(&mut self, input: &StoreInput<'_, ClickHouse>) {
         let system = system_columns(
             input.options.version_column.as_deref(),
             input.options.deleted_column.as_deref(),
         );
         for (name, spec) in &input.options.edge_tables {
-            let mut column_types = spec.column_types(&input.store.package, name, diagnostics);
-            let mut columns: HashSet<String> = column_types.keys().cloned().collect();
+            let mut columns: HashSet<String> = spec.columns.keys().cloned().collect();
+            let mut column_types: HashMap<String, DataType> = spec
+                .columns
+                .iter()
+                .filter_map(|(column, layout)| {
+                    let data_type = schema::data_type(layout.storage_type.as_deref()?)?;
+                    Some((column.clone(), data_type))
+                })
+                .collect();
             columns.extend(
                 input
                     .options

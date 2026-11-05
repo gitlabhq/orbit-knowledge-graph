@@ -3,8 +3,7 @@ mod derive;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Debug, Clone)]
-pub struct ClickHouse;
+pub use super::ClickHouse;
 
 impl crate::RelationalBackend for ClickHouse {
     type StorageType = String;

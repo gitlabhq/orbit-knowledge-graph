@@ -9,7 +9,10 @@ pub use authorization::{
 };
 pub use graph::{EntitySpec, GraphFragment, PropertyDetail, PropertySpec, RelationshipSpec};
 pub use service::{LookupSpec, ServiceFragment};
-pub use storage::{BackendOptions, EngineSpec, RouteSpec, SourceSpec, StorageFragment};
+pub use storage::{
+    BackendOptions, EngineSpec, OptionValue, RouteSpec, SourceSpec, StorageFragment,
+    decode_options, encode_options,
+};
 
 use serde::{Deserialize, Serialize};
 

@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 
-use super::{Diagnostics, Model, Source, Store};
-use crate::spec::{BackendOptions, parse_variant};
+use super::{Access, Diagnostics, Model, Source, Store};
+use crate::spec::{BackendOptions, decode_options, parse_variant};
 use crate::{DataModelError, EntityId, GraphCatalog, RelationshipId, RelationshipVariantId};
 
 pub trait StorageBackend: Sized {
@@ -32,6 +32,7 @@ pub struct RouteInput<'a, O> {
 
 pub struct StoreInput<'a, B: StorageBackend> {
     pub graph: &'a GraphCatalog,
+    pub access: &'a Access,
     pub store: &'a Store,
     pub connection: &'a [&'a Store],
     pub options: B::Options,
@@ -181,6 +182,7 @@ impl Model {
             })
             .collect();
         StoreInput {
+            access: &self.access,
             graph,
             store,
             connection,
@@ -197,7 +199,7 @@ fn parse<T: DeserializeOwned + Default>(
     options: &BackendOptions,
     diagnostics: &mut Diagnostics,
 ) -> T {
-    serde_json::from_value(serde_json::Value::Object(options.clone())).unwrap_or_else(|error| {
+    decode_options(options).unwrap_or_else(|error| {
         diagnostics.error(package, format!("{context}: {error}"));
         T::default()
     })
