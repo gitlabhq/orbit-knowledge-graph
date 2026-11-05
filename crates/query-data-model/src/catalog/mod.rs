@@ -1,15 +1,20 @@
 mod access;
+mod backend;
 mod diagnostics;
 mod frontend;
+mod lookups;
 mod store;
 
-pub use access::{Access, EntityAccess, Guard, PropertyAccess, Redaction, RowFilter, Scope};
-pub(crate) use diagnostics::Diagnostics;
-pub use diagnostics::SpecError;
-pub use frontend::Unresolved;
-pub use store::{
-    Column, EdgeTable, Engine, IndexKind, Lookup, Realization, Source, Store, Versioning,
+pub use access::{
+    Access, EntityAccess, Guard, PathHop, PropertyAccess, Redaction, RowFilter, Scope,
 };
+pub use backend::{Catalog, RouteInput, SourceInput, StorageBackend, StoreInput};
+pub use diagnostics::{Diagnostics, SpecError};
+pub use frontend::Unresolved;
+pub use lookups::{Lookup, Lookups};
+pub use store::{DeclaredRoute, Source, Store};
+
+use std::collections::HashSet;
 
 use sha2::{Digest, Sha256};
 
@@ -17,17 +22,18 @@ use crate::spec::Fragment;
 use crate::{DataModelError, GraphCatalog, PropertyId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CatalogId([u8; 32]);
+pub struct ModelId([u8; 32]);
 
 #[derive(Debug)]
-pub struct Catalog {
-    id: CatalogId,
+pub struct Model {
+    id: ModelId,
     graph: GraphCatalog,
     access: Access,
+    lookups: Lookups,
     stores: Vec<Store>,
 }
 
-impl Catalog {
+impl Model {
     pub fn from_yaml<'a>(
         sources: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Result<Self, DataModelError> {
@@ -46,31 +52,34 @@ impl Catalog {
 
     pub fn load(fragments: &[Fragment]) -> Result<Self, DataModelError> {
         let mut diagnostics = Diagnostics::default();
-        let (mut graphs, mut authorizations, mut storages) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut graphs, mut authorizations, mut storages, mut services) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for fragment in fragments {
             match fragment {
                 Fragment::Graph(graph) => graphs.push(graph.clone()),
                 Fragment::Authorization(access) => authorizations.push(access),
                 Fragment::Storage(storage) => storages.push(storage.as_ref()),
+                Fragment::Service(service) => services.push(service),
             }
         }
 
         let graph = GraphCatalog::from_spec(graphs, &mut diagnostics);
         let access = Access::resolve(&graph, &authorizations, &mut diagnostics);
-        let mut stores = store::resolve(&graph, &storages, &mut diagnostics);
-        for store in &mut stores {
-            access.resolve_guards(&graph, store, &mut diagnostics);
-        }
+        let lookups = Lookups::resolve(&graph, &services, &mut diagnostics);
+        let served: HashSet<PropertyId> = lookups.served().collect();
+        let mut stores = store::resolve(&graph, &storages, &served, &mut diagnostics);
+        access.resolve_guards(&graph, &mut stores, &mut diagnostics);
         diagnostics.finish()?;
         Ok(Self {
             id: identity(fragments)?,
             graph,
             access,
+            lookups,
             stores,
         })
     }
 
-    pub fn id(&self) -> CatalogId {
+    pub fn id(&self) -> ModelId {
         self.id
     }
 
@@ -82,25 +91,20 @@ impl Catalog {
         &self.access
     }
 
+    pub fn lookups(&self) -> &Lookups {
+        &self.lookups
+    }
+
+    pub fn lookup(&self, property: PropertyId) -> Option<&Lookup> {
+        self.lookups.get(property)
+    }
+
     pub fn stores(&self) -> &[Store] {
         &self.stores
     }
-
-    pub fn store(&self, name: &str) -> Option<&Store> {
-        self.stores.iter().find(|store| store.name == name)
-    }
-
-    pub fn realizations(
-        &self,
-        property: PropertyId,
-    ) -> impl Iterator<Item = (&Store, &Realization)> {
-        self.stores
-            .iter()
-            .filter_map(move |store| Some((store, store.realization(property)?)))
-    }
 }
 
-fn identity(fragments: &[Fragment]) -> Result<CatalogId, DataModelError> {
+fn identity(fragments: &[Fragment]) -> Result<ModelId, DataModelError> {
     let mut hasher = Sha256::new();
     for fragment in fragments {
         let yaml = fragment
@@ -108,5 +112,5 @@ fn identity(fragments: &[Fragment]) -> Result<CatalogId, DataModelError> {
             .map_err(|error| DataModelError::Invalid(error.to_string()))?;
         hasher.update(yaml.as_bytes());
     }
-    Ok(CatalogId(hasher.finalize().into()))
+    Ok(ModelId(hasher.finalize().into()))
 }

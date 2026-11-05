@@ -1,67 +1,18 @@
 use std::collections::HashSet;
 
 use indexmap::IndexMap;
-use ontology::FieldSelectivity;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use super::Diagnostics;
 use super::access::Guard;
 use crate::spec::{
-    EngineSpec, RouteSpec, SourceSpec, StorageFragment, format_variant, parse_variant, parse_word,
-    snake_case,
+    BackendOptions, EngineSpec, RouteSpec, SourceSpec, StorageFragment, format_variant,
+    parse_variant, snake_case,
 };
 use crate::{
-    EntityId, ForeignKey, GraphCatalog, PropertyId, RelationshipVariant, RelationshipVariantId,
-    VariantRoute,
+    EntityId, ForeignKey, GraphCatalog, PropertyId, RelationshipId, RelationshipVariant,
+    RelationshipVariantId,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Engine {
-    Clickhouse,
-    Duckdb,
-    Search,
-    Service,
-}
-
-impl Engine {
-    pub fn is_relational(self) -> bool {
-        matches!(self, Self::Clickhouse | Self::Duckdb)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IndexKind {
-    Text,
-    Bloom,
-    Set,
-    MinMax,
-}
-
-impl IndexKind {
-    fn parse(word: &str) -> Option<Self> {
-        match word.split('(').next()? {
-            "text" => Some(Self::Text),
-            "bloom" | "bloom_filter" => Some(Self::Bloom),
-            "set" => Some(Self::Set),
-            "minmax" => Some(Self::MinMax),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Versioning {
-    pub version: String,
-    pub deleted: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct EdgeTable {
-    pub name: String,
-    pub sort_key: Vec<String>,
-    pub domains: Vec<String>,
-}
 
 #[derive(Debug, Clone)]
 pub struct Source {
@@ -69,46 +20,42 @@ pub struct Source {
     pub table: String,
     pub key: String,
     pub path_column: Option<String>,
-    pub sort_key: Vec<String>,
-    pub high_fan_out: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct Column {
-    pub name: String,
-    pub indexes: Vec<IndexKind>,
-    pub selectivity: FieldSelectivity,
+pub struct DeclaredRoute {
+    pub relationship: RelationshipId,
+    pub package: String,
+    pub spec: RouteSpec,
 }
 
-#[derive(Debug, Clone)]
-pub struct Lookup {
-    pub name: String,
-    pub operation: String,
-    pub entity: EntityId,
-    pub provides: Vec<PropertyId>,
-    pub keys: Vec<PropertyId>,
-    pub operators: Vec<String>,
-    pub disabled: bool,
-}
-
-#[derive(Debug, Clone)]
-pub enum Realization {
-    Column(Column),
-    Lookup(usize),
+impl DeclaredRoute {
+    pub fn for_variant(
+        &self,
+        graph: &GraphCatalog,
+        variant: &RelationshipVariant,
+    ) -> Option<&RouteSpec> {
+        let key = format_variant(
+            &graph.entity(variant.source).name,
+            &graph.entity(variant.target).name,
+        );
+        self.spec.variants.get(&key)
+    }
 }
 
 #[derive(Debug)]
 pub struct Store {
     pub name: String,
-    pub engine: Engine,
+    pub connection: String,
+    pub kind: String,
     pub trusted: bool,
-    pub versioning: Option<Versioning>,
-    pub edge_tables: Vec<EdgeTable>,
-    default_edge_table: Option<usize>,
+    pub package: String,
+    pub(crate) options: BackendOptions,
+    pub(crate) source_options: Vec<(EntityId, String, BackendOptions)>,
+    pub(crate) routes: Vec<DeclaredRoute>,
     sources: Vec<Option<Source>>,
-    realizations: Vec<Option<Realization>>,
-    routes: Vec<Option<VariantRoute>>,
-    lookups: Vec<Lookup>,
+    columns: Vec<Option<String>>,
+    foreign_keys: Vec<Option<ForeignKey>>,
     pub(super) guards: Vec<Option<Guard>>,
 }
 
@@ -121,372 +68,203 @@ impl Store {
         self.sources.iter().flatten()
     }
 
-    pub fn realization(&self, property: PropertyId) -> Option<&Realization> {
-        self.realizations[property.index()].as_ref()
+    pub fn column(&self, property: PropertyId) -> Option<&str> {
+        self.columns[property.index()].as_deref()
     }
 
-    pub fn column(&self, property: PropertyId) -> Option<&Column> {
-        match self.realization(property)? {
-            Realization::Column(column) => Some(column),
-            Realization::Lookup(_) => None,
-        }
-    }
-
-    pub fn lookup(&self, property: PropertyId) -> Option<&Lookup> {
-        match self.realization(property)? {
-            Realization::Lookup(lookup) => Some(&self.lookups[*lookup]),
-            Realization::Column(_) => None,
-        }
-    }
-
-    pub fn lookups(&self) -> &[Lookup] {
-        &self.lookups
-    }
-
-    pub fn route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
-        self.routes[variant.index()].as_ref()
+    pub fn foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey> {
+        self.foreign_keys[variant.index()]
     }
 
     pub fn guard(&self, entity: EntityId) -> Option<&Guard> {
         self.guards[entity.index()].as_ref()
     }
 
-    pub fn default_edge_table(&self) -> Option<&EdgeTable> {
-        self.default_edge_table
-            .map(|index| &self.edge_tables[index])
+    pub fn route(&self, relationship: RelationshipId) -> Option<&DeclaredRoute> {
+        self.routes
+            .iter()
+            .find(|route| route.relationship == relationship)
     }
 }
 
 pub(super) fn resolve(
     graph: &GraphCatalog,
     fragments: &[&StorageFragment],
+    served: &HashSet<PropertyId>,
     diagnostics: &mut Diagnostics,
 ) -> Vec<Store> {
     let mut grouped = IndexMap::<&str, Vec<&StorageFragment>>::new();
     for fragment in fragments {
         grouped.entry(&fragment.store).or_default().push(fragment);
     }
-    let mut stores: Vec<(Store, Vec<&StorageFragment>)> = grouped
+    let mut stores: Vec<Store> = grouped
         .into_iter()
         .filter_map(|(name, fragments)| {
-            Some((
-                declare_store(name, &fragments, graph, diagnostics)?,
-                fragments,
-            ))
+            let (package, engine) = declare_engine(name, &fragments, diagnostics)?;
+            let mut store = Store::new(name, package, engine, graph);
+            for fragment in &fragments {
+                store.declare_sources(fragment, engine, served, graph, diagnostics);
+            }
+            store.declare_routes(&fragments, graph, diagnostics);
+            Some(store)
         })
         .collect();
-    for (store, fragments) in &mut stores {
-        for fragment in fragments.iter() {
-            store.declare_lookups(fragment, graph, diagnostics);
-        }
-    }
-    let served: HashSet<PropertyId> = stores
+    let keys: Vec<Vec<Option<ForeignKey>>> = stores
         .iter()
-        .flat_map(|(store, _)| {
-            store
-                .lookups
-                .iter()
-                .flat_map(|lookup| lookup.provides.iter().copied())
-        })
+        .map(|store| store.resolve_foreign_keys(&stores, graph, diagnostics))
         .collect();
-    for (store, fragments) in &mut stores {
-        let engine = fragments
+    for (store, keys) in stores.iter_mut().zip(keys) {
+        store.foreign_keys = keys;
+    }
+    check_connections(&stores, diagnostics);
+    stores
+}
+
+fn check_connections(stores: &[Store], diagnostics: &mut Diagnostics) {
+    for (index, store) in stores.iter().enumerate() {
+        let Some(first) = stores[..index]
             .iter()
-            .find_map(|fragment| fragment.engine.as_ref());
-        for fragment in fragments.iter() {
-            store.declare_sources(fragment, engine, &served, graph, diagnostics);
-        }
-        if let Some(engine) = engine.filter(|_| store.engine.is_relational()) {
-            store.declare_routes(fragments, engine, graph, diagnostics);
-        } else if let Some(fragment) = fragments.iter().find(|f| !f.relationships.is_empty()) {
+            .find(|other| other.connection == store.connection)
+        else {
+            continue;
+        };
+        if first.kind != store.kind {
             diagnostics.error(
-                &fragment.package,
-                format!("store {} cannot route relationships", store.name),
+                &store.package,
+                format!(
+                    "store {} is {} but connection {} is {}",
+                    store.name, store.kind, store.connection, first.kind
+                ),
+            );
+        }
+        if first.trusted != store.trusted {
+            diagnostics.error(
+                &store.package,
+                format!(
+                    "store {} and store {} share connection {} but only one is trusted",
+                    store.name, first.name, store.connection
+                ),
             );
         }
     }
-    stores.into_iter().map(|(store, _)| store).collect()
 }
 
-fn declare_store(
+fn declare_engine<'a>(
     name: &str,
-    fragments: &[&StorageFragment],
-    graph: &GraphCatalog,
+    fragments: &[&'a StorageFragment],
     diagnostics: &mut Diagnostics,
-) -> Option<Store> {
+) -> Option<(&'a str, &'a EngineSpec)> {
     let mut engines = fragments
         .iter()
-        .filter_map(|fragment| Some((fragment, fragment.engine.as_ref()?)));
-    let Some((fragment, spec)) = engines.next() else {
+        .filter_map(|fragment| Some((fragment.package.as_str(), fragment.engine.as_ref()?)));
+    let Some(first) = engines.next() else {
         diagnostics.error(
             &fragments[0].package,
             format!("store {name} declares no engine"),
         );
         return None;
     };
-    if let Some((duplicate, _)) = engines.next() {
-        diagnostics.error(
-            &duplicate.package,
-            format!("store {name} declares its engine twice"),
-        );
+    if let Some((package, _)) = engines.next() {
+        diagnostics.error(package, format!("store {name} declares its engine twice"));
     }
-    let Some(engine) = parse_word::<Engine>(&spec.kind) else {
-        diagnostics.error(
-            &fragment.package,
-            format!("store {name} has unknown engine `{}`", spec.kind),
-        );
-        return None;
-    };
-    let edge_tables: Vec<EdgeTable> = spec
-        .edge_tables
-        .iter()
-        .map(|(name, table)| EdgeTable {
-            name: name.clone(),
-            sort_key: table.sort_key.clone(),
-            domains: table.domains.clone(),
-        })
-        .collect();
-    let defaults: Vec<usize> = spec
-        .edge_tables
-        .values()
-        .enumerate()
-        .filter_map(|(index, table)| table.default.then_some(index))
-        .collect();
-    let mut domains = HashSet::new();
-    for domain in spec.edge_tables.values().flat_map(|table| &table.domains) {
-        if !domains.insert(domain) {
-            diagnostics.error(
-                &fragment.package,
-                format!("store {name} assigns domain {domain} to two edge tables"),
-            );
-        }
-    }
-    if defaults.len() > 1 {
-        diagnostics.error(
-            &fragment.package,
-            format!("store {name} has more than one default edge table"),
-        );
-    }
-    let versioning = match (&spec.version_column, &spec.deleted_column) {
-        (Some(version), Some(deleted)) => Some(Versioning {
-            version: version.clone(),
-            deleted: deleted.clone(),
-        }),
-        (None, None) => None,
-        _ => {
-            diagnostics.error(
-                &fragment.package,
-                format!("store {name} must name both version and deleted columns"),
-            );
-            None
-        }
-    };
-    Some(Store {
-        name: name.to_string(),
-        engine,
-        trusted: spec.trusted,
-        versioning,
-        edge_tables,
-        default_edge_table: defaults.first().copied(),
-        sources: (0..graph.entities().count()).map(|_| None).collect(),
-        realizations: vec![None; graph.properties().count()],
-        routes: vec![None; graph.variants().count()],
-        lookups: Vec::new(),
-        guards: vec![None; graph.entities().count()],
-    })
+    Some(first)
 }
 
 impl Store {
-    fn declare_lookups(
-        &mut self,
-        fragment: &StorageFragment,
-        graph: &GraphCatalog,
-        diagnostics: &mut Diagnostics,
-    ) {
-        let package = fragment.package.as_str();
-        if !fragment.lookups.is_empty() && self.engine != Engine::Service {
-            diagnostics.error(
-                package,
-                format!(
-                    "store {} is not a service and cannot declare lookups",
-                    self.name
-                ),
-            );
-            return;
-        }
-        for (name, spec) in &fragment.lookups {
-            let Some(entity) = graph.entity_id(&spec.entity) else {
-                diagnostics.error(
-                    package,
-                    format!("lookup {name} names unknown entity {}", spec.entity),
-                );
-                continue;
-            };
-            let mut properties = |names: &[String]| -> Vec<PropertyId> {
-                names
-                    .iter()
-                    .filter_map(|property| {
-                        diagnostics.require(graph.property_id(entity, property), package, || {
-                            format!(
-                                "lookup {name} names unknown property {}.{property}",
-                                spec.entity
-                            )
-                        })
-                    })
-                    .collect()
-            };
-            let provides = properties(&spec.provides);
-            let keys = properties(&spec.keys);
-            if let Some(shared) = provides.iter().find(|property| keys.contains(property)) {
-                diagnostics.error(
-                    package,
-                    format!(
-                        "lookup {name} uses {} as both key and output",
-                        graph.property(*shared).name
-                    ),
-                );
-            }
-            let index = self.lookups.len();
-            for property in &provides {
-                self.realizations[property.index()] = Some(Realization::Lookup(index));
-            }
-            self.lookups.push(Lookup {
-                name: name.clone(),
-                operation: spec.operation.clone().unwrap_or_else(|| name.clone()),
-                entity,
-                provides,
-                keys,
-                operators: spec.operators.clone(),
-                disabled: spec.disabled,
-            });
+    fn new(name: &str, package: &str, engine: &EngineSpec, graph: &GraphCatalog) -> Self {
+        Self {
+            name: name.to_string(),
+            connection: engine
+                .connection
+                .clone()
+                .unwrap_or_else(|| engine.kind.clone()),
+            kind: engine.kind.clone(),
+            trusted: engine.trusted,
+            package: package.to_string(),
+            options: engine.backend.clone(),
+            source_options: Vec::new(),
+            routes: Vec::new(),
+            sources: (0..graph.entities().count()).map(|_| None).collect(),
+            columns: vec![None; graph.properties().count()],
+            foreign_keys: vec![None; graph.variants().count()],
+            guards: vec![None; graph.entities().count()],
         }
     }
 
     fn declare_sources(
         &mut self,
         fragment: &StorageFragment,
-        engine: Option<&EngineSpec>,
+        engine: &EngineSpec,
         served: &HashSet<PropertyId>,
         graph: &GraphCatalog,
         diagnostics: &mut Diagnostics,
     ) {
         let package = fragment.package.as_str();
         for (name, spec) in &fragment.entities {
-            let Some(entity) = graph.entity_id(name) else {
-                diagnostics.error(
-                    package,
-                    format!("store {} binds unknown entity {name}", self.name),
-                );
+            let Some(entity) = diagnostics.require(graph.entity_id(name), package, || {
+                format!("store {} binds unknown entity {name}", self.name)
+            }) else {
                 continue;
             };
             if self.sources[entity.index()].is_some() {
                 diagnostics.error(package, format!("store {} binds {name} twice", self.name));
                 continue;
             }
-            let Some(table) = Self::table_name(name, spec, engine) else {
-                diagnostics.error(
-                    package,
-                    format!("store {} has no table for {name}", self.name),
-                );
+            let table = spec.table.clone().or_else(|| {
+                let pattern = engine.table.as_ref()?;
+                Some(pattern.replace("{entity}", &snake_case(name)))
+            });
+            let Some(table) = diagnostics.require(table, package, || {
+                format!("store {} has no table for {name}", self.name)
+            }) else {
                 continue;
             };
-            let store = self.name.clone();
-            let resolve = |property: &str, diagnostics: &mut Diagnostics| {
-                diagnostics.require(graph.property_id(entity, property), package, || {
-                    format!("store {store} names unknown property {name}.{property}")
-                })
-            };
-            let stored = self.stored_properties(entity, spec, served, graph, &resolve, diagnostics);
-            for (property, column) in stored {
-                let data_type = graph.property(property).data_type;
-                self.realizations[property.index()] = Some(Realization::Column(Column {
-                    name: column,
-                    indexes: Vec::new(),
-                    selectivity: FieldSelectivity::from_data_type(data_type),
-                }));
+            let columns = self.stored_columns(entity, spec, served, graph, package, diagnostics);
+            for (property, column) in columns {
+                self.columns[property.index()] = Some(column);
             }
-            self.annotate_columns(name, spec, &resolve, package, diagnostics);
-            let high_fan_out = spec
-                .high_fan_out
-                .iter()
-                .filter_map(|property| resolve(property, diagnostics))
-                .count()
-                > 0;
             let key = graph
                 .property_id(entity, DEFAULT_PRIMARY_KEY)
                 .and_then(|id| self.column(id))
-                .map(|column| column.name.clone());
-            let Some(key) = key else {
-                diagnostics.error(
-                    package,
-                    format!("store {} does not store the id of {name}", self.name),
-                );
+                .map(str::to_string);
+            let Some(key) = diagnostics.require(key, package, || {
+                format!("store {} does not store the id of {name}", self.name)
+            }) else {
                 continue;
             };
             let path_column = match &spec.path_column {
                 Some(column) => column.clone(),
-                None => engine.and_then(|engine| engine.path_column.clone()),
-            };
-            let sort_key = match (&spec.sort_key[..], engine) {
-                ([], Some(engine)) => engine.sort_key.clone(),
-                (sort_key, _) => sort_key.to_vec(),
+                None => engine.path_column.clone(),
             };
             self.sources[entity.index()] = Some(Source {
                 entity,
                 table,
                 key,
                 path_column,
-                sort_key,
-                high_fan_out,
             });
+            self.source_options
+                .push((entity, package.to_string(), spec.backend.clone()));
         }
     }
 
-    fn table_name(entity: &str, spec: &SourceSpec, engine: Option<&EngineSpec>) -> Option<String> {
-        spec.table.clone().or_else(|| {
-            let pattern = engine?.table.as_ref()?;
-            Some(pattern.replace("{entity}", &snake_case(entity)))
-        })
-    }
-
-    fn annotate_columns(
-        &mut self,
-        entity: &str,
-        spec: &SourceSpec,
-        resolve: &impl Fn(&str, &mut Diagnostics) -> Option<PropertyId>,
-        package: &str,
-        diagnostics: &mut Diagnostics,
-    ) {
-        for (property, kinds) in &spec.indexes {
-            let Some(id) = resolve(property, diagnostics) else {
-                continue;
-            };
-            for kind in kinds.kinds() {
-                let parsed = diagnostics.require(IndexKind::parse(kind), package, || {
-                    format!("{entity}.{property} has unknown index kind `{kind}`")
-                });
-                if let (Some(parsed), Some(column)) = (parsed, self.column_mut(id)) {
-                    column.indexes.push(parsed);
-                }
-            }
-        }
-        for property in &spec.low_selectivity {
-            if let Some(column) = resolve(property, diagnostics).and_then(|id| self.column_mut(id))
-            {
-                column.selectivity = FieldSelectivity::Low;
-            }
-        }
-    }
-
-    fn stored_properties(
+    fn stored_columns(
         &self,
         entity: EntityId,
         spec: &SourceSpec,
         served: &HashSet<PropertyId>,
         graph: &GraphCatalog,
-        resolve: &impl Fn(&str, &mut Diagnostics) -> Option<PropertyId>,
+        package: &str,
         diagnostics: &mut Diagnostics,
     ) -> Vec<(PropertyId, String)> {
+        let name = &graph.entity(entity).name;
+        let resolve = |property: &str, diagnostics: &mut Diagnostics| {
+            diagnostics.require(graph.property_id(entity, property), package, || {
+                format!(
+                    "store {} names unknown property {name}.{property}",
+                    self.name
+                )
+            })
+        };
         let renamed: Vec<(PropertyId, &String)> = spec
             .columns
             .iter()
@@ -495,14 +273,14 @@ impl Store {
         let excluded: HashSet<PropertyId> = spec
             .exclude
             .iter()
-            .filter_map(|property| resolve(property, diagnostics))
+            .filter_map(|p| resolve(p, diagnostics))
             .collect();
         let candidates: Vec<PropertyId> = if spec.only.is_empty() {
             graph.entity(entity).properties.clone()
         } else {
             spec.only
                 .iter()
-                .filter_map(|property| resolve(property, diagnostics))
+                .filter_map(|p| resolve(p, diagnostics))
                 .collect()
         };
         candidates
@@ -510,9 +288,17 @@ impl Store {
             .filter(|property| !excluded.contains(property))
             .filter_map(|property| {
                 let renamed = renamed.iter().find(|(id, _)| *id == property);
-                if renamed.is_none()
-                    && (served.contains(&property) || self.realizations[property.index()].is_some())
-                {
+                if served.contains(&property) {
+                    if renamed.is_some() {
+                        diagnostics.error(
+                            package,
+                            format!(
+                                "store {} stores {name}.{}, which a lookup provides",
+                                self.name,
+                                graph.property(property).name
+                            ),
+                        );
+                    }
                     return None;
                 }
                 let column = renamed.map_or_else(
@@ -524,111 +310,121 @@ impl Store {
             .collect()
     }
 
-    fn column_mut(&mut self, property: PropertyId) -> Option<&mut Column> {
-        match self.realizations[property.index()].as_mut()? {
-            Realization::Column(column) => Some(column),
-            Realization::Lookup(_) => None,
-        }
-    }
-
     fn declare_routes(
         &mut self,
         fragments: &[&StorageFragment],
-        engine: &EngineSpec,
         graph: &GraphCatalog,
         diagnostics: &mut Diagnostics,
     ) {
-        let mut specs = IndexMap::<&str, (&str, &RouteSpec)>::new();
         for fragment in fragments {
+            let package = fragment.package.as_str();
             for (name, spec) in &fragment.relationships {
-                if graph.relationship_id(name).is_none() {
-                    diagnostics.error(
-                        &fragment.package,
-                        format!("store {} routes unknown relationship {name}", self.name),
-                    );
-                } else if specs.insert(name, (&fragment.package, spec)).is_some() {
-                    diagnostics.error(
-                        &fragment.package,
-                        format!("store {} routes {name} twice", self.name),
-                    );
+                let relationship =
+                    diagnostics.require(graph.relationship_id(name), package, || {
+                        format!("store {} routes unknown relationship {name}", self.name)
+                    });
+                let Some(relationship) = relationship else {
+                    continue;
+                };
+                if self.route(relationship).is_some() {
+                    diagnostics.error(package, format!("store {} routes {name} twice", self.name));
+                    continue;
                 }
-            }
-        }
-        for (name, (package, spec)) in &specs {
-            for variant in spec.variants.keys() {
-                let known = parse_variant(variant)
-                    .and_then(|(source, target)| graph.variant_named(name, source, target));
-                if known.is_none() {
-                    diagnostics.error(
-                        package,
+                for variant in spec.variants.keys() {
+                    let known = parse_variant(variant)
+                        .and_then(|(source, target)| graph.variant_named(name, source, target));
+                    diagnostics.require(known, package, || {
                         format!(
                             "store {} routes unknown variant {name}({variant})",
                             self.name
-                        ),
-                    );
+                        )
+                    });
                 }
+                self.routes.push(DeclaredRoute {
+                    relationship,
+                    package: package.to_string(),
+                    spec: spec.clone(),
+                });
             }
-        }
-        for variant in graph.variants() {
-            if self.source(variant.source).is_none() || self.source(variant.target).is_none() {
-                continue;
-            }
-            let name = graph.relationship(variant.relationship).name.as_str();
-            let (package, spec) = specs.get(name).copied().unzip();
-            let package = package.unwrap_or(&fragments[0].package);
-            let key = format_variant(
-                &graph.entity(variant.source).name,
-                &graph.entity(variant.target).name,
-            );
-            let narrow = spec.and_then(|spec| spec.variants.get(&key));
-            let table = narrow
-                .and_then(|spec| spec.table.as_deref())
-                .or_else(|| spec?.table.as_deref())
-                .or_else(|| {
-                    engine.edge_table_for(
-                        graph.entity(variant.source).domain.as_deref(),
-                        graph.entity(variant.target).domain.as_deref(),
-                    )
-                })
-                .map(str::to_string);
-            let Some(table) = table else {
-                continue;
-            };
-            if !self.edge_tables.iter().any(|edge| edge.name == table) {
-                diagnostics.error(
-                    package,
-                    format!(
-                        "store {} routes {name}({key}) to undeclared edge table {table}",
-                        self.name
-                    ),
-                );
-                continue;
-            }
-            let fk = narrow
-                .and_then(|spec| spec.fk.as_deref())
-                .or_else(|| spec?.fk.as_deref());
-            let foreign_key = fk.and_then(|column| {
-                let found = ForeignKey::resolve(graph, variant.source, variant.target, column);
-                match found {
-                    None => diagnostics.error(package, format!("{name}({key}) foreign key {column} is on neither endpoint")),
-                    Some(found) if !references_other_endpoint(graph, variant, found) => diagnostics.error(
-                        package,
-                        format!("{name}({key}) foreign key {column} does not reference the other endpoint in the graph"),
-                    ),
-                    Some(_) => {}
-                }
-                found
-            });
-            self.routes[variant.id.index()] = Some(VariantRoute { table, foreign_key });
         }
     }
-}
 
-fn references_other_endpoint(
-    graph: &GraphCatalog,
-    variant: &RelationshipVariant,
-    key: ForeignKey,
-) -> bool {
-    let other = key.referenced_entity(variant.source, variant.target);
-    graph.property(key.property).references.contains(&other)
+    fn resolve_foreign_keys(
+        &self,
+        stores: &[Store],
+        graph: &GraphCatalog,
+        diagnostics: &mut Diagnostics,
+    ) -> Vec<Option<ForeignKey>> {
+        let on_connection = |entity: EntityId| {
+            stores
+                .iter()
+                .any(|store| store.connection == self.connection && store.source(entity).is_some())
+        };
+        let mut keys = vec![None; graph.variants().count()];
+        for route in &self.routes {
+            let mut matched = false;
+            for id in &graph.relationship(route.relationship).variants {
+                let variant = graph.variant(*id);
+                let narrow = route.for_variant(graph, variant);
+                let explicit = narrow.and_then(|spec| spec.fk.as_deref());
+                let Some(column) = explicit.or(route.spec.fk.as_deref()) else {
+                    continue;
+                };
+                let label = format!(
+                    "{}({})",
+                    graph.relationship(route.relationship).name,
+                    format_variant(
+                        &graph.entity(variant.source).name,
+                        &graph.entity(variant.target).name
+                    )
+                );
+                let found = ForeignKey::resolve(graph, variant.source, variant.target, column);
+                matched |= found.is_some();
+                let joinable = found.filter(|key| {
+                    let holder = key.holder_entity(variant.source, variant.target);
+                    let referenced = key.referenced_entity(variant.source, variant.target);
+                    self.source(holder).is_some()
+                        && self.column(key.property).is_some()
+                        && on_connection(referenced)
+                });
+                let Some(key) = joinable else {
+                    if explicit.is_some() {
+                        diagnostics.error(
+                            &route.package,
+                            format!(
+                                "{label} foreign key {column} is not joinable on connection {}",
+                                self.connection
+                            ),
+                        );
+                    }
+                    continue;
+                };
+                let referenced = key.referenced_entity(variant.source, variant.target);
+                if !graph
+                    .property(key.property)
+                    .references
+                    .contains(&referenced)
+                {
+                    diagnostics.error(
+                        &route.package,
+                        format!(
+                            "{label} foreign key {column} does not reference the other endpoint in the graph"
+                        ),
+                    );
+                    continue;
+                }
+                keys[id.index()] = Some(key);
+            }
+            if let Some(column) = route.spec.fk.as_deref().filter(|_| !matched) {
+                diagnostics.error(
+                    &route.package,
+                    format!(
+                        "{} foreign key {column} is on no endpoint of any variant",
+                        graph.relationship(route.relationship).name
+                    ),
+                );
+            }
+        }
+        keys
+    }
 }

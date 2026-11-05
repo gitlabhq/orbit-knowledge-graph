@@ -6,4 +6,4 @@ entities:
   Note:
     table: notes
     only: [id, body, traversal_path]
-    indexes: { body: text }
+    backend: { text: [body] }

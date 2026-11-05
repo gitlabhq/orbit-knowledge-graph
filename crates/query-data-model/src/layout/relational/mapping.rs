@@ -54,6 +54,13 @@ impl ForeignKey {
             Endpoint::Target => source,
         }
     }
+
+    pub fn holder_entity(self, source: EntityId, target: EntityId) -> EntityId {
+        match self.holder {
+            Endpoint::Source => source,
+            Endpoint::Target => target,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

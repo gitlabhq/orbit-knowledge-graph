@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use super::Catalog;
+use super::Model;
 use crate::{Direction, EntityId, Hop, Property, RelationshipId};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -24,7 +24,7 @@ pub enum Unresolved {
     },
 }
 
-impl Catalog {
+impl Model {
     pub fn entity(&self, name: &str) -> Result<EntityId, Unresolved> {
         self.graph
             .entity_id(name)

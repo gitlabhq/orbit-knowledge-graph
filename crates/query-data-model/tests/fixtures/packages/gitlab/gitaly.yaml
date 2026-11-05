@@ -1,7 +1,6 @@
-kind: storage
+kind: service
 package: gitlab
-store: gitaly
-engine: { kind: service }
+service: gitaly
 lookups:
   mr_raw_patch:
     entity: MergeRequest

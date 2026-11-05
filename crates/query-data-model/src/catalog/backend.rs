@@ -1,0 +1,194 @@
+use std::fmt::Debug;
+
+use serde::de::DeserializeOwned;
+
+use super::{Diagnostics, Model, Source, Store};
+use crate::spec::{BackendOptions, parse_variant};
+use crate::{DataModelError, EntityId, GraphCatalog, RelationshipId, RelationshipVariantId};
+
+pub trait StorageBackend: Sized {
+    const KIND: &'static str;
+    type Options: DeserializeOwned + Default;
+    type SourceOptions: DeserializeOwned + Default;
+    type RouteOptions: DeserializeOwned + Default;
+    type Store: Debug;
+
+    fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
+}
+
+pub struct SourceInput<'a, O> {
+    pub entity: EntityId,
+    pub package: &'a str,
+    pub options: O,
+}
+
+pub struct RouteInput<'a, O> {
+    pub relationship: RelationshipId,
+    pub package: &'a str,
+    pub options: O,
+    pub variants: Vec<(RelationshipVariantId, O)>,
+}
+
+pub struct StoreInput<'a, B: StorageBackend> {
+    pub graph: &'a GraphCatalog,
+    pub store: &'a Store,
+    pub connection: &'a [&'a Store],
+    pub options: B::Options,
+    pub sources: Vec<SourceInput<'a, B::SourceOptions>>,
+    pub routes: Vec<RouteInput<'a, B::RouteOptions>>,
+}
+
+#[derive(Debug)]
+pub struct Catalog<'m, B: StorageBackend> {
+    model: &'m Model,
+    connection: String,
+    stores: Vec<(&'m Store, B::Store)>,
+}
+
+impl<'m, B: StorageBackend> Catalog<'m, B> {
+    pub fn model(&self) -> &'m Model {
+        self.model
+    }
+
+    pub fn connection(&self) -> &str {
+        &self.connection
+    }
+
+    pub fn stores(&self) -> impl Iterator<Item = (&'m Store, &B::Store)> {
+        self.stores.iter().map(|(store, facts)| (*store, facts))
+    }
+
+    pub fn store(&self, name: &str) -> Option<&'m Store> {
+        self.stores()
+            .find(|(store, _)| store.name == name)
+            .map(|(store, _)| store)
+    }
+
+    pub fn backend(&self, name: &str) -> Option<&B::Store> {
+        self.stores()
+            .find(|(store, _)| store.name == name)
+            .map(|(_, facts)| facts)
+    }
+
+    pub fn sources(&self, entity: EntityId) -> impl Iterator<Item = (&'m Store, &'m Source)> {
+        self.stores
+            .iter()
+            .filter_map(move |(store, _)| Some((*store, store.source(entity)?)))
+    }
+}
+
+impl Model {
+    pub fn physical<B: StorageBackend>(
+        &self,
+        connection: &str,
+    ) -> Result<Catalog<'_, B>, DataModelError> {
+        let members: Vec<&Store> = self
+            .stores
+            .iter()
+            .filter(|store| store.connection == connection)
+            .collect();
+        let Some(first) = members.first() else {
+            return Err(DataModelError::UnknownReference {
+                kind: "connection",
+                name: connection.to_string(),
+            });
+        };
+        if first.kind != B::KIND {
+            let mut diagnostics = Diagnostics::default();
+            diagnostics.error(
+                &first.package,
+                format!("connection {connection} is {}, not {}", first.kind, B::KIND),
+            );
+            diagnostics.finish()?;
+        }
+        let mut diagnostics = Diagnostics::default();
+        let inputs: Vec<StoreInput<'_, B>> = members
+            .iter()
+            .map(|store| self.input::<B>(store, &members, &mut diagnostics))
+            .collect();
+        diagnostics.finish()?;
+        let mut diagnostics = Diagnostics::default();
+        let stores = members
+            .iter()
+            .zip(inputs)
+            .map(|(store, input)| (*store, B::resolve(input, &mut diagnostics)))
+            .collect();
+        diagnostics.finish()?;
+        Ok(Catalog {
+            model: self,
+            connection: connection.to_string(),
+            stores,
+        })
+    }
+
+    fn input<'a, B: StorageBackend>(
+        &'a self,
+        store: &'a Store,
+        connection: &'a [&'a Store],
+        diagnostics: &mut Diagnostics,
+    ) -> StoreInput<'a, B> {
+        let graph = &self.graph;
+        let context = format!("store {}", store.name);
+        let sources = store
+            .source_options
+            .iter()
+            .map(|(entity, package, options)| SourceInput {
+                entity: *entity,
+                package,
+                options: parse(
+                    package,
+                    &format!("{context} {}", graph.entity(*entity).name),
+                    options,
+                    diagnostics,
+                ),
+            })
+            .collect();
+        let routes = store
+            .routes
+            .iter()
+            .map(|route| {
+                let name = &graph.relationship(route.relationship).name;
+                let label = format!("{context} route {name}");
+                RouteInput {
+                    relationship: route.relationship,
+                    package: &route.package,
+                    options: parse(&route.package, &label, &route.spec.backend, diagnostics),
+                    variants: route
+                        .spec
+                        .variants
+                        .iter()
+                        .filter_map(|(variant, spec)| {
+                            let (source, target) = parse_variant(variant)?;
+                            let id = graph.variant_named(name, source, target)?.id;
+                            let label = format!("{label}({variant})");
+                            Some((
+                                id,
+                                parse(&route.package, &label, &spec.backend, diagnostics),
+                            ))
+                        })
+                        .collect(),
+                }
+            })
+            .collect();
+        StoreInput {
+            graph,
+            store,
+            connection,
+            options: parse(&store.package, &context, &store.options, diagnostics),
+            sources,
+            routes,
+        }
+    }
+}
+
+fn parse<T: DeserializeOwned + Default>(
+    package: &str,
+    context: &str,
+    options: &BackendOptions,
+    diagnostics: &mut Diagnostics,
+) -> T {
+    serde_json::from_value(serde_json::Value::Object(options.clone())).unwrap_or_else(|error| {
+        diagnostics.error(package, format!("{context}: {error}"));
+        T::default()
+    })
+}

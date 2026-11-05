@@ -1,20 +1,22 @@
 use std::collections::HashMap;
 
-use ontology::constants::DEFAULT_PRIMARY_KEY;
-
 use indexmap::IndexMap;
+use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{
     DataType, EdgeVariantScope, EnumType, FieldSelectivity, FieldSource, NodeRefKind, Ontology,
     RequiredRole,
 };
+use serde::Serialize;
 
 use crate::DataModelError;
-
-use super::{
-    AuthorizationFragment, EdgeTableSpec, EngineSpec, EntityAccessSpec, EntitySpec, Fragment,
-    GraphFragment, IndexKinds, LookupSpec, PropertyAccessSpec, PropertyDetail, PropertySpec,
-    RedactionSpec, RelationshipSpec, RouteSpec, ScopeSpec, ScopeVariants, SourceSpec,
-    StorageFragment, format_variant,
+use crate::implementations::clickhouse::backend::{ClickHouseSource, IndexKinds};
+use crate::implementations::duckdb::backend::DuckDbSource;
+use crate::implementations::relational::{EdgeTableSpec, RelationalOptions, RelationalRoute};
+use crate::spec::{
+    AuthorizationFragment, BackendOptions, EngineSpec, EntityAccessSpec, EntitySpec, Fragment,
+    GraphFragment, LookupSpec, PropertyAccessSpec, PropertyDetail, PropertySpec, RedactionSpec,
+    RelationshipSpec, RouteSpec, ScopeSpec, ScopeVariants, ServiceFragment, SourceSpec,
+    StorageFragment, format_variant, snake_case,
 };
 
 const PLATFORM: &str = "gitlab";
@@ -25,13 +27,9 @@ pub fn from_ontology(ontology: &Ontology) -> Result<Vec<Fragment>, DataModelErro
         .map(Fragment::Graph)
         .collect();
     fragments.push(Fragment::Authorization(authorization(ontology)));
-    fragments.push(Fragment::Storage(Box::new(graph_store(ontology))));
-    fragments.push(Fragment::Storage(Box::new(local_store(ontology))));
-    fragments.extend(
-        service_stores(ontology)
-            .into_iter()
-            .map(|store| Fragment::Storage(Box::new(store))),
-    );
+    fragments.push(Fragment::Storage(Box::new(graph_store(ontology)?)));
+    fragments.push(Fragment::Storage(Box::new(local_store(ontology)?)));
+    fragments.extend(services(ontology).into_iter().map(Fragment::Service));
     Ok(fragments)
 }
 
@@ -287,16 +285,21 @@ fn scope_word(scope: EdgeVariantScope) -> &'static str {
     }
 }
 
-fn graph_store(ontology: &Ontology) -> StorageFragment {
-    let default_sort_key = ontology.default_entity_sort_key().to_vec();
-    let engine = EngineSpec {
-        kind: "clickhouse".to_string(),
-        trusted: false,
-        table: Some(format!("{}{{entity}}", ontology.table_prefix())),
-        path_column: Some(ontology::constants::TRAVERSAL_PATH_COLUMN.to_string()),
+fn options(value: impl Serialize) -> Result<BackendOptions, DataModelError> {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::Object(map)) => Ok(map),
+        Ok(other) => Err(DataModelError::Invalid(format!(
+            "backend options must be a map, got {other}"
+        ))),
+        Err(error) => Err(DataModelError::Invalid(error.to_string())),
+    }
+}
+
+fn graph_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
+    let relational = RelationalOptions {
         version_column: Some(ontology::VERSION_COLUMN.to_string()),
         deleted_column: Some(ontology::DELETED_COLUMN.to_string()),
-        sort_key: default_sort_key.clone(),
+        sort_key: ontology.default_entity_sort_key().to_vec(),
         edge_tables: ontology
             .edge_tables()
             .into_iter()
@@ -321,12 +324,13 @@ fn graph_store(ontology: &Ontology) -> StorageFragment {
                 .iter()
                 .filter(|edge| !edge.source_kind.is_empty() && !edge.target_kind.is_empty())
                 .filter_map(|edge| {
-                    let expected = engine
+                    let expected = relational
                         .edge_table_for(domain_of(&edge.source_kind), domain_of(&edge.target_kind));
+                    let table = (Some(edge.destination_table.as_str()) != expected)
+                        .then(|| edge.destination_table.clone());
                     let route = RouteSpec {
-                        table: (Some(edge.destination_table.as_str()) != expected)
-                            .then(|| edge.destination_table.clone()),
                         fk: edge.fk_column.clone(),
+                        backend: options(RelationalRoute { table }).ok()?,
                         variants: IndexMap::new(),
                     };
                     (route != RouteSpec::default())
@@ -340,34 +344,38 @@ fn graph_store(ontology: &Ontology) -> StorageFragment {
             (!route.variants.is_empty()).then(|| (name.to_string(), route))
         })
         .collect();
-    StorageFragment {
+    let default_sort_key = relational.sort_key.clone();
+    let entities = ontology
+        .nodes()
+        .map(|node| {
+            Ok((
+                node.name.clone(),
+                graph_source(ontology, node, &default_sort_key)?,
+            ))
+        })
+        .collect::<Result<_, DataModelError>>()?;
+    Ok(StorageFragment {
         package: PLATFORM.to_string(),
         store: "graph".to_string(),
-        engine: Some(engine),
-        entities: ontology
-            .nodes()
-            .map(|node| {
-                (
-                    node.name.clone(),
-                    graph_source(ontology, node, &default_sort_key),
-                )
-            })
-            .collect(),
+        engine: Some(EngineSpec {
+            kind: "clickhouse".to_string(),
+            connection: Some("main".to_string()),
+            trusted: false,
+            table: Some(format!("{}{{entity}}", ontology.table_prefix())),
+            path_column: Some(ontology::constants::TRAVERSAL_PATH_COLUMN.to_string()),
+            backend: options(relational)?,
+        }),
+        entities,
         relationships,
-        lookups: IndexMap::new(),
-    }
+    })
 }
 
 fn graph_source(
     ontology: &Ontology,
     node: &ontology::NodeEntity,
     default_sort_key: &[String],
-) -> SourceSpec {
-    let pattern = format!(
-        "{}{}",
-        ontology.table_prefix(),
-        super::snake_case(&node.name)
-    );
+) -> Result<SourceSpec, DataModelError> {
+    let pattern = format!("{}{}", ontology.table_prefix(), snake_case(&node.name));
     let mut indexes = IndexMap::<String, Vec<String>>::new();
     for index in &node.storage.indexes {
         if node.fields.iter().any(|field| field.name == index.column) {
@@ -377,17 +385,12 @@ fn graph_source(
                 .push(index.index_type.clone());
         }
     }
-    SourceSpec {
-        table: (node.destination_table != pattern).then(|| node.destination_table.clone()),
-        path_column: (node.global || !node.has_traversal_path).then_some(None),
+    let backend = ClickHouseSource {
         sort_key: if node.sort_key == default_sort_key {
             Vec::new()
         } else {
             node.sort_key.clone()
         },
-        columns: IndexMap::new(),
-        only: Vec::new(),
-        exclude: Vec::new(),
         indexes: indexes
             .into_iter()
             .map(|(column, mut kinds)| {
@@ -413,14 +416,34 @@ fn graph_source(
             .filter(|field| field.high_fan_out)
             .map(|field| field.name.clone())
             .collect(),
-    }
+    };
+    Ok(SourceSpec {
+        table: (node.destination_table != pattern).then(|| node.destination_table.clone()),
+        path_column: (node.global || !node.has_traversal_path).then_some(None),
+        backend: options(backend)?,
+        ..SourceSpec::default()
+    })
 }
 
-fn local_store(ontology: &Ontology) -> StorageFragment {
+fn local_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
     let edge_table = ontology
         .local_edge_table_name()
         .unwrap_or(ontology.edge_table())
         .to_string();
+    let relational = RelationalOptions {
+        edge_tables: IndexMap::from([(
+            edge_table.clone(),
+            EdgeTableSpec {
+                default: true,
+                domains: Vec::new(),
+                sort_key: ontology
+                    .sort_key_for_table(&edge_table)
+                    .unwrap_or(ontology.edge_sort_key())
+                    .to_vec(),
+            },
+        )]),
+        ..RelationalOptions::default()
+    };
     let local = ontology.local_entity_names();
     let entities = ontology
         .nodes()
@@ -448,65 +471,54 @@ fn local_store(ontology: &Ontology) -> StorageFragment {
                 .collect();
             let spec = SourceSpec {
                 table: Some(node.destination_table.clone()),
-                sort_key: node.sort_key.clone(),
                 columns,
                 exclude,
+                backend: options(DuckDbSource {
+                    sort_key: node.sort_key.clone(),
+                })?,
                 ..SourceSpec::default()
             };
-            (node.name.clone(), spec)
+            Ok((node.name.clone(), spec))
         })
-        .collect();
-    StorageFragment {
+        .collect::<Result<_, DataModelError>>()?;
+    Ok(StorageFragment {
         package: PLATFORM.to_string(),
         store: "local".to_string(),
         engine: Some(EngineSpec {
             kind: "duckdb".to_string(),
+            connection: Some("local".to_string()),
             trusted: true,
-            edge_tables: IndexMap::from([(
-                edge_table.clone(),
-                EdgeTableSpec {
-                    default: true,
-                    domains: Vec::new(),
-                    sort_key: ontology
-                        .sort_key_for_table(&edge_table)
-                        .unwrap_or(ontology.edge_sort_key())
-                        .to_vec(),
-                },
-            )]),
+            backend: options(relational)?,
             ..EngineSpec::default()
         }),
         entities,
         relationships: IndexMap::new(),
-        lookups: IndexMap::new(),
-    }
+    })
 }
 
-fn service_stores(ontology: &Ontology) -> Vec<StorageFragment> {
-    let mut stores = IndexMap::<String, StorageFragment>::new();
+fn services(ontology: &Ontology) -> Vec<ServiceFragment> {
+    let mut services = IndexMap::<String, ServiceFragment>::new();
     for node in ontology.nodes() {
         for field in &node.fields {
             let FieldSource::Virtual(source) = &field.source else {
                 continue;
             };
-            let store = stores
-                .entry(source.service.clone())
-                .or_insert_with(|| StorageFragment {
-                    package: PLATFORM.to_string(),
-                    store: source.service.clone(),
-                    engine: Some(EngineSpec {
-                        kind: "service".to_string(),
-                        ..EngineSpec::default()
-                    }),
-                    ..StorageFragment::default()
-                });
-            let name = match store.lookups.get(&source.lookup) {
+            let service =
+                services
+                    .entry(source.service.clone())
+                    .or_insert_with(|| ServiceFragment {
+                        package: PLATFORM.to_string(),
+                        service: source.service.clone(),
+                        lookups: IndexMap::new(),
+                    });
+            let name = match service.lookups.get(&source.lookup) {
                 Some(existing) if existing.entity != node.name => {
                     format!("{}.{}", node.name, source.lookup)
                 }
                 _ => source.lookup.clone(),
             };
             let operation = (name != source.lookup).then(|| source.lookup.clone());
-            let lookup = store.lookups.entry(name).or_insert_with(|| LookupSpec {
+            let lookup = service.lookups.entry(name).or_insert_with(|| LookupSpec {
                 operation,
                 entity: node.name.clone(),
                 provides: Vec::new(),
@@ -517,5 +529,5 @@ fn service_stores(ontology: &Ontology) -> Vec<StorageFragment> {
             lookup.provides.push(field.name.clone());
         }
     }
-    stores.into_values().collect()
+    services.into_values().collect()
 }

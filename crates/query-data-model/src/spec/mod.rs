@@ -1,18 +1,15 @@
 mod authorization;
-mod from_ontology;
 mod graph;
+mod service;
 mod storage;
 
 pub use authorization::{
     AuthorizationFragment, EntityAccessSpec, PropertyAccessSpec, RedactionSpec, ScopeSpec,
     ScopeVariants,
 };
-pub use from_ontology::from_ontology;
-pub(crate) use from_ontology::graph_fragments;
 pub use graph::{EntitySpec, GraphFragment, PropertyDetail, PropertySpec, RelationshipSpec};
-pub use storage::{
-    EdgeTableSpec, EngineSpec, IndexKinds, LookupSpec, RouteSpec, SourceSpec, StorageFragment,
-};
+pub use service::{LookupSpec, ServiceFragment};
+pub use storage::{BackendOptions, EngineSpec, RouteSpec, SourceSpec, StorageFragment};
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +19,7 @@ pub enum Fragment {
     Graph(GraphFragment),
     Storage(Box<StorageFragment>),
     Authorization(AuthorizationFragment),
+    Service(ServiceFragment),
 }
 
 impl Fragment {
@@ -38,6 +36,7 @@ impl Fragment {
             Self::Graph(fragment) => &fragment.package,
             Self::Storage(fragment) => &fragment.package,
             Self::Authorization(fragment) => &fragment.package,
+            Self::Service(fragment) => &fragment.package,
         }
     }
 }

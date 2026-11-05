@@ -41,8 +41,20 @@ pub struct PropertyAccess {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowFilter {
     None,
-    Path { column: String },
-    PathThrough { hops: Vec<Hop>, column: String },
+    Path {
+        column: String,
+    },
+    PathThrough {
+        hops: Vec<PathHop>,
+        store: String,
+        column: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathHop {
+    pub hop: Hop,
+    pub store: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,29 +289,47 @@ impl Access {
     pub(super) fn resolve_guards(
         &self,
         graph: &GraphCatalog,
-        store: &mut Store,
+        stores: &mut [Store],
         diagnostics: &mut Diagnostics,
     ) {
-        let guards: Vec<(EntityId, Option<Guard>)> = store
-            .sources()
-            .map(|source| (source.entity, self.guard(graph, store, source.entity)))
+        let guards: Vec<Vec<(EntityId, Option<Guard>)>> = stores
+            .iter()
+            .map(|store| {
+                store
+                    .sources()
+                    .map(|source| {
+                        (
+                            source.entity,
+                            self.guard(graph, stores, store, source.entity),
+                        )
+                    })
+                    .collect()
+            })
             .collect();
-        for (entity, guard) in guards {
-            if guard.is_none() && self.entity(entity).is_some() {
-                let entity = graph.entity(entity);
-                diagnostics.error(
-                    &entity.package,
-                    format!(
-                        "{} in store {} has no namespace path column, reaches no entity that has one, and has no redaction rule",
-                        entity.name, store.name
-                    ),
-                );
+        for (store, guards) in stores.iter_mut().zip(guards) {
+            for (entity, guard) in guards {
+                if guard.is_none() && self.entity(entity).is_some() {
+                    let entity = graph.entity(entity);
+                    diagnostics.error(
+                        &entity.package,
+                        format!(
+                            "{} in store {} has no namespace path column, reaches no entity that has one, and has no redaction rule",
+                            entity.name, store.name
+                        ),
+                    );
+                }
+                store.guards[entity.index()] = guard;
             }
-            store.guards[entity.index()] = guard;
         }
     }
 
-    fn guard(&self, graph: &GraphCatalog, store: &Store, entity: EntityId) -> Option<Guard> {
+    fn guard(
+        &self,
+        graph: &GraphCatalog,
+        stores: &[Store],
+        store: &Store,
+        entity: EntityId,
+    ) -> Option<Guard> {
         let access = self.entity(entity)?;
         let redacted = access.redaction.is_some();
         if store.trusted || access.scope == Scope::Global {
@@ -315,24 +345,54 @@ impl Access {
                 .unwrap_or(RequiredRole::Reporter)
                 .as_access_level(),
         );
-        let path_of = |entity: EntityId| store.source(entity)?.path_column.clone();
-        if let Some(column) = path_of(entity) {
+        if let Some(column) = store
+            .source(entity)
+            .and_then(|source| source.path_column.clone())
+        {
             return Some(Guard {
                 filter: RowFilter::Path { column },
                 min_role,
                 redacted,
             });
         }
+        let nearby =
+            || {
+                std::iter::once(store).chain(stores.iter().filter(|other| {
+                    other.connection == store.connection && other.name != store.name
+                }))
+            };
+        let anchor_store = |hop: &Hop| {
+            nearby()
+                .filter(|candidate| hop.from != entity || candidate.name == store.name)
+                .find(|candidate| self.anchors(candidate, hop))
+        };
+        let with_path = |entity: EntityId| {
+            nearby().find_map(|candidate| {
+                let column = candidate.source(entity)?.path_column.clone()?;
+                Some((candidate.name.clone(), column))
+            })
+        };
         let hops = graph
             .walk(entity)
             .max_hops(graph.entities().count())
-            .filter(|hop| self.anchors(store, hop))
-            .shortest(|reached| path_of(reached).is_some());
+            .filter(|hop| anchor_store(hop).is_some())
+            .shortest(|reached| with_path(reached).is_some());
         match hops {
             Some(hops) => {
-                let column = path_of(hops.last()?.to)?;
+                let (store, column) = with_path(hops.last()?.to)?;
+                let hops = hops
+                    .into_iter()
+                    .map(|hop| {
+                        let store = anchor_store(&hop)?.name.clone();
+                        Some(PathHop { hop, store })
+                    })
+                    .collect::<Option<Vec<_>>>()?;
                 Some(Guard {
-                    filter: RowFilter::PathThrough { hops, column },
+                    filter: RowFilter::PathThrough {
+                        hops,
+                        store,
+                        column,
+                    },
                     min_role,
                     redacted,
                 })
@@ -348,9 +408,8 @@ impl Access {
     fn anchors(&self, store: &Store, hop: &Hop) -> bool {
         let anchor = self.variant_scope(hop.variant) == Some(EdgeVariantScope::NamespaceAnchor);
         let held_by_source = store
-            .route(hop.variant)
-            .and_then(|route| route.foreign_key)
+            .foreign_key(hop.variant)
             .is_some_and(|key| key.holder == Endpoint::Source);
-        anchor && held_by_source
+        hop.forward && anchor && held_by_source
     }
 }

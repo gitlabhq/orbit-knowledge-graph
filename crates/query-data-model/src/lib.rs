@@ -2,6 +2,7 @@ pub mod authz;
 pub mod catalog;
 mod derive;
 mod error;
+pub mod from_ontology;
 pub mod generic;
 pub mod implementations;
 pub mod layout;
@@ -11,7 +12,7 @@ pub use layout::{Layout, Mapping, Relational, RelationalBackend};
 
 pub use authz::gitlab::{EntityAuthConfig, GitLabAuthzCatalog, GitLabPolicy};
 pub use authz::trusted::TrustedLocalCatalog;
-pub use catalog::Catalog;
+pub use catalog::{Catalog, Model, StorageBackend};
 pub use error::DataModelError;
 pub use generic::{
     DataModel, Direction, Entity, EntityId, GraphCatalog, Hop, Property, PropertyId, Reach,

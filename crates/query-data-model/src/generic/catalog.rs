@@ -71,7 +71,7 @@ impl GraphCatalog {
     }
 
     pub(crate) fn derive(ontology: &Ontology) -> Result<Self, DataModelError> {
-        let fragments = crate::spec::graph_fragments(ontology)?;
+        let fragments = crate::from_ontology::graph_fragments(ontology)?;
         let mut diagnostics = Diagnostics::default();
         let graph = Self::from_spec(fragments, &mut diagnostics);
         diagnostics.finish()?;
