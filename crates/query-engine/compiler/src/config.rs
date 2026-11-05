@@ -40,6 +40,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub result_ctx: ResultContext,
         pub query_config: QueryConfig,
         pub hydration_plan: HydrationPlan,
+        pub relational: crate::passes::codegen::ClickHousePlan,
         pub output: CompiledQueryContext,
     }
 
@@ -121,14 +122,19 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [security_ctx, data_model]
             mutates: [node]
         }
+        build_plan {
+            reads_env: [data_model]
+            reads_state: [node, query_config]
+            mutates: [relational]
+        }
         security_check {
             reads_env: [security_ctx, data_model]
-            reads_state: [node]
+            reads_state: [relational]
         }
         codegen {
             reads_env: [data_model]
             reads_state: [input]
-            mutates: [node, result_ctx, query_config, hydration_plan, output]
+            mutates: [node, relational, result_ctx, query_config, hydration_plan, output]
         }
         duckdb_codegen {
             reads_env: [data_model]
@@ -141,20 +147,20 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, security_check, codegen]
+            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, build_plan, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, security_check, codegen]
+            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, build_plan, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, security_check, codegen]
+            state: [input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, build_plan, security_check, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
@@ -333,13 +339,22 @@ fn paginate(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn security_check<C>(ctx: &mut C) -> Result<()>
-where
-    C: CompilerCtx,
-    C::Model: query_data_model::OrbitQueryModel,
-{
-    let node = require(ctx.node().clone(), "node")?;
-    security_check::verify(&node, ctx.security_ctx(), ctx.data_model())
+fn build_plan(
+    ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
+) -> Result<()> {
+    let node = require(ctx.node().as_ref(), "node")?;
+    let query_config = ctx.query_config().clone().unwrap_or_default();
+    let plan = codegen::build(node, ctx.data_model().catalog(), &query_config)?;
+    ctx.set_relational(plan);
+    Ok(())
+}
+
+fn security_check(
+    ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
+) -> Result<()> {
+    let plan = require(ctx.relational().as_ref(), "relational")?;
+    let model = ctx.data_model();
+    security_check::verify(plan, model.catalog(), ctx.security_ctx(), model)
 }
 
 fn hydrate_plan<C>(ctx: &mut C) -> Result<()>
@@ -373,12 +388,13 @@ fn codegen(
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
     let node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
-    let base = codegen::codegen(
-        &node,
+    let plan = require(ctx.take_relational(), "relational")?;
+    let base = codegen::render(
+        &plan,
         ctx.data_model().catalog(),
         result_context,
         query_config,
-    )?;
+    );
     let query_type = input.query_type;
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {

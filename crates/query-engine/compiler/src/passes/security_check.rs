@@ -1,129 +1,139 @@
-//! Post-compilation safety checks.
+//! Post-compilation policy check over the checked relational plan.
 //!
-//! Runs after security filter injection to verify invariants that must hold
-//! before the AST is handed to codegen. Checks that every namespaced graph
-//! table alias has a role-eligible traversal path predicate or a fail-closed
-//! false predicate.
+//! Runs after security filter injection. Every scan of a namespaced graph
+//! table needs a role-eligible traversal path predicate, or a fail-closed
+//! false predicate, among the filters that directly consume its join tree.
 
+use std::collections::HashMap;
+
+use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::Catalog;
+use query_data_model::implementations::clickhouse::ClickHouse;
+use query_data_model::implementations::relational::RelationalFacts;
+use query_data_model::implementations::relational::plan::{
+    BinaryOp, Expr, Function, Operation, Relational, Table,
+};
+use query_data_model::plan::tracking::{NodeId, Plan, Ref};
 use serde_json::Value;
 
-use crate::ast::visit::{visit_queries, visit_relations};
-use crate::ast::{Expr, Function, Node, Op, Query, TableRef};
 use crate::error::{QueryError, Result};
+use crate::passes::codegen::ClickHousePlan;
 use crate::types::SecurityContext;
 
 pub fn verify(
-    node: &Node,
+    plan: &ClickHousePlan,
+    catalog: &Catalog<ClickHouse>,
     ctx: &SecurityContext,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
-    match node {
-        Node::Query(q) => visit_queries(q, &mut |query| check_query(query, ctx, model)),
-        Node::Insert(_) => Ok(()),
-    }
-}
-
-fn check_query(
-    q: &Query,
-    ctx: &SecurityContext,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Result<()> {
-    let mut error = None;
-    visit_relations(&q.from, &mut |relation| {
-        if error.is_some() {
-            return;
-        }
-        if let TableRef::Scan { table, alias, .. } = relation {
-            if table.is_empty() {
-                return;
-            }
-            let Some(columns) = model.table_path_columns(table) else {
-                error = Some(QueryError::Security(format!(
-                    "post-check failed: unresolved table '{table}'"
+    let graph = &plan.plan;
+    let consumers: HashMap<NodeId, NodeId> = graph
+        .nodes()
+        .flat_map(|node| graph.inputs(node).iter().map(move |input| (*input, node)))
+        .collect();
+    for node in graph.nodes() {
+        let Operation::Scan { table, alias, .. } = graph.operation(node) else {
+            continue;
+        };
+        let table = table_name(catalog, *table);
+        let Some(columns) = model.table_path_columns(table) else {
+            return Err(QueryError::Security(format!(
+                "post-check failed: unresolved table '{table}'"
+            )));
+        };
+        let filters = join_filters(graph, &consumers, node);
+        for column in columns {
+            let access_level = column
+                .entity
+                .and_then(|entity| model.required_access_level(entity))
+                .unwrap_or(ontology::RequiredRole::Reporter.as_access_level());
+            let eligible = ctx.paths_at_least(access_level);
+            let output = graph
+                .outputs(node)
+                .find(|output| graph.name(*output) == Some(column.name.as_str()));
+            let guarded = output.is_some_and(|output| {
+                filters
+                    .iter()
+                    .any(|filter| has_valid_path_filter(filter, output, &eligible))
+            });
+            if !guarded {
+                return Err(QueryError::Security(format!(
+                    "post-check failed: column '{alias}.{}' missing valid traversal_path filter at access level {access_level}",
+                    column.name
                 )));
-                return;
-            };
-            for column in columns {
-                let access_level = column
-                    .entity
-                    .and_then(|entity| model.required_access_level(entity))
-                    .unwrap_or(ontology::RequiredRole::Reporter.as_access_level());
-                let eligible_paths = ctx.paths_at_least(access_level);
-                if !has_valid_path_filter(
-                    q.where_clause.as_ref(),
-                    alias,
-                    &column.name,
-                    &eligible_paths,
-                ) {
-                    error = Some(QueryError::Security(format!(
-                        "post-check failed: column '{alias}.{}' missing valid traversal_path filter at access level {access_level}",
-                        column.name
-                    )));
-                    break;
-                }
             }
         }
-    });
-    error.map_or(Ok(()), Err)
+    }
+    Ok(())
 }
 
-fn has_valid_path_filter(
-    expr: Option<&Expr>,
-    alias: &str,
-    column: &str,
-    eligible_paths: &[&orbit_utils::traversal_path::TraversalPath],
-) -> bool {
-    let Some(expr) = expr else { return false };
+fn table_name(catalog: &Catalog<ClickHouse>, table: Table) -> &str {
+    let (_, facts) = catalog
+        .stores()
+        .nth(table.store())
+        .expect("plans scan tables of their catalog");
+    &facts.relational().tables[table.index()].name
+}
+
+fn join_filters<'p>(
+    graph: &'p Plan<Relational<ClickHouse>>,
+    consumers: &HashMap<NodeId, NodeId>,
+    scan: NodeId,
+) -> Vec<&'p Expr> {
+    let mut node = scan;
+    while let Some(consumer) = consumers.get(&node)
+        && matches!(graph.operation(*consumer), Operation::Join(_))
+    {
+        node = *consumer;
+    }
+    let mut filters = Vec::new();
+    while let Some(consumer) = consumers.get(&node)
+        && let Operation::Filter(predicate) = graph.operation(*consumer)
+    {
+        filters.push(predicate);
+        node = *consumer;
+    }
+    filters
+}
+
+fn has_valid_path_filter(expr: &Expr, column: Ref, eligible: &[&TraversalPath]) -> bool {
     match expr {
-        Expr::Literal(Value::Bool(false))
-        | Expr::Param {
+        Expr::Bool(false)
+        | Expr::Parameter {
             value: Value::Bool(false),
             ..
         } => true,
-        Expr::BinaryOp {
-            op: Op::And,
+        Expr::Binary {
+            op: BinaryOp::And,
             left,
             right,
         } => {
-            has_valid_path_filter(Some(left), alias, column, eligible_paths)
-                || has_valid_path_filter(Some(right), alias, column, eligible_paths)
+            has_valid_path_filter(left, column, eligible)
+                || has_valid_path_filter(right, column, eligible)
         }
-        Expr::BinaryOp {
-            op: Op::Or,
+        Expr::Binary {
+            op: BinaryOp::Or,
             left,
             right,
         } => {
-            has_valid_path_filter(Some(left), alias, column, eligible_paths)
-                && has_valid_path_filter(Some(right), alias, column, eligible_paths)
+            has_valid_path_filter(left, column, eligible)
+                && has_valid_path_filter(right, column, eligible)
         }
-        Expr::FuncCall {
-            name: Function::StartsWith,
+        Expr::Call {
+            function: Function::StartsWith,
             args,
-        } => {
-            let [
-                Expr::Column {
-                    table,
-                    column: actual,
-                },
-                path,
-            ] = args.as_slice()
-            else {
-                return false;
-            };
-            if table != alias || actual != column {
-                return false;
-            }
-            match path {
-                Expr::Literal(Value::String(path))
-                | Expr::Param {
+        } => match args.as_slice() {
+            [
+                Expr::Column(actual),
+                Expr::Parameter {
                     value: Value::String(path),
                     ..
-                } => eligible_paths
-                    .iter()
-                    .any(|authorized| path.starts_with(authorized.as_str())),
-                _ => false,
-            }
-        }
+                },
+            ] if *actual == column => eligible
+                .iter()
+                .any(|authorized| path.starts_with(authorized.as_str())),
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -133,7 +143,8 @@ mod tests {
     use super::*;
     use std::sync::{Arc, LazyLock};
 
-    use crate::ast::{SelectExpr, TableRef};
+    use crate::ast::visit::visit_queries;
+    use crate::ast::{Expr, Function, Node, Op, Query, SelectExpr, TableRef};
     use crate::constants::TRAVERSAL_PATH_COLUMN;
     use query_data_model::ClickHouseDataModel;
 
@@ -154,7 +165,16 @@ mod tests {
     }
 
     fn check(node: &Node, context: &SecurityContext, model: &ClickHouseDataModel) -> Result<()> {
-        verify(node, context, model)
+        let plan = crate::passes::codegen::build(node, model.catalog(), &Default::default())?;
+        verify(&plan, model.catalog(), context, model)
+    }
+
+    fn unscoped() -> Query {
+        Query {
+            select: vec![SelectExpr::col("u", "id")],
+            from: TableRef::scan("gl_user", "u"),
+            ..Default::default()
+        }
     }
     fn project_query(where_clause: Option<Expr>) -> Node {
         Node::Query(Box::new(Query {
@@ -205,6 +225,7 @@ mod tests {
             let scalar = Expr::Scalar(Box::new(inner.clone()));
             let mut query = Query {
                 select: vec![SelectExpr::new(Expr::int(1), "result")],
+                from: TableRef::scan("gl_user", "u"),
                 ..Default::default()
             };
             match position {
@@ -217,8 +238,8 @@ mod tests {
                 "join" => {
                     query.from = TableRef::join(
                         JoinType::Inner,
-                        TableRef::subquery(Query::default(), "outer"),
-                        TableRef::subquery(Query::default(), "other"),
+                        TableRef::subquery(unscoped(), "outer"),
+                        TableRef::subquery(unscoped(), "other"),
                         Expr::eq(scalar, Expr::int(1)),
                     )
                 }
@@ -226,7 +247,8 @@ mod tests {
                     query.where_clause = Some(Expr::InSelect {
                         expr: Box::new(scalar),
                         query: Box::new(Query {
-                            from: TableRef::subquery(Query::default(), "lookup"),
+                            select: vec![SelectExpr::col("lookup", "id")],
+                            from: TableRef::subquery(unscoped(), "lookup"),
                             ..Default::default()
                         }),
                     })
@@ -528,7 +550,7 @@ mod tests {
     fn skips_declared_ctes() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = Node::Query(Box::new(Query {
-            ctes: vec![crate::ast::Cte::new("path_cte", Query::default())],
+            ctes: vec![crate::ast::Cte::new("path_cte", unscoped())],
             select: vec![SelectExpr {
                 expr: Expr::col("c", "id"),
                 alias: None,
@@ -628,10 +650,10 @@ mod tests {
         let inner = Query {
             select: vec![SelectExpr {
                 expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
-                alias: Some("cnt".into()),
+                alias: Some("id".into()),
             }],
             from: TableRef::scan("gl_project", "p"),
-            group_by: vec![Expr::col("p", "namespace_id")],
+            group_by: vec![Expr::col("p", "visibility_level")],
             having: Some(Expr::binary(
                 crate::ast::Op::Gt,
                 Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
@@ -660,11 +682,11 @@ mod tests {
         let inner = Query {
             select: vec![SelectExpr {
                 expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
-                alias: Some("cnt".into()),
+                alias: Some("id".into()),
             }],
             from: TableRef::scan("gl_project", "p"),
             where_clause: Some(filter),
-            group_by: vec![Expr::col("p", "namespace_id")],
+            group_by: vec![Expr::col("p", "visibility_level")],
             having: Some(Expr::binary(
                 crate::ast::Op::Gt,
                 Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
@@ -680,7 +702,8 @@ mod tests {
     fn accepts_subquery_wrapping_cte() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let inner = Query {
-            ctes: vec![crate::ast::Cte::new("dedup_cte", Query::default())],
+            ctes: vec![crate::ast::Cte::new("dedup_cte", unscoped())],
+            select: vec![SelectExpr::col("d", "id")],
             from: TableRef::cte("dedup_cte", "d"),
             ..Default::default()
         };
@@ -763,7 +786,7 @@ mod tests {
                 },
             )],
             select: vec![SelectExpr {
-                expr: Expr::col("base", "node_id"),
+                expr: Expr::col("b", "node_id"),
                 alias: None,
             }],
             from: TableRef::cte("base", "b"),
@@ -805,7 +828,7 @@ mod tests {
                 },
             )],
             select: vec![SelectExpr {
-                expr: Expr::col("base", "node_id"),
+                expr: Expr::col("b", "node_id"),
                 alias: None,
             }],
             from: TableRef::cte("base", "b"),
@@ -827,7 +850,7 @@ mod tests {
         );
         let node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
-                expr: Expr::col("hop", "source_id"),
+                expr: Expr::col("e", "source_id"),
                 alias: None,
             }],
             from: TableRef::join(
@@ -879,7 +902,7 @@ mod tests {
         );
         let node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
-                expr: Expr::col("hop", "source_id"),
+                expr: Expr::col("e", "source_id"),
                 alias: None,
             }],
             from: TableRef::join(

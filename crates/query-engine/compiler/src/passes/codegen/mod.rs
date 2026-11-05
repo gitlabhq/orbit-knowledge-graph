@@ -9,7 +9,7 @@ use query_data_model::Catalog;
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::duckdb::DuckDb;
 use query_data_model::implementations::duckdb::render::type_name;
-use query_data_model::implementations::relational::plan::RelationalError;
+use query_data_model::implementations::relational::plan::{RelationalError, RelationalPlan};
 
 use crate::ast::{Node, Query, SqlType};
 use crate::error::{QueryError, Result};
@@ -20,23 +20,43 @@ pub use orbit_utils::query_types::ParamValue;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+pub type ClickHousePlan = RelationalPlan<ClickHouse>;
+
+pub fn build(
+    ast: &Node,
+    catalog: &Catalog<ClickHouse>,
+    query_config: &QueryConfig,
+) -> Result<ClickHousePlan> {
+    let settings = query_config
+        .to_clickhouse_settings()
+        .map_err(QueryError::Codegen)?;
+    import::clickhouse(ast, catalog, settings).map_err(rejected)
+}
+
+pub fn render(
+    plan: &ClickHousePlan,
+    catalog: &Catalog<ClickHouse>,
+    result_context: ResultContext,
+    query_config: QueryConfig,
+) -> ParameterizedQuery {
+    let rendered = catalog.render(plan);
+    ParameterizedQuery {
+        sql: rendered.sql,
+        params: rendered.parameters,
+        result_context,
+        query_config,
+        dialect: SqlDialect::ClickHouse,
+    }
+}
+
 pub fn codegen(
     ast: &Node,
     catalog: &Catalog<ClickHouse>,
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
-    let settings = query_config
-        .to_clickhouse_settings()
-        .map_err(QueryError::Codegen)?;
-    let rendered = import::clickhouse(ast, catalog, settings).map_err(rejected)?;
-    Ok(ParameterizedQuery {
-        sql: rendered.sql,
-        params: rendered.parameters,
-        result_context,
-        query_config,
-        dialect: SqlDialect::ClickHouse,
-    })
+    let plan = build(ast, catalog, &query_config)?;
+    Ok(render(&plan, catalog, result_context, query_config))
 }
 
 pub fn duckdb_codegen(
@@ -44,7 +64,7 @@ pub fn duckdb_codegen(
     catalog: &Catalog<DuckDb>,
     result_context: ResultContext,
 ) -> Result<ParameterizedQuery> {
-    let rendered = import::duckdb(ast, catalog).map_err(rejected)?;
+    let rendered = catalog.render(&import::duckdb(ast, catalog).map_err(rejected)?);
     Ok(ParameterizedQuery {
         sql: rendered.sql,
         params: rendered.parameters,
@@ -75,7 +95,8 @@ pub fn cte_statements(ast: &Node, catalog: &Catalog<ClickHouse>) -> Result<Vec<C
                     .collect(),
                 ..(*cte.query).clone()
             }));
-            let rendered = import::clickhouse(&statement, catalog, Vec::new()).map_err(rejected)?;
+            let plan = import::clickhouse(&statement, catalog, Vec::new()).map_err(rejected)?;
+            let rendered = catalog.render(&plan);
             Ok((cte.name.clone(), rendered.sql, rendered.parameters))
         })
         .collect()
