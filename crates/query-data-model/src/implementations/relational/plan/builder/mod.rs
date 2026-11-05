@@ -51,6 +51,10 @@ impl<'c, B: RelationalBackend> RelationalBuilder<'c, B> {
         })
     }
 
+    pub fn catalog(&self) -> &'c Catalog<B> {
+        self.catalog
+    }
+
     pub fn settings(
         &mut self,
         settings: impl IntoIterator<Item = (String, String)>,

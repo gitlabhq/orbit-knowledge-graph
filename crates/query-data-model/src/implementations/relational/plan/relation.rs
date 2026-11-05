@@ -41,17 +41,16 @@ pub struct Relation {
 
 impl Relation {
     pub fn column(&self, name: &str) -> Result<Column, RelationalError> {
-        self.find(name, |visible| visible.name == name)
+        self.find(name, |visible| {
+            visible.name == name && visible.range.is_none()
+        })
+        .or_else(|_| self.find(name, |visible| visible.name == name))
     }
 
     pub fn qualified(&self, range: &str, name: &str) -> Result<Column, RelationalError> {
         self.find(&format!("{range}.{name}"), |visible| {
             visible.name == name && visible.range.as_deref() == Some(range)
         })
-    }
-
-    pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.visible.iter().map(|visible| visible.name.as_str())
     }
 
     fn find(

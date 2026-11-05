@@ -127,7 +127,7 @@ impl StorageBackend for ClickHouse {
         store.resolve_joins(&input, diagnostics);
         store.resolve_copies(&input, diagnostics);
         store.schema = schema::resolve(&input, &store.relational, diagnostics);
-        store.relational.tables = store.schema.iter().flat_map(table_schemas).collect();
+        store.relational.tables = store.table_schemas();
         store
     }
 }
@@ -568,7 +568,33 @@ impl crate::query_model::QueryFacts for ClickHouseStore {
     }
 }
 
-fn table_schemas(schema: &Schema) -> impl Iterator<Item = TableSchema> + '_ {
+impl ClickHouseStore {
+    fn table_schemas(&self) -> Vec<TableSchema> {
+        let mut tables: Vec<_> = self.schema.iter().flat_map(physical_tables).collect();
+        let mut names: Vec<_> = self.tables.keys().collect();
+        names.sort();
+        for name in names {
+            let facts = &self.tables[name];
+            let index = match tables.iter().position(|table| &table.name == name) {
+                Some(index) => index,
+                None => {
+                    tables.push(TableSchema::new(name, []));
+                    tables.len() - 1
+                }
+            };
+            let mut columns: Vec<_> = facts.columns.iter().flatten().collect();
+            columns.sort();
+            tables[index].extend(
+                columns
+                    .into_iter()
+                    .map(|column| (column.clone(), facts.column_types.get(column).copied())),
+            );
+        }
+        tables
+    }
+}
+
+fn physical_tables(schema: &Schema) -> impl Iterator<Item = TableSchema> + '_ {
     schema
         .tables()
         .iter()

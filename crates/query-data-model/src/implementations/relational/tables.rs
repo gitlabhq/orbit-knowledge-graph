@@ -26,6 +26,14 @@ impl TableSchema {
         }
     }
 
+    pub fn extend(&mut self, columns: impl IntoIterator<Item = (String, Option<DataType>)>) {
+        for (name, data_type) in columns {
+            if self.column(&name).is_none() {
+                self.columns.push(ColumnSchema { name, data_type });
+            }
+        }
+    }
+
     pub fn column(&self, name: &str) -> Option<&ColumnSchema> {
         self.columns.iter().find(|column| column.name == name)
     }
