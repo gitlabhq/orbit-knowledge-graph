@@ -17,13 +17,9 @@ use crate::passes::codegen::SqlDialect;
 pub fn clickhouse(
     ast: &Node,
     catalog: &Catalog<ClickHouse>,
-    settings: Vec<(String, String)>,
 ) -> Result<RelationalPlan<ClickHouse>, RelationalError> {
     let root = query(ast)?;
-    catalog.build(|q| {
-        q.settings(settings)?;
-        query::Importer::new(SqlDialect::ClickHouse).statement(q, root)
-    })
+    catalog.build(|q| query::Importer::new(SqlDialect::ClickHouse).statement(q, root))
 }
 
 pub fn duckdb(

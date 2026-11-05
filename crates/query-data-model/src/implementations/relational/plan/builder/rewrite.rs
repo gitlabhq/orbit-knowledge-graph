@@ -53,7 +53,10 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
     }
 
     pub(super) fn view(&mut self, rows: Rows) -> Result<Relation, RelationalError> {
-        let view = self.derive(&rows);
+        let view = match self.views.get(&rows.node()) {
+            Some(view) => Ok(view.clone()),
+            None => self.derive(&rows),
+        };
         Ok(self.guard(view)?.relation(rows))
     }
 

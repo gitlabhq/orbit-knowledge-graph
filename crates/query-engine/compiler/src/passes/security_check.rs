@@ -67,7 +67,7 @@ pub fn verify(
     Ok(())
 }
 
-fn table_name(catalog: &Catalog<ClickHouse>, table: Table) -> &str {
+pub(super) fn table_name(catalog: &Catalog<ClickHouse>, table: Table) -> &str {
     let (_, facts) = catalog
         .stores()
         .nth(table.store())
@@ -143,7 +143,6 @@ mod tests {
     use super::*;
     use std::sync::LazyLock;
 
-    use crate::ast::visit::visit_queries;
     use crate::ast::{Expr, Function, Node, Op, Query, SelectExpr, TableRef};
     use crate::constants::TRAVERSAL_PATH_COLUMN;
     use query_data_model::ClickHouseDataModel;
@@ -158,12 +157,20 @@ mod tests {
         query_data_model::from_ontology::clickhouse(&ontology).unwrap()
     }
 
-    fn apply_security(node: &mut Node, context: &SecurityContext, model: &ClickHouseDataModel) {
-        crate::passes::security::apply_security_context(node, context, model).unwrap();
+    fn secured(
+        node: &Node,
+        context: &SecurityContext,
+        model: &ClickHouseDataModel,
+    ) -> Result<ClickHousePlan> {
+        let plan = crate::passes::codegen::build(node, model.catalog())?;
+        let plan =
+            crate::passes::security::apply_security_context(plan, model.catalog(), context, model)?;
+        verify(&plan, model.catalog(), context, model)?;
+        Ok(plan)
     }
 
     fn check(node: &Node, context: &SecurityContext, model: &ClickHouseDataModel) -> Result<()> {
-        let plan = crate::passes::codegen::build(node, model.catalog(), &Default::default())?;
+        let plan = crate::passes::codegen::build(node, model.catalog())?;
         verify(&plan, model.catalog(), context, model)
     }
 
@@ -190,9 +197,8 @@ mod tests {
     #[test]
     fn passes_after_security_injection() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let mut node = project_query(None);
-        apply_security(&mut node, &ctx, model());
-        assert!(check(&node, &ctx, model()).is_ok());
+        let node = project_query(None);
+        assert!(secured(&node, &ctx, model()).is_ok());
     }
 
     #[test]
@@ -276,37 +282,16 @@ mod tests {
                 "table_union" => query.from = TableRef::union_all(vec![inner], "arms"),
                 _ => unreachable!(),
             }
-            let outer_predicate = query.where_clause.clone();
-            let mut node = Node::Query(Box::new(query));
+            let node = Node::Query(Box::new(query));
             assert!(check(&node, &context, model()).is_err(), "{position}");
-            apply_security(&mut node, &context, model());
-            check(&node, &context, model()).unwrap_or_else(|error| panic!("{position}: {error}"));
-            let Node::Query(query) = &node else {
-                unreachable!()
-            };
-            if outer_predicate.is_none() {
-                assert!(query.where_clause.is_none(), "{position}");
-            }
-            let mut protected_scans = 0;
-            visit_queries(query, &mut |query| {
-                if matches!(&query.from, TableRef::Scan { alias, .. } if alias == "protected") {
-                    protected_scans += 1;
-                    assert_eq!(
-                        query.where_clause,
-                        Some(Expr::func(
-                            Function::StartsWith,
-                            vec![
-                                Expr::col("protected", "traversal_path"),
-                                Expr::string("42/43/")
-                            ],
-                        )),
-                        "{position}"
-                    );
-                }
-                Ok(())
-            })
-            .unwrap();
-            assert_eq!(protected_scans, 1, "{position}");
+            let plan = secured(&node, &context, model())
+                .unwrap_or_else(|error| panic!("{position}: {error}"));
+            let sql = model().catalog().render(&plan).sql;
+            assert_eq!(sql.matches("startsWith(").count(), 1, "{position}: {sql}");
+            assert!(
+                sql.contains("startsWith(protected.traversal_path, "),
+                "{position}: {sql}"
+            );
         }
     }
 
@@ -369,9 +354,8 @@ mod tests {
     #[test]
     fn accepts_lowest_common_prefix() {
         let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
-        let mut node = project_query(None);
-        apply_security(&mut node, &ctx, model());
-        assert!(check(&node, &ctx, model()).is_ok());
+        let node = project_query(None);
+        assert!(secured(&node, &ctx, model()).is_ok());
     }
 
     /// An AND-chain containing `Bool(false)` short-circuits to zero rows, so
@@ -628,8 +612,6 @@ mod tests {
     fn accepts_subquery_with_inner_security_filter() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut inner = inner_project_query(None);
-        let mut wrapped = Node::Query(Box::new(inner.clone()));
-        apply_security(&mut wrapped, &ctx, model());
         let filter = Expr::func(
             Function::StartsWith,
             vec![
@@ -744,7 +726,7 @@ mod tests {
     #[test]
     fn accepts_union_all_arms_with_security_filters() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let mut node = Node::Query(Box::new(Query {
+        let node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
                 expr: Expr::col("u", "id"),
                 alias: None,
@@ -762,8 +744,7 @@ mod tests {
             }],
             ..Default::default()
         }));
-        apply_security(&mut node, &ctx, model());
-        assert!(check(&node, &ctx, model()).is_ok());
+        assert!(secured(&node, &ctx, model()).is_ok());
     }
 
     #[test]
