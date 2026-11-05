@@ -13,10 +13,12 @@ impl<V> Declare<V> {
             value,
         }
     }
+}
 
-    pub fn anonymous(value: V) -> Self {
-        Self { name: None, value }
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub struct Named<T> {
+    pub item: T,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

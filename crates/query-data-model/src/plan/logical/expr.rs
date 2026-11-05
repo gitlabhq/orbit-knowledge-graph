@@ -1,5 +1,5 @@
 use crate::PropertyId;
-use crate::plan::tracking::Ref;
+use crate::plan::tracking::{Named, Ref};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Expr {
@@ -101,12 +101,6 @@ pub fn count() -> Measure {
 pub enum Order {
     Ascending,
     Descending,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Named<T> {
-    pub item: T,
-    pub name: String,
 }
 
 impl Measure {

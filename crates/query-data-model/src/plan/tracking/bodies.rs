@@ -43,7 +43,7 @@ impl<L: Language> Construction<L> {
         })
     }
 
-    pub fn read(&mut self, body: Body) -> Result<Connected, Rejected> {
+    pub fn read(&mut self, body: Body, operation: L::Operation) -> Result<Connected, Rejected> {
         self.attempt(|this| {
             if body.plan != this.arena.plan {
                 return Err(Rejected::ForeignPlan);
@@ -64,7 +64,7 @@ impl<L: Language> Construction<L> {
                     })
                 })
                 .collect::<Vec<_>>();
-            this.connect(L::read(body), Vec::new(), Outputs::replace(outputs))
+            this.connect(operation, Vec::new(), Outputs::replace(outputs))
         })
     }
 }

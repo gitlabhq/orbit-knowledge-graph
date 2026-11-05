@@ -1,10 +1,12 @@
 use std::collections::BTreeSet;
 
 use super::{
-    Expr, Logical, LogicalCatalog, LogicalOperation, LogicalPlan, LogicalType, Measure, Named,
-    Order, PlanError, Predicate, Rows, check,
+    Expr, Logical, LogicalCatalog, LogicalOperation, LogicalPlan, LogicalType, Measure, Order,
+    PlanError, Predicate, Rows, check,
 };
-use crate::plan::tracking::{self, Body, Construction, Declare, Declared, Output, Outputs, Ref};
+use crate::plan::tracking::{
+    self, Body, Construction, Declare, Declared, Named, Output, Outputs, Ref,
+};
 use crate::{Direction, EntityId, Model, RelationshipId};
 
 pub struct LogicalBuilder<'m> {
@@ -213,7 +215,7 @@ impl<'m> LogicalBuilder<'m> {
     }
 
     pub fn read(&mut self, body: Body) -> Result<Rows<'m>, PlanError> {
-        let connected = self.construction.read(body)?;
+        let connected = self.construction.read(body, LogicalOperation::Read(body))?;
         self.view(connected.rows)
     }
 

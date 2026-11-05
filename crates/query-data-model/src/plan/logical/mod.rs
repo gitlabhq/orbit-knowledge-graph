@@ -8,7 +8,7 @@ use ontology::DataType;
 
 pub use builder::LogicalBuilder;
 pub use error::PlanError;
-pub use expr::{Comparison, Expr, Literal, Measure, Named, Order, Predicate, count};
+pub use expr::{Comparison, Expr, Literal, Measure, Order, Predicate, count};
 pub use handle::{Binding, Rows};
 
 use crate::plan::tracking::{self, Body, Declared, Language, Plan, Ref};
@@ -47,10 +47,6 @@ pub enum LogicalOperation {
 impl Language for Logical {
     type Operation = LogicalOperation;
     type Value = LogicalType;
-
-    fn read(body: Body) -> LogicalOperation {
-        LogicalOperation::Read(body)
-    }
 
     fn references(operation: &mut LogicalOperation, visit: &mut dyn FnMut(&mut Ref)) {
         match operation {
