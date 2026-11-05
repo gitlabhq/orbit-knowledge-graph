@@ -11,7 +11,7 @@ Orbit team dashboard: MRs by the direct members of gitlab-org/orbit/team in publ
 {{#review limit=10}}
 ## Ready for review
 
-Review requested or labelled `workflow::ready for review`, no approval yet, nothing else blocking. Labelled `priority::*` or `severity::*` first, then oldest first.
+Review requested or labelled `workflow::ready for review`, no approval yet, nothing else blocking. Labelled `priority::N` or `severity::N` first, then oldest first.
 
 {{items}}
 {{/review}}
@@ -19,7 +19,7 @@ Review requested or labelled `workflow::ready for review`, no approval yet, noth
 {{#ready}}
 ## Ready to merge
 
-Approved, nothing blocks the merge. Labelled `priority::*` or `severity::*` first, then oldest first.
+Approved, nothing blocks the merge. Labelled `priority::N` or `severity::N` first, then oldest first.
 
 {{items}}
 {{/ready}}

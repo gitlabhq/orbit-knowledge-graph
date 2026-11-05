@@ -331,6 +331,32 @@ class RenderTest(DashboardTestCase):
         self.assertIn(f"- {url(2)} · 22d · severity::1", review)
         self.assertIn(f"- {url(1)} · 30d\n", review + "\n")
 
+    def test_most_urgent_label_decides_and_severity_only_can_beat_priority_only(self):
+        ready = dashboard.READY_LABEL
+        mrs = [
+            merge_request(1, labels=[ready, "priority::4"], status="not_approved"),
+            merge_request(2, labels=[ready, "severity::1"], status="not_approved"),
+            merge_request(3, labels=[ready, "priority::high"], status="not_approved"),
+            merge_request(4, labels=[ready, "severity::2", "priority::2"], status="not_approved"),
+            merge_request(5, labels=[ready, "priority::2", "severity::1"], status="not_approved"),
+        ]
+        routes = self.approvals_for({i: approvals() for i in range(1, 6)})
+        review = block(self.region(self.kg(*mrs, routes=routes)), "## Ready for review", "## Ready to merge")
+        order = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", review)]
+        self.assertEqual(order, [5, 2, 4, 1, 3])
+        self.assertIn("· priority::2 · severity::2", review)
+
+    def test_hostile_labels_are_neither_shown_nor_ranked(self):
+        ready = dashboard.READY_LABEL
+        hostile = ["priority::1 @team", "severity::1 <b>[x](https://evil.example)</b>", "priority::1|x", "priority::-->"]
+        mrs = [merge_request(1, labels=[ready], status="not_approved"),
+               merge_request(2, labels=[ready, *hostile], status="not_approved")]
+        routes = self.approvals_for({1: approvals(), 2: approvals()})
+        review = block(self.region(self.kg(*mrs, routes=routes)), "## Ready for review", "## Ready to merge")
+        self.assertLess(review.index(url(1)), review.index(url(2)))
+        for fragment in ("@team", "<b>", "evil", "|x", "priority::"):
+            self.assertNotIn(fragment, review)
+
     def test_labels_show_before_the_status_and_pinned_list_keeps_its_order(self):
         pinned = [(None, 7), (None, 8)]
         routes = {

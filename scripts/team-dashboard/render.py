@@ -56,7 +56,8 @@ BEGIN = "<!-- dashboard:begin -->"
 END = "<!-- dashboard:end -->"
 UPDATED_RE = re.compile(r"Updated (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC\.")
 PRIORITY_REFERENCE_RE = re.compile(r"((?:[\w.-]+/)+[\w.-]+)?!(\d+)")
-TRIAGE_LABEL_RE = re.compile(r"(priority|severity)::.+")
+TRIAGE_SCOPES = ("priority", "severity")
+TRIAGE_LABEL_RE = re.compile(r"(priority|severity)::\d+")
 UNRANKED = 1_000_000
 PAGE_SIZE = 100
 GRAPHQL_USER_BATCH = 50
@@ -177,7 +178,7 @@ def item_line(web_url: str, created: str, now: datetime, suffix: str = "") -> st
 
 
 def triage_labels(mr: dict) -> Dict[str, str]:
-    """The merge request's priority::* and severity::* labels, keyed by scope (first label wins)."""
+    """The merge request's well-formed priority::N and severity::N labels by scope, first wins. Other titles are untrusted and ignored."""
     found: Dict[str, str] = {}
     for label in mr.get("labels", []):
         match = TRIAGE_LABEL_RE.fullmatch(str(label))
@@ -187,25 +188,23 @@ def triage_labels(mr: dict) -> Dict[str, str]:
 
 
 def triage_rank(label: Optional[str]) -> int:
-    """Lower is more urgent: priority::1 and severity::1 are the highest; a missing or unnumbered label is last."""
-    digits = re.search(r"\d+$", label or "")
-    return int(digits.group()) if digits else UNRANKED
+    """Lower is more urgent: priority::1 and severity::1 are the highest; a missing label is last."""
+    return int(label.rsplit("::", 1)[1]) if label else UNRANKED
 
 
 def merge_request_line(candidate: Candidate, now: datetime, suffix: str = "") -> str:
-    labels = list(triage_labels(candidate.mr).values())
-    parts = [part for part in (" · ".join(labels), suffix) if part]
-    return item_line(str(candidate.mr["web_url"]), str(candidate.mr.get("created_at")), now, " · ".join(parts))
+    labels = triage_labels(candidate.mr)
+    shown = " · ".join(labels[scope] for scope in TRIAGE_SCOPES if scope in labels)
+    return item_line(str(candidate.mr["web_url"]), str(candidate.mr.get("created_at")), now,
+                     " · ".join(part for part in (shown, suffix) if part))
 
 
-def oldest_first(candidates: Sequence[Candidate]) -> List[Candidate]:
-    """Labelled merge requests first (priority, then severity, highest first), then the rest; ties oldest first."""
+def float_labelled_first(candidates: Sequence[Candidate]) -> List[Candidate]:
+    """Labelled merge requests first, by their most urgent label, then priority, then severity; ties and the rest oldest first."""
     def key(candidate: Candidate):
         labels = triage_labels(candidate.mr)
-        floated = (
-            (0, triage_rank(labels.get("priority")), triage_rank(labels.get("severity")))
-            if labels else (1, 0, 0)
-        )
+        priority, severity = (triage_rank(labels.get(scope)) for scope in TRIAGE_SCOPES)
+        floated = (0, min(priority, severity), priority, severity) if labels else (1, 0, 0, 0)
         return (*floated, str(candidate.mr.get("created_at")), str(candidate.mr.get("web_url")))
     return sorted(candidates, key=key)
 
@@ -440,7 +439,7 @@ def render_blocks(template: str, blocks: Dict[str, List[str]]) -> str:
 
 def render_region(api: Api, args: argparse.Namespace, now: datetime) -> str:
     visibility = Visibility(api)
-    candidates = oldest_first([
+    candidates = float_labelled_first([
         candidate
         for mr in candidate_merge_requests(api, args.source_project, args.team_group)
         if (candidate := candidate_for(api, visibility, mr))
