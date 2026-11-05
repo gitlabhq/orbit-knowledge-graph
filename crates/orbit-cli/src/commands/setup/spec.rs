@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Embed)]
-#[folder = "$CONFIG_DIR/setup"]
+#[folder = "$ORBIT_CONFIG_DIR/setup"]
 struct SetupAssets;
 
 #[derive(Embed)]
@@ -154,7 +154,7 @@ impl PluginSpec {
             if path == ".claude-plugin/plugin.json" {
                 let mut manifest: Value =
                     serde_json::from_slice(&data).expect("plugin.json is JSON");
-                manifest["version"] = Value::String(env!("ORBIT_VERSION").to_string());
+                manifest["version"] = Value::String(crate::version::get().to_string());
                 data = serde_json::to_vec_pretty(&manifest).unwrap();
             }
             (format!("{}/{path}", self.name), data)
@@ -573,7 +573,7 @@ mod tests {
             .unwrap()
             .1;
         let manifest: Value = serde_json::from_slice(&manifest).unwrap();
-        assert_eq!(manifest["version"], env!("ORBIT_VERSION"));
+        assert_eq!(manifest["version"], crate::version::get());
         let marketplace: Value = serde_json::from_slice(
             &plugin
                 .files(&plugin.marketplace)

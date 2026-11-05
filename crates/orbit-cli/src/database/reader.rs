@@ -2,7 +2,7 @@ use super::{lock_database, read_lock_database, schema};
 use crate::commands::setup::spec;
 use crate::workspace;
 use anyhow::{Context, Result};
-use duckdb_client::{DuckDbClient, sql_lit, string_column};
+use duckdb_client::{DuckDbClient, OpenMode, sql_lit, string_column};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -51,7 +51,7 @@ impl GraphReader {
                 spec::launcher()
             );
         };
-        let client = DuckDbClient::open_read_only(&db_path)
+        let client = DuckDbClient::open(OpenMode::ReadOnly(&db_path))
             .with_context(|| format!("failed to open {}", db_path.display()))?;
         if schema::stored_meta(&client, "revision")?.is_some()
             && schema::stored_meta(&client, "indexed_commit")?.is_none()
@@ -65,7 +65,8 @@ impl GraphReader {
     }
 
     fn open_workspace() -> Result<Self> {
-        let manifest = workspace::Workspace::open_default()?.manifest_path();
+        let data_root = workspace::Workspace::default_root()?;
+        let manifest = workspace::Workspace::open(data_root.clone())?.manifest_path();
         if !manifest.exists() {
             anyhow::bail!(
                 "no local graph found. Run `{} workspace index` first.",
@@ -73,7 +74,7 @@ impl GraphReader {
             );
         }
         let mut reader = Self {
-            client: DuckDbClient::open_in_memory()?,
+            client: DuckDbClient::open(OpenMode::InMemoryAttaching(&data_root))?,
             _locks: Vec::new(),
         };
         let client = &reader.client;
