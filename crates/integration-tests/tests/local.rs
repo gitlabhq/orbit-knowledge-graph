@@ -1,4 +1,5 @@
 mod compiler;
+mod duckdb_fips;
 
 #[path = "server/querying_pipeline/mod.rs"]
 mod querying_pipeline;
