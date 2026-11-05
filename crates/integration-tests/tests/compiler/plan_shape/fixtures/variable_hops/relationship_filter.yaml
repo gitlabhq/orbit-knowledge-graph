@@ -19,7 +19,4 @@ physical:
         - (Filter _orbit_e1.relationship_kind = 'CALLS', _orbit_e1.project_id = 9, ... (_))
         - (Filter _orbit_e2.relationship_kind = 'CALLS', _orbit_e2.project_id = 9, ... (_))
   duckdb:
-    planned:
-      expect:
-        - (Filter _orbit_e1._deleted = false, _orbit_e1.project_id = 9 (Bind _orbit_e1 (Filter ..., _orbit_e1.relationship_kind = 'CALLS' (_))))
-        - (Filter _orbit_e2._deleted = false, _orbit_e2.project_id = 9 (Bind _orbit_e2 (Filter ..., _orbit_e2.relationship_kind = 'CALLS' (_))))
+    rejected: unknown column _orbit_e1.project_id

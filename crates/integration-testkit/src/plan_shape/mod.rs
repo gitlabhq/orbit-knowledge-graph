@@ -64,6 +64,7 @@ struct HydrationSetup {
 struct PhysicalAssertions {
     planned: Option<Assertions>,
     emitted: Option<Assertions>,
+    rejected: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -307,6 +308,14 @@ fn check<M: OrbitQueryModel>(
         }
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
         let assertions = &scenario.physical[backend];
+        if let Some(rejected) = &assertions.rejected {
+            match codegen(&lowered.ast) {
+                Err(error) if error.contains(rejected.as_str()) => {}
+                Err(error) => failures.push(format!("{label}: expected {rejected}, got {error}")),
+                Ok(()) => failures.push(format!("{label}: expected {rejected}, got a plan")),
+            }
+            continue;
+        }
         if assertions.planned.is_none() && assertions.emitted.is_none() {
             failures.push(format!("{label}: missing assertion targets"));
             continue;
@@ -340,13 +349,9 @@ fn clickhouse_sql(ast: &compiler::Node, model: &ClickHouseDataModel) -> Result<(
 }
 
 fn duckdb_sql(ast: &compiler::Node, model: &DuckDbDataModel) -> Result<(), String> {
-    match compiler::duckdb_codegen(ast, model.catalog(), Default::default()) {
-        // Relationship property filters plan against columns the local edge table lacks.
-        Err(compiler::QueryError::Codegen(message)) if message.starts_with("unknown column") => {
-            Ok(())
-        }
-        result => result.map(drop).map_err(|error| error.to_string()),
-    }
+    compiler::duckdb_codegen(ast, model.catalog(), Default::default())
+        .map(drop)
+        .map_err(|error| error.to_string())
 }
 
 pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
