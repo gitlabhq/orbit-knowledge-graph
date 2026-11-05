@@ -147,9 +147,14 @@ fn flatten(predicates: Conditions<'_>) -> Conditions<'_> {
 fn local<'i>(
     predicates: Conditions<'i>,
     aliases: &[&str],
-) -> Result<Vec<Conditions<'i>>, SurfaceError> {
+) -> Result<(Vec<Conditions<'i>>, Conditions<'i>), SurfaceError> {
     let mut split: Vec<Conditions<'i>> = aliases.iter().map(|_| Vec::new()).collect();
+    let mut typed = Vec::new();
     for conjunct in flatten(predicates) {
+        if conditions::typed(&conjunct) {
+            typed.push(conjunct);
+            continue;
+        }
         let referenced = conditions::referenced(std::slice::from_ref(&conjunct));
         let owner = aliases
             .iter()
@@ -161,7 +166,7 @@ fn local<'i>(
             })?;
         split[owner].push(conjunct);
     }
-    Ok(split)
+    Ok((split, typed))
 }
 
 fn path<'m>(
@@ -176,7 +181,13 @@ fn path<'m>(
             "shortest paths require named relationship types, such as -[:CONTAINS*1..3]->; a wildcard expands over every edge type",
         ));
     }
-    let mut split = local(predicates, &[&edge.from, &edge.to])?.into_iter();
+    let (split, typed) = local(predicates, &[&edge.from, &edge.to])?;
+    if !typed.is_empty() {
+        return Err(
+            PlanError::shape("type() conditions on a shortest path are unsupported").into(),
+        );
+    }
+    let mut split = split.into_iter();
     let mut endpoint = |q: &mut LogicalBuilder<'m>, alias: &str| {
         let node = scope
             .node(alias)
@@ -198,9 +209,11 @@ fn neighbors<'m>(
 ) -> Built<'m> {
     let (center, edge) = (&scope.nodes[0], &scope.edges[0]);
     let rows = bind(q, center)?;
-    let mut split = local(predicates, &[&center.alias])?;
+    let (mut split, typed) = local(predicates, &[&center.alias])?;
     let rows = filtered(q, rows, scope, split.remove(0))?;
     let from = rows.binding(&center.alias)?;
     let via = relationships(q, &edge.types)?;
-    Ok(q.neighbors(rows, from, &via, edge.direction, name)?)
+    let variable = edge.variable.as_deref();
+    let rows = q.neighbors(rows, from, &via, edge.direction, name, variable)?;
+    filtered(q, rows, scope, typed)
 }

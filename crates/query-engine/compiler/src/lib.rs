@@ -36,6 +36,7 @@
 
 pub mod analytics;
 pub mod ast;
+pub mod bridge;
 pub mod constants;
 pub mod data_model;
 pub mod error;

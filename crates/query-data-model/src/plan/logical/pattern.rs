@@ -70,6 +70,7 @@ impl<'m> LogicalBuilder<'m> {
         via: &[Declared<RelationshipId>],
         direction: Direction,
         name: &str,
+        edge: Option<&str>,
     ) -> Result<Rows<'m>, PlanError> {
         let operation = self.attempt(|catalog, construction| {
             let start = Self::bound(from)?;
@@ -83,8 +84,15 @@ impl<'m> LogicalBuilder<'m> {
                 direction,
             })
         })?;
+        let edge = Declare {
+            name: edge.map(str::to_string),
+            value: LogicalType::Edge,
+        };
         self.connect(operation, vec![rows], |_, _, _| {
-            Ok(Outputs::extend([Declare::named(name, LogicalType::Node)]))
+            Ok(Outputs::extend([
+                edge,
+                Declare::named(name, LogicalType::Node),
+            ]))
         })
     }
 

@@ -75,7 +75,7 @@ fn neighbors<'m>(q: &mut LogicalBuilder<'m>, request: &Request) -> Built<'m> {
     let rows = pattern::node(q, center)?;
     let from = rows.binding(&center.id)?;
     let via = pattern::relationships(q, &config.rel_types)?;
-    Ok(q.neighbors(rows, from, &via, config.direction.into(), "neighbor")?)
+    Ok(q.neighbors(rows, from, &via, config.direction.into(), "neighbor", None)?)
 }
 
 fn path<'m>(q: &mut LogicalBuilder<'m>, request: &Request) -> Built<'m> {

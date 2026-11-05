@@ -76,7 +76,7 @@ fn neighbors_paths_and_aggregates_declare_their_outputs() {
             let rows = q.entities_as(catalog.entity("Project")?, "p")?;
             let center = rows.binding("p")?;
             let rows = q.filter(rows, center.property("id")?.eq(1))?;
-            let rows = q.neighbors(rows, center, &[], Direction::Both, "n")?;
+            let rows = q.neighbors(rows, center, &[], Direction::Both, "n", None)?;
             assert_eq!(rows.binding("n")?.kind(), LogicalType::Node);
             q.limit(rows, 10)
         })

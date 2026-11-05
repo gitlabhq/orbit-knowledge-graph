@@ -1843,6 +1843,7 @@ dependencies = [
  "chrono",
  "compiler-pipeline-macros",
  "jsonschema",
+ "named-queries",
  "ontology",
  "opentelemetry",
  "orbit-observability",

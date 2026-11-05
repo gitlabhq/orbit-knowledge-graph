@@ -59,6 +59,13 @@ pub(super) fn project<'m>(
         }
     };
     let mut returned = Returned::default();
+    if items.is_empty() {
+        returned.items = scope
+            .nodes
+            .iter()
+            .map(|node| Item::Node(node.alias.clone(), None, false))
+            .collect();
+    }
     for item in items {
         returned.item(scope, item)?;
     }
@@ -377,24 +384,6 @@ impl Returned {
                 None => Projection::Value(conditions::edge_field(bound, "relationship_kind")?)
                     .named(name),
             });
-        }
-        for node in &scope.nodes {
-            if scope.dynamic(&node.alias)
-                || self
-                    .items
-                    .iter()
-                    .any(|item| matches!(item, Item::Node(alias, ..) if *alias == node.alias))
-            {
-                continue;
-            }
-            let binding = rows.binding(&node.alias)?.output();
-            items.push(
-                Projection::Graph {
-                    binding,
-                    columns: Columns::Default,
-                }
-                .named(&node.alias),
-            );
         }
         if let Shape::Path(name) | Shape::Neighbors(name) = &scope.shape {
             let columns = self.dynamic.unwrap_or(Columns::Default);

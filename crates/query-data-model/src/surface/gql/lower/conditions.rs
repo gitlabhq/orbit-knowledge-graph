@@ -29,6 +29,14 @@ pub(super) fn referenced(predicates: &[BooleanExpression<Leaf<'_>>]) -> HashSet<
     into
 }
 
+pub(super) fn typed(tree: &BooleanExpression<Leaf<'_>>) -> bool {
+    match tree {
+        BooleanExpression::Leaf(leaf) => matches!(leaf, Leaf::RelationshipType { .. }),
+        BooleanExpression::And(all) => all.iter().any(typed),
+        BooleanExpression::Not(inner) => typed(inner),
+    }
+}
+
 pub(super) fn tree(
     tree: BooleanExpression<Leaf<'_>>,
     rows: &Rows<'_>,
