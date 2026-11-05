@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
-use ontology::constants::DEFAULT_PRIMARY_KEY as KEY;
+use ontology::constants::{DEFAULT_PRIMARY_KEY as KEY, EDGE_RESERVED_COLUMNS};
 use ontology::{DataType, EnumType};
 
-use super::catalog::{Entity, GraphCatalog, Property, Relationship, RelationshipVariant};
-use super::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
+use super::catalog::{
+    Attribute, Entity, GraphCatalog, Property, Relationship, RelationshipVariant,
+};
+use super::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 use crate::catalog::Diagnostics;
 use crate::spec::{
-    EntitySpec, GraphFragment, PropertyDetail, PropertySpec, RelationshipSpec, parse_variant,
-    parse_word,
+    AttributeSpec, EntitySpec, GraphFragment, PropertyDetail, PropertySpec, RelationshipSpec,
+    parse_variant, parse_word,
 };
 
 struct PendingReference {
@@ -165,10 +167,14 @@ impl GraphCatalog {
                         name: name.clone(),
                         description: spec.description,
                         variants: Vec::new(),
+                        attributes: Vec::new(),
                     });
                     id
                 }
             };
+            for (attribute, spec) in spec.attributes {
+                self.declare_attribute(relationship, attribute, spec, package, diagnostics);
+            }
             for variant in &spec.variants {
                 let Some((source, target)) = parse_variant(variant) else {
                     diagnostics.error(
@@ -208,6 +214,52 @@ impl GraphCatalog {
         }
     }
 
+    fn declare_attribute(
+        &mut self,
+        relationship: RelationshipId,
+        name: String,
+        spec: AttributeSpec,
+        package: &str,
+        diagnostics: &mut Diagnostics,
+    ) {
+        let qualified = format!("{}.{name}", self.relationship(relationship).name);
+        if EDGE_RESERVED_COLUMNS.contains(&name.as_str()) {
+            diagnostics.error(
+                package,
+                format!("attribute {qualified} is a reserved edge column"),
+            );
+            return;
+        }
+        let written = spec.data_type();
+        let Some((data_type, nullable)) =
+            parse_type(written).filter(|(data_type, _)| *data_type != DataType::Enum)
+        else {
+            diagnostics.error(
+                package,
+                format!("attribute {qualified} has unsupported type `{written}`"),
+            );
+            return;
+        };
+        let id = AttributeId(self.attributes.len());
+        if self
+            .attribute_ids
+            .insert((relationship, name.clone()), id)
+            .is_some()
+        {
+            diagnostics.error(package, format!("attribute {qualified} is declared twice"));
+            return;
+        }
+        self.relationships[relationship.index()].attributes.push(id);
+        self.attributes.push(Attribute {
+            id,
+            relationship,
+            name,
+            description: spec.description().map(str::to_string),
+            data_type,
+            nullable,
+        });
+    }
+
     fn index_adjacency(&mut self) {
         self.outgoing = vec![Vec::new(); self.entities.len()];
         self.incoming = vec![Vec::new(); self.entities.len()];
@@ -227,11 +279,7 @@ fn declare_property(
     diagnostics: &mut Diagnostics,
 ) -> Option<(Property, Vec<String>)> {
     let written = spec.data_type();
-    let (word, nullable) = match written.strip_suffix('?') {
-        Some(word) => (word, true),
-        None => (written, false),
-    };
-    let Some(data_type) = parse_word::<DataType>(word) else {
+    let Some((data_type, nullable)) = parse_type(written) else {
         diagnostics.error(
             package,
             format!("property {name} has unknown type `{written}`"),
@@ -279,4 +327,12 @@ fn declare_property(
         references: Vec::new(),
     };
     Some((property, detail.references))
+}
+
+fn parse_type(written: &str) -> Option<(DataType, bool)> {
+    let (word, nullable) = match written.strip_suffix('?') {
+        Some(word) => (word, true),
+        None => (written, false),
+    };
+    Some((parse_word(word)?, nullable))
 }

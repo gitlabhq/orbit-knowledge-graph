@@ -454,6 +454,73 @@ fn frontend_errors_name_the_alternatives() {
     );
 }
 
+const HAS_NOTE_ATTRIBUTES: &str = "    variants: [MergeRequest -> Note]
+    attributes:
+      position: int64?
+      thread: { type: string, description: Discussion the note belongs to }";
+
+#[test]
+fn relationships_declare_typed_attributes() {
+    let model = load_with(
+        &["gitlab"],
+        edit_one(
+            "gitlab/graph.yaml",
+            "    variants: [MergeRequest -> Note]",
+            HAS_NOTE_ATTRIBUTES,
+        ),
+    )
+    .unwrap();
+    let graph = model.graph();
+    let has_note = graph.relationship_id("HAS_NOTE").unwrap();
+    let names: Vec<_> = graph
+        .relationship(has_note)
+        .attributes
+        .iter()
+        .map(|id| graph.attribute(*id))
+        .map(|attribute| {
+            (
+                attribute.name.as_str(),
+                attribute.data_type,
+                attribute.nullable,
+            )
+        })
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("position", ontology::DataType::Int, true),
+            ("thread", ontology::DataType::String, false),
+        ]
+    );
+    let thread = graph.attribute_id(has_note, "thread").unwrap();
+    assert_eq!(
+        graph.attribute(thread).description.as_deref(),
+        Some("Discussion the note belongs to")
+    );
+    assert_eq!(graph.attribute_id(has_note, "missing"), None);
+}
+
+#[test]
+fn bad_relationship_attributes_fail_the_load() {
+    let errors = spec_errors(load_with(
+        &["gitlab"],
+        edit_one(
+            "gitlab/graph.yaml",
+            "    variants: [MergeRequest -> Note]",
+            "    variants: [MergeRequest -> Note]
+    attributes: { source_id: int64, mood: feeling, state: enum }",
+        ),
+    ));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: attribute HAS_NOTE.source_id is a reserved edge column",
+            "gitlab: attribute HAS_NOTE.mood has unsupported type `feeling`",
+            "gitlab: attribute HAS_NOTE.state has unsupported type `enum`",
+        ]
+    );
+}
+
 #[test]
 fn string_enums_keep_their_declared_values() {
     let model = load(&["gitlab", "linear"]).unwrap();

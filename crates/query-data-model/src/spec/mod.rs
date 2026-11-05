@@ -7,7 +7,10 @@ pub use authorization::{
     AuthorizationFragment, EntityAccessSpec, PropertyAccessSpec, RedactionSpec, ScopeSpec,
     ScopeVariants,
 };
-pub use graph::{EntitySpec, GraphFragment, PropertyDetail, PropertySpec, RelationshipSpec};
+pub use graph::{
+    AttributeDetail, AttributeSpec, EntitySpec, GraphFragment, PropertyDetail, PropertySpec,
+    RelationshipSpec,
+};
 pub use service::{LookupSpec, ServiceFragment};
 pub use storage::{
     BackendOptions, EngineSpec, OptionValue, RouteSpec, SourceSpec, StorageFragment,

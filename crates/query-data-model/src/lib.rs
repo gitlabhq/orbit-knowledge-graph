@@ -14,8 +14,9 @@ pub mod surface;
 pub use catalog::{Catalog, Model, StorageBackend};
 pub use error::DataModelError;
 pub use generic::{
-    Direction, Endpoint, Entity, EntityId, ForeignKey, GraphCatalog, Hop, Property, PropertyId,
-    Reach, Relationship, RelationshipId, RelationshipVariant, RelationshipVariantId, Walk,
+    Attribute, AttributeId, Direction, Endpoint, Entity, EntityId, ForeignKey, GraphCatalog, Hop,
+    Property, PropertyId, Reach, Relationship, RelationshipId, RelationshipVariant,
+    RelationshipVariantId, Walk,
 };
 pub use implementations::clickhouse::facts::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,

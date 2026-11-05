@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use ontology::{DataType, EnumType};
 
-use super::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
+use super::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
 #[derive(Debug)]
 pub struct Property {
@@ -47,6 +47,17 @@ pub struct Relationship {
     pub name: String,
     pub description: Option<String>,
     pub variants: Vec<RelationshipVariantId>,
+    pub attributes: Vec<AttributeId>,
+}
+
+#[derive(Debug)]
+pub struct Attribute {
+    pub id: AttributeId,
+    pub relationship: RelationshipId,
+    pub name: String,
+    pub description: Option<String>,
+    pub data_type: DataType,
+    pub nullable: bool,
 }
 
 #[derive(Debug, Default)]
@@ -55,9 +66,11 @@ pub struct GraphCatalog {
     pub(super) properties: Vec<Property>,
     pub(super) relationships: Vec<Relationship>,
     pub(super) variants: Vec<RelationshipVariant>,
+    pub(super) attributes: Vec<Attribute>,
     pub(super) entity_ids: HashMap<String, EntityId>,
     pub(super) property_ids: Vec<HashMap<String, PropertyId>>,
     pub(super) relationship_ids: HashMap<String, RelationshipId>,
+    pub(super) attribute_ids: HashMap<(RelationshipId, String), AttributeId>,
     pub(super) variant_ids: HashMap<(RelationshipId, EntityId, EntityId), RelationshipVariantId>,
     pub(super) outgoing: Vec<Vec<RelationshipVariantId>>,
     pub(super) incoming: Vec<Vec<RelationshipVariantId>>,
@@ -84,6 +97,10 @@ impl GraphCatalog {
         self.variants.iter()
     }
 
+    pub fn attributes(&self) -> impl Iterator<Item = &Attribute> {
+        self.attributes.iter()
+    }
+
     pub fn entity(&self, id: EntityId) -> &Entity {
         &self.entities[id.index()]
     }
@@ -98,6 +115,16 @@ impl GraphCatalog {
 
     pub fn variant(&self, id: RelationshipVariantId) -> &RelationshipVariant {
         &self.variants[id.index()]
+    }
+
+    pub fn attribute(&self, id: AttributeId) -> &Attribute {
+        &self.attributes[id.index()]
+    }
+
+    pub fn attribute_id(&self, relationship: RelationshipId, name: &str) -> Option<AttributeId> {
+        self.attribute_ids
+            .get(&(relationship, name.to_string()))
+            .copied()
     }
 
     pub fn entity_id(&self, name: &str) -> Option<EntityId> {

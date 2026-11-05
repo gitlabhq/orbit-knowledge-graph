@@ -8,5 +8,5 @@ pub use foreign_key::{Endpoint, ForeignKey};
 
 pub use walk::{Direction, Hop, Reach, Walk};
 
-pub use catalog::{Entity, GraphCatalog, Property, Relationship, RelationshipVariant};
-pub use ids::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
+pub use catalog::{Attribute, Entity, GraphCatalog, Property, Relationship, RelationshipVariant};
+pub use ids::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};

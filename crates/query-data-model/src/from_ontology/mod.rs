@@ -186,6 +186,7 @@ pub(crate) fn graph_fragments(ontology: &Ontology) -> Result<Vec<GraphFragment>,
                     RelationshipSpec {
                         description,
                         variants,
+                        attributes: IndexMap::new(),
                     },
                 )
             })

@@ -65,6 +65,24 @@ pub struct RelationshipSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub variants: Vec<String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub attributes: IndexMap<String, AttributeSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AttributeSpec {
+    Type(String),
+    Detail(AttributeDetail),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttributeDetail {
+    #[serde(rename = "type")]
+    pub data_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 impl PropertySpec {
@@ -79,6 +97,22 @@ impl PropertySpec {
         match self {
             Self::Type(_) => None,
             Self::Detail(detail) => Some(detail),
+        }
+    }
+}
+
+impl AttributeSpec {
+    pub fn data_type(&self) -> &str {
+        match self {
+            Self::Type(data_type) => data_type,
+            Self::Detail(detail) => &detail.data_type,
+        }
+    }
+
+    pub fn description(&self) -> Option<&str> {
+        match self {
+            Self::Type(_) => None,
+            Self::Detail(detail) => detail.description.as_deref(),
         }
     }
 }
