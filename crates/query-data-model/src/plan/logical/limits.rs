@@ -10,6 +10,9 @@ pub const MAX_PINS: usize = 500;
 pub const MAX_COLUMNS: usize = 50;
 pub const MAX_MEASURES: usize = 10;
 pub const MAX_GROUPS: usize = 4;
+pub const MAX_TEXT: usize = 1024;
+pub const MAX_IDENTIFIER: usize = 64;
+pub const MAX_NESTING: usize = 32;
 
 pub(super) fn at_most(what: &str, found: usize, max: usize) -> Result<(), PlanError> {
     if found > max {

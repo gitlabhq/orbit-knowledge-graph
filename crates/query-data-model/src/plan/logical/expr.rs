@@ -21,7 +21,9 @@ pub enum Expr {
     Output(Ref),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, strum::EnumString, strum::VariantNames, strum::IntoStaticStr,
+)]
 #[strum(serialize_all = "snake_case")]
 pub enum TimeUnit {
     Minute,

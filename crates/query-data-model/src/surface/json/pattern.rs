@@ -36,8 +36,9 @@ pub(super) fn restrict<'m>(q: &mut LogicalBuilder<'m>, rows: Rows<'m>, node: &No
     predicates.extend(filters::conditions(&node.filters, |name| {
         Ok(binding.property(name)?)
     })?);
-    let negated = filters::conditions(&node.not, |name| Ok(binding.property(name)?))?;
-    if !negated.is_empty() {
+    for (property, entry) in &node.not {
+        let single = serde_json::Map::from_iter([(property.clone(), entry.clone())]);
+        let negated = filters::conditions(&single, |name| Ok(binding.property(name)?))?;
         predicates.push(!Predicate::And(negated));
     }
     conjoin(q, rows, predicates)

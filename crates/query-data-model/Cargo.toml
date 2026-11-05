@@ -10,6 +10,9 @@ indexmap = { workspace = true, features = ["serde"] }
 jsonschema = { workspace = true }
 ontology = { path = "../ontology" }
 orbit-utils = { path = "../utils" }
+pest = { workspace = true }
+pest_consume = { workspace = true }
+pest_derive = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

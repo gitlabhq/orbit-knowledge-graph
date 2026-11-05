@@ -11,7 +11,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/query_limits.rs");
     println!("cargo:rerun-if-changed=src/passes/frontend/json_dsl/schema_contract.rs");
-    println!("cargo:rerun-if-changed=src/passes/frontend/gql/query.pest");
+    println!("cargo:rerun-if-changed=../../query-data-model/src/surface/gql/query.pest");
 
     let schema_dir = PathBuf::from(std::env::var("SCHEMA_DIR").unwrap_or_else(|_| {
         panic!("SCHEMA_DIR must be set via .cargo/config.toml [env] when building the compiler")
@@ -100,8 +100,8 @@ fn main() {
         MAX_FILTER_ENTRIES_PER_PROPERTY,
     );
 
-    let grammar =
-        std::fs::read_to_string("src/passes/frontend/gql/query.pest").expect("read GQL grammar");
+    let grammar = std::fs::read_to_string("../../query-data-model/src/surface/gql/query.pest")
+        .expect("read GQL grammar");
     check_grammar_bound(
         &grammar,
         "UnescapedSymbolicName",
