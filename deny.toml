@@ -25,7 +25,8 @@ ignore = [
     "RUSTSEC-2024-0436",
     # proc-macro-error2 unmaintained - transitive dep from tabled_derive
     "RUSTSEC-2026-0173",
-    # astral-tokio-tar unmaintained - dev-only via testcontainers -> integration-testkit.
+    # astral-tokio-tar unmaintained - dev-only via testcontainers, reached through
+    # integration-testkit and testcontainers-modules (nats-client, integration-tests).
     # No safe upgrade available. Remove when testcontainers drops it
     # (check: cargo tree -i astral-tokio-tar)
     "RUSTSEC-2026-0440",
