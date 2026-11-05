@@ -304,14 +304,19 @@ pub trait OrbitQueryModel {
         source: &str,
         target: &str,
     ) -> Vec<String> {
-        self.graph()
-            .relationships()
-            .filter(|relationship| {
-                relationships.is_empty()
-                    || relationships.iter().any(|kind| kind == "*")
-                    || relationships.contains(&relationship.name)
+        let graph = self.graph();
+        let (Some(source), Some(target)) = (graph.entity_id(source), graph.entity_id(target))
+        else {
+            return Vec::new();
+        };
+        let any = relationships.is_empty() || relationships.iter().any(|kind| kind == "*");
+        graph
+            .hops(source, crate::Direction::Outgoing)
+            .filter(|hop| {
+                hop.to == target
+                    && (any || relationships.contains(&graph.relationship(hop.relationship).name))
             })
-            .filter_map(|relationship| self.variant_route(&relationship.name, source, target))
+            .filter_map(|hop| self.query_backend().variant_route(hop.variant))
             .map(|route| route.table.clone())
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

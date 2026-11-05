@@ -1,0 +1,6 @@
+kind: storage
+package: integration.linear
+store: graph
+entities:
+  LinearIssue:
+    indexes: { title: text }

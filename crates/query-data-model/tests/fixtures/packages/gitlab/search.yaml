@@ -1,0 +1,9 @@
+kind: storage
+package: gitlab
+store: note_search
+engine: { kind: search, path_column: traversal_path }
+entities:
+  Note:
+    table: notes
+    only: [id, body, traversal_path]
+    indexes: { body: text }

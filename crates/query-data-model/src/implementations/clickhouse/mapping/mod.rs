@@ -8,8 +8,8 @@ use super::{ClickHouseBindings, EntityLayout, TableLayout, layout::ClickHouse};
 use crate::implementations::derive_property_backend_facts;
 use crate::{
     DataModelError, DenormalizedCatalog, DenormalizedDirection, DenormalizedKey,
-    DenormalizedProperty, Endpoint, EntityId, ForeignKey, GraphCatalog, PathColumn,
-    PropertyRealization, TraversalPathLookup,
+    DenormalizedProperty, EntityId, ForeignKey, GraphCatalog, PathColumn, PropertyRealization,
+    TraversalPathLookup,
 };
 use crate::{Mapping, Relational};
 
@@ -133,18 +133,10 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                             relationship.name, edge.source, edge.target
                         ))
                     })?;
-                let foreign_key = edge.foreign_key.as_deref().and_then(|column| {
-                    let (holder, property, referenced) = match graph.property_id(source, column) {
-                        Some(property) => (Endpoint::Source, property, target),
-                        None => (Endpoint::Target, graph.property_id(target, column)?, source),
-                    };
-                    Some(ForeignKey {
-                        holder,
-                        property,
-                        referenced_key: graph
-                            .property_id(referenced, ontology::constants::DEFAULT_PRIMARY_KEY)?,
-                    })
-                });
+                let foreign_key = edge
+                    .foreign_key
+                    .as_deref()
+                    .and_then(|column| ForeignKey::resolve(graph, source, target, column));
                 if let Some(foreign_key) = foreign_key {
                     property_facts[foreign_key.property.index()].foreign_key = true;
                 }

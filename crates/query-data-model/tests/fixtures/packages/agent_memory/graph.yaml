@@ -1,0 +1,18 @@
+kind: graph
+package: tenant.agent_memory
+domain: agents
+entities:
+  AgentMemory:
+    description: A fact an agent saved while it worked in a project.
+    label: summary
+    defaults: [id, summary, created_at]
+    properties:
+      id: { type: int64, immutable: true }
+      summary: string
+      created_at: { type: timestamp, immutable: true }
+      project_id: { type: int64, immutable: true, references: [Project] }
+relationships:
+  IN_PROJECT:
+    variants: [AgentMemory -> Project]
+  REMEMBERS:
+    variants: [AgentMemory -> MergeRequest, AgentMemory -> Note]

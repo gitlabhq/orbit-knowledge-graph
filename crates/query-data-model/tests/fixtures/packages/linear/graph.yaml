@@ -1,0 +1,23 @@
+kind: graph
+package: integration.linear
+domain: planning
+entities:
+  LinearIssue:
+    description: A Linear ticket linked to GitLab work.
+    label: title
+    defaults: [id, title, state]
+    properties:
+      id: { type: int64, immutable: true }
+      title: string
+      body: string
+      state:
+        type: enum
+        stored_as_text: true
+        values: { 0: backlog, 1: todo, 2: in_progress, 3: done, 4: canceled }
+      traversal_path: string
+relationships:
+  CLOSES:
+    description: A Linear ticket closed by a merge request.
+    variants: [MergeRequest -> LinearIssue]
+  RELATES_TO:
+    variants: [LinearIssue -> MergeRequest]

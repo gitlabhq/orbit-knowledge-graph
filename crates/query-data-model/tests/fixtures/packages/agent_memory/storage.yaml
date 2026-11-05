@@ -1,0 +1,7 @@
+kind: storage
+package: tenant.agent_memory
+store: graph
+entities:
+  AgentMemory:
+    table: tenant_agent_memory
+    path_column: null

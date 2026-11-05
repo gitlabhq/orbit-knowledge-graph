@@ -5,7 +5,11 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
+indexmap = { workspace = true, features = ["serde"] }
 ontology = { path = "../ontology" }
+orbit-utils = { path = "../utils" }
+serde = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 
 [lints]

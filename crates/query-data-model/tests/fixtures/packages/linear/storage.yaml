@@ -1,0 +1,11 @@
+kind: storage
+package: integration.linear
+store: lake
+engine:
+  kind: clickhouse
+  path_column: traversal_path
+entities:
+  LinearIssue:
+    table: linear_tickets
+    path_column: trav_path
+    columns: { id: ticket_id, title: ticket_title, body: ticket_body, traversal_path: trav_path }

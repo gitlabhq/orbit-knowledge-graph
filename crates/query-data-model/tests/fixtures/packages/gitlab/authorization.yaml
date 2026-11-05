@@ -1,0 +1,19 @@
+kind: authorization
+package: gitlab
+entities:
+  Group: { scope: namespace, role: reporter, redaction: { resource: group, ability: read_group } }
+  Project: { scope: namespace, role: reporter, redaction: { resource: project, ability: read_project } }
+  User: { scope: global }
+  MergeRequest: { scope: namespace, role: reporter, redaction: { resource: merge_request, ability: read_merge_request } }
+  Note: { scope: namespace, role: reporter, redaction: { resource: note, ability: read_note } }
+relationships:
+  CONTAINS: same_namespace
+  IN_PROJECT: namespace_anchor
+  AUTHORED: prune_to_target
+  HAS_NOTE: same_namespace
+properties:
+  Group.traversal_path: { hidden: true, filterable: false }
+  Project.traversal_path: { hidden: true, filterable: false }
+  MergeRequest.traversal_path: { hidden: true, filterable: false }
+  Note.traversal_path: { hidden: true, filterable: false }
+  User.email: { admin_only: true, like: false }

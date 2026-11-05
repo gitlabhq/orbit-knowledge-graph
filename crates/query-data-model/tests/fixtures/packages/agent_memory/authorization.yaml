@@ -1,0 +1,6 @@
+kind: authorization
+package: tenant.agent_memory
+entities:
+  AgentMemory: { scope: namespace, role: developer }
+relationships:
+  REMEMBERS: prune_to_target

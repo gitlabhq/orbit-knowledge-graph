@@ -1,0 +1,61 @@
+kind: graph
+package: gitlab
+domain: core
+entities:
+  Group:
+    label: full_path
+    defaults: [id, name, full_path]
+    properties:
+      id: { type: int64, immutable: true }
+      name: string
+      full_path: { type: string, unique: true }
+      traversal_path: string
+  Project:
+    label: full_path
+    defaults: [id, name, full_path]
+    properties:
+      id: { type: int64, immutable: true }
+      name: string
+      full_path: { type: string, unique: true }
+      traversal_path: string
+  User:
+    label: username
+    defaults: [id, username]
+    properties:
+      id: { type: int64, immutable: true }
+      username: { type: string, unique: true }
+      email: string?
+  MergeRequest:
+    description: A merge request for code review.
+    label: title
+    defaults: [id, iid, title, state]
+    properties:
+      id: { type: int64, immutable: true }
+      iid: { type: int64, immutable: true }
+      title: string
+      state:
+        type: enum
+        values: { 1: opened, 2: closed, 3: merged, 4: locked }
+        terminal: [merged]
+      project_id: { type: int64, immutable: true, references: [Project] }
+      author_id: { type: int64?, references: [User] }
+      diff: string?
+      traversal_path: string
+  Note:
+    label: body
+    defaults: [id, body]
+    properties:
+      id: { type: int64, immutable: true }
+      body: string
+      project_id: { type: int64, references: [Project] }
+      author_id: { type: int64?, references: [User] }
+      traversal_path: string
+relationships:
+  CONTAINS:
+    variants: [Group -> Project, Group -> Group]
+  IN_PROJECT:
+    variants: [MergeRequest -> Project, Note -> Project]
+  AUTHORED:
+    variants: [User -> MergeRequest, User -> Note]
+  HAS_NOTE:
+    variants: [MergeRequest -> Note]

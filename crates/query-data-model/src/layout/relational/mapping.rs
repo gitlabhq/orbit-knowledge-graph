@@ -29,6 +29,33 @@ pub struct ForeignKey {
     pub referenced_key: PropertyId,
 }
 
+impl ForeignKey {
+    pub fn resolve(
+        graph: &GraphCatalog,
+        source: EntityId,
+        target: EntityId,
+        column: &str,
+    ) -> Option<Self> {
+        let (holder, property, referenced) = match graph.property_id(source, column) {
+            Some(property) => (Endpoint::Source, property, target),
+            None => (Endpoint::Target, graph.property_id(target, column)?, source),
+        };
+        Some(Self {
+            holder,
+            property,
+            referenced_key: graph
+                .property_id(referenced, ontology::constants::DEFAULT_PRIMARY_KEY)?,
+        })
+    }
+
+    pub fn referenced_entity(self, source: EntityId, target: EntityId) -> EntityId {
+        match self.holder {
+            Endpoint::Source => target,
+            Endpoint::Target => source,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TraversalPathLookup {
     pub table: String,

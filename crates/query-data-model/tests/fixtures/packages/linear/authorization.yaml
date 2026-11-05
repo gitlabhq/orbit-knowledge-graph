@@ -1,0 +1,9 @@
+kind: authorization
+package: integration.linear
+entities:
+  LinearIssue: { scope: namespace, role: maintainer }
+relationships:
+  CLOSES: same_namespace
+  RELATES_TO: same_namespace
+properties:
+  LinearIssue.traversal_path: { hidden: true, filterable: false }

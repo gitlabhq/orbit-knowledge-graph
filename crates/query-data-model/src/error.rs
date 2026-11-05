@@ -6,4 +6,6 @@ pub enum DataModelError {
     Duplicate { kind: &'static str, name: String },
     #[error("invalid query data model: {0}")]
     Invalid(String),
+    #[error("invalid model spec:\n{}", .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"))]
+    Spec(Vec<crate::catalog::SpecError>),
 }

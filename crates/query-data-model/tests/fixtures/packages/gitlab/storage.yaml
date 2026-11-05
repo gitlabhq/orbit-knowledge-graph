@@ -1,0 +1,23 @@
+kind: storage
+package: gitlab
+store: graph
+engine:
+  kind: clickhouse
+  table: gl_{entity}
+  path_column: traversal_path
+  version_column: _version
+  deleted_column: _deleted
+  sort_key: [traversal_path, id]
+  edge_tables:
+    gl_edge: { default: true, sort_key: [traversal_path, source_id, relationship_kind, target_id] }
+entities:
+  Group: {}
+  Project: {}
+  User: { path_column: null, sort_key: [id] }
+  MergeRequest:
+    indexes: { title: text, state: set, project_id: bloom_filter }
+  Note:
+    indexes: { body: text }
+relationships:
+  IN_PROJECT: { fk: project_id }
+  AUTHORED: { fk: author_id }
