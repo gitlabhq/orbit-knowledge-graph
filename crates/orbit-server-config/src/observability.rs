@@ -1,62 +1,42 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-fn default_host_map_refresh_seconds() -> u64 {
-    300
-}
-
-fn default_host_map_retry_after_seconds() -> u64 {
-    30
-}
-
-fn default_request_timeout_seconds() -> u64 {
-    10
-}
-
-fn default_query_timeout_seconds() -> u64 {
-    15
-}
-
-fn default_max_result_rows() -> u64 {
-    10_000
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ObservabilityConfig {
     pub provisioner_url: Option<String>,
     pub provisioner_api_key: Option<String>,
-    #[serde(default = "default_host_map_refresh_seconds")]
     pub host_map_refresh_seconds: u64,
     /// Minimum wait before retrying the provisioner after a failed refresh, so
     /// a provisioner outage does not add the request timeout to every query.
-    #[serde(default = "default_host_map_retry_after_seconds")]
     pub host_map_retry_after_seconds: u64,
-    #[serde(default = "default_request_timeout_seconds")]
     pub request_timeout_seconds: u64,
     /// Server-side bound on a tenant ClickHouse query, sent as max_execution_time.
-    #[serde(default = "default_query_timeout_seconds")]
     pub query_timeout_seconds: u64,
-    #[serde(default = "default_max_result_rows")]
     pub max_result_rows: u64,
 }
 
 /// The host map carries every tenant's ClickHouse password, so plain HTTP is
 /// only accepted for a loopback provisioner.
-fn transport_is_protected(url: &str) -> bool {
-    if url.starts_with("https://") {
-        return true;
-    }
-
-    let Some(authority) = url.strip_prefix("http://") else {
+fn transport_is_protected(raw: &str) -> bool {
+    let Ok(url) = url::Url::parse(raw) else {
         return false;
     };
-    let authority = authority.split(['/', '?', '#']).next().unwrap_or_default();
-    let host = authority
-        .rsplit_once(':')
-        .map_or(authority, |(host, _port)| host);
 
-    matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1")
+    if !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+
+    match url.scheme() {
+        "https" => true,
+        "http" => matches!(
+            url.host(),
+            Some(url::Host::Domain("localhost"))
+                | Some(url::Host::Ipv4(std::net::Ipv4Addr::LOCALHOST))
+                | Some(url::Host::Ipv6(std::net::Ipv6Addr::LOCALHOST))
+        ),
+        _ => false,
+    }
 }
 
 impl ObservabilityConfig {
@@ -69,13 +49,18 @@ impl ObservabilityConfig {
         Some(ObservabilityResolverSettings {
             provisioner_url,
             provisioner_api_key: non_empty(self.provisioner_api_key.as_deref())?,
-            host_map_refresh_seconds: self.host_map_refresh_seconds,
-            host_map_retry_after_seconds: self.host_map_retry_after_seconds,
-            request_timeout_seconds: self.request_timeout_seconds,
-            query_timeout_seconds: self.query_timeout_seconds,
-            max_result_rows: self.max_result_rows,
+            host_map_refresh_seconds: positive(self.host_map_refresh_seconds)?,
+            host_map_retry_after_seconds: positive(self.host_map_retry_after_seconds)?,
+            request_timeout_seconds: positive(self.request_timeout_seconds)?,
+            query_timeout_seconds: positive(self.query_timeout_seconds)?,
+            max_result_rows: positive(self.max_result_rows)?,
         })
     }
+}
+
+/// Zero means unlimited to ClickHouse, so a zeroed bound is a missing bound.
+fn positive(value: u64) -> Option<u64> {
+    (value > 0).then_some(value)
 }
 
 fn non_empty(value: Option<&str>) -> Option<String> {
@@ -119,8 +104,31 @@ mod tests {
     }
 
     #[test]
-    fn default_configuration_yields_no_settings() {
-        assert!(ObservabilityConfig::default().resolver_settings().is_none());
+    fn an_unconfigured_provisioner_yields_no_settings() {
+        let mut config = complete();
+        config.provisioner_url = None;
+        config.provisioner_api_key = None;
+
+        assert!(config.resolver_settings().is_none());
+    }
+
+    #[test]
+    fn a_zeroed_bound_disables_resolution() {
+        for zero in [
+            (|c: &mut ObservabilityConfig| c.host_map_refresh_seconds = 0)
+                as fn(&mut ObservabilityConfig),
+            |c: &mut ObservabilityConfig| c.host_map_retry_after_seconds = 0,
+            |c: &mut ObservabilityConfig| c.request_timeout_seconds = 0,
+            |c: &mut ObservabilityConfig| c.query_timeout_seconds = 0,
+            |c: &mut ObservabilityConfig| c.max_result_rows = 0,
+        ] {
+            let mut config = complete();
+            zero(&mut config);
+            assert!(
+                config.resolver_settings().is_none(),
+                "zero means unlimited to ClickHouse"
+            );
+        }
     }
 
     #[test]
@@ -153,12 +161,39 @@ mod tests {
             "http://127.0.0.1:3000",
             "http://localhost:3000",
             "http://[::1]:3000",
+            "http://[::1]",
             "http://localhost",
             "http://127.0.0.1/api",
         ] {
             let mut config = complete();
             config.provisioner_url = Some(url.to_string());
             assert!(config.resolver_settings().is_some(), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_url_carrying_userinfo_is_rejected() {
+        for url in [
+            "http://localhost:80@evil.com",
+            "http://localhost@evil.com",
+            "http://user:pass@evil.com",
+            "https://localhost@evil.com",
+        ] {
+            let mut config = complete();
+            config.provisioner_url = Some(url.to_string());
+            assert!(
+                config.resolver_settings().is_none(),
+                "userinfo makes the real host something else: {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_http_scheme_is_rejected() {
+        for url in ["ftp://provisioner.internal", "file:///etc/passwd"] {
+            let mut config = complete();
+            config.provisioner_url = Some(url.to_string());
+            assert!(config.resolver_settings().is_none(), "{url}");
         }
     }
 

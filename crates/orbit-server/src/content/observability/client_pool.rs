@@ -6,7 +6,9 @@ use orbit_server_config::{ClickHouseConfiguration, ProfilingConfig};
 
 use super::host_map::TenantRoute;
 
-type ClientKey = (String, String);
+/// Credentials are part of the identity: a rotated password must build a new
+/// client rather than reuse one authenticating with the old one.
+type ClientKey = (String, String, String, String);
 
 pub struct TenantClientPool {
     clients: RwLock<HashMap<ClientKey, Arc<ArrowClickHouseClient>>>,
@@ -31,15 +33,29 @@ impl TenantClientPool {
 
     /// Drops clients whose tenant no longer appears in the host map, so a
     /// moved or deprovisioned tenant does not keep a connection pool alive.
-    pub fn retain_databases(&self, live: &[String]) {
+    pub fn retain_routes(&self, live: &[TenantRoute]) {
+        let keys: Vec<ClientKey> = live
+            .iter()
+            .map(|route| Self::key_for(route, &route.traces_db))
+            .collect();
+
         self.clients
             .write()
             .expect("tenant client pool poisoned")
-            .retain(|(_, database), _| live.iter().any(|name| name == database));
+            .retain(|key, _| keys.contains(key));
+    }
+
+    fn key_for(route: &TenantRoute, database: &str) -> ClientKey {
+        (
+            route.url(),
+            database.to_string(),
+            route.username.clone(),
+            route.password.clone(),
+        )
     }
 
     fn client_for(&self, route: &TenantRoute, database: &str) -> ArrowClickHouseClient {
-        let key = (route.url(), database.to_string());
+        let key = Self::key_for(route, database);
 
         if let Some(client) = self
             .clients
@@ -132,9 +148,40 @@ mod tests {
         pool.traces_client(&staying);
         pool.traces_client(&leaving);
 
-        pool.retain_databases(std::slice::from_ref(&staying.traces_db));
+        pool.retain_routes(std::slice::from_ref(&staying));
 
         assert_eq!(pool.clients.read().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_tenant_that_moves_host_does_not_leak_its_old_client() {
+        let pool = TenantClientPool::new();
+        let before = route("12345", "10.0.1.5");
+        let after = route("12345", "10.0.2.9");
+        pool.traces_client(&before);
+        pool.traces_client(&after);
+        assert_eq!(pool.clients.read().unwrap().len(), 2);
+
+        pool.retain_routes(std::slice::from_ref(&after));
+
+        assert_eq!(pool.clients.read().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_rotated_password_builds_a_new_client() {
+        let pool = TenantClientPool::new();
+        let before = route("12345", "10.0.1.5");
+        let mut after = before.clone();
+        after.password = "rotated".to_string();
+
+        pool.traces_client(&before);
+        pool.traces_client(&after);
+
+        assert_eq!(
+            pool.clients.read().unwrap().len(),
+            2,
+            "the old client still authenticates with the old password"
+        );
     }
 
     /// The tenant user carries a READONLY settings profile, so any session
