@@ -650,6 +650,7 @@ fips-check:
   needs: []
   script:
     - ./scripts/checks/fips/check-graph.sh
+    - mise run fips:duckdb:check
     - cargo build -p orbit-server --locked
     - ./scripts/checks/fips/check-binary.sh target/debug/gkg-server
     - sccache --show-stats || true
