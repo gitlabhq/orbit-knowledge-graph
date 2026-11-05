@@ -40,6 +40,7 @@ pub enum LogicalOperation {
     Select(Vec<Expr>),
     Order(Vec<(Expr, Order)>),
     Limit(u64),
+    Union,
     Read(Body),
 }
 
@@ -70,6 +71,7 @@ impl Language for Logical {
             }
             LogicalOperation::Entities(_)
             | LogicalOperation::Limit(_)
+            | LogicalOperation::Union
             | LogicalOperation::Read(_) => {}
         }
     }

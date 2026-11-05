@@ -39,11 +39,15 @@ impl<'m> LogicalBuilder<'m> {
         &mut self,
         operation: LogicalOperation,
         inputs: Vec<Rows<'m>>,
-        check: impl FnOnce(&Model, &Construction<Logical>) -> Result<Outputs<LogicalType>, PlanError>,
+        check: impl FnOnce(
+            &Model,
+            &Construction<Logical>,
+            &[Rows<'m>],
+        ) -> Result<Outputs<LogicalType>, PlanError>,
     ) -> Result<Rows<'m>, PlanError> {
         let model = self.catalog.model();
         self.construction.attempt(|construction| {
-            let outputs = check(model, construction)?;
+            let outputs = check(model, construction, &inputs)?;
             let inputs = inputs.into_iter().map(Rows::into_inner).collect();
             let connected = construction.connect(operation, inputs, outputs)?;
             Rows::view(model, construction, connected.rows)
@@ -62,10 +66,8 @@ impl<'m> LogicalBuilder<'m> {
         let id = self
             .construction
             .attempt(|construction| construction.declared(entity))?;
-        self.connect(LogicalOperation::Entities(id), Vec::new(), |_, _| {
-            Ok(Outputs::extend([Declare::anonymous(LogicalType::Entity(
-                id,
-            ))]))
+        self.connect(LogicalOperation::Entities(id), Vec::new(), |model, _, _| {
+            Ok(binding(model, id))
         })
     }
 
@@ -74,7 +76,7 @@ impl<'m> LogicalBuilder<'m> {
         self.connect(
             LogicalOperation::Filter(predicate),
             vec![rows],
-            |model, construction| {
+            |model, construction, _| {
                 check::predicate(model, construction, &checked)?;
                 Ok(Outputs::preserve())
             },
@@ -121,11 +123,7 @@ impl<'m> LogicalBuilder<'m> {
             from: from.output(),
             hops,
         };
-        self.connect(operation, vec![rows], |_, _| {
-            Ok(Outputs::extend([Declare::anonymous(LogicalType::Entity(
-                to,
-            ))]))
-        })
+        self.connect(operation, vec![rows], |model, _, _| Ok(binding(model, to)))
     }
 
     pub fn aggregate(
@@ -146,7 +144,7 @@ impl<'m> LogicalBuilder<'m> {
             groups: groups.clone(),
             measures: measures.clone(),
         };
-        self.connect(operation, vec![rows], |model, construction| {
+        self.connect(operation, vec![rows], |model, construction, _| {
             let group_types = groups
                 .iter()
                 .map(|group| Ok(check::scalar(model, construction, *group)?.data_type));
@@ -170,7 +168,7 @@ impl<'m> LogicalBuilder<'m> {
             .map(|named| (named.item, named.name))
             .unzip();
         let operation = LogicalOperation::Select(exprs.clone());
-        self.connect(operation, vec![rows], |model, construction| {
+        self.connect(operation, vec![rows], |model, construction, _| {
             let types = exprs
                 .iter()
                 .map(|expr| Ok(check::scalar(model, construction, *expr)?.data_type));
@@ -188,7 +186,7 @@ impl<'m> LogicalBuilder<'m> {
         self.connect(
             LogicalOperation::Order(keys),
             vec![rows],
-            |model, construction| {
+            |model, construction, _| {
                 for key in checked {
                     check::scalar(model, construction, key)?;
                 }
@@ -198,7 +196,7 @@ impl<'m> LogicalBuilder<'m> {
     }
 
     pub fn limit(&mut self, rows: Rows<'m>, count: u64) -> Result<Rows<'m>, PlanError> {
-        self.connect(LogicalOperation::Limit(count), vec![rows], |_, _| {
+        self.connect(LogicalOperation::Limit(count), vec![rows], |_, _, _| {
             Ok(Outputs::preserve())
         })
     }
@@ -222,6 +220,46 @@ impl<'m> LogicalBuilder<'m> {
     pub fn reconnect(&mut self, from: Ref, to: Ref) -> Result<(), PlanError> {
         Ok(self.construction.reconnect(from, to)?)
     }
+
+    pub fn union(&mut self, inputs: Vec<Rows<'m>>) -> Result<Rows<'m>, PlanError> {
+        self.connect(
+            LogicalOperation::Union,
+            inputs,
+            |_, construction, inputs| {
+                let signature = |rows: &Rows<'m>| {
+                    construction
+                        .outputs(rows.inner())?
+                        .into_iter()
+                        .map(|output| {
+                            let (name, value) = construction.value(output)?;
+                            Ok(Declare {
+                                name: name.map(str::to_string),
+                                value: *value,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, PlanError>>()
+                };
+                let mut signatures = inputs.iter().map(signature);
+                let first = signatures.next().transpose()?.unwrap_or_default();
+                match signatures
+                    .find(|other| other.as_ref() != Ok(&first))
+                    .transpose()?
+                {
+                    Some(other) => Err(PlanError::Type {
+                        expr: "union".to_string(),
+                        expected: format!("{first:?}"),
+                        found: format!("{other:?}"),
+                    }),
+                    None => Ok(Outputs::replace(first.into_iter().map(Output::Declare))),
+                }
+            },
+        )
+    }
+}
+
+fn binding(model: &Model, entity: EntityId) -> Outputs<LogicalType> {
+    let name = &model.graph().entity(entity).name;
+    Outputs::extend([Declare::named(name, LogicalType::Entity(entity))])
 }
 
 fn declare(
