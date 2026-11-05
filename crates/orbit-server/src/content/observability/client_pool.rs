@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use orbit_server_config::{
-    ClickHouseConfiguration, ObservabilityResolverSettings, ProfilingConfig,
-};
+use orbit_server_config::{ClickHouseConfiguration, ProfilingConfig};
 
 use super::host_map::TenantRoute;
 
@@ -12,6 +10,12 @@ type ClientKey = (String, String);
 
 pub struct TenantClientPool {
     clients: RwLock<HashMap<ClientKey, Arc<ArrowClickHouseClient>>>,
+}
+
+impl Default for TenantClientPool {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TenantClientPool {
