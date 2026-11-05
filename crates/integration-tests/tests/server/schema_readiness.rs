@@ -8,7 +8,7 @@ use integration_testkit::TestContext;
 use jsonwebtoken::{EncodingKey, Header, encode};
 use nats_client::{KvPutOptions, NatsClient};
 use orbit_migrations::archive::Release;
-use orbit_migrations::catalog::{ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
+use orbit_migrations::catalog::{MODEL_ARCHIVES_BUCKET, ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
 use orbit_migrations::schema::{GraphSchema, Schema};
 use orbit_migrations::version::{
     ensure_version_table, mark_version_migrating, mark_version_retired, promote_version,
@@ -321,20 +321,26 @@ impl Cluster {
     }
 
     async fn corrupt_archive(&self, version: u32) {
-        self.overwrite_archive(version, bytes::Bytes::from_static(b"corrupt archive"))
+        let corrupt = bytes::Bytes::from_static(b"corrupt archive");
+        self.overwrite_archive(ONTOLOGY_ARCHIVES_BUCKET, version, corrupt)
             .await;
     }
 
     async fn restore_archive(&self, version: u32) {
-        let contents =
-            bytes::Bytes::copy_from_slice(test_archive(version).ontology_archive().bytes());
-        self.overwrite_archive(version, contents).await;
+        let release = test_archive(version);
+        for (bucket, bytes) in [
+            (ONTOLOGY_ARCHIVES_BUCKET, release.ontology_archive().bytes()),
+            (MODEL_ARCHIVES_BUCKET, release.model_archive().bytes()),
+        ] {
+            self.overwrite_archive(bucket, version, bytes::Bytes::copy_from_slice(bytes))
+                .await;
+        }
     }
 
-    async fn overwrite_archive(&self, version: u32, contents: bytes::Bytes) {
+    async fn overwrite_archive(&self, bucket: &str, version: u32, contents: bytes::Bytes) {
         self.nats_client
             .kv_put(
-                ONTOLOGY_ARCHIVES_BUCKET,
+                bucket,
                 &version.to_string(),
                 contents,
                 KvPutOptions::default(),
@@ -788,6 +794,9 @@ fn test_archive(version: u32) -> Release {
                 .as_array_mut()
                 .unwrap()
                 .retain(|column| column["name"] != property);
+            if let Some(indexes) = node["storage"]["indexes"].as_array_mut() {
+                indexes.retain(|index| index["column"] != property);
+            }
             sources.insert(path.into(), yaml::to_string(&node).unwrap());
         }
     }
