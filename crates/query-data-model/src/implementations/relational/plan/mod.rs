@@ -83,4 +83,12 @@ impl<B: RelationalBackend> Catalog<B> {
         let root = construct(&mut builder);
         builder.finish(root)
     }
+
+    pub fn rewrite<'c>(
+        &'c self,
+        plan: RelationalPlan<B>,
+        visit: impl FnMut(&mut RelationalBuilder<'c, B>, Relation) -> Result<Relation, RelationalError>,
+    ) -> Result<RelationalPlan<B>, RelationalError> {
+        RelationalBuilder::rewriting(self, plan)?.rewrite(visit)
+    }
 }

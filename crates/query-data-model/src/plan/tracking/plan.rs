@@ -105,6 +105,10 @@ impl<L: Language> Plan<L> {
         &self.arena.outputs[output.output.0].value
     }
 
+    pub fn bodies(&self) -> impl Iterator<Item = BodyId> {
+        (0..self.arena.bodies.len()).map(BodyId)
+    }
+
     pub fn body(&self, body: BodyId) -> (&str, NodeId) {
         let info = &self.arena.bodies[body.0];
         (&info.name, info.root)
