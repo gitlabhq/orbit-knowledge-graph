@@ -518,6 +518,38 @@ mod tests {
     }
 
     #[test]
+    fn setup_detects_duo_from_the_binary_glab_installed_before_its_first_run() {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join(".config/glab-cli/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("duo"), "").unwrap();
+        let machine = Machine::new(home.path().to_path_buf(), BTreeMap::new());
+
+        let dir = tempfile::tempdir().unwrap();
+        let run = install(options_for(&[]), project(dir.path()), &machine).unwrap();
+
+        assert_eq!(run.detected_agents, ["duo"]);
+        assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
+    }
+
+    #[test]
+    fn setup_detects_duo_from_its_xdg_config_dir() {
+        let home = tempfile::tempdir().unwrap();
+        let xdg = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(xdg.path().join("gitlab/duo")).unwrap();
+        let env = BTreeMap::from([(
+            "XDG_CONFIG_HOME".to_string(),
+            xdg.path().display().to_string(),
+        )]);
+        let machine = Machine::new(home.path().to_path_buf(), env);
+
+        let dir = tempfile::tempdir().unwrap();
+        let run = install(options_for(&[]), project(dir.path()), &machine).unwrap();
+
+        assert_eq!(run.detected_agents, ["duo"]);
+    }
+
+    #[test]
     fn setup_with_nothing_detected_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let run = install(options_for(&[]), project(dir.path()), &bare_machine()).unwrap();
