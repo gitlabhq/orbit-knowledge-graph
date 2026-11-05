@@ -49,12 +49,14 @@ pub struct Store {
     pub connection: String,
     pub kind: String,
     pub trusted: bool,
+    pub path_column: Option<String>,
     pub package: String,
     pub(crate) options: BackendOptions,
     pub(crate) source_options: Vec<(EntityId, String, BackendOptions)>,
     pub(crate) routes: Vec<DeclaredRoute>,
     sources: Vec<Option<Source>>,
     columns: Vec<Option<String>>,
+    excluded: HashSet<PropertyId>,
     foreign_keys: Vec<Option<ForeignKey>>,
     pub(super) guards: Vec<Option<Guard>>,
 }
@@ -70,6 +72,10 @@ impl Store {
 
     pub fn column(&self, property: PropertyId) -> Option<&str> {
         self.columns[property.index()].as_deref()
+    }
+
+    pub fn excludes(&self, property: PropertyId) -> bool {
+        self.excluded.contains(&property)
     }
 
     pub fn foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey> {
@@ -180,12 +186,14 @@ impl Store {
                 .unwrap_or_else(|| engine.kind.clone()),
             kind: engine.kind.clone(),
             trusted: engine.trusted,
+            path_column: engine.path_column.clone(),
             package: package.to_string(),
             options: engine.backend.clone(),
             source_options: Vec::new(),
             routes: Vec::new(),
             sources: (0..graph.entities().count()).map(|_| None).collect(),
             columns: vec![None; graph.properties().count()],
+            excluded: HashSet::new(),
             foreign_keys: vec![None; graph.variants().count()],
             guards: vec![None; graph.entities().count()],
         }
@@ -248,7 +256,7 @@ impl Store {
     }
 
     fn stored_columns(
-        &self,
+        &mut self,
         entity: EntityId,
         spec: &SourceSpec,
         served: &HashSet<PropertyId>,
@@ -283,6 +291,13 @@ impl Store {
                 .filter_map(|p| resolve(p, diagnostics))
                 .collect()
         };
+        self.excluded.extend(
+            graph
+                .entity(entity)
+                .properties
+                .iter()
+                .filter(|property| excluded.contains(property) || !candidates.contains(property)),
+        );
         candidates
             .into_iter()
             .filter(|property| !excluded.contains(property))

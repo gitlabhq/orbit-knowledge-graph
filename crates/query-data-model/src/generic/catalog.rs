@@ -21,6 +21,7 @@ pub struct Property {
     pub enum_type: EnumType,
     pub terminal_values: Vec<String>,
     pub references: Vec<EntityId>,
+    pub selectivity: ontology::FieldSelectivity,
 }
 
 #[derive(Debug)]

@@ -1,8 +1,12 @@
+use std::collections::{HashMap, HashSet};
+
 use indexmap::IndexMap;
+use ontology::DataType;
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{Catalog, Diagnostics, StorageBackend, StoreInput};
-use crate::{EntityId, ForeignKey, RelationshipVariantId};
+use crate::spec::parse_word;
+use crate::{EntityId, ForeignKey, PathColumn, RelationshipVariantId};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -15,6 +19,8 @@ pub struct RelationalOptions {
     pub sort_key: Vec<String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub edge_tables: IndexMap<String, EdgeTableSpec>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub route_all_variants: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -26,6 +32,37 @@ pub struct EdgeTableSpec {
     pub domains: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sort_key: Vec<String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub columns: IndexMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TableFacts {
+    pub entity: Option<EntityId>,
+    pub columns: Option<HashSet<String>>,
+    pub column_types: HashMap<String, DataType>,
+    pub sort_key: Vec<String>,
+    pub path_columns: Option<Vec<PathColumn>>,
+}
+
+impl EdgeTableSpec {
+    pub fn column_types(
+        &self,
+        package: &str,
+        table: &str,
+        diagnostics: &mut Diagnostics,
+    ) -> HashMap<String, DataType> {
+        self.columns
+            .iter()
+            .filter_map(|(column, word)| {
+                let data_type =
+                    diagnostics.require(parse_word::<DataType>(word), package, || {
+                        format!("edge table {table} column {column} has unknown type `{word}`")
+                    })?;
+                Some((column.clone(), data_type))
+            })
+            .collect()
+    }
 }
 
 impl RelationalOptions {
@@ -159,7 +196,8 @@ impl RelationalStore {
         };
         let mut edge_routes = vec![None; graph.variants().count()];
         for variant in graph.variants() {
-            if store.source(variant.source).is_none() || !on_connection(variant.target) {
+            let bound = store.source(variant.source).is_some() && on_connection(variant.target);
+            if !bound && !options.route_all_variants {
                 continue;
             }
             let route = input
@@ -219,6 +257,7 @@ impl RelationalStore {
 
 pub trait RelationalFacts {
     fn relational(&self) -> &RelationalStore;
+    fn table(&self, name: &str) -> Option<&TableFacts>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -239,7 +278,7 @@ pub struct Route<'a> {
     pub foreign_key: Option<KeyRoute<'a>>,
 }
 
-impl<B: StorageBackend> Catalog<'_, B>
+impl<B: StorageBackend> Catalog<B>
 where
     B::Store: RelationalFacts,
 {

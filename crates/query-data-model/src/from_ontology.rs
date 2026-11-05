@@ -9,7 +9,11 @@ use ontology::{
 use serde::Serialize;
 
 use crate::DataModelError;
-use crate::implementations::clickhouse::backend::{ClickHouseSource, IndexKinds};
+use crate::implementations::clickhouse::backend::{
+    ClickHouseOptions, ClickHouseSource, CopySpec, DenormalizedSpec, IndexKinds, JoinNodeSpec,
+    JoinRelationshipSpec, JoinSourceSpec, JoinSpec, PathLookupSpec,
+};
+use crate::implementations::clickhouse::layout::ClickHouse;
 use crate::implementations::duckdb::backend::DuckDbSource;
 use crate::implementations::relational::{EdgeTableSpec, RelationalOptions, RelationalRoute};
 use crate::spec::{
@@ -168,6 +172,8 @@ fn property(field: &ontology::Field, references: Vec<String>) -> PropertySpec {
         stored_as_text: field.enum_type == EnumType::String,
         terminal: field.terminal_values.clone().unwrap_or_default(),
         references,
+        selectivity: (field.selectivity != FieldSelectivity::from_data_type(field.data_type))
+            .then(|| selectivity_word(field.selectivity).to_string()),
     };
     let plain = PropertyDetail {
         data_type: detail.data_type.clone(),
@@ -177,6 +183,13 @@ fn property(field: &ontology::Field, references: Vec<String>) -> PropertySpec {
         PropertySpec::Type(detail.data_type)
     } else {
         PropertySpec::Detail(detail)
+    }
+}
+
+fn selectivity_word(selectivity: FieldSelectivity) -> &'static str {
+    match selectivity {
+        FieldSelectivity::Low => "low",
+        FieldSelectivity::High => "high",
     }
 }
 
@@ -295,8 +308,19 @@ fn options(value: impl Serialize) -> Result<BackendOptions, DataModelError> {
     }
 }
 
+fn edge_columns(columns: &[ontology::EdgeColumn]) -> IndexMap<String, String> {
+    columns
+        .iter()
+        .map(|column| {
+            let name = column.name.trim_matches('`').to_string();
+            (name, type_word(column.data_type).to_string())
+        })
+        .collect()
+}
+
 fn graph_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
-    let relational = RelationalOptions {
+    let layout = crate::Relational::<ClickHouse>::derive(ontology)?;
+    let relational = ClickHouseOptions {
         version_column: Some(ontology::VERSION_COLUMN.to_string()),
         deleted_column: Some(ontology::DELETED_COLUMN.to_string()),
         sort_key: ontology.default_entity_sort_key().to_vec(),
@@ -309,11 +333,82 @@ fn graph_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
                     default: name == ontology.edge_table(),
                     domains: config.domains.iter().cloned().collect(),
                     sort_key: config.sort_key.clone(),
+                    columns: edge_columns(&config.columns),
                 };
                 Some((name.to_string(), spec))
             })
             .collect(),
+        denormalized: ontology
+            .denormalized_properties()
+            .iter()
+            .map(|property| DenormalizedSpec {
+                entity: property.node_kind.clone(),
+                property: property.property_name.clone(),
+                relationship: property.relationship_kind.clone(),
+                side: match property.direction {
+                    ontology::DenormDirection::Source => "source",
+                    ontology::DenormDirection::Target => "target",
+                }
+                .to_string(),
+                column: property.edge_column.clone(),
+                tag: property.tag_key.clone(),
+                nullable: property.nullable,
+            })
+            .collect(),
+        copies: ontology
+            .reordered_tables()
+            .iter()
+            .map(|copy| {
+                let spec = CopySpec {
+                    source: copy.source.clone(),
+                    sort_key: copy.sort_key.clone(),
+                };
+                (copy.name.clone(), spec)
+            })
+            .collect(),
+        joins: layout
+            .joins()
+            .iter()
+            .map(|join| {
+                let spec = JoinSpec {
+                    sort_key: layout
+                        .table(&join.table)
+                        .map(|table| table.sort_key.clone())
+                        .unwrap_or_default(),
+                    sources: join
+                        .sources
+                        .iter()
+                        .map(|source| JoinSourceSpec {
+                            table: source.table.clone(),
+                            path_column: source.path_column.clone(),
+                            columns: source.columns.clone(),
+                        })
+                        .collect(),
+                    nodes: join
+                        .nodes
+                        .iter()
+                        .map(|node| JoinNodeSpec {
+                            entity: node.entity.clone(),
+                            source: node.source_occurrence,
+                            key: node.identity_column.clone(),
+                        })
+                        .collect(),
+                    relationships: join
+                        .relationships
+                        .iter()
+                        .map(|relationship| JoinRelationshipSpec {
+                            relationship: relationship.kind.clone(),
+                            source: relationship.source_slot,
+                            target: relationship.target_slot,
+                            edge: relationship.edge_occurrence,
+                        })
+                        .collect(),
+                };
+                (join.table.clone(), spec)
+            })
+            .collect(),
     };
+    let routing = relational.relational();
     let domain_of = |entity: &str| ontology.get_node(entity).map(|node| node.domain.as_str());
     let relationships = ontology
         .edge_names()
@@ -324,7 +419,7 @@ fn graph_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
                 .iter()
                 .filter(|edge| !edge.source_kind.is_empty() && !edge.target_kind.is_empty())
                 .filter_map(|edge| {
-                    let expected = relational
+                    let expected = routing
                         .edge_table_for(domain_of(&edge.source_kind), domain_of(&edge.target_kind));
                     let table = (Some(edge.destination_table.as_str()) != expected)
                         .then(|| edge.destination_table.clone());
@@ -401,20 +496,28 @@ fn graph_source(
                 (column, kinds)
             })
             .collect(),
-        low_selectivity: node
-            .fields
-            .iter()
-            .filter(|field| {
-                field.selectivity == FieldSelectivity::Low
-                    && FieldSelectivity::from_data_type(field.data_type) != FieldSelectivity::Low
-            })
-            .map(|field| field.name.clone())
-            .collect(),
         high_fan_out: node
             .fields
             .iter()
             .filter(|field| field.high_fan_out)
             .map(|field| field.name.clone())
+            .collect(),
+        epoch_nulls: epoch_nulls(node),
+        path_lookups: ontology
+            .traversal_path_lookups()
+            .iter()
+            .filter(|lookup| lookup.entity == node.name)
+            .map(|lookup| {
+                let kind = match lookup.kind {
+                    ontology::TraversalPathKind::Id => "id",
+                    ontology::TraversalPathKind::FullPath => "full_path",
+                };
+                let spec = PathLookupSpec {
+                    table: lookup.source_table.clone(),
+                    key: lookup.key_column.clone(),
+                };
+                (kind.to_string(), spec)
+            })
             .collect(),
     };
     Ok(SourceSpec {
@@ -423,6 +526,25 @@ fn graph_source(
         backend: options(backend)?,
         ..SourceSpec::default()
     })
+}
+
+fn epoch_nulls(node: &ontology::NodeEntity) -> Vec<String> {
+    let non_nullable: std::collections::HashSet<&str> = node
+        .storage
+        .columns
+        .iter()
+        .filter(|column| !column.ch_type.starts_with("Nullable("))
+        .map(|column| column.name.trim_matches('`'))
+        .collect();
+    node.fields
+        .iter()
+        .filter(|field| {
+            field.nullable
+                && matches!(field.data_type, DataType::DateTime | DataType::Date)
+                && non_nullable.contains(field.name.as_str())
+        })
+        .map(|field| field.name.clone())
+        .collect()
 }
 
 fn local_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
@@ -440,8 +562,10 @@ fn local_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
                     .sort_key_for_table(&edge_table)
                     .unwrap_or(ontology.edge_sort_key())
                     .to_vec(),
+                columns: edge_columns(ontology.local_edge_columns()),
             },
         )]),
+        route_all_variants: true,
         ..RelationalOptions::default()
     };
     let local = ontology.local_entity_names();
@@ -469,8 +593,14 @@ fn local_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
                     _ => None,
                 })
                 .collect();
+            let has_path = kept
+                .as_ref()
+                .map_or(node.fields.iter().collect(), |kept| kept.clone())
+                .iter()
+                .any(|field| field.name == ontology::constants::TRAVERSAL_PATH_COLUMN);
             let spec = SourceSpec {
                 table: Some(node.destination_table.clone()),
+                path_column: (!has_path).then_some(None),
                 columns,
                 exclude,
                 backend: options(DuckDbSource {
@@ -488,6 +618,7 @@ fn local_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
             kind: "duckdb".to_string(),
             connection: Some("local".to_string()),
             trusted: true,
+            path_column: Some(ontology::constants::TRAVERSAL_PATH_COLUMN.to_string()),
             backend: options(relational)?,
             ..EngineSpec::default()
         }),

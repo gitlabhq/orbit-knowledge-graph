@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
+use ontology::TraversalPathKind;
 use serde::{Deserialize, Serialize};
 
 use super::layout::DuckDb;
 use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
 use crate::implementations::relational::{
-    RelationalFacts, RelationalOptions, RelationalRoute, RelationalStore,
+    RelationalFacts, RelationalOptions, RelationalRoute, RelationalStore, TableFacts,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -16,11 +19,16 @@ pub struct DuckDbSource {
 #[derive(Debug)]
 pub struct DuckDbStore {
     pub relational: RelationalStore,
+    tables: HashMap<String, TableFacts>,
 }
 
 impl RelationalFacts for DuckDbStore {
     fn relational(&self) -> &RelationalStore {
         &self.relational
+    }
+
+    fn table(&self, name: &str) -> Option<&TableFacts> {
+        self.tables.get(name)
     }
 }
 
@@ -41,6 +49,74 @@ impl StorageBackend for DuckDb {
                 .map(|source| (source.entity, source.options.sort_key.clone())),
             diagnostics,
         );
-        DuckDbStore { relational }
+        let mut tables = HashMap::new();
+        for source in input.store.sources() {
+            tables.insert(
+                source.table.clone(),
+                TableFacts {
+                    entity: Some(source.entity),
+                    sort_key: relational
+                        .sort_key(source.entity)
+                        .unwrap_or_default()
+                        .to_vec(),
+                    ..TableFacts::default()
+                },
+            );
+        }
+        for (name, spec) in &input.options.edge_tables {
+            let column_types = spec.column_types(&input.store.package, name, diagnostics);
+            tables.insert(
+                name.clone(),
+                TableFacts {
+                    entity: None,
+                    columns: Some(column_types.keys().cloned().collect()),
+                    column_types,
+                    sort_key: spec.sort_key.clone(),
+                    path_columns: None,
+                },
+            );
+        }
+        DuckDbStore { relational, tables }
+    }
+}
+
+impl crate::query_model::QueryFacts for DuckDbStore {
+    const SELECTIVE_LATEST_ROWS: bool = false;
+    const DEFERRED_NODE_LOADING: bool = false;
+    const REFERENCE_HINTS: bool = false;
+    const ALL_PROPERTIES_BY_DEFAULT: bool = true;
+
+    fn text_index(&self, _property: crate::PropertyId) -> bool {
+        false
+    }
+
+    fn null_as_epoch(&self, _property: crate::PropertyId) -> bool {
+        false
+    }
+
+    fn high_fan_out(&self, _entity: crate::EntityId) -> bool {
+        false
+    }
+
+    fn denormalized(&self) -> &crate::DenormalizedCatalog {
+        static EMPTY: std::sync::LazyLock<crate::DenormalizedCatalog> =
+            std::sync::LazyLock::new(crate::DenormalizedCatalog::default);
+        &EMPTY
+    }
+
+    fn path_lookup(
+        &self,
+        _entity: crate::EntityId,
+        _kind: TraversalPathKind,
+    ) -> Option<&crate::TraversalPathLookup> {
+        None
+    }
+
+    fn copies_of<'a>(&'a self, _table: &str) -> Vec<&'a str> {
+        Vec::new()
+    }
+
+    fn joins(&self) -> &[crate::MaterializedJoin] {
+        &[]
     }
 }

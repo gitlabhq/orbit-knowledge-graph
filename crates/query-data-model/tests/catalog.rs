@@ -24,14 +24,14 @@ fn package_sources(packages: &[&str]) -> Vec<(String, String)> {
     sources
 }
 
-fn load(packages: &[&str]) -> Result<Model, DataModelError> {
+fn load(packages: &[&str]) -> Result<std::sync::Arc<Model>, DataModelError> {
     load_with(packages, |_, yaml| yaml)
 }
 
 fn load_with(
     packages: &[&str],
     edit: impl Fn(&str, String) -> String,
-) -> Result<Model, DataModelError> {
+) -> Result<std::sync::Arc<Model>, DataModelError> {
     let sources: Vec<_> = package_sources(packages)
         .into_iter()
         .map(|(name, yaml)| {
@@ -44,6 +44,7 @@ fn load_with(
             .iter()
             .map(|(name, yaml)| (name.as_str(), yaml.as_str())),
     )
+    .map(std::sync::Arc::new)
 }
 
 fn spec_errors<T: std::fmt::Debug>(result: Result<T, DataModelError>) -> Vec<String> {

@@ -11,9 +11,9 @@ use query_data_model::{
     RelationalMapping,
 };
 
-fn models() -> (Model, ClickHouseDataModel, DuckDbDataModel) {
+fn models() -> (Arc<Model>, ClickHouseDataModel, DuckDbDataModel) {
     let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
-    let model = Model::load(&from_ontology(&ontology).unwrap()).unwrap();
+    let model = Arc::new(Model::load(&from_ontology(&ontology).unwrap()).unwrap());
     let remote = ClickHouseDataModel::derive(Arc::clone(&ontology)).unwrap();
     let local = DuckDbDataModel::derive(ontology).unwrap();
     (model, remote, local)

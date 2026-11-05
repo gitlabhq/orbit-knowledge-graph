@@ -7,6 +7,7 @@ pub mod generic;
 pub mod implementations;
 pub mod layout;
 pub mod models;
+pub mod query_model;
 pub mod spec;
 pub use layout::{Layout, Mapping, Relational, RelationalBackend};
 
@@ -21,6 +22,7 @@ pub use generic::{
 pub use layout::relational::{
     MaterializedJoin, MaterializedNode, MaterializedRelationship, VariantRoute,
 };
+pub use query_model::{QueryFacts, QueryModel};
 
 pub use layout::relational::RelationalMapping;
 pub use layout::relational::{

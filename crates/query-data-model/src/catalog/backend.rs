@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 
@@ -39,26 +40,32 @@ pub struct StoreInput<'a, B: StorageBackend> {
 }
 
 #[derive(Debug)]
-pub struct Catalog<'m, B: StorageBackend> {
-    model: &'m Model,
+pub struct Catalog<B: StorageBackend> {
+    model: Arc<Model>,
     connection: String,
-    stores: Vec<(&'m Store, B::Store)>,
+    stores: Vec<(usize, B::Store)>,
 }
 
-impl<'m, B: StorageBackend> Catalog<'m, B> {
-    pub fn model(&self) -> &'m Model {
-        self.model
+impl<B: StorageBackend> Catalog<B> {
+    pub fn model(&self) -> &Model {
+        &self.model
+    }
+
+    pub fn graph(&self) -> &GraphCatalog {
+        self.model.graph()
     }
 
     pub fn connection(&self) -> &str {
         &self.connection
     }
 
-    pub fn stores(&self) -> impl Iterator<Item = (&'m Store, &B::Store)> {
-        self.stores.iter().map(|(store, facts)| (*store, facts))
+    pub fn stores(&self) -> impl Iterator<Item = (&Store, &B::Store)> {
+        self.stores
+            .iter()
+            .map(|(index, facts)| (&self.model.stores[*index], facts))
     }
 
-    pub fn store(&self, name: &str) -> Option<&'m Store> {
+    pub fn store(&self, name: &str) -> Option<&Store> {
         self.stores()
             .find(|(store, _)| store.name == name)
             .map(|(store, _)| store)
@@ -70,23 +77,26 @@ impl<'m, B: StorageBackend> Catalog<'m, B> {
             .map(|(_, facts)| facts)
     }
 
-    pub fn sources(&self, entity: EntityId) -> impl Iterator<Item = (&'m Store, &'m Source)> {
-        self.stores
-            .iter()
-            .filter_map(move |(store, _)| Some((*store, store.source(entity)?)))
+    pub fn sources(&self, entity: EntityId) -> impl Iterator<Item = (&Store, &Source)> {
+        self.stores()
+            .filter_map(move |(store, _)| Some((store, store.source(entity)?)))
+    }
+
+    pub fn home(&self, entity: EntityId) -> Option<(&Store, &B::Store)> {
+        self.stores()
+            .find(|(store, _)| store.source(entity).is_some())
     }
 }
 
 impl Model {
     pub fn physical<B: StorageBackend>(
-        &self,
+        self: &Arc<Self>,
         connection: &str,
-    ) -> Result<Catalog<'_, B>, DataModelError> {
-        let members: Vec<&Store> = self
-            .stores
-            .iter()
-            .filter(|store| store.connection == connection)
+    ) -> Result<Catalog<B>, DataModelError> {
+        let indexes: Vec<usize> = (0..self.stores.len())
+            .filter(|index| self.stores[*index].connection == connection)
             .collect();
+        let members: Vec<&Store> = indexes.iter().map(|index| &self.stores[*index]).collect();
         let Some(first) = members.first() else {
             return Err(DataModelError::UnknownReference {
                 kind: "connection",
@@ -108,14 +118,14 @@ impl Model {
             .collect();
         diagnostics.finish()?;
         let mut diagnostics = Diagnostics::default();
-        let stores = members
+        let stores = indexes
             .iter()
             .zip(inputs)
-            .map(|(store, input)| (*store, B::resolve(input, &mut diagnostics)))
+            .map(|(index, input)| (*index, B::resolve(input, &mut diagnostics)))
             .collect();
         diagnostics.finish()?;
         Ok(Catalog {
-            model: self,
+            model: Arc::clone(self),
             connection: connection.to_string(),
             stores,
         })

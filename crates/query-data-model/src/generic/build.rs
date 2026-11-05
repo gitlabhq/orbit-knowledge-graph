@@ -250,8 +250,17 @@ fn declare_property(
     } else {
         EnumType::Int
     };
+    let selectivity = match detail.selectivity.as_deref() {
+        None => ontology::FieldSelectivity::from_data_type(data_type),
+        Some(word) => diagnostics
+            .require(parse_word(word), package, || {
+                format!("property {name} has unknown selectivity `{word}`")
+            })
+            .unwrap_or_default(),
+    };
     let property = Property {
         id,
+        selectivity,
         entity,
         name,
         description: detail.description,
