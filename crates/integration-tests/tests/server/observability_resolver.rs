@@ -27,10 +27,12 @@ fn bucket(unix: i64) -> u64 {
     (unix / 1_800 * 1_800) as u64
 }
 
-/// Mirrors the user, profile, quota and grants o11y_provisioner creates in
-/// ClickhouseMigrationRunner#grant_orbit_reader_script. A client that sends a
-/// session setting outside this profile is rejected with code 164, so this is
-/// what makes the test able to catch that.
+/// The settings profile o11y_provisioner declares in
+/// clickhouse_configs/users.xml, and the user and grants
+/// ClickhouseMigrationRunner#grant_orbit_reader_script creates against it.
+/// Production also restricts the user with HOST IP. A client that sends a
+/// session setting the profile does not fix is rejected with code 164, so
+/// resolving as this user is what makes the test able to catch that.
 const ORBIT_READER_USER: &str = "orbit_reader";
 const ORBIT_READER_PASSWORD: &str = "orbit-test-secret";
 const ORBIT_READER_PROFILE: &str = "orbit_reader_profile";
@@ -55,12 +57,7 @@ async fn create_orbit_reader(ctx: &TestContext) {
     .await;
     ctx.execute(&format!(
         "CREATE USER {ORBIT_READER_USER} IDENTIFIED BY '{ORBIT_READER_PASSWORD}' \
-         HOST ANY SETTINGS PROFILE {ORBIT_READER_PROFILE}"
-    ))
-    .await;
-    ctx.execute(&format!(
-        "CREATE QUOTA {ORBIT_READER_PROFILE} \
-         FOR INTERVAL 1 HOUR MAX queries = 10000 TO {ORBIT_READER_USER}"
+         SETTINGS PROFILE {ORBIT_READER_PROFILE}"
     ))
     .await;
     ctx.execute(&format!(
