@@ -12,7 +12,7 @@ use crate::user_agent::UserAgent;
 
 use orbit_analytics::AnalyticsTracker;
 
-use super::context::{apply_outcome, build_common, build_query};
+use super::context::{apply_outcome, build_common, build_query, build_standard};
 
 const GKG_CATEGORY: &str = "gkg";
 const ACTION_QUERY_EXECUTED: &str = "gkg_query_executed";
@@ -129,11 +129,21 @@ impl AnalyticsObserver {
         query.data.graph_schema_version = self.schema_version.parse().ok();
         apply_outcome(&mut query.data, error);
 
-        match StructuredEvent::builder(GKG_CATEGORY, ACTION_QUERY_EXECUTED)
+        let mut builder = StructuredEvent::builder(GKG_CATEGORY, ACTION_QUERY_EXECUTED)
             .context(common)
-            .context(query)
-            .build()
-        {
+            .context(query);
+        // Last, so orbit_common and orbit_query keep their positions. A bad
+        // gitlab_standard drops only that context, not the query event.
+        match build_standard(&self.config, &self.claims) {
+            Ok(standard) => builder = builder.context(standard),
+            Err(e) => orbit_log_fields::warn!(
+                safe(ERROR_TYPE) = e.kind(),
+                expanded(ERROR_MESSAGE) = %e,
+                "failed to build gitlab_standard context, sending event without it"
+            ),
+        }
+
+        match builder.build() {
             Ok(event) => tracker.track(event),
             Err(e) => orbit_log_fields::warn!(
                 safe(ERROR_TYPE) = e.kind(),
@@ -208,6 +218,57 @@ mod tests {
         assert_eq!(data["status"], "ok");
         assert_eq!(data["outcome"], "success");
         assert!(data["failure_reason"].is_null());
+    }
+
+    #[test]
+    fn attaches_gitlab_standard_last_with_a_string_user_id() {
+        let tracker = Arc::new(InMemoryAnalyticsTracker::new());
+        let obs = AnalyticsObserver::new(
+            Some(tracker.clone()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
+            test_claims(),
+            "query_graph",
+            UserAgent::default(),
+            "33".to_string(),
+        );
+        obs.finish(10, 0);
+        let events = tracker.drain();
+        let contexts = events[0].contexts();
+        assert_eq!(contexts.len(), 3);
+        assert_eq!(contexts[0].schema, orbit_analytics::ORBIT_COMMON_SCHEMA);
+        assert_eq!(contexts[1].schema, orbit_analytics::ORBIT_QUERY_SCHEMA);
+        assert_eq!(
+            contexts[2].schema,
+            labkit_events::standard::GITLAB_STANDARD_SCHEMA
+        );
+        let data = &contexts[2].data;
+        assert_eq!(data["user_id"], "1");
+        assert_eq!(data["global_user_id"], "guser");
+        assert_eq!(data["instance_id"], "inst");
+        assert_eq!(data["unique_instance_id"], "uniq");
+        assert_eq!(data["host_name"], "gitlab.com");
+    }
+
+    #[test]
+    fn sends_the_event_without_gitlab_standard_when_it_fails_to_build() {
+        let tracker = Arc::new(InMemoryAnalyticsTracker::new());
+        let obs = AnalyticsObserver::new(
+            Some(tracker.clone()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
+            Claims {
+                user_id: 1,
+                user_type: Some("x".repeat(256)),
+                ..test_claims()
+            },
+            "query_graph",
+            UserAgent::default(),
+            "33".to_string(),
+        );
+        obs.finish(10, 0);
+        let events = tracker.drain();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].contexts().len(), 2);
+        assert_eq!(events[0].contexts()[1].data["status"], "ok");
     }
 
     #[test]

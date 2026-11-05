@@ -2,10 +2,11 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use labkit_events::Error as LabkitError;
+use labkit_events::{DeploymentType, GitlabStandardContext, Realm};
 use orbit_analytics::{
     OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query, parse_opt, validation,
 };
-use orbit_server_config::AnalyticsConfig;
+use orbit_server_config::{AnalyticsConfig, DeploymentKind};
 use orbit_versions::VERSIONS;
 use query_engine::compiler::ExecMetrics;
 use query_engine::pipeline::PipelineError;
@@ -45,6 +46,49 @@ pub(crate) fn build_common(
                 .map_err(validation("schema_version"))?,
         ),
     }))
+}
+
+/// The shared `gitlab_standard` context, so queries count against the same
+/// user and instance identity as every other GitLab event. `user_id` goes out
+/// as a string: the pipeline's pseudonymization enrichment only replaces
+/// string values, so an integer would be stored as sent.
+pub(crate) fn build_standard(
+    config: &AnalyticsConfig,
+    claims: &Claims,
+) -> Result<GitlabStandardContext, LabkitError> {
+    let environment: &'static str = config.deployment.environment.into();
+    let (realm, deployment_type) = match config.deployment.kind {
+        DeploymentKind::Com => (Realm::Saas, DeploymentType::Com),
+        DeploymentKind::Dedicated => (Realm::Dedicated, DeploymentType::Dedicated),
+        DeploymentKind::SelfManaged => (Realm::SelfManaged, DeploymentType::SelfManaged),
+    };
+
+    let mut builder = GitlabStandardContext::builder(environment)
+        .user_id_str(claims.user_id.to_string())
+        .realm(realm)
+        .deployment_type(deployment_type);
+    if let Some(v) = &claims.global_user_id {
+        builder = builder.global_user_id(v);
+    }
+    if let Some(v) = &claims.user_type {
+        builder = builder.user_type(v);
+    }
+    if let Some(v) = claims.is_gitlab_team_member {
+        builder = builder.is_gitlab_team_member(v);
+    }
+    if let Some(v) = &claims.instance_id {
+        builder = builder.instance_id(v);
+    }
+    if let Some(v) = &claims.unique_instance_id {
+        builder = builder.unique_instance_id(v);
+    }
+    if let Some(v) = &claims.host_name {
+        builder = builder.host_name(v);
+    }
+    if let Some(v) = &claims.instance_version {
+        builder = builder.instance_version(v);
+    }
+    builder.build()
 }
 
 pub(crate) fn build_query(
@@ -524,6 +568,49 @@ mod tests {
         let claims = claims_with_paths(vec![]);
         let data = common_data(&claims, "33");
         assert_eq!(data["schema_version"], "33");
+    }
+
+    #[test]
+    fn build_standard_maps_deployment_kind_to_realm_and_deployment_type() {
+        let claims = claims_with_paths(vec![]);
+        let mut config = orbit_server_config::AppConfig::embedded_defaults().analytics;
+        for (kind, realm, deployment_type) in [
+            (DeploymentKind::Com, "saas", ".com"),
+            (DeploymentKind::Dedicated, "dedicated", "dedicated"),
+            (DeploymentKind::SelfManaged, "self-managed", "self-managed"),
+        ] {
+            config.deployment.kind = kind;
+            let data = build_standard(&config, &claims).unwrap().data();
+            assert_eq!(data["realm"], realm);
+            assert_eq!(data["deployment_type"], deployment_type);
+        }
+    }
+
+    #[test]
+    fn build_standard_sends_user_id_as_a_string() {
+        let mut claims = claims_with_paths(vec![]);
+        claims.user_id = 12345;
+        let data = build_standard(
+            &orbit_server_config::AppConfig::embedded_defaults().analytics,
+            &claims,
+        )
+        .unwrap()
+        .data();
+        assert_eq!(data["user_id"], serde_json::json!("12345"));
+    }
+
+    #[test]
+    fn build_standard_omits_absent_claims() {
+        let claims = claims_with_paths(vec![]);
+        let data = build_standard(
+            &orbit_server_config::AppConfig::embedded_defaults().analytics,
+            &claims,
+        )
+        .unwrap()
+        .data();
+        for field in ["global_user_id", "user_type", "instance_id", "host_name"] {
+            assert!(data.get(field).is_none(), "{field}");
+        }
     }
 
     #[test]
