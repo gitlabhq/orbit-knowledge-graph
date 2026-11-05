@@ -457,7 +457,7 @@ run = "cargo xtask metrics-catalog --check"
 description = "Fail if the committed metrics catalog is out of date"
 
 [tasks."fips:duckdb:check"]
-run = "uv run --quiet scripts/checks/fips/check-duckdb-mbedtls.py"
+run = "uv run --quiet scripts/checks/fips/duckdb-mbedtls/check.py"
 description = "Check that DuckDB reaches mbedtls only through the reviewed entry points"
 
 [tasks."dashboards"]

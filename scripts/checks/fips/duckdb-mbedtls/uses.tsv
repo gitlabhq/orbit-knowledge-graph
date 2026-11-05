@@ -1,5 +1,5 @@
 # libduckdb-sys 1.20000.0
-# Every place the compiled DuckDB code reaches mbedtls, written by check-duckdb-mbedtls.py --update.
+# Every place the compiled DuckDB code reaches mbedtls, written by check.py --update.
 # Categories, with why gkg-server never runs them:
 #   extension-signature   SHA-256 and RSA checks on extension load; the lockdown blocks every load
 #   extension-repository  SHA-256 fingerprint of a repository key; same lockdown

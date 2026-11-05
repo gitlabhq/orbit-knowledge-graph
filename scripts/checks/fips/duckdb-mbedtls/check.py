@@ -3,7 +3,7 @@
 
 DuckDB links mbedtls into gkg-server unconditionally. This check scans the sources and
 headers that the locked libduckdb-sys version compiles, counts each mbedtls entry point per
-file, and compares the counts with duckdb-mbedtls-uses.tsv, where every entry carries a
+file, and compares the counts with uses.tsv, where every entry carries a
 reviewed category. A DuckDB upgrade that adds, moves, or repeats an entry point fails until
 someone reviews it.
 
@@ -20,7 +20,7 @@ import tarfile
 from collections import Counter
 from pathlib import Path
 
-PINS = Path(__file__).with_name("duckdb-mbedtls-uses.tsv")
+PINS = Path(__file__).with_name("uses.tsv")
 UNREVIEWED = "unreviewed"
 EXTENSION_FEATURES = {"json": "json", "parquet": "parquet"}
 SCOPE_NEUTRAL_FEATURES = {"bundled", "capi-v1", "capi-v2", "default", "download-lib", "pkg-config", "vcpkg"}
