@@ -78,7 +78,10 @@ impl NamespaceStorageSnapshotScenario {
 
     async fn create_schema(&self) {
         let client = self.context.create_client();
-        let schema = orbit_migrations::schema::GraphSchema::from_ontology(&self.ontology).unwrap();
+        let schema = orbit_migrations::schema::GraphSchema::new(
+            integration_testkit::embedded_schema(),
+            false,
+        );
         orbit_migrations::execute::create_unversioned_definitions(&client, &schema)
             .await
             .unwrap();
@@ -88,7 +91,7 @@ impl NamespaceStorageSnapshotScenario {
     async fn replace_view(&self) {
         orbit_migrations::execute::replace_refreshable_views(
             &self.context.create_client(),
-            &self.ontology,
+            &integration_testkit::embedded_schema(),
             *SCHEMA_VERSION,
         )
         .await
@@ -98,7 +101,7 @@ impl NamespaceStorageSnapshotScenario {
     async fn drop_view(&self) {
         orbit_migrations::execute::drop_versioned_refreshable_views(
             &self.context.create_client(),
-            &self.ontology,
+            &integration_testkit::embedded_schema(),
             *SCHEMA_VERSION,
         )
         .await

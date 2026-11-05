@@ -1,5 +1,6 @@
 use compiler::{AccessLevel, AuthorizedPath, SecurityContext};
 use ontology::{DataType, Ontology};
+use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
 use std::sync::Arc;
 
 pub fn test_ctx() -> SecurityContext {
@@ -57,15 +58,41 @@ pub fn embedded_ontology() -> Arc<Ontology> {
     Arc::new(Ontology::load_embedded().expect("Failed to load embedded ontology"))
 }
 
+pub fn embedded_model() -> Arc<ClickHouseDataModel> {
+    Arc::new(ClickHouseDataModel::embedded().expect("embedded packages must load"))
+}
+
+pub fn embedded_local_model() -> Arc<DuckDbDataModel> {
+    Arc::new(DuckDbDataModel::embedded().expect("embedded packages must load"))
+}
+
+pub fn model(ontology: &Ontology) -> Arc<ClickHouseDataModel> {
+    Arc::new(
+        query_data_model::from_ontology::clickhouse(ontology)
+            .expect("fixture ontology must produce a ClickHouse model"),
+    )
+}
+
+pub fn local_model(ontology: &Ontology) -> Arc<DuckDbDataModel> {
+    Arc::new(
+        query_data_model::from_ontology::duckdb(ontology)
+            .expect("fixture ontology must produce a DuckDB model"),
+    )
+}
+
+pub fn test_model() -> Arc<ClickHouseDataModel> {
+    model(&test_ontology())
+}
+
 pub fn compile_pair(
     json: &str,
     orbit_query: &str,
-    ontology: &Arc<Ontology>,
+    data_model: &Arc<ClickHouseDataModel>,
     context: &SecurityContext,
 ) -> compiler::Result<compiler::CompiledQueryContext> {
-    let json_result = super::parity::compile(json, compiler::Frontend::JsonDsl, ontology, context);
+    let json_result = compiler::compile(json, compiler::Frontend::JsonDsl, data_model, context);
     let orbit_query_result =
-        super::parity::compile(orbit_query, compiler::Frontend::Gql, ontology, context);
+        compiler::compile(orbit_query, compiler::Frontend::Gql, data_model, context);
     match (json_result, orbit_query_result) {
         (Ok(json), Ok(orbit_query_result)) => {
             assert_eq!(

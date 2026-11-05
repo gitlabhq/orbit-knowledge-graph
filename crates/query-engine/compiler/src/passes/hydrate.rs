@@ -387,7 +387,7 @@ mod tests {
                 });
             })
             .unwrap();
-        ClickHouseDataModel::derive(std::sync::Arc::new(ontology)).unwrap()
+        query_data_model::from_ontology::clickhouse(&ontology).unwrap()
     }
 
     fn entity(model: &ClickHouseDataModel) -> query_data_model::EntityId {
@@ -542,7 +542,7 @@ mod tests {
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::All);
 
-        let model = ClickHouseDataModel::derive(std::sync::Arc::new(ont)).unwrap();
+        let model = query_data_model::from_ontology::clickhouse(&ont).unwrap();
         let specs = build_dynamic_specs(&input, &model, &ctx);
         let user = specs
             .iter()
@@ -570,7 +570,7 @@ mod tests {
         let ctx = admin_ctx();
         let input = neighbors_input(DynamicColumnMode::All);
 
-        let model = ClickHouseDataModel::derive(std::sync::Arc::new(ont)).unwrap();
+        let model = query_data_model::from_ontology::clickhouse(&ont).unwrap();
         let specs = build_dynamic_specs(&input, &model, &ctx);
         let user = specs
             .iter()
@@ -599,7 +599,7 @@ mod tests {
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::Default);
 
-        let model = ClickHouseDataModel::derive(std::sync::Arc::new(ont)).unwrap();
+        let model = query_data_model::from_ontology::clickhouse(&ont).unwrap();
         let specs = build_dynamic_specs(&input, &model, &ctx);
         let user = specs
             .iter()
@@ -617,8 +617,8 @@ mod tests {
         let input = neighbors_input(DynamicColumnMode::All);
 
         let emitted = Node::Query(Box::default());
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ont)).unwrap();
-        let plan = generate_hydration_plan(&input, &emitted, model.as_ref(), &ctx);
+        let model = query_data_model::from_ontology::clickhouse(&ont).unwrap();
+        let plan = generate_hydration_plan(&input, &emitted, &model, &ctx);
 
         match plan {
             HydrationPlan::Dynamic(specs) => {

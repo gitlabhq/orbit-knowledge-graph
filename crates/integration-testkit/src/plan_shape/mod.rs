@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use compiler::input::Input;
 use compiler::passes::{frontend, lower, normalize, page, plan, response_policy};
-use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
+use query_data_model::{ClickHouseDataModel, DuckDbDataModel, Model, OrbitQueryModel};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -232,7 +232,6 @@ fn check<M: OrbitQueryModel>(
     backend: &str,
     path: &Path,
     build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
-    codegen: impl Fn(&compiler::Node) -> Result<(), String>,
 ) -> Result<(), Vec<String>> {
     let mut failures = Vec::new();
     for (language, raw) in &scenario.query {
@@ -322,8 +321,20 @@ fn check<M: OrbitQueryModel>(
                 failures.push(error);
             }
         }
-        if let Err(error) = codegen(&lowered.ast) {
-            failures.push(format!("{label}: {error}"));
+        match backend {
+            "clickhouse" => {
+                if let Err(error) = compiler::emit_simple_query(&lowered.ast) {
+                    failures.push(format!("{label}: {error}"));
+                }
+            }
+            "duckdb" => {
+                if let Err(error) =
+                    compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default())
+                {
+                    failures.push(format!("{label}: {error}"));
+                }
+            }
+            _ => unreachable!(),
         }
     }
     if failures.is_empty() {
@@ -333,21 +344,8 @@ fn check<M: OrbitQueryModel>(
     }
 }
 
-fn clickhouse_parity(ast: &compiler::Node, model: &ClickHouseDataModel) -> Result<(), String> {
-    let (sql, parameters) = compiler::emit_simple_query(ast).map_err(|error| error.to_string())?;
-    let rendered = compiler::parity::clickhouse(ast, model.catalog(), Vec::new());
-    compiler::parity::compare(&sql, &parameters, rendered).map(drop)
-}
-
-fn duckdb_parity(ast: &compiler::Node, model: &DuckDbDataModel) -> Result<(), String> {
-    let query = compiler::passes::codegen::duckdb::codegen(ast, Default::default())
-        .map_err(|error| error.to_string())?;
-    let rendered = compiler::parity::duckdb(ast, model.catalog());
-    compiler::parity::compare(&query.sql, &query.params, rendered).map(drop)
-}
-
-pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
-    if let Err(failures) = check_dir(directory, ontology) {
+pub fn run_dir(directory: &Path) {
+    if let Err(failures) = check_dir(directory) {
         panic!(
             "{} plan fixture failure(s):\n\n{}",
             failures.len(),
@@ -356,9 +354,9 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     }
 }
 
-fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
-    let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();
-    let local = DuckDbDataModel::derive(ontology.clone()).unwrap();
+fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
+    let remote = ClickHouseDataModel::embedded().unwrap();
+    let local = DuckDbDataModel::embedded().unwrap();
     let mut paths = Vec::new();
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
@@ -384,10 +382,10 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
             continue;
         }
         let overlay = scenario.ontology_overlay.as_ref().map(|name| {
-            let ontology = Arc::new(crate::load_ontology_overlay(name));
+            let model = Arc::new(Model::load(&crate::overlay_fragments(name)).unwrap());
             (
-                ClickHouseDataModel::derive(ontology.clone()).unwrap(),
-                DuckDbDataModel::derive(ontology.clone()).unwrap(),
+                ClickHouseDataModel::from_model(&model).unwrap(),
+                DuckDbDataModel::from_model(&model).unwrap(),
             )
         });
         let (remote, local) = overlay
@@ -397,18 +395,17 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
         for backend in scenario.physical.keys() {
             match backend.as_str() {
                 "clickhouse" => {
-                    let build =
-                        |input: &Input, options| plan::plan_clickhouse(input, remote, options);
-                    if let Err(errors) = check(&scenario, remote, backend, path, build, |ast| {
-                        clickhouse_parity(ast, remote)
-                    }) {
+                    if let Err(errors) =
+                        check(&scenario, remote, backend, path, |input, options| {
+                            plan::plan_clickhouse(input, remote, options)
+                        })
+                    {
                         failures.extend(errors);
                     }
                 }
                 "duckdb" => {
-                    let build = |input: &Input, options| plan::plan_duckdb(input, local, options);
-                    if let Err(errors) = check(&scenario, local, backend, path, build, |ast| {
-                        duckdb_parity(ast, local)
+                    if let Err(errors) = check(&scenario, local, backend, path, |input, options| {
+                        plan::plan_duckdb(input, local, options)
                     }) {
                         failures.extend(errors);
                     }
@@ -492,11 +489,7 @@ cases:
     )
     .unwrap();
 
-    let failures = check_dir(
-        directory.path(),
-        Arc::new(ontology::Ontology::new().with_nodes(["User", "Project"])),
-    )
-    .unwrap_err();
+    let failures = check_dir(directory.path()).unwrap_err();
 
     assert_eq!(failures.len(), 4);
     assert!(
@@ -789,8 +782,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
     use compiler::passes::plan::query_types::hydration::HydrationPathFilter;
     use orbit_utils::traversal_path::TraversalPath;
 
-    let model = ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
-        .unwrap();
+    let model = ClickHouseDataModel::embedded().unwrap();
     for (count, dynamic, budget, set, expected_paths) in [
         (256, true, None, false, 256),
         (257, true, None, true, 257),

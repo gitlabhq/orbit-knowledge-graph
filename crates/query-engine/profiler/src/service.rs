@@ -24,14 +24,14 @@ pub struct ProfilerPipelineService {
 impl ProfilerPipelineService {
     pub fn new(
         ontology: Arc<Ontology>,
+        data_model: Arc<query_data_model::ClickHouseDataModel>,
         client: Arc<ArrowClickHouseClient>,
-    ) -> Result<Self, query_data_model::DataModelError> {
-        let data_model = compiler::data_model::clickhouse(Arc::clone(&ontology))?;
-        Ok(Self {
+    ) -> Self {
+        Self {
             ontology,
             data_model,
             client,
-        })
+        }
     }
 
     pub async fn run_query(

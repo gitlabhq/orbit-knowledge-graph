@@ -19,14 +19,17 @@ pub use seed::load_seed;
 pub use seeded_resolver::SeededColumnResolver;
 
 /// `GKG_TEST_ONTOLOGY_OVERLAY=<name>` merges `config/seeds/overlays/<name>/` over the ontology.
-pub(crate) fn load_unprefixed_ontology() -> ontology::Ontology {
-    let Some(name) = std::env::var("GKG_TEST_ONTOLOGY_OVERLAY")
+fn overlay_name() -> Option<String> {
+    std::env::var("GKG_TEST_ONTOLOGY_OVERLAY")
         .ok()
         .filter(|v| !v.is_empty())
-    else {
-        return ontology::Ontology::load_embedded().expect("embedded ontology should load");
-    };
-    load_ontology_overlay(&name)
+}
+
+pub(crate) fn load_unprefixed_ontology() -> ontology::Ontology {
+    match overlay_name() {
+        Some(name) => load_ontology_overlay(&name),
+        None => ontology::Ontology::load_embedded().expect("embedded ontology should load"),
+    }
 }
 
 pub fn load_ontology_overlay(name: &str) -> ontology::Ontology {
@@ -40,20 +43,67 @@ pub fn load_ontology_overlay(name: &str) -> ontology::Ontology {
 }
 
 pub fn load_ontology() -> std::sync::Arc<ontology::Ontology> {
-    let ont = load_unprefixed_ontology();
-    let prefix = &*TABLE_PREFIX;
-    if prefix.is_empty() {
-        std::sync::Arc::new(ont)
-    } else {
-        std::sync::Arc::new(ont.with_schema_version_prefix(prefix))
+    std::sync::Arc::new(load_unprefixed_ontology().with_schema_version_prefix(&TABLE_PREFIX))
+}
+
+pub fn overlay_fragments(name: &str) -> Vec<query_data_model::spec::Fragment> {
+    query_data_model::from_ontology::from_ontology(&load_ontology_overlay(name))
+        .unwrap_or_else(|e| panic!("ontology overlay '{name}' has no model: {e}"))
+}
+
+fn unprefixed_fragments() -> Vec<query_data_model::spec::Fragment> {
+    match overlay_name() {
+        Some(name) => overlay_fragments(&name),
+        None => query_data_model::Packages::embedded()
+            .fragments()
+            .expect("embedded packages should parse"),
     }
 }
 
-pub fn derive_clickhouse_data_model(
-    ontology: &std::sync::Arc<ontology::Ontology>,
+fn load_model(
+    fragments: &[query_data_model::spec::Fragment],
+) -> std::sync::Arc<query_data_model::Model> {
+    std::sync::Arc::new(query_data_model::Model::load(fragments).expect("test model should load"))
+}
+
+pub fn versioned_data_model(
+    fragments: Vec<query_data_model::spec::Fragment>,
 ) -> std::sync::Arc<query_data_model::ClickHouseDataModel> {
-    query_engine::compiler::data_model::clickhouse(std::sync::Arc::clone(ontology))
-        .expect("test ontology should produce a ClickHouse data model")
+    let fragments =
+        query_data_model::implementations::clickhouse::versioned(fragments, &TABLE_PREFIX)
+            .expect("test tables should take the schema prefix");
+    std::sync::Arc::new(
+        query_data_model::ClickHouseDataModel::from_model(&load_model(&fragments))
+            .expect("test model should bind its ClickHouse connection"),
+    )
+}
+
+pub fn graph_schema(
+    fragments: &[query_data_model::spec::Fragment],
+) -> orbit_migrations::schema::GraphSchema {
+    let physical = orbit_migrations::schema::Schema::from_model(&load_model(fragments))
+        .expect("test model should resolve a ClickHouse schema");
+    orbit_migrations::schema::GraphSchema::new(physical, false)
+}
+
+pub fn embedded_schema() -> orbit_migrations::schema::Schema {
+    orbit_migrations::schema::Schema::from_model(
+        &query_data_model::Packages::embedded()
+            .load()
+            .expect("embedded packages should load"),
+    )
+    .expect("embedded packages should resolve a ClickHouse schema")
+}
+
+pub fn load_data_model() -> std::sync::Arc<query_data_model::ClickHouseDataModel> {
+    versioned_data_model(unprefixed_fragments())
+}
+
+pub fn load_local_data_model() -> std::sync::Arc<query_data_model::DuckDbDataModel> {
+    std::sync::Arc::new(
+        query_data_model::DuckDbDataModel::from_model(&load_model(&unprefixed_fragments()))
+            .expect("test model should bind its DuckDB connection"),
+    )
 }
 
 pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("SEEDS_DIR"), "/siphon.sql"));
@@ -69,11 +119,10 @@ pub fn t(table: &str) -> String {
     format!("{}{}", *TABLE_PREFIX, table)
 }
 
-/// Generated from the ontology so integration tests create the same prefixed
+/// Generated from the model so integration tests create the same prefixed
 /// tables and materialized views the indexer writes to at runtime.
 pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
-    let ontology = load_unprefixed_ontology();
-    let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
+    let schema = graph_schema(&unprefixed_fragments());
 
     let mut stmts: Vec<String> = schema
         .tables
@@ -212,4 +261,38 @@ macro_rules! run_subtests_shared {
 
         $crate::collect_subtest_results(_handles).await;
     }};
+}
+
+pub fn release(
+    version: u32,
+    sources: &std::collections::BTreeMap<String, String>,
+    packages: &query_data_model::Packages,
+) -> orbit_migrations::archive::Release {
+    orbit_migrations::archive::Release::new(
+        ontology::archive::OntologyArchive::from_sources(version, sources)
+            .expect("test ontology archive should build"),
+        orbit_migrations::archive::ModelArchive::from_packages(version, packages)
+            .expect("test model archive should build"),
+    )
+    .expect("test archives should form one release")
+}
+
+pub fn embedded_release(version: u32) -> orbit_migrations::archive::Release {
+    release(
+        version,
+        &ontology::migrations::embedded_sources(),
+        &query_data_model::Packages::embedded(),
+    )
+}
+
+pub fn derived_release(
+    version: u32,
+    sources: &std::collections::BTreeMap<String, String>,
+) -> orbit_migrations::archive::Release {
+    let ontology = ontology::archive::OntologyArchive::from_sources(version, sources)
+        .and_then(|archive| archive.load_ontology())
+        .expect("test ontology should load");
+    let packages = query_data_model::from_ontology::packages(&ontology)
+        .expect("test ontology should convert to packages");
+    release(version, sources, &packages)
 }

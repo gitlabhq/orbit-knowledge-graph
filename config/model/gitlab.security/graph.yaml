@@ -1,0 +1,268 @@
+kind: graph
+package: gitlab.security
+domain: security
+entities:
+  Finding:
+    description: A security scan finding (occurrence) that may be linked to a vulnerability
+    label: uuid
+    defaults: [id, uuid, name, severity]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      uuid: {type: uuid, description: Unique UUID., immutable: true}
+      name: {type: string, description: Finding name.}
+      description: {type: string, description: Detailed description.}
+      solution: {type: string, description: Recommended remediation.}
+      severity:
+        type: enum
+        description: Severity level.
+        values: {1: info, 2: unknown, 4: low, 5: medium, 6: high, 7: critical}
+      deduplicated: {type: boolean, description: Deduplicated flag.}
+      overridden_uuid: {type: uuid, description: UUID of the overridden finding., immutable: true}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      scan_id:
+        type: int64
+        description: Producing security scan ID.
+        immutable: true
+        references: [SecurityScan]
+      scanner_id:
+        type: int64
+        description: Detecting scanner ID.
+        immutable: true
+        references: [VulnerabilityScanner]
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  SecurityScan:
+    description: A security scan execution that produces findings within a CI/CD pipeline
+    label: id
+    defaults: [id, scan_type, status]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      scan_type:
+        type: enum
+        description: Scan type.
+        immutable: true
+        values:
+          1: sast
+          2: dependency_scanning
+          3: container_scanning
+          4: dast
+          5: secret_detection
+          6: coverage_fuzzing
+          7: api_fuzzing
+          8: cluster_image_scanning
+          9: sarif
+      status:
+        type: enum
+        description: Current status.
+        values:
+          0: created
+          1: succeeded
+          2: job_failed
+          3: report_error
+          4: preparing
+          5: preparation_failed
+          6: purged
+        terminal: [succeeded, job_failed, report_error, preparation_failed, purged]
+      latest:
+        type: boolean
+        description: Whether this is the latest scan of its type for the project.
+      created_at: {type: timestamp, description: Creation timestamp., immutable: true}
+      updated_at: {type: timestamp, description: Last update timestamp.}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      pipeline_id:
+        type: int64?
+        description: Pipeline ID that ran this scan.
+        immutable: true
+        references: [Pipeline]
+      build_id:
+        type: int64
+        description: Job (build) ID that executed this scan.
+        immutable: true
+        references: [Job]
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  Vulnerability:
+    description: >-
+      A security vulnerability identified in a project, representing a confirmed or
+      potential security issue
+    label: title
+    defaults: [id, title, state, severity, report_type]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      title: {type: string, description: Summary title.}
+      description: {type: string, description: Detailed description.}
+      state:
+        type: enum
+        description: Current state.
+        values: {1: detected, 2: dismissed, 3: resolved, 4: confirmed}
+      severity:
+        type: enum
+        description: Severity level.
+        values: {1: info, 2: unknown, 4: low, 5: medium, 6: high, 7: critical}
+      report_type:
+        type: enum
+        description: Security scan type that detected this.
+        immutable: true
+        values:
+          0: sast
+          1: dependency_scanning
+          2: container_scanning
+          3: dast
+          4: secret_detection
+          5: coverage_fuzzing
+          6: api_fuzzing
+          7: cluster_image_scanning
+          8: container_scanning_for_registry
+          9: sarif
+          99: generic
+      resolved_on_default_branch: {type: boolean, description: Resolved on default branch.}
+      present_on_default_branch: {type: boolean, description: Present on default branch.}
+      created_at: {type: timestamp, description: Creation timestamp., immutable: true}
+      updated_at: {type: timestamp, description: Last update timestamp.}
+      detected_at: {type: timestamp?, description: First detection timestamp.}
+      resolved_at: {type: timestamp?, description: Resolution timestamp.}
+      confirmed_at: {type: timestamp?, description: Confirmation timestamp.}
+      dismissed_at: {type: timestamp?, description: Dismissal timestamp.}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      finding_id:
+        type: int64
+        description: Associated vulnerability occurrence ID.
+        immutable: true
+        references: [VulnerabilityOccurrence]
+      author_id: {type: int64, description: Author user ID., immutable: true, references: [User]}
+      confirmed_by_id: {type: int64?, description: Confirming user ID., references: [User]}
+      resolved_by_id: {type: int64?, description: Resolving user ID., references: [User]}
+      dismissed_by_id: {type: int64?, description: Dismissing user ID., references: [User]}
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  VulnerabilityIdentifier:
+    description: A vulnerability identifier such as a CVE, CWE, or other external reference
+    label: name
+    defaults: [id, name, external_type, external_id]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      external_type:
+        type: string
+        description: Identifier type (e.g. cve, cwe, gemnasium).
+        immutable: true
+        selectivity: low
+      external_id:
+        type: string
+        description: Identifier value (e.g. CVE-2021-44228).
+        immutable: true
+      name: {type: string, description: Human-readable name.}
+      url: {type: string, description: Reference URL. May be empty for some identifier types.}
+      created_at: {type: timestamp, description: Creation timestamp., immutable: true}
+      updated_at: {type: timestamp, description: Last update timestamp.}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  VulnerabilityOccurrence:
+    description: A specific occurrence of a vulnerability detected in a project
+    label: uuid
+    defaults: [id, uuid, name, severity, report_type]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      uuid: {type: uuid, description: Unique UUID., immutable: true}
+      name: {type: string, description: Occurrence name.}
+      description: {type: string, description: Detailed description.}
+      solution: {type: string, description: Recommended remediation.}
+      cve:
+        type: string
+        description: >-
+          Legacy fingerprint for deduplication. Not necessarily a CVE ID despite the
+          column name.
+      location:
+        type: string
+        description: "Vulnerability location (serialized JSON: file, dependency, image, or kubernetes_resource)."
+      location_fingerprint: {type: string, description: Location fingerprint.}
+      severity:
+        type: enum
+        description: Severity level.
+        values: {1: info, 2: unknown, 4: low, 5: medium, 6: high, 7: critical}
+      report_type:
+        type: enum
+        description: Security report type.
+        immutable: true
+        values:
+          0: sast
+          1: dependency_scanning
+          2: container_scanning
+          3: dast
+          4: secret_detection
+          5: coverage_fuzzing
+          6: api_fuzzing
+          7: cluster_image_scanning
+          8: container_scanning_for_registry
+          9: sarif
+          99: generic
+      detection_method:
+        type: enum
+        description: Detection method.
+        immutable: true
+        values:
+          0: gitlab_security_report
+          1: external_security_report
+          2: bug_bounty
+          3: code_review
+          4: security_audit
+      created_at: {type: timestamp, description: Creation timestamp., immutable: true}
+      updated_at: {type: timestamp, description: Last update timestamp.}
+      detected_at: {type: timestamp?, description: Detection timestamp.}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      scanner_id:
+        type: int64
+        description: Detecting scanner ID.
+        immutable: true
+        references: [VulnerabilityScanner]
+      vulnerability_id:
+        type: int64?
+        description: Linked vulnerability ID.
+        references: [Vulnerability]
+      primary_identifier_id:
+        type: int64
+        description: Primary identifier (CVE/CWE) ID.
+        immutable: true
+        references: [VulnerabilityIdentifier]
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  VulnerabilityScanner:
+    description: A security scanner that detects vulnerabilities in projects
+    label: name
+    defaults: [id, name, vendor]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      external_id:
+        type: string
+        description: External ID (e.g. gemnasium, bandit).
+        immutable: true
+      name: {type: string, description: Display name.}
+      vendor: {type: string, description: "Scanner vendor (default: GitLab).", selectivity: low}
+      created_at: {type: timestamp, description: Creation timestamp., immutable: true}
+      updated_at: {type: timestamp, description: Last update timestamp.}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      traversal_path: {type: string, description: Namespace path for authz.}

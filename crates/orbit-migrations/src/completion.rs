@@ -74,15 +74,15 @@ pub struct SdlcReindexProgress {
 pub async fn resolve_migration_scope(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
+    physical: &crate::schema::Schema,
     migrating_version: u32,
 ) -> Result<MigrationScope, MigrationError> {
     let active = read_active_version(graph).await?.unwrap_or(0);
     let ledger = MigrationLedger::load_embedded().map_err(MigrationError::Ledger)?;
     let requested_scope = ledger.resolve_scope_between(active, migrating_version);
-    let physical = crate::schema::Schema::derive(ontology)?;
     Ok(widen_scope_for_shared_table_writers(
         ontology,
-        &physical,
+        physical,
         &requested_scope,
     ))
 }

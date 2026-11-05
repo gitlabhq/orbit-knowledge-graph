@@ -8,8 +8,10 @@ use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::schema;
 use indexer::{DispatcherConfig, IndexerConfig};
+use ontology::archive::OntologyArchive;
 use orbit_billing::{QuotaService, SnowplowBillingTracker};
 use orbit_log_fields::{info, warn};
+use orbit_migrations::archive::{ModelArchive, Release};
 use orbit_migrations::version::SCHEMA_VERSION;
 use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::{ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker};
@@ -25,6 +27,16 @@ use orbit_server_config::AppConfig;
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
+
+fn embedded_release() -> anyhow::Result<Release> {
+    Ok(Release::new(
+        OntologyArchive::from_bytes(
+            *SCHEMA_VERSION,
+            include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
+        )?,
+        ModelArchive::from_bytes(*SCHEMA_VERSION, include_bytes!(env!("MODEL_ARCHIVE_PATH")))?,
+    )?)
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -94,17 +106,14 @@ async fn main() -> anyhow::Result<()> {
             Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config).await,
             Mode::DispatchIndexing => {
                 config.schema.validate()?;
-                let archive = ontology::archive::OntologyArchive::from_bytes(
-                    *schema::version::SCHEMA_VERSION,
-                    include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
-                )?;
+                let release = embedded_release()?;
 
                 let graph = config.graph.build_client("graph");
                 info!("initializing schema version table");
                 schema::version::init(&graph).await?;
 
                 let dispatcher_config = DispatcherConfig::from(&config);
-                indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown)
+                indexer::run_dispatcher(&dispatcher_config, &release, serving, shutdown)
                     .await
                     .map_err(Into::into)
             }
@@ -197,15 +206,11 @@ async fn run_webserver(
             .await
             .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
     );
-    let archive = ontology::archive::OntologyArchive::from_bytes(
-        *SCHEMA_VERSION,
-        include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
-    )?;
     let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats).await?;
     ActiveSchema::spawn(
         &active_schema,
         Arc::new(graph.clone()),
-        archive,
+        embedded_release()?,
         catalog,
         config,
         shutdown.clone(),

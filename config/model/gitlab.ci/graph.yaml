@@ -1,0 +1,417 @@
+kind: graph
+package: gitlab.ci
+domain: ci
+entities:
+  Deployment:
+    description: A deployment of a specific commit to a CI/CD environment
+    label: id
+    defaults: [id, iid, status, ref, sha]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      iid: {type: int64, description: Project-scoped deployment number., immutable: true}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      ref: {type: string, description: Git ref (branch or tag) deployed., immutable: true}
+      tag: {type: boolean, description: Whether the ref is a tag., immutable: true}
+      sha: {type: string, description: Deployed commit SHA., immutable: true}
+      status:
+        type: enum
+        description: Execution status.
+        values: {0: created, 1: running, 2: success, 3: failed, 4: canceled, 5: skipped, 6: blocked}
+        terminal: [success, failed, canceled, skipped]
+      deployable_type:
+        type: string
+        description: Polymorphic type (typically CommitStatus, the STI base class for Ci::Build).
+        immutable: true
+        selectivity: low
+      deployable_id: {type: int64?, description: Deployable ID., immutable: true}
+      on_stop: {type: string, description: Job name that stops this deployment.}
+      archived: {type: boolean, description: Whether archived.}
+      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      finished_at: {type: timestamp?, description: Execution finish timestamp.}
+      updated_at: {type: timestamp?, description: Last update timestamp.}
+      environment_id:
+        type: int64
+        description: Target environment ID.
+        immutable: true
+        references: [Environment]
+      user_id: {type: int64?, description: Deploying user ID., immutable: true, references: [User]}
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  Environment:
+    description: A CI/CD deployment target (production, staging, review app, etc.)
+    label: name
+    defaults: [id, name, state, tier]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      name: {type: string, description: "Name (e.g. 'production', 'staging', 'review/feature-x')."}
+      slug: {type: string, description: URL-safe slug derived from name.}
+      external_url: {type: string, description: External URL of the environment.}
+      environment_type:
+        type: string
+        description: Category from name prefix before first '/' (e.g. 'review'); empty when no '/'.
+        selectivity: low
+      state:
+        type: enum
+        description: Lifecycle state.
+        values: {0: available, 1: stopping, 2: stopped}
+        stored_as_text: true
+      tier:
+        type: enum
+        description: Deployment tier.
+        values: {0: production, 1: staging, 2: testing, 3: development, 4: other}
+      auto_stop_at: {type: timestamp?, description: Scheduled auto-stop timestamp.}
+      auto_delete_at: {type: timestamp?, description: Scheduled auto-delete timestamp.}
+      auto_stop_setting:
+        type: enum
+        description: Auto-stop behavior.
+        values: {0: always, 1: with_action}
+      cluster_agent_id: {type: int64?, description: Associated Kubernetes cluster agent ID.}
+      kubernetes_namespace: {type: string, description: Target Kubernetes namespace.}
+      flux_resource_path: {type: string, description: Flux resource path for GitOps.}
+      description: {type: string, description: Free-form description.}
+      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      updated_at: {type: timestamp?, description: Last update timestamp.}
+      merge_request_id:
+        type: int64?
+        description: MR that created this review environment.
+        immutable: true
+        references: [MergeRequest]
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  Job:
+    description: A CI/CD job that executes scripts within a pipeline stage
+    label: name
+    defaults: [id, name, status, ref]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      name: {type: string, description: Job name from .gitlab-ci.yml., immutable: true}
+      status:
+        type: enum
+        description: Execution status.
+        values:
+          0: created
+          1: pending
+          2: running
+          3: success
+          4: failed
+          5: canceled
+          6: skipped
+          7: manual
+          8: scheduled
+          9: preparing
+          10: waiting_for_resource
+          11: waiting_for_callback
+          12: canceling
+        stored_as_text: true
+        terminal: [success, failed, canceled, skipped]
+      ref: {type: string, description: Branch or tag name., immutable: true}
+      tag: {type: boolean?, description: Whether running on a git tag., immutable: true}
+      allow_failure:
+        type: boolean
+        description: Whether failure is allowed without failing the pipeline.
+      coverage: {type: string, description: Reported code coverage percentage.}
+      environment:
+        type: string
+        description: Target environment name (e.g. production, staging).
+      when:
+        type: enum
+        description: Run condition.
+        immutable: true
+        values: {0: on_success, 1: on_failure, 2: always, 3: manual, 4: delayed}
+        stored_as_text: true
+      retried: {type: boolean?, description: Whether superseded by a retry.}
+      failure_reason:
+        type: enum
+        description: Failure reason.
+        values:
+          1: script_failure
+          2: api_failure
+          3: stuck_or_timeout_failure
+          4: runner_system_failure
+          5: missing_dependency_failure
+          6: runner_unsupported
+          7: stale_schedule
+          8: job_execution_timeout
+          9: archived_failure
+          10: unmet_prerequisites
+          11: scheduler_failure
+          12: data_integrity_failure
+          13: forward_deployment_failure
+          14: user_blocked
+          15: project_deleted
+          16: ci_quota_exceeded
+          17: pipeline_loop_detected
+          18: no_matching_runner
+          19: trace_size_exceeded
+          20: builds_disabled
+          21: environment_creation_failure
+          22: deployment_rejected
+          23: failed_outdated_deployment_job
+          24: job_execution_server_timeout
+          25: stuck_pending_with_matching_runners
+          26: stuck_pending_no_matching_runners
+          27: no_updates_running
+          28: no_updates_canceling
+          29: server_timeout_running
+          30: server_timeout_canceling
+          1000: protected_environment_failure
+          1001: insufficient_bridge_permissions
+          1002: downstream_bridge_project_not_found
+          1003: invalid_bridge_trigger
+          1004: upstream_bridge_project_not_found
+          1005: insufficient_upstream_permissions
+          1006: bridge_pipeline_is_child_pipeline
+          1007: downstream_pipeline_creation_failed
+          1008: secrets_provider_not_found
+          1009: reached_max_descendant_pipelines_depth
+          1010: ip_restriction_failure
+          1011: reached_max_pipeline_hierarchy_size
+          1012: reached_downstream_pipeline_trigger_rate_limit
+          1013: duo_workflow_not_allowed
+          1014: job_router_failure
+          1015: job_token_expired
+      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      started_at: {type: timestamp?, description: Execution start timestamp.}
+      finished_at: {type: timestamp?, description: Execution finish timestamp.}
+      queued_at: {type: timestamp?, description: Queue timestamp.}
+      duration:
+        type: int64?
+        description: >-
+          Execution time in seconds (finished_at - started_at). Null until the job has
+          started and finished. Trigger (bridge) jobs cover downstream pipeline time, not
+          runner time.
+      queued_duration:
+        type: int64?
+        description: >-
+          Queue time in seconds, up to started_at or, if never started, finished_at. Null
+          while waiting, or when queued_at is after started_at (re-queued job; wait
+          unknown).
+      type:
+        type: string
+        description: "STI class: Ci::Build, Ci::Bridge, or GenericCommitStatus."
+        immutable: true
+        selectivity: low
+      runner_id: {type: int64?, description: Executing runner ID., references: [Runner]}
+      timeout: {type: int64?, description: Effective timeout in seconds.}
+      timeout_source:
+        type: enum
+        description: "Timeout origin: project, runner, or job."
+        values:
+          1: unknown_timeout_source
+          2: project_timeout_source
+          3: runner_timeout_source
+          4: job_timeout_source
+      exit_code: {type: int64?, description: Process exit code from the runner.}
+      scheduling_type:
+        type: enum
+        description: "Scheduling mode: stage or DAG."
+        immutable: true
+        values: {0: stage, 1: dag}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      user_id: {type: int64?, description: Triggering user ID., immutable: true, references: [User]}
+      upstream_pipeline_id:
+        type: int64?
+        description: Upstream pipeline ID for bridge jobs.
+        immutable: true
+        references: [Pipeline]
+      stage_id:
+        type: int64?
+        description: Containing stage ID.
+        immutable: true
+        references: [Stage]
+      pipeline_id:
+        type: int64?
+        description: Containing pipeline ID. Source column is commit_id (legacy Rails naming).
+        immutable: true
+        references: [Pipeline]
+      auto_canceled_by_id:
+        type: int64?
+        description: Pipeline ID that auto-canceled this job.
+        references: [Pipeline]
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  Pipeline:
+    description: >-
+      A CI/CD pipeline that runs a series of stages and jobs to build, test, and
+      deploy code
+    label: id
+    defaults: [id, iid, status, ref, source]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      iid: {type: int64?, description: Project-scoped pipeline number., immutable: true}
+      sha: {type: string, description: Commit SHA the pipeline runs against., immutable: true}
+      ref: {type: string, description: Branch or tag name., immutable: true}
+      status:
+        type: enum
+        description: Execution status.
+        values:
+          0: created
+          1: pending
+          2: running
+          3: success
+          4: failed
+          5: canceled
+          6: skipped
+          7: manual
+          8: scheduled
+          9: preparing
+          10: waiting_for_resource
+          11: waiting_for_callback
+          12: canceling
+        stored_as_text: true
+        terminal: [success, failed, canceled, skipped]
+      source:
+        type: enum
+        description: Trigger source.
+        immutable: true
+        values:
+          0: unknown
+          1: push
+          2: web
+          3: trigger
+          4: schedule
+          5: api
+          6: external
+          7: pipeline
+          8: chat
+          9: webide
+          10: merge_request_event
+          11: external_pull_request_event
+          12: parent_pipeline
+          13: ondemand_dast_scan
+          14: ondemand_dast_validation
+          15: security_orchestration_policy
+          16: container_registry_push
+          17: duo_workflow
+          18: pipeline_execution_policy_schedule
+          19: dependency_management_security_update
+      tag: {type: boolean, description: Whether running on a git tag., immutable: true}
+      duration:
+        type: int64?
+        description: >-
+          Wall-clock duration in seconds (first job start to last job finish, excluding
+          queued time).
+      failure_reason:
+        type: enum
+        description: Failure reason.
+        values:
+          0: unknown_failure
+          1: config_error
+          2: external_validation_failure
+          3: user_not_verified
+          21: size_limit_exceeded
+          22: job_activity_limit_exceeded
+          23: deployments_limit_exceeded
+          25: project_deleted
+          26: filtered_by_rules
+          27: filtered_by_workflow_rules
+          28: composite_identity_forbidden
+          29: pipeline_ref_creation_failure
+          30: filtered_by_no_pipeline
+      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      started_at: {type: timestamp?, description: Execution start timestamp.}
+      finished_at: {type: timestamp?, description: Execution finish timestamp.}
+      committed_at: {type: timestamp?, description: Commit timestamp., immutable: true}
+      updated_at: {type: timestamp?, description: Last update timestamp.}
+      before_sha:
+        type: string
+        description: Previous commit SHA before the triggering push.
+        immutable: true
+      yaml_errors: {type: string, description: CI config parsing errors.}
+      protected: {type: boolean?, description: Whether the ref is protected.}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      user_id: {type: int64?, description: Triggering user ID., immutable: true, references: [User]}
+      merge_request_id:
+        type: int64?
+        description: Triggering MR ID.
+        immutable: true
+        references: [MergeRequest]
+      auto_canceled_by_id:
+        type: int64?
+        description: Pipeline ID that auto-canceled this one.
+        references: [Pipeline]
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  Runner:
+    description: A CI/CD runner that executes jobs
+    label: name
+    defaults: [id, runner_type, name, active]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      runner_type:
+        type: enum
+        description: "Scope: instance, group, or project."
+        immutable: true
+        values: {1: instance_type, 2: group_type, 3: project_type}
+      name: {type: string, description: Human-readable runner name.}
+      description: {type: string, description: Maintainer-provided description.}
+      active: {type: boolean, description: Whether currently accepting jobs.}
+      locked: {type: boolean, description: Whether locked to its assignment.}
+      run_untagged: {type: boolean, description: Whether it picks up untagged jobs.}
+      access_level:
+        type: enum
+        description: Whether restricted to protected refs.
+        values: {0: not_protected, 1: ref_protected}
+      maximum_timeout: {type: int64?, description: Max job timeout in seconds.}
+      organization_id: {type: int64?, description: Cell organization ID.}
+      created_at: {type: timestamp?, description: Registration timestamp., immutable: true}
+      contacted_at: {type: timestamp?, description: Last contact timestamp.}
+
+  Stage:
+    description: >-
+      A stage within a CI/CD pipeline that groups related jobs (e.g., build, test,
+      deploy)
+    label: name
+    defaults: [id, name, status]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      name: {type: string, description: "Stage name (e.g. build, test, deploy).", immutable: true}
+      status:
+        type: enum
+        description: Execution status.
+        values:
+          0: created
+          1: pending
+          2: running
+          3: success
+          4: failed
+          5: canceled
+          6: skipped
+          7: manual
+          8: scheduled
+          9: preparing
+          10: waiting_for_resource
+          11: waiting_for_callback
+          12: canceling
+        terminal: [success, failed, canceled, skipped]
+      position: {type: int64?, description: Order within the pipeline (0-indexed).}
+      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      updated_at: {type: timestamp?, description: Last update timestamp.}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      pipeline_id:
+        type: int64?
+        description: Containing pipeline ID.
+        immutable: true
+        references: [Pipeline]
+      traversal_path: {type: string, description: Namespace path for authz.}

@@ -111,6 +111,7 @@ pub(super) fn resolve(
             for fragment in &fragments {
                 store.declare_sources(fragment, engine, served, graph, diagnostics);
             }
+            store.source_options.sort_by_key(|(entity, _, _)| *entity);
             store.declare_routes(&fragments, graph, diagnostics);
             Some(store)
         })

@@ -3,6 +3,9 @@ pub mod facts;
 pub mod render;
 pub mod schema;
 pub mod spec;
+mod versioned;
+
+pub use versioned::versioned;
 
 use super::relational::{Capabilities, CurrentRows, RelationalBackend};
 

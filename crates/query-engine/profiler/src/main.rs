@@ -11,6 +11,7 @@ use clap::Parser;
 use clickhouse_client::ArrowClickHouseClient;
 use compiler::SecurityContext;
 use ontology::Ontology;
+use query_data_model::{ClickHouseDataModel, Packages};
 use tracing::Instrument;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -60,6 +61,10 @@ struct Cli {
     /// Ontology config directory
     #[arg(long, default_value = "config/ontology")]
     ontology: PathBuf,
+
+    /// Data model package directory
+    #[arg(long, default_value = "config/model")]
+    model: PathBuf,
 
     /// Schema version prefix for table names (e.g. 24 → v24_gl_project).
     /// Defaults to the embedded SCHEMA_VERSION from config/SCHEMA_VERSION.
@@ -259,10 +264,10 @@ fn frontend(cli: &Cli) -> compiler::Frontend {
 fn compile_one(
     query_json: &str,
     frontend: compiler::Frontend,
-    ontology: &Arc<Ontology>,
+    data_model: &Arc<ClickHouseDataModel>,
     security_ctx: &SecurityContext,
 ) -> Result<compiler::CompiledQueryContext> {
-    compiler::compile(query_json, frontend, ontology, security_ctx)
+    compiler::compile(query_json, frontend, data_model, security_ctx)
         .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
 }
 
@@ -290,7 +295,7 @@ fn format_hydration(plan: &compiler::HydrationPlan) -> String {
 
 fn run_compile_only(
     query_json: &str,
-    ontology: &Arc<Ontology>,
+    data_model: &Arc<ClickHouseDataModel>,
     security_ctx: &SecurityContext,
     show: &CompileShow,
     cli: &Cli,
@@ -300,7 +305,7 @@ fn run_compile_only(
     if entries.len() > 1 || cli.output.is_some() {
         let mut report = BTreeMap::new();
         for (name, query) in entries {
-            let value = match compile_one(&query, frontend(cli), ontology, security_ctx) {
+            let value = match compile_one(&query, frontend(cli), data_model, security_ctx) {
                 Ok(compiled) => {
                     let mut value = serde_json::json!({ "query": query });
                     if matches!(show, CompileShow::Base | CompileShow::Both) {
@@ -320,7 +325,7 @@ fn run_compile_only(
     }
 
     for (name, query) in &entries {
-        let compiled = compile_one(query, frontend(cli), ontology, security_ctx)?;
+        let compiled = compile_one(query, frontend(cli), data_model, security_ctx)?;
         if entries.len() > 1 {
             eprintln!("--- {} ---", name);
         }
@@ -429,17 +434,20 @@ async fn main() -> Result<()> {
         cli.query.clone()
     };
 
-    let ontology = {
-        let ont = Ontology::load_from_dir(&cli.ontology).context("failed to load ontology")?;
-        let version = cli.schema_version.unwrap_or(embedded_schema_version());
-        if version > 0 {
-            let prefix = format!("v{version}_");
-            eprintln!("using table prefix: {prefix}");
-            Arc::new(ont.with_schema_version_prefix(&prefix))
-        } else {
-            Arc::new(ont)
-        }
+    let version = cli.schema_version.unwrap_or(embedded_schema_version());
+    let prefix = if version > 0 {
+        format!("v{version}_")
+    } else {
+        String::new()
     };
+    eprintln!("using table prefix: {prefix:?}");
+    let ontology = Arc::new(
+        Ontology::load_from_dir(&cli.ontology)
+            .context("failed to load ontology")?
+            .with_schema_version_prefix(&prefix),
+    );
+    let packages = Packages::read_dir(&cli.model).context("failed to read model packages")?;
+    let data_model = Arc::new(ClickHouseDataModel::versioned(&packages, &prefix)?);
 
     let authorized_paths = cli
         .traversal_paths
@@ -455,7 +463,7 @@ async fn main() -> Result<()> {
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
 
     if let Some(show) = &cli.compile_only {
-        return run_compile_only(&query_json, &ontology, &security_ctx, show, &cli);
+        return run_compile_only(&query_json, &data_model, &security_ctx, show, &cli);
     }
 
     let custom_settings: std::collections::HashMap<String, String> = cli
@@ -507,7 +515,7 @@ async fn main() -> Result<()> {
         None
     };
 
-    let service = ProfilerPipelineService::new(ontology, Arc::clone(&client))?;
+    let service = ProfilerPipelineService::new(ontology, data_model, Arc::clone(&client));
     let run_ctx = RunContext {
         service: &service,
         client: &client,

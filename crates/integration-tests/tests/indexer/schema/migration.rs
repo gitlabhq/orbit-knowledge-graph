@@ -45,8 +45,12 @@ async fn setup() -> (TestContext, ontology::Ontology, MigrationMetrics) {
     (ctx, ontology, metrics)
 }
 
+fn physical(ontology: &ontology::Ontology) -> orbit_migrations::schema::Schema {
+    query_data_model::from_ontology::schema(ontology).unwrap()
+}
+
 fn test_schema(ontology: &ontology::Ontology) -> GraphSchema {
-    GraphSchema::from_ontology(ontology).unwrap()
+    GraphSchema::new(physical(ontology), false)
 }
 
 fn lock() -> Arc<dyn LockService> {
@@ -105,6 +109,7 @@ async fn fresh_install_creates_tables_and_records_version() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -158,6 +163,7 @@ async fn matching_version_is_noop() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -183,6 +189,7 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -241,6 +248,7 @@ async fn created_tables_have_correct_columns() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -281,6 +289,7 @@ async fn idempotent_rerun_succeeds() {
         &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -292,6 +301,7 @@ async fn idempotent_rerun_succeeds() {
         &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -315,6 +325,7 @@ async fn lock_released_after_migration() {
         &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -344,6 +355,7 @@ async fn held_lock_causes_timeout() {
         &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -370,6 +382,7 @@ async fn mismatch_opens_campaign_steady_state_does_not() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &migrating_campaign,
     )
@@ -388,6 +401,7 @@ async fn mismatch_opens_campaign_steady_state_does_not() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &matching_campaign,
     )
@@ -410,6 +424,7 @@ async fn rollback_reactivates_directly_when_embedded_tables_are_intact() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -425,6 +440,7 @@ async fn rollback_reactivates_directly_when_embedded_tables_are_intact() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -480,6 +496,7 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -535,6 +552,7 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -559,6 +577,7 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -621,6 +640,7 @@ async fn lock_released_after_rollback_reactivation() {
         &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -639,6 +659,7 @@ async fn lock_released_after_rollback_reactivation() {
         &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -670,6 +691,7 @@ async fn lock_released_after_rollback_rebuild() {
         &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
+        &physical(&ontology),
         &metrics,
         &campaign(),
     )
@@ -1594,7 +1616,7 @@ async fn garbage_collection_keeps_most_recent_retired_version_by_created_at() {
     ))
     .await;
 
-    let schema = GraphSchema::from_ontology(&ontology).unwrap();
+    let schema = test_schema(&ontology);
     let entities = find_droppable_entities(&client, &schema, 2, &[])
         .await
         .unwrap();

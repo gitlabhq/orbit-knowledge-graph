@@ -1,0 +1,34 @@
+kind: service
+package: gitlab
+service: gitaly
+lookups:
+  blob_content:
+    entity: Definition
+    provides: [content]
+    keys: [project_id, commit_sha, branch, file_path, start_byte, end_byte]
+    operators: [eq, contains, starts_with, ends_with, is_null, is_not_null]
+
+  File.blob_content:
+    operation: blob_content
+    entity: File
+    provides: [content]
+    keys: [project_id, commit_sha, branch, path]
+    operators: [eq, contains, starts_with, ends_with, is_null, is_not_null]
+
+  mr_raw_patch:
+    entity: MergeRequest
+    provides: [diff]
+    keys: [project_id, iid]
+    operators: [eq, contains, starts_with, ends_with, is_null, is_not_null]
+
+  raw_patch:
+    entity: MergeRequestDiff
+    provides: [patch]
+    keys: [project_id, id]
+    operators: [eq, contains, starts_with, ends_with, is_null, is_not_null]
+
+  patch:
+    entity: MergeRequestDiffFile
+    provides: [diff]
+    keys: [project_id, merge_request_diff_id, old_path, new_path, too_large]
+    operators: [eq, contains, starts_with, ends_with, is_null, is_not_null]

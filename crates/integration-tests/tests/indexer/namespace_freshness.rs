@@ -11,8 +11,6 @@ use indexer::schema::version::{
     SCHEMA_VERSION, ensure_version_table, mark_version_active, prefixed_table_name,
 };
 use ontology::EtlScope;
-use ontology::archive::OntologyArchive;
-use ontology::migrations::embedded_sources;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 use orbit_migrations::catalog::OntologyCatalog;
@@ -51,7 +49,7 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     // A served version that differs from this binary's proves the task reads what users query.
     let served = *SCHEMA_VERSION - 1;
     catalog
-        .publish(&OntologyArchive::from_sources(served, &embedded_sources()).unwrap())
+        .publish(&integration_testkit::embedded_release(served))
         .await
         .unwrap();
 

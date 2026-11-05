@@ -1,6 +1,8 @@
 mod clickhouse;
+mod yaml;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use indexmap::IndexMap;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
@@ -10,7 +12,7 @@ use ontology::{
 };
 use serde::Serialize;
 
-use crate::DataModelError;
+use crate::implementations::clickhouse::schema::Schema;
 use crate::implementations::duckdb::backend::DuckDbSource;
 use crate::implementations::relational::{EdgeTableSpec, RelationalOptions};
 use crate::spec::{
@@ -19,36 +21,151 @@ use crate::spec::{
     RelationshipSpec, ScopeSpec, ScopeVariants, ServiceFragment, SourceSpec, StorageFragment,
     encode_options, format_variant,
 };
+use crate::{ClickHouseDataModel, DataModelError, DuckDbDataModel, Model, Packages};
 
 const PLATFORM: &str = "gitlab";
 
+pub fn model(ontology: &Ontology) -> Result<Arc<Model>, DataModelError> {
+    Model::load(&from_ontology(ontology)?).map(Arc::new)
+}
+
+pub fn clickhouse(ontology: &Ontology) -> Result<ClickHouseDataModel, DataModelError> {
+    ClickHouseDataModel::from_model(&model(ontology)?)
+}
+
+pub fn duckdb(ontology: &Ontology) -> Result<DuckDbDataModel, DataModelError> {
+    DuckDbDataModel::from_model(&model(ontology)?)
+}
+
+pub fn schema(ontology: &Ontology) -> Result<Schema, DataModelError> {
+    Schema::from_model(&model(ontology)?)
+}
+
+pub fn packages(ontology: &Ontology) -> Result<Packages, DataModelError> {
+    from_ontology(ontology)?
+        .iter()
+        .map(|fragment| Ok((path(fragment), yaml::render(fragment)?)))
+        .collect::<Result<BTreeMap<_, _>, DataModelError>>()
+        .map(Packages::new)
+}
+
 pub fn from_ontology(ontology: &Ontology) -> Result<Vec<Fragment>, DataModelError> {
+    let package_of = |entity: &str| {
+        ontology
+            .get_node(entity)
+            .map_or_else(|| PLATFORM.to_string(), |node| domain_package(&node.domain))
+    };
     let mut fragments: Vec<Fragment> = graph_fragments(ontology)?
         .into_iter()
         .map(Fragment::Graph)
         .collect();
-    fragments.push(Fragment::Authorization(authorization(ontology)));
-    fragments.push(Fragment::Storage(Box::new(clickhouse::graph_store(
-        ontology,
-    )?)));
-    fragments.push(Fragment::Storage(Box::new(local_store(ontology)?)));
+    fragments.extend(
+        split_authorization(authorization(ontology), &package_of)
+            .into_iter()
+            .map(Fragment::Authorization),
+    );
+    for store in [clickhouse::graph_store(ontology)?, local_store(ontology)?] {
+        fragments.extend(
+            split_store(store, &package_of)
+                .into_iter()
+                .map(|store| Fragment::Storage(Box::new(store))),
+        );
+    }
     fragments.extend(services(ontology).into_iter().map(Fragment::Service));
+    fragments.sort_by_cached_key(path);
     Ok(fragments)
+}
+
+fn path(fragment: &Fragment) -> String {
+    let file = match fragment {
+        Fragment::Graph(_) => "graph".to_string(),
+        Fragment::Authorization(_) => "authorization".to_string(),
+        Fragment::Storage(storage) => format!("{}_store", storage.store),
+        Fragment::Service(service) => format!("{}_service", service.service),
+    };
+    format!("{}/{file}.yaml", fragment.package())
+}
+
+fn domain_package(domain: &str) -> String {
+    format!("{PLATFORM}.{domain}")
+}
+
+fn split_authorization(
+    platform: AuthorizationFragment,
+    package_of: &impl Fn(&str) -> String,
+) -> Vec<AuthorizationFragment> {
+    fn fragment(
+        fragments: &mut IndexMap<String, AuthorizationFragment>,
+        package: String,
+    ) -> &mut AuthorizationFragment {
+        fragments
+            .entry(package.clone())
+            .or_insert_with(|| AuthorizationFragment {
+                package,
+                ..AuthorizationFragment::default()
+            })
+    }
+    let mut fragments = IndexMap::new();
+    for (entity, spec) in platform.entities {
+        fragment(&mut fragments, package_of(&entity))
+            .entities
+            .insert(entity, spec);
+    }
+    for (property, spec) in platform.properties {
+        let entity = property
+            .split_once('.')
+            .map_or(property.as_str(), |(entity, _)| entity);
+        fragment(&mut fragments, package_of(entity))
+            .properties
+            .insert(property, spec);
+    }
+    fragment(&mut fragments, platform.package).relationships = platform.relationships;
+    fragments.into_values().collect()
+}
+
+fn split_store(
+    platform: StorageFragment,
+    package_of: &impl Fn(&str) -> String,
+) -> Vec<StorageFragment> {
+    let mut fragments = IndexMap::<String, StorageFragment>::new();
+    for (entity, source) in platform.entities {
+        let package = package_of(&entity);
+        fragments
+            .entry(package.clone())
+            .or_insert_with(|| StorageFragment {
+                package,
+                store: platform.store.clone(),
+                ..StorageFragment::default()
+            })
+            .entities
+            .insert(entity, source);
+    }
+    fragments.insert(
+        platform.package.clone(),
+        StorageFragment {
+            entities: IndexMap::new(),
+            ..platform
+        },
+    );
+    fragments.into_values().collect()
 }
 
 pub(crate) fn graph_fragments(ontology: &Ontology) -> Result<Vec<GraphFragment>, DataModelError> {
     let routed = routed_references(ontology);
-    let mut fragments = ontology
-        .nodes()
-        .map(|node| {
-            Ok(GraphFragment {
-                package: format!("{PLATFORM}.{}", node.domain),
+    let mut domains = IndexMap::<&str, GraphFragment>::new();
+    for node in ontology.nodes() {
+        let fragment = domains
+            .entry(node.domain.as_str())
+            .or_insert_with(|| GraphFragment {
+                package: domain_package(&node.domain),
                 domain: Some(node.domain.clone()),
-                entities: IndexMap::from([(node.name.clone(), entity(ontology, node, &routed)?)]),
-                relationships: IndexMap::new(),
-            })
-        })
-        .collect::<Result<Vec<_>, DataModelError>>()?;
+                ..GraphFragment::default()
+            });
+        fragment
+            .entities
+            .insert(node.name.clone(), entity(ontology, node, &routed)?);
+    }
+    let mut fragments: Vec<GraphFragment> = domains.into_values().collect();
     fragments.push(GraphFragment {
         package: PLATFORM.to_string(),
         domain: None,

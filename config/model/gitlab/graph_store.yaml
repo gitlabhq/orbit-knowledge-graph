@@ -1,0 +1,3007 @@
+kind: storage
+package: gitlab
+store: graph
+engine:
+  kind: clickhouse
+  connection: main
+  table: gl_{entity}
+  path_column: traversal_path
+  backend:
+    version_column: _version
+    deleted_column: _deleted
+    engine: ReplacingMergeTree(_version, _deleted)
+    sort_key: [traversal_path, id]
+    columns:
+      _version: {type: "DateTime64(6, 'UTC')", default: now64(6), codec: [Delta(8), ZSTD(1)]}
+      _deleted: {type: Bool, default: "false"}
+    settings:
+      index_granularity: "1024"
+      allow_experimental_replacing_merge_with_cleanup: "1"
+      enable_block_number_column: "1"
+      enable_block_offset_column: "1"
+    edge_tables:
+      gl_ci_edge:
+        sort_key:
+        - traversal_path
+        - relationship_kind
+        - source_id
+        - target_id
+        - source_kind
+        - target_kind
+        primary_key: [traversal_path, relationship_kind, source_id]
+        columns:
+          traversal_path: {type: String, default: "'0/'", codec: [ZSTD(1)]}
+          source_id: {type: Int64, codec: [Delta(8), ZSTD(1)]}
+          source_kind: {type: LowCardinality(String), codec: [LZ4]}
+          relationship_kind: {type: LowCardinality(String), codec: [LZ4]}
+          target_id: {type: Int64, codec: [T64, ZSTD(1)]}
+          target_kind: {type: LowCardinality(String), codec: [LZ4]}
+          source_tags: {type: Array(LowCardinality(String)), codec: [LZ4]}
+          target_tags: {type: Array(LowCardinality(String)), codec: [LZ4]}
+        indexes:
+          _deleted: minmax
+          source_id: bloom_filter(0.0001)
+          target_id: bloom_filter(0.0001)
+          source_tags: {type: text(tokenizer = 'array'), granularity: 64, name: source_tags_idx}
+          target_tags: {type: text(tokenizer = 'array'), granularity: 64, name: target_tags_idx}
+        writers:
+        - BUILT_BY
+        - CHILD_OF
+        - DEPLOYED_TO
+        - Deployment
+        - Environment
+        - Job
+        - MergeRequest
+        - Pipeline
+        - SecurityScan
+        - Stage
+        - TRIGGERS_PIPELINE
+      gl_code_edge:
+        domains: [source_code]
+        sort_key:
+        - traversal_path
+        - relationship_kind
+        - project_id
+        - branch
+        - source_id
+        - target_id
+        - source_kind
+        - target_kind
+        primary_key: [traversal_path, relationship_kind, project_id, branch]
+        columns:
+          traversal_path: {type: String, default: "'0/'", codec: [ZSTD(1)]}
+          project_id: {type: Int64, codec: [T64, ZSTD(1)]}
+          branch: {type: String, codec: [ZSTD(1)]}
+          source_id: {type: Int64, codec: [Delta(8), ZSTD(1)]}
+          source_kind: {type: LowCardinality(String), codec: [LZ4]}
+          relationship_kind: {type: LowCardinality(String), codec: [LZ4]}
+          target_id: {type: Int64, codec: [T64, ZSTD(1)]}
+          target_kind: {type: LowCardinality(String), codec: [LZ4]}
+          source_tags: {type: Array(LowCardinality(String)), codec: [LZ4]}
+          target_tags: {type: Array(LowCardinality(String)), codec: [LZ4]}
+        indexes:
+          _deleted: minmax
+          source_id: bloom_filter(0.0001)
+          target_id: bloom_filter(0.0001)
+          project_id: bloom_filter(0.0001)
+          branch: bloom_filter(0.0001)
+          source_tags: {type: text(tokenizer = 'array'), granularity: 64, name: source_tags_idx}
+          target_tags: {type: text(tokenizer = 'array'), granularity: 64, name: target_tags_idx}
+        writers: [Branch, Definition, Directory, File, ImportedSymbol]
+      gl_diff_edge:
+        sort_key:
+        - traversal_path
+        - relationship_kind
+        - source_id
+        - target_id
+        - source_kind
+        - target_kind
+        primary_key: [traversal_path, relationship_kind, source_id]
+        columns:
+          traversal_path: {type: String, default: "'0/'", codec: [ZSTD(1)]}
+          source_id: {type: Int64, codec: [Delta(8), ZSTD(1)]}
+          source_kind: {type: LowCardinality(String), codec: [LZ4]}
+          relationship_kind: {type: LowCardinality(String), codec: [LZ4]}
+          target_id: {type: Int64, codec: [T64, ZSTD(1)]}
+          target_kind: {type: LowCardinality(String), codec: [LZ4]}
+          source_tags: {type: Array(LowCardinality(String)), codec: [LZ4]}
+          target_tags: {type: Array(LowCardinality(String)), codec: [LZ4]}
+        indexes:
+          _deleted: minmax
+          source_id: bloom_filter(0.0001)
+          target_id: bloom_filter(0.0001)
+          source_tags: {type: text(tokenizer = 'array'), granularity: 64, name: source_tags_idx}
+          target_tags: {type: text(tokenizer = 'array'), granularity: 64, name: target_tags_idx}
+        writers: [IN_PROJECT, MergeRequest, MergeRequestDiff, MergeRequestDiffFile]
+      gl_edge:
+        default: true
+        sort_key:
+        - traversal_path
+        - relationship_kind
+        - source_id
+        - target_id
+        - source_kind
+        - target_kind
+        primary_key: [traversal_path, relationship_kind, source_id]
+        columns:
+          traversal_path: {type: String, default: "'0/'", codec: [ZSTD(1)]}
+          source_id: {type: Int64, codec: [Delta(8), ZSTD(1)]}
+          source_kind: {type: LowCardinality(String), codec: [LZ4]}
+          relationship_kind: {type: LowCardinality(String), codec: [LZ4]}
+          target_id: {type: Int64, codec: [T64, ZSTD(1)]}
+          target_kind: {type: LowCardinality(String), codec: [LZ4]}
+          source_tags: {type: Array(LowCardinality(String)), codec: [LZ4]}
+          target_tags: {type: Array(LowCardinality(String)), codec: [LZ4]}
+        indexes:
+          _deleted: minmax
+          source_id: bloom_filter(0.0001)
+          target_id: bloom_filter(0.0001)
+          source_tags: {type: text(tokenizer = 'array'), granularity: 64, name: source_tags_idx}
+          target_tags: {type: text(tokenizer = 'array'), granularity: 64, name: target_tags_idx}
+        writers:
+        - APPROVED
+        - ASSIGNED
+        - AgentSession
+        - CLOSES
+        - CONTAINS
+        - CREATED_MR
+        - ContainerRepository
+        - DECLARES_DEPENDENCY
+        - Dependency
+        - Group
+        - HAS_LABEL
+        - Label
+        - MEMBER_OF
+        - MergeRequest
+        - Milestone
+        - Note
+        - Package
+        - PackageFile
+        - Project
+        - RELATED_TO
+        - REOPENED
+        - REVIEWER
+        - SystemNote
+        - WorkItem
+      gl_sec_edge:
+        sort_key:
+        - traversal_path
+        - relationship_kind
+        - source_id
+        - target_id
+        - source_kind
+        - target_kind
+        primary_key: [traversal_path, relationship_kind, source_id]
+        columns:
+          traversal_path: {type: String, default: "'0/'", codec: [ZSTD(1)]}
+          source_id: {type: Int64, codec: [Delta(8), ZSTD(1)]}
+          source_kind: {type: LowCardinality(String), codec: [LZ4]}
+          relationship_kind: {type: LowCardinality(String), codec: [LZ4]}
+          target_id: {type: Int64, codec: [T64, ZSTD(1)]}
+          target_kind: {type: LowCardinality(String), codec: [LZ4]}
+          source_tags: {type: Array(LowCardinality(String)), codec: [LZ4]}
+          target_tags: {type: Array(LowCardinality(String)), codec: [LZ4]}
+        indexes:
+          _deleted: minmax
+          source_id: bloom_filter(0.0001)
+          target_id: bloom_filter(0.0001)
+          source_tags: {type: text(tokenizer = 'array'), granularity: 64, name: source_tags_idx}
+          target_tags: {type: text(tokenizer = 'array'), granularity: 64, name: target_tags_idx}
+        writers:
+        - FIXES
+        - Finding
+        - HAS_IDENTIFIER
+        - HAS_VULNERABILITY
+        - IN_PROJECT
+        - SecurityScan
+        - Vulnerability
+        - VulnerabilityIdentifier
+        - VulnerabilityOccurrence
+        - VulnerabilityScanner
+    denormalized:
+    - entity: Branch
+      property: is_default
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: is_default
+    - entity: Branch
+      property: is_default
+      relationship: ON_BRANCH
+      side: target
+      column: target_tags
+      tag: is_default
+    - entity: Definition
+      property: definition_type
+      relationship: CALLS
+      side: source
+      column: source_tags
+      tag: definition_type
+    - entity: Definition
+      property: definition_type
+      relationship: CALLS
+      side: target
+      column: target_tags
+      tag: definition_type
+    - entity: Definition
+      property: definition_type
+      relationship: DEFINES
+      side: target
+      column: target_tags
+      tag: definition_type
+    - entity: Definition
+      property: definition_type
+      relationship: DEFINES
+      side: source
+      column: source_tags
+      tag: definition_type
+    - entity: Definition
+      property: definition_type
+      relationship: EXTENDS
+      side: source
+      column: source_tags
+      tag: definition_type
+    - entity: Definition
+      property: definition_type
+      relationship: EXTENDS
+      side: target
+      column: target_tags
+      tag: definition_type
+    - entity: Definition
+      property: definition_type
+      relationship: IMPORTS
+      side: target
+      column: target_tags
+      tag: definition_type
+    - entity: Deployment
+      property: status
+      relationship: DEPLOYED_BY
+      side: target
+      column: target_tags
+      tag: status
+    - entity: Deployment
+      property: status
+      relationship: DEPLOYED_TO
+      side: target
+      column: target_tags
+      tag: status
+    - entity: Deployment
+      property: status
+      relationship: IN_ENVIRONMENT
+      side: source
+      column: source_tags
+      tag: status
+    - entity: Deployment
+      property: status
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: status
+    - entity: Deployment
+      property: tag
+      relationship: DEPLOYED_BY
+      side: target
+      column: target_tags
+      tag: tag
+    - entity: Deployment
+      property: tag
+      relationship: DEPLOYED_TO
+      side: target
+      column: target_tags
+      tag: tag
+    - entity: Deployment
+      property: tag
+      relationship: IN_ENVIRONMENT
+      side: source
+      column: source_tags
+      tag: tag
+    - entity: Deployment
+      property: tag
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: tag
+    - entity: Deployment
+      property: archived
+      relationship: DEPLOYED_BY
+      side: target
+      column: target_tags
+      tag: archived
+    - entity: Deployment
+      property: archived
+      relationship: DEPLOYED_TO
+      side: target
+      column: target_tags
+      tag: archived
+    - entity: Deployment
+      property: archived
+      relationship: IN_ENVIRONMENT
+      side: source
+      column: source_tags
+      tag: archived
+    - entity: Deployment
+      property: archived
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: archived
+    - entity: Environment
+      property: state
+      relationship: CREATED_FOR_MR
+      side: source
+      column: source_tags
+      tag: state
+    - entity: Environment
+      property: state
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: state
+    - entity: Environment
+      property: tier
+      relationship: CREATED_FOR_MR
+      side: source
+      column: source_tags
+      tag: tier
+    - entity: Environment
+      property: tier
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: tier
+    - entity: Environment
+      property: auto_stop_setting
+      relationship: CREATED_FOR_MR
+      side: source
+      column: source_tags
+      tag: auto_stop_setting
+    - entity: Environment
+      property: auto_stop_setting
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: auto_stop_setting
+    - entity: File
+      property: extension
+      relationship: CALLS
+      side: source
+      column: source_tags
+      tag: extension
+    - entity: File
+      property: extension
+      relationship: DEFINES
+      side: source
+      column: source_tags
+      tag: extension
+    - entity: File
+      property: extension
+      relationship: IMPORTS
+      side: source
+      column: source_tags
+      tag: extension
+    - entity: File
+      property: extension
+      relationship: ON_BRANCH
+      side: source
+      column: source_tags
+      tag: extension
+    - entity: File
+      property: language
+      relationship: CALLS
+      side: source
+      column: source_tags
+      tag: language
+    - entity: File
+      property: language
+      relationship: DEFINES
+      side: source
+      column: source_tags
+      tag: language
+    - entity: File
+      property: language
+      relationship: IMPORTS
+      side: source
+      column: source_tags
+      tag: language
+    - entity: File
+      property: language
+      relationship: ON_BRANCH
+      side: source
+      column: source_tags
+      tag: language
+    - entity: Finding
+      property: severity
+      relationship: DETECTED_BY
+      side: source
+      column: source_tags
+      tag: severity
+    - entity: Finding
+      property: severity
+      relationship: HAS_FINDING
+      side: target
+      column: target_tags
+      tag: severity
+    - entity: Finding
+      property: severity
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: severity
+    - entity: Finding
+      property: deduplicated
+      relationship: DETECTED_BY
+      side: source
+      column: source_tags
+      tag: deduplicated
+    - entity: Finding
+      property: deduplicated
+      relationship: HAS_FINDING
+      side: target
+      column: target_tags
+      tag: deduplicated
+    - entity: Finding
+      property: deduplicated
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: deduplicated
+    - entity: Group
+      property: visibility_level
+      relationship: OWNER
+      side: target
+      column: target_tags
+      tag: visibility_level
+    - entity: ImportedSymbol
+      property: import_type
+      relationship: CALLS
+      side: target
+      column: target_tags
+      tag: import_type
+    - entity: ImportedSymbol
+      property: import_type
+      relationship: IMPORTS
+      side: target
+      column: target_tags
+      tag: import_type
+    - entity: ImportedSymbol
+      property: import_type
+      relationship: IMPORTS
+      side: source
+      column: source_tags
+      tag: import_type
+    - entity: Job
+      property: status
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: status
+    - entity: Job
+      property: status
+      relationship: HAS_JOB
+      side: target
+      column: target_tags
+      tag: status
+    - entity: Job
+      property: status
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: status
+    - entity: Job
+      property: status
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: status
+    - entity: Job
+      property: status
+      relationship: RUNS_ON
+      side: source
+      column: source_tags
+      tag: status
+    - entity: Job
+      property: status
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: status
+    - entity: Job
+      property: status
+      relationship: TRIGGERED_BY_PIPELINE
+      side: source
+      column: source_tags
+      tag: status
+    - entity: Job
+      property: status
+      relationship: TRIGGERS_PIPELINE
+      side: source
+      column: source_tags
+      tag: status
+    - entity: Job
+      property: tag
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: tag
+      nullable: true
+    - entity: Job
+      property: tag
+      relationship: HAS_JOB
+      side: target
+      column: target_tags
+      tag: tag
+      nullable: true
+    - entity: Job
+      property: tag
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: tag
+      nullable: true
+    - entity: Job
+      property: tag
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: tag
+      nullable: true
+    - entity: Job
+      property: tag
+      relationship: RUNS_ON
+      side: source
+      column: source_tags
+      tag: tag
+      nullable: true
+    - entity: Job
+      property: tag
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: tag
+      nullable: true
+    - entity: Job
+      property: tag
+      relationship: TRIGGERED_BY_PIPELINE
+      side: source
+      column: source_tags
+      tag: tag
+      nullable: true
+    - entity: Job
+      property: tag
+      relationship: TRIGGERS_PIPELINE
+      side: source
+      column: source_tags
+      tag: tag
+      nullable: true
+    - entity: Job
+      property: allow_failure
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: allow_failure
+    - entity: Job
+      property: allow_failure
+      relationship: HAS_JOB
+      side: target
+      column: target_tags
+      tag: allow_failure
+    - entity: Job
+      property: allow_failure
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: allow_failure
+    - entity: Job
+      property: allow_failure
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: allow_failure
+    - entity: Job
+      property: allow_failure
+      relationship: RUNS_ON
+      side: source
+      column: source_tags
+      tag: allow_failure
+    - entity: Job
+      property: allow_failure
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: allow_failure
+    - entity: Job
+      property: allow_failure
+      relationship: TRIGGERED_BY_PIPELINE
+      side: source
+      column: source_tags
+      tag: allow_failure
+    - entity: Job
+      property: allow_failure
+      relationship: TRIGGERS_PIPELINE
+      side: source
+      column: source_tags
+      tag: allow_failure
+    - entity: Job
+      property: when
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: when
+    - entity: Job
+      property: when
+      relationship: HAS_JOB
+      side: target
+      column: target_tags
+      tag: when
+    - entity: Job
+      property: when
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: when
+    - entity: Job
+      property: when
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: when
+    - entity: Job
+      property: when
+      relationship: RUNS_ON
+      side: source
+      column: source_tags
+      tag: when
+    - entity: Job
+      property: when
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: when
+    - entity: Job
+      property: when
+      relationship: TRIGGERED_BY_PIPELINE
+      side: source
+      column: source_tags
+      tag: when
+    - entity: Job
+      property: when
+      relationship: TRIGGERS_PIPELINE
+      side: source
+      column: source_tags
+      tag: when
+    - entity: Job
+      property: retried
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: retried
+      nullable: true
+    - entity: Job
+      property: retried
+      relationship: HAS_JOB
+      side: target
+      column: target_tags
+      tag: retried
+      nullable: true
+    - entity: Job
+      property: retried
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: retried
+      nullable: true
+    - entity: Job
+      property: retried
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: retried
+      nullable: true
+    - entity: Job
+      property: retried
+      relationship: RUNS_ON
+      side: source
+      column: source_tags
+      tag: retried
+      nullable: true
+    - entity: Job
+      property: retried
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: retried
+      nullable: true
+    - entity: Job
+      property: retried
+      relationship: TRIGGERED_BY_PIPELINE
+      side: source
+      column: source_tags
+      tag: retried
+      nullable: true
+    - entity: Job
+      property: retried
+      relationship: TRIGGERS_PIPELINE
+      side: source
+      column: source_tags
+      tag: retried
+      nullable: true
+    - entity: Job
+      property: failure_reason
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: failure_reason
+    - entity: Job
+      property: failure_reason
+      relationship: HAS_JOB
+      side: target
+      column: target_tags
+      tag: failure_reason
+    - entity: Job
+      property: failure_reason
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: failure_reason
+    - entity: Job
+      property: failure_reason
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: failure_reason
+    - entity: Job
+      property: failure_reason
+      relationship: RUNS_ON
+      side: source
+      column: source_tags
+      tag: failure_reason
+    - entity: Job
+      property: failure_reason
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: failure_reason
+    - entity: Job
+      property: failure_reason
+      relationship: TRIGGERED_BY_PIPELINE
+      side: source
+      column: source_tags
+      tag: failure_reason
+    - entity: Job
+      property: failure_reason
+      relationship: TRIGGERS_PIPELINE
+      side: source
+      column: source_tags
+      tag: failure_reason
+    - entity: Job
+      property: type
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: type
+    - entity: Job
+      property: type
+      relationship: HAS_JOB
+      side: target
+      column: target_tags
+      tag: type
+    - entity: Job
+      property: type
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: type
+    - entity: Job
+      property: type
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: type
+    - entity: Job
+      property: type
+      relationship: RUNS_ON
+      side: source
+      column: source_tags
+      tag: type
+    - entity: Job
+      property: type
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: type
+    - entity: Job
+      property: type
+      relationship: TRIGGERED_BY_PIPELINE
+      side: source
+      column: source_tags
+      tag: type
+    - entity: Job
+      property: type
+      relationship: TRIGGERS_PIPELINE
+      side: source
+      column: source_tags
+      tag: type
+    - entity: Job
+      property: timeout_source
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: timeout_source
+    - entity: Job
+      property: timeout_source
+      relationship: HAS_JOB
+      side: target
+      column: target_tags
+      tag: timeout_source
+    - entity: Job
+      property: timeout_source
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: timeout_source
+    - entity: Job
+      property: timeout_source
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: timeout_source
+    - entity: Job
+      property: timeout_source
+      relationship: RUNS_ON
+      side: source
+      column: source_tags
+      tag: timeout_source
+    - entity: Job
+      property: timeout_source
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: timeout_source
+    - entity: Job
+      property: timeout_source
+      relationship: TRIGGERED_BY_PIPELINE
+      side: source
+      column: source_tags
+      tag: timeout_source
+    - entity: Job
+      property: timeout_source
+      relationship: TRIGGERS_PIPELINE
+      side: source
+      column: source_tags
+      tag: timeout_source
+    - entity: Job
+      property: scheduling_type
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: scheduling_type
+    - entity: Job
+      property: scheduling_type
+      relationship: HAS_JOB
+      side: target
+      column: target_tags
+      tag: scheduling_type
+    - entity: Job
+      property: scheduling_type
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: scheduling_type
+    - entity: Job
+      property: scheduling_type
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: scheduling_type
+    - entity: Job
+      property: scheduling_type
+      relationship: RUNS_ON
+      side: source
+      column: source_tags
+      tag: scheduling_type
+    - entity: Job
+      property: scheduling_type
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: scheduling_type
+    - entity: Job
+      property: scheduling_type
+      relationship: TRIGGERED_BY_PIPELINE
+      side: source
+      column: source_tags
+      tag: scheduling_type
+    - entity: Job
+      property: scheduling_type
+      relationship: TRIGGERS_PIPELINE
+      side: source
+      column: source_tags
+      tag: scheduling_type
+    - entity: MergeRequest
+      property: state
+      relationship: APPROVED
+      side: target
+      column: target_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: ASSIGNED
+      side: target
+      column: target_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: CLOSED
+      side: target
+      column: target_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: CLOSES
+      side: source
+      column: source_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: DEPLOYED_TO
+      side: source
+      column: source_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: FIXES
+      side: source
+      column: source_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: HAS_HEAD_PIPELINE
+      side: source
+      column: source_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: HAS_LATEST_DIFF
+      side: source
+      column: source_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: IN_MILESTONE
+      side: source
+      column: source_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: LAST_EDITED_BY
+      side: target
+      column: target_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: MERGED
+      side: target
+      column: target_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: MERGED_AT_COMMIT
+      side: source
+      column: source_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: REOPENED
+      side: target
+      column: target_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: REVIEWER
+      side: target
+      column: target_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: SOURCE_PROJECT
+      side: source
+      column: source_tags
+      tag: state
+    - entity: MergeRequest
+      property: state
+      relationship: UPDATED_BY
+      side: target
+      column: target_tags
+      tag: state
+    - entity: MergeRequest
+      property: merge_status
+      relationship: APPROVED
+      side: target
+      column: target_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: ASSIGNED
+      side: target
+      column: target_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: CLOSED
+      side: target
+      column: target_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: CLOSES
+      side: source
+      column: source_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: DEPLOYED_TO
+      side: source
+      column: source_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: FIXES
+      side: source
+      column: source_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: HAS_HEAD_PIPELINE
+      side: source
+      column: source_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: HAS_LATEST_DIFF
+      side: source
+      column: source_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: IN_MILESTONE
+      side: source
+      column: source_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: LAST_EDITED_BY
+      side: target
+      column: target_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: MERGED
+      side: target
+      column: target_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: MERGED_AT_COMMIT
+      side: source
+      column: source_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: REOPENED
+      side: target
+      column: target_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: REVIEWER
+      side: target
+      column: target_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: SOURCE_PROJECT
+      side: source
+      column: source_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: merge_status
+      relationship: UPDATED_BY
+      side: target
+      column: target_tags
+      tag: merge_status
+    - entity: MergeRequest
+      property: draft
+      relationship: APPROVED
+      side: target
+      column: target_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: ASSIGNED
+      side: target
+      column: target_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: CLOSED
+      side: target
+      column: target_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: CLOSES
+      side: source
+      column: source_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: DEPLOYED_TO
+      side: source
+      column: source_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: FIXES
+      side: source
+      column: source_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: HAS_HEAD_PIPELINE
+      side: source
+      column: source_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: HAS_LATEST_DIFF
+      side: source
+      column: source_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: IN_MILESTONE
+      side: source
+      column: source_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: LAST_EDITED_BY
+      side: target
+      column: target_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: MERGED
+      side: target
+      column: target_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: MERGED_AT_COMMIT
+      side: source
+      column: source_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: REOPENED
+      side: target
+      column: target_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: REVIEWER
+      side: target
+      column: target_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: SOURCE_PROJECT
+      side: source
+      column: source_tags
+      tag: draft
+    - entity: MergeRequest
+      property: draft
+      relationship: UPDATED_BY
+      side: target
+      column: target_tags
+      tag: draft
+    - entity: MergeRequest
+      property: squash
+      relationship: APPROVED
+      side: target
+      column: target_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: ASSIGNED
+      side: target
+      column: target_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: CLOSED
+      side: target
+      column: target_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: CLOSES
+      side: source
+      column: source_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: DEPLOYED_TO
+      side: source
+      column: source_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: FIXES
+      side: source
+      column: source_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: HAS_HEAD_PIPELINE
+      side: source
+      column: source_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: HAS_LATEST_DIFF
+      side: source
+      column: source_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: IN_MILESTONE
+      side: source
+      column: source_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: LAST_EDITED_BY
+      side: target
+      column: target_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: MERGED
+      side: target
+      column: target_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: MERGED_AT_COMMIT
+      side: source
+      column: source_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: REOPENED
+      side: target
+      column: target_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: REVIEWER
+      side: target
+      column: target_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: SOURCE_PROJECT
+      side: source
+      column: source_tags
+      tag: squash
+    - entity: MergeRequest
+      property: squash
+      relationship: UPDATED_BY
+      side: target
+      column: target_tags
+      tag: squash
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: APPROVED
+      side: target
+      column: target_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: ASSIGNED
+      side: target
+      column: target_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: CLOSED
+      side: target
+      column: target_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: CLOSES
+      side: source
+      column: source_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: DEPLOYED_TO
+      side: source
+      column: source_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: FIXES
+      side: source
+      column: source_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: HAS_HEAD_PIPELINE
+      side: source
+      column: source_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: HAS_LATEST_DIFF
+      side: source
+      column: source_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: IN_MILESTONE
+      side: source
+      column: source_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: LAST_EDITED_BY
+      side: target
+      column: target_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: MERGED
+      side: target
+      column: target_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: MERGED_AT_COMMIT
+      side: source
+      column: source_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: REOPENED
+      side: target
+      column: target_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: REVIEWER
+      side: target
+      column: target_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: SOURCE_PROJECT
+      side: source
+      column: source_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: discussion_locked
+      relationship: UPDATED_BY
+      side: target
+      column: target_tags
+      tag: discussion_locked
+      nullable: true
+    - entity: MergeRequest
+      property: first_contribution
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: first_contribution
+    - entity: MergeRequest
+      property: first_contribution
+      relationship: CLOSED
+      side: target
+      column: target_tags
+      tag: first_contribution
+    - entity: MergeRequest
+      property: first_contribution
+      relationship: HAS_HEAD_PIPELINE
+      side: source
+      column: source_tags
+      tag: first_contribution
+    - entity: MergeRequest
+      property: first_contribution
+      relationship: HAS_LATEST_DIFF
+      side: source
+      column: source_tags
+      tag: first_contribution
+    - entity: MergeRequest
+      property: first_contribution
+      relationship: IN_MILESTONE
+      side: source
+      column: source_tags
+      tag: first_contribution
+    - entity: MergeRequest
+      property: first_contribution
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: first_contribution
+    - entity: MergeRequest
+      property: first_contribution
+      relationship: LAST_EDITED_BY
+      side: target
+      column: target_tags
+      tag: first_contribution
+    - entity: MergeRequest
+      property: first_contribution
+      relationship: MERGED
+      side: target
+      column: target_tags
+      tag: first_contribution
+    - entity: MergeRequest
+      property: first_contribution
+      relationship: MERGED_AT_COMMIT
+      side: source
+      column: source_tags
+      tag: first_contribution
+    - entity: MergeRequest
+      property: first_contribution
+      relationship: SOURCE_PROJECT
+      side: source
+      column: source_tags
+      tag: first_contribution
+    - entity: MergeRequest
+      property: first_contribution
+      relationship: UPDATED_BY
+      side: target
+      column: target_tags
+      tag: first_contribution
+    - entity: MergeRequestDiff
+      property: diff_type
+      relationship: HAS_DIFF
+      side: target
+      column: target_tags
+      tag: diff_type
+    - entity: MergeRequestDiff
+      property: diff_type
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: diff_type
+    - entity: MergeRequestDiff
+      property: stored_externally
+      relationship: HAS_DIFF
+      side: target
+      column: target_tags
+      tag: stored_externally
+    - entity: MergeRequestDiff
+      property: stored_externally
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: stored_externally
+    - entity: MergeRequestDiff
+      property: state
+      relationship: HAS_DIFF
+      side: target
+      column: target_tags
+      tag: state
+    - entity: MergeRequestDiff
+      property: state
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: state
+    - entity: MergeRequestDiffFile
+      property: too_large
+      relationship: HAS_FILE
+      side: target
+      column: target_tags
+      tag: too_large
+    - entity: MergeRequestDiffFile
+      property: too_large
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: too_large
+    - entity: MergeRequestDiffFile
+      property: new_file
+      relationship: HAS_FILE
+      side: target
+      column: target_tags
+      tag: new_file
+    - entity: MergeRequestDiffFile
+      property: new_file
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: new_file
+    - entity: MergeRequestDiffFile
+      property: renamed_file
+      relationship: HAS_FILE
+      side: target
+      column: target_tags
+      tag: renamed_file
+    - entity: MergeRequestDiffFile
+      property: renamed_file
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: renamed_file
+    - entity: MergeRequestDiffFile
+      property: deleted_file
+      relationship: HAS_FILE
+      side: target
+      column: target_tags
+      tag: deleted_file
+    - entity: MergeRequestDiffFile
+      property: deleted_file
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: deleted_file
+    - entity: MergeRequestDiffFile
+      property: binary
+      relationship: HAS_FILE
+      side: target
+      column: target_tags
+      tag: binary
+      nullable: true
+    - entity: MergeRequestDiffFile
+      property: binary
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: binary
+      nullable: true
+    - entity: MergeRequestDiffFile
+      property: generated
+      relationship: HAS_FILE
+      side: target
+      column: target_tags
+      tag: generated
+      nullable: true
+    - entity: MergeRequestDiffFile
+      property: generated
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: generated
+      nullable: true
+    - entity: Milestone
+      property: state
+      relationship: IN_GROUP
+      side: source
+      column: source_tags
+      tag: state
+    - entity: Milestone
+      property: state
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: state
+    - entity: Note
+      property: noteable_type
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: noteable_type
+    - entity: Note
+      property: noteable_type
+      relationship: HAS_NOTE
+      side: target
+      column: target_tags
+      tag: noteable_type
+    - entity: Note
+      property: noteable_type
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: noteable_type
+    - entity: Note
+      property: internal
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: internal
+    - entity: Note
+      property: internal
+      relationship: HAS_NOTE
+      side: target
+      column: target_tags
+      tag: internal
+    - entity: Note
+      property: internal
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: internal
+    - entity: Note
+      property: confidential
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: confidential
+      nullable: true
+    - entity: Note
+      property: confidential
+      relationship: HAS_NOTE
+      side: target
+      column: target_tags
+      tag: confidential
+      nullable: true
+    - entity: Note
+      property: confidential
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: confidential
+      nullable: true
+    - entity: Pipeline
+      property: status
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: status
+    - entity: Pipeline
+      property: status
+      relationship: AUTO_CANCELED_BY
+      side: target
+      column: target_tags
+      tag: status
+    - entity: Pipeline
+      property: status
+      relationship: CHILD_OF
+      side: source
+      column: source_tags
+      tag: status
+    - entity: Pipeline
+      property: status
+      relationship: CHILD_OF
+      side: target
+      column: target_tags
+      tag: status
+    - entity: Pipeline
+      property: status
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: status
+    - entity: Pipeline
+      property: status
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: status
+    - entity: Pipeline
+      property: status
+      relationship: TRIGGERS_PIPELINE
+      side: target
+      column: target_tags
+      tag: status
+    - entity: Pipeline
+      property: source
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: source
+    - entity: Pipeline
+      property: source
+      relationship: AUTO_CANCELED_BY
+      side: target
+      column: target_tags
+      tag: source
+    - entity: Pipeline
+      property: source
+      relationship: CHILD_OF
+      side: source
+      column: source_tags
+      tag: source
+    - entity: Pipeline
+      property: source
+      relationship: CHILD_OF
+      side: target
+      column: target_tags
+      tag: source
+    - entity: Pipeline
+      property: source
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: source
+    - entity: Pipeline
+      property: source
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: source
+    - entity: Pipeline
+      property: source
+      relationship: TRIGGERS_PIPELINE
+      side: target
+      column: target_tags
+      tag: source
+    - entity: Pipeline
+      property: tag
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: tag
+    - entity: Pipeline
+      property: tag
+      relationship: AUTO_CANCELED_BY
+      side: target
+      column: target_tags
+      tag: tag
+    - entity: Pipeline
+      property: tag
+      relationship: CHILD_OF
+      side: source
+      column: source_tags
+      tag: tag
+    - entity: Pipeline
+      property: tag
+      relationship: CHILD_OF
+      side: target
+      column: target_tags
+      tag: tag
+    - entity: Pipeline
+      property: tag
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: tag
+    - entity: Pipeline
+      property: tag
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: tag
+    - entity: Pipeline
+      property: tag
+      relationship: TRIGGERS_PIPELINE
+      side: target
+      column: target_tags
+      tag: tag
+    - entity: Pipeline
+      property: failure_reason
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: failure_reason
+    - entity: Pipeline
+      property: failure_reason
+      relationship: AUTO_CANCELED_BY
+      side: target
+      column: target_tags
+      tag: failure_reason
+    - entity: Pipeline
+      property: failure_reason
+      relationship: CHILD_OF
+      side: source
+      column: source_tags
+      tag: failure_reason
+    - entity: Pipeline
+      property: failure_reason
+      relationship: CHILD_OF
+      side: target
+      column: target_tags
+      tag: failure_reason
+    - entity: Pipeline
+      property: failure_reason
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: failure_reason
+    - entity: Pipeline
+      property: failure_reason
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: failure_reason
+    - entity: Pipeline
+      property: failure_reason
+      relationship: TRIGGERS_PIPELINE
+      side: target
+      column: target_tags
+      tag: failure_reason
+    - entity: Pipeline
+      property: protected
+      relationship: AUTO_CANCELED_BY
+      side: source
+      column: source_tags
+      tag: protected
+      nullable: true
+    - entity: Pipeline
+      property: protected
+      relationship: AUTO_CANCELED_BY
+      side: target
+      column: target_tags
+      tag: protected
+      nullable: true
+    - entity: Pipeline
+      property: protected
+      relationship: CHILD_OF
+      side: source
+      column: source_tags
+      tag: protected
+      nullable: true
+    - entity: Pipeline
+      property: protected
+      relationship: CHILD_OF
+      side: target
+      column: target_tags
+      tag: protected
+      nullable: true
+    - entity: Pipeline
+      property: protected
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: protected
+      nullable: true
+    - entity: Pipeline
+      property: protected
+      relationship: TRIGGERED
+      side: target
+      column: target_tags
+      tag: protected
+      nullable: true
+    - entity: Pipeline
+      property: protected
+      relationship: TRIGGERS_PIPELINE
+      side: target
+      column: target_tags
+      tag: protected
+      nullable: true
+    - entity: Project
+      property: visibility_level
+      relationship: CREATOR
+      side: target
+      column: target_tags
+      tag: visibility_level
+    - entity: Project
+      property: archived
+      relationship: CREATOR
+      side: target
+      column: target_tags
+      tag: archived
+    - entity: SecurityScan
+      property: scan_type
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: scan_type
+    - entity: SecurityScan
+      property: scan_type
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: scan_type
+    - entity: SecurityScan
+      property: scan_type
+      relationship: RAN_BY
+      side: source
+      column: source_tags
+      tag: scan_type
+    - entity: SecurityScan
+      property: status
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: status
+    - entity: SecurityScan
+      property: status
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: status
+    - entity: SecurityScan
+      property: status
+      relationship: RAN_BY
+      side: source
+      column: source_tags
+      tag: status
+    - entity: SecurityScan
+      property: latest
+      relationship: IN_PIPELINE
+      side: source
+      column: source_tags
+      tag: latest
+    - entity: SecurityScan
+      property: latest
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: latest
+    - entity: SecurityScan
+      property: latest
+      relationship: RAN_BY
+      side: source
+      column: source_tags
+      tag: latest
+    - entity: Stage
+      property: status
+      relationship: HAS_STAGE
+      side: target
+      column: target_tags
+      tag: status
+    - entity: Stage
+      property: status
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: status
+    - entity: User
+      property: state
+      relationship: APPROVED
+      side: source
+      column: source_tags
+      tag: state
+    - entity: User
+      property: state
+      relationship: ASSIGNED
+      side: source
+      column: source_tags
+      tag: state
+    - entity: User
+      property: state
+      relationship: MEMBER_OF
+      side: source
+      column: source_tags
+      tag: state
+    - entity: User
+      property: state
+      relationship: REOPENED
+      side: source
+      column: source_tags
+      tag: state
+    - entity: User
+      property: state
+      relationship: REVIEWER
+      side: source
+      column: source_tags
+      tag: state
+    - entity: User
+      property: private_profile
+      relationship: APPROVED
+      side: source
+      column: source_tags
+      tag: private_profile
+    - entity: User
+      property: private_profile
+      relationship: ASSIGNED
+      side: source
+      column: source_tags
+      tag: private_profile
+    - entity: User
+      property: private_profile
+      relationship: MEMBER_OF
+      side: source
+      column: source_tags
+      tag: private_profile
+    - entity: User
+      property: private_profile
+      relationship: REOPENED
+      side: source
+      column: source_tags
+      tag: private_profile
+    - entity: User
+      property: private_profile
+      relationship: REVIEWER
+      side: source
+      column: source_tags
+      tag: private_profile
+    - entity: User
+      property: is_admin
+      relationship: APPROVED
+      side: source
+      column: source_tags
+      tag: is_admin
+    - entity: User
+      property: is_admin
+      relationship: ASSIGNED
+      side: source
+      column: source_tags
+      tag: is_admin
+    - entity: User
+      property: is_admin
+      relationship: MEMBER_OF
+      side: source
+      column: source_tags
+      tag: is_admin
+    - entity: User
+      property: is_admin
+      relationship: REOPENED
+      side: source
+      column: source_tags
+      tag: is_admin
+    - entity: User
+      property: is_admin
+      relationship: REVIEWER
+      side: source
+      column: source_tags
+      tag: is_admin
+    - entity: User
+      property: is_auditor
+      relationship: APPROVED
+      side: source
+      column: source_tags
+      tag: is_auditor
+    - entity: User
+      property: is_auditor
+      relationship: ASSIGNED
+      side: source
+      column: source_tags
+      tag: is_auditor
+    - entity: User
+      property: is_auditor
+      relationship: MEMBER_OF
+      side: source
+      column: source_tags
+      tag: is_auditor
+    - entity: User
+      property: is_auditor
+      relationship: REOPENED
+      side: source
+      column: source_tags
+      tag: is_auditor
+    - entity: User
+      property: is_auditor
+      relationship: REVIEWER
+      side: source
+      column: source_tags
+      tag: is_auditor
+    - entity: User
+      property: is_external
+      relationship: APPROVED
+      side: source
+      column: source_tags
+      tag: is_external
+    - entity: User
+      property: is_external
+      relationship: ASSIGNED
+      side: source
+      column: source_tags
+      tag: is_external
+    - entity: User
+      property: is_external
+      relationship: MEMBER_OF
+      side: source
+      column: source_tags
+      tag: is_external
+    - entity: User
+      property: is_external
+      relationship: REOPENED
+      side: source
+      column: source_tags
+      tag: is_external
+    - entity: User
+      property: is_external
+      relationship: REVIEWER
+      side: source
+      column: source_tags
+      tag: is_external
+    - entity: User
+      property: user_type
+      relationship: APPROVED
+      side: source
+      column: source_tags
+      tag: user_type
+    - entity: User
+      property: user_type
+      relationship: ASSIGNED
+      side: source
+      column: source_tags
+      tag: user_type
+    - entity: User
+      property: user_type
+      relationship: MEMBER_OF
+      side: source
+      column: source_tags
+      tag: user_type
+    - entity: User
+      property: user_type
+      relationship: REOPENED
+      side: source
+      column: source_tags
+      tag: user_type
+    - entity: User
+      property: user_type
+      relationship: REVIEWER
+      side: source
+      column: source_tags
+      tag: user_type
+    - entity: Vulnerability
+      property: state
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: state
+    - entity: Vulnerability
+      property: state
+      relationship: CONFIRMED_BY
+      side: target
+      column: target_tags
+      tag: state
+    - entity: Vulnerability
+      property: state
+      relationship: DISMISSED_BY
+      side: target
+      column: target_tags
+      tag: state
+    - entity: Vulnerability
+      property: state
+      relationship: FIXES
+      side: target
+      column: target_tags
+      tag: state
+    - entity: Vulnerability
+      property: state
+      relationship: HAS_FINDING
+      side: source
+      column: source_tags
+      tag: state
+    - entity: Vulnerability
+      property: state
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: state
+    - entity: Vulnerability
+      property: state
+      relationship: RESOLVED_BY
+      side: target
+      column: target_tags
+      tag: state
+    - entity: Vulnerability
+      property: severity
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: severity
+    - entity: Vulnerability
+      property: severity
+      relationship: CONFIRMED_BY
+      side: target
+      column: target_tags
+      tag: severity
+    - entity: Vulnerability
+      property: severity
+      relationship: DISMISSED_BY
+      side: target
+      column: target_tags
+      tag: severity
+    - entity: Vulnerability
+      property: severity
+      relationship: FIXES
+      side: target
+      column: target_tags
+      tag: severity
+    - entity: Vulnerability
+      property: severity
+      relationship: HAS_FINDING
+      side: source
+      column: source_tags
+      tag: severity
+    - entity: Vulnerability
+      property: severity
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: severity
+    - entity: Vulnerability
+      property: severity
+      relationship: RESOLVED_BY
+      side: target
+      column: target_tags
+      tag: severity
+    - entity: Vulnerability
+      property: report_type
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: report_type
+    - entity: Vulnerability
+      property: report_type
+      relationship: CONFIRMED_BY
+      side: target
+      column: target_tags
+      tag: report_type
+    - entity: Vulnerability
+      property: report_type
+      relationship: DISMISSED_BY
+      side: target
+      column: target_tags
+      tag: report_type
+    - entity: Vulnerability
+      property: report_type
+      relationship: FIXES
+      side: target
+      column: target_tags
+      tag: report_type
+    - entity: Vulnerability
+      property: report_type
+      relationship: HAS_FINDING
+      side: source
+      column: source_tags
+      tag: report_type
+    - entity: Vulnerability
+      property: report_type
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: report_type
+    - entity: Vulnerability
+      property: report_type
+      relationship: RESOLVED_BY
+      side: target
+      column: target_tags
+      tag: report_type
+    - entity: Vulnerability
+      property: resolved_on_default_branch
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: resolved_on_default_branch
+    - entity: Vulnerability
+      property: resolved_on_default_branch
+      relationship: CONFIRMED_BY
+      side: target
+      column: target_tags
+      tag: resolved_on_default_branch
+    - entity: Vulnerability
+      property: resolved_on_default_branch
+      relationship: DISMISSED_BY
+      side: target
+      column: target_tags
+      tag: resolved_on_default_branch
+    - entity: Vulnerability
+      property: resolved_on_default_branch
+      relationship: FIXES
+      side: target
+      column: target_tags
+      tag: resolved_on_default_branch
+    - entity: Vulnerability
+      property: resolved_on_default_branch
+      relationship: HAS_FINDING
+      side: source
+      column: source_tags
+      tag: resolved_on_default_branch
+    - entity: Vulnerability
+      property: resolved_on_default_branch
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: resolved_on_default_branch
+    - entity: Vulnerability
+      property: resolved_on_default_branch
+      relationship: RESOLVED_BY
+      side: target
+      column: target_tags
+      tag: resolved_on_default_branch
+    - entity: Vulnerability
+      property: present_on_default_branch
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: present_on_default_branch
+    - entity: Vulnerability
+      property: present_on_default_branch
+      relationship: CONFIRMED_BY
+      side: target
+      column: target_tags
+      tag: present_on_default_branch
+    - entity: Vulnerability
+      property: present_on_default_branch
+      relationship: DISMISSED_BY
+      side: target
+      column: target_tags
+      tag: present_on_default_branch
+    - entity: Vulnerability
+      property: present_on_default_branch
+      relationship: FIXES
+      side: target
+      column: target_tags
+      tag: present_on_default_branch
+    - entity: Vulnerability
+      property: present_on_default_branch
+      relationship: HAS_FINDING
+      side: source
+      column: source_tags
+      tag: present_on_default_branch
+    - entity: Vulnerability
+      property: present_on_default_branch
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: present_on_default_branch
+    - entity: Vulnerability
+      property: present_on_default_branch
+      relationship: RESOLVED_BY
+      side: target
+      column: target_tags
+      tag: present_on_default_branch
+    - entity: VulnerabilityOccurrence
+      property: severity
+      relationship: DETECTED_BY
+      side: source
+      column: source_tags
+      tag: severity
+    - entity: VulnerabilityOccurrence
+      property: severity
+      relationship: HAS_IDENTIFIER
+      side: source
+      column: source_tags
+      tag: severity
+    - entity: VulnerabilityOccurrence
+      property: severity
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: severity
+    - entity: VulnerabilityOccurrence
+      property: severity
+      relationship: OCCURRENCE_OF
+      side: source
+      column: source_tags
+      tag: severity
+    - entity: VulnerabilityOccurrence
+      property: report_type
+      relationship: DETECTED_BY
+      side: source
+      column: source_tags
+      tag: report_type
+    - entity: VulnerabilityOccurrence
+      property: report_type
+      relationship: HAS_IDENTIFIER
+      side: source
+      column: source_tags
+      tag: report_type
+    - entity: VulnerabilityOccurrence
+      property: report_type
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: report_type
+    - entity: VulnerabilityOccurrence
+      property: report_type
+      relationship: OCCURRENCE_OF
+      side: source
+      column: source_tags
+      tag: report_type
+    - entity: VulnerabilityOccurrence
+      property: detection_method
+      relationship: DETECTED_BY
+      side: source
+      column: source_tags
+      tag: detection_method
+    - entity: VulnerabilityOccurrence
+      property: detection_method
+      relationship: HAS_IDENTIFIER
+      side: source
+      column: source_tags
+      tag: detection_method
+    - entity: VulnerabilityOccurrence
+      property: detection_method
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: detection_method
+    - entity: VulnerabilityOccurrence
+      property: detection_method
+      relationship: OCCURRENCE_OF
+      side: source
+      column: source_tags
+      tag: detection_method
+    - entity: VulnerabilityScanner
+      property: vendor
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: vendor
+    - entity: VulnerabilityScanner
+      property: vendor
+      relationship: SCANS
+      side: source
+      column: source_tags
+      tag: vendor
+    - entity: WorkItem
+      property: state
+      relationship: ASSIGNED
+      side: target
+      column: target_tags
+      tag: state
+    - entity: WorkItem
+      property: state
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: state
+    - entity: WorkItem
+      property: state
+      relationship: CLOSED
+      side: target
+      column: target_tags
+      tag: state
+    - entity: WorkItem
+      property: state
+      relationship: CLOSES
+      side: target
+      column: target_tags
+      tag: state
+    - entity: WorkItem
+      property: state
+      relationship: CONTAINS
+      side: source
+      column: source_tags
+      tag: state
+    - entity: WorkItem
+      property: state
+      relationship: CONTAINS
+      side: target
+      column: target_tags
+      tag: state
+    - entity: WorkItem
+      property: state
+      relationship: IN_GROUP
+      side: source
+      column: source_tags
+      tag: state
+    - entity: WorkItem
+      property: state
+      relationship: IN_MILESTONE
+      side: source
+      column: source_tags
+      tag: state
+    - entity: WorkItem
+      property: state
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: state
+    - entity: WorkItem
+      property: state
+      relationship: RELATED_TO
+      side: source
+      column: source_tags
+      tag: state
+    - entity: WorkItem
+      property: state
+      relationship: RELATED_TO
+      side: target
+      column: target_tags
+      tag: state
+    - entity: WorkItem
+      property: state
+      relationship: REOPENED
+      side: target
+      column: target_tags
+      tag: state
+    - entity: WorkItem
+      property: work_item_type
+      relationship: ASSIGNED
+      side: target
+      column: target_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: work_item_type
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: work_item_type
+      relationship: CLOSED
+      side: target
+      column: target_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: work_item_type
+      relationship: CLOSES
+      side: target
+      column: target_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: work_item_type
+      relationship: CONTAINS
+      side: source
+      column: source_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: work_item_type
+      relationship: CONTAINS
+      side: target
+      column: target_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: work_item_type
+      relationship: IN_GROUP
+      side: source
+      column: source_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: work_item_type
+      relationship: IN_MILESTONE
+      side: source
+      column: source_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: work_item_type
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: work_item_type
+      relationship: RELATED_TO
+      side: source
+      column: source_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: work_item_type
+      relationship: RELATED_TO
+      side: target
+      column: target_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: work_item_type
+      relationship: REOPENED
+      side: target
+      column: target_tags
+      tag: wi_type
+    - entity: WorkItem
+      property: confidential
+      relationship: ASSIGNED
+      side: target
+      column: target_tags
+      tag: confidential
+    - entity: WorkItem
+      property: confidential
+      relationship: AUTHORED
+      side: target
+      column: target_tags
+      tag: confidential
+    - entity: WorkItem
+      property: confidential
+      relationship: CLOSED
+      side: target
+      column: target_tags
+      tag: confidential
+    - entity: WorkItem
+      property: confidential
+      relationship: CLOSES
+      side: target
+      column: target_tags
+      tag: confidential
+    - entity: WorkItem
+      property: confidential
+      relationship: CONTAINS
+      side: source
+      column: source_tags
+      tag: confidential
+    - entity: WorkItem
+      property: confidential
+      relationship: CONTAINS
+      side: target
+      column: target_tags
+      tag: confidential
+    - entity: WorkItem
+      property: confidential
+      relationship: IN_GROUP
+      side: source
+      column: source_tags
+      tag: confidential
+    - entity: WorkItem
+      property: confidential
+      relationship: IN_MILESTONE
+      side: source
+      column: source_tags
+      tag: confidential
+    - entity: WorkItem
+      property: confidential
+      relationship: IN_PROJECT
+      side: source
+      column: source_tags
+      tag: confidential
+    - entity: WorkItem
+      property: confidential
+      relationship: RELATED_TO
+      side: source
+      column: source_tags
+      tag: confidential
+    - entity: WorkItem
+      property: confidential
+      relationship: RELATED_TO
+      side: target
+      column: target_tags
+      tag: confidential
+    - entity: WorkItem
+      property: confidential
+      relationship: REOPENED
+      side: target
+      column: target_tags
+      tag: confidential
+    tables:
+      namespace_storage_snapshot:
+        versioned: false
+        engine: ReplacingMergeTree
+        columns:
+          snapshot_date: {type: Date32}
+          schema_version: {type: Int64}
+          logical_table: {type: String}
+          top_level_namespace: {type: String}
+          compressed_bytes: {type: Int64}
+        sort_key: [logical_table, top_level_namespace, snapshot_date]
+        settings:
+          allow_experimental_replacing_merge_with_cleanup: "1"
+          enable_block_number_column: "1"
+          enable_block_offset_column: "1"
+        ttl: snapshot_date + INTERVAL 400 DAY
+      checkpoint:
+        engine: ReplacingMergeTree(_version, _deleted)
+        columns:
+          key: {type: String, codec: [ZSTD(1)]}
+          watermark: {type: "DateTime64(6, 'UTC')", codec: [Delta(8), ZSTD(1)]}
+          cursor_values: {type: String, default: "''", codec: [ZSTD(1)]}
+          attempts: {type: Int64, default: "0", codec: [ZSTD(1)]}
+          indexed_at: {type: "Nullable(DateTime64(6, 'UTC'))", codec: [Delta(8), ZSTD(1)]}
+          _version: {type: "DateTime64(6, 'UTC')", default: now64(6), codec: [Delta(8), ZSTD(1)]}
+          _deleted: {type: Bool, default: "false"}
+        sort_key: [key]
+        settings:
+          allow_experimental_replacing_merge_with_cleanup: "1"
+          enable_block_number_column: "1"
+          enable_block_offset_column: "1"
+      namespace_deletion_schedule:
+        engine: ReplacingMergeTree(_version, _deleted)
+        columns:
+          namespace_id: {type: Int64, codec: [ZSTD(1)]}
+          traversal_path: {type: String, codec: [ZSTD(1)]}
+          scheduled_deletion_date: {type: "DateTime64(6, 'UTC')", codec: [Delta(8), ZSTD(1)]}
+          _version: {type: "DateTime64(6, 'UTC')", default: now64(6), codec: [Delta(8), ZSTD(1)]}
+          _deleted: {type: Bool, default: "false"}
+        sort_key: [namespace_id, traversal_path]
+        settings:
+          allow_experimental_replacing_merge_with_cleanup: "1"
+          enable_block_number_column: "1"
+          enable_block_offset_column: "1"
+      code_indexing_checkpoint:
+        engine: ReplacingMergeTree(_version, _deleted)
+        columns:
+          traversal_path: {type: String, codec: [ZSTD(1)]}
+          project_id: {type: Int64, codec: [ZSTD(1)]}
+          branch: {type: String, codec: [ZSTD(1)]}
+          last_task_id: {type: Int64, codec: [ZSTD(1)]}
+          last_commit: {type: String, default: "''", codec: [ZSTD(1)]}
+          indexed_at: {type: "Nullable(DateTime64(6, 'UTC'))", codec: [Delta(8), ZSTD(1)]}
+          attempts: {type: Int64, default: "0", codec: [ZSTD(1)]}
+          is_default_branch: {type: Bool, default: "false"}
+          _version: {type: "DateTime64(6, 'UTC')", default: now64(6), codec: [Delta(8), ZSTD(1)]}
+          _deleted: {type: Bool, default: "false"}
+        sort_key: [traversal_path, project_id, branch]
+        settings:
+          allow_experimental_replacing_merge_with_cleanup: "1"
+          enable_block_number_column: "1"
+          enable_block_offset_column: "1"
+    dictionaries:
+      gl_project_traversal_paths_dict:
+        source: gl_project
+        key: id
+        attributes: {id: Int64, traversal_path: String}
+        layout: hashed
+        lifetime: {min: 60, max: 300}
+      gl_group_traversal_paths_dict:
+        source: gl_group
+        key: id
+        attributes: {id: Int64, traversal_path: String}
+        layout: hashed
+        lifetime: {min: 60, max: 300}
+    refreshable_views:
+      namespace_storage_snapshot_refresh:
+        append_to: namespace_storage_snapshot
+        refresh: EVERY 1 DAY OFFSET 2 HOUR
+        select: |
+          {% for table in graph.tables if table.has_traversal_path %}
+          SELECT
+              today() AS snapshot_date,
+              {{ schema.version }} AS schema_version,
+              '{{ table.logical_name }}' AS logical_table,
+              top_level_namespace,
+              toInt64(sum(attributed)) AS compressed_bytes
+          FROM (
+            SELECT top_level_namespace,
+                   data_compressed_bytes * (w_eff / sum(w_eff) OVER (PARTITION BY part_name)) AS attributed
+            FROM (
+              SELECT part_name, top_level_namespace, data_compressed_bytes,
+                     if(max(w_raw) OVER (PARTITION BY part_name) = 0, n_granules, w_raw) AS w_eff
+              FROM (
+                SELECT pp.part_name AS part_name, pp.top_level_namespace AS top_level_namespace, pp.n_granules AS n_granules,
+                       p.data_compressed_bytes AS data_compressed_bytes,
+                       if(p.part_type = 'Wide', pp.w_sum, pp.w_min) AS w_raw
+                FROM (
+                  SELECT part_name, top_level_namespace,
+                         sum(d_sum) AS w_sum, sum(d_min) AS w_min, toInt64(count()) AS n_granules
+                  FROM (
+                    SELECT
+                      part_name,
+                      arrayStringConcat(arraySlice(splitByChar('/', traversal_path), 1, 2), '/') AS top_level_namespace,
+                      greatest(toInt64(leadInFrame(sum_off, 1, sum_off) OVER w) - toInt64(sum_off), 0) AS d_sum,
+                      greatest(toInt64(leadInFrame(min_off, 1, min_off) OVER w) - toInt64(min_off), 0) AS d_min
+                    FROM (
+                      SELECT part_name, mark_number, traversal_path,
+                             arraySum(x -> ifNull(x.1, 0), array(COLUMNS('\\.mark$'))) AS sum_off,
+                             arrayMin(x -> ifNull(x.1, 0), array(COLUMNS('\\.mark$'))) AS min_off
+                      FROM mergeTreeIndex(currentDatabase(), '{{ table.physical_name }}', with_marks = true)
+                    )
+                    WINDOW w AS (PARTITION BY part_name ORDER BY mark_number ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+                  )
+                  GROUP BY part_name, top_level_namespace
+                ) pp
+                JOIN (
+                  SELECT name, part_type, data_compressed_bytes
+                  FROM system.parts
+                  WHERE database = currentDatabase() AND active
+                    AND table = '{{ table.physical_name }}'
+                ) p ON p.name = pp.part_name
+              )
+            )
+          )
+          GROUP BY top_level_namespace
+          UNION ALL
+          {% endfor %}
+          SELECT
+              today() AS snapshot_date,
+              {{ schema.version }} AS schema_version,
+              replaceRegexpOne(table, '^v\\d+_', '') AS logical_table,
+              '0/' AS top_level_namespace,
+              toInt64(sum(data_compressed_bytes)) AS compressed_bytes
+          FROM system.parts
+          WHERE database = currentDatabase() AND active
+            AND table IN (
+          {% for table in graph.tables if table.global %}
+              '{{ table.physical_name }}'{% if not loop.last %},{% endif %}
+          {% endfor %}
+            )
+          GROUP BY table
+relationships:
+  AUTHORED:
+    variants:
+      User -> Note: {fk: author_id}
+      User -> MergeRequest: {fk: author_id}
+      User -> Vulnerability: {fk: author_id, backend: {table: gl_sec_edge}}
+      User -> WorkItem: {fk: author_id}
+
+  AUTO_CANCELED_BY:
+    variants:
+      Pipeline -> Pipeline: {fk: auto_canceled_by_id, backend: {table: gl_ci_edge}}
+      Job -> Pipeline: {fk: auto_canceled_by_id, backend: {table: gl_ci_edge}}
+
+  BUILT_BY:
+    variants:
+      Package -> Pipeline: {backend: {table: gl_ci_edge}}
+      PackageFile -> Pipeline: {backend: {table: gl_ci_edge}}
+
+  CHILD_OF: {variants: {Pipeline -> Pipeline: {backend: {table: gl_ci_edge}}}}
+  CLOSED:
+    variants: {User -> WorkItem: {fk: closed_by_id}, User -> MergeRequest: {fk: closed_by_id}}
+
+  CONFIRMED_BY:
+    variants: {User -> Vulnerability: {fk: confirmed_by_id, backend: {table: gl_sec_edge}}}
+
+  CONTAINS: {variants: {Project -> Branch: {backend: {table: gl_code_edge}}}}
+  CREATED_FOR_MR:
+    variants: {Environment -> MergeRequest: {fk: merge_request_id, backend: {table: gl_ci_edge}}}
+
+  DEPLOYED_BY: {variants: {User -> Deployment: {fk: user_id, backend: {table: gl_ci_edge}}}}
+  DEPLOYED_TO: {variants: {MergeRequest -> Deployment: {backend: {table: gl_ci_edge}}}}
+  DETECTED_BY:
+    variants:
+      Finding -> VulnerabilityScanner: {fk: scanner_id, backend: {table: gl_sec_edge}}
+      VulnerabilityOccurrence -> VulnerabilityScanner:
+        fk: scanner_id
+        backend: {table: gl_sec_edge}
+
+  DISMISSED_BY:
+    variants: {User -> Vulnerability: {fk: dismissed_by_id, backend: {table: gl_sec_edge}}}
+
+  FIXES: {variants: {MergeRequest -> Vulnerability: {backend: {table: gl_sec_edge}}}}
+  HAS_DIFF:
+    variants:
+      MergeRequest -> MergeRequestDiff: {fk: merge_request_id, backend: {table: gl_diff_edge}}
+
+  HAS_FILE:
+    variants:
+      MergeRequestDiff -> MergeRequestDiffFile:
+        fk: merge_request_diff_id
+        backend: {table: gl_diff_edge}
+
+  HAS_FINDING:
+    variants:
+      Vulnerability -> VulnerabilityOccurrence: {fk: finding_id, backend: {table: gl_sec_edge}}
+      SecurityScan -> Finding: {fk: scan_id, backend: {table: gl_sec_edge}}
+
+  HAS_HEAD_PIPELINE:
+    variants: {MergeRequest -> Pipeline: {fk: head_pipeline_id, backend: {table: gl_ci_edge}}}
+
+  HAS_IDENTIFIER:
+    variants:
+      Finding -> VulnerabilityIdentifier: {backend: {table: gl_sec_edge}}
+      VulnerabilityOccurrence -> VulnerabilityIdentifier:
+        fk: primary_identifier_id
+        backend: {table: gl_sec_edge}
+
+  HAS_JOB:
+    variants:
+      Stage -> Job: {fk: stage_id, backend: {table: gl_ci_edge}}
+      Pipeline -> Job: {fk: pipeline_id, backend: {table: gl_ci_edge}}
+
+  HAS_LATEST_DIFF:
+    variants:
+      MergeRequest -> MergeRequestDiff:
+        fk: latest_merge_request_diff_id
+        backend: {table: gl_diff_edge}
+
+  HAS_PACKAGE_FILE: {variants: {Package -> PackageFile: {fk: package_id}}}
+  HAS_STAGE: {variants: {Pipeline -> Stage: {fk: pipeline_id, backend: {table: gl_ci_edge}}}}
+  HAS_VULNERABILITY: {variants: {Package -> Vulnerability: {backend: {table: gl_sec_edge}}}}
+  IN_ENVIRONMENT:
+    variants: {Deployment -> Environment: {fk: environment_id, backend: {table: gl_ci_edge}}}
+
+  IN_GROUP:
+    variants:
+      Milestone -> Group: {fk: group_id}
+      Label -> Group: {fk: group_id}
+      WorkItem -> Group: {fk: namespace_id}
+
+  IN_MILESTONE:
+    variants:
+      WorkItem -> Milestone: {fk: milestone_id}
+      MergeRequest -> Milestone: {fk: milestone_id}
+
+  IN_PIPELINE:
+    variants:
+      SecurityScan -> Pipeline: {fk: pipeline_id, backend: {table: gl_ci_edge}}
+      Job -> Pipeline: {fk: pipeline_id, backend: {table: gl_ci_edge}}
+
+  IN_PROJECT:
+    variants:
+      Note -> Project: {fk: project_id}
+      MergeRequest -> Project: {fk: project_id}
+      Pipeline -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
+      Stage -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
+      Job -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
+      Vulnerability -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
+      Finding -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
+      VulnerabilityIdentifier -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
+      WorkItem -> Project: {fk: project_id}
+      Milestone -> Project: {fk: project_id}
+      Label -> Project: {fk: project_id}
+      SecurityScan -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
+      Branch -> Project: {fk: project_id, backend: {table: gl_code_edge}}
+      Deployment -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
+      Environment -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
+      MergeRequestDiff -> Project: {fk: project_id, backend: {table: gl_diff_edge}}
+      MergeRequestDiffFile -> Project: {fk: project_id, backend: {table: gl_diff_edge}}
+      VulnerabilityScanner -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
+      VulnerabilityOccurrence -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
+      Package -> Project: {fk: project_id}
+      PackageFile -> Project: {fk: project_id}
+      ContainerRepository -> Project: {fk: project_id}
+      Dependency -> Project: {fk: project_id}
+      AgentSession -> Project: {fk: project_id}
+
+  LAST_EDITED_BY: {variants: {User -> MergeRequest: {fk: last_edited_by_id}}}
+  MERGED: {variants: {User -> MergeRequest: {fk: merge_user_id}}}
+  MERGED_AT_COMMIT: {variants: {MergeRequest -> Commit: {fk: merged_commit_id}}}
+  OCCURRENCE_OF:
+    variants:
+      VulnerabilityOccurrence -> Vulnerability:
+        fk: vulnerability_id
+        backend: {table: gl_sec_edge}
+
+  RAN_BY: {variants: {SecurityScan -> Job: {fk: build_id, backend: {table: gl_ci_edge}}}}
+  RESOLVED_BY:
+    variants: {User -> Vulnerability: {fk: resolved_by_id, backend: {table: gl_sec_edge}}}
+
+  RUNS_ON: {variants: {Job -> Runner: {fk: runner_id, backend: {table: gl_ci_edge}}}}
+  SCANS:
+    variants: {VulnerabilityScanner -> Project: {fk: project_id, backend: {table: gl_sec_edge}}}
+
+  SOURCE_PROJECT: {variants: {MergeRequest -> Project: {fk: source_project_id}}}
+  TRIGGERED:
+    variants:
+      User -> Pipeline: {fk: user_id, backend: {table: gl_ci_edge}}
+      MergeRequest -> Pipeline: {fk: merge_request_id, backend: {table: gl_ci_edge}}
+      User -> Job: {fk: user_id, backend: {table: gl_ci_edge}}
+
+  TRIGGERED_BY_PIPELINE:
+    variants: {Job -> Pipeline: {fk: upstream_pipeline_id, backend: {table: gl_ci_edge}}}
+
+  TRIGGERS_PIPELINE: {variants: {Job -> Pipeline: {backend: {table: gl_ci_edge}}}}
+  UPDATED_BY: {variants: {User -> MergeRequest: {fk: updated_by_id}}}

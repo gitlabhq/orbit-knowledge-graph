@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn accepts_only_visible_columns_and_filterable_fields() {
         let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
-        let model = query_data_model::ClickHouseDataModel::derive(ontology.clone()).unwrap();
+        let model = query_data_model::from_ontology::clickhouse(&ontology).unwrap();
         for entity in model.graph().entities() {
             for property in entity
                 .properties

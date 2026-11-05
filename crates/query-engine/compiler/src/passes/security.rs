@@ -119,7 +119,7 @@ fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, LazyLock};
+    use std::sync::LazyLock;
 
     use crate::AuthorizedPath;
     use crate::ast::visit::{visit_expressions, visit_queries};
@@ -130,21 +130,19 @@ mod tests {
     use serde_json::Value;
 
     fn model() -> &'static ClickHouseDataModel {
-        static MODEL: LazyLock<ClickHouseDataModel> = LazyLock::new(|| {
-            ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
-                .unwrap()
-        });
+        static MODEL: LazyLock<ClickHouseDataModel> =
+            LazyLock::new(|| query_data_model::ClickHouseDataModel::embedded().unwrap());
         &MODEL
     }
 
     fn security_model() -> &'static ClickHouseDataModel {
         static MODEL: LazyLock<ClickHouseDataModel> = LazyLock::new(|| {
-            ClickHouseDataModel::derive(Arc::new(
-                ontology::Ontology::new()
+            query_data_model::from_ontology::clickhouse(
+                &ontology::Ontology::new()
                     .with_nodes(["Project", "Vulnerability"])
                     .with_redaction("Vulnerability", "vulnerabilities", "id")
                     .with_redaction_role("Vulnerability", ontology::RequiredRole::SecurityManager),
-            ))
+            )
             .unwrap()
         });
         &MODEL

@@ -1,31 +1,30 @@
 use std::collections::BTreeMap;
 
-use ontology::Ontology;
 use ontology::migrations::{
     Fingerprints, embedded_sources, hash_edge_row_sources, sha256_hex, source_fingerprints,
 };
-use query_data_model::DataModelError;
+use query_data_model::{DataModelError, Packages};
 
-use crate::schema::{GraphSchema, render_refreshable_view_select};
+use crate::schema::{GraphSchema, Schema, render_refreshable_view_select};
 
-pub fn current_fingerprints(ontology: &Ontology) -> Result<Fingerprints, DataModelError> {
-    fingerprints_for(ontology, &embedded_sources())
+pub fn current_fingerprints() -> Result<Fingerprints, DataModelError> {
+    fingerprints_for(&embedded_sources(), &Packages::embedded())
 }
 
 fn fingerprints_for(
-    ontology: &Ontology,
     sources: &BTreeMap<String, String>,
+    packages: &Packages,
 ) -> Result<Fingerprints, DataModelError> {
+    let schema = GraphSchema::new(Schema::from_model(&packages.load()?)?, false);
     Ok(Fingerprints {
         sources: source_fingerprints(sources),
-        ddl: ddl_fingerprints(ontology)?,
+        ddl: ddl_fingerprints(&schema),
         edge_rows: hash_edge_row_sources(sources),
-        auxiliary_schema: auxiliary_schema_fingerprints(ontology)?,
+        auxiliary_schema: auxiliary_schema_fingerprints(&schema)?,
     })
 }
 
-pub fn ddl_fingerprints(ontology: &Ontology) -> Result<BTreeMap<String, String>, DataModelError> {
-    let schema = GraphSchema::from_ontology(ontology)?;
+fn ddl_fingerprints(schema: &GraphSchema) -> BTreeMap<String, String> {
     let mut fingerprints = BTreeMap::new();
 
     for table in &schema.tables {
@@ -43,13 +42,12 @@ pub fn ddl_fingerprints(ontology: &Ontology) -> Result<BTreeMap<String, String>,
         );
     }
 
-    Ok(fingerprints)
+    fingerprints
 }
 
-pub fn auxiliary_schema_fingerprints(
-    ontology: &Ontology,
+fn auxiliary_schema_fingerprints(
+    schema: &GraphSchema,
 ) -> Result<BTreeMap<String, String>, DataModelError> {
-    let schema = GraphSchema::from_ontology(ontology)?;
     let mut fingerprints = BTreeMap::new();
 
     for definition in &schema.unversioned_definitions {
@@ -86,10 +84,11 @@ pub fn auxiliary_schema_fingerprints(
 
 #[cfg(test)]
 mod tests {
-    use ontology::archive::OntologyArchive;
+    use ontology::Ontology;
     use ontology::migrations::{EdgeRows, MigrationScope, derive_edge_rows, derive_scope};
 
     use super::*;
+    use crate::archive::Release;
 
     struct ArchivedVersion {
         version: u32,
@@ -99,11 +98,12 @@ mod tests {
     }
 
     fn load_archive(version: u32) -> ArchivedVersion {
-        let archive = OntologyArchive::bundled(version)
+        let release = Release::bundled(version)
             .unwrap()
-            .unwrap_or_else(|| panic!("v{version} archive is bundled"));
+            .unwrap_or_else(|| panic!("v{version} archives are bundled"));
+        let archive = release.ontology_archive();
         let ontology = archive.load_ontology().unwrap();
-        let fingerprints = fingerprints_for(&ontology, archive.sources()).unwrap();
+        let fingerprints = fingerprints_for(archive.sources(), &release.packages()).unwrap();
         ArchivedVersion {
             version,
             ontology,

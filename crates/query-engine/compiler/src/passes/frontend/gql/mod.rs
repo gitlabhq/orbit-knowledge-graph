@@ -11,6 +11,7 @@ use crate::{CompiledQueryContext, Input, Ontology, QueryError, Result, SecurityC
 use errors::{invalid, parse_failure, syntax_error};
 use ontology::introspection::{IntrospectionScope, SchemaResponse, build_compact_schema_response};
 use pest_derive::Parser;
+use query_data_model::ClickHouseDataModel;
 
 #[derive(Parser)]
 #[grammar = "../../../query-data-model/src/surface/gql/query.pest"]
@@ -66,11 +67,12 @@ pub enum PreparedStatement {
 pub fn prepare(
     raw: &str,
     ontology: &Ontology,
+    data_model: &Arc<ClickHouseDataModel>,
     security_context: &SecurityContext,
     scope: IntrospectionScope,
 ) -> Result<PreparedStatement> {
     match route(raw, ontology, scope)? {
-        RoutedStatement::Query(query) => compile_query(*query, ontology, security_context)
+        RoutedStatement::Query(query) => compile_query(*query, data_model, security_context)
             .map(|compiled| PreparedStatement::Query(Box::new(compiled))),
         RoutedStatement::Schema(response) => Ok(PreparedStatement::Schema(response)),
     }
@@ -103,18 +105,7 @@ pub fn parse_query(raw: &str) -> Result<ParsedQuery> {
 
 pub fn compile_query(
     query: ParsedQuery,
-    ontology: &Ontology,
-    security_context: &SecurityContext,
-) -> Result<CompiledQueryContext> {
-    let ontology = Arc::new(ontology.clone());
-    let data_model = crate::data_model::clickhouse(Arc::clone(&ontology))
-        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    compile_query_model(query, &data_model, security_context)
-}
-
-pub fn compile_query_model(
-    query: ParsedQuery,
-    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    data_model: &Arc<ClickHouseDataModel>,
     security_context: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let mut ctx = config::ClickhouseGqlCtx::new(security_context.clone(), Arc::clone(data_model));

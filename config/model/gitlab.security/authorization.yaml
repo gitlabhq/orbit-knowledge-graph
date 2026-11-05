@@ -1,0 +1,40 @@
+kind: authorization
+package: gitlab.security
+entities:
+  Finding:
+    scope: namespace
+    role: security_manager
+    redaction: {resource: security_finding, ability: read_security_resource}
+
+  SecurityScan:
+    scope: namespace
+    role: security_manager
+    redaction: {resource: security_scan, ability: read_scan}
+
+  Vulnerability:
+    scope: namespace
+    role: security_manager
+    redaction: {resource: vulnerability, ability: read_vulnerability}
+
+  VulnerabilityIdentifier:
+    scope: namespace
+    role: security_manager
+    redaction: {resource: vulnerability_identifier, ability: read_vulnerability}
+
+  VulnerabilityOccurrence:
+    scope: namespace
+    role: security_manager
+    redaction: {resource: vulnerability_occurrence, ability: read_vulnerability}
+
+  VulnerabilityScanner:
+    scope: namespace
+    role: security_manager
+    redaction: {resource: vulnerability_scanner, ability: read_vulnerability_scanner}
+properties:
+  Finding.traversal_path: {hidden: true, filterable: false}
+  SecurityScan.traversal_path: {hidden: true, filterable: false}
+  Vulnerability.title: {like: false}
+  Vulnerability.traversal_path: {hidden: true, filterable: false}
+  VulnerabilityIdentifier.traversal_path: {hidden: true, filterable: false}
+  VulnerabilityOccurrence.traversal_path: {hidden: true, filterable: false}
+  VulnerabilityScanner.traversal_path: {hidden: true, filterable: false}

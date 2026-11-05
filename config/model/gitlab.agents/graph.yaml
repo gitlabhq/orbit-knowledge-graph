@@ -1,0 +1,67 @@
+kind: graph
+package: gitlab.agents
+domain: agents
+entities:
+  AgentSession:
+    description: >-
+      An AI agent session in a project, recorded in the AI governance sessions table.
+      Existence, source and flow type only, never its content
+    label: flow_type
+    defaults: [id, source, flow_type, session_started_at]
+    properties:
+      id: {type: int64, description: Governance session ID., immutable: true}
+      flow_type:
+        type: enum
+        description: >-
+          Kind of flow, from the workflow definition with its version dropped
+          (developer/v1 becomes developer). Unrecognized definitions, and flows addressed by display
+          name, are 'other'.
+        values:
+          0: software_development
+          1: external_agent
+          2: ai_catalog_agent
+          3: claude_code_compliance_api
+          4: chat
+          5: agentic_chat
+          6: developer
+          7: code_review
+          8: deep_code_review
+          9: fix_pipeline
+          10: convert_to_gl_ci
+          11: resolve_sast_vulnerability
+          12: sast_fp_detection
+          13: secrets_fp_detection
+          14: security_review
+          15: recommend_reviewers
+          16: risk_classification
+          17: workplan
+          18: readiness_score
+          19: slack_assistant
+          20: resolve_dependency_bump
+          21: bl_security
+          22: business_context_security_guidelines
+          23: orbit_agent
+          24: duo_planner
+          25: security_analyst_agent
+          26: analytics_agent
+          27: ci_expert_agent
+          28: duo_permissions_assistant
+          29: support_assistant
+          30: onboarding_guide
+          31: flow_creator
+          32: other
+          33: ambient
+          34: issue_to_merge_request
+          35: convert_to_gitlab_ci
+        stored_as_text: true
+      source:
+        type: enum
+        description: Where the session was recorded. Only gitlab_duo sessions are indexed today.
+        values: {0: gitlab_duo, 1: claude_code_compliance_api, 2: claude_code_glab, 3: mcp}
+      project_id:
+        type: int64
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      session_started_at: {type: timestamp, description: When the session started., immutable: true}
+      traversal_path: {type: string, description: Namespace path for authz.}

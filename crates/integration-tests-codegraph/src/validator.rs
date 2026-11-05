@@ -7,6 +7,7 @@ use compiler::{Frontend, compile_local};
 use duckdb_client::DuckDbClient;
 use ontology::Ontology;
 use orbit_arrow::ArrowUtils;
+use query_data_model::DuckDbDataModel;
 use tabled::{Table, builder::Builder};
 
 use super::assertions::{
@@ -25,7 +26,8 @@ pub struct Failure {
 pub fn run_suite(
     suite: &TestSuite,
     client: &DuckDbClient,
-    ontology: &Arc<Ontology>,
+    ontology: &Ontology,
+    data_model: &Arc<DuckDbDataModel>,
     probe_skipped: bool,
 ) -> Vec<Failure> {
     let mut failures = undeclared_edges(client, ontology);
@@ -33,11 +35,11 @@ pub fn run_suite(
         if test.skip {
             eprintln!("  [SKIP] \"{}\"", test.name);
             if probe_skipped {
-                failures.extend(probe_test(test, client, ontology));
+                failures.extend(probe_test(test, client, data_model));
             }
             continue;
         }
-        failures.extend(run_test(test, client, ontology));
+        failures.extend(run_test(test, client, data_model));
     }
     failures
 }
@@ -77,9 +79,13 @@ fn undeclared_edges(client: &DuckDbClient, ontology: &Ontology) -> Vec<Failure> 
     failures
 }
 
-fn run_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) -> Vec<Failure> {
+fn run_test(
+    test: &TestCase,
+    client: &DuckDbClient,
+    data_model: &Arc<DuckDbDataModel>,
+) -> Vec<Failure> {
     if test.debug {
-        dump_datasets(client, ontology);
+        dump_datasets(client, data_model);
     }
 
     let blocks = test.all_queries();
@@ -96,12 +102,12 @@ fn run_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) ->
             test.severity,
             block,
             client,
-            ontology,
+            data_model,
         ));
     }
 
     if !failures.is_empty() && !test.debug {
-        dump_datasets(client, ontology);
+        dump_datasets(client, data_model);
     }
 
     failures
@@ -109,10 +115,14 @@ fn run_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) ->
 
 /// A skipped test's queries without its assertions, so a query that no
 /// longer runs or needs a LIMIT fails the suite while it stays skipped.
-fn probe_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) -> Vec<Failure> {
+fn probe_test(
+    test: &TestCase,
+    client: &DuckDbClient,
+    data_model: &Arc<DuckDbDataModel>,
+) -> Vec<Failure> {
     test.all_queries()
         .iter()
-        .filter_map(|block| run_query(&test.name, test.severity, block, client, ontology).err())
+        .filter_map(|block| run_query(&test.name, test.severity, block, client, data_model).err())
         .flatten()
         .collect()
 }
@@ -120,14 +130,14 @@ fn probe_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) 
 fn execute_cypher(
     cypher: &str,
     client: &DuckDbClient,
-    ontology: &Arc<Ontology>,
+    data_model: &Arc<DuckDbDataModel>,
 ) -> anyhow::Result<(RecordBatch, bool)> {
     let (clean_query, aliases) = rewrite_query(cypher);
     if !aliases.is_empty() {
         eprintln!("  ALIASES: {aliases:?}");
         eprintln!("  REWRITTEN: {clean_query}");
     }
-    let compiled = compile_local(&clean_query, Frontend::Gql, ontology)?;
+    let compiled = compile_local(&clean_query, Frontend::Gql, data_model)?;
     let sql = compiled.base.render();
     eprintln!("  SQL: {sql}");
     let batches = client.query_arrow(&sql)?;
@@ -228,7 +238,7 @@ fn apply_aliases(
         .unwrap_or_else(|e| panic!("apply_aliases failed: {e}"))
 }
 
-fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>) {
+fn dump_datasets(client: &DuckDbClient, data_model: &Arc<DuckDbDataModel>) {
     let debug_queries = [
         (
             "Definitions",
@@ -243,7 +253,7 @@ fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>) {
 
     eprintln!("\n  ╔══ DEBUG DUMP ══════════════════════════════════════");
     for (label, cypher) in debug_queries {
-        match execute_cypher(cypher, client, ontology) {
+        match execute_cypher(cypher, client, data_model) {
             Ok((batch, _)) => print_result(&format!("  {label}"), cypher, &batch),
             Err(e) => eprintln!("  {label}: query failed: {e}"),
         }
@@ -256,9 +266,9 @@ fn run_query(
     severity: Severity,
     block: &QueryBlock,
     client: &DuckDbClient,
-    ontology: &Arc<Ontology>,
+    data_model: &Arc<DuckDbDataModel>,
 ) -> Result<RecordBatch, Vec<Failure>> {
-    match execute_cypher(&block.query, client, ontology) {
+    match execute_cypher(&block.query, client, data_model) {
         Ok((batch, has_more)) if has_more && !has_explicit_limit(&block.query) => {
             print_result(label, &block.query, &batch);
             Err(vec![fail(
@@ -284,9 +294,9 @@ fn run_query_block(
     severity: Severity,
     block: &QueryBlock,
     client: &DuckDbClient,
-    ontology: &Arc<Ontology>,
+    data_model: &Arc<DuckDbDataModel>,
 ) -> Vec<Failure> {
-    let batch = match run_query(label, severity, block, client, ontology) {
+    let batch = match run_query(label, severity, block, client, data_model) {
         Ok(batch) => batch,
         Err(failures) => return failures,
     };

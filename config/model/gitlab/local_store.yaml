@@ -1,0 +1,27 @@
+kind: storage
+package: gitlab
+store: local
+engine:
+  kind: duckdb
+  connection: local
+  trusted: true
+  path_column: traversal_path
+  backend:
+    edge_tables:
+      gl_edge:
+        default: true
+        sort_key:
+        - traversal_path
+        - relationship_kind
+        - source_id
+        - target_id
+        - source_kind
+        - target_kind
+        columns:
+          source_id: int64
+          source_kind: string
+          relationship_kind: string
+          target_id: int64
+          target_kind: string
+          traversal_path: string
+    route_all_variants: true

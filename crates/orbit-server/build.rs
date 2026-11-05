@@ -1,27 +1,26 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    export_current_ontology_archive_path();
+    export_current_archive_paths();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
 }
 
-/// Points `ONTOLOGY_ARCHIVE_PATH` at the bundled archive for the current
-/// schema version.
-fn export_current_ontology_archive_path() {
-    let directory = std::path::Path::new(env!("ORBIT_CONFIG_DIR")).join("ontology-archives");
-    println!("cargo:rerun-if-changed={}", directory.display());
-    // Keep in sync with `OntologyArchive::path`.
-    let current_path = directory.join(format!("v{}.tar.gz", orbit_versions::VERSIONS.schema));
-    let resolved = current_path.canonicalize().unwrap_or_else(|_| {
-        panic!(
-            "{} is missing; run `mise schema:snapshot` to seed the current archive.",
-            current_path.display()
-        )
-    });
-    println!(
-        "cargo:rustc-env=ONTOLOGY_ARCHIVE_PATH={}",
-        resolved.display()
-    );
+fn export_current_archive_paths() {
+    for (variable, directory) in [
+        ("ONTOLOGY_ARCHIVE_PATH", "ontology-archives"),
+        ("MODEL_ARCHIVE_PATH", "model-archives"),
+    ] {
+        let directory = std::path::Path::new(env!("ORBIT_CONFIG_DIR")).join(directory);
+        println!("cargo:rerun-if-changed={}", directory.display());
+        let current_path = directory.join(format!("v{}.tar.gz", orbit_versions::VERSIONS.schema));
+        let resolved = current_path.canonicalize().unwrap_or_else(|_| {
+            panic!(
+                "{} is missing; run `mise schema:snapshot` to seed the current archive.",
+                current_path.display()
+            )
+        });
+        println!("cargo:rustc-env={variable}={}", resolved.display());
+    }
 }
 
 #[cfg(feature = "regenerate-protos")]

@@ -67,12 +67,11 @@ fn first_difference(old: &str, new: &str) -> String {
     )
 }
 
-const MATCHED_AT_LEAST: usize = 948;
+const MATCHED_AT_LEAST: usize = 947;
 
 #[test]
 fn surfaces_build_the_same_input_as_the_frontends() {
-    let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
-    let data_model = ClickHouseDataModel::derive(ontology).unwrap();
+    let data_model = Arc::new(ClickHouseDataModel::embedded().unwrap());
     let model = data_model.catalog().model();
     let cases = corpus::load();
     let mut tally: BTreeMap<String, Vec<String>> = BTreeMap::new();

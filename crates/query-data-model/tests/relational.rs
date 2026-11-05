@@ -1,5 +1,3 @@
-use std::sync::{Arc, LazyLock};
-
 use orbit_utils::query_types::SqlType;
 use query_data_model::implementations::relational::plan::{
     AggregateFunction, BinaryOp, Expr, JoinKind, Measure, Order, ReadMode, RelationalError,
@@ -8,17 +6,12 @@ use query_data_model::plan::tracking::Declare;
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
 use serde_json::json;
 
-static ONTOLOGY: LazyLock<Arc<ontology::Ontology>> =
-    LazyLock::new(|| Arc::new(ontology::Ontology::load_embedded().unwrap()));
-
 fn clickhouse() -> ClickHouseDataModel {
-    ClickHouseDataModel::derive(Arc::clone(&ONTOLOGY)).unwrap()
+    ClickHouseDataModel::embedded().unwrap()
 }
 
 fn duckdb() -> DuckDbDataModel {
-    let mut ontology = ONTOLOGY.as_ref().clone();
-    ontology.remove_data_model_optimizations();
-    DuckDbDataModel::derive(Arc::new(ontology)).unwrap()
+    DuckDbDataModel::embedded().unwrap()
 }
 
 fn eq(left: Expr, right: Expr) -> Expr {

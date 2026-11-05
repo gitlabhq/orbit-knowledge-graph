@@ -1,0 +1,21 @@
+kind: authorization
+package: gitlab.core
+entities:
+  Group: {scope: namespace, role: reporter, redaction: {resource: group, ability: read_group}}
+  Note: {scope: namespace, role: reporter, redaction: {resource: note, ability: read_note}}
+  Project: {scope: namespace, role: reporter, redaction: {resource: project, ability: read_code}}
+  User: {scope: global, role: reporter, redaction: {resource: user, ability: read_user}}
+properties:
+  Group.traversal_path: {hidden: true, filterable: false}
+  Note.traversal_path: {hidden: true, filterable: false}
+  Project.traversal_path: {hidden: true, filterable: false}
+  User.email: {admin_only: true, like: false}
+  User.first_name: {admin_only: true}
+  User.last_name: {admin_only: true}
+  User.updated_at: {admin_only: true}
+  User.public_email: {like: false}
+  User.preferred_language: {admin_only: true}
+  User.private_profile: {admin_only: true}
+  User.is_admin: {admin_only: true}
+  User.is_auditor: {admin_only: true}
+  User.is_external: {admin_only: true}

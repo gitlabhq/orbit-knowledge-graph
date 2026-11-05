@@ -1,10 +1,11 @@
 pub mod catalog;
-mod derive;
 mod error;
+#[cfg(feature = "from-ontology")]
 pub mod from_ontology;
 pub mod generic;
 pub mod implementations;
 pub mod models;
+pub mod packages;
 pub mod plan;
 pub mod query_model;
 pub mod spec;
@@ -25,4 +26,5 @@ pub use models::orbit::{
     ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, PropertyRealization, RelationshipRoute,
     VariantRoute,
 };
+pub use packages::Packages;
 pub use query_model::{EntityAuthConfig, QueryFacts, QueryModel};

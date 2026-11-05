@@ -11,9 +11,9 @@ use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, TestContext, compile_and_execute, load_ontology,
     resolve_owners, run_redaction, test_security_context,
 };
-use integration_testkit::{run_subtests, run_subtests_shared, t};
+use integration_testkit::{load_data_model, run_subtests, run_subtests_shared, t};
 use orbit_server::redaction::QueryResult;
-use query_engine::compiler::build_entity_auth;
+use query_data_model::OrbitQueryModel;
 
 fn table_users() -> String {
     t("gl_user")
@@ -109,7 +109,7 @@ async fn setup_test_data(ctx: &TestContext) {
 }
 
 async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -121,7 +121,7 @@ async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -144,7 +144,7 @@ async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
 }
 
 async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -156,7 +156,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext)
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -189,7 +189,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext)
 }
 
 async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -201,7 +201,7 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -237,7 +237,7 @@ async fn agent_session_hidden_when_project_read_code_is_denied(ctx: &TestContext
     .await;
     ctx.optimize_all().await;
 
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let query = compile(
         r#"{
             "query_type": "traversal",
@@ -245,7 +245,7 @@ async fn agent_session_hidden_when_project_read_code_is_denied(ctx: &TestContext
             "limit": 10
         }"#,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &test_security_context(),
     )
     .unwrap();
@@ -268,7 +268,7 @@ async fn agent_session_hidden_when_project_read_code_is_denied(ctx: &TestContext
 }
 
 async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -284,7 +284,7 @@ async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -340,7 +340,7 @@ async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
 }
 
 async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -356,7 +356,7 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &T
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -390,7 +390,7 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &T
 }
 
 async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -410,7 +410,7 @@ async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -464,7 +464,7 @@ async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
 }
 
 async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -484,7 +484,7 @@ async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContex
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -534,7 +534,7 @@ async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContex
 }
 
 async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -550,7 +550,7 @@ async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -598,7 +598,7 @@ async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
 }
 
 async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -610,7 +610,7 @@ async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -641,7 +641,7 @@ async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
 }
 
 async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -661,7 +661,7 @@ async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -697,7 +697,7 @@ async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
 }
 
 async fn empty_query_result_stays_empty(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -709,7 +709,7 @@ async fn empty_query_result_stays_empty(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -728,7 +728,7 @@ async fn empty_query_result_stays_empty(ctx: &TestContext) {
 }
 
 async fn all_authorized_preserves_all_data(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -744,7 +744,7 @@ async fn all_authorized_preserves_all_data(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -767,7 +767,7 @@ async fn all_authorized_preserves_all_data(ctx: &TestContext) {
 }
 
 async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -783,7 +783,7 @@ async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -879,7 +879,7 @@ async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
 }
 
 async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -899,7 +899,7 @@ async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -930,7 +930,7 @@ async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
 }
 
 async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -942,7 +942,7 @@ async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1000,7 +1000,7 @@ fn fail_closed_null_id_denies_row() {
         RecordBatch::try_new(schema, arrays).unwrap()
     }
 
-    let ontology = load_ontology();
+    let data_model = load_data_model();
 
     let batch = make_batch(vec![
         (
@@ -1024,7 +1024,7 @@ fn fail_closed_null_id_denies_row() {
     let mut ctx = ResultContext::new();
     ctx.add_node("u", "User");
     ctx.add_node("p", "Project");
-    for (entity, config) in build_entity_auth(&ontology) {
+    for (entity, config) in data_model.entity_auth().clone() {
         ctx.add_entity_auth(entity, config);
     }
 
@@ -1053,7 +1053,7 @@ fn fail_closed_null_id_denies_row() {
 }
 
 async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1068,7 +1068,7 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1106,7 +1106,7 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
 }
 
 async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1121,7 +1121,7 @@ async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1139,7 +1139,7 @@ async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
 }
 
 async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1154,7 +1154,7 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1214,7 +1214,7 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
 }
 
 async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1229,7 +1229,7 @@ async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1266,7 +1266,7 @@ async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
 }
 
 async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1281,7 +1281,7 @@ async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1302,7 +1302,7 @@ async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
 }
 
 async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1317,7 +1317,7 @@ async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1345,7 +1345,7 @@ async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
 }
 
 async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1360,7 +1360,7 @@ async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1394,7 +1394,7 @@ async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext
 }
 
 async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1409,7 +1409,7 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1440,7 +1440,7 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
 }
 
 async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1455,7 +1455,7 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1500,7 +1500,7 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
 }
 
 async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1515,7 +1515,7 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1539,7 +1539,7 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
 }
 
 async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1554,7 +1554,7 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1642,7 +1642,7 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
 }
 
 async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1662,7 +1662,7 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1702,7 +1702,7 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
 }
 
 async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1721,7 +1721,7 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1751,7 +1751,7 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
 }
 
 async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1767,7 +1767,7 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1797,7 +1797,7 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
 }
 
 async fn search_with_id_range_filter(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1813,7 +1813,7 @@ async fn search_with_id_range_filter(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1837,7 +1837,7 @@ async fn search_with_id_range_filter(ctx: &TestContext) {
 }
 
 async fn search_with_specific_node_ids(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1853,7 +1853,7 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1883,7 +1883,7 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
 }
 
 async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1901,7 +1901,7 @@ async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1919,7 +1919,7 @@ async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
 }
 
 async fn search_fail_closed_no_authorization(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1935,7 +1935,7 @@ async fn search_fail_closed_no_authorization(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -1957,7 +1957,7 @@ async fn search_fail_closed_no_authorization(ctx: &TestContext) {
 }
 
 async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -1975,7 +1975,7 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2027,7 +2027,7 @@ fn fail_closed_null_type_denies_row() {
         RecordBatch::try_new(schema, arrays).unwrap()
     }
 
-    let ontology = load_ontology();
+    let data_model = load_data_model();
 
     let batch = make_batch(vec![
         (
@@ -2042,7 +2042,7 @@ fn fail_closed_null_type_denies_row() {
 
     let mut ctx = ResultContext::new();
     ctx.add_node("u", "User");
-    for (entity, config) in build_entity_auth(&ontology) {
+    for (entity, config) in data_model.entity_auth().clone() {
         ctx.add_entity_auth(entity, config);
     }
 
@@ -2062,7 +2062,7 @@ fn fail_closed_null_type_denies_row() {
 }
 
 async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2079,7 +2079,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2131,7 +2131,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
 }
 
 async fn column_selection_wildcard_returns_listed_columns_plus_mandatory(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2148,7 +2148,7 @@ async fn column_selection_wildcard_returns_listed_columns_plus_mandatory(ctx: &T
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2201,7 +2201,7 @@ async fn column_selection_wildcard_returns_listed_columns_plus_mandatory(ctx: &T
 }
 
 async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2213,7 +2213,7 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2254,7 +2254,7 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
 }
 
 async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2274,7 +2274,7 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2342,7 +2342,7 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
 }
 
 async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2358,7 +2358,7 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2397,7 +2397,7 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
 }
 
 async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2417,7 +2417,7 @@ async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2444,7 +2444,7 @@ async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext
 }
 
 async fn column_selection_data_values_preserved_through_redaction(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2463,7 +2463,7 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2492,7 +2492,7 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
 }
 
 async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2509,7 +2509,7 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2571,7 +2571,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
     ))
     .await;
 
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2589,7 +2589,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2669,7 +2669,7 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
     ))
     .await;
 
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2687,7 +2687,7 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2739,7 +2739,7 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
 }
 
 async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2755,7 +2755,7 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2801,7 +2801,7 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
 }
 
 async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2819,7 +2819,7 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2852,7 +2852,7 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
 }
 
 async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2869,7 +2869,7 @@ async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -2887,7 +2887,7 @@ async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
 }
 
 async fn neighbors_query_comprehensive(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -2899,7 +2899,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3015,7 +3015,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
 }
 
 async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -3027,7 +3027,7 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3047,7 +3047,7 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
 }
 
 async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -3059,7 +3059,7 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3092,7 +3092,7 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
 }
 
 async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -3104,7 +3104,7 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3196,7 +3196,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     setup_test_data(ctx).await;
     setup_indirect_auth_data(ctx).await;
 
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -3208,7 +3208,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3348,7 +3348,7 @@ async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestConte
     setup_test_data(ctx).await;
     setup_indirect_auth_data(ctx).await;
 
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -3363,7 +3363,7 @@ async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestConte
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3397,7 +3397,7 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
     setup_test_data(ctx).await;
     setup_indirect_auth_data(ctx).await;
 
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -3409,7 +3409,7 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3453,7 +3453,7 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
 }
 
 async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -3469,7 +3469,7 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3619,7 +3619,7 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
 }
 
 async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -3639,7 +3639,7 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3760,7 +3760,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     ))
     .await;
 
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -3772,7 +3772,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3836,7 +3836,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
 /// Normalization coerces int filter values to string labels for int-based enums
 /// (no enum_type in ontology); string-based enums (enum_type: string) pass through.
 async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
 
     // User.user_type is int-based: 0=human, 6=project_bot, 11=service_account.
@@ -3848,7 +3848,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3884,7 +3884,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3906,7 +3906,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3938,7 +3938,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3959,7 +3959,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -3980,7 +3980,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -4012,7 +4012,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();
@@ -4033,7 +4033,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let query = compile(
         json,
         query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
+        &data_model,
         &security_ctx,
     )
     .unwrap();

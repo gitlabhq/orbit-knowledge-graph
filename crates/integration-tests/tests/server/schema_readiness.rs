@@ -7,9 +7,9 @@ use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use integration_testkit::TestContext;
 use jsonwebtoken::{EncodingKey, Header, encode};
 use nats_client::{KvPutOptions, NatsClient};
-use ontology::archive::OntologyArchive;
-use orbit_migrations::catalog::{ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
-use orbit_migrations::schema::GraphSchema;
+use orbit_migrations::archive::Release;
+use orbit_migrations::catalog::{MODEL_ARCHIVES_BUCKET, ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
+use orbit_migrations::schema::{GraphSchema, Schema};
 use orbit_migrations::version::{
     ensure_version_table, mark_version_migrating, mark_version_retired, promote_version,
     table_prefix,
@@ -56,7 +56,7 @@ async fn split_route_archive_is_served_by_variant_aware_queries() {
     let mut calls: Value = yaml::from_str(&sources["edges/calls.yaml"]).unwrap();
     calls["variants"][0]["table"] = json!("gl_edge");
     sources.insert("edges/calls.yaml".into(), yaml::to_string(&calls).unwrap());
-    let archive = OntologyArchive::from_sources(2, &sources).unwrap();
+    let archive = integration_testkit::derived_release(2, &sources);
     cluster.catalog.publish(&archive).await.unwrap();
     cluster.promote(2).await;
     cluster.await_serving(Some(2)).await;
@@ -321,19 +321,26 @@ impl Cluster {
     }
 
     async fn corrupt_archive(&self, version: u32) {
-        self.overwrite_archive(version, bytes::Bytes::from_static(b"corrupt archive"))
+        let corrupt = bytes::Bytes::from_static(b"corrupt archive");
+        self.overwrite_archive(ONTOLOGY_ARCHIVES_BUCKET, version, corrupt)
             .await;
     }
 
     async fn restore_archive(&self, version: u32) {
-        let contents = bytes::Bytes::copy_from_slice(test_archive(version).bytes());
-        self.overwrite_archive(version, contents).await;
+        let release = test_archive(version);
+        for (bucket, bytes) in [
+            (ONTOLOGY_ARCHIVES_BUCKET, release.ontology_archive().bytes()),
+            (MODEL_ARCHIVES_BUCKET, release.model_archive().bytes()),
+        ] {
+            self.overwrite_archive(bucket, version, bytes::Bytes::copy_from_slice(bytes))
+                .await;
+        }
     }
 
-    async fn overwrite_archive(&self, version: u32, contents: bytes::Bytes) {
+    async fn overwrite_archive(&self, bucket: &str, version: u32, contents: bytes::Bytes) {
         self.nats_client
             .kv_put(
-                ONTOLOGY_ARCHIVES_BUCKET,
+                bucket,
                 &version.to_string(),
                 contents,
                 KvPutOptions::default(),
@@ -344,10 +351,10 @@ impl Cluster {
 
     async fn create_tables(&self, versions: &[u32]) {
         for &version in versions {
-            let ontology = test_archive(version).load_ontology().unwrap();
+            let physical =
+                Schema::from_model(&test_archive(version).packages().load().unwrap()).unwrap();
             let project_table = format!("v{version}_gl_project");
-            for table_name in GraphSchema::from_ontology(&ontology)
-                .unwrap()
+            for table_name in GraphSchema::new(physical, false)
                 .prefixed_table_names(&table_prefix(version))
                 .into_iter()
                 .filter(|table_name| *table_name != project_table)
@@ -773,7 +780,7 @@ fn project_has_description_in(version: u32) -> bool {
     version > 1
 }
 
-fn test_archive(version: u32) -> OntologyArchive {
+fn test_archive(version: u32) -> Release {
     let mut sources = ontology::migrations::embedded_sources();
     if version == 1 {
         for (path, property) in PROPERTIES_ADDED_IN_V2 {
@@ -787,10 +794,13 @@ fn test_archive(version: u32) -> OntologyArchive {
                 .as_array_mut()
                 .unwrap()
                 .retain(|column| column["name"] != property);
+            if let Some(indexes) = node["storage"]["indexes"].as_array_mut() {
+                indexes.retain(|index| index["column"] != property);
+            }
             sources.insert(path.into(), yaml::to_string(&node).unwrap());
         }
     }
-    OntologyArchive::from_sources(version, &sources).unwrap()
+    integration_testkit::derived_release(version, &sources)
 }
 
 fn webserver_config(graph: &TestContext, nats_address: &str) -> AppConfig {

@@ -29,7 +29,10 @@ fn orbit_skills_match_cli_commands() {
 #[test]
 fn named_queries_render_and_compile() {
     let directory = PathBuf::from(env!("NAMED_QUERIES_DIR"));
-    let ontology = embedded_ontology();
+    let data_model = Arc::new(
+        query_data_model::ClickHouseDataModel::embedded()
+            .unwrap_or_else(|error| panic!("embedded model failed to load: {error}")),
+    );
     let security_context = compiler::SecurityContext::new_with_roles(
         1,
         vec![compiler::AuthorizedPath::new(
@@ -49,7 +52,8 @@ fn named_queries_render_and_compile() {
             let rendered = query
                 .render_example_language(language)
                 .unwrap_or_else(|error| panic!("named query failed to render: {error}"));
-            if let Err(error) = compiler::compile(&rendered, frontend, &ontology, &security_context)
+            if let Err(error) =
+                compiler::compile(&rendered, frontend, &data_model, &security_context)
             {
                 panic!(
                     "named query `{}` ({language:?}) failed to compile: {error}",

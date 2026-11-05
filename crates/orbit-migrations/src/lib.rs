@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod campaign;
 pub mod catalog;
 pub mod completion;

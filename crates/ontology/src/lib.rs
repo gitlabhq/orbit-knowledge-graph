@@ -840,33 +840,6 @@ impl Ontology {
         self.edge_table_configs.keys().map(|s| s.as_str()).collect()
     }
 
-    /// Collapse all edge routing to a single table. Used by the local/DuckDB
-    /// pipeline where only one edge table exists.
-    pub fn collapse_edge_tables(&mut self, table: &str) {
-        let table = table.to_string();
-        self.default_edge_table = table.clone();
-        for variants in self.edges.values_mut() {
-            for edge in variants {
-                edge.destination_table = table.clone();
-            }
-        }
-    }
-
-    pub fn remove_data_model_optimizations(&mut self) {
-        if let Some(table) = self.local_edge_table_name.clone() {
-            self.collapse_edge_tables(&table);
-        }
-        let allowed: std::collections::HashSet<&str> = self
-            .local_edge_columns
-            .iter()
-            .map(|c| c.name.as_str())
-            .collect();
-        self.denormalized_properties
-            .retain(|dp| allowed.contains(dp.edge_column.as_str()));
-        self.denormalized_joins.clear();
-        self.reordered_tables.clear();
-    }
-
     pub fn edge_route(
         &self,
         relationship_kind: &str,

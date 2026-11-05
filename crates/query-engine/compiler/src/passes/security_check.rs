@@ -131,22 +131,20 @@ fn has_valid_path_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, LazyLock};
+    use std::sync::LazyLock;
 
     use crate::ast::{SelectExpr, TableRef};
     use crate::constants::TRAVERSAL_PATH_COLUMN;
     use query_data_model::ClickHouseDataModel;
 
     fn model() -> &'static ClickHouseDataModel {
-        static MODEL: LazyLock<ClickHouseDataModel> = LazyLock::new(|| {
-            ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
-                .unwrap()
-        });
+        static MODEL: LazyLock<ClickHouseDataModel> =
+            LazyLock::new(|| query_data_model::ClickHouseDataModel::embedded().unwrap());
         &MODEL
     }
 
     fn derive_model(ontology: ontology::Ontology) -> ClickHouseDataModel {
-        ClickHouseDataModel::derive(Arc::new(ontology)).unwrap()
+        query_data_model::from_ontology::clickhouse(&ontology).unwrap()
     }
 
     fn apply_security(node: &mut Node, context: &SecurityContext, model: &ClickHouseDataModel) {

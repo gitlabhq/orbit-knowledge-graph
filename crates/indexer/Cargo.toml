@@ -58,6 +58,7 @@ uuid = { workspace = true }
 zstd = "0.14.3"
 
 [dev-dependencies]
+query-data-model = { path = "../query-data-model", features = ["from-ontology"] }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 jsonschema = { workspace = true }
 nats-client = { workspace = true, features = ["testkit"] }

@@ -66,9 +66,13 @@ enum Command {
         #[arg(long, short, default_value = "remote")]
         target: DdlTarget,
 
-        /// Path to ontology directory (default: embedded).
+        /// Path to ontology directory for the local target (default: embedded).
         #[arg(long, short)]
         ontology: Option<std::path::PathBuf>,
+
+        /// Path to model package directory for remote targets (default: embedded).
+        #[arg(long, short)]
+        model: Option<std::path::PathBuf>,
 
         /// Table prefix (e.g., "v1_"; remote only).
         #[arg(long, short, default_value = "")]
@@ -211,6 +215,8 @@ enum MigrationLedgerCommand {
     },
     /// Snapshot auxiliary tables and refreshable views without changing the schema pin.
     Snapshot,
+    /// Write the model archive of every bundled schema version that lacks one.
+    LegacyModelArchives,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -358,17 +364,16 @@ async fn main() -> Result<()> {
         Command::Ddl {
             target,
             ontology,
+            model,
             prefix,
             diff,
         } => match target {
-            DdlTarget::Remote(RemoteLifecycle::Versioned) => {
-                ddl::run_remote(ontology, prefix, diff)
-            }
+            DdlTarget::Remote(RemoteLifecycle::Versioned) => ddl::run_remote(model, prefix, diff),
             DdlTarget::Remote(RemoteLifecycle::Persistent) => {
                 if !prefix.is_empty() {
                     anyhow::bail!("--prefix is only supported for --target remote");
                 }
-                ddl::run_persistent(ontology, diff)
+                ddl::run_persistent(model, diff)
             }
             DdlTarget::Local => {
                 if !prefix.is_empty() || diff.is_some() {
@@ -391,6 +396,9 @@ async fn main() -> Result<()> {
             } => migration_ledger::bump(scope, entities, note, base, amend, new),
             MigrationLedgerCommand::Check { base } => migration_ledger::check(base),
             MigrationLedgerCommand::Snapshot => migration_ledger::snapshot(),
+            MigrationLedgerCommand::LegacyModelArchives => {
+                migration_ledger::legacy_model_archives()
+            }
         },
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),

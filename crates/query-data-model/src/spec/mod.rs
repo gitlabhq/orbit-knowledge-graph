@@ -30,8 +30,20 @@ impl Fragment {
         orbit_utils::yaml::from_str(yaml)
     }
 
-    pub fn to_yaml(&self) -> Result<String, orbit_utils::yaml::SerializeError> {
-        orbit_utils::yaml::to_string(self)
+    pub fn parse_all<'a>(
+        sources: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Result<Vec<Self>, crate::DataModelError> {
+        let mut diagnostics = crate::catalog::Diagnostics::default();
+        let fragments = sources
+            .into_iter()
+            .filter_map(|(name, yaml)| {
+                Self::parse(yaml)
+                    .map_err(|error| diagnostics.error(name, error.to_string()))
+                    .ok()
+            })
+            .collect();
+        diagnostics.finish()?;
+        Ok(fragments)
     }
 
     pub fn package(&self) -> &str {

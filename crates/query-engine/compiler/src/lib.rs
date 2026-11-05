@@ -13,14 +13,9 @@
 //! ```rust,no_run
 //! use std::sync::Arc;
 //! use compiler::{compile, Frontend, SecurityContext};
-//! use ontology::{Ontology, DataType};
+//! use query_data_model::ClickHouseDataModel;
 //!
-//! let ontology = Arc::new(
-//!     Ontology::new()
-//!         .with_nodes(["User", "Project"])
-//!         .with_edges(["MEMBER_OF"])
-//!         .with_fields("User", [("username", DataType::String)]),
-//! );
+//! let data_model = Arc::new(ClickHouseDataModel::embedded().unwrap());
 //!
 //! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
 //!
@@ -30,7 +25,7 @@
 //!     "limit": 10
 //! }"#;
 //!
-//! let result = compile(json, Frontend::JsonDsl, &ontology, &ctx).unwrap();
+//! let result = compile(json, Frontend::JsonDsl, &data_model, &ctx).unwrap();
 //! println!("SQL: {}", result.base.sql);
 //! ```
 
@@ -38,7 +33,6 @@ pub mod analytics;
 pub mod ast;
 pub mod bridge;
 pub mod constants;
-pub mod data_model;
 pub mod error;
 pub mod input;
 pub mod metrics;
@@ -67,6 +61,7 @@ pub use input::{
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
 pub use query_data_model::EntityAuthConfig;
+use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
 
 pub use analytics::ExecMetrics;
 pub use passes::codegen::{
@@ -80,7 +75,6 @@ pub use passes::hydrate::{
     DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
 };
-pub use passes::normalize::build_entity_auth;
 pub use passes::plan::HydrationCompileOptions;
 pub use passes::result_contract::{EdgeMeta, RedactionNode, ResultContext};
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
@@ -107,18 +101,7 @@ fn finish<C: config::CompilerCtx>(
 pub fn compile(
     raw: &str,
     fe: Frontend,
-    ontology: &Arc<Ontology>,
-    ctx: &SecurityContext,
-) -> Result<CompiledQueryContext> {
-    let data_model = data_model::clickhouse(Arc::clone(ontology))
-        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    compile_model(raw, fe, &data_model, ctx)
-}
-
-pub fn compile_model(
-    raw: &str,
-    fe: Frontend,
-    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    data_model: &Arc<ClickHouseDataModel>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let compiled = match fe {
@@ -142,43 +125,38 @@ pub fn compile_model(
 
 /// Compile a graph query into DuckDB SQL for local execution.
 ///
-/// Collapses edge tables to the local single-table layout before compiling.
 /// No security or hydration phases — local mode trusts all data.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(
     raw: &str,
     fe: Frontend,
-    ontology: &Arc<Ontology>,
+    data_model: &Arc<DuckDbDataModel>,
 ) -> Result<CompiledQueryContext> {
-    let mut ontology = ontology.as_ref().clone();
-    ontology.remove_data_model_optimizations();
-    let ontology = Arc::new(ontology);
-    let data_model = data_model::duckdb(Arc::clone(&ontology))
-        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     let compiled = match fe {
         Frontend::JsonDsl => {
-            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&data_model));
+            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(data_model));
             c.set_raw(raw.to_string());
             finish(&mut c, config::run_duckdb_json_dsl)
         }
         Frontend::Gql => {
-            let mut c = config::DuckdbGqlCtx::new(Arc::clone(&data_model));
+            let mut c = config::DuckdbGqlCtx::new(Arc::clone(data_model));
             c.set_raw(raw.to_string());
             finish(&mut c, config::run_duckdb_gql)
         }
     };
     #[cfg(test)]
     parity::assert_matches(&compiled, |compiled| {
-        parity::check_duckdb(compiled, &data_model)
+        parity::check_duckdb(compiled, data_model)
     });
     compiled
 }
 
 /// Run only `validate` + `normalize`, returning the normalized [`Input`].
-pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<Input> {
-    let data_model = data_model::clickhouse(Arc::clone(ontology))
-        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    let mut ctx = config::ValidateNormalizeCtx::new(data_model);
+pub fn validate_normalize(
+    json_input: &str,
+    data_model: &Arc<ClickHouseDataModel>,
+) -> Result<Input> {
+    let mut ctx = config::ValidateNormalizeCtx::new(Arc::clone(data_model));
     ctx.set_raw(json_input.to_string());
     config::run_validate_normalize(&mut ctx)
         .and_then(|()| {
@@ -189,10 +167,8 @@ pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<
         .count_err()
 }
 
-pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Input> {
-    let data_model = data_model::clickhouse(Arc::clone(ontology))
-        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    let mut ctx = config::ValidateNormalizeGqlCtx::new(data_model);
+pub fn validate_normalize_gql(raw: &str, data_model: &Arc<ClickHouseDataModel>) -> Result<Input> {
+    let mut ctx = config::ValidateNormalizeGqlCtx::new(Arc::clone(data_model));
     ctx.set_raw(raw.to_string());
     config::run_validate_normalize_gql(&mut ctx)
         .and_then(|()| {
@@ -213,18 +189,7 @@ pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Inp
 pub fn compile_input(
     input: Input,
     options: HydrationCompileOptions,
-    ontology: &Arc<Ontology>,
-    ctx: &SecurityContext,
-) -> Result<CompiledQueryContext> {
-    let data_model = data_model::clickhouse(Arc::clone(ontology))
-        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    compile_input_model(input, options, &data_model, ctx)
-}
-
-pub fn compile_input_model(
-    input: Input,
-    options: HydrationCompileOptions,
-    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    data_model: &Arc<ClickHouseDataModel>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let mut ctx = config::ChHydrationCtx::new(ctx.clone(), Arc::clone(data_model));
@@ -265,24 +230,27 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use query_data_model::spec::Fragment;
     use std::sync::LazyLock;
 
-    static ONTOLOGY: LazyLock<Arc<Ontology>> =
-        LazyLock::new(|| Arc::new(Ontology::load_embedded().expect("ontology must load")));
+    static MODEL: LazyLock<Arc<ClickHouseDataModel>> =
+        LazyLock::new(|| Arc::new(ClickHouseDataModel::embedded().expect("model must load")));
+    static LOCAL: LazyLock<Arc<DuckDbDataModel>> =
+        LazyLock::new(|| Arc::new(DuckDbDataModel::embedded().expect("model must load")));
 
     fn security_ctx() -> SecurityContext {
         crate::testkit::non_admin_ctx()
     }
 
     fn compile_sql(query: &str) -> String {
-        compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
+        compile(query, Frontend::JsonDsl, &MODEL, &security_ctx())
             .expect("should compile")
             .base
             .render()
     }
 
     fn compile_gql_sql(query: &str) -> String {
-        compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx())
+        compile(query, Frontend::Gql, &MODEL, &security_ctx())
             .expect("should compile")
             .base
             .render()
@@ -304,7 +272,7 @@ mod tests {
             }]
         }"#;
 
-        let compiled = compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).unwrap();
+        let compiled = compile(query, Frontend::JsonDsl, &MODEL, &security_ctx()).unwrap();
         let filter_param = compiled
             .base
             .params
@@ -322,8 +290,7 @@ mod tests {
         use std::sync::atomic::Ordering;
         for fe in [Frontend::JsonDsl, Frontend::Gql] {
             let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-            let err =
-                compile("not a query", fe, &ONTOLOGY, &security_ctx()).expect_err("must reject");
+            let err = compile("not a query", fe, &MODEL, &security_ctx()).expect_err("must reject");
             let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
             assert!(
                 matches!(
@@ -346,7 +313,7 @@ mod tests {
         let query = r#"{"query_type":"traversal","nodes":[{"id":"x","entity":"NotARealEntity","columns":["id"]}],"limit":1}"#;
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         let err =
-            compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).expect_err("must reject");
+            compile(query, Frontend::JsonDsl, &MODEL, &security_ctx()).expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             !matches!(err, crate::error::QueryError::PipelineInvariant(_)),
@@ -358,9 +325,25 @@ mod tests {
         );
     }
 
+    fn packaged_model(fragments: &[Fragment]) -> Arc<ClickHouseDataModel> {
+        let model = Arc::new(query_data_model::Model::load(fragments).expect("model must load"));
+        Arc::new(ClickHouseDataModel::from_model(&model).expect("model must bind"))
+    }
+
+    fn versioned(fragments: Vec<Fragment>, prefix: &str) -> Vec<Fragment> {
+        query_data_model::implementations::clickhouse::versioned(fragments, prefix)
+            .expect("prefix must apply")
+    }
+
+    fn embedded_fragments() -> Vec<Fragment> {
+        query_data_model::Packages::embedded()
+            .fragments()
+            .expect("packages must parse")
+    }
+
     #[test]
-    fn compile_with_prefixed_ontology_produces_prefixed_sql() {
-        let prefixed = Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v1_"));
+    fn compile_with_versioned_packages_produces_prefixed_sql() {
+        let prefixed = packaged_model(&versioned(embedded_fragments(), "v1_"));
 
         let query = r#"{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]}],"limit":1}"#;
         let compiled =
@@ -374,34 +357,38 @@ mod tests {
     }
 
     #[test]
-    fn compile_uses_supplied_ontology_for_scoped_user_table() {
-        let scoped_user = (**ONTOLOGY).clone().with_path_scopable_nodes(["User"]);
+    fn compile_uses_supplied_model_for_scoped_user_table() {
+        let scoped_user = Ontology::load_embedded()
+            .expect("ontology must load")
+            .with_path_scopable_nodes(["User"]);
+        let fragments = query_data_model::from_ontology::from_ontology(&scoped_user)
+            .expect("scoped ontology must convert");
         let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}"#;
 
-        for (ontology, expected_table) in [
-            (Arc::new(scoped_user.clone()), "gl_user"),
+        for (model, expected_table) in [
+            (packaged_model(&fragments), "gl_user"),
             (
-                Arc::new(scoped_user.with_schema_version_prefix("v1_")),
+                packaged_model(&versioned(fragments.clone(), "v1_")),
                 "v1_gl_user",
             ),
         ] {
-            let sql = compile(query, Frontend::JsonDsl, &ontology, &security_ctx())
+            let sql = compile(query, Frontend::JsonDsl, &model, &security_ctx())
                 .expect("should compile")
                 .base
                 .render();
             assert!(
                 sql.contains("startsWith(u.traversal_path"),
-                "supplied ontology must keep the User alias scoped, got:\n{sql}"
+                "supplied model must keep the User alias scoped, got:\n{sql}"
             );
             assert!(
                 sql.contains(expected_table),
-                "ontology should render {expected_table}, got:\n{sql}"
+                "model should render {expected_table}, got:\n{sql}"
             );
         }
     }
 
     #[test]
-    fn compile_uses_each_ontologys_global_tables_and_keeps_join_filters() {
+    fn compile_uses_each_models_global_tables_and_keeps_join_filters() {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -416,29 +403,30 @@ mod tests {
             "limit": 1
         }"#;
 
-        let mut sources = ontology::migrations::embedded_sources();
-        let user_source = sources.get_mut("nodes/core/user.yaml").unwrap();
-        *user_source = user_source.replace(
-            "destination_table: gl_user",
-            "destination_table: gl_renamed_user",
-        );
-        let archived_ontology = ontology::archive::OntologyArchive::from_sources(1, &sources)
-            .expect("renamed archive should build")
-            .load_ontology()
-            .expect("renamed archive should load");
-        let prefixed = archived_ontology.clone().with_schema_version_prefix("v1_");
+        let mut renamed = embedded_fragments();
+        for fragment in &mut renamed {
+            if let Fragment::Storage(storage) = fragment
+                && let Some(user) = storage.entities.get_mut("User")
+                && storage.store == "graph"
+            {
+                user.table = Some("gl_renamed_user".into());
+            }
+        }
 
-        for (ontology, expected_user_table) in [
-            (Arc::new(archived_ontology.clone()), "gl_renamed_user"),
-            (ONTOLOGY.clone(), "gl_user"),
-            (Arc::new(prefixed), "v1_gl_renamed_user"),
+        for (model, expected_user_table) in [
+            (packaged_model(&renamed), "gl_renamed_user"),
+            (Arc::clone(&MODEL), "gl_user"),
             (
-                Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v2_")),
+                packaged_model(&versioned(renamed.clone(), "v1_")),
+                "v1_gl_renamed_user",
+            ),
+            (
+                packaged_model(&versioned(embedded_fragments(), "v2_")),
                 "v2_gl_user",
             ),
-            (Arc::new(archived_ontology), "gl_renamed_user"),
+            (packaged_model(&renamed), "gl_renamed_user"),
         ] {
-            let sql = compile(query, Frontend::JsonDsl, &ontology, &security_ctx())
+            let sql = compile(query, Frontend::JsonDsl, &model, &security_ctx())
                 .expect("should compile")
                 .base
                 .render();
@@ -462,7 +450,7 @@ mod tests {
     }
 
     fn compile_error(query: &str) -> String {
-        compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
+        compile(query, Frontend::JsonDsl, &MODEL, &security_ctx())
             .expect_err("query must be rejected")
             .to_string()
     }
@@ -710,7 +698,7 @@ mod tests {
                 r#"{{"query_type": "neighbors", "nodes": [{{"id": "u", "entity": "User", "node_ids": {ids}}}],
                     "neighbors": {{"direction": "outgoing"}}, "limit": 10}}"#
             );
-            let compiled = compile(&query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).unwrap();
+            let compiled = compile(&query, Frontend::JsonDsl, &MODEL, &security_ctx()).unwrap();
             let context = &compiled.base.result_context;
             (
                 context
@@ -941,7 +929,7 @@ mod tests {
         let sql = compile(
             query,
             Frontend::JsonDsl,
-            &ONTOLOGY,
+            &MODEL,
             &crate::testkit::admin_ctx(),
         )
         .expect("should compile")
@@ -1035,7 +1023,7 @@ mod tests {
         ];
 
         for (name, query) in queries {
-            let compiled = compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
+            let compiled = compile(query, Frontend::JsonDsl, &MODEL, &security_ctx())
                 .unwrap_or_else(|err| panic!("{name} should compile: {err}"));
             let sql = compiled.base.render();
             assert!(
@@ -1059,7 +1047,7 @@ mod tests {
             let error = compile(
                 &format!("{query} RETURN count(p) AS c LIMIT 20"),
                 Frontend::Gql,
-                &ONTOLOGY,
+                &MODEL,
                 &security_ctx(),
             )
             .unwrap_err();
@@ -1086,7 +1074,7 @@ mod tests {
                 }}"#
             );
 
-            let sql = compile_local(&query, Frontend::JsonDsl, &ONTOLOGY)
+            let sql = compile_local(&query, Frontend::JsonDsl, &LOCAL)
                 .expect("should compile")
                 .base
                 .render();
@@ -1118,7 +1106,7 @@ mod tests {
 
     #[test]
     fn multi_filter_range_compiles_both_predicates() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let model = Arc::clone(&MODEL);
         let query = r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
@@ -1133,7 +1121,7 @@ mod tests {
             "limit": 10
         }"#;
         let compiled =
-            compile(query, Frontend::JsonDsl, &ontology, &security_ctx()).expect("should compile");
+            compile(query, Frontend::JsonDsl, &model, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
         assert!(
@@ -1144,7 +1132,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_compiles_without_sql_predicate() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let model = Arc::clone(&MODEL);
         let compiled = compile(
             r#"{
         "query_type": "traversal",
@@ -1155,7 +1143,7 @@ mod tests {
         "limit": 5
                 }"#,
             Frontend::JsonDsl,
-            &ontology,
+            &model,
             &security_ctx(),
         )
         .expect("virtual column filter should compile");
@@ -1178,7 +1166,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_without_selecting_it_injects_resolution() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let model = Arc::clone(&MODEL);
         let compiled = compile(
             r#"{
         "query_type": "traversal",
@@ -1190,7 +1178,7 @@ mod tests {
         "limit": 10
                 }"#,
             Frontend::JsonDsl,
-            &ontology,
+            &model,
             &security_ctx(),
         )
         .expect("filter-only virtual column should compile");
@@ -1221,7 +1209,7 @@ mod tests {
 
     #[test]
     fn filter_on_selected_virtual_column_is_not_marked_injected() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let model = Arc::clone(&MODEL);
         let compiled = compile(
             r#"{
         "query_type": "traversal",
@@ -1232,7 +1220,7 @@ mod tests {
         "limit": 5
                 }"#,
             Frontend::JsonDsl,
-            &ontology,
+            &model,
             &security_ctx(),
         )
         .expect("should compile");
@@ -1253,7 +1241,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_rejected_without_node_ids() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let model = Arc::clone(&MODEL);
         let err = compile(
             r#"{
         "query_type": "traversal",
@@ -1264,7 +1252,7 @@ mod tests {
         "limit": 10
                 }"#,
             Frontend::JsonDsl,
-            &ontology,
+            &model,
             &security_ctx(),
         )
         .expect_err("virtual filter without node_ids should be rejected");
@@ -1279,7 +1267,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_rejected_for_aggregation() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let model = Arc::clone(&MODEL);
         let err = compile(
             r#"{
         "query_type": "aggregation",
@@ -1290,7 +1278,7 @@ mod tests {
         "limit": 5
                 }"#,
             Frontend::JsonDsl,
-            &ontology,
+            &model,
             &security_ctx(),
         )
         .expect_err("virtual filter on aggregation should be rejected");
@@ -1305,7 +1293,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_rejected_for_neighbors() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let model = Arc::clone(&MODEL);
         let err = compile(
             r#"{
         "query_type": "neighbors",
@@ -1315,7 +1303,7 @@ mod tests {
         "limit": 5
                 }"#,
             Frontend::JsonDsl,
-            &ontology,
+            &model,
             &security_ctx(),
         )
         .expect_err("virtual filter on neighbors should be rejected");
@@ -1330,7 +1318,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_rejects_unsupported_op() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let model = Arc::clone(&MODEL);
         let err = compile(
             r#"{
         "query_type": "traversal",
@@ -1340,7 +1328,7 @@ mod tests {
         "limit": 5
                 }"#,
             Frontend::JsonDsl,
-            &ontology,
+            &model,
             &security_ctx(),
         )
         .expect_err("unsupported op on virtual column should be rejected");
@@ -1398,7 +1386,7 @@ mod tests {
     }
 
     fn note_excerpt_chars(limit: u32) -> u32 {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let model = Arc::clone(&MODEL);
         let compiled = compile(
             &format!(
                 r#"{{
@@ -1408,7 +1396,7 @@ mod tests {
             }}"#
             ),
             Frontend::JsonDsl,
-            &ontology,
+            &model,
             &security_ctx(),
         )
         .expect("note query should compile");

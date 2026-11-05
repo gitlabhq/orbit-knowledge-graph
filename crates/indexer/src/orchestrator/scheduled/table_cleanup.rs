@@ -6,6 +6,7 @@ use orbit_log_fields::{info, warn};
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use orbit_migrations::schema::Schema;
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
@@ -24,16 +25,16 @@ pub struct TableCleanup {
 impl TableCleanup {
     pub fn new(
         graph: ArrowClickHouseClient,
-        ontology: &ontology::Ontology,
+        physical: &Schema,
         metrics: ScheduledTaskMetrics,
         config: TableCleanupConfig,
-    ) -> Result<Self, query_data_model::DataModelError> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             graph,
-            tables: list_graph_tables(ontology)?,
+            tables: list_graph_tables(physical),
             metrics,
             config,
-        })
+        }
     }
 }
 
@@ -119,16 +120,12 @@ impl TableCleanup {
     }
 }
 
-fn list_graph_tables(
-    ontology: &ontology::Ontology,
-) -> Result<Vec<String>, query_data_model::DataModelError> {
-    Ok(
-        query_data_model::implementations::clickhouse::schema::Schema::derive(ontology)?
-            .tables()
-            .iter()
-            .map(|table| prefixed_table_name(&table.name, *SCHEMA_VERSION))
-            .collect(),
-    )
+fn list_graph_tables(physical: &Schema) -> Vec<String> {
+    physical
+        .tables()
+        .iter()
+        .map(|table| prefixed_table_name(&table.name, *SCHEMA_VERSION))
+        .collect()
 }
 
 fn build_apply_deleted_mask_sql(table: &str) -> String {
@@ -143,8 +140,12 @@ mod tests {
     use super::*;
 
     fn all_tables() -> Vec<String> {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        list_graph_tables(&ontology).unwrap()
+        list_graph_tables(
+            &orbit_migrations::schema::Schema::from_model(
+                &query_data_model::Packages::embedded().load().unwrap(),
+            )
+            .unwrap(),
+        )
     }
 
     #[test]
@@ -189,7 +190,8 @@ mod tests {
             "/../../config/seeds/overlays/reordered_edges"
         ))
         .unwrap();
-        let tables = list_graph_tables(&ontology).unwrap();
+        let tables =
+            list_graph_tables(&query_data_model::from_ontology::schema(&ontology).unwrap());
         assert!(
             !tables
                 .iter()

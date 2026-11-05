@@ -1,0 +1,8 @@
+kind: authorization
+package: gitlab.agents
+entities:
+  AgentSession:
+    scope: namespace
+    role: reporter
+    redaction: {resource: project, ability: read_code, id: project_id}
+properties: {AgentSession.traversal_path: {hidden: true, filterable: false}}

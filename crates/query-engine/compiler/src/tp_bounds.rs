@@ -575,11 +575,8 @@ mod tests {
             r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"diff","entity":"MergeRequestDiff"}],"relationships":[{"type":"HAS_DIFF","from":"mr","to":"diff"}],"limit":1}"#,
         )
         .unwrap();
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(
-            ontology::Ontology::load_embedded().unwrap(),
-        ))
-        .unwrap();
-        let edges = bound_edges(&input, model.as_ref());
+        let model = query_data_model::ClickHouseDataModel::embedded().unwrap();
+        let edges = bound_edges(&input, &model);
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].from, "mr");
         assert_eq!(edges[0].to, "diff");

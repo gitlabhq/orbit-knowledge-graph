@@ -1,11 +1,12 @@
 use std::sync::{Arc, LazyLock};
 
-use compiler::{AccessLevel, AuthorizedPath, Frontend, Ontology, SecurityContext};
+use compiler::{AccessLevel, AuthorizedPath, Frontend, SecurityContext};
 use named_queries::{BindingValues, Language, NamedQueries, NamedQuery};
+use query_data_model::ClickHouseDataModel;
 use serde_json::{Map, Value};
 
-static ONTOLOGY: LazyLock<Arc<Ontology>> =
-    LazyLock::new(|| Arc::new(Ontology::load_embedded().unwrap()));
+static DATA_MODEL: LazyLock<Arc<ClickHouseDataModel>> =
+    LazyLock::new(|| Arc::new(ClickHouseDataModel::embedded().unwrap()));
 
 const BINDINGS: BindingValues = BindingValues {
     current_user_id: 42,
@@ -27,7 +28,7 @@ fn compile(
     )
     .unwrap()
     .with_role(true, Some(AccessLevel::Owner as u32));
-    crate::compiler::parity::compile(&rendered, frontend, &ONTOLOGY, &security)
+    compiler::compile(&rendered, frontend, &DATA_MODEL, &security)
         .unwrap_or_else(|error| panic!("{} ({language:?}): {error}\n{rendered}", query.name))
 }
 

@@ -1,0 +1,17 @@
+kind: authorization
+package: gitlab.packages
+entities:
+  Dependency:
+    scope: namespace
+    role: reporter
+    redaction: {resource: dependency, ability: read_package}
+
+  Package: {scope: namespace, role: reporter, redaction: {resource: package, ability: read_package}}
+  PackageFile:
+    scope: namespace
+    role: reporter
+    redaction: {resource: package_file, ability: read_package}
+properties:
+  Dependency.traversal_path: {hidden: true, filterable: false}
+  Package.traversal_path: {hidden: true, filterable: false}
+  PackageFile.traversal_path: {hidden: true, filterable: false}

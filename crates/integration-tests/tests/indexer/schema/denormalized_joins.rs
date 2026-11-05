@@ -1,6 +1,6 @@
 use clickhouse_client::FromArrowColumn;
 use integration_testkit::{
-    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology, load_seed,
+    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_data_model, load_ontology, load_seed,
 };
 use ontology::denormalized::{DenormalizedJoin, alias};
 use query_data_model::OrbitQueryModel;
@@ -11,7 +11,7 @@ async fn denormalized_tables_match_their_source_join() {
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_all().await;
     let ontology = load_ontology();
-    let model = integration_testkit::derive_clickhouse_data_model(&ontology);
+    let model = load_data_model();
 
     for join in ontology.denormalized_joins() {
         let materialized = count(

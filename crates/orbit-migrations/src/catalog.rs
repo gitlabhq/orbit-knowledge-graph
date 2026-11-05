@@ -5,12 +5,15 @@ use clickhouse_client::ArrowClickHouseClient;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use nats_client::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult, NatsClient};
-use ontology::Ontology;
 use ontology::archive::{ArchiveError, OntologyArchive};
+use orbit_utils::source_archive::SourceArchiveError;
+use query_data_model::DataModelError;
 
+use crate::archive::{LoadedRelease, ModelArchive, Release};
 use crate::version::{SchemaVersionError, read_active_version};
 
 pub const ONTOLOGY_ARCHIVES_BUCKET: &str = "orbit_ontology_archives";
+pub const MODEL_ARCHIVES_BUCKET: &str = "orbit_model_archives";
 pub const ACTIVE_VERSION_KEY: &str = "active_version";
 
 pub type ActiveVersionChanges = BoxStream<'static, Result<Option<u32>, CatalogError>>;
@@ -22,6 +25,12 @@ pub enum CatalogError {
     Nats(#[from] nats_client::NatsError),
     #[error(transparent)]
     Archive(#[from] ArchiveError),
+    #[error("model {0}")]
+    ModelArchive(#[from] SourceArchiveError),
+    #[error(transparent)]
+    DataModel(#[from] DataModelError),
+    #[error("ontology archive v{ontology} and model archive v{model} are not one release")]
+    SplitRelease { ontology: u32, model: u32 },
     #[error(transparent)]
     SchemaVersion(#[from] SchemaVersionError),
     #[error(
@@ -47,67 +56,101 @@ pub struct OntologyCatalog {
 
 impl OntologyCatalog {
     pub async fn open(client: Arc<NatsClient>) -> Result<Self, CatalogError> {
-        client
-            .ensure_kv_bucket_exists(ONTOLOGY_ARCHIVES_BUCKET, KvBucketConfig::default())
-            .await?;
+        for bucket in [ONTOLOGY_ARCHIVES_BUCKET, MODEL_ARCHIVES_BUCKET] {
+            client
+                .ensure_kv_bucket_exists(bucket, KvBucketConfig::default())
+                .await?;
+        }
         Ok(Self { client })
     }
 
-    pub async fn publish(&self, archive: &OntologyArchive) -> Result<Ontology, CatalogError> {
-        let ontology = archive.load_ontology()?;
+    pub async fn publish(&self, release: &Release) -> Result<LoadedRelease, CatalogError> {
+        let loaded = release.load()?;
+        let version = release.schema_version();
+        self.put(
+            ONTOLOGY_ARCHIVES_BUCKET,
+            version,
+            release.ontology_archive().bytes(),
+        )
+        .await?;
+        self.put(
+            MODEL_ARCHIVES_BUCKET,
+            version,
+            release.model_archive().bytes(),
+        )
+        .await?;
+        Ok(loaded)
+    }
+
+    async fn put(&self, bucket: &str, version: u32, bytes: &[u8]) -> Result<(), CatalogError> {
         let limit = self.client.nats_client().max_payload();
-        if archive.bytes().len() > limit {
+        if bytes.len() > limit {
             return Err(CatalogError::TooLarge {
-                size: archive.bytes().len(),
+                size: bytes.len(),
                 limit,
             });
         }
-        let version = archive.schema_version();
         let result = self
             .client
             .kv_put(
-                ONTOLOGY_ARCHIVES_BUCKET,
+                bucket,
                 &version.to_string(),
-                Bytes::copy_from_slice(archive.bytes()),
+                Bytes::copy_from_slice(bytes),
                 KvPutOptions::create_only(),
             )
             .await?;
         match result {
-            KvPutResult::Success(_) => Ok(ontology),
+            KvPutResult::Success(_) => Ok(()),
             KvPutResult::AlreadyExists => {
-                let stored = self.load(version).await?;
-                if stored.bytes() != archive.bytes() {
+                let stored = self.get(bucket, version).await?;
+                if stored != bytes {
                     return Err(CatalogError::Conflict(version));
                 }
-                Ok(ontology)
+                Ok(())
             }
             KvPutResult::RevisionMismatch => Err(CatalogError::RevisionMismatch),
         }
     }
 
-    pub async fn load(&self, version: u32) -> Result<OntologyArchive, CatalogError> {
-        let entry = self
+    async fn get(&self, bucket: &str, version: u32) -> Result<Bytes, CatalogError> {
+        Ok(self
             .client
-            .kv_get(ONTOLOGY_ARCHIVES_BUCKET, &version.to_string())
+            .kv_get(bucket, &version.to_string())
             .await?
-            .ok_or(CatalogError::Missing(version))?;
-        Ok(OntologyArchive::from_bytes(version, &entry.value)?)
+            .ok_or(CatalogError::Missing(version))?
+            .value)
+    }
+
+    pub async fn load(&self, version: u32) -> Result<Release, CatalogError> {
+        let ontology = self.load_ontology_archive(version).await?;
+        let model = self.load_model_archive(version).await?;
+        Release::new(ontology, model)
     }
 
     pub async fn verify_archive(&self, version: u32) -> Result<(), CatalogError> {
-        self.load(version).await?.load_ontology()?;
+        self.load_ontology_archive(version).await?.load_ontology()?;
+        self.load_model_archive(version).await?.packages().load()?;
         Ok(())
+    }
+
+    async fn load_ontology_archive(&self, version: u32) -> Result<OntologyArchive, CatalogError> {
+        let bytes = self.get(ONTOLOGY_ARCHIVES_BUCKET, version).await?;
+        Ok(OntologyArchive::from_bytes(version, &bytes)?)
+    }
+
+    async fn load_model_archive(&self, version: u32) -> Result<ModelArchive, CatalogError> {
+        let bytes = self.get(MODEL_ARCHIVES_BUCKET, version).await?;
+        Ok(ModelArchive::from_bytes(version, &bytes)?)
     }
 
     pub async fn ensure_archive(&self, version: u32) -> Result<(), CatalogError> {
         match self.verify_archive(version).await {
             Err(CatalogError::Missing(_)) => {
-                let archive =
-                    OntologyArchive::bundled(version)?.ok_or(CatalogError::Missing(version))?;
-                self.publish(&archive).await?;
+                let release = Release::bundled(version)?.ok_or(CatalogError::Missing(version))?;
+                self.publish(&release).await?;
                 orbit_log_fields::info!(
                     safe(SCHEMA_VERSION) = version,
-                    "bootstrapped missing ontology archive from release bundle"
+                    "bootstrapped missing schema archives from release bundle"
                 );
                 Ok(())
             }

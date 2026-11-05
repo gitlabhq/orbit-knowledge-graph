@@ -1,12 +1,46 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
+use crate::implementations::clickhouse::ClickHouse;
+use crate::implementations::duckdb::DuckDb;
 use crate::{
-    DenormalizedCatalog, Entity, EntityAuthConfig, EntityId, ForeignKey, GraphCatalog,
-    MaterializedJoin, PathColumn, Property, PropertyId, RelationshipVariant,
+    DataModelError, DenormalizedCatalog, Entity, EntityAuthConfig, EntityId, ForeignKey,
+    GraphCatalog, MaterializedJoin, Model, Packages, PathColumn, Property, PropertyId, QueryModel,
+    RelationshipVariant,
 };
 
-pub type ClickHouseDataModel = crate::QueryModel<crate::implementations::clickhouse::ClickHouse>;
-pub type DuckDbDataModel = crate::QueryModel<crate::implementations::duckdb::DuckDb>;
+pub type ClickHouseDataModel = QueryModel<ClickHouse>;
+pub type DuckDbDataModel = QueryModel<DuckDb>;
+
+impl ClickHouseDataModel {
+    pub const CONNECTION: &'static str = "main";
+
+    pub fn from_model(model: &Arc<Model>) -> Result<Self, DataModelError> {
+        Self::new(model, Self::CONNECTION)
+    }
+
+    pub fn embedded() -> Result<Self, DataModelError> {
+        Self::from_model(&Packages::embedded().load()?)
+    }
+
+    pub fn versioned(packages: &Packages, table_prefix: &str) -> Result<Self, DataModelError> {
+        let fragments =
+            crate::implementations::clickhouse::versioned(packages.fragments()?, table_prefix)?;
+        Self::from_model(&Arc::new(Model::load(&fragments)?))
+    }
+}
+
+impl DuckDbDataModel {
+    pub const CONNECTION: &'static str = "local";
+
+    pub fn from_model(model: &Arc<Model>) -> Result<Self, DataModelError> {
+        Self::new(model, Self::CONNECTION)
+    }
+
+    pub fn embedded() -> Result<Self, DataModelError> {
+        Self::from_model(&Packages::embedded().load()?)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct VariantRoute {
