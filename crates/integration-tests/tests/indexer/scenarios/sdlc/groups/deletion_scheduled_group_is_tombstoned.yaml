@@ -1,0 +1,26 @@
+description: A group that is scheduled for deletion or being deleted is tombstoned on the next incremental run
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/", slug: parent }
+        - { id: 200, parent_id: 100, traversal_path: "1/100/200/", slug: scheduled }
+        - { id: 300, parent_id: 100, traversal_path: "1/100/300/", slug: deleting }
+    expect:
+      nodes:
+        gl_group:
+          count: 3
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Group, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      siphon_namespaces:
+        - { id: 200, name: scheduled, path: scheduled-deletion_scheduled-200, type: Group, visibility_level: 0, parent_id: 100, traversal_ids: [1, 100, 200], state: 2, _siphon_replicated_at: "2024-01-20 18:00:00" }
+        - { id: 300, name: deleting, path: deleting-deletion_scheduled-300, type: Group, visibility_level: 0, parent_id: 100, traversal_ids: [1, 100, 300], state: 4, _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      nodes:
+        gl_group:
+          count: 1
+          rows:
+            - { id: 100 }

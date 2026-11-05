@@ -5,7 +5,7 @@ use ontology::Ontology;
 use ontology::archive::OntologyArchive;
 
 fn config_directory() -> &'static Path {
-    Path::new(env!("CONFIG_DIR"))
+    Path::new(env!("ORBIT_CONFIG_DIR"))
 }
 
 fn embedded_ontology() -> Arc<Ontology> {

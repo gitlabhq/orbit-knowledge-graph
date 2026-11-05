@@ -8,4 +8,4 @@ docs/
 e2e/
 fixtures/
 scripts/
-!scripts/checks/fips/check-binary.sh
+!scripts/checks/fips/aws-lc/check-binary.sh
