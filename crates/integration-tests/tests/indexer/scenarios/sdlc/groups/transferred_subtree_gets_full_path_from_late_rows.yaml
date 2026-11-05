@@ -1,0 +1,76 @@
+description: A group subtree moved between top-level groups gets each full path and description from rows that arrive after the transfer
+scope: { namespace: 300 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/", slug: old-root }
+        - { id: 200, parent_id: 100, traversal_path: "1/100/200/", slug: tanuki-risk }
+        - { id: 201, parent_id: 200, traversal_path: "1/100/200/201/", slug: libs }
+        - { id: 202, parent_id: 201, traversal_path: "1/100/200/201/202/", slug: core }
+        - { id: 300, traversal_path: "1/300/", slug: new-root }
+      siphon_routes:
+        - { id: 100, source_id: 100, source_type: Namespace, path: old-root, namespace_id: 100, traversal_path: "1/100/" }
+        - { id: 200, source_id: 200, source_type: Namespace, path: old-root/tanuki-risk, namespace_id: 200, traversal_path: "1/100/200/" }
+        - { id: 201, source_id: 201, source_type: Namespace, path: old-root/tanuki-risk/libs, namespace_id: 201, traversal_path: "1/100/200/201/" }
+        - { id: 202, source_id: 202, source_type: Namespace, path: old-root/tanuki-risk/libs/core, namespace_id: 202, traversal_path: "1/100/200/201/202/" }
+        - { id: 300, source_id: 300, source_type: Namespace, path: new-root, namespace_id: 300, traversal_path: "1/300/" }
+    expect:
+      nodes:
+        gl_group:
+          count: 1
+          rows:
+            - { id: 300, full_path: new-root }
+
+  - seed:
+      checkpoint:
+        - { key: ns.300.Group, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      siphon_namespaces:
+        - { id: 200, name: tanuki-risk, path: tanuki-risk, type: Group, visibility_level: 0, parent_id: 300, traversal_ids: [1, 300, 200], _siphon_replicated_at: "2024-01-20 18:00:00" }
+        - { id: 201, name: libs, path: libs, type: Group, visibility_level: 0, parent_id: 200, traversal_ids: [1, 300, 200, 201], _siphon_replicated_at: "2024-01-20 18:00:00" }
+        - { id: 202, name: core, path: core, type: Group, visibility_level: 0, parent_id: 201, traversal_ids: [1, 300, 200, 201, 202], _siphon_replicated_at: "2024-01-20 18:00:00" }
+      namespace_traversal_paths:
+        - { id: 200, traversal_path: "1/300/200/" }
+        - { id: 201, traversal_path: "1/300/200/201/" }
+        - { id: 202, traversal_path: "1/300/200/201/202/" }
+    expect:
+      nodes:
+        gl_group:
+          count: 4
+          rows:
+            - { id: 300, full_path: new-root }
+            - { id: 200, full_path: tanuki-risk, traversal_path: "1/300/200/" }
+            - { id: 201, full_path: libs, traversal_path: "1/300/200/201/" }
+            - { id: 202, full_path: core, traversal_path: "1/300/200/201/202/" }
+
+  - seed:
+      checkpoint:
+        - { key: ns.300.Group, watermark: "2024-01-20 19:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 19:00:00.000000" }
+      siphon_routes:
+        - { id: 200, source_id: 200, source_type: Namespace, path: new-root/tanuki-risk, namespace_id: 200, traversal_path: "1/300/200/", _siphon_replicated_at: "2024-01-20 20:00:00" }
+        - { id: 201, source_id: 201, source_type: Namespace, path: new-root/tanuki-risk/libs, namespace_id: 201, traversal_path: "1/300/200/201/", _siphon_replicated_at: "2024-01-20 20:00:00" }
+        - { id: 202, source_id: 202, source_type: Namespace, path: new-root/tanuki-risk/libs/core, namespace_id: 202, traversal_path: "1/300/200/201/202/", _siphon_replicated_at: "2024-01-20 20:00:00" }
+    expect:
+      nodes:
+        gl_group:
+          count: 4
+          rows:
+            - { id: 300, full_path: new-root }
+            - { id: 200, full_path: new-root/tanuki-risk }
+            - { id: 201, full_path: new-root/tanuki-risk/libs }
+            - { id: 202, full_path: new-root/tanuki-risk/libs/core }
+
+  - seed:
+      checkpoint:
+        - { key: ns.300.Group, watermark: "2024-01-20 21:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 21:00:00.000000" }
+      siphon_namespace_details:
+        - { namespace_id: 200, description: Risk demo, traversal_path: "1/300/200/", _siphon_replicated_at: "2024-01-20 22:00:00" }
+        - { namespace_id: 201, description: Shared libraries, traversal_path: "1/300/200/201/", _siphon_replicated_at: "2024-01-20 22:00:00" }
+    expect:
+      nodes:
+        gl_group:
+          count: 4
+          rows:
+            - { id: 200, full_path: new-root/tanuki-risk, description: Risk demo }
+            - { id: 201, full_path: new-root/tanuki-risk/libs, description: Shared libraries }
+            - { id: 202, full_path: new-root/tanuki-risk/libs/core, description: "" }

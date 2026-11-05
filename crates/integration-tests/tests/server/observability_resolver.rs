@@ -5,7 +5,6 @@ use orbit_arrow::ColumnValue;
 use orbit_server::content::observability::client_pool::TenantClientPool;
 use orbit_server::content::observability::host_map::TenantRoute;
 use orbit_server::content::observability::traces::{self, TraceLookup};
-use orbit_server_config::ObservabilityResolverSettings;
 
 const SIGNOZ_INDEX_DDL: &str = "
 CREATE TABLE IF NOT EXISTS signoz_index_v3 (
@@ -65,18 +64,6 @@ async fn create_orbit_reader(ctx: &TestContext) {
         ctx.config.database
     ))
     .await;
-}
-
-fn settings() -> ObservabilityResolverSettings {
-    ObservabilityResolverSettings {
-        provisioner_url: "https://provisioner.invalid".to_string(),
-        provisioner_api_key: "key".to_string(),
-        host_map_refresh_seconds: 300,
-        host_map_retry_after_seconds: 30,
-        request_timeout_seconds: 10,
-        query_timeout_seconds: 15,
-        max_result_rows: 10_000,
-    }
 }
 
 fn route(ctx: &TestContext) -> TenantRoute {

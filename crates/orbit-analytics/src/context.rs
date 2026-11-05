@@ -208,6 +208,9 @@ pub const ORBIT_CLI_SCHEMA: &str = orbit_cli::SCHEMA_URI;
 pub const ORBIT_CLI_COMMAND_SCHEMA: &str = orbit_cli_command::SCHEMA_URI;
 pub const ORBIT_CLI_SETUP_SCHEMA: &str = orbit_cli_setup::SCHEMA_URI;
 
+#[cfg(any(test, feature = "testkit"))]
+const IGLU_SELF_DESCRIBING_BASE_DIALECT: &str = "http://json-schema.org/draft-04/schema#";
+
 /// Return the inlined schema JSON for `name` at its pinned version.
 ///
 /// Used by tests in this crate's consumers to compile an Iglu validator
@@ -224,5 +227,8 @@ pub fn load_schema_json(name: &str) -> serde_json::Value {
         "orbit_cli_setup" => orbit_cli_setup::SCHEMA_JSON,
         other => panic!("unknown iglu schema {other:?}"),
     };
-    serde_json::from_str(raw).expect("vendored Iglu schema is valid JSON")
+    let mut schema: serde_json::Value =
+        serde_json::from_str(raw).expect("vendored Iglu schema is valid JSON");
+    schema["$schema"] = IGLU_SELF_DESCRIBING_BASE_DIALECT.into();
+    schema
 }
