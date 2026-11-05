@@ -20,7 +20,7 @@ RUN --mount=type=secret,id=sccache_gcs_key \
     "$SCCACHE_BIN" --start-server || true && \
     cargo build --release -p orbit-server --locked --features libduckdb-sys/bundled && \
     "$SCCACHE_BIN" --show-stats || true && \
-    ./scripts/checks/fips/check-binary.sh target/release/gkg-server && \
+    ./scripts/checks/fips/aws-lc/check-binary.sh target/release/gkg-server && \
     cp target/release/gkg-server /gkg-server
 
 FROM registry.access.redhat.com/ubi10/ubi-minimal:10.2

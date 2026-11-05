@@ -177,6 +177,8 @@ This issue occurs when GitLab cannot check whether the group can run queries.
 
 The workaround is to wait a few minutes, then send the query again.
 
+On GitLab Self-Managed, if the error persists, see [Troubleshooting GitLab Orbit on GitLab Self-Managed](self-managed/troubleshooting.md#error-unable-to-verify-gitlab-credits).
+
 ### Results are missing recent data
 
 This issue occurs when the indexer has not finished indexing the group or project.
