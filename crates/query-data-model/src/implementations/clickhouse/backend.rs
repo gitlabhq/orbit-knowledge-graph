@@ -7,7 +7,7 @@ use super::schema::{self, Schema};
 use super::spec::{ClickHouseOptions, ClickHouseSource};
 use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
 use crate::implementations::relational::{
-    RelationalFacts, RelationalRoute, RelationalStore, TableFacts,
+    RelationalFacts, RelationalRoute, RelationalStore, TableFacts, TableSchema,
 };
 use crate::spec::parse_word;
 use crate::{
@@ -127,6 +127,7 @@ impl StorageBackend for ClickHouse {
         store.resolve_joins(&input, diagnostics);
         store.resolve_copies(&input, diagnostics);
         store.schema = schema::resolve(&input, &store.relational, diagnostics);
+        store.relational.tables = store.schema.iter().flat_map(table_schemas).collect();
         store
     }
 }
@@ -565,4 +566,20 @@ impl crate::query_model::QueryFacts for ClickHouseStore {
     fn joins(&self) -> &[MaterializedJoin] {
         &self.joins
     }
+}
+
+fn table_schemas(schema: &Schema) -> impl Iterator<Item = TableSchema> + '_ {
+    schema
+        .tables()
+        .iter()
+        .chain(schema.auxiliary_tables().iter().map(|table| &table.table))
+        .map(|table| {
+            TableSchema::new(
+                &table.name,
+                table
+                    .columns
+                    .iter()
+                    .map(|column| (column.name.clone(), schema::data_type(&column.storage_type))),
+            )
+        })
 }

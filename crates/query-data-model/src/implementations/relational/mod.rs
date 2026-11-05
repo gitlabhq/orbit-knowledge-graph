@@ -8,6 +8,13 @@ use crate::catalog::{Catalog, Diagnostics, StorageBackend, StoreInput};
 use crate::spec::parse_word;
 use crate::{EntityId, ForeignKey, RelationshipVariantId};
 
+mod capabilities;
+pub mod plan;
+mod tables;
+
+pub use capabilities::{Capabilities, CurrentRows, RelationalBackend};
+pub use tables::{ColumnSchema, TableSchema};
+
 #[derive(Debug, Clone)]
 pub struct PathColumn {
     pub name: String,
@@ -116,6 +123,7 @@ pub struct EdgeTable {
 pub struct RelationalStore {
     pub versioning: Option<Versioning>,
     pub edge_tables: Vec<EdgeTable>,
+    pub tables: Vec<TableSchema>,
     sort_keys: Vec<Option<Vec<String>>>,
     edge_routes: Vec<Option<String>>,
 }
@@ -131,6 +139,10 @@ impl RelationalStore {
 
     pub fn edge_table(&self, variant: RelationshipVariantId) -> Option<&str> {
         self.edge_routes[variant.index()].as_deref()
+    }
+
+    pub fn table_schema(&self, name: &str) -> Option<&TableSchema> {
+        self.tables.iter().find(|table| table.name == name)
     }
 
     pub fn resolve<B: StorageBackend<RouteOptions = RelationalRoute>>(
@@ -255,6 +267,7 @@ impl RelationalStore {
                     default: table.default,
                 })
                 .collect(),
+            tables: Vec::new(),
             sort_keys: keys,
             edge_routes,
         }

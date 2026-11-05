@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use super::DuckDb;
 use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
 use crate::implementations::relational::{
-    RelationalFacts, RelationalOptions, RelationalRoute, RelationalStore, TableFacts,
+    RelationalFacts, RelationalOptions, RelationalRoute, RelationalStore, TableFacts, TableSchema,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -49,6 +49,8 @@ impl StorageBackend for DuckDb {
                 .map(|source| (source.entity, source.options.sort_key.clone())),
             diagnostics,
         );
+        let mut relational = relational;
+        relational.tables = entity_schemas(&input).collect();
         let mut tables = HashMap::new();
         for source in input.store.sources() {
             tables.insert(
@@ -65,6 +67,12 @@ impl StorageBackend for DuckDb {
         }
         for (name, spec) in &input.options.edge_tables {
             let column_types = spec.column_types(&input.store.package, name, diagnostics);
+            relational.tables.push(TableSchema::new(
+                name,
+                spec.columns
+                    .keys()
+                    .map(|column| (column.clone(), column_types.get(column).copied())),
+            ));
             tables.insert(
                 name.clone(),
                 TableFacts {
@@ -78,6 +86,24 @@ impl StorageBackend for DuckDb {
         }
         DuckDbStore { relational, tables }
     }
+}
+
+fn entity_schemas<'a>(input: &'a StoreInput<'_, DuckDb>) -> impl Iterator<Item = TableSchema> + 'a {
+    let graph = input.graph;
+    input.store.sources().map(move |source| {
+        let columns = graph
+            .entity(source.entity)
+            .properties
+            .iter()
+            .filter_map(|property| {
+                let column = input.store.column(*property)?;
+                Some((
+                    column.to_string(),
+                    Some(graph.property(*property).data_type),
+                ))
+            });
+        TableSchema::new(&source.table, columns)
+    })
 }
 
 impl crate::query_model::QueryFacts for DuckDbStore {
