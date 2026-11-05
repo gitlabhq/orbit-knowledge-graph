@@ -10,6 +10,7 @@ use crate::{EntityId, ForeignKey, RelationshipVariantId};
 
 mod capabilities;
 pub mod plan;
+pub mod render;
 mod tables;
 
 pub use capabilities::{Capabilities, CurrentRows, RelationalBackend};

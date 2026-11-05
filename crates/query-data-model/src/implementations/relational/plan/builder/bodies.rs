@@ -58,7 +58,7 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
         self.frames.push(Vec::new());
         let root = build(self);
         let with = self.frames.pop().unwrap_or_default();
-        let root = self.guard(root.and_then(|root| complete(root, "a subquery")))?;
+        let root = self.guard(complete(root?, "a subquery"))?;
         let width = self.construction.outputs(&root.rows)?.len();
         let body = self.construction.close(opening, root.rows)?;
         self.bodies.push(BodyUse { sharing, with });

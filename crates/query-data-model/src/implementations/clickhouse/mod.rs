@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod facts;
+pub mod render;
 pub mod schema;
 pub mod spec;
 

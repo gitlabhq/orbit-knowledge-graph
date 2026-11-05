@@ -41,7 +41,7 @@ impl<'c, B: RelationalBackend> RelationalBuilder<'c, B> {
         mut self,
         root: Result<Relation, RelationalError>,
     ) -> Result<RelationalPlan<B>, RelationalError> {
-        let root = self.guard(root.and_then(|root| complete(root, "a plan")))?;
+        let root = self.guard(complete(root?, "a plan"))?;
         let with = self.frames.pop().unwrap_or_default();
         Ok(RelationalPlan {
             plan: self.construction.finish(root.rows)?,

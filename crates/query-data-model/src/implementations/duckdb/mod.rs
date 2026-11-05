@@ -1,4 +1,6 @@
 pub mod backend;
+mod functions;
+pub mod render;
 
 use super::relational::{Capabilities, CurrentRows, RelationalBackend};
 
