@@ -1,8 +1,8 @@
 use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
 use compiler::input::AggFunction;
 use compiler::passes::codegen::codegen;
-use integration_testkit::TestContext;
 use integration_testkit::visitor::NodeExt;
+use integration_testkit::{TestContext, derive_clickhouse_data_model, load_ontology};
 
 use super::helpers::run_query;
 use crate::common::compile_and_execute;
@@ -79,10 +79,11 @@ pub(super) async fn path_finding_code_filtered_endpoints_stay_on_same_traversal_
 
 #[tokio::test]
 async fn semantic_aggregate_and_nested_cte_codegen_execute() {
+    let model = derive_clickhouse_data_model(&load_ontology());
     let ctx = TestContext::new(&[]).await;
-    ctx.execute("CREATE TABLE measurements(value Nullable(Int64), keep Bool) ENGINE=Memory")
+    ctx.execute("CREATE TABLE gl_merge_request(iid Nullable(Int64), draft Bool) ENGINE=Memory")
         .await;
-    ctx.execute("INSERT INTO measurements VALUES (2,true),(2,true),(NULL,true),(9,false)")
+    ctx.execute("INSERT INTO gl_merge_request VALUES (2,true),(2,true),(NULL,true),(9,false)")
         .await;
     for (argument, distinct, expected) in
         [(false, false, "3"), (true, false, "2"), (true, true, "1")]
@@ -95,43 +96,56 @@ async fn semantic_aggregate_and_nested_cte_codegen_execute() {
                         "seed",
                         Query {
                             select: vec![SelectExpr::star()],
-                            from: TableRef::scan("measurements", "m"),
+                            from: TableRef::scan("gl_merge_request", "m"),
                             ..Default::default()
                         },
                     )],
                     select: vec![SelectExpr::new(
                         Expr::Aggregate {
                             function: AggFunction::Count,
-                            argument: argument.then(|| Box::new(Expr::col("s", "value"))),
+                            argument: argument.then(|| Box::new(Expr::col("s", "iid"))),
                             distinct,
-                            condition: Some(Box::new(Expr::col("s", "keep"))),
+                            condition: Some(Box::new(Expr::col("s", "draft"))),
                         },
                         "n",
                     )],
-                    from: TableRef::scan("seed", "s"),
+                    from: TableRef::cte("seed", "s"),
                     ..Default::default()
                 },
             )],
             select: vec![SelectExpr::col("r", "n")],
-            from: TableRef::scan("result", "r"),
+            from: TableRef::cte("result", "r"),
             ..Default::default()
         }));
-        let compiled = codegen(&ast, Default::default(), Default::default()).unwrap();
+        let compiled = codegen(
+            &ast,
+            model.catalog(),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
         let result = ctx.query(&compiled.render()).await;
         assert_eq!(
             arrow::util::display::array_value_to_string(result[0].column(0), 0).unwrap(),
             expected
         );
-        let Node::Query(arm) = ast else {
+        let Node::Query(mut union) = ast else {
             unreachable!()
         };
-        let union = Node::Query(Box::new(Query {
+        union.union_all.push(Query {
             select: vec![SelectExpr::new(Expr::int(0), "n")],
-            from: TableRef::scan("system.one", "one"),
-            union_all: vec![*arm],
+            from: TableRef::scan("gl_merge_request", "one"),
+            limit: Some(1),
             ..Default::default()
-        }));
-        let compiled = codegen(&union, Default::default(), Default::default()).unwrap();
+        });
+        let union = Node::Query(union);
+        let compiled = codegen(
+            &union,
+            model.catalog(),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
         let result = ctx.query(&compiled.render()).await;
         assert_eq!(
             result.iter().map(|batch| batch.num_rows()).sum::<usize>(),

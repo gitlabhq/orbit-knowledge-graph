@@ -126,10 +126,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [node]
         }
         codegen {
+            reads_env: [data_model]
             reads_state: [input]
             mutates: [node, result_ctx, query_config, hydration_plan, output]
         }
         duckdb_codegen {
+            reads_env: [data_model]
             reads_state: [input]
             mutates: [node, result_ctx, hydration_plan, output]
         }
@@ -363,13 +365,20 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn codegen(
+    ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
+) -> Result<()> {
     let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
     let query_config = ctx.take_query_config().unwrap_or_default();
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
     let node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
-    let base = codegen::codegen(&node, result_context, query_config)?;
+    let base = codegen::codegen(
+        &node,
+        ctx.data_model().catalog(),
+        result_context,
+        query_config,
+    )?;
     let query_type = input.query_type;
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
@@ -383,12 +392,14 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn duckdb_codegen(
+    ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataModel>,
+) -> Result<()> {
     let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
     let node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
-    let base = codegen::duckdb::codegen(&node, result_context)?;
+    let base = codegen::duckdb_codegen(&node, ctx.data_model().catalog(), result_context)?;
     let query_type = input.query_type;
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {

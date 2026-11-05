@@ -1,7 +1,7 @@
-use super::parity::{compile, compile_input};
 use super::setup::{admin_ctx, embedded_ontology, test_ctx};
 use compiler::{
     ColumnSelection, Frontend, HydrationCompileOptions, HydrationPlan, Input, InputNode, QueryType,
+    compile, compile_input,
 };
 use orbit_utils::traversal_path::TraversalPath;
 

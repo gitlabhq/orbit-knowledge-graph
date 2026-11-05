@@ -60,6 +60,12 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
     let (start_id, end_id) = relation.direction.edge_columns();
     let path_id = if reverse_output { start_id } else { end_id };
     let from = &pattern.nodes[&relation.from_node];
+    let tagged = relation.edge_tables.iter().all(|table| {
+        pattern
+            .model
+            .table_columns(table)
+            .is_none_or(|columns| columns.contains(SOURCE_TAGS_COLUMN))
+    });
 
     let first_hop = hop_alias(1);
     let mut first_predicates = vec![live(&first_hop)];
@@ -87,7 +93,7 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
         1,
         (&first_hop, &first_hop, &first_hop),
         first_path,
-        &required,
+        (&required, tagged),
     );
     let mut depths = Vec::new();
     if relation.min_hops <= 1 {
@@ -158,7 +164,7 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
             depth,
             (&previous_alias, source, target),
             path,
-            &required,
+            (&required, tagged),
         );
         if depth >= relation.min_hops.max(1) {
             depths.push(
@@ -220,21 +226,25 @@ fn project_depth(
     depth: u32,
     (meta, source, target): (&str, &str, &str),
     path: OutputValue,
-    required: &[String],
+    (required, tagged): (&[String], bool),
 ) -> RelationId {
-    let mut outputs = vec![
-        Projection::col(meta, RELATIONSHIP_KIND_COLUMN),
-        Projection::col(source, SOURCE_ID_COLUMN),
-        Projection::col(source, SOURCE_KIND_COLUMN),
-        Projection::col(source, SOURCE_TAGS_COLUMN),
-        Projection::col(target, TARGET_ID_COLUMN),
-        Projection::col(target, TARGET_KIND_COLUMN),
-        Projection::col(target, TARGET_TAGS_COLUMN),
-        Projection::new(path, path_nodes_column()),
-        Projection::new(OutputValue::Depth(depth), depth_column()),
-        Projection::col(meta, DELETED_COLUMN),
-        Projection::col(meta, TRAVERSAL_PATH_COLUMN),
-    ];
+    let tags = |alias, column| tagged.then(|| Projection::col(alias, column));
+    let mut outputs: Vec<_> = [
+        Some(Projection::col(meta, RELATIONSHIP_KIND_COLUMN)),
+        Some(Projection::col(source, SOURCE_ID_COLUMN)),
+        Some(Projection::col(source, SOURCE_KIND_COLUMN)),
+        tags(source, SOURCE_TAGS_COLUMN),
+        Some(Projection::col(target, TARGET_ID_COLUMN)),
+        Some(Projection::col(target, TARGET_KIND_COLUMN)),
+        tags(target, TARGET_TAGS_COLUMN),
+        Some(Projection::new(path, path_nodes_column())),
+        Some(Projection::new(OutputValue::Depth(depth), depth_column())),
+        Some(Projection::col(meta, DELETED_COLUMN)),
+        Some(Projection::col(meta, TRAVERSAL_PATH_COLUMN)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     outputs.extend(required.iter().map(|column| Projection::col(meta, column)));
     graph.project(input, outputs)
 }

@@ -1,9 +1,8 @@
-use crate::compiler::parity::compile;
 use crate::compiler::setup::{compile_pair, test_ctx, test_ontology};
 use crate::compiler::utils::has_param_value;
 use compiler::gql::{PreparedStatement, prepare};
 use compiler::input::DynamicColumnMode;
-use compiler::{Frontend, QueryError};
+use compiler::{Frontend, QueryError, compile};
 use ontology::introspection::{
     IntrospectionScope::{All, Local},
     build_compact_schema_response,
@@ -1468,7 +1467,7 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User {username: '\\uD800'}) RETURN u",
     ];
     for query in queries {
-        let error = crate::compiler::parity::compile(
+        let error = compiler::compile(
             query,
             compiler::Frontend::Gql,
             &test_ontology(),
@@ -1548,7 +1547,7 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
     }
     let query = "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u";
     assert!(
-        crate::compiler::parity::compile(
+        compiler::compile(
             query,
             compiler::Frontend::Gql,
             &test_ontology(),
@@ -1641,7 +1640,7 @@ fn native_conditions_need_a_column() {
         }],
     );
     for input in [empty_group, empty_property] {
-        let error = crate::compiler::parity::compile_input(
+        let error = compiler::compile_input(
             input,
             Default::default(),
             &crate::compiler::setup::embedded_ontology(),
@@ -2122,7 +2121,9 @@ fn cte_statements_carry_the_ctes_they_read() {
         &test_ctx(),
     )
     .unwrap();
-    let statements = compiler::passes::codegen::clickhouse::cte_statements(&compiled.ast).unwrap();
+    let model = compiler::data_model::clickhouse(embedded_ontology()).unwrap();
+    let statements =
+        compiler::passes::codegen::cte_statements(&compiled.ast, model.catalog()).unwrap();
     assert!(
         statements
             .iter()

@@ -266,6 +266,13 @@ impl Ontology {
     ) -> Self {
         let leads_with_tp =
             self.default_entity_sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN);
+        let path_field = self
+            .nodes
+            .values()
+            .flat_map(|node| &node.fields)
+            .find(|field| field.name == TRAVERSAL_PATH_COLUMN)
+            .filter(|_| leads_with_tp)
+            .cloned();
         for name in names {
             let name = name.into();
             self.nodes.insert(
@@ -274,6 +281,7 @@ impl Ontology {
                     name: name.clone(),
                     destination_table: format!("{}{}", self.table_prefix, name.to_lowercase()),
                     sort_key: self.default_entity_sort_key.clone(),
+                    fields: path_field.iter().cloned().collect(),
                     has_traversal_path: leads_with_tp,
                     ..Default::default()
                 },
