@@ -1,7 +1,7 @@
 ---
 name: orbit
-description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab, including packages, their dependencies and vulnerabilities, and the pipelines that built them. Skip it for writes that `glab` handles.
-version: 0.36.0+gql
+description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
+version: 0.35.16+gql
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
@@ -73,14 +73,7 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
 - There is no `OR`, `XOR`, `RETURN DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`. `DISTINCT` works only inside `count()`: `count(DISTINCT pl)`.
-- Package and container questions use `Package`, `PackageFile`, `Dependency`, and `ContainerRepository`. This is the free-tier Package Registry and Container Registry. Artifact Registry data is not in Orbit. See [the recipes](references/gql.md#package-registry-and-container-registry).
-- A missing `HAS_VULNERABILITY` link is not proof a package is safe. The link comes from SBOM data, matched by package name and version. No rows can also mean the caller lacks the Security Manager role or higher on the project.
-- Vulnerabilities in a package's project are not that package's vulnerabilities. Only a `HAS_VULNERABILITY` link ties a vulnerability to a package version.
-- `ContainerRepository` has no tags. Read the tag count from the Container Registry API with the repository `id`, and no `/api/v4/` prefix: `glab api "registry/repositories/<id>?tags_count=true"`.
-- To scope packages to a group, join to the project and filter its path: `MATCH (p:Package)-[:IN_PROJECT]->(pr:Project) WHERE pr.full_path STARTS WITH 'gitlab-org/'`. Walking `Group` and `CONTAINS` to a fixed depth misses deeper subgroups.
-- To count packages the way GitLab lists them, filter `p.status IN ['default', 'error', 'deprecated']`. Without it, counts include `hidden` packages, packages still `processing`, and packages `pending_destruction`.
-- A response with `has_more: true` or `truncated: true` is not the full result. Count with an aggregate query, or page with `SKIP`, before you say how many there are or that you found them all.
-- `PackageFile` rows are the stored files of a package version, such as one `.tgz` or `.jar`. They are not the files inside the archive. Read them with `-[:HAS_PACKAGE_FILE]->(f:PackageFile)`.
+- For packages, their files, dependencies and vulnerabilities, and container repositories, load the `orbit-package-registry` skill first: `glab orbit skills get orbit-package-registry`.
 
 ## Iteration budget
 
@@ -111,7 +104,6 @@ Skip the confirmation prompts for good with `glab config set orbit_cli_auto_run 
 |---|---|
 | First-run setup, exit codes, service health, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
 | openCypher 9-based syntax and paste-ready queries | [`references/gql.md`](references/gql.md) |
-| Package registry and container registry | [`references/gql.md`](references/gql.md#package-registry-and-container-registry) |
 | Empty results and query validation errors | [`references/gql.md`](references/gql.md#troubleshooting) |
 | Reporting results and coverage caveats | [`references/reporting.md`](references/reporting.md) |
 | Maintaining this skill (contributing, doc sync) | [`references/maintaining.md`](references/maintaining.md) |

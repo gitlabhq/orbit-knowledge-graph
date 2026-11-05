@@ -1,7 +1,7 @@
 ---
 name: orbit-wrapper
-description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab, including packages, their dependencies and vulnerabilities, and the pipelines that built them. Skip it for writes that `glab` handles.
-version: 0.3.0
+description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
+version: 0.2.4
 license: MIT
 compatibility: Requires glab v1.126.0 or later with the GitLab Orbit CLI v0.163.0 or later, and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:

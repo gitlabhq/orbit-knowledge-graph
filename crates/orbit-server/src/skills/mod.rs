@@ -29,6 +29,12 @@ struct MigrationAssets;
 #[folder = "$SKILLS_DIR/orbit-start"]
 struct StartAssets;
 
+const PACKAGE_REGISTRY_SKILL_NAME: &str = "orbit-package-registry";
+
+#[derive(Embed)]
+#[folder = "$SKILLS_DIR/orbit-package-registry"]
+struct PackageRegistryAssets;
+
 static JSON_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
     SkillCatalog::load_embedded(Frontend::JsonDsl)
         .expect("embedded skills passed full frontmatter and tree validation in tests")
@@ -104,7 +110,9 @@ impl SkillCatalog {
         })?;
         let migration = load_skill::<MigrationAssets>(MIGRATION_SKILL_NAME, |path| Some(path))?;
         let start = load_skill::<StartAssets>(START_SKILL_NAME, |path| Some(path))?;
-        let skills = [orbit, migration, start]
+        let package_registry =
+            load_skill::<PackageRegistryAssets>(PACKAGE_REGISTRY_SKILL_NAME, |path| Some(path))?;
+        let skills = [orbit, migration, start, package_registry]
             .into_iter()
             .map(|skill| (skill.metadata.name.clone(), skill))
             .collect();
@@ -205,7 +213,12 @@ mod tests {
                 .iter()
                 .map(|skill| skill.name.as_str())
                 .collect::<Vec<_>>(),
-            [SKILL_NAME, MIGRATION_SKILL_NAME, START_SKILL_NAME]
+            [
+                SKILL_NAME,
+                MIGRATION_SKILL_NAME,
+                PACKAGE_REGISTRY_SKILL_NAME,
+                START_SKILL_NAME
+            ]
         );
         let skill = &skills[0];
         assert_eq!(skill.name, "orbit");
@@ -377,7 +390,12 @@ mod tests {
         assert_eq!(error.name, "unknown");
         assert_eq!(
             error.known_names,
-            [SKILL_NAME, MIGRATION_SKILL_NAME, START_SKILL_NAME]
+            [
+                SKILL_NAME,
+                MIGRATION_SKILL_NAME,
+                PACKAGE_REGISTRY_SKILL_NAME,
+                START_SKILL_NAME
+            ]
         );
     }
 
