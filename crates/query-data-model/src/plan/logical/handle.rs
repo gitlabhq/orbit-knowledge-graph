@@ -87,12 +87,19 @@ impl<'m> Rows<'m> {
         construction: &Construction<Logical>,
         rows: tracking::Rows,
     ) -> Result<Self, PlanError> {
-        let mut bindings = Vec::new();
+        let mut bindings: Vec<(Option<String>, Binding<'m>)> = Vec::new();
         let mut columns = Vec::new();
         for output in construction.outputs(&rows)? {
             match construction.value(output)? {
                 (Some(name), LogicalType::Scalar(_)) => columns.push((name.to_string(), output)),
                 (_, LogicalType::Scalar(_)) => {}
+                (Some(name), _)
+                    if bindings
+                        .iter()
+                        .any(|(bound, _)| bound.as_deref() == Some(name)) =>
+                {
+                    return Err(PlanError::Duplicate(name.to_string()));
+                }
                 (name, kind) => bindings.push((
                     name.map(str::to_string),
                     Binding {

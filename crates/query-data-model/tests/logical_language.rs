@@ -1,39 +1,14 @@
-use std::path::Path;
+mod support;
 
 use query_data_model::Direction;
-use query_data_model::Model;
 use query_data_model::plan::logical::{
     Columns, ErrorClass, Hops, Literal, LogicalOperation, LogicalType, Matching, Measure, Order,
-    Projection, Step, TimeUnit,
+    PlanError, Projection, Step, TimeUnit,
 };
-
-fn gitlab() -> Model {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/packages/gitlab");
-    let mut files: Vec<_> = std::fs::read_dir(root)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .collect();
-    files.sort();
-    let sources: Vec<_> = files
-        .iter()
-        .map(|file| {
-            (
-                file.display().to_string(),
-                std::fs::read_to_string(file).unwrap(),
-            )
-        })
-        .collect();
-    Model::from_yaml(
-        sources
-            .iter()
-            .map(|(name, yaml)| (name.as_str(), yaml.as_str())),
-    )
-    .unwrap()
-}
 
 #[test]
 fn a_pattern_binds_aliases_hops_and_edges() {
-    let model = gitlab();
+    let model = support::gitlab();
     let catalog = model.logical();
     let plan = catalog
         .build(|q| {
@@ -94,7 +69,7 @@ fn a_pattern_binds_aliases_hops_and_edges() {
 
 #[test]
 fn neighbors_paths_and_aggregates_declare_their_outputs() {
-    let model = gitlab();
+    let model = support::gitlab();
     let catalog = model.logical();
     let plan = catalog
         .build(|q| {
@@ -117,7 +92,7 @@ fn neighbors_paths_and_aggregates_declare_their_outputs() {
             let projects = q.entities_as(catalog.entity("Project")?, "p")?;
             let rows = q.shortest(groups, projects, &[], 3, "path")?;
             assert_eq!(rows.binding("path")?.kind(), LogicalType::Path);
-            Ok(rows)
+            Ok::<_, PlanError>(rows)
         })
         .unwrap();
 
@@ -145,13 +120,13 @@ fn neighbors_paths_and_aggregates_declare_their_outputs() {
 
 #[test]
 fn construction_errors_name_their_class() {
-    let model = gitlab();
+    let model = support::gitlab();
     let catalog = model.logical();
     let unknown = catalog
         .build(|q| {
             let rows = q.entities_as(catalog.entity("User")?, "u")?;
             rows.binding("x")?;
-            Ok(rows)
+            Ok::<_, PlanError>(rows)
         })
         .unwrap_err();
     assert_eq!(unknown.class(), ErrorClass::Reference);

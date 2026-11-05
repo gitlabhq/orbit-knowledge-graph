@@ -45,13 +45,13 @@ impl<'m> LogicalCatalog<'m> {
         ))
     }
 
-    pub fn build(
+    pub fn build<E: From<PlanError>>(
         self,
-        construct: impl FnOnce(&mut LogicalBuilder<'m>) -> Result<Rows<'m>, PlanError>,
-    ) -> Result<LogicalPlan, PlanError> {
+        construct: impl FnOnce(&mut LogicalBuilder<'m>) -> Result<Rows<'m>, E>,
+    ) -> Result<LogicalPlan, E> {
         let mut builder = LogicalBuilder::new(self, tracking::Construction::new(self.model.id()));
-        let root = construct(&mut builder).map(Rows::into_inner);
-        builder.finish(root)
+        let root = construct(&mut builder)?;
+        Ok(builder.finish(Ok(root.into_inner()))?)
     }
 
     pub fn rewrite(

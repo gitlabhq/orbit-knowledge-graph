@@ -249,7 +249,7 @@ fn handles_from_another_plan_or_snapshot_are_rejected() {
         .build(|q| {
             let rows = q.entities(requests)?;
             title = Some(rows.property("title")?);
-            Ok(rows)
+            Ok::<_, PlanError>(rows)
         })
         .unwrap();
     let second = catalog.build(|q| {
@@ -381,7 +381,7 @@ fn a_failed_step_closes_the_construction_session() {
     assert_eq!(result.unwrap_err(), PlanError::NoEntity);
 
     let mut swallowed = None;
-    let result = catalog.build(|q| {
+    let result = catalog.build(|q| -> Result<_, PlanError> {
         let rows = q.entities(requests)?;
         let other = q.entities(requests)?;
         swallowed = q

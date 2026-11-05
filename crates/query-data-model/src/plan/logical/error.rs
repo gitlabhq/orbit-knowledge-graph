@@ -56,6 +56,8 @@ pub enum PlanError {
         name: String,
         available: Vec<String>,
     },
+    #[error("{0} is bound twice")]
+    Duplicate(String),
     #[error("{0}")]
     Shape(String),
     #[error("{what} is {found}; the maximum is {max}")]
@@ -79,7 +81,9 @@ impl PlanError {
             | Self::NotFilterable(_)
             | Self::NoSubstring(_) => ErrorClass::Policy,
             Self::Type { .. } | Self::Value { .. } | Self::NoEntity => ErrorClass::Type,
-            Self::UnknownColumn { .. } | Self::UnknownBinding { .. } => ErrorClass::Reference,
+            Self::UnknownColumn { .. } | Self::UnknownBinding { .. } | Self::Duplicate(_) => {
+                ErrorClass::Reference
+            }
             Self::Shape(_) => ErrorClass::Shape,
             Self::Limit { .. } => ErrorClass::Limit,
         }

@@ -1,6 +1,6 @@
 use super::{
-    Binding, Logical, LogicalCatalog, LogicalOperation, LogicalPlan, LogicalType, PlanError,
-    Predicate, Rows, Step, filter,
+    Binding, Expr, Literal, Logical, LogicalCatalog, LogicalOperation, LogicalPlan, LogicalType,
+    PlanError, Predicate, Rows, Step, filter,
 };
 use crate::plan::tracking::{self, Body, Construction, Declare, Declared, Outputs, Ref};
 use crate::{Direction, EntityId, RelationshipId};
@@ -98,6 +98,21 @@ impl<'m> LogicalBuilder<'m> {
             vec![rows],
             |catalog, construction, _| {
                 super::limits::in_values(&checked)?;
+                filter::predicate(catalog.model(), construction, &checked)?;
+                Ok(Outputs::preserve())
+            },
+        )
+    }
+
+    pub fn pin(&mut self, rows: Rows<'m>, key: Expr, ids: &[i64]) -> Result<Rows<'m>, PlanError> {
+        let predicate = key.one_of(ids.iter().copied().map(Literal::Int));
+        let checked = predicate.clone();
+        let count = ids.len();
+        self.connect(
+            LogicalOperation::Filter(predicate),
+            vec![rows],
+            |catalog, construction, _| {
+                super::limits::at_most("pinned ids", count, super::limits::MAX_PINS)?;
                 filter::predicate(catalog.model(), construction, &checked)?;
                 Ok(Outputs::preserve())
             },

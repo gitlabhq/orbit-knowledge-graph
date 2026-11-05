@@ -6,6 +6,7 @@ pub const MAX_RELATIONSHIP_TYPES: usize = 10;
 pub const MAX_ROWS: u64 = 1000;
 pub const MAX_SKIP: u64 = 10_000;
 pub const MAX_IN_VALUES: usize = 100;
+pub const MAX_PINS: usize = 500;
 pub const MAX_COLUMNS: usize = 50;
 pub const MAX_MEASURES: usize = 10;
 pub const MAX_GROUPS: usize = 4;
