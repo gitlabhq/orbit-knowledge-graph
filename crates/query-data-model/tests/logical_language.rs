@@ -248,3 +248,28 @@ fn edge_attributes_are_checked_at_construction() {
     assert_eq!(error.class(), ErrorClass::Policy);
     assert_eq!(error.to_string(), "CALLS.branch is hidden");
 }
+
+#[test]
+fn plans_carry_the_declared_node_order_through_rewrites() {
+    let model = support::gitlab();
+    let catalog = model.logical();
+    let plan = catalog
+        .build(|q| {
+            let rows = q.entities_as(catalog.entity("User")?, "u")?;
+            let user = rows.binding("u")?;
+            let step = Step::new(Direction::Outgoing)
+                .via([catalog.relationship("AUTHORED")?])
+                .to(catalog.entity("MergeRequest")?)
+                .named("mr");
+            let rows = q.traverse(rows, user, step)?;
+            q.declare_order([rows.binding("mr")?, rows.binding("u")?])?;
+            Ok::<_, PlanError>(rows)
+        })
+        .unwrap();
+    let plan = catalog.rewrite(plan, |_, rows| Ok(rows)).unwrap();
+    let order: Vec<_> = plan
+        .declaration_order()
+        .map(|output| plan.name(output).unwrap())
+        .collect();
+    assert_eq!(order, ["mr", "u"]);
+}

@@ -29,6 +29,7 @@ impl<L: Language> Construction<L> {
                 outputs: Vec::new(),
                 parents: vec![None],
                 bodies: Vec::new(),
+                order: Vec::new(),
             },
             scope: ScopeId(0),
             failed: false,
@@ -95,6 +96,16 @@ impl<L: Language> Construction<L> {
             .find(|node| node.spec.owns(output.output))
             .map(|node| &node.operation)
             .ok_or_else(|| Rejected::NotVisible(self.arena.describe(output.output)))
+    }
+
+    pub fn declare_order(&mut self, outputs: &[Ref]) -> Result<(), Rejected> {
+        self.attempt(|this| {
+            if outputs.iter().any(|output| output.plan != this.arena.plan) {
+                return Err(Rejected::ForeignPlan);
+            }
+            this.arena.order = outputs.iter().map(|output| output.output).collect();
+            Ok(())
+        })
     }
 
     pub fn connect(

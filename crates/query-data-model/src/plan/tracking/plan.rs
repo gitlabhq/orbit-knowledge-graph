@@ -33,6 +33,7 @@ pub(super) struct Arena<L: Language> {
     pub(super) outputs: Vec<OutputInfo<L::Value>>,
     pub(super) parents: Vec<Option<ScopeId>>,
     pub(super) bodies: Vec<BodyInfo>,
+    pub(super) order: Vec<OutputId>,
 }
 
 impl<L: Language> Arena<L> {
@@ -103,6 +104,14 @@ impl<L: Language> Plan<L> {
 
     pub fn value(&self, output: Ref) -> &L::Value {
         &self.arena.outputs[output.output.0].value
+    }
+
+    pub fn declaration_order(&self) -> impl Iterator<Item = Ref> + '_ {
+        let plan = self.arena.plan;
+        self.arena.order.iter().map(move |output| Ref {
+            plan,
+            output: *output,
+        })
     }
 
     pub fn body(&self, body: BodyId) -> (&str, NodeId) {

@@ -161,6 +161,14 @@ impl<'m> LogicalBuilder<'m> {
         self.view(connected.rows)
     }
 
+    pub fn declare_order(
+        &mut self,
+        bindings: impl IntoIterator<Item = Binding<'m>>,
+    ) -> Result<(), PlanError> {
+        let outputs: Vec<Ref> = bindings.into_iter().map(Binding::output).collect();
+        Ok(self.construction.declare_order(&outputs)?)
+    }
+
     pub fn reconnect(&mut self, from: Ref, to: Ref) -> Result<(), PlanError> {
         Ok(self.construction.reconnect(from, to)?)
     }

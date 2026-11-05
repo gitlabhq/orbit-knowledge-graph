@@ -50,6 +50,7 @@ impl<L: Language> Construction<L> {
             outputs,
             parents,
             bodies,
+            order,
         } = plan.arena;
         let pending_bodies = bodies
             .iter()
@@ -64,6 +65,7 @@ impl<L: Language> Construction<L> {
             outputs,
             parents,
             bodies,
+            order,
         };
         construction.pending = Some(Pending {
             old: nodes.into_iter().map(Some).collect(),
@@ -154,6 +156,9 @@ impl<L: Language> Construction<L> {
 
     fn rewritten(&mut self) -> Result<Rows, Rejected> {
         let pending = self.pending.as_ref().ok_or(Rejected::Failed)?;
+        for output in &mut self.arena.order {
+            *output = pending.remap.get(output).copied().unwrap_or(*output);
+        }
         Ok(self.rows(pending.mapped[pending.root.0]))
     }
 
