@@ -6,7 +6,7 @@ use super::super::ast::{BooleanExpression, Comparison, FilterOp, MapEntry, Predi
 use super::super::errors::invalid;
 use super::scope::{Scope, Shape};
 use crate::plan::logical::{
-    Binding, Comparison as Compare, EdgeField, Expr, Literal, Matching, PlanError, Predicate, Rows,
+    Comparison as Compare, EdgeField, Expr, Literal, Matching, Predicate, Rows,
 };
 use crate::surface::SurfaceError;
 
@@ -67,17 +67,6 @@ pub(super) fn entries(
         .collect()
 }
 
-pub(super) fn edge_field(link: Binding<'_>, name: &str) -> Result<Expr, SurfaceError> {
-    let field: EdgeField = name.parse().map_err(|_| PlanError::UnknownColumn {
-        name: name.to_string(),
-        available: <EdgeField as strum::VariantNames>::VARIANTS
-            .iter()
-            .map(|name| name.to_string())
-            .collect(),
-    })?;
-    Ok(link.field(field)?)
-}
-
 fn leaf(leaf: Leaf<'_>, rows: &Rows<'_>, scope: &Scope<'_>) -> Result<Predicate, SurfaceError> {
     let comparison = match leaf {
         Leaf::Comparison(comparison) => *comparison,
@@ -97,7 +86,7 @@ fn leaf(leaf: Leaf<'_>, rows: &Rows<'_>, scope: &Scope<'_>) -> Result<Predicate,
                         ),
                     ));
                 }
-                Some(_) => edge_field(rows.binding(name)?, "relationship_kind")?,
+                Some(_) => rows.binding(name)?.field(EdgeField::Kind)?,
                 None => return Err(not_relationship(span, name, scope)),
             };
             let value = value.ok_or_else(|| invalid(span, "type() compares with a value"))?;
@@ -163,7 +152,7 @@ fn column(
             span,
             "a variable-length relationship binds a list; relationship-list predicates are unsupported",
         )),
-        Some(_) => edge_field(rows.binding(alias)?, property),
+        Some(_) => Ok(rows.edge_column(rows.binding(alias)?, property)?),
         None => Err(invalid(span, &format!("undefined variable {alias}"))),
     }
 }

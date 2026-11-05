@@ -29,6 +29,7 @@ pub fn input(statement: &Statement, model: &Model) -> Result<Input> {
     for node in statement.plan.nodes() {
         bridge.operation(node)?;
     }
+    bridge.declaration_order();
     for condition in std::mem::take(&mut bridge.conditions) {
         bridge.input.absorb(condition)?;
     }
@@ -59,6 +60,20 @@ impl Bridge<'_> {
     fn declared(&self, node: NodeId, back: usize) -> Ref {
         let outputs: Vec<Ref> = self.plan.outputs(node).collect();
         outputs[outputs.len() - back]
+    }
+
+    fn declaration_order(&mut self) {
+        let declared: Vec<&str> = self
+            .plan
+            .declaration_order()
+            .filter_map(|output| self.plan.name(output))
+            .collect();
+        self.input.nodes.sort_by_key(|node| {
+            declared
+                .iter()
+                .position(|alias| *alias == node.id)
+                .unwrap_or(declared.len())
+        });
     }
 
     fn alias(&self, binding: Ref) -> Result<String> {

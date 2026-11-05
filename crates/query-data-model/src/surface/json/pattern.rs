@@ -2,9 +2,7 @@ use serde_json::Value;
 
 use super::filters;
 use super::request::{Node, Relationship, Request};
-use crate::plan::logical::{
-    Comparison, EdgeField, Hops, LogicalBuilder, PlanError, Predicate, Rows, Step,
-};
+use crate::plan::logical::{Comparison, Hops, LogicalBuilder, PlanError, Predicate, Rows, Step};
 use crate::plan::tracking::Declared;
 use crate::surface::SurfaceError;
 use crate::{Direction, RelationshipId};
@@ -179,20 +177,6 @@ fn step<'m>(
     let from = rows.binding(near)?;
     let rows = q.traverse(rows, from, step)?;
     let link = rows.edge().ok_or(PlanError::NoEntity)?;
-    let predicates = filters::conditions(&edge.filters, |name| {
-        let field: EdgeField = name.parse().map_err(|_| PlanError::UnknownColumn {
-            name: name.to_string(),
-            available: edge_fields(),
-        })?;
-        Ok(link.field(field)?)
-    })?;
+    let predicates = filters::conditions(&edge.filters, |name| Ok(rows.edge_column(link, name)?))?;
     conjoin(q, rows, predicates)
-}
-
-fn edge_fields() -> Vec<String> {
-    use strum::VariantNames;
-    EdgeField::VARIANTS
-        .iter()
-        .map(|name| name.to_string())
-        .collect()
 }

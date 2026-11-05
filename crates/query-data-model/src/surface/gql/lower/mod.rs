@@ -37,6 +37,8 @@ pub(super) fn lower(
             Shape::Path(name) => path(q, &scope, predicates, name)?,
             Shape::Neighbors(name) => neighbors(q, &scope, predicates, name)?,
         };
+        let declared = scope.nodes.iter().map(|node| rows.binding(&node.alias));
+        q.declare_order(declared.collect::<Result<Vec<_>, _>>()?)?;
         let rows = returns::project(q, rows, &scope, projections, order)?;
         let limit = limit.unwrap_or(DEFAULT_LIMIT);
         Ok(q.slice(rows, limit.into(), skip.unwrap_or(0).into())?)
@@ -126,7 +128,7 @@ fn matched<'m>(
         rows = q.traverse(rows, from, step)?;
         let link = rows.edge().ok_or(PlanError::NoEntity)?;
         let predicates =
-            conditions::entries(&edge.properties, |name| conditions::edge_field(link, name))?;
+            conditions::entries(&edge.properties, |name| Ok(rows.edge_column(link, name)?))?;
         rows = conjoin(q, rows, predicates)?;
         rows = inline(q, rows, target)?;
         bound.push(far);

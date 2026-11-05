@@ -116,6 +116,14 @@ impl Bridge<'_> {
                 };
                 Ok((PredicateTarget::Relationship(index), property.to_string()))
             }
+            Expr::Attribute { binding, attribute } => {
+                let index =
+                    self.edges.get(binding).copied().ok_or_else(|| {
+                        QueryError::PipelineInvariant("unbound relationship".into())
+                    })?;
+                let name = &self.model.graph().attribute(*attribute).name;
+                Ok((PredicateTarget::Relationship(index), name.clone()))
+            }
             other => Err(QueryError::PipelineInvariant(format!(
                 "{other:?} is not a filterable column"
             ))),

@@ -5,9 +5,9 @@ use super::super::ast::{
 };
 use super::super::errors::invalid;
 use super::scope::{Scope, Shape};
-use super::{Built, aggregate, conditions};
+use super::{Built, aggregate};
 use crate::plan::logical::limits::MAX_COLUMNS;
-use crate::plan::logical::{Columns, Expr, LogicalBuilder, Order, Projection, Rows};
+use crate::plan::logical::{Columns, EdgeField, Expr, LogicalBuilder, Order, Projection, Rows};
 use crate::surface::SurfaceError;
 
 pub(super) enum Item {
@@ -302,7 +302,7 @@ impl Returned {
         key: SortKey<'_>,
     ) -> Result<Expr, SurfaceError> {
         let kind = |name: &Name<'_>| -> Result<Expr, SurfaceError> {
-            conditions::edge_field(rows.binding(&name.value)?, "relationship_kind")
+            Ok(rows.binding(&name.value)?.field(EdgeField::Kind)?)
         };
         let (node, property) = match key {
             SortKey::Property(key) if scope.edge(&key.node.value).is_some() => {
@@ -381,8 +381,7 @@ impl Returned {
                     columns,
                 }
                 .named(name),
-                None => Projection::Value(conditions::edge_field(bound, "relationship_kind")?)
-                    .named(name),
+                None => Projection::Value(bound.field(EdgeField::Kind)?).named(name),
             });
         }
         if let Shape::Path(name) | Shape::Neighbors(name) = &scope.shape {

@@ -1,6 +1,7 @@
 mod support;
 
-use query_data_model::plan::logical::{ErrorClass, LogicalOperation, Projection};
+use query_data_model::Packages;
+use query_data_model::plan::logical::{ErrorClass, Expr, LogicalOperation, Projection};
 use query_data_model::surface::{SurfaceError, gql};
 
 fn plan(query: &str) -> Result<Vec<String>, SurfaceError> {
@@ -124,4 +125,58 @@ fn surface_and_model_errors_keep_their_kind() {
         Err(SurfaceError::Schema(_))
     ));
     assert!(matches!(plan("MATCH RETURN"), Err(SurfaceError::Schema(_))));
+}
+
+#[test]
+fn relationship_attributes_filter_inline_and_in_where() {
+    let model = Packages::embedded().load().unwrap();
+    let statement = gql::parse(
+        "MATCH (f:File {project_id: 1})-[r:DEFINES {branch: 'main'}]->(d:Definition) \
+         WHERE r.project_id = 1 RETURN d",
+        model.logical(),
+    )
+    .unwrap();
+    let plan = statement.plan;
+    let attributes: Vec<_> = plan
+        .nodes()
+        .filter_map(|node| match plan.operation(node) {
+            LogicalOperation::Filter(predicate) => Some(predicate.exprs()),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|expr| match expr {
+            Expr::Attribute { attribute, .. } => {
+                Some(model.graph().attribute(attribute).name.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(attributes, ["branch", "project_id"]);
+
+    let error = gql::parse(
+        "MATCH (u:User {id: 1})-[r:AUTHORED]->(m:MergeRequest) WHERE r.branch = 'main' RETURN m",
+        model.logical(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "unknown column branch; available: relationship_kind, source_id, source_kind, target_id, target_kind"
+    );
+}
+
+#[test]
+fn a_match_declares_its_nodes_in_written_order() {
+    let model = Packages::embedded().load().unwrap();
+    let statement = gql::parse(
+        "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest), (pipe:Pipeline), \
+         (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe) RETURN *",
+        model.logical(),
+    )
+    .unwrap();
+    let plan = statement.plan;
+    let order: Vec<_> = plan
+        .declaration_order()
+        .map(|output| plan.name(output).unwrap())
+        .collect();
+    assert_eq!(order, ["u", "mr", "pipe", "p"]);
 }
