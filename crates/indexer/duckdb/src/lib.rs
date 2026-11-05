@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
-use duckdb_client::{DuckDbClient, OpenMode};
+use duckdb_client::{DuckDbClient, Limits, OpenMode};
 use indexer::handler::HandlerError;
 use indexer::modules::sdlc::{
     BlockTransform, SOURCE_DATA_TABLE, SqlTransformFactory, TableBatch, Transformation,
@@ -11,8 +11,17 @@ use indexer::modules::sdlc::{
 use orbit_arrow::prepare_batch;
 
 /// Every transform shares one in-memory database, so the process runs one DuckDB thread pool.
-pub fn sql_transform() -> duckdb_client::Result<SqlTransformFactory> {
-    let database = Arc::new(Mutex::new(DuckDbClient::open(OpenMode::InMemoryArrow)?));
+pub fn sql_transform(
+    threads: Option<u32>,
+    memory_limit: Option<&str>,
+) -> duckdb_client::Result<SqlTransformFactory> {
+    let limits = Limits {
+        threads,
+        memory_limit,
+    };
+    let database = Arc::new(Mutex::new(DuckDbClient::open(OpenMode::InMemoryArrow(
+        limits,
+    ))?));
     Ok(Arc::new(move |name, transforms| {
         let outputs = transforms
             .iter()

@@ -513,6 +513,22 @@
           "type": "integer",
           "format": "uint",
           "minimum": 1
+        },
+        "transform_threads": {
+          "description": "DuckDB threads for the SQL transforms. Unset = DuckDB's default, one per CPU it sees.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1
+        },
+        "transform_memory_limit": {
+          "description": "DuckDB memory limit for the SQL transforms, such as `4GiB`. Unset = 80% of the memory it sees.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false,

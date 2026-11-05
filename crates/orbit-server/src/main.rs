@@ -113,15 +113,14 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(Into::into),
             Mode::Indexer => {
                 let indexer_config = IndexerConfig::from(&config);
-                indexer::run(
-                    &indexer_config,
-                    ontology,
-                    serving,
-                    shutdown,
-                    indexer_duckdb::sql_transform()?,
-                )
-                .await
-                .map_err(Into::into)
+                let entity_handler = &indexer_config.engine.handlers.entity_handler;
+                let sql_transform = indexer_duckdb::sql_transform(
+                    entity_handler.transform_threads,
+                    entity_handler.transform_memory_limit.as_deref(),
+                )?;
+                indexer::run(&indexer_config, ontology, serving, shutdown, sql_transform)
+                    .await
+                    .map_err(Into::into)
             }
             Mode::Webserver => {
                 config.schema.validate()?;

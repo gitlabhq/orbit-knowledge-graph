@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
-use duckdb_client::{DuckDbClient, OpenMode, string_column};
+use duckdb_client::{DuckDbClient, Limits, OpenMode, string_column};
 use indexer::modules::sdlc::{SOURCE_DATA_TABLE, sql_transformations};
 use serde_json::Value;
 
-const ALLOWED_FUNCTIONS: &[&str] = &["cardinality", "concat", "list_value", "unnest"];
+const ALLOWED_FUNCTIONS: &[&str] = &["cardinality", "list_value", "map", "unnest", "||"];
 
 #[test]
 fn generated_transforms_are_selects_over_the_block_with_allowed_functions() {
@@ -29,17 +29,18 @@ fn generated_transforms_are_selects_over_the_block_with_allowed_functions() {
             "{table}"
         );
 
-        let mut functions = BTreeSet::new();
-        let mut tables = BTreeSet::new();
-        collect(&tree, &mut functions, &mut tables);
-        let unexpected: Vec<_> = functions
+        let mut found = Tree::default();
+        found.collect(&tree);
+        let unexpected: Vec<_> = found
+            .functions
             .iter()
             .filter(|name| !ALLOWED_FUNCTIONS.contains(&name.as_str()))
             .collect();
         assert!(unexpected.is_empty(), "{table} calls {unexpected:?}");
+        let read: BTreeSet<_> = found.tables.difference(&found.ctes).collect();
         assert_eq!(
-            tables,
-            BTreeSet::from([format!("..{SOURCE_DATA_TABLE}")]),
+            read,
+            BTreeSet::from([&format!("..{SOURCE_DATA_TABLE}")]),
             "{table}"
         );
     }
@@ -47,7 +48,7 @@ fn generated_transforms_are_selects_over_the_block_with_allowed_functions() {
 
 #[test]
 fn server_database_rejects_extensions_and_crypto_settings() {
-    let database = DuckDbClient::open(OpenMode::InMemoryArrow).unwrap();
+    let database = DuckDbClient::open(OpenMode::InMemoryArrow(Limits::default())).unwrap();
     for sql in [
         "INSTALL httpfs",
         "LOAD httpfs",
@@ -64,23 +65,58 @@ fn server_database_rejects_extensions_and_crypto_settings() {
     }
 }
 
-fn collect(node: &Value, functions: &mut BTreeSet<String>, tables: &mut BTreeSet<String>) {
-    match node {
-        Value::Object(map) => {
-            if let Some(name) = map.get("function_name").and_then(Value::as_str) {
-                functions.insert(name.to_string());
+#[test]
+fn server_database_applies_the_configured_limits() {
+    let database = DuckDbClient::open(OpenMode::InMemoryArrow(Limits {
+        threads: Some(2),
+        memory_limit: Some("512MiB"),
+    }))
+    .unwrap();
+    let setting = |name: &str| {
+        string_column(
+            &database
+                .query_arrow_json(
+                    "SELECT current_setting(?)::VARCHAR AS value",
+                    &[name.into()],
+                )
+                .unwrap(),
+            "value",
+        )
+    };
+    assert_eq!(setting("threads"), ["2"]);
+    assert_eq!(setting("memory_limit"), ["512.0 MiB"]);
+}
+
+#[derive(Default)]
+struct Tree {
+    functions: BTreeSet<String>,
+    tables: BTreeSet<String>,
+    ctes: BTreeSet<String>,
+}
+
+impl Tree {
+    fn collect(&mut self, node: &Value) {
+        match node {
+            Value::Object(map) => {
+                if let Some(name) = map.get("function_name").and_then(Value::as_str) {
+                    self.functions.insert(name.to_string());
+                }
+                if let Some(name) = map.get("table_name").and_then(Value::as_str) {
+                    let qualifier = ["catalog_name", "schema_name"]
+                        .map(|key| map.get(key).and_then(Value::as_str).unwrap_or_default());
+                    self.tables
+                        .insert(format!("{}.{}.{name}", qualifier[0], qualifier[1]));
+                }
+                let ctes = map.get("cte_map").and_then(|ctes| ctes["map"].as_array());
+                for cte in ctes.into_iter().flatten() {
+                    if let Some(name) = cte["key"].as_str() {
+                        self.ctes.insert(format!("..{name}"));
+                    }
+                }
+                map.values().for_each(|value| self.collect(value));
             }
-            if let Some(name) = map.get("table_name").and_then(Value::as_str) {
-                let qualifier = ["catalog_name", "schema_name"]
-                    .map(|key| map.get(key).and_then(Value::as_str).unwrap_or_default());
-                tables.insert(format!("{}.{}.{name}", qualifier[0], qualifier[1]));
-            }
-            map.values()
-                .for_each(|value| collect(value, functions, tables));
+            Value::Array(values) => values.iter().for_each(|value| self.collect(value)),
+            _ => {}
         }
-        Value::Array(values) => values
-            .iter()
-            .for_each(|value| collect(value, functions, tables)),
-        _ => {}
     }
 }

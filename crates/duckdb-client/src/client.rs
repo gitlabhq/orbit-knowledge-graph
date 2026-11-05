@@ -34,9 +34,15 @@ pub enum OpenMode<'a> {
     /// In memory, where SQL may `ATTACH` database files under this directory only.
     InMemoryAttaching(&'a Path),
     /// In memory, where [`DuckDbClient::create_temp_table`] can load Arrow batches.
-    InMemoryArrow,
+    InMemoryArrow(Limits<'a>),
     /// Another connection to an open database, sharing its settings and thread pool.
     Connection(&'a DuckDbClient),
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Limits<'a> {
+    pub threads: Option<u32>,
+    pub memory_limit: Option<&'a str>,
 }
 
 impl<'a, P: AsRef<Path> + ?Sized> From<&'a P> for OpenMode<'a> {
@@ -51,10 +57,12 @@ impl DuckDbClient {
         match mode.into() {
             OpenMode::ReadWrite(path) => Self::open_file(path, false),
             OpenMode::ReadOnly(path) => Self::open_file(path, true),
-            OpenMode::InMemory => Self::connect(in_memory, false, None),
-            OpenMode::InMemoryAttaching(dir) => Self::connect(in_memory, false, Some(dir)),
-            OpenMode::InMemoryArrow => {
-                let client = Self::connect(in_memory, false, None)?;
+            OpenMode::InMemory => Self::connect(in_memory, false, None, Limits::default()),
+            OpenMode::InMemoryAttaching(dir) => {
+                Self::connect(in_memory, false, Some(dir), Limits::default())
+            }
+            OpenMode::InMemoryArrow(limits) => {
+                let client = Self::connect(in_memory, false, None, limits)?;
                 client.conn.register_table_function::<ArrowVTab>("arrow")?;
                 Ok(client)
             }
@@ -76,7 +84,7 @@ impl DuckDbClient {
             (MAX_OPEN_RETRIES, INITIAL_BACKOFF)
         };
         for attempt in 0..=retries {
-            match Self::connect(path, read_only, None) {
+            match Self::connect(path, read_only, None, Limits::default()) {
                 Err(e) if attempt < retries && is_lock_error(&e) => {
                     std::thread::sleep(backoff);
                     if !read_only {
@@ -89,7 +97,12 @@ impl DuckDbClient {
         unreachable!()
     }
 
-    fn connect(path: &Path, read_only: bool, attachable_dir: Option<&Path>) -> Result<Self> {
+    fn connect(
+        path: &Path,
+        read_only: bool,
+        attachable_dir: Option<&Path>,
+        limits: Limits,
+    ) -> Result<Self> {
         let access_mode = if read_only {
             duckdb::AccessMode::ReadOnly
         } else {
@@ -101,6 +114,14 @@ impl DuckDbClient {
             .and_then(|config| config.with("autoinstall_known_extensions", "false"))
             .and_then(|config| config.with("allow_community_extensions", "false"))
             .and_then(|config| config.with("allow_persistent_secrets", "false"))
+            .and_then(|config| match limits.threads {
+                Some(threads) => config.threads(i64::from(threads)),
+                None => Ok(config),
+            })
+            .and_then(|config| match limits.memory_limit {
+                Some(memory_limit) => config.max_memory(memory_limit),
+                None => Ok(config),
+            })
             .map_err(|e| DuckDbError::Schema(e.to_string()))?;
         let conn = duckdb::Connection::open_with_flags(path, config)?;
         let allowed = attachable_dir
@@ -485,7 +506,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn create_temp_table_quotes_the_table_name() {
-        let client = DuckDbClient::open(OpenMode::InMemoryArrow).unwrap();
+        let client = DuckDbClient::open(OpenMode::InMemoryArrow(Limits::default())).unwrap();
         let batch = make_file_batch(&[1, 2], &["a.rs", "b.rs"]);
         client
             .create_temp_table("source data; DROP TABLE x", batch)

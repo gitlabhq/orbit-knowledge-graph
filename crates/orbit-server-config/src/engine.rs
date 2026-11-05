@@ -202,6 +202,13 @@ pub struct EntityHandlerConfig {
     /// Maximum number of items bound into each SystemNote resolver lookup.
     #[schemars(range(min = 1))]
     pub system_notes_resolve_lookup_batch_size: usize,
+
+    /// DuckDB threads for the SQL transforms. Unset = DuckDB's default, one per CPU it sees.
+    #[schemars(range(min = 1))]
+    pub transform_threads: Option<u32>,
+
+    /// DuckDB memory limit for the SQL transforms, such as `4GiB`. Unset = 80% of the memory it sees.
+    pub transform_memory_limit: Option<String>,
 }
 
 impl EntityHandlerConfig {

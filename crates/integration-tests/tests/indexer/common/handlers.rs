@@ -78,7 +78,7 @@ async fn build_fan_out(
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
         indexer::modules::sdlc::PARTITION_MIN_ROWS,
-        indexer_duckdb::sql_transform().expect("DuckDB opens in memory"),
+        indexer_duckdb::sql_transform(None, None).expect("DuckDB opens in memory"),
     )
     .await
     .expect("failed to register SDLC handlers");
@@ -151,7 +151,7 @@ async fn entity_handler_for_config(
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
         0,
-        indexer_duckdb::sql_transform().expect("DuckDB opens in memory"),
+        indexer_duckdb::sql_transform(None, None).expect("DuckDB opens in memory"),
     )
     .await
     .expect("failed to register SDLC handlers");

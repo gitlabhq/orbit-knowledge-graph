@@ -64,6 +64,13 @@ pub(super) struct DenormalizedColumnProjection {
     enum_mapping: Option<BTreeMap<i64, String>>,
 }
 
+struct EdgeSelect {
+    table: String,
+    columns: Vec<String>,
+    tags: [String; 2],
+    filter: Option<String>,
+}
+
 enum NodeColumn {
     Identity(String),
     Rename {
@@ -152,14 +159,16 @@ fn build_node_transform(
         dict_encode_columns: low_cardinality_columns(&transform_declaration.storage_columns),
     }];
 
+    let mut selects = Vec::new();
     for mapping in &transform_declaration.edges {
-        transforms.extend(fk_edge_transform(
+        selects.extend(fk_edge_transform(
             mapping,
             &transform_declaration.node_name,
             namespaced,
             ontology,
         )?);
     }
+    transforms.extend(edge_queries(selects, ontology));
 
     Ok(TransformSpec::DataFusion(transforms))
 }
@@ -175,14 +184,15 @@ fn edge_transform(
         EdgeFilter::IsNotNull(mapping.source.field.clone()),
         EdgeFilter::IsNotNull(mapping.target.field.clone()),
     ];
-    Ok(TransformSpec::DataFusion(edge_transformations(
+    let selects = edge_transformations(
         relationship_kind,
         mapping,
         scope == EtlScope::Namespaced,
         filters,
         denormalized,
         ontology,
-    )?))
+    )?;
+    Ok(TransformSpec::DataFusion(edge_queries(selects, ontology)))
 }
 
 fn fk_edge_transform(
@@ -190,7 +200,7 @@ fn fk_edge_transform(
     node_name: &str,
     namespaced: bool,
     ontology: &Ontology,
-) -> Result<Vec<Transformation>, ontology::OntologyError> {
+) -> Result<Vec<EdgeSelect>, ontology::OntologyError> {
     let mut filters = Vec::new();
     for node_ref in [&mapping.source, &mapping.target] {
         if node_ref.field == DEFAULT_PRIMARY_KEY {
@@ -220,7 +230,7 @@ fn edge_transformations(
     mut filters: Vec<EdgeFilter>,
     denormalized: Vec<DenormalizedColumnProjection>,
     ontology: &Ontology,
-) -> Result<Vec<Transformation>, ontology::OntologyError> {
+) -> Result<Vec<EdgeSelect>, ontology::OntologyError> {
     let (source_kind, source_filter) = resolve_node_ref_kind(&mapping.source, || {
         ontology.get_edge_source_types(relationship_kind)
     });
@@ -259,9 +269,9 @@ fn edge_transformations(
                     variants,
                 });
             }
-            let meta = edge_table_metadata(table, ontology);
-            Ok(Transformation {
-                sql: build_edge_transform_sql(
+            Ok(EdgeSelect {
+                table: table.to_string(),
+                columns: edge_columns(
                     &edge_id_sql(&resolve_edge_id(
                         &mapping.source,
                         mapping.array_field.as_deref(),
@@ -274,12 +284,9 @@ fn edge_transformations(
                     )),
                     &target_kind_sql,
                     namespaced,
-                    &denormalized,
-                    &filters,
-                    &meta.sort_key,
                 ),
-                destination_table: prefixed_table_name(table, *SCHEMA_VERSION),
-                dict_encode_columns: meta.dict_columns,
+                tags: edge_tags(&denormalized),
+                filter: edge_filters_sql(&filters),
             })
         })
         .collect()
@@ -561,117 +568,157 @@ fn edge_filters_sql(filters: &[EdgeFilter]) -> Option<String> {
     )
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "SQL builder takes each edge-transform input as a distinct typed parameter"
-)]
-fn build_edge_transform_sql(
-    source_id: &str,
-    source_kind: &str,
-    relationship_kind: &str,
-    target_id: &str,
-    target_kind: &str,
-    namespaced: bool,
-    denormalized: &[DenormalizedColumnProjection],
-    filters: &[EdgeFilter],
-    sort_key: &[String],
-) -> String {
-    let select_list = edge_select_list(
-        source_id,
-        source_kind,
-        relationship_kind,
-        target_id,
-        target_kind,
-        namespaced,
-        denormalized,
-    );
-    let mut sql = format!("SELECT {} FROM {SOURCE_DATA_TABLE}", select_list.join(", "));
-    if let Some(where_sql) = edge_filters_sql(filters) {
-        sql.push_str(" WHERE ");
-        sql.push_str(&where_sql);
+const NO_TAGS: &str = "CAST([] AS VARCHAR[])";
+const TAGGED_TABLE: &str = "_tagged";
+
+fn edge_queries(selects: Vec<EdgeSelect>, ontology: &Ontology) -> Vec<Transformation> {
+    let mut by_table: Vec<(String, Vec<EdgeSelect>)> = Vec::new();
+    for select in selects {
+        match by_table
+            .iter_mut()
+            .find(|(table, _)| *table == select.table)
+        {
+            Some((_, group)) => group.push(select),
+            None => by_table.push((select.table.clone(), vec![select])),
+        }
+    }
+    by_table
+        .into_iter()
+        .map(|(table, selects)| {
+            let meta = edge_table_metadata(&table, ontology);
+            Transformation {
+                sql: edge_union_sql(&selects, &meta.sort_key),
+                destination_table: prefixed_table_name(&table, *SCHEMA_VERSION),
+                dict_encode_columns: meta.dict_columns,
+            }
+        })
+        .collect()
+}
+
+fn edge_union_sql(selects: &[EdgeSelect], sort_key: &[String]) -> String {
+    let all_tags: Vec<&str> = selects
+        .iter()
+        .flat_map(|select| select.tags.iter().map(String::as_str))
+        .filter(|tags| *tags != NO_TAGS)
+        .collect();
+    let mut shared: Vec<&str> = Vec::new();
+    for tags in &all_tags {
+        if all_tags.iter().filter(|other| *other == tags).count() > 1 && !shared.contains(tags) {
+            shared.push(tags);
+        }
+    }
+    let shared_column = |index: usize| quote_ident(&format!("_tags_{index}"));
+    let from = if shared.is_empty() {
+        SOURCE_DATA_TABLE.to_string()
+    } else {
+        quote_ident(TAGGED_TABLE)
+    };
+
+    let branches: Vec<String> = selects
+        .iter()
+        .map(|select| {
+            let tags =
+                select
+                    .tags
+                    .iter()
+                    .zip(["source_tags", "target_tags"])
+                    .map(|(tags, name)| {
+                        let tags = shared
+                            .iter()
+                            .position(|candidate| candidate == tags)
+                            .map_or_else(|| tags.clone(), shared_column);
+                        format!("{tags} AS {name}")
+                    });
+            let columns: Vec<String> = select.columns.iter().cloned().chain(tags).collect();
+            let mut sql = format!("SELECT {} FROM {from}", columns.join(", "));
+            if let Some(filter) = &select.filter {
+                sql.push_str(" WHERE ");
+                sql.push_str(filter);
+            }
+            sql
+        })
+        .collect();
+
+    let mut sql = branches.join(" UNION ALL ");
+    if !shared.is_empty() {
+        let columns: Vec<String> = shared
+            .iter()
+            .enumerate()
+            .map(|(index, tags)| format!("{tags} AS {}", shared_column(index)))
+            .collect();
+        sql = format!(
+            "WITH {} AS MATERIALIZED (SELECT *, {} FROM {SOURCE_DATA_TABLE}) {sql}",
+            quote_ident(TAGGED_TABLE),
+            columns.join(", ")
+        );
     }
     if !sort_key.is_empty() {
-        sql.push_str(" ORDER BY ");
         let sort_key: Vec<String> = sort_key
             .iter()
             .map(String::as_str)
             .map(quote_ident)
             .collect();
+        sql.push_str(" ORDER BY ");
         sql.push_str(&sort_key.join(", "));
     }
     sql
 }
 
-fn edge_select_list(
+fn edge_columns(
     source_id: &str,
     source_kind: &str,
     relationship_kind: &str,
     target_id: &str,
     target_kind: &str,
     namespaced: bool,
-    denormalized: &[DenormalizedColumnProjection],
 ) -> Vec<String> {
     let traversal_path = if namespaced {
         quote_ident("traversal_path")
     } else {
         "'0/' AS traversal_path".to_string()
     };
-
-    let mut cols = vec![
+    vec![
         traversal_path,
-        format!("{source_id} AS source_id"),
+        format!("CAST({source_id} AS BIGINT) AS source_id"),
         format!("{source_kind} AS source_kind"),
         format!("'{relationship_kind}' AS relationship_kind"),
-        format!("{target_id} AS target_id"),
+        format!("CAST({target_id} AS BIGINT) AS target_id"),
         format!("{target_kind} AS target_kind"),
         quote_ident(VERSION_COLUMN),
         quote_ident(DELETED_COLUMN),
-    ];
+    ]
+}
 
-    let mut tag_groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for d in denormalized {
-        let tag_expr = match &d.enum_mapping {
-            Some(mapping) => {
-                let cases: Vec<String> = mapping
-                    .iter()
-                    .map(|(key, value)| {
-                        format!(
-                            "WHEN {} = {} THEN '{}'",
-                            quote_ident(&d.source_column),
-                            key,
-                            value.replace('\'', "''")
-                        )
-                    })
-                    .collect();
-                format!(
-                    "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CASE {cases} ELSE CAST({col} AS VARCHAR) END) END",
-                    key = d.tag_key,
-                    cases = cases.join(" "),
-                    col = quote_ident(&d.source_column)
-                )
-            }
-            None => format!(
-                "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CAST({col} AS VARCHAR)) END",
-                key = d.tag_key,
-                col = quote_ident(&d.source_column)
-            ),
-        };
-        tag_groups
-            .entry(d.edge_column.clone())
-            .or_default()
-            .push(tag_expr);
-    }
+/// Both tag lists are always emitted, empty when unused, so the Arrow schema matches the edge table.
+fn edge_tags(denormalized: &[DenormalizedColumnProjection]) -> [String; 2] {
+    ["source_tags", "target_tags"].map(|edge_column| {
+        let tags: Vec<String> = denormalized
+            .iter()
+            .filter(|d| d.edge_column == edge_column)
+            .map(tag_sql)
+            .collect();
+        if tags.is_empty() {
+            NO_TAGS.to_string()
+        } else {
+            format!("CAST([{}] AS VARCHAR[])", tags.join(", "))
+        }
+    })
+}
 
-    // Both tag columns always emitted (empty when unused) so the Arrow schema matches the edge table.
-    for col_name in &["source_tags", "target_tags"] {
-        let expr = match tag_groups.remove(*col_name) {
-            Some(tag_exprs) => format!("CAST([{}] AS VARCHAR[])", tag_exprs.join(", ")),
-            None => "CAST([] AS VARCHAR[])".to_string(),
-        };
-        cols.push(format!("{expr} AS {col_name}"));
-    }
-
-    cols
+fn tag_sql(d: &DenormalizedColumnProjection) -> String {
+    let column = quote_ident(&d.source_column);
+    let value = format!("CAST({column} AS VARCHAR)");
+    let value = match &d.enum_mapping {
+        Some(mapping) if !mapping.is_empty() => {
+            let entries: Vec<String> = mapping
+                .iter()
+                .map(|(key, name)| format!("{key}: '{}'", name.replace('\'', "''")))
+                .collect();
+            format!("MAP {{{}}}[{column}], {value}", entries.join(", "))
+        }
+        _ => value,
+    };
+    format!("'{}:' || coalesce({value}, 'null')", d.tag_key)
 }
 
 #[cfg(test)]
@@ -786,19 +833,10 @@ mod tests {
             user_state.enum_mapping
         );
 
-        let sql = edge_select_list(
-            "id",
-            "'User'",
-            "APPROVED",
-            "merge_request_id",
-            "'MergeRequest'",
-            true,
-            &projections,
-        )
-        .join(", ");
+        let sql = edge_tags(&projections).join(", ");
         assert!(!sql.contains(r#""user_state" = 0"#), "sql: {sql}");
         assert!(
-            sql.contains(r#"concat('state:', CAST("user_state" AS VARCHAR))"#),
+            sql.contains(r#"'state:' || coalesce(CAST("user_state" AS VARCHAR), 'null')"#),
             "sql: {sql}"
         );
     }
@@ -809,12 +847,12 @@ mod tests {
         let sql = fk_edge_transform(&mapping, "Group", true, &test_ontology())
             .unwrap()
             .pop()
-            .unwrap()
-            .sql;
+            .map(|select| edge_union_sql(&[select], &[]))
+            .unwrap();
 
-        assert!(sql.contains(r#""owner_id" AS source_id"#));
+        assert!(sql.contains(r#"CAST("owner_id" AS BIGINT) AS source_id"#));
         assert!(sql.contains("'User' AS source_kind"));
-        assert!(sql.contains(r#""id" AS target_id"#));
+        assert!(sql.contains(r#"CAST("id" AS BIGINT) AS target_id"#));
         assert!(sql.contains("'Group' AS target_kind"));
         assert!(sql.contains(r#"("owner_id" IS NOT NULL)"#));
     }
@@ -849,8 +887,8 @@ mod tests {
         let sql = fk_edge_transform(&edge, "Note", true, &test_ontology())
             .unwrap()
             .pop()
-            .unwrap()
-            .sql;
+            .map(|select| edge_union_sql(&[select], &[]))
+            .unwrap();
         assert!(
             sql.contains(r#"WHEN "noteable_type" = 'Issue' THEN 'WorkItem'"#),
             "sql: {sql}"
@@ -880,8 +918,8 @@ mod tests {
         let sql = fk_edge_transform(&edge, "MergeRequest", true, &test_ontology())
             .unwrap()
             .pop()
-            .unwrap()
-            .sql;
+            .map(|select| edge_union_sql(&[select], &[]))
+            .unwrap();
         assert!(
             sql.contains(r#"unnest("assignees")['user_id']"#),
             "sql: {sql}"
@@ -889,6 +927,72 @@ mod tests {
         assert!(
             sql.contains(r#"(cardinality("assignees") > 0)"#),
             "sql: {sql}"
+        );
+    }
+
+    fn select(table: &str, source_id: &str, tags: &str) -> EdgeSelect {
+        EdgeSelect {
+            table: table.to_string(),
+            columns: vec![format!("{source_id} AS source_id")],
+            tags: [tags.to_string(), NO_TAGS.to_string()],
+            filter: Some(format!("({source_id} IS NOT NULL)")),
+        }
+    }
+
+    #[test]
+    fn edge_queries_combine_each_table_and_share_repeated_tags() {
+        let tags = "CAST(['k:' || coalesce(CAST(\"k\" AS VARCHAR), 'null')] AS VARCHAR[])";
+        let queries = edge_queries(
+            vec![
+                select("gl_edge", "\"a\"", tags),
+                select("gl_ci_edge", "\"b\"", NO_TAGS),
+                select("gl_edge", "\"c\"", tags),
+            ],
+            &test_ontology(),
+        );
+
+        let tables: Vec<_> = queries
+            .iter()
+            .map(|q| q.destination_table.as_str())
+            .collect();
+        assert_eq!(
+            tables,
+            [
+                prefixed_table_name("gl_edge", *SCHEMA_VERSION),
+                prefixed_table_name("gl_ci_edge", *SCHEMA_VERSION),
+            ]
+        );
+        let combined = &queries[0].sql;
+        assert_eq!(combined.matches(" UNION ALL ").count(), 1, "{combined}");
+        assert!(
+            combined.starts_with(&format!(
+                r#"WITH "_tagged" AS MATERIALIZED (SELECT *, {tags} AS "_tags_0" FROM source_data)"#
+            )),
+            "{combined}"
+        );
+        assert_eq!(
+            combined.matches(r#""_tags_0" AS source_tags"#).count(),
+            2,
+            "{combined}"
+        );
+        assert_eq!(combined.matches(" ORDER BY ").count(), 1, "{combined}");
+        assert!(!queries[1].sql.contains("_tagged"), "{}", queries[1].sql);
+    }
+
+    #[test]
+    fn enum_tag_maps_ordinals_and_falls_back_to_the_raw_value() {
+        let projection = DenormalizedColumnProjection {
+            source_column: "state_id".to_string(),
+            edge_column: "target_tags".to_string(),
+            tag_key: "state".to_string(),
+            enum_mapping: Some(BTreeMap::from([
+                (1, "opened".to_string()),
+                (2, "it's".to_string()),
+            ])),
+        };
+        assert_eq!(
+            tag_sql(&projection),
+            r#"'state:' || coalesce(MAP {1: 'opened', 2: 'it''s'}["state_id"], CAST("state_id" AS VARCHAR), 'null')"#
         );
     }
 
