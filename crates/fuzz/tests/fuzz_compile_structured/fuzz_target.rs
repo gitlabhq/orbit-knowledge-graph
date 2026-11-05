@@ -1,11 +1,13 @@
 use bolero::check;
-use compiler::{Frontend, Ontology, SecurityContext, compile};
+use compiler::{Frontend, SecurityContext, compile};
 use orbit_fuzz::generators::FuzzQuery;
+use query_data_model::ClickHouseDataModel;
 use std::sync::{Arc, OnceLock};
 
-fn ontology() -> &'static Arc<Ontology> {
-    static ONTOLOGY: OnceLock<Arc<Ontology>> = OnceLock::new();
-    ONTOLOGY.get_or_init(|| Arc::new(Ontology::load_embedded().expect("load embedded ontology")))
+fn data_model() -> &'static Arc<ClickHouseDataModel> {
+    static DATA_MODEL: OnceLock<Arc<ClickHouseDataModel>> = OnceLock::new();
+    DATA_MODEL
+        .get_or_init(|| Arc::new(ClickHouseDataModel::embedded().expect("load embedded model")))
 }
 
 fn ctx() -> &'static SecurityContext {
@@ -17,6 +19,6 @@ fn main() {
     check!()
         .with_type::<FuzzQuery>()
         .for_each(|query: &FuzzQuery| {
-            let _ = compile(&query.json, Frontend::JsonDsl, ontology(), ctx());
+            let _ = compile(&query.json, Frontend::JsonDsl, data_model(), ctx());
         });
 }

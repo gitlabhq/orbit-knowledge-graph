@@ -1,11 +1,13 @@
 use bolero::check;
-use compiler::{Frontend, Ontology, SecurityContext, compile};
+use compiler::{Frontend, SecurityContext, compile};
+use query_data_model::ClickHouseDataModel;
 use std::str::from_utf8;
 use std::sync::{Arc, OnceLock};
 
-fn ontology() -> &'static Arc<Ontology> {
-    static ONTOLOGY: OnceLock<Arc<Ontology>> = OnceLock::new();
-    ONTOLOGY.get_or_init(|| Arc::new(Ontology::load_embedded().expect("load embedded ontology")))
+fn data_model() -> &'static Arc<ClickHouseDataModel> {
+    static DATA_MODEL: OnceLock<Arc<ClickHouseDataModel>> = OnceLock::new();
+    DATA_MODEL
+        .get_or_init(|| Arc::new(ClickHouseDataModel::embedded().expect("load embedded model")))
 }
 
 fn ctx() -> &'static SecurityContext {
@@ -16,7 +18,7 @@ fn ctx() -> &'static SecurityContext {
 fn main() {
     check!().for_each(|input: &[u8]| {
         if let Ok(s) = from_utf8(input)
-            && let Err(error) = compile(s, Frontend::Gql, ontology(), ctx())
+            && let Err(error) = compile(s, Frontend::Gql, data_model(), ctx())
         {
             assert!(error.is_client_safe(), "{s:?}\n{error}");
         }

@@ -233,8 +233,8 @@ mod tests {
     use std::collections::HashMap;
 
     fn apply(input: &Input, ontology: &Ontology, context: &SecurityContext) -> Result<()> {
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        restrict(input, model.as_ref(), context)
+        let model = query_data_model::from_ontology::clickhouse(&ontology).unwrap();
+        restrict(input, &model, context)
     }
 
     fn ontology() -> Ontology {
@@ -915,9 +915,9 @@ mod tests {
             relationships: vec![rel_kind(&["REVIEWER"], "u", "mr")],
             ..Input::default()
         };
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ont.clone())).unwrap();
-        restrict(&input, model.as_ref(), &ctx).expect("restrict ok");
-        let bounds = crate::tp_bounds::TpBounds::derive(&input, model.as_ref());
+        let model = query_data_model::from_ontology::clickhouse(&ont).unwrap();
+        restrict(&input, &model, &ctx).expect("restrict ok");
+        let bounds = crate::tp_bounds::TpBounds::derive(&input, &model);
         let mr_prefix = bounds.node("mr");
         assert!(
             mr_prefix.is_some(),
@@ -956,9 +956,9 @@ mod tests {
             ],
             ..Input::default()
         };
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ont.clone())).unwrap();
-        restrict(&input, model.as_ref(), &ctx).expect("restrict ok");
-        let bounds = crate::tp_bounds::TpBounds::derive(&input, model.as_ref());
+        let model = query_data_model::from_ontology::clickhouse(&ont).unwrap();
+        restrict(&input, &model, &ctx).expect("restrict ok");
+        let bounds = crate::tp_bounds::TpBounds::derive(&input, &model);
 
         assert!(
             bounds.node("mr_a").is_some() && bounds.node("mr_b").is_none(),

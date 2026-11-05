@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use duckdb_client::DuckDbClient;
 use orbit_server::redaction::QueryResult;
+use query_data_model::DuckDbDataModel;
 use query_engine::compiler::{CompiledQueryContext, Frontend, compile_local, generate_local_ddl};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::shared::PipelineOutput;
@@ -18,7 +19,8 @@ use crate::scenario::{Seed, discover};
 
 pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
     let root = Path::new(root);
-    let ontology = Arc::new(crate::load_unprefixed_ontology());
+    let ontology = crate::load_unprefixed_ontology();
+    let data_model = crate::load_local_data_model();
     let base = seed_preset(Path::new(presets), seed);
     let mut files = Vec::new();
     discover(root, &mut files);
@@ -40,7 +42,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
             seed_local(&database, [&step.seed], &name);
             run_step(
                 &database,
-                &ontology,
+                &data_model,
                 step,
                 &step_label(&name, index, steps.len()),
             );
@@ -52,7 +54,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
 
 fn run_step(
     database: &DuckDbClient,
-    ontology: &Arc<ontology::Ontology>,
+    data_model: &Arc<DuckDbDataModel>,
     step: &QueryStep,
     name: &str,
 ) {
@@ -63,7 +65,7 @@ fn run_step(
         let label = format!("{name} [{key} on duckdb]");
         let expect = &step.expect;
         expect.validate_pages_exclusive(&label);
-        let compiled = compile_local(query, frontend, ontology).map(Arc::new);
+        let compiled = compile_local(query, frontend, data_model).map(Arc::new);
         let Some(compiled) = assert_compilation(compiled, expect, key, &label) else {
             continue;
         };
@@ -74,7 +76,7 @@ fn run_step(
             let output = execute(database, &compiled, &label);
             let baseline = assert_output(&output, frontend, expect, &label);
             for run in 2..=repeat_count(expect, &label) {
-                let compiled = compile_local(query, frontend, ontology).map(Arc::new);
+                let compiled = compile_local(query, frontend, data_model).map(Arc::new);
                 let compiled = assert_compilation(compiled, expect, key, &label)
                     .expect("repeated query should compile");
                 let output = execute(database, &compiled, &label);
@@ -87,7 +89,7 @@ fn run_step(
         for (index, page_expect) in expect.pages.iter().enumerate() {
             let page_label = format!("{label} page {}", index + 1);
             let compiled = Arc::new(
-                compile_local(&page_query(frontend, query, index), frontend, ontology)
+                compile_local(&page_query(frontend, query, index), frontend, data_model)
                     .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}")),
             );
             let output = execute(database, &compiled, &page_label);
@@ -100,9 +102,11 @@ fn run_step(
             collected.assert_expect(all_pages, &label);
             if all_pages.matches_unpaginated {
                 let query = unpaginated(frontend, query);
-                let compiled = Arc::new(compile_local(&query, frontend, ontology).unwrap_or_else(
-                    |error| panic!("{label}: unpaginated compile failed: {error}"),
-                ));
+                let compiled = Arc::new(
+                    compile_local(&query, frontend, data_model).unwrap_or_else(|error| {
+                        panic!("{label}: unpaginated compile failed: {error}")
+                    }),
+                );
                 let output = execute(database, &compiled, &label);
                 assert_pagination(&output, &label);
                 let response =

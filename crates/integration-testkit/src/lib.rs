@@ -19,14 +19,17 @@ pub use seed::load_seed;
 pub use seeded_resolver::SeededColumnResolver;
 
 /// `GKG_TEST_ONTOLOGY_OVERLAY=<name>` merges `config/seeds/overlays/<name>/` over the ontology.
-pub(crate) fn load_unprefixed_ontology() -> ontology::Ontology {
-    let Some(name) = std::env::var("GKG_TEST_ONTOLOGY_OVERLAY")
+fn overlay_name() -> Option<String> {
+    std::env::var("GKG_TEST_ONTOLOGY_OVERLAY")
         .ok()
         .filter(|v| !v.is_empty())
-    else {
-        return ontology::Ontology::load_embedded().expect("embedded ontology should load");
-    };
-    load_ontology_overlay(&name)
+}
+
+pub(crate) fn load_unprefixed_ontology() -> ontology::Ontology {
+    match overlay_name() {
+        Some(name) => load_ontology_overlay(&name),
+        None => ontology::Ontology::load_embedded().expect("embedded ontology should load"),
+    }
 }
 
 pub fn load_ontology_overlay(name: &str) -> ontology::Ontology {
@@ -40,20 +43,50 @@ pub fn load_ontology_overlay(name: &str) -> ontology::Ontology {
 }
 
 pub fn load_ontology() -> std::sync::Arc<ontology::Ontology> {
-    let ont = load_unprefixed_ontology();
-    let prefix = &*TABLE_PREFIX;
-    if prefix.is_empty() {
-        std::sync::Arc::new(ont)
-    } else {
-        std::sync::Arc::new(ont.with_schema_version_prefix(prefix))
+    std::sync::Arc::new(load_unprefixed_ontology().with_schema_version_prefix(&TABLE_PREFIX))
+}
+
+pub fn overlay_fragments(name: &str) -> Vec<query_data_model::spec::Fragment> {
+    query_data_model::from_ontology::from_ontology(&load_ontology_overlay(name))
+        .unwrap_or_else(|e| panic!("ontology overlay '{name}' has no model: {e}"))
+}
+
+fn unprefixed_fragments() -> Vec<query_data_model::spec::Fragment> {
+    match overlay_name() {
+        Some(name) => overlay_fragments(&name),
+        None => query_data_model::Packages::embedded()
+            .fragments()
+            .expect("embedded packages should parse"),
     }
 }
 
-pub fn derive_clickhouse_data_model(
-    ontology: &std::sync::Arc<ontology::Ontology>,
+fn load_model(
+    fragments: &[query_data_model::spec::Fragment],
+) -> std::sync::Arc<query_data_model::Model> {
+    std::sync::Arc::new(query_data_model::Model::load(fragments).expect("test model should load"))
+}
+
+pub fn versioned_data_model(
+    fragments: Vec<query_data_model::spec::Fragment>,
 ) -> std::sync::Arc<query_data_model::ClickHouseDataModel> {
-    query_engine::compiler::data_model::clickhouse(std::sync::Arc::clone(ontology))
-        .expect("test ontology should produce a ClickHouse data model")
+    let fragments =
+        query_data_model::implementations::clickhouse::versioned(fragments, &TABLE_PREFIX)
+            .expect("test tables should take the schema prefix");
+    std::sync::Arc::new(
+        query_data_model::ClickHouseDataModel::from_model(&load_model(&fragments))
+            .expect("test model should bind its ClickHouse connection"),
+    )
+}
+
+pub fn load_data_model() -> std::sync::Arc<query_data_model::ClickHouseDataModel> {
+    versioned_data_model(unprefixed_fragments())
+}
+
+pub fn load_local_data_model() -> std::sync::Arc<query_data_model::DuckDbDataModel> {
+    std::sync::Arc::new(
+        query_data_model::DuckDbDataModel::from_model(&load_model(&unprefixed_fragments()))
+            .expect("test model should bind its DuckDB connection"),
+    )
 }
 
 pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("SEEDS_DIR"), "/siphon.sql"));

@@ -164,7 +164,6 @@ mod tests {
     use crate::passes::plan::{HydrationCompileOptions, plan_clickhouse};
     use crate::passes::result_contract::ResultContext;
     use orbit_server_config::QueryConfig;
-    use std::sync::Arc;
 
     fn render(node: &Node) -> String {
         codegen(node, ResultContext::new(), QueryConfig::default())
@@ -207,10 +206,7 @@ mod tests {
     }
 
     fn emit(nodes: &[InputNode], dynamic: bool) -> Node {
-        let model = query_data_model::ClickHouseDataModel::derive(Arc::new(
-            ontology::Ontology::load_embedded().unwrap(),
-        ))
-        .unwrap();
+        let model = query_data_model::ClickHouseDataModel::embedded().unwrap();
         let input = Input {
             query_type: QueryType::Hydration,
             nodes: nodes.to_vec(),

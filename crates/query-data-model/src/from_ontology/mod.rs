@@ -2,6 +2,7 @@ mod clickhouse;
 mod yaml;
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use indexmap::IndexMap;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
@@ -11,18 +12,34 @@ use ontology::{
 };
 use serde::Serialize;
 
-use crate::DataModelError;
+use crate::implementations::clickhouse::schema::Schema;
 use crate::implementations::duckdb::backend::DuckDbSource;
 use crate::implementations::relational::{EdgeTableSpec, RelationalOptions};
-use crate::packages::Packages;
 use crate::spec::{
     AuthorizationFragment, BackendOptions, EngineSpec, EntityAccessSpec, EntitySpec, Fragment,
     GraphFragment, LookupSpec, PropertyAccessSpec, PropertyDetail, PropertySpec, RedactionSpec,
     RelationshipSpec, ScopeSpec, ScopeVariants, ServiceFragment, SourceSpec, StorageFragment,
     encode_options, format_variant,
 };
+use crate::{ClickHouseDataModel, DataModelError, DuckDbDataModel, Model, Packages};
 
 const PLATFORM: &str = "gitlab";
+
+pub fn model(ontology: &Ontology) -> Result<Arc<Model>, DataModelError> {
+    Model::load(&from_ontology(ontology)?).map(Arc::new)
+}
+
+pub fn clickhouse(ontology: &Ontology) -> Result<ClickHouseDataModel, DataModelError> {
+    ClickHouseDataModel::from_model(&model(ontology)?)
+}
+
+pub fn duckdb(ontology: &Ontology) -> Result<DuckDbDataModel, DataModelError> {
+    DuckDbDataModel::from_model(&model(ontology)?)
+}
+
+pub fn schema(ontology: &Ontology) -> Result<Schema, DataModelError> {
+    Schema::from_model(&model(ontology)?)
+}
 
 pub fn packages(ontology: &Ontology) -> Result<Packages, DataModelError> {
     from_ontology(ontology)?

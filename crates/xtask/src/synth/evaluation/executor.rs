@@ -5,6 +5,7 @@ use anyhow::Result;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::stream::{self, StreamExt};
 use ontology::Ontology;
+use query_data_model::ClickHouseDataModel;
 use query_engine::compiler::{Frontend, ParamValue, SecurityContext, compile};
 use rand::RngExt;
 use regex::Regex;
@@ -161,6 +162,7 @@ impl ExecutionResult {
 pub struct QueryExecutor {
     client: ArrowClickHouseClient,
     ontology: Arc<Ontology>,
+    data_model: Arc<ClickHouseDataModel>,
     sampler: ParameterSampler,
     security_contexts: Vec<(i64, String)>,
     query_settings: String,
@@ -170,6 +172,7 @@ impl QueryExecutor {
     pub fn new(
         client: ArrowClickHouseClient,
         ontology: Ontology,
+        data_model: ClickHouseDataModel,
         sample_size: usize,
         user_settings: &std::collections::HashMap<String, String>,
     ) -> Self {
@@ -178,6 +181,7 @@ impl QueryExecutor {
         Self {
             client,
             ontology: Arc::new(ontology),
+            data_model: Arc::new(data_model),
             sampler,
             security_contexts: Vec::new(),
             query_settings,
@@ -496,7 +500,7 @@ impl QueryExecutor {
 
         builder = builder.substituted_query(serde_json::Value::String(substituted.clone()));
 
-        let compiled = match compile(&substituted, Frontend::Gql, &self.ontology, &security_ctx) {
+        let compiled = match compile(&substituted, Frontend::Gql, &self.data_model, &security_ctx) {
             Ok(c) => c,
             Err(e) => {
                 let error_msg = format!("Query compilation failed: {}", e);

@@ -5,7 +5,7 @@ use clickhouse_client::ArrowClickHouseClient;
 use orbit_arrow::ArrowUtils;
 use thiserror::Error;
 
-use crate::schema::{self, DictionaryCredentials, GraphSchema, Schema};
+use crate::schema::{self, DictionaryCredentials, GraphSchema};
 use crate::scope::{
     InvalidatedPipelines, MigrationScope, TableMigrationAction, classify_tables_for_scope,
     find_invalidated_pipelines, widen_scope_for_shared_table_writers,
@@ -146,7 +146,7 @@ pub async fn replace_refreshable_views(
     version: u32,
 ) -> Result<(), MigrationError> {
     let prefix = table_prefix(version);
-    let physical = Schema::derive(ontology)?;
+    let physical = query_data_model::from_ontology::schema(ontology)?;
     for view in physical.refreshable_views() {
         let view_name = if view.versioned {
             format!("{prefix}{}", view.name)
@@ -182,7 +182,7 @@ pub async fn drop_versioned_refreshable_views(
     version: u32,
 ) -> Result<(), MigrationError> {
     let prefix = table_prefix(version);
-    for view in Schema::derive(ontology)?
+    for view in query_data_model::from_ontology::schema(ontology)?
         .refreshable_views()
         .iter()
         .filter(|view| view.versioned)

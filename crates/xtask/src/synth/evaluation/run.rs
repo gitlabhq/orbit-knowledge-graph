@@ -92,6 +92,7 @@ pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
     let mut executor = QueryExecutor::new(
         client,
         ontology,
+        query_data_model::ClickHouseDataModel::embedded()?,
         config.evaluation.sample_size,
         &config.evaluation.settings,
     );

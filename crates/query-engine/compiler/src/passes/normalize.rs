@@ -3,20 +3,8 @@ use crate::input::{ColumnSelection, Direction, Input, InputFilter, PredicateTarg
 use ontology::EnumType;
 #[cfg(test)]
 use ontology::Ontology;
-use query_data_model::ClickHouseDataModel;
-use query_data_model::{EntityAuthConfig, OrbitQueryModel};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
-
-/// Build the entity auth map for every entity type in the ontology that has a
-/// redaction config. This is the single source of truth consumed by both the
-/// compilation pipeline (via `normalize`) and tests that construct `ResultContext`
-/// directly without going through `compile()`.
-pub fn build_entity_auth(ontology: &ontology::Ontology) -> HashMap<String, EntityAuthConfig> {
-    ClickHouseDataModel::derive(std::sync::Arc::new(ontology.clone()))
-        .map(|model| model.entity_auth().clone())
-        .unwrap_or_default()
-}
 
 pub fn normalize<M: query_data_model::OrbitQueryModel>(input: Input, model: &M) -> Result<Input> {
     let mut input = input;
@@ -245,8 +233,8 @@ mod tests {
     fn normalize_query(json: &str) -> Input {
         let input = parse_input(json).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology)).unwrap();
-        normalize(input, model.as_ref()).unwrap()
+        let model = query_data_model::from_ontology::clickhouse(&ontology).unwrap();
+        normalize(input, &model).unwrap()
     }
 
     #[test]
@@ -379,8 +367,8 @@ mod tests {
             r#"{"query_type": "traversal", "nodes": [{"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}]}"#,
         ).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology)).unwrap();
-        let err = normalize(input, model.as_ref()).unwrap_err();
+        let model = query_data_model::from_ontology::clickhouse(&ontology).unwrap();
+        let err = normalize(input, &model).unwrap_err();
         assert!(
             matches!(err, QueryError::AllowlistRejected(_)),
             "unknown entity should be AllowlistRejected, got: {err}"

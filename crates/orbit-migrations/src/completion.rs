@@ -79,7 +79,7 @@ pub async fn resolve_migration_scope(
     let active = read_active_version(graph).await?.unwrap_or(0);
     let ledger = MigrationLedger::load_embedded().map_err(MigrationError::Ledger)?;
     let requested_scope = ledger.resolve_scope_between(active, migrating_version);
-    let physical = crate::schema::Schema::derive(ontology)?;
+    let physical = query_data_model::from_ontology::schema(ontology)?;
     Ok(widen_scope_for_shared_table_writers(
         ontology,
         &physical,

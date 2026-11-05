@@ -1,4 +1,4 @@
-use super::setup::{admin_ctx, embedded_ontology, test_ctx};
+use super::setup::{admin_ctx, embedded_model, test_ctx};
 use compiler::{
     ColumnSelection, Frontend, HydrationCompileOptions, HydrationPlan, Input, InputNode, QueryType,
     compile, compile_input,
@@ -13,7 +13,7 @@ fn valid_column_in_order_by() {
         "limit": 10,
         "order_by": "u.username"
     }"#;
-    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).is_ok());
+    assert!(compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).is_ok());
 }
 
 #[test]
@@ -26,7 +26,7 @@ fn invalid_column_in_order_by() {
         "order_by": "u.nonexistent_column"
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -40,7 +40,7 @@ fn valid_column_in_filter() {
         "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": "admin"}}],
         "limit": 10
     }"#;
-    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).is_ok());
+    assert!(compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).is_ok());
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn invalid_column_in_filter() {
         "query_type": "traversal",
         "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"nonexistent_column": "value"}}],
         "limit": 10
-    }"#, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap_err();
+    }"#, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap_err();
     assert!(err.to_string().contains("nonexistent_column"));
 }
 
@@ -64,7 +64,7 @@ fn valid_column_in_aggregation() {
             "limit": 10
         }"#,
             Frontend::JsonDsl,
-            &embedded_ontology(),
+            &embedded_model(),
             &test_ctx(),
         )
         .is_ok()
@@ -81,7 +81,7 @@ fn invalid_column_in_aggregation() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -97,7 +97,7 @@ fn invalid_entity_type_rejected() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -120,7 +120,7 @@ fn invalid_filter_key_lists_valid_candidates() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -144,7 +144,7 @@ fn invalid_group_by_property_lists_valid_fields() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -166,7 +166,7 @@ fn malformed_group_by_entry_shows_expected_shapes() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -189,7 +189,7 @@ fn bare_string_group_by_dotted_garbage_shows_expected_shapes() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -212,7 +212,7 @@ fn bare_string_group_by_unknown_node_names_the_reference() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -229,7 +229,7 @@ fn invalid_column_lists_valid_candidates() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -255,7 +255,7 @@ fn invalid_relationship_type_lists_valid_candidates() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -279,7 +279,7 @@ fn package_built_by_pipeline_traversal() {
         "limit": 25
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_package"));
@@ -298,7 +298,7 @@ fn search_with_specific_columns() {
         "limit": 10
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -315,7 +315,7 @@ fn search_with_wildcard_columns() {
         "limit": 10
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -335,7 +335,7 @@ fn traversal_with_columns() {
         "limit": 10
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -358,7 +358,7 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
         "limit": 10
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -381,7 +381,7 @@ fn path_finding_uses_orbit_path_not_node_columns() {
                  "rel_types": ["CONTAINS"]}
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_path"));
@@ -400,7 +400,7 @@ fn result_context_populated() {
         "limit": 10
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert_eq!(result.base.result_context.len(), 2);
@@ -433,7 +433,7 @@ fn single_hop_does_not_generate_recursive_cte() {
         "limit": 25
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -456,7 +456,7 @@ fn multi_hop_aggregation() {
         "limit": 10
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("UNION ALL"));
@@ -472,7 +472,7 @@ fn definition_uses_project_id_for_redaction() {
         "limit": 10
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_d_id"));
@@ -491,7 +491,7 @@ fn project_still_uses_id_for_redaction() {
         "limit": 10
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_p_id"));
@@ -514,7 +514,7 @@ fn render_traversal_inlines_all_params() {
     "limit": 10
         }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap()
@@ -543,7 +543,7 @@ fn render_in_filter_inlines_array() {
     "limit": 10
         }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap()
@@ -566,7 +566,7 @@ fn render_node_ids_inlines_array() {
     "limit": 10
         }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap()
@@ -593,7 +593,7 @@ fn debug_json_round_trip() {
     "limit": 10
         }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
@@ -651,7 +651,7 @@ fn hydration_query_type_generates_union_all() {
     let result = compile_input(
         input,
         HydrationCompileOptions::default(),
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
@@ -694,7 +694,7 @@ fn hydration_widens_paths_to_segment_budget() {
                 dynamic: true,
                 path_segment_budget: budget,
             },
-            &embedded_ontology(),
+            &embedded_model(),
             &test_ctx(),
         )
         .unwrap()
@@ -770,7 +770,7 @@ fn hydration_single_entity_no_union_all() {
     let result = compile_input(
         input,
         HydrationCompileOptions::default(),
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
@@ -803,7 +803,7 @@ fn hydration_uses_parameterized_ids() {
     let result = compile_input(
         input,
         HydrationCompileOptions::default(),
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
@@ -843,7 +843,7 @@ fn hydration_applies_security_context() {
     let result = compile_input(
         input,
         HydrationCompileOptions::default(),
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
@@ -877,7 +877,7 @@ fn hydration_id_only_columns_produces_map_with_id() {
     let result = compile_input(
         input,
         HydrationCompileOptions::default(),
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
@@ -906,7 +906,7 @@ fn hydration_empty_columns_produces_empty_json() {
     let result = compile_input(
         input,
         HydrationCompileOptions::default(),
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
@@ -939,7 +939,7 @@ fn hydration_id_column_included_in_map() {
     let result = compile_input(
         input,
         HydrationCompileOptions::default(),
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
@@ -967,7 +967,7 @@ fn like_rejects_short_contains_pattern() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -988,7 +988,7 @@ fn like_rejects_single_char_starts_with() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -1009,7 +1009,7 @@ fn like_rejects_empty_ends_with() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -1030,7 +1030,7 @@ fn like_rejects_contains_on_email() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -1050,7 +1050,7 @@ fn like_rejects_starts_with_on_email() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -1074,7 +1074,7 @@ fn like_equality_on_email_compiles_for_admin() {
             "limit": 10
         }"#,
             Frontend::JsonDsl,
-            &embedded_ontology(),
+            &embedded_model(),
             &admin_ctx(),
         )
         .is_ok()
@@ -1091,7 +1091,7 @@ fn equality_on_email_rejected_for_non_admin() {
         "limit": 10
     }"#,
         Frontend::JsonDsl,
-        &embedded_ontology(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -1110,7 +1110,7 @@ fn aggregation_count_keeps_final_for_project_anchor() {
                    "filters": {"project_id": {"eq": 278964}}}],
         "aggregations": [{"count": "d", "as": "total"}]
     }"#;
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -1139,7 +1139,7 @@ fn pinned_traversal_narrows_joined_node_via_nf_cte() {
         "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
         "limit": 50
     }"#;
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -1168,7 +1168,7 @@ fn calls_traversal_compiles_against_embedded_ontology() {
         "limit": 25
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -1188,7 +1188,7 @@ fn aggregation_count_in_clause_keeps_final_for_project_anchor() {
                    "filters": {"project_id": {"in": [69095239, 278964, 74646916]}}}],
         "aggregations": [{"count": "d", "as": "total"}]
     }"#;
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -1209,7 +1209,7 @@ fn extends_traversal_compiles_against_embedded_ontology() {
         "limit": 25
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -1233,7 +1233,7 @@ fn calls_to_imported_symbol_variant_compiles() {
         "limit": 10
     }"#;
 
-    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).is_ok());
+    assert!(compile(json, Frontend::JsonDsl, &embedded_model(), &admin_ctx()).is_ok());
 }
 
 #[test]
@@ -1250,7 +1250,7 @@ fn calls_aggregation_compiles() {
         "limit": 1
     }"#;
 
-    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).is_ok());
+    assert!(compile(json, Frontend::JsonDsl, &embedded_model(), &admin_ctx()).is_ok());
 }
 
 #[test]
@@ -1267,7 +1267,7 @@ fn code_graph_edge_union_routes_to_code_table() {
         "limit": 25
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -1313,7 +1313,7 @@ fn agent_session_detail_columns_are_not_queryable() {
         }}"#
         );
         assert!(
-            compile(&json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).is_err(),
+            compile(&json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).is_err(),
             "AgentSession.{column} must not be selectable"
         );
     }
@@ -1331,7 +1331,7 @@ fn agent_session_created_mr_traversal_compiles() {
         "limit": 25
     }"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_agent_session"));

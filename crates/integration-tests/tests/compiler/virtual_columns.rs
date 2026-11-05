@@ -1,11 +1,10 @@
-use ontology::Ontology;
+use crate::compiler::setup::embedded_model;
 use query_engine::compiler::{Frontend, HydrationPlan, SecurityContext, compile};
-use std::sync::Arc;
 
 fn compile_query(json: &str) -> query_engine::compiler::CompiledQueryContext {
-    let ontology = Arc::new(Ontology::load_embedded().unwrap());
+    let data_model = embedded_model();
     let security_ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-    compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap()
+    compile(json, Frontend::JsonDsl, &data_model, &security_ctx).unwrap()
 }
 
 #[test]

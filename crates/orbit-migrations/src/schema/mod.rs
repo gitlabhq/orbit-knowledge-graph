@@ -36,7 +36,7 @@ impl GraphSchema {
         ontology: &Ontology,
         replicated: bool,
     ) -> Result<Self, DataModelError> {
-        let physical = Schema::derive(ontology)?;
+        let physical = query_data_model::from_ontology::schema(ontology)?;
         let engine = |engine: Engine| {
             if replicated {
                 engine.replicated()

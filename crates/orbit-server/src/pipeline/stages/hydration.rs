@@ -7,8 +7,7 @@ use orbit_log_fields::warn;
 use query_data_model::OrbitQueryModel;
 use query_engine::compiler::constants::{MAX_DYNAMIC_HYDRATION_RESULTS, hydration_node_alias};
 use query_engine::compiler::{
-    ColumnSelection, HydrationCompileOptions, HydrationPlan, InputNode, QueryType,
-    compile_input_model,
+    ColumnSelection, HydrationCompileOptions, HydrationPlan, InputNode, QueryType, compile_input,
 };
 
 use query_engine::pipeline::{
@@ -160,7 +159,7 @@ impl HydrationStage {
             .server_extensions
             .get::<Arc<query_data_model::ClickHouseDataModel>>()
             .ok_or_else(|| PipelineError::custom("query data model missing"))?;
-        let compiled = compile_input_model(
+        let compiled = compile_input(
             hydration_input,
             options,
             data_model,

@@ -20,9 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
-use crate::common::{
-    DummyClaims, GRAPH_SCHEMA_SQL, TestContext, derive_clickhouse_data_model, load_ontology,
-};
+use crate::common::{DummyClaims, GRAPH_SCHEMA_SQL, TestContext, load_data_model, load_ontology};
 use compiler::{Frontend, parse_input};
 use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
@@ -502,7 +500,7 @@ async fn corpus_smoke() {
     ctx.optimize_if_needed().await;
 
     let ontology = load_ontology();
-    let data_model = derive_clickhouse_data_model(&ontology);
+    let data_model = load_data_model();
     // Admin claims -> Owner over org root, so access-gated entities are visible
     // and the real SQL runs (not `WHERE false`).
     let claims = Claims::dummy();

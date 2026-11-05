@@ -8,6 +8,7 @@ publish = false
 compiler = { path = "../query-engine/compiler" }
 code-graph = { path = "../code-graph" }
 indexer = { path = "../indexer" }
+query-data-model = { path = "../query-data-model" }
 bolero = "0.13.4"
 serde_json.workspace = true
 pest_meta = "2.9.1"

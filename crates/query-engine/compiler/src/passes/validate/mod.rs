@@ -1732,7 +1732,7 @@ mod tests {
     fn validator(ontology: &Ontology) -> Validator<'_, ClickHouseDataModel> {
         Validator {
             model: ValidationModel::Owned(
-                ClickHouseDataModel::derive(std::sync::Arc::new(ontology.clone())).unwrap(),
+                query_data_model::from_ontology::clickhouse(&ontology).unwrap(),
             ),
             skip: Skip::default(),
         }

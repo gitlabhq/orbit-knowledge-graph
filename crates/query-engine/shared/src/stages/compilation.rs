@@ -16,35 +16,31 @@ impl PipelineStage for CompilationStage {
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
         let t = Instant::now();
-        let ontology = &ctx.ontology;
         let security_context = ctx
             .security_context()
             .inspect_err(|e| obs.record_error(e))?;
 
-        let data_model = ctx
+        let compiled = ctx
             .server_extensions
-            .get::<Arc<query_data_model::ClickHouseDataModel>>();
-        let compiled = match ctx.phases.get::<compiler::gql::ParsedQuery>() {
-            Some(query) => match data_model {
-                Some(data_model) => {
-                    compiler::gql::compile_query_model(query.clone(), data_model, security_context)
-                }
-                None => compiler::gql::compile_query(query.clone(), ontology, security_context),
-            },
-            None => match data_model {
-                Some(data_model) => compiler::compile_model(
-                    &ctx.query_json,
-                    ctx.frontend,
-                    data_model,
-                    security_context,
-                ),
-                None => {
-                    compiler::compile(&ctx.query_json, ctx.frontend, ontology, security_context)
-                }
-            },
-        }
-        .map_err(PipelineError::from)
-        .inspect_err(|e| obs.record_error(e))?;
+            .get::<Arc<query_data_model::ClickHouseDataModel>>()
+            .ok_or_else(|| {
+                compiler::QueryError::PipelineInvariant("no data model in the pipeline".into())
+            })
+            .and_then(
+                |data_model| match ctx.phases.get::<compiler::gql::ParsedQuery>() {
+                    Some(query) => {
+                        compiler::gql::compile_query(query.clone(), data_model, security_context)
+                    }
+                    None => compiler::compile(
+                        &ctx.query_json,
+                        ctx.frontend,
+                        data_model,
+                        security_context,
+                    ),
+                },
+            )
+            .map_err(PipelineError::from)
+            .inspect_err(|e| obs.record_error(e))?;
 
         let query_type: &str = compiled.query_type.into();
         obs.set_query_type(query_type);

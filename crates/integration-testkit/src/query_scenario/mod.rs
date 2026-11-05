@@ -36,9 +36,7 @@ use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Seed};
 use crate::visitor::{NodeExt, Requirement, ResponseView};
-use crate::{
-    SeededColumnResolver, collect_subtest_results, derive_clickhouse_data_model, load_ontology,
-};
+use crate::{SeededColumnResolver, collect_subtest_results, load_data_model, load_ontology};
 
 pub use duckdb::run_duckdb_dir;
 pub use format::{
@@ -98,7 +96,7 @@ pub async fn run_query(
     redaction: &MockRedactionService,
 ) -> ResponseView {
     let ontology = load_ontology();
-    let data_model = derive_clickhouse_data_model(&ontology);
+    let data_model = load_data_model();
     let compiled = compile_like_server(query, frontend, (&data_model, &ontology), security)
         .await
         .expect("query should compile");
@@ -270,15 +268,15 @@ async fn run_case(
         resolve_preset("redaction", &Some(redaction_with_default), presets, name);
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
-    let ontology = cfg
-        .ontology_overlay
-        .as_ref()
-        .map_or_else(load_ontology, |name| {
+    let (ontology, data_model) = match &cfg.ontology_overlay {
+        Some(name) => (
             Arc::new(
                 crate::load_ontology_overlay(name).with_schema_version_prefix(&crate::TABLE_PREFIX),
-            )
-        });
-    let data_model = derive_clickhouse_data_model(&ontology);
+            ),
+            crate::versioned_data_model(crate::overlay_fragments(name)),
+        ),
+        None => (load_ontology(), load_data_model()),
+    };
 
     for (index, step) in steps.iter().enumerate() {
         if !step.seed.is_empty() {
@@ -1242,14 +1240,14 @@ mod tests {
 
     #[test]
     fn both_frontends_compile_the_same_query_identically() {
-        let ontology = load_ontology();
+        let data_model = load_data_model();
         let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let json = compile(r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"limit":5}"#, Frontend::JsonDsl, &ontology, &security)
+        let json = compile(r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"limit":5}"#, Frontend::JsonDsl, &data_model, &security)
         .unwrap();
         let gql = compile(
             "MATCH (u:User {id: 1}) RETURN u.username LIMIT 5",
             Frontend::Gql,
-            &ontology,
+            &data_model,
             &security,
         )
         .unwrap();
@@ -1261,7 +1259,7 @@ mod tests {
 
     #[test]
     fn gql_syntax_errors_report_position_without_echoing_source() {
-        let ontology = load_ontology();
+        let data_model = load_data_model();
         let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         for (raw, position) in [
             ("CREATE (u:User)", "line 1, column 1"),
@@ -1270,7 +1268,7 @@ mod tests {
                 "line 2, column",
             ),
         ] {
-            let error = compile(raw, Frontend::Gql, &ontology, &security).unwrap_err();
+            let error = compile(raw, Frontend::Gql, &data_model, &security).unwrap_err();
             let message = error.to_string();
             assert!(error.is_client_safe(), "{message}");
             assert!(message.contains("Orbit query syntax"), "{message}");

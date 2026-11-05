@@ -1,12 +1,13 @@
 use compiler::{Frontend, QueryError, compile, compile_local};
 
-use super::setup::{embedded_ontology, test_ctx};
+use super::setup::{embedded_local_model, embedded_model, test_ctx};
 
 fn assert_budget(query: &str, frontend: Frontend, count: usize) {
-    let ontology = embedded_ontology();
+    let data_model = embedded_model();
+    let local = embedded_local_model();
     for result in [
-        compile(query, frontend, &ontology, &test_ctx()),
-        compile_local(query, frontend, &ontology),
+        compile(query, frontend, &data_model, &test_ctx()),
+        compile_local(query, frontend, &local),
     ] {
         if count == 16 {
             result.unwrap();

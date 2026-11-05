@@ -1,11 +1,11 @@
 //! DuckDB dialect end-to-end tests.
 
-use crate::compiler::setup::test_ontology;
+use crate::compiler::setup::{embedded_local_model, local_model, test_ontology};
 use crate::compiler::utils::ParsedSql;
 use compiler::{Frontend, compile_local};
 
 fn compile(json: &str) -> compiler::passes::codegen::CompiledQueryContext {
-    compile_local(json, Frontend::JsonDsl, &test_ontology()).unwrap()
+    compile_local(json, Frontend::JsonDsl, &local_model(&test_ontology())).unwrap()
 }
 
 fn parse_duckdb(json: &str) -> ParsedSql {
@@ -14,17 +14,18 @@ fn parse_duckdb(json: &str) -> ParsedSql {
 
 #[test]
 fn cycles_are_rejected() {
-    let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
+    let local = embedded_local_model();
     let cycle_query = serde_json::json!({"query_type":"traversal", "nodes":[{"id":"a","entity":"Definition","node_ids":[1],"columns":["id"]},{"id":"b","entity":"Definition","columns":["id"]},{"id":"c","entity":"Definition","columns":["id"]}], "relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"},{"type":"CALLS","from":"c","to":"a"}]});
-    let error = compile_local(&cycle_query.to_string(), Frontend::JsonDsl, &ontology).unwrap_err();
+    let error = compile_local(&cycle_query.to_string(), Frontend::JsonDsl, &local).unwrap_err();
     assert!(error.to_string().contains("exactly n-1 relationships"));
-    let error = compile_local("MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(a) RETURN a.id, b.id, c.id", Frontend::Gql, &ontology).unwrap_err();
+    let error = compile_local("MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(a) RETURN a.id, b.id, c.id", Frontend::Gql, &local).unwrap_err();
     assert!(error.to_string().contains("cycles are unsupported"));
 }
 
 #[test]
 fn local_starts_with_folds_unicode_case() {
     let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
+    let local = embedded_local_model();
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("folding.duckdb")).unwrap();
@@ -40,7 +41,7 @@ fn local_starts_with_folds_unicode_case() {
     let compiled = compile_local(
         r#"{"query_type":"traversal","nodes":[{"id":"f","entity":"File","columns":["path"],"filters":{"path":{"starts_with":"ÄRG"}}}],"limit":10}"#,
         Frontend::JsonDsl,
-        &ontology,
+        &local,
     )
     .unwrap();
 
@@ -512,7 +513,7 @@ fn group_by_truncate_all_units_emit_duckdb_date_trunc() {
                 "limit": 10
             }}"#
         );
-        let result = compile_local(&json, Frontend::JsonDsl, &test_ontology())
+        let result = compile_local(&json, Frontend::JsonDsl, &local_model(&test_ontology()))
             .unwrap_or_else(|e| panic!("compile_local failed for unit {unit}: {e:?}"));
         let rendered = result.base.render();
         let expected = if unit == "week" {
@@ -543,7 +544,7 @@ fn node_ids_expand_params() {
 }
 
 fn compile_gql(cypher: &str) -> Result<compiler::passes::codegen::CompiledQueryContext, String> {
-    compile_local(cypher, Frontend::Gql, &test_ontology()).map_err(|e| e.to_string())
+    compile_local(cypher, Frontend::Gql, &local_model(&test_ontology())).map_err(|e| e.to_string())
 }
 
 #[ignore = "fixture ontology fails the data model load checks"]

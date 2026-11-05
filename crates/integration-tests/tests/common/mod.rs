@@ -5,15 +5,15 @@ use std::sync::Arc;
 use ontology::Ontology;
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
+pub use query_engine::compiler::compile;
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext,
 };
-pub use query_engine::compiler::{compile, compile_model};
 use query_engine::pipeline::{QueryPipelineContext, TypeMap};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
 pub use integration_testkit::{
-    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, derive_clickhouse_data_model, load_ontology,
+    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_data_model, load_ontology,
 };
 
 pub fn test_security_context() -> SecurityContext {
@@ -33,9 +33,9 @@ pub async fn compile_and_execute(
     ctx: &TestContext,
     json: &str,
 ) -> (CompiledQueryContext, QueryResult) {
-    let ontology = load_ontology();
+    let data_model = load_data_model();
     let security_ctx = test_security_context();
-    let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
+    let compiled = compile(json, Frontend::JsonDsl, &data_model, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&compiled.base).await;
     let result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
     (compiled, result)
@@ -95,7 +95,7 @@ pub async fn resolve_owners(
     let ontology = load_ontology();
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::new(ctx.create_client()));
-    server_extensions.insert(derive_clickhouse_data_model(&ontology));
+    server_extensions.insert(load_data_model());
     let mut pipeline_ctx = QueryPipelineContext {
         frontend: Frontend::JsonDsl,
         query_json: String::new(),

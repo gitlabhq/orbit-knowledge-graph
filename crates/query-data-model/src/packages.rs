@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use rust_embed::Embed;
 
+use crate::spec::Fragment;
 use crate::{DataModelError, Model};
 
 #[derive(Embed)]
@@ -32,16 +34,41 @@ impl Packages {
         )
     }
 
+    pub fn read_dir(root: &Path) -> std::io::Result<Self> {
+        let mut sources = BTreeMap::new();
+        for package in std::fs::read_dir(root)? {
+            let package = package?.path();
+            if !package.is_dir() {
+                continue;
+            }
+            for file in std::fs::read_dir(&package)? {
+                let file = file?.path();
+                if file
+                    .extension()
+                    .is_some_and(|extension| extension == "yaml")
+                {
+                    let relative = file.strip_prefix(root).map_err(std::io::Error::other)?;
+                    let key = relative.to_string_lossy().into_owned();
+                    sources.insert(key, std::fs::read_to_string(&file)?);
+                }
+            }
+        }
+        Ok(Self::new(sources))
+    }
+
     pub fn sources(&self) -> &BTreeMap<String, String> {
         &self.sources
     }
 
-    pub fn load(&self) -> Result<Arc<Model>, DataModelError> {
-        Model::from_yaml(
+    pub fn fragments(&self) -> Result<Vec<Fragment>, DataModelError> {
+        Fragment::parse_all(
             self.sources
                 .iter()
                 .map(|(path, yaml)| (path.as_str(), yaml.as_str())),
         )
-        .map(Arc::new)
+    }
+
+    pub fn load(&self) -> Result<Arc<Model>, DataModelError> {
+        Model::load(&self.fragments()?).map(Arc::new)
     }
 }

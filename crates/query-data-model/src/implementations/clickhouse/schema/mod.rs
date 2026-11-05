@@ -5,6 +5,10 @@ mod resolve;
 mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+
+use super::ClickHouse;
+use crate::{ClickHouseDataModel, DataModelError, Model};
 
 pub use render::DictionaryCredentials;
 pub use resolve::default_index_name;
@@ -125,6 +129,20 @@ pub struct GraphTable {
 }
 
 impl Schema {
+    pub fn from_model(model: &Arc<Model>) -> Result<Self, DataModelError> {
+        let catalog = model.physical::<ClickHouse>(ClickHouseDataModel::CONNECTION)?;
+        catalog
+            .stores()
+            .find_map(|(_, store)| store.schema())
+            .cloned()
+            .ok_or_else(|| {
+                DataModelError::Invalid(format!(
+                    "connection {} has no schema",
+                    ClickHouseDataModel::CONNECTION
+                ))
+            })
+    }
+
     pub fn tables(&self) -> &[Table] {
         &self.tables
     }

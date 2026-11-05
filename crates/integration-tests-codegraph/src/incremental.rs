@@ -10,6 +10,7 @@ use code_graph_incremental::{
     Context, Env, Envelope, Killed, Limits, Pipeline, Scalar, State, templates,
 };
 use ontology::Ontology;
+use query_data_model::DuckDbDataModel;
 
 struct FixturePolicy;
 
@@ -117,6 +118,7 @@ fn index_and_check(yaml: &str) {
         .collect();
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
+    let data_model = Arc::new(DuckDbDataModel::embedded().expect("embedded model"));
     let env = Env::with_limits(lang_id, suite_limits(&suite)).expect("rules compile");
 
     let repository = Arc::new(
@@ -133,6 +135,7 @@ fn index_and_check(yaml: &str) {
     let (mut state, mut failures) = check(
         graph,
         &ontology,
+        &data_model,
         &suite.tests,
         &suite.skipped,
         &suite.limited,
@@ -166,7 +169,7 @@ fn index_and_check(yaml: &str) {
         );
         let graph = templates::reindex(Context::new(&env, changes), state, step.remove.clone())
             .expect("suite exceeded the total budget");
-        let (next, step_failures) = check(graph, &ontology, &step.tests, &[], &[]);
+        let (next, step_failures) = check(graph, &ontology, &data_model, &step.tests, &[], &[]);
         state = next;
         failures.extend(step_failures);
     }
@@ -178,6 +181,7 @@ fn index_and_check(yaml: &str) {
 fn check(
     graph: Pipeline<'_, Resolved>,
     ontology: &Arc<Ontology>,
+    data_model: &Arc<DuckDbDataModel>,
     tests: &[TestCase],
     skipped: &[SkippedFile],
     limited: &[SkippedFile],
@@ -212,7 +216,10 @@ fn check(
         tests: tests.to_vec(),
         steps: Vec::new(),
     };
-    (displayed.state, run_suite(&suite, &db, ontology, true))
+    (
+        displayed.state,
+        run_suite(&suite, &db, ontology, data_model, true),
+    )
 }
 
 /// Fails unless the files the budgets `kind` (skipped or limited) are the

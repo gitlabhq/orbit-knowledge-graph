@@ -1,5 +1,4 @@
 pub mod catalog;
-mod derive;
 mod error;
 pub mod from_ontology;
 pub mod generic;

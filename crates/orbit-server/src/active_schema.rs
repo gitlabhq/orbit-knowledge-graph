@@ -176,9 +176,9 @@ pub struct SchemaSnapshot {
 
 impl SchemaSnapshot {
     fn new(migration_version: u32, ontology: Arc<Ontology>) -> anyhow::Result<Self> {
-        let data_model = query_engine::compiler::data_model::clickhouse(Arc::clone(&ontology))?;
+        let data_model = Arc::new(query_data_model::from_ontology::clickhouse(&ontology)?);
         let mut named_queries = NamedQueries::load_embedded()?;
-        named_queries.retain(|query| match fits_ontology(query, &ontology) {
+        named_queries.retain(|query| match fits_data_model(query, &data_model) {
             Ok(()) => true,
             Err(error) => {
                 warn!(
@@ -238,15 +238,18 @@ impl SnapshotLoader {
     }
 }
 
-fn fits_ontology(query: &NamedQuery, ontology: &Arc<Ontology>) -> Result<(), String> {
+fn fits_data_model(
+    query: &NamedQuery,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+) -> Result<(), String> {
     let json = query
         .render_example_language(Language::Json)
         .map_err(|error| error.to_string())?;
-    validate_normalize(&json, ontology).map_err(|error| error.to_string())?;
+    validate_normalize(&json, data_model).map_err(|error| error.to_string())?;
     let gql = query
         .render_example_language(Language::Gql)
         .map_err(|error| error.to_string())?;
-    validate_normalize_gql(&gql, ontology).map_err(|error| error.to_string())?;
+    validate_normalize_gql(&gql, data_model).map_err(|error| error.to_string())?;
     Ok(())
 }
 

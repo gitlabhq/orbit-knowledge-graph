@@ -37,17 +37,7 @@ impl Model {
     pub fn from_yaml<'a>(
         sources: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Result<Self, DataModelError> {
-        let mut diagnostics = Diagnostics::default();
-        let fragments = sources
-            .into_iter()
-            .filter_map(|(name, yaml)| {
-                Fragment::parse(yaml)
-                    .map_err(|error| diagnostics.error(name, error.to_string()))
-                    .ok()
-            })
-            .collect::<Vec<_>>();
-        diagnostics.finish()?;
-        Self::load(&fragments)
+        Self::load(&Fragment::parse_all(sources)?)
     }
 
     pub fn load(fragments: &[Fragment]) -> Result<Self, DataModelError> {

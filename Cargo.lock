@@ -4571,6 +4571,7 @@ dependencies = [
  "orbit-arrow",
  "orbit-server-config",
  "orbit-utils",
+ "query-data-model",
  "rayon",
  "regex",
  "serde",
@@ -6050,6 +6051,7 @@ dependencies = [
  "compiler",
  "indexer",
  "pest_meta",
+ "query-data-model",
  "serde_json",
 ]
 
@@ -11808,6 +11810,7 @@ dependencies = [
  "orbit-utils",
  "orbit-versions",
  "parquet",
+ "query-data-model",
  "query-engine",
  "rand 0.10.2",
  "regex",

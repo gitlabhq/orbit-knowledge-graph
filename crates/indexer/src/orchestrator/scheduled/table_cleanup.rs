@@ -122,13 +122,11 @@ impl TableCleanup {
 fn list_graph_tables(
     ontology: &ontology::Ontology,
 ) -> Result<Vec<String>, query_data_model::DataModelError> {
-    Ok(
-        query_data_model::implementations::clickhouse::schema::Schema::derive(ontology)?
-            .tables()
-            .iter()
-            .map(|table| prefixed_table_name(&table.name, *SCHEMA_VERSION))
-            .collect(),
-    )
+    Ok(query_data_model::from_ontology::schema(ontology)?
+        .tables()
+        .iter()
+        .map(|table| prefixed_table_name(&table.name, *SCHEMA_VERSION))
+        .collect())
 }
 
 fn build_apply_deleted_mask_sql(table: &str) -> String {
