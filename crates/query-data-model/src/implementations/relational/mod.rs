@@ -4,9 +4,9 @@ use indexmap::IndexMap;
 use ontology::DataType;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{Catalog, Diagnostics, StorageBackend, StoreInput};
+use crate::catalog::{Catalog, Diagnostics, StorageBackend, Store, StoreInput};
 use crate::spec::parse_word;
-use crate::{EntityId, ForeignKey, RelationshipVariantId};
+use crate::{EntityId, ForeignKey, GraphCatalog, RelationshipVariantId};
 
 mod capabilities;
 pub mod plan;
@@ -278,6 +278,59 @@ impl RelationalStore {
 pub trait RelationalFacts {
     fn relational(&self) -> &RelationalStore;
     fn table(&self, name: &str) -> Option<&TableFacts>;
+
+    fn check_attribute_columns(
+        &self,
+        store: &Store,
+        graph: &GraphCatalog,
+        diagnostics: &mut Diagnostics,
+    ) {
+        for variant in graph.variants() {
+            let relationship = &graph.relationship(variant.relationship).name;
+            let label = || {
+                let (source, target) = (
+                    &graph.entity(variant.source).name,
+                    &graph.entity(variant.target).name,
+                );
+                format!("store {} {relationship}({source} -> {target})", store.name)
+            };
+            let mut bound = store.attribute_columns(variant.id).peekable();
+            if bound.peek().is_none() {
+                continue;
+            }
+            let Some(table) = self.relational().edge_table(variant.id) else {
+                diagnostics.error(
+                    &store.package,
+                    format!("{} binds attributes but uses no edge table", label()),
+                );
+                continue;
+            };
+            let types = self.table(table).map(|facts| &facts.column_types);
+            for (attribute, column) in bound {
+                let attribute = graph.attribute(attribute);
+                match types.and_then(|types| types.get(column)) {
+                    Some(found) if *found == attribute.data_type => {}
+                    Some(found) => diagnostics.error(
+                        &store.package,
+                        format!(
+                            "{} binds {} to {table}.{column}, which is {found:?}, not {:?}",
+                            label(),
+                            attribute.name,
+                            attribute.data_type
+                        ),
+                    ),
+                    None => diagnostics.error(
+                        &store.package,
+                        format!(
+                            "{} binds {} to {table}.{column}, which does not exist",
+                            label(),
+                            attribute.name
+                        ),
+                    ),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

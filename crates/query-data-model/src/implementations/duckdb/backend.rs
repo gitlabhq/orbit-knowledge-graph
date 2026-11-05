@@ -84,7 +84,9 @@ impl StorageBackend for DuckDb {
                 },
             );
         }
-        DuckDbStore { relational, tables }
+        let store = DuckDbStore { relational, tables };
+        store.check_attribute_columns(input.store, input.graph, diagnostics);
+        store
     }
 }
 

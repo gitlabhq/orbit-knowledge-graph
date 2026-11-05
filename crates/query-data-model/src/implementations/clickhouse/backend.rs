@@ -128,6 +128,7 @@ impl StorageBackend for ClickHouse {
         store.resolve_copies(&input, diagnostics);
         store.schema = schema::resolve(&input, &store.relational, diagnostics);
         store.relational.tables = store.table_schemas();
+        store.check_attribute_columns(input.store, input.graph, diagnostics);
         store
     }
 }

@@ -521,6 +521,78 @@ fn bad_relationship_attributes_fail_the_load() {
     );
 }
 
+fn attribute_storage(
+    edge_columns: &'static str,
+    route: &'static str,
+) -> impl Fn(&str, String) -> String {
+    move |name, yaml| {
+        match name {
+        "gitlab/graph.yaml" => yaml.replace("    variants: [MergeRequest -> Note]", HAS_NOTE_ATTRIBUTES),
+        "gitlab/storage.yaml" => yaml
+            .replace(
+                "sort_key: [traversal_path, source_id, relationship_kind, target_id] }",
+                &format!("sort_key: [traversal_path, source_id, relationship_kind, target_id], columns: {{ {edge_columns} }} }}"),
+            )
+            .replace("relationships:\n", &format!("relationships:\n  HAS_NOTE: {route}\n")),
+        _ => yaml,
+    }
+    }
+}
+
+#[test]
+fn stores_bind_relationship_attributes_to_edge_columns() {
+    let model = load_with(
+        &["gitlab"],
+        attribute_storage(
+            "note_thread: { type: LowCardinality(String) }, position: { type: Nullable(Int32) }",
+            "{ columns: { thread: note_thread, position: position } }",
+        ),
+    )
+    .unwrap();
+    let graph = model.graph();
+    let has_note = graph
+        .variant_named("HAS_NOTE", "MergeRequest", "Note")
+        .unwrap();
+    let thread = graph.attribute_id(has_note.relationship, "thread").unwrap();
+    let catalog = model.physical::<ClickHouse>("main").unwrap();
+    let store = catalog.store("graph").unwrap();
+    assert_eq!(
+        store.attribute_column(has_note.id, thread),
+        Some("note_thread")
+    );
+}
+
+#[test]
+fn attribute_bindings_need_a_matching_edge_column() {
+    let errors = spec_errors(load_with(
+        &["gitlab"],
+        attribute_storage(
+            "position: { type: String }",
+            "{ columns: { thread: note_thread, position: position, mood: mood } }",
+        ),
+    ));
+    assert_eq!(
+        errors,
+        ["gitlab: store graph binds unknown attribute HAS_NOTE.mood"]
+    );
+    let model = load_with(
+        &["gitlab"],
+        attribute_storage(
+            "position: { type: String }",
+            "{ variants: { MergeRequest -> Note: { columns: { thread: note_thread, position: position } } } }",
+        ),
+    )
+    .unwrap();
+    let errors = spec_errors(model.physical::<ClickHouse>("main"));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph HAS_NOTE(MergeRequest -> Note) binds thread to gl_edge.note_thread, which does not exist",
+            "gitlab: store graph HAS_NOTE(MergeRequest -> Note) binds position to gl_edge.position, which is String, not Int",
+        ]
+    );
+}
+
 #[test]
 fn string_enums_keep_their_declared_values() {
     let model = load(&["gitlab", "linear"]).unwrap();

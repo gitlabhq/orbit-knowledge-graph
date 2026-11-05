@@ -10,8 +10,8 @@ use crate::spec::{
     parse_variant, snake_case,
 };
 use crate::{
-    EntityId, ForeignKey, GraphCatalog, PropertyId, RelationshipId, RelationshipVariant,
-    RelationshipVariantId,
+    AttributeId, EntityId, ForeignKey, GraphCatalog, PropertyId, RelationshipId,
+    RelationshipVariant, RelationshipVariantId,
 };
 
 #[derive(Debug, Clone)]
@@ -58,6 +58,7 @@ pub struct Store {
     columns: Vec<Option<String>>,
     excluded: HashSet<PropertyId>,
     foreign_keys: Vec<Option<ForeignKey>>,
+    attribute_columns: Vec<Vec<(AttributeId, String)>>,
     pub(super) guards: Vec<Option<Guard>>,
 }
 
@@ -80,6 +81,25 @@ impl Store {
 
     pub fn foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey> {
         self.foreign_keys[variant.index()]
+    }
+
+    pub fn attribute_columns(
+        &self,
+        variant: RelationshipVariantId,
+    ) -> impl Iterator<Item = (AttributeId, &str)> {
+        self.attribute_columns[variant.index()]
+            .iter()
+            .map(|(attribute, column)| (*attribute, column.as_str()))
+    }
+
+    pub fn attribute_column(
+        &self,
+        variant: RelationshipVariantId,
+        attribute: AttributeId,
+    ) -> Option<&str> {
+        self.attribute_columns(variant)
+            .find(|(bound, _)| *bound == attribute)
+            .map(|(_, column)| column)
     }
 
     pub fn guard(&self, entity: EntityId) -> Option<&Guard> {
@@ -196,6 +216,7 @@ impl Store {
             columns: vec![None; graph.properties().count()],
             excluded: HashSet::new(),
             foreign_keys: vec![None; graph.variants().count()],
+            attribute_columns: vec![Vec::new(); graph.variants().count()],
             guards: vec![None; graph.entities().count()],
         }
     }
@@ -356,12 +377,56 @@ impl Store {
                         )
                     });
                 }
+                self.bind_attributes(relationship, spec, graph, package, diagnostics);
                 self.routes.push(DeclaredRoute {
                     relationship,
                     package: package.to_string(),
                     spec: spec.clone(),
                 });
             }
+        }
+    }
+
+    fn bind_attributes(
+        &mut self,
+        relationship: RelationshipId,
+        spec: &RouteSpec,
+        graph: &GraphCatalog,
+        package: &str,
+        diagnostics: &mut Diagnostics,
+    ) {
+        let name = &graph.relationship(relationship).name;
+        let store = self.name.clone();
+        let mut resolve = |columns: &IndexMap<String, String>| -> Vec<(AttributeId, String)> {
+            columns
+                .iter()
+                .filter_map(|(attribute, column)| {
+                    let id = graph.attribute_id(relationship, attribute);
+                    let id = diagnostics.require(id, package, || {
+                        format!("store {store} binds unknown attribute {name}.{attribute}")
+                    })?;
+                    Some((id, column.clone()))
+                })
+                .collect()
+        };
+        let shared = resolve(&spec.columns);
+        for id in &graph.relationship(relationship).variants {
+            let variant = graph.variant(*id);
+            let key = format_variant(
+                &graph.entity(variant.source).name,
+                &graph.entity(variant.target).name,
+            );
+            let mut bound = shared.clone();
+            for (attribute, column) in spec
+                .variants
+                .get(&key)
+                .map(|narrow| resolve(&narrow.columns))
+                .unwrap_or_default()
+            {
+                bound.retain(|(other, _)| *other != attribute);
+                bound.push((attribute, column));
+            }
+            self.attribute_columns[id.index()] = bound;
         }
     }
 

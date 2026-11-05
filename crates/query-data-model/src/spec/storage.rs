@@ -82,6 +82,8 @@ pub struct SourceSpec {
 pub struct RouteSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fk: Option<String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub columns: IndexMap<String, String>,
     #[serde(default, skip_serializing_if = "BackendOptions::is_empty")]
     pub backend: BackendOptions,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]

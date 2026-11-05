@@ -316,6 +316,7 @@ fn routes(
                 fk: edge.fk_column.clone().filter(|column| {
                     holds(&edge.source_kind, column) || holds(&edge.target_kind, column)
                 }),
+                columns: IndexMap::new(),
                 backend: options(RelationalRoute { table })?,
                 variants: IndexMap::new(),
             };
