@@ -111,7 +111,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         hydrate_plan {
             reads_env: [security_ctx, data_model]
-            reads_state: [input, node]
+            reads_state: [input, relational]
             mutates: [hydration_plan]
         }
         settings {
@@ -149,13 +149,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, build_plan, settings, security, security_check, codegen]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, build_plan, hydrate_plan, settings, security, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, build_plan, settings, security, security_check, codegen]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, build_plan, hydrate_plan, settings, security, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
@@ -355,15 +355,17 @@ fn security_check(
     security_check::verify(plan, model.catalog(), ctx.security_ctx(), model)
 }
 
-fn hydrate_plan<C>(ctx: &mut C) -> Result<()>
-where
-    C: CompilerCtx,
-    C::Model: query_data_model::OrbitQueryModel,
-{
+fn hydrate_plan(
+    ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
+) -> Result<()> {
     let input = require(ctx.input().as_ref(), "input")?;
-    let emitted = require(ctx.node().as_ref(), "node")?;
+    let relational = &require(ctx.relational().as_ref(), "relational")?.plan;
+    let projected: Vec<&str> = relational
+        .outputs(relational.root())
+        .filter_map(|output| relational.name(output))
+        .collect();
     let plan =
-        hydrate::generate_hydration_plan(input, emitted, ctx.data_model(), ctx.security_ctx());
+        hydrate::generate_hydration_plan(input, &projected, ctx.data_model(), ctx.security_ctx());
     ctx.set_hydration_plan(plan);
     Ok(())
 }

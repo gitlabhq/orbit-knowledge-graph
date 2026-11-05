@@ -6,7 +6,6 @@ use std::collections::HashSet;
 use ontology::VirtualSource;
 use query_data_model::PropertyRealization;
 
-use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
 use crate::types::SecurityContext;
 
@@ -88,7 +87,7 @@ pub struct VirtualColumnRequest {
 /// Build the hydration plan for a compiled query.
 ///
 /// - Aggregation/Traversal: one static template per input node, minus the
-///   columns `emitted` already projects as `{alias}_{col}`. Nodes the base
+///   columns the base query already projects as `{alias}_{col}`. Nodes the base
 ///   query joins inline therefore need no second query; single-node search
 ///   keeps only its virtual columns.
 /// - PathFinding/Neighbors: dynamic plan over all ontology entity types.
@@ -99,7 +98,7 @@ pub struct VirtualColumnRequest {
 /// `node.columns`.
 pub fn generate_hydration_plan(
     input: &Input,
-    emitted: &Node,
+    projected: &[&str],
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> HydrationPlan {
@@ -109,7 +108,7 @@ pub fn generate_hydration_plan(
             HydrationPlan::Dynamic(build_dynamic_specs(input, model, security_ctx))
         }
         QueryType::Aggregation | QueryType::Traversal => {
-            let mut templates = build_static_templates(input, emitted, model);
+            let mut templates = build_static_templates(input, projected, model);
 
             // Aggregation builds its own SELECT, so no {alias}_{col} alias exists to match.
             if input.query_type == QueryType::Aggregation {
@@ -127,10 +126,10 @@ pub fn generate_hydration_plan(
 
 fn build_static_templates(
     input: &Input,
-    emitted: &Node,
+    projected: &[&str],
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Vec<HydrationTemplate> {
-    let projected = |alias: &str| matches!(emitted, Node::Query(q) if q.selects_alias(alias));
+    let projected = |alias: &str| projected.contains(&alias);
     input
         .nodes
         .iter()
@@ -616,9 +615,8 @@ mod tests {
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::All);
 
-        let emitted = Node::Query(Box::default());
         let model = query_data_model::from_ontology::clickhouse(&ont).unwrap();
-        let plan = generate_hydration_plan(&input, &emitted, &model, &ctx);
+        let plan = generate_hydration_plan(&input, &[], &model, &ctx);
 
         match plan {
             HydrationPlan::Dynamic(specs) => {
