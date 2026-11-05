@@ -1,16 +1,52 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::layout::relational::{
-    DenormalizedCatalog, ForeignKey, PropertyRealization, RelationshipRoute,
-};
 use crate::{
-    Entity, EntityAuthConfig, EntityId, GraphCatalog, MaterializedJoin, PathColumn, Property,
-    PropertyId, VariantRoute,
+    DenormalizedCatalog, Entity, EntityAuthConfig, EntityId, ForeignKey, GraphCatalog,
+    MaterializedJoin, PathColumn, Property, PropertyId, RelationshipVariant,
 };
 
-pub type ClickHouseDataModel =
-    crate::QueryModel<crate::implementations::clickhouse::layout::ClickHouse>;
-pub type DuckDbDataModel = crate::QueryModel<crate::implementations::duckdb::layout::DuckDb>;
+pub type ClickHouseDataModel = crate::QueryModel<crate::implementations::clickhouse::ClickHouse>;
+pub type DuckDbDataModel = crate::QueryModel<crate::implementations::duckdb::DuckDb>;
+
+#[derive(Debug, Clone)]
+pub struct VariantRoute {
+    pub table: String,
+    pub foreign_key: Option<ForeignKey>,
+}
+
+#[derive(Debug, Clone)]
+pub enum PropertyRealization {
+    Stored { column: String },
+    Virtual(ontology::VirtualSource),
+}
+
+#[derive(Debug)]
+pub struct RelationshipRoute<'a> {
+    pub table: &'a str,
+    pub(crate) variants: Vec<&'a RelationshipVariant>,
+}
+
+impl RelationshipRoute<'_> {
+    pub fn variants(&self) -> impl Iterator<Item = &RelationshipVariant> + '_ {
+        self.variants.iter().copied()
+    }
+
+    pub fn source_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
+        self.variants.iter().map(|variant| variant.source)
+    }
+
+    pub fn target_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
+        self.variants.iter().map(|variant| variant.target)
+    }
+
+    pub fn has_source(&self, entity: EntityId) -> bool {
+        self.source_entities().any(|source| source == entity)
+    }
+
+    pub fn has_target(&self, entity: EntityId) -> bool {
+        self.target_entities().any(|target| target == entity)
+    }
+}
 
 pub trait OrbitQueryModel {
     fn graph(&self) -> &GraphCatalog;

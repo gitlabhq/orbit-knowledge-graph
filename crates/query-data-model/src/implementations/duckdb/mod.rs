@@ -1,2 +1,4 @@
 pub mod backend;
-pub mod layout;
+
+#[derive(Debug, Clone)]
+pub struct DuckDb;

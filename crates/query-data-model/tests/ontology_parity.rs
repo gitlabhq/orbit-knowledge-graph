@@ -3,7 +3,7 @@ use std::sync::Arc;
 use query_data_model::Model;
 use query_data_model::catalog::{RowFilter, Scope};
 use query_data_model::from_ontology::from_ontology;
-use query_data_model::implementations::clickhouse::layout::ClickHouse;
+use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::spec::Fragment;
 
 fn model() -> (Arc<Model>, ontology::Ontology) {

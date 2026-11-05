@@ -37,7 +37,7 @@ impl Schema {
 mod tests {
     use std::sync::Arc;
 
-    use crate::implementations::clickhouse::layout::ClickHouse;
+    use crate::implementations::clickhouse::schema::Schema;
     use crate::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, PropertyRealization};
     use ontology::FieldSource;
 
@@ -64,7 +64,7 @@ mod tests {
             backend.table_sort_key("gl_code_edge_by_target").unwrap()[1],
             "target_id"
         );
-        let storage = crate::Relational::<ClickHouse>::derive(&ontology).unwrap();
+        let storage = Schema::derive(&ontology).unwrap();
         assert_eq!(
             storage.dependencies()["gl_code_edge_by_target"],
             std::collections::BTreeSet::from(["gl_code_edge".to_string()])
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn writer_catalog_tracks_exact_node_mapping_routes() {
         let ontology = ontology::Ontology::load_embedded().unwrap();
-        let storage = crate::Relational::<ClickHouse>::derive(&ontology).unwrap();
+        let storage = Schema::derive(&ontology).unwrap();
 
         let code_writers = storage.writers("gl_code_edge").unwrap();
         assert!(code_writers.contains("Branch"));

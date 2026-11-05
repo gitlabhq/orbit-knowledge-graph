@@ -58,4 +58,16 @@ mod tests {
         assert!(Engine::parse("Bad Name(x)").is_none());
         assert!(Engine::parse("MergeTree(x").is_none());
     }
+
+    #[test]
+    fn replicated_prefixes_merge_tree_engines_only() {
+        let engine = Engine::parse("ReplacingMergeTree(_version, _deleted)")
+            .unwrap()
+            .replicated();
+        assert_eq!(engine.name, "ReplicatedReplacingMergeTree");
+        assert_eq!(engine.replicated().name, "ReplicatedReplacingMergeTree");
+        for name in ["Null", "SharedMergeTree", "Dictionary"] {
+            assert_eq!(Engine::parse(name).unwrap().replicated().name, name);
+        }
+    }
 }

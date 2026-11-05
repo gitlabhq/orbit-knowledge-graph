@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ontology::TraversalPathKind;
 use serde::{Deserialize, Serialize};
 
-use super::layout::DuckDb;
+use super::DuckDb;
 use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
 use crate::implementations::relational::{
     RelationalFacts, RelationalOptions, RelationalRoute, RelationalStore, TableFacts,

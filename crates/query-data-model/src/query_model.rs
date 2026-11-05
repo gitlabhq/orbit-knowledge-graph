@@ -5,11 +5,11 @@ use ontology::{EdgeVariantScope, FieldSelectivity, TraversalPathKind};
 
 use crate::catalog::{Catalog, Model, StorageBackend};
 use crate::implementations::relational::RelationalFacts;
-use crate::layout::relational::RelationshipRoute;
 use crate::{
     DataModelError, DenormalizedCatalog, Entity, EntityId, ForeignKey, GraphCatalog,
     MaterializedJoin, OrbitQueryModel, PathColumn, Property, PropertyId, PropertyRealization,
-    RelationshipId, RelationshipVariant, RelationshipVariantId, TraversalPathLookup, VariantRoute,
+    RelationshipId, RelationshipRoute, RelationshipVariant, RelationshipVariantId,
+    TraversalPathLookup, VariantRoute,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

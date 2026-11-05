@@ -6,7 +6,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::{Catalog, Diagnostics, StorageBackend, StoreInput};
 use crate::spec::parse_word;
-use crate::{EntityId, ForeignKey, PathColumn, RelationshipVariantId};
+use crate::{EntityId, ForeignKey, RelationshipVariantId};
+
+#[derive(Debug, Clone)]
+pub struct PathColumn {
+    pub name: String,
+    pub entity: Option<EntityId>,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

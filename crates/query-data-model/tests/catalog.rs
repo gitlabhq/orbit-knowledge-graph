@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use query_data_model::catalog::RowFilter;
+use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::clickhouse::backend::IndexKind;
-use query_data_model::implementations::clickhouse::layout::ClickHouse;
-use query_data_model::implementations::duckdb::layout::DuckDb;
+use query_data_model::implementations::duckdb::DuckDb;
 use query_data_model::implementations::search::Search;
 use query_data_model::{DataModelError, Direction, Endpoint, Model};
 
