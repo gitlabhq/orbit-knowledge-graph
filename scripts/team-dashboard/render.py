@@ -56,6 +56,8 @@ BEGIN = "<!-- dashboard:begin -->"
 END = "<!-- dashboard:end -->"
 UPDATED_RE = re.compile(r"Updated (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC\.")
 PRIORITY_REFERENCE_RE = re.compile(r"((?:[\w.-]+/)+[\w.-]+)?!(\d+)")
+TRIAGE_LABEL_RE = re.compile(r"(priority|severity)::.+")
+UNRANKED = 1_000_000
 PAGE_SIZE = 100
 GRAPHQL_USER_BATCH = 50
 TEAM_WIDE_MIN_ASSIGNEES = 3
@@ -174,12 +176,38 @@ def item_line(web_url: str, created: str, now: datetime, suffix: str = "") -> st
     return f"- {web_url}+ · {age_days(created, now)}d" + (f" · {suffix}" if suffix else "")
 
 
+def triage_labels(mr: dict) -> Dict[str, str]:
+    """The merge request's priority::* and severity::* labels, keyed by scope (first label wins)."""
+    found: Dict[str, str] = {}
+    for label in mr.get("labels", []):
+        match = TRIAGE_LABEL_RE.fullmatch(str(label))
+        if match:
+            found.setdefault(match.group(1), str(label))
+    return found
+
+
+def triage_rank(label: Optional[str]) -> int:
+    """Lower is more urgent: priority::1 and severity::1 are the highest; a missing or unnumbered label is last."""
+    digits = re.search(r"\d+$", label or "")
+    return int(digits.group()) if digits else UNRANKED
+
+
 def merge_request_line(candidate: Candidate, now: datetime, suffix: str = "") -> str:
-    return item_line(str(candidate.mr["web_url"]), str(candidate.mr.get("created_at")), now, suffix)
+    labels = list(triage_labels(candidate.mr).values())
+    parts = [part for part in (" · ".join(labels), suffix) if part]
+    return item_line(str(candidate.mr["web_url"]), str(candidate.mr.get("created_at")), now, " · ".join(parts))
 
 
 def oldest_first(candidates: Sequence[Candidate]) -> List[Candidate]:
-    return sorted(candidates, key=lambda c: (str(c.mr.get("created_at")), str(c.mr.get("web_url"))))
+    """Labelled merge requests first (priority, then severity, highest first), then the rest; ties oldest first."""
+    def key(candidate: Candidate):
+        labels = triage_labels(candidate.mr)
+        floated = (
+            (0, triage_rank(labels.get("priority")), triage_rank(labels.get("severity")))
+            if labels else (1, 0, 0)
+        )
+        return (*floated, str(candidate.mr.get("created_at")), str(candidate.mr.get("web_url")))
+    return sorted(candidates, key=key)
 
 
 def is_bot_username(username: str) -> bool:

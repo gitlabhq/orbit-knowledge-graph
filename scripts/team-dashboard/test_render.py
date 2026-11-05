@@ -311,6 +311,38 @@ class RenderTest(DashboardTestCase):
         self.assertLess(teamwide.index("/issues/6+"), teamwide.index("/issues/1+"))
         self.assertNotIn("/issues/1470+", teamwide)
 
+    def test_labelled_merge_requests_float_by_priority_then_severity(self):
+        ready = dashboard.READY_LABEL
+        mrs = [
+            merge_request(1, created="2026-10-01T00:00:00Z", labels=[ready], status="not_approved"),
+            merge_request(2, created="2026-10-09T00:00:00Z", labels=[ready, "severity::1"], status="not_approved"),
+            merge_request(3, created="2026-10-08T00:00:00Z", labels=[ready, "priority::2", "severity::1"], status="not_approved"),
+            merge_request(4, created="2026-10-07T00:00:00Z", labels=[ready, "priority::1", "severity::3"], status="not_approved"),
+            merge_request(5, created="2026-10-06T00:00:00Z", labels=[ready, "priority::1", "severity::2"], status="not_approved"),
+            merge_request(6, created="2026-10-02T00:00:00Z", labels=[ready], status="not_approved"),
+            merge_request(7, created="2026-10-05T00:00:00Z", labels=[ready, "priority::1", "severity::2"], status="not_approved"),
+        ]
+        routes = self.approvals_for({i: approvals() for i in range(1, 8)})
+        text = self.region(self.kg(*mrs, routes=routes))
+        review = block(text, "## Ready for review", "## Ready to merge")
+        order = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", review)]
+        self.assertEqual(order, [7, 5, 4, 3, 2, 1, 6])
+        self.assertIn(f"- {url(5)} · 25d · priority::1 · severity::2", review)
+        self.assertIn(f"- {url(2)} · 22d · severity::1", review)
+        self.assertIn(f"- {url(1)} · 30d\n", review + "\n")
+
+    def test_labels_show_before_the_status_and_pinned_list_keeps_its_order(self):
+        pinned = [(None, 7), (None, 8)]
+        routes = {
+            ("GET", f"{SOURCE_PATH}/merge_requests/7"): merge_request(7, status="conflict"),
+            ("GET", f"{SOURCE_PATH}/merge_requests/8"): merge_request(8, labels=["priority::1"], status="conflict"),
+        }
+        with mock.patch.object(dashboard, "read_pinned", return_value=pinned):
+            text = self.region(FakeApi(routes))
+        priority = block(text, "## Priority")
+        self.assertLess(priority.index(url(7)), priority.index(url(8)))
+        self.assertIn(f"- {url(8)} · 30d · priority::1 · conflict", priority)
+
     def test_pinned_priority_list(self):
         pinned = [(None, 7), ("gitlab-org/docs", 8)]
         routes = {
