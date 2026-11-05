@@ -3,10 +3,11 @@ use std::sync::Arc;
 
 use query_data_model::catalog::Unresolved;
 use query_data_model::plan::logical::{
-    Expr, LogicalOperation, LogicalPlan, Order, PlanError, count,
+    Expr, LogicalBuilder, LogicalCatalog, LogicalOperation, LogicalPlan, Order, PlanError, Rows,
+    count,
 };
-use query_data_model::plan::tracking::{NodeId, Rejected};
-use query_data_model::{DataModelError, Direction, Model};
+use query_data_model::plan::tracking::{Declared, NodeId, Ref, Rejected};
+use query_data_model::{DataModelError, Direction, EntityId, Model};
 
 fn package_sources(packages: &[&str]) -> Vec<(String, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/packages");
@@ -225,4 +226,297 @@ fn shared_bodies_are_reused_and_scoped() {
         leaked.unwrap_err(),
         PlanError::Rejected(Rejected::OutOfScope)
     );
+}
+
+#[test]
+fn handles_from_another_plan_or_snapshot_are_rejected() {
+    let model = load(&["gitlab"]);
+    let other = load(&["gitlab", "linear"]);
+    let catalog = model.logical();
+    let requests = catalog.entity("MergeRequest").unwrap();
+    let foreign = other.logical().entity("MergeRequest").unwrap();
+
+    let snapshot = catalog.build(|q| q.entities(foreign));
+    assert_eq!(
+        snapshot.unwrap_err(),
+        PlanError::Rejected(Rejected::ForeignSnapshot)
+    );
+
+    let mut title = None;
+    let first = catalog
+        .build(|q| {
+            let rows = q.entities(requests)?;
+            title = Some(rows.property("title")?);
+            Ok(rows)
+        })
+        .unwrap();
+    let second = catalog.build(|q| {
+        let rows = q.entities(requests)?;
+        q.filter(rows, title.unwrap().eq("x"))
+    });
+    assert_eq!(
+        second.unwrap_err(),
+        PlanError::Rejected(Rejected::ForeignPlan)
+    );
+
+    let rewritten = other.logical().rewrite(first, |_, rows| Ok(rows));
+    assert_eq!(
+        rewritten.unwrap_err(),
+        PlanError::Rejected(Rejected::ForeignSnapshot)
+    );
+}
+
+#[test]
+fn an_invalid_follow_names_the_connecting_relationships() {
+    let model = load(&["gitlab"]);
+    let catalog = model.logical();
+    let requests = catalog.entity("MergeRequest").unwrap();
+    let users = catalog.entity("User").unwrap();
+    let contains = catalog.relationship("CONTAINS").unwrap();
+    let authored = catalog.relationship("AUTHORED").unwrap();
+
+    let error = catalog
+        .build(|q| {
+            let rows = q.entities(requests)?;
+            q.follow(rows, contains, Direction::Outgoing)
+        })
+        .unwrap_err();
+    let PlanError::Unresolved(Unresolved::NotConnected { connecting, .. }) = error else {
+        panic!("expected a connectivity error, got {error:?}");
+    };
+    assert_eq!(connecting, ["HAS_NOTE", "IN_PROJECT"]);
+
+    let error = catalog
+        .build(|q| {
+            let rows = q.entities(users)?;
+            q.follow(rows, authored, Direction::Outgoing)
+        })
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "AUTHORED reaches several entities; pick one of: MergeRequest, Note"
+    );
+}
+
+#[test]
+fn property_policy_and_types_are_checked_at_construction() {
+    let model = load_with(&["gitlab"], |name, yaml| {
+        if name.ends_with("authorization.yaml") {
+            yaml.replace("{ admin_only: true, like: false }", "{ filterable: false }")
+        } else {
+            yaml
+        }
+    })
+    .unwrap();
+    let catalog = model.logical();
+    let requests = catalog.entity("MergeRequest").unwrap();
+    let users = catalog.entity("User").unwrap();
+    let attempt = |entity, property: &str, predicate: fn(Expr) -> _| {
+        catalog
+            .build(|q| {
+                let rows = q.entities(entity)?;
+                let value = rows.property(property)?;
+                q.filter(rows, predicate(value))
+            })
+            .unwrap_err()
+            .to_string()
+    };
+
+    assert_eq!(
+        attempt(requests, "traversal_path", |value| value.eq("1/")),
+        "MergeRequest.traversal_path is hidden"
+    );
+    assert_eq!(
+        attempt(users, "email", |value| value.eq("a@b.c")),
+        "User.email cannot be filtered"
+    );
+    assert_eq!(
+        attempt(requests, "state", |value| value.eq("draft")),
+        "MergeRequest.state has no value draft; allowed: opened, closed, merged, locked"
+    );
+    assert_eq!(
+        attempt(requests, "title", |value| value.gt(3)),
+        "MergeRequest.title is Int(3), not String"
+    );
+
+    let model = load(&["gitlab"]);
+    let catalog = model.logical();
+    let users = catalog.entity("User").unwrap();
+    let error = catalog.build(|q| {
+        let rows = q.entities(users)?;
+        let email = rows.property("email")?;
+        q.filter(rows, email.contains("@gitlab"))
+    });
+    assert_eq!(
+        error.unwrap_err().to_string(),
+        "User.email does not support substring matching"
+    );
+}
+
+#[test]
+fn a_failed_step_closes_the_construction_session() {
+    let model = load(&["gitlab"]);
+    let catalog = model.logical();
+    let requests = catalog.entity("MergeRequest").unwrap();
+
+    let result = catalog.build(|q| {
+        let rows = q.entities(requests)?;
+        let title = rows.property("title")?;
+        let failed = q.filter(rows, title.eq(true));
+        assert!(matches!(failed, Err(PlanError::Type { .. })));
+        let retry = q.entities(requests);
+        assert_eq!(retry.unwrap_err(), PlanError::Rejected(Rejected::Failed));
+        Err(PlanError::NoEntity)
+    });
+    assert_eq!(result.unwrap_err(), PlanError::NoEntity);
+
+    let mut swallowed = None;
+    let result = catalog.build(|q| {
+        let rows = q.entities(requests)?;
+        let other = q.entities(requests)?;
+        swallowed = q
+            .follow(
+                other,
+                catalog.relationship("CONTAINS")?,
+                Direction::Outgoing,
+            )
+            .err();
+        Ok(rows)
+    });
+    assert!(matches!(swallowed, Some(PlanError::Unresolved(_))));
+    assert_eq!(result.unwrap_err(), PlanError::Rejected(Rejected::Failed));
+
+    let unused = catalog.build(|q| {
+        q.entities(requests)?;
+        q.entities(requests)
+    });
+    assert_eq!(
+        unused.unwrap_err(),
+        PlanError::Rejected(Rejected::Unused(1))
+    );
+}
+
+fn guard_every_scan(
+    catalog: LogicalCatalog<'_>,
+    plan: LogicalPlan,
+) -> Result<(LogicalPlan, usize), PlanError> {
+    let mut visits = 0;
+    let plan = catalog.rewrite(plan, |q, rows| {
+        visits += 1;
+        if !matches!(q.operation(&rows)?, LogicalOperation::Entities(_)) {
+            return Ok(rows);
+        }
+        let state = rows.property("state")?;
+        q.filter(rows, state.ne("locked"))
+    })?;
+    Ok((plan, visits))
+}
+
+fn consumers_of_scans(plan: &LogicalPlan) -> Vec<&LogicalOperation> {
+    plan.nodes()
+        .filter(|node| {
+            plan.inputs(*node)
+                .iter()
+                .any(|input| matches!(plan.operation(*input), LogicalOperation::Entities(_)))
+        })
+        .map(|node| plan.operation(node))
+        .collect()
+}
+
+#[test]
+fn a_rewrite_guards_every_scan_and_preserves_outputs() {
+    let model = load(&["gitlab"]);
+    let catalog = model.logical();
+    let requests = catalog.entity("MergeRequest").unwrap();
+    fn titles<'m>(
+        q: &mut LogicalBuilder<'m>,
+        requests: Declared<EntityId>,
+    ) -> Result<Rows<'m>, PlanError> {
+        let rows = q.entities(requests)?;
+        let title = rows.property("title")?;
+        q.select(rows, [title.named("title")])
+    }
+
+    let plan = catalog
+        .build(|q| {
+            let first = titles(q, requests)?;
+            let second = titles(q, requests)?;
+            q.union(vec![first, second])
+        })
+        .unwrap();
+    let before: Vec<Ref> = plan.outputs(plan.root()).collect();
+    let (plan, visits) = guard_every_scan(catalog, plan).unwrap();
+    assert_eq!(visits, 5);
+    assert_eq!(plan.outputs(plan.root()).collect::<Vec<_>>(), before);
+    let consumers = consumers_of_scans(&plan);
+    assert_eq!(consumers.len(), 2);
+    assert!(
+        consumers
+            .iter()
+            .all(|operation| matches!(operation, LogicalOperation::Filter(_)))
+    );
+
+    let plan = catalog
+        .build(|q| {
+            let body = q.share("titles", |q| titles(q, requests))?;
+            let first = q.read(body)?;
+            let second = q.read(body)?;
+            q.union(vec![first, second])
+        })
+        .unwrap();
+    let (plan, visits) = guard_every_scan(catalog, plan).unwrap();
+    assert_eq!(visits, 5);
+    assert_eq!(consumers_of_scans(&plan).len(), 1);
+}
+
+#[test]
+fn changed_outputs_need_explicit_reconnection() {
+    let model = load(&["gitlab"]);
+    let catalog = model.logical();
+    let requests = catalog.entity("MergeRequest").unwrap();
+    let build = || {
+        catalog.build(|q| {
+            let rows = q.entities(requests)?;
+            let title = rows.property("title")?;
+            let rows = q.select(rows, [title.named("title")])?;
+            let title = rows.column("title")?;
+            q.order(rows, [(title, Order::Ascending)])
+        })
+    };
+    let rename = |reconnect: bool| {
+        catalog.rewrite(build().unwrap(), move |q, rows| {
+            if !matches!(q.operation(&rows)?, LogicalOperation::Select(_)) {
+                return Ok(rows);
+            }
+            let Expr::Output(title) = rows.column("title")? else {
+                unreachable!("select outputs are columns");
+            };
+            let renamed = q.select(rows, [Expr::Output(title).named("name")])?;
+            let Expr::Output(name) = renamed.column("name")? else {
+                unreachable!("select outputs are columns");
+            };
+            if reconnect {
+                q.reconnect(title, name)?;
+            }
+            Ok(renamed)
+        })
+    };
+
+    assert_eq!(
+        rename(false).unwrap_err(),
+        PlanError::Rejected(Rejected::ChangedOutputs("title, name".into()))
+    );
+    let plan = rename(true).unwrap();
+    assert_eq!(names(&plan, plan.root()), ["name"]);
+
+    let plan = catalog
+        .rewrite(build().unwrap(), |q, rows| {
+            if !matches!(q.operation(&rows)?, LogicalOperation::Order(_)) {
+                return Ok(rows);
+            }
+            let title = rows.column("title")?;
+            q.select(rows, [title.named("result")])
+        })
+        .unwrap();
+    assert_eq!(names(&plan, plan.root()), ["result"]);
 }
