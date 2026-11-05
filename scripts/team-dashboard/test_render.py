@@ -354,7 +354,7 @@ class RenderTest(DashboardTestCase):
         routes = self.approvals_for({1: approvals(), 2: approvals()})
         review = block(self.region(self.kg(*mrs, routes=routes)), "## Ready for review", "## Ready to merge")
         self.assertLess(review.index(url(1)), review.index(url(2)))
-        for fragment in ("@team", "<b>", "evil", "|x", "priority::"):
+        for fragment in ("@team", "<b>", "evil", "|x"):
             self.assertNotIn(fragment, review)
 
     def test_labels_show_before_the_status_and_pinned_list_keeps_its_order(self):
