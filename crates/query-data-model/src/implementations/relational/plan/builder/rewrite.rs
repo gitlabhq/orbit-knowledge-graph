@@ -21,6 +21,15 @@ impl View {
         }
     }
 
+    pub(super) fn relation(self, rows: Rows) -> Relation {
+        Relation {
+            rows,
+            stage: self.stage,
+            visible: self.visible,
+            computed: self.computed,
+        }
+    }
+
     fn from(stage: Stage, visible: Vec<Visible>) -> Self {
         Self {
             stage,
@@ -45,13 +54,7 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
 
     pub(super) fn view(&mut self, rows: Rows) -> Result<Relation, RelationalError> {
         let view = self.derive(&rows);
-        let view = self.guard(view)?;
-        Ok(Relation {
-            rows,
-            stage: view.stage,
-            visible: view.visible,
-            computed: view.computed,
-        })
+        Ok(self.guard(view)?.relation(rows))
     }
 
     fn input(&self, rows: &Rows, index: usize) -> Result<View, RelationalError> {

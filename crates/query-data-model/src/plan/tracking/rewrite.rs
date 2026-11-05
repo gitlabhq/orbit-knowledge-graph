@@ -16,6 +16,7 @@ pub(super) struct Pending<L: Language> {
 
 struct Visit {
     old: NodeId,
+    new: NodeId,
     contract: Vec<OutputId>,
     reconnect: Vec<(OutputId, OutputId)>,
 }
@@ -98,6 +99,31 @@ impl<L: Language> Construction<L> {
         })
     }
 
+    pub fn visiting(&self) -> Option<NodeId> {
+        let pending = self.pending.as_ref()?;
+        pending.visiting.as_ref().map(|visit| visit.old)
+    }
+
+    pub fn detach(&mut self, rows: Rows) -> Result<(L::Operation, Vec<Rows>), Rejected> {
+        self.attempt(|this| {
+            let node = this.node(&rows)?;
+            let visited = this
+                .pending
+                .as_ref()
+                .and_then(|pending| pending.visiting.as_ref())
+                .is_some_and(|visit| visit.new == node);
+            if !visited || node.0 + 1 != this.arena.nodes.len() {
+                return Err(Rejected::NotDetachable);
+            }
+            let detached = this.arena.nodes.pop().ok_or(Rejected::Failed)?;
+            for input in &detached.inputs {
+                this.arena.nodes[input.0].consumed = false;
+            }
+            let inputs = detached.inputs.iter().map(|input| this.rows(*input));
+            Ok((detached.operation, inputs.collect()))
+        })
+    }
+
     fn advance(&mut self) -> Result<Option<Rows>, Rejected> {
         self.attempt(|this| {
             let Some(pending) = this.pending.as_mut() else {
@@ -125,6 +151,7 @@ impl<L: Language> Construction<L> {
             let pending = this.pending.as_mut().ok_or(Rejected::Failed)?;
             pending.visiting = Some(Visit {
                 old,
+                new,
                 contract: this.arena.nodes[new.0].contract.clone(),
                 reconnect: Vec::new(),
             });

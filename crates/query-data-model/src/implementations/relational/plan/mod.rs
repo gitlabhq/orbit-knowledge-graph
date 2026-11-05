@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 
 use ontology::DataType;
 
-pub use builder::{Aggregated, RelationalBuilder, Subquery};
+pub use builder::{Aggregated, Detached, RelationalBuilder, Subquery};
 pub use error::RelationalError;
 pub use expr::{BinaryOp, Expr, Function, TextMatch, TimeUnit, UnaryOp};
 pub use operation::{

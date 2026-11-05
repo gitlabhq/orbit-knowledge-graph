@@ -278,3 +278,55 @@ fn relational_rewrites_reconnect_changed_outputs() {
          WHERE (u.username = {p0:String}) ORDER BY handle ASC"
     );
 }
+
+#[test]
+fn a_detached_operation_reattaches_onto_rewritten_inputs() {
+    let model = clickhouse();
+    let catalog = model.catalog();
+    let users = catalog.table("gl_user").unwrap();
+    let build = || {
+        catalog
+            .build(|q| {
+                let rows = q.scan(users, ReadMode::Current, "u")?;
+                let id = rows.qualified("u", "id")?;
+                let name = rows.qualified("u", "username")?;
+                let (rows, computed) =
+                    q.compute(rows, vec![Declare::named("handle", name.expr())])?;
+                q.select(rows, vec![id, computed[0]])
+            })
+            .unwrap()
+    };
+    let guarded = catalog
+        .rewrite(build(), |q, rows| {
+            if !matches!(q.operation(&rows)?, Operation::Compute(_)) {
+                return Ok(rows);
+            }
+            let mut detached = q.detach(rows)?;
+            let input = detached.inputs.remove(0);
+            let deleted = input.qualified("u", "_deleted")?;
+            let live = Expr::Unary {
+                op: UnaryOp::Not,
+                value: Box::new(deleted.expr()),
+            };
+            detached.inputs.push(q.filter(input, live)?);
+            q.reattach(detached)
+        })
+        .unwrap();
+    assert_eq!(
+        catalog.render(&guarded).sql,
+        "SELECT u.id, u.username AS handle FROM gl_user AS u FINAL WHERE (NOT u._deleted)"
+    );
+
+    let stray = catalog.rewrite(build(), |q, rows| {
+        if !matches!(q.operation(&rows)?, Operation::Select(_)) {
+            return Ok(rows);
+        }
+        let other = q.scan(users, ReadMode::Current, "v")?;
+        q.detach(other)?;
+        Ok(rows)
+    });
+    assert_eq!(
+        stray.unwrap_err(),
+        RelationalError::Rejected(Rejected::NotDetachable)
+    );
+}
