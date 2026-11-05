@@ -501,6 +501,42 @@ fn relationships_declare_typed_attributes() {
 }
 
 #[test]
+fn access_entries_apply_to_relationship_attributes() {
+    let model = load_with(&["gitlab"], |name, yaml| match name {
+        "gitlab/graph.yaml" => {
+            yaml.replace("    variants: [MergeRequest -> Note]", HAS_NOTE_ATTRIBUTES)
+        }
+        "gitlab/authorization.yaml" => {
+            yaml + "  HAS_NOTE.thread: { hidden: true, filterable: false }\n  HAS_NOTE.mood: { hidden: true }\n"
+        }
+        _ => yaml,
+    });
+    assert_eq!(
+        spec_errors(model),
+        ["gitlab: authorization names unknown property HAS_NOTE.mood"]
+    );
+    let model = load_with(&["gitlab"], |name, yaml| match name {
+        "gitlab/graph.yaml" => {
+            yaml.replace("    variants: [MergeRequest -> Note]", HAS_NOTE_ATTRIBUTES)
+        }
+        "gitlab/authorization.yaml" => {
+            yaml + "  HAS_NOTE.thread: { hidden: true, filterable: false }\n"
+        }
+        _ => yaml,
+    })
+    .unwrap();
+    let graph = model.graph();
+    let has_note = graph.relationship_id("HAS_NOTE").unwrap();
+    let access = |name| {
+        model
+            .access()
+            .attribute(graph.attribute_id(has_note, name).unwrap())
+    };
+    assert!(access("thread").hidden && !access("thread").filterable);
+    assert!(!access("position").hidden && access("position").filterable);
+}
+
+#[test]
 fn bad_relationship_attributes_fail_the_load() {
     let errors = spec_errors(load_with(
         &["gitlab"],

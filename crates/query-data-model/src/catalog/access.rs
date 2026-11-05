@@ -6,7 +6,7 @@ use ontology::{EdgeVariantScope, RequiredRole};
 use super::Diagnostics;
 use super::store::Store;
 use crate::spec::{AuthorizationFragment, ScopeSpec, ScopeVariants, parse_variant, parse_word};
-use crate::{Endpoint, EntityId, GraphCatalog, Hop, PropertyId};
+use crate::{AttributeId, Endpoint, EntityId, GraphCatalog, Hop, PropertyId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -68,15 +68,18 @@ pub struct Guard {
 pub struct Access {
     entities: Vec<Option<EntityAccess>>,
     properties: Vec<Option<PropertyAccess>>,
+    attributes: Vec<Option<PropertyAccess>>,
     variant_scopes: Vec<Option<EdgeVariantScope>>,
 }
 
-const OPEN: PropertyAccess = PropertyAccess {
-    hidden: false,
-    admin_only: false,
-    filterable: true,
-    like: true,
-};
+impl PropertyAccess {
+    pub const OPEN: Self = Self {
+        hidden: false,
+        admin_only: false,
+        filterable: true,
+        like: true,
+    };
+}
 
 impl Access {
     pub fn entity(&self, entity: EntityId) -> Option<&EntityAccess> {
@@ -84,7 +87,11 @@ impl Access {
     }
 
     pub fn property(&self, property: PropertyId) -> PropertyAccess {
-        self.properties[property.index()].unwrap_or(OPEN)
+        self.properties[property.index()].unwrap_or(PropertyAccess::OPEN)
+    }
+
+    pub fn attribute(&self, attribute: AttributeId) -> PropertyAccess {
+        self.attributes[attribute.index()].unwrap_or(PropertyAccess::OPEN)
     }
 
     pub fn variant_scope(&self, variant: crate::RelationshipVariantId) -> Option<EdgeVariantScope> {
@@ -99,6 +106,7 @@ impl Access {
         let mut access = Self {
             entities: vec![None; graph.entities().count()],
             properties: vec![None; graph.properties().count()],
+            attributes: vec![None; graph.attributes().count()],
             variant_scopes: vec![None; graph.variants().count()],
         };
         let mut scoped = HashSet::new();
@@ -233,26 +241,34 @@ impl Access {
     ) {
         let package = fragment.package.as_str();
         for (path, spec) in &fragment.properties {
-            let property = path
-                .split_once('.')
-                .and_then(|(entity, property)| graph.property_named(entity, property));
-            let Some(property) = property else {
-                diagnostics.error(
-                    package,
-                    format!("authorization names unknown property {path}"),
-                );
-                continue;
-            };
             let declared = PropertyAccess {
                 hidden: spec.hidden,
                 admin_only: spec.admin_only,
                 filterable: spec.filterable,
                 like: spec.like,
             };
-            if self.properties[property.id.index()]
-                .replace(declared)
-                .is_some()
+            let Some((owner, name)) = path.split_once('.') else {
+                diagnostics.error(
+                    package,
+                    format!("authorization names unknown property {path}"),
+                );
+                continue;
+            };
+            let slot = if let Some(property) = graph.property_named(owner, name) {
+                &mut self.properties[property.id.index()]
+            } else if let Some(attribute) = graph
+                .relationship_id(owner)
+                .and_then(|relationship| graph.attribute_id(relationship, name))
             {
+                &mut self.attributes[attribute.index()]
+            } else {
+                diagnostics.error(
+                    package,
+                    format!("authorization names unknown property {path}"),
+                );
+                continue;
+            };
+            if slot.replace(declared).is_some() {
                 diagnostics.error(package, format!("{path} has two access entries"));
             }
         }
