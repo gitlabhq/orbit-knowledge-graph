@@ -29,24 +29,29 @@ fn bucket(unix: i64) -> u64 {
 /// The settings profile o11y_provisioner declares in
 /// clickhouse_configs/users.xml, and the user and grants
 /// ClickhouseMigrationRunner#grant_orbit_reader_script creates against it.
-/// Production also restricts the user with HOST IP. A client that sends a
-/// session setting the profile does not fix is rejected with code 164, so
-/// resolving as this user is what makes the test able to catch that.
-const ORBIT_READER_USER: &str = "orbit_reader";
+/// Production also restricts the user with HOST IP, which a container test
+/// cannot reproduce. The readonly profile is the part that matters here: a
+/// client sending a session setting it does not fix is rejected with code 164.
 const ORBIT_READER_PASSWORD: &str = "orbit-test-secret";
-const ORBIT_READER_PROFILE: &str = "orbit_reader_profile";
+
+/// Users and profiles are server-wide while databases are per test, so both
+/// are named after the database to keep parallel tests from sharing them.
+fn reader_user(ctx: &TestContext) -> String {
+    format!("orbit_reader_{}", ctx.config.database)
+}
+
+fn reader_profile(ctx: &TestContext) -> String {
+    format!("orbit_reader_profile_{}", ctx.config.database)
+}
 
 async fn create_orbit_reader(ctx: &TestContext) {
-    ctx.execute(&format!("DROP USER IF EXISTS {ORBIT_READER_USER}"))
-        .await;
-    ctx.execute(&format!("DROP QUOTA IF EXISTS {ORBIT_READER_PROFILE}"))
+    let user = reader_user(ctx);
+    let profile = reader_profile(ctx);
+    ctx.execute(&format!("DROP USER IF EXISTS {user}")).await;
+    ctx.execute(&format!("DROP SETTINGS PROFILE IF EXISTS {profile}"))
         .await;
     ctx.execute(&format!(
-        "DROP SETTINGS PROFILE IF EXISTS {ORBIT_READER_PROFILE}"
-    ))
-    .await;
-    ctx.execute(&format!(
-        "CREATE SETTINGS PROFILE {ORBIT_READER_PROFILE} SETTINGS \
+        "CREATE SETTINGS PROFILE {profile} SETTINGS \
          readonly = 2 READONLY, \
          max_execution_time = 30 READONLY, \
          max_result_rows = 10000 READONLY, \
@@ -55,12 +60,12 @@ async fn create_orbit_reader(ctx: &TestContext) {
     ))
     .await;
     ctx.execute(&format!(
-        "CREATE USER {ORBIT_READER_USER} IDENTIFIED BY '{ORBIT_READER_PASSWORD}' \
-         SETTINGS PROFILE {ORBIT_READER_PROFILE}"
+        "CREATE USER {user} IDENTIFIED BY '{ORBIT_READER_PASSWORD}' \
+         SETTINGS PROFILE {profile}"
     ))
     .await;
     ctx.execute(&format!(
-        "GRANT SELECT ON {}.* TO {ORBIT_READER_USER}",
+        "GRANT SELECT ON {}.* TO {user}",
         ctx.config.database
     ))
     .await;
@@ -82,7 +87,7 @@ fn route(ctx: &TestContext) -> TenantRoute {
         scheme: scheme.to_string(),
         host: host.to_string(),
         port: port.to_string(),
-        username: ORBIT_READER_USER.to_string(),
+        username: reader_user(ctx),
         password: ORBIT_READER_PASSWORD.to_string(),
         traces_db: ctx.config.database.clone(),
         logs_db: ctx.config.database.clone(),
