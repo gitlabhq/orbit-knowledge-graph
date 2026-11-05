@@ -6,7 +6,7 @@ use rust_embed::Embed;
 use super::Options;
 
 #[derive(Embed)]
-#[folder = "$CONFIG_DIR/grep"]
+#[folder = "$ORBIT_CONFIG_DIR/grep"]
 struct GrepAssets;
 
 #[derive(Debug, Default, PartialEq, Eq)]

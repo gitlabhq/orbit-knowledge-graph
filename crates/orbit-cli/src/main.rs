@@ -12,6 +12,7 @@ mod sql;
 mod sql_format;
 mod telemetry;
 mod tui;
+mod version;
 mod workspace;
 
 use anyhow::{Context, Result};
@@ -28,7 +29,7 @@ const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const DETACHED_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Parser)]
-#[command(name = "orbit", version = env!("ORBIT_VERSION"))]
+#[command(name = "orbit", version = version::get())]
 #[command(
     about = descriptions::short("cli"),
     after_help = descriptions::summary("cli")
@@ -913,7 +914,7 @@ async fn dispatch(
 ) -> Result<()> {
     match command {
         Commands::Version => {
-            println!("{}", env!("ORBIT_VERSION"));
+            println!("{}", version::get());
             Ok(())
         }
         Commands::Grep(args) => run_grep(*args).await,

@@ -154,6 +154,7 @@ KV lock makes sure that only one dispatcher runs a task per interval.
 
 | Key | Effect |
 | --- | --- |
+| `schedule.tasks.<task>.run_timeout_secs` | Longest time for one run. After it, the scheduler stops the run and the task starts again on its next tick. `0` removes the limit. |
 | `schedule.tasks.namespace.sweep_interval_secs` | Age of the last full sweep before the next one |
 | `schedule.tasks.stale-edge-reconciliation.lookback_secs` | Time window that each run scans again |
 | `schedule.tasks.code-backfill.publish_window` | Projects per publish batch and per run |
@@ -266,7 +267,7 @@ overrides it for that type.
 | `billing.enabled` | Snowplow billing events |
 | `billing.collector_url` | Billing collector. GitLab Self-Managed and GitLab Dedicated use the host of the Cloud Connector token audience. |
 | `billing.auth_mode` | `oidc` (GitLab.com workload identity) or `cloud_connector` (GitLab Self-Managed and GitLab Dedicated) |
-| `billing.quota.enabled` | Check metered queries (`mcp`, `rest`) against CustomersDot before they run |
+| `billing.quota.enabled` | Check every query against CustomersDot before it runs |
 | `billing.quota.customers_dot_url` | CustomersDot URL |
 | `billing.quota.auth_mode` | `admin_token` (GitLab.com) or `license_checksum` (GitLab Self-Managed and GitLab Dedicated) |
 | `billing.quota.api_user`, `billing.quota.api_token` | CustomersDot credentials for `admin_token`, from `/etc/secrets/billing/quota/` |
