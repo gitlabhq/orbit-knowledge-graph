@@ -422,4 +422,31 @@ mod tests {
         assert!(manifest.content.contains("glab orbit skills get orbit"));
         assert!(manifest.content.contains("Do not use `glab orbit`"));
     }
+
+    #[test]
+    fn package_registry_skill_is_served_unchanged_in_both_modes() {
+        let json = get_skill(PACKAGE_REGISTRY_SKILL_NAME, Frontend::JsonDsl, false).unwrap();
+        let gql = get_skill(PACKAGE_REGISTRY_SKILL_NAME, Frontend::Gql, false).unwrap();
+        assert_eq!(json, gql);
+        assert_eq!(json.metadata.name, PACKAGE_REGISTRY_SKILL_NAME);
+        assert!(!json.metadata.version.contains("+gql"));
+        assert!(
+            json.metadata
+                .description
+                .starts_with("Use Orbit graph queries")
+        );
+
+        let files = json.files.unwrap();
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            [MANIFEST]
+        );
+        let manifest = &files[0];
+        assert_eq!(manifest.sha256, sha256_hex(manifest.content.as_bytes()));
+        let source = PackageRegistryAssets::get(MANIFEST).unwrap();
+        assert_eq!(manifest.content.as_bytes(), source.data.as_ref());
+    }
 }
