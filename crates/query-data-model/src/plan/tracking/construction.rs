@@ -85,6 +85,18 @@ impl<L: Language> Construction<L> {
         Ok((info.name.as_deref(), &info.value))
     }
 
+    pub fn producer(&self, output: Ref) -> Result<&L::Operation, Rejected> {
+        if output.plan != self.arena.plan {
+            return Err(Rejected::ForeignPlan);
+        }
+        self.arena
+            .nodes
+            .iter()
+            .find(|node| node.spec.owns(output.output))
+            .map(|node| &node.operation)
+            .ok_or_else(|| Rejected::NotVisible(self.arena.describe(output.output)))
+    }
+
     pub fn connect(
         &mut self,
         operation: L::Operation,

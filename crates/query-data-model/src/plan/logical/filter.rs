@@ -51,7 +51,7 @@ pub(super) fn predicate(
             needle,
         } => {
             let typed = filterable(model, construction, *left)?;
-            text(model, &typed, *matching, needle)
+            text(&typed, *matching, needle)
         }
     }
 }
@@ -87,20 +87,14 @@ pub(super) fn filterable<'m>(
     expr: Expr,
 ) -> Result<Typed<'m>, PlanError> {
     let typed = scalar(model, construction, expr)?;
-    match typed.property {
-        Some(property) if !model.access().property(property.id).filterable => {
-            Err(PlanError::NotFilterable(typed.name))
-        }
-        _ => Ok(typed),
+    if typed.access.filterable {
+        Ok(typed)
+    } else {
+        Err(PlanError::NotFilterable(typed.name))
     }
 }
 
-fn text(
-    model: &Model,
-    typed: &Typed<'_>,
-    matching: Matching,
-    needle: &str,
-) -> Result<(), PlanError> {
+fn text(typed: &Typed<'_>, matching: Matching, needle: &str) -> Result<(), PlanError> {
     if !matches!(
         typed.data_type,
         DataType::String | DataType::Enum | DataType::Uuid
@@ -111,10 +105,7 @@ fn text(
             found: format!("{:?}", typed.data_type),
         });
     }
-    if typed
-        .property
-        .is_some_and(|property| !model.access().property(property.id).like)
-    {
+    if !typed.access.like {
         return Err(PlanError::NoSubstring(typed.name.clone()));
     }
     let length = needle.chars().count();

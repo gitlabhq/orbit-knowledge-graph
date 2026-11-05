@@ -1,6 +1,6 @@
 use super::{EdgeField, Expr, Logical, LogicalCatalog, LogicalType, PlanError, TimeUnit};
 use crate::plan::tracking::{self, Construction, Ref};
-use crate::{EntityId, PropertyId};
+use crate::{EntityId, PropertyId, RelationshipId};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Binding<'m> {
@@ -78,6 +78,7 @@ impl<'m> Binding<'m> {
 pub struct Rows<'m> {
     rows: tracking::Rows,
     bindings: Vec<(Option<String>, Binding<'m>)>,
+    edges: Vec<(Ref, Vec<RelationshipId>)>,
     columns: Vec<(String, Ref)>,
 }
 
@@ -88,11 +89,27 @@ impl<'m> Rows<'m> {
         rows: tracking::Rows,
     ) -> Result<Self, PlanError> {
         let mut bindings = Vec::new();
+        let mut edges = Vec::new();
         let mut columns = Vec::new();
         for output in construction.outputs(&rows)? {
             match construction.value(output)? {
                 (Some(name), LogicalType::Scalar(_)) => columns.push((name.to_string(), output)),
                 (_, LogicalType::Scalar(_)) => {}
+                (name, LogicalType::Edge) => {
+                    let model = catalog.model();
+                    edges.push((
+                        output,
+                        super::check::edge_relationships(model, construction, output)?,
+                    ));
+                    bindings.push((
+                        name.map(str::to_string),
+                        Binding {
+                            catalog,
+                            kind: LogicalType::Edge,
+                            output,
+                        },
+                    ));
+                }
                 (name, kind) => bindings.push((
                     name.map(str::to_string),
                     Binding {
@@ -106,6 +123,7 @@ impl<'m> Rows<'m> {
         Ok(Self {
             rows,
             bindings,
+            edges,
             columns,
         })
     }
@@ -152,6 +170,27 @@ impl<'m> Rows<'m> {
 
     pub fn property(&self, name: &str) -> Result<Expr, PlanError> {
         self.endpoint()?.property(name)
+    }
+
+    pub fn edge_column(&self, edge: Binding<'m>, name: &str) -> Result<Expr, PlanError> {
+        if let Ok(field) = name.parse() {
+            return edge.field(field);
+        }
+        let Some((_, relationships)) = self.edges.iter().find(|(output, _)| *output == edge.output)
+        else {
+            return Err(super::check::mismatch(name, "a relationship", edge.kind));
+        };
+        let attribute = super::check::edge_attribute(edge.catalog.model(), relationships, name)?;
+        if attribute.access.hidden {
+            return Err(PlanError::Hidden(attribute.name));
+        }
+        if attribute.access.admin_only && !edge.catalog.admin() {
+            return Err(PlanError::AdminOnly(attribute.name));
+        }
+        Ok(Expr::Attribute {
+            binding: edge.output,
+            attribute: attribute.id,
+        })
     }
 
     pub(super) fn names(&self) -> impl Iterator<Item = &str> {

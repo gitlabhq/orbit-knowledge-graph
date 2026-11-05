@@ -1,13 +1,104 @@
+use std::collections::BTreeSet;
+
 use ontology::DataType;
 
-use super::{EdgeField, Expr, Logical, LogicalType, Measure, PlanError};
+use super::{EdgeField, Expr, Logical, LogicalOperation, LogicalType, Measure, PlanError};
+use crate::catalog::PropertyAccess;
 use crate::plan::tracking::{Construction, Ref};
-use crate::{Model, Property};
+use crate::{AttributeId, Model, Property, RelationshipId};
 
 pub(super) struct Typed<'m> {
     pub(super) data_type: DataType,
     pub(super) property: Option<&'m Property>,
+    pub(super) access: PropertyAccess,
     pub(super) name: String,
+}
+
+pub(super) struct EdgeAttribute {
+    pub(super) id: AttributeId,
+    pub(super) access: PropertyAccess,
+    pub(super) name: String,
+}
+
+pub(super) fn edge_relationships(
+    model: &Model,
+    construction: &Construction<Logical>,
+    edge: Ref,
+) -> Result<Vec<RelationshipId>, PlanError> {
+    let relationships: BTreeSet<RelationshipId> = match construction.producer(edge)? {
+        LogicalOperation::Follow { hops, .. } => hops.iter().map(|hop| hop.relationship).collect(),
+        LogicalOperation::Neighbors {
+            relationships,
+            direction,
+            from,
+        } if relationships.is_empty() => match construction.value(*from)? {
+            (_, LogicalType::Entity(entity)) => model
+                .graph()
+                .hops(*entity, *direction)
+                .map(|hop| hop.relationship)
+                .collect(),
+            (name, found) => return Err(mismatch(name.unwrap_or("node"), "an entity", *found)),
+        },
+        LogicalOperation::Neighbors { relationships, .. } => {
+            relationships.iter().copied().collect()
+        }
+        _ => {
+            let (name, found) = construction.value(edge)?;
+            return Err(mismatch(name.unwrap_or("edge"), "a relationship", *found));
+        }
+    };
+    Ok(relationships.into_iter().collect())
+}
+
+pub(super) fn edge_attribute(
+    model: &Model,
+    relationships: &[RelationshipId],
+    name: &str,
+) -> Result<EdgeAttribute, PlanError> {
+    let graph = model.graph();
+    let declared = |name: &str| -> Option<Vec<AttributeId>> {
+        let ids: Vec<AttributeId> = relationships
+            .iter()
+            .map(|relationship| graph.attribute_id(*relationship, name))
+            .collect::<Option<_>>()?;
+        let first = graph.attribute(*ids.first()?);
+        ids.iter()
+            .all(|id| graph.attribute(*id).data_type == first.data_type)
+            .then_some(ids)
+    };
+    let Some(ids) = declared(name) else {
+        let attributes: BTreeSet<&str> = relationships
+            .iter()
+            .flat_map(|relationship| &graph.relationship(*relationship).attributes)
+            .map(|id| graph.attribute(*id).name.as_str())
+            .filter(|name| declared(name).is_some())
+            .collect();
+        return Err(PlanError::UnknownColumn {
+            name: name.to_string(),
+            available: <EdgeField as strum::VariantNames>::VARIANTS
+                .iter()
+                .copied()
+                .chain(attributes)
+                .map(str::to_string)
+                .collect(),
+        });
+    };
+    let accesses = ids.iter().map(|id| model.access().attribute(*id));
+    let access = accesses.fold(PropertyAccess::OPEN, |all, one| PropertyAccess {
+        hidden: all.hidden || one.hidden,
+        admin_only: all.admin_only || one.admin_only,
+        filterable: all.filterable && one.filterable,
+        like: all.like && one.like,
+    });
+    let owners: Vec<&str> = relationships
+        .iter()
+        .map(|relationship| graph.relationship(*relationship).name.as_str())
+        .collect();
+    Ok(EdgeAttribute {
+        id: ids[0],
+        access,
+        name: format!("{}.{name}", owners.join("|")),
+    })
 }
 
 pub(super) fn scalar<'m>(
@@ -41,10 +132,22 @@ pub(super) fn scalar<'m>(
                     }
                 },
                 property: None,
+                access: PropertyAccess::OPEN,
                 name: format!("{field:?}"),
             }),
             (name, found) => Err(mismatch(name.unwrap_or("edge"), "a relationship", *found)),
         },
+        Expr::Attribute { binding, attribute } => {
+            let declared = model.graph().attribute(attribute);
+            let relationships = edge_relationships(model, construction, binding)?;
+            let resolved = edge_attribute(model, &relationships, &declared.name)?;
+            Ok(Typed {
+                data_type: declared.data_type,
+                property: None,
+                access: resolved.access,
+                name: resolved.name,
+            })
+        }
         Expr::Node(binding) => {
             let (name, found) = construction.value(binding)?;
             Err(mismatch(name.unwrap_or("node"), "a scalar", *found))
@@ -53,6 +156,7 @@ pub(super) fn scalar<'m>(
             (name, LogicalType::Scalar(data_type)) => Ok(Typed {
                 data_type: *data_type,
                 property: None,
+                access: PropertyAccess::OPEN,
                 name: name.unwrap_or("output").to_string(),
             }),
             (name, found) => Err(mismatch(name.unwrap_or("output"), "a scalar", *found)),
@@ -73,6 +177,7 @@ fn property_of<'m>(
         (_, LogicalType::Entity(bound)) if *bound == property.entity => Ok(Typed {
             data_type: property.data_type,
             property: Some(property),
+            access: model.access().property(property.id),
             name,
         }),
         (_, found) => Err(mismatch(name, entity, *found)),

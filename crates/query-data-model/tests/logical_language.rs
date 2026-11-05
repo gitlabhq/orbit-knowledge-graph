@@ -1,10 +1,10 @@
 mod support;
 
-use query_data_model::Direction;
 use query_data_model::plan::logical::{
-    Columns, ErrorClass, Hops, Literal, LogicalOperation, LogicalType, Matching, Measure, Order,
-    PlanError, Projection, Step, TimeUnit,
+    Columns, ErrorClass, Expr, Hops, Literal, LogicalCatalog, LogicalOperation, LogicalPlan,
+    LogicalType, Matching, Measure, Order, PlanError, Predicate, Projection, Step, TimeUnit,
 };
+use query_data_model::{Direction, Model, Packages};
 
 #[test]
 fn a_pattern_binds_aliases_hops_and_edges() {
@@ -172,4 +172,79 @@ fn construction_errors_name_their_class() {
         })
         .unwrap_err();
     assert_eq!(page.class(), ErrorClass::Shape);
+}
+
+fn platform(extra: &[(&str, &str)]) -> Model {
+    let packages = Packages::embedded();
+    let sources = packages
+        .sources()
+        .iter()
+        .map(|(name, yaml)| (name.as_str(), yaml.as_str()))
+        .chain(extra.iter().copied());
+    Model::from_yaml(sources).unwrap()
+}
+
+fn calls(
+    catalog: LogicalCatalog<'_>,
+    via: &[&str],
+    column: &str,
+) -> Result<LogicalPlan, PlanError> {
+    catalog.build(|q| {
+        let rows = q.entities_as(catalog.entity("Definition")?, "d")?;
+        let from = rows.binding("d")?;
+        let via = via
+            .iter()
+            .map(|name| catalog.relationship(name))
+            .collect::<Result<Vec<_>, _>>()?;
+        let step = Step::new(Direction::Outgoing)
+            .via(via)
+            .to(catalog.entity("Definition")?)
+            .named("callee")
+            .edge("r");
+        let rows = q.traverse(rows, from, step)?;
+        let value = rows.edge_column(rows.binding("r")?, column)?;
+        let rows = q.filter(rows, value.eq("main"))?;
+        q.select(rows, [Projection::Value(value).named(column)])
+    })
+}
+
+#[test]
+fn edges_filter_and_select_relationship_attributes() {
+    let model = platform(&[]);
+    let plan = calls(model.logical(), &["CALLS", "DEFINES"], "branch").unwrap();
+    let operations: Vec<_> = plan.nodes().map(|node| plan.operation(node)).collect();
+    let LogicalOperation::Filter(Predicate::Compare {
+        left: Expr::Attribute { attribute, .. },
+        ..
+    }) = operations[2]
+    else {
+        panic!("{operations:?}");
+    };
+    assert_eq!(model.graph().attribute(*attribute).name, "branch");
+    assert!(matches!(
+        operations[3],
+        LogicalOperation::Select(items)
+            if matches!(items[0], Projection::Value(Expr::Attribute { .. }))
+    ));
+}
+
+#[test]
+fn edge_attributes_are_checked_at_construction() {
+    let model = platform(&[]);
+    let unknown = calls(model.logical(), &["CALLS"], "brnch").unwrap_err();
+    assert_eq!(unknown.class(), ErrorClass::Reference);
+    assert_eq!(
+        unknown.to_string(),
+        "unknown column brnch; available: relationship_kind, source_id, source_kind, target_id, target_kind, branch, project_id"
+    );
+    let typed = calls(model.logical(), &["CALLS"], "project_id").unwrap_err();
+    assert_eq!(typed.class(), ErrorClass::Type);
+
+    let hidden = platform(&[(
+        "overlay/authorization.yaml",
+        "kind: authorization\npackage: overlay\nproperties:\n  CALLS.branch: { hidden: true }\n",
+    )]);
+    let error = calls(hidden.logical(), &["CALLS"], "branch").unwrap_err();
+    assert_eq!(error.class(), ErrorClass::Policy);
+    assert_eq!(error.to_string(), "CALLS.branch is hidden");
 }

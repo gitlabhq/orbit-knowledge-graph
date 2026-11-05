@@ -60,6 +60,13 @@ pub(super) enum Spec {
 }
 
 impl Spec {
+    pub(super) fn owns(&self, output: OutputId) -> bool {
+        match self {
+            Self::Preserve(own) => own.contains(&output),
+            Self::Replace(items) => items.contains(&Item::Own(output)),
+        }
+    }
+
     pub(super) fn remap(&mut self, map: impl Fn(OutputId) -> OutputId) {
         if let Self::Replace(items) = self {
             for item in items {

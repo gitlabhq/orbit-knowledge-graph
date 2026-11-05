@@ -1,6 +1,6 @@
 use super::{Comparison, Matching, Predicate};
-use crate::PropertyId;
 use crate::plan::tracking::{Named, Ref};
+use crate::{AttributeId, PropertyId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Expr {
@@ -17,6 +17,10 @@ pub enum Expr {
     Edge {
         binding: Ref,
         field: EdgeField,
+    },
+    Attribute {
+        binding: Ref,
+        attribute: AttributeId,
     },
     Output(Ref),
 }
@@ -106,6 +110,7 @@ impl Expr {
             Self::Property { binding, .. }
             | Self::Truncate { binding, .. }
             | Self::Edge { binding, .. }
+            | Self::Attribute { binding, .. }
             | Self::Node(binding)
             | Self::Output(binding) => visit(binding),
         }
