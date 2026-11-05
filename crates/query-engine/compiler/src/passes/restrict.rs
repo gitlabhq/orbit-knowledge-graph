@@ -233,7 +233,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn apply(input: &Input, ontology: &Ontology, context: &SecurityContext) -> Result<()> {
-        let model = query_data_model::from_ontology::clickhouse(&ontology).unwrap();
+        let model = query_data_model::from_ontology::clickhouse(ontology).unwrap();
         restrict(input, &model, context)
     }
 

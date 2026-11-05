@@ -24,7 +24,7 @@ fn fingerprints_for(
     })
 }
 
-pub fn ddl_fingerprints(schema: &GraphSchema) -> BTreeMap<String, String> {
+fn ddl_fingerprints(schema: &GraphSchema) -> BTreeMap<String, String> {
     let mut fingerprints = BTreeMap::new();
 
     for table in &schema.tables {
@@ -45,7 +45,7 @@ pub fn ddl_fingerprints(schema: &GraphSchema) -> BTreeMap<String, String> {
     fingerprints
 }
 
-pub fn auxiliary_schema_fingerprints(
+fn auxiliary_schema_fingerprints(
     schema: &GraphSchema,
 ) -> Result<BTreeMap<String, String>, DataModelError> {
     let mut fingerprints = BTreeMap::new();

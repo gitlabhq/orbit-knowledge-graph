@@ -7495,6 +7495,7 @@ dependencies = [
  "indexmap 2.14.2",
  "ontology",
  "orbit-utils",
+ "query-data-model",
  "rust-embed",
  "serde",
  "serde-saphyr 1.1.0",

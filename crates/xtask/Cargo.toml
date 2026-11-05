@@ -50,7 +50,7 @@ clickhouse-client = { path = "../clickhouse-client" }
 orbit-utils = { path = "../utils" }
 orbit-migrations = { path = "../orbit-migrations" }
 orbit-versions = { path = "../orbit-versions" }
-query-data-model = { path = "../query-data-model" }
+query-data-model = { path = "../query-data-model", features = ["from-ontology"] }
 query-engine = { path = "../query-engine" }
 # Load-test subcommand: gRPC client + JWT auth, reusing the canonical proto
 # and claims from orbit-server (no vendored proto, no hand-rolled JWT).

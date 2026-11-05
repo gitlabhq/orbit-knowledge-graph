@@ -11,7 +11,7 @@ path = "src/main.rs"
 [features]
 default = []
 regenerate-protos = ["dep:tonic-prost-build"]
-testkit = ["orbit-analytics/testkit"]
+testkit = ["orbit-analytics/testkit", "query-data-model/from-ontology"]
 
 [dependencies]
 mimalloc = { workspace = true }
@@ -76,6 +76,7 @@ orbit-versions = { path = "../orbit-versions" }
 tonic-prost-build = { workspace = true, optional = true }
 
 [dev-dependencies]
+query-data-model = { path = "../query-data-model", features = ["from-ontology"] }
 axum = { workspace = true }
 compiler = { path = "../query-engine/compiler" }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }

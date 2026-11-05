@@ -26,5 +26,8 @@ jsonschema = { workspace = true }
 [build-dependencies]
 serde_json = { workspace = true }
 
+[dev-dependencies]
+query-data-model = { path = "../../query-data-model", features = ["from-ontology"] }
+
 [lints]
 workspace = true
