@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use orbit_arrow::ColumnValue;
 use orbit_log_fields::warn;
 use orbit_server_config::ObservabilityResolverSettings;
+use orbit_utils::traversal_path::TraversalPath;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
 
@@ -22,19 +23,21 @@ pub const SERVICE_NAME: &str = "observability";
 
 /// Checked per row rather than once at startup, so the flag's namespace
 /// allowlist can gate a rollout to one root namespace at a time.
-fn enabled_for_path(traversal_path: &str) -> bool {
-    let root = orbit_utils::traversal_path::TraversalPath::new_unchecked(traversal_path)
-        .top_level_namespace_id();
+fn gated_namespace(traversal_path: &TraversalPath) -> Option<i64> {
+    traversal_path.top_level_namespace_id()
+}
 
+fn enabled_for_path(traversal_path: &TraversalPath) -> bool {
     orbit_server_config::features::enabled_for(
         orbit_server_config::Feature::ObservabilityColumns,
-        root,
+        gated_namespace(traversal_path),
     )
 }
 
 pub struct ObservabilityService {
     host_map: TenantHostMap,
     pool: TenantClientPool,
+    query_timeout: Duration,
 }
 
 impl ObservabilityService {
@@ -54,6 +57,7 @@ impl ObservabilityService {
                 Duration::from_secs(settings.host_map_retry_after_seconds),
             ),
             pool: TenantClientPool::new(),
+            query_timeout: Duration::from_secs(settings.query_timeout_seconds),
         })
     }
 
@@ -61,6 +65,8 @@ impl ObservabilityService {
         let traversal_path = props
             .get("traversal_path")
             .and_then(|value| value.coerce::<String>())?;
+
+        let traversal_path = TraversalPath::new_unchecked(traversal_path);
 
         if !enabled_for_path(&traversal_path) {
             return None;
@@ -70,8 +76,7 @@ impl ObservabilityService {
     }
 
     async fn evict_departed_tenants(&self) {
-        self.pool
-            .retain_databases(&self.host_map.live_databases().await);
+        self.pool.retain_routes(&self.host_map.live_routes().await);
     }
 }
 
@@ -124,14 +129,24 @@ impl ColumnResolver for ObservabilityService {
         }
 
         let futures = batches.iter().map(|(database, (route, keys))| async move {
-            let values = match traces::fetch(&self.pool, route, trace_lookup, keys).await {
-                Ok(values) => values,
-                Err(e) => {
+            let fetch = traces::fetch(&self.pool, route, trace_lookup, keys);
+
+            let values = match tokio::time::timeout(self.query_timeout, fetch).await {
+                Ok(Ok(values)) => values,
+                Ok(Err(e)) => {
                     warn!(
                         safe(ERROR_TYPE) = "observability_lookup",
                         safe(QUERY_NAME) = lookup,
                         expanded(ERROR_MESSAGE) = %e,
                         "observability lookup failed, resolving to null for this tenant"
+                    );
+                    HashMap::new()
+                }
+                Err(_) => {
+                    warn!(
+                        safe(ERROR_TYPE) = "observability_timeout",
+                        safe(QUERY_NAME) = lookup,
+                        "observability lookup timed out, resolving to null for this tenant"
                     );
                     HashMap::new()
                 }
@@ -173,29 +188,45 @@ pub fn build(settings: &ObservabilityResolverSettings) -> Option<Arc<Observabili
 
 #[cfg(test)]
 mod tests {
-    fn root_namespace_of(traversal_path: &str) -> Option<i64> {
-        orbit_utils::traversal_path::TraversalPath::new_unchecked(traversal_path)
-            .top_level_namespace_id()
+    use super::*;
+
+    fn path(raw: &str) -> TraversalPath {
+        TraversalPath::new_unchecked(raw)
     }
 
     /// The first segment is the organization, so reading it would both miss
     /// every allowlisted namespace and match other tenants in that org.
     #[test]
     fn the_gate_reads_the_root_namespace_not_the_organization() {
-        assert_eq!(root_namespace_of("9970/12345/67890/"), Some(12345));
-        assert_eq!(root_namespace_of("9970/12345/"), Some(12345));
+        assert_eq!(gated_namespace(&path("1/9970/12345/")), Some(9970));
+        assert_eq!(gated_namespace(&path("1/9970/")), Some(9970));
     }
 
     #[test]
     fn a_path_without_a_root_namespace_has_none() {
-        assert_eq!(root_namespace_of("9970/"), None);
-        assert_eq!(root_namespace_of(""), None);
+        assert_eq!(gated_namespace(&path("1/")), None);
+        assert_eq!(gated_namespace(&path("")), None);
     }
 
     /// Off until features::init runs, so an unconfigured server resolves
     /// nothing rather than resolving for everyone.
     #[test]
     fn the_gate_is_closed_before_the_flag_is_installed() {
-        assert!(!super::enabled_for_path("9970/12345/"));
+        assert!(!enabled_for_path(&path("1/9970/")));
+    }
+
+    /// A tenant whose server never answers must not hold the batch open for
+    /// longer than the configured query timeout.
+    #[tokio::test(start_paused = true)]
+    async fn a_stalled_tenant_is_cut_off_at_the_query_timeout() {
+        let query_timeout = Duration::from_secs(15);
+        let never_answers = async {
+            tokio::time::sleep(Duration::from_secs(600)).await;
+            Ok::<(), ()>(())
+        };
+
+        let outcome = tokio::time::timeout(query_timeout, never_answers).await;
+
+        assert!(outcome.is_err(), "the batch would stall on this tenant");
     }
 }

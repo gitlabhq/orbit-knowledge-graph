@@ -72,16 +72,7 @@
       "$ref": "#/$defs/ObjectStorageConfig"
     },
     "observability": {
-      "$ref": "#/$defs/ObservabilityConfig",
-      "default": {
-        "provisioner_url": null,
-        "provisioner_api_key": null,
-        "host_map_refresh_seconds": 0,
-        "host_map_retry_after_seconds": 0,
-        "request_timeout_seconds": 0,
-        "query_timeout_seconds": 0,
-        "max_result_rows": 0
-      }
+      "$ref": "#/$defs/ObservabilityConfig"
     }
   },
   "additionalProperties": false,
@@ -105,7 +96,8 @@
     "analytics",
     "billing",
     "features",
-    "object_storage"
+    "object_storage",
+    "observability"
   ],
   "$defs": {
     "NatsConfiguration": {
@@ -1793,37 +1785,39 @@
         "host_map_refresh_seconds": {
           "type": "integer",
           "format": "uint64",
-          "minimum": 0,
-          "default": 300
+          "minimum": 0
         },
         "host_map_retry_after_seconds": {
           "description": "Minimum wait before retrying the provisioner after a failed refresh, so\na provisioner outage does not add the request timeout to every query.",
           "type": "integer",
           "format": "uint64",
-          "minimum": 0,
-          "default": 30
+          "minimum": 0
         },
         "request_timeout_seconds": {
           "type": "integer",
           "format": "uint64",
-          "minimum": 0,
-          "default": 10
+          "minimum": 0
         },
         "query_timeout_seconds": {
           "description": "Server-side bound on a tenant ClickHouse query, sent as max_execution_time.",
           "type": "integer",
           "format": "uint64",
-          "minimum": 0,
-          "default": 15
+          "minimum": 0
         },
         "max_result_rows": {
           "type": "integer",
           "format": "uint64",
-          "minimum": 0,
-          "default": 10000
+          "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "host_map_refresh_seconds",
+        "host_map_retry_after_seconds",
+        "request_timeout_seconds",
+        "query_timeout_seconds",
+        "max_result_rows"
+      ]
     }
   }
 }

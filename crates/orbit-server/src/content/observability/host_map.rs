@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use orbit_log_fields::warn;
+use orbit_utils::traversal_path::TraversalPath;
 use serde::Deserialize;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Instant;
@@ -48,11 +49,14 @@ struct HostMapResponse {
 
 pub type TenantRoutes = Arc<HashMap<String, TenantRoute>>;
 
-/// Nearest first, so a subgroup's own instance wins over an ancestor's.
-pub fn namespace_ids_nearest_first(traversal_path: &str) -> Vec<&str> {
-    let mut ids: Vec<&str> = traversal_path
-        .split('/')
-        .filter(|segment| !segment.is_empty())
+/// Nearest first, so a subgroup's own instance wins over an ancestor's. The
+/// first segment is the organization, never a group, so including it would let
+/// a row match a tenant whose group id happens to equal that organization id.
+pub fn namespace_ids_nearest_first(traversal_path: &TraversalPath) -> Vec<String> {
+    let mut ids: Vec<String> = traversal_path
+        .segments()
+        .skip(1)
+        .map(|segment| segment.to_string())
         .collect();
     ids.reverse();
     ids
@@ -103,11 +107,11 @@ impl TenantHostMap {
         }
     }
 
-    pub async fn route_for(&self, traversal_path: &str) -> Option<TenantRoute> {
+    pub async fn route_for(&self, traversal_path: &TraversalPath) -> Option<TenantRoute> {
         let routes = self.routes().await?;
         namespace_ids_nearest_first(traversal_path)
             .into_iter()
-            .find_map(|id| routes.get(id).cloned())
+            .find_map(|id| routes.get(&id).cloned())
     }
 
     async fn routes(&self) -> Option<TenantRoutes> {
@@ -165,18 +169,14 @@ impl TenantHostMap {
         Some(Arc::clone(&cached.routes))
     }
 
-    /// Database names across every tenant in the current map.
-    pub async fn live_databases(&self) -> Vec<String> {
+    /// Every tenant in the current map.
+    pub async fn live_routes(&self) -> Vec<TenantRoute> {
         let cache = self.cache.read().await;
         let Some(cached) = cache.as_ref() else {
             return Vec::new();
         };
 
-        cached
-            .routes
-            .values()
-            .map(|route| route.traces_db.clone())
-            .collect()
+        cached.routes.values().cloned().collect()
     }
 
     async fn store(&self, routes: TenantRoutes, refresh_after: Duration) {
@@ -238,29 +238,38 @@ mod tests {
         )
     }
 
+    fn path(raw: &str) -> TraversalPath {
+        TraversalPath::new_unchecked(raw)
+    }
+
     #[test]
     fn namespace_ids_are_returned_nearest_first() {
         assert_eq!(
-            namespace_ids_nearest_first("9970/12345/67890/"),
+            namespace_ids_nearest_first(&path("1/9970/12345/67890/")),
             vec!["67890", "12345", "9970"]
         );
     }
 
     #[test]
-    fn a_root_only_path_yields_one_id() {
-        assert_eq!(namespace_ids_nearest_first("9970/"), vec!["9970"]);
+    fn the_organization_segment_is_never_a_candidate_group() {
+        assert_eq!(
+            namespace_ids_nearest_first(&path("1/9970/")),
+            vec!["9970"],
+            "the first segment is the organization, not a group"
+        );
+        assert!(namespace_ids_nearest_first(&path("1/")).is_empty());
     }
 
     #[test]
     fn an_empty_path_yields_no_ids() {
-        assert!(namespace_ids_nearest_first("").is_empty());
-        assert!(namespace_ids_nearest_first("/").is_empty());
+        assert!(namespace_ids_nearest_first(&path("")).is_empty());
+        assert!(namespace_ids_nearest_first(&path("/")).is_empty());
     }
 
     #[test]
     fn a_path_without_a_trailing_slash_still_parses() {
         assert_eq!(
-            namespace_ids_nearest_first("9970/12345"),
+            namespace_ids_nearest_first(&path("1/9970/12345")),
             vec!["12345", "9970"]
         );
     }
@@ -322,7 +331,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_databases_lists_every_tenant_in_the_map() {
+    async fn live_routes_lists_every_tenant_in_the_map() {
         let map = host_map();
         map.store(
             Arc::new(HashMap::from([
@@ -333,10 +342,15 @@ mod tests {
         )
         .await;
 
-        let mut databases = map.live_databases().await;
-        databases.sort();
+        let mut group_ids: Vec<String> = map
+            .live_routes()
+            .await
+            .into_iter()
+            .map(|route| route.group_id)
+            .collect();
+        group_ids.sort();
 
-        assert_eq!(databases, vec!["12345_signoz_traces", "9970_signoz_traces"]);
+        assert_eq!(group_ids, vec!["12345", "9970"]);
     }
 
     #[tokio::test]
@@ -355,6 +369,23 @@ mod tests {
         );
     }
 
+    /// A row whose organization id happens to equal another tenant's group id
+    /// must not read that tenant's data.
+    #[tokio::test]
+    async fn an_organization_id_matching_a_provisioned_group_does_not_resolve() {
+        let map = host_map();
+        map.store(
+            Arc::new(HashMap::from([("12345".to_string(), route("12345"))])),
+            Duration::from_secs(300),
+        )
+        .await;
+
+        assert!(
+            map.route_for(&path("12345/88888/")).await.is_none(),
+            "matched a tenant through the organization segment"
+        );
+    }
+
     #[tokio::test]
     async fn the_nearest_provisioned_ancestor_wins() {
         let map = host_map();
@@ -367,7 +398,10 @@ mod tests {
         )
         .await;
 
-        let resolved = map.route_for("9970/12345/67890/").await.expect("route");
+        let resolved = map
+            .route_for(&path("1/9970/12345/67890/"))
+            .await
+            .expect("route");
 
         assert_eq!(resolved.group_id, "12345");
     }
@@ -381,6 +415,6 @@ mod tests {
         )
         .await;
 
-        assert!(map.route_for("8888/7777/").await.is_none());
+        assert!(map.route_for(&path("1/8888/7777/")).await.is_none());
     }
 }

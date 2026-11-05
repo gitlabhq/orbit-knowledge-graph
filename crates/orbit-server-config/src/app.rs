@@ -57,7 +57,6 @@ pub struct AppConfig {
     pub billing: BillingConfig,
     pub features: FeaturesConfig,
     pub object_storage: ObjectStorageConfig,
-    #[serde(default)]
     pub observability: ObservabilityConfig,
 }
 
