@@ -249,7 +249,7 @@ fn handles_from_another_plan_or_snapshot_are_rejected() {
         .build(|q| {
             let rows = q.entities(requests)?;
             title = Some(rows.property("title")?);
-            Ok(rows)
+            Ok::<_, PlanError>(rows)
         })
         .unwrap();
     let second = catalog.build(|q| {
@@ -342,15 +342,23 @@ fn property_policy_and_types_are_checked_at_construction() {
     );
 
     let model = load(&["gitlab"]);
-    let catalog = model.logical();
-    let users = catalog.entity("User").unwrap();
-    let error = catalog.build(|q| {
-        let rows = q.entities(users)?;
-        let email = rows.property("email")?;
-        q.filter(rows, email.contains("@gitlab"))
-    });
+    let search = |catalog: query_data_model::plan::logical::LogicalCatalog<'_>| {
+        let users = catalog.entity("User").unwrap();
+        catalog
+            .build(|q| {
+                let rows = q.entities(users)?;
+                let email = rows.property("email")?;
+                q.filter(rows, email.contains("@gitlab"))
+            })
+            .unwrap_err()
+            .to_string()
+    };
     assert_eq!(
-        error.unwrap_err().to_string(),
+        search(model.logical()),
+        "User.email is available to administrators only"
+    );
+    assert_eq!(
+        search(model.logical().as_admin()),
         "User.email does not support substring matching"
     );
 }
@@ -373,7 +381,7 @@ fn a_failed_step_closes_the_construction_session() {
     assert_eq!(result.unwrap_err(), PlanError::NoEntity);
 
     let mut swallowed = None;
-    let result = catalog.build(|q| {
+    let result = catalog.build(|q| -> Result<_, PlanError> {
         let rows = q.entities(requests)?;
         let other = q.entities(requests)?;
         swallowed = q

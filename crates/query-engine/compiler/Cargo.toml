@@ -26,6 +26,9 @@ strum = { workspace = true }
 thiserror = { workspace = true }
 jsonschema = { workspace = true }
 
+[dev-dependencies]
+named-queries = { path = "../../named-queries" }
+
 [build-dependencies]
 serde_json = { workspace = true }
 

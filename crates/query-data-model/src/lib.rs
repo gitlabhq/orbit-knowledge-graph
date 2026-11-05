@@ -8,6 +8,7 @@ pub mod models;
 pub mod plan;
 pub mod query_model;
 pub mod spec;
+pub mod surface;
 
 pub use catalog::{Catalog, Model, StorageBackend};
 pub use error::DataModelError;

@@ -13,10 +13,10 @@ use ontology::introspection::{IntrospectionScope, SchemaResponse, build_compact_
 use pest_derive::Parser;
 
 #[derive(Parser)]
-#[grammar = "passes/frontend/gql/query.pest"]
+#[grammar = "../../../query-data-model/src/surface/gql/query.pest"]
 struct QueryParser;
 
-pub const GRAMMAR: &str = include_str!("query.pest");
+pub const GRAMMAR: &str = query_data_model::surface::gql::GRAMMAR;
 
 pub fn pair_outline(query: &str) -> Option<Vec<(usize, String)>> {
     fn visit(
