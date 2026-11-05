@@ -221,6 +221,15 @@ For TLS, private certificate authorities, NATS TLS, and plaintext connections, s
 For every value and its default, see the [GitLab Orbit Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts).
 For pod sizes, see [GitLab Orbit sizing](sizing.md).
 
+### Billing requirements
+
+GitLab Orbit reports usage to GitLab and checks that your subscription has GitLab Credits available.
+The Helm chart configures billing by default.
+Allow outbound HTTPS from the webserver to `customers.gitlab.com` and `billing.prdsub.gitlab.net`.
+For more information, see [Billing connections](networking.md#billing-connections).
+
+When your subscription has no GitLab Credits available, queries fail with the [`GitLab credits exhausted`](../troubleshooting.md#error-gitlab-credits-exhausted) error.
+
 ## Turn on indexing for a group
 
 GitLab Orbit indexes top-level groups, with their subgroups and projects.

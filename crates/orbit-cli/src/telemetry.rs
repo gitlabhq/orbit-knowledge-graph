@@ -96,7 +96,7 @@ pub fn emit_command_event<T: AnalyticsTracker + ?Sized>(
         success: exit_code == 0,
         exit_code: u8::try_from(exit_code).ok(),
         duration_ms: i64::try_from(duration.as_millis()).ok(),
-        cli_version: env!("ORBIT_VERSION").parse().ok(),
+        cli_version: crate::version::get().parse().ok(),
     };
     track_event(
         tracker,
@@ -180,7 +180,7 @@ fn track_event<T: AnalyticsTracker + ?Sized>(
 
 fn build_cli_context() -> OrbitCliContext {
     OrbitCliContext::new(orbit_cli::OrbitCli {
-        cli_version: env!("ORBIT_VERSION").parse().ok(),
+        cli_version: crate::version::get().parse().ok(),
         os: std::env::consts::OS.parse().ok(),
         arch: std::env::consts::ARCH.parse().ok(),
         distribution: detect_distribution(|key| std::env::var(key).ok())
@@ -350,7 +350,7 @@ mod tests {
         assert_eq!(command["success"], false);
         assert_eq!(command["exit_code"], 3);
         assert_eq!(command["duration_ms"], 1500);
-        assert_eq!(command["cli_version"], env!("ORBIT_VERSION"));
+        assert_eq!(command["cli_version"], crate::version::get());
     }
 
     #[test]
@@ -369,7 +369,7 @@ mod tests {
             let cli = context_data(&event, orbit_analytics::ORBIT_CLI_SCHEMA);
             assert_eq!(
                 cli["cli_version"],
-                env!("ORBIT_VERSION"),
+                crate::version::get(),
                 "{}",
                 event.action()
             );
