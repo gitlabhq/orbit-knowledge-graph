@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod parity;
 pub(crate) mod translate;
 
 use ontology::Ontology;
