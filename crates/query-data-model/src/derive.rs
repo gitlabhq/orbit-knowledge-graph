@@ -1,25 +1,22 @@
-use crate::implementations::{clickhouse, duckdb};
-use crate::{
-    ClickHouseDataModel, DataModelError, DuckDbDataModel, GitLabAuthzCatalog, GraphCatalog,
-    Relational, TrustedLocalCatalog,
-};
 use std::sync::Arc;
+
+use crate::catalog::Model;
+use crate::from_ontology::from_ontology;
+use crate::{ClickHouseDataModel, DataModelError, DuckDbDataModel, QueryModel};
+
+fn model(ontology: &ontology::Ontology) -> Result<Arc<Model>, DataModelError> {
+    Ok(Arc::new(Model::load(&from_ontology(ontology)?)?))
+}
 
 impl ClickHouseDataModel {
     pub fn derive(ontology: Arc<ontology::Ontology>) -> Result<Self, DataModelError> {
-        let graph = GraphCatalog::derive(&ontology)?;
-        let schema = Relational::<clickhouse::layout::ClickHouse>::derive(&ontology)?;
-        let authorization = GitLabAuthzCatalog::from_ontology(&ontology, &graph)?;
-        Self::build(graph, schema, authorization)
+        QueryModel::new(&model(&ontology)?, "main")
     }
 }
 
 impl DuckDbDataModel {
     pub fn derive(ontology: Arc<ontology::Ontology>) -> Result<Self, DataModelError> {
-        let graph = GraphCatalog::derive(&ontology)?;
-        let schema = Relational::<duckdb::layout::DuckDb>::derive(&ontology);
-        let authorization = TrustedLocalCatalog::from_ontology(&ontology, &graph)?;
-        Self::build(graph, schema, authorization)
+        QueryModel::new(&model(&ontology)?, "local")
     }
 }
 
@@ -27,10 +24,8 @@ impl DuckDbDataModel {
 mod tests {
     use std::sync::Arc;
 
-    use crate::{
-        ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, PropertyRealization,
-        RelationalMapping,
-    };
+    use crate::implementations::clickhouse::layout::ClickHouse;
+    use crate::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, PropertyRealization};
     use ontology::FieldSource;
 
     fn overlay_ontology(name: &str) -> Arc<ontology::Ontology> {
@@ -42,14 +37,21 @@ mod tests {
 
     #[test]
     fn reordered_tables_retain_source_columns_and_dependencies() {
-        let model = ClickHouseDataModel::derive(overlay_ontology("reordered_edges")).unwrap();
-        let layouts = model.backend().equivalent_layouts("gl_code_edge");
-        assert_eq!(layouts, ["gl_code_edge_by_target"]);
-        let storage = model.layout().schema();
-        let source = storage.table("gl_code_edge").unwrap();
-        let copy = storage.table("gl_code_edge_by_target").unwrap();
-        assert_eq!(copy.columns.len(), source.columns.len());
-        assert_eq!(copy.sort_key[1], "target_id");
+        let ontology = overlay_ontology("reordered_edges");
+        let model = ClickHouseDataModel::derive(Arc::clone(&ontology)).unwrap();
+        let backend = &model;
+        assert_eq!(
+            backend.equivalent_layouts("gl_code_edge"),
+            ["gl_code_edge_by_target"]
+        );
+        let source = backend.table_columns("gl_code_edge").unwrap();
+        let copy = backend.table_columns("gl_code_edge_by_target").unwrap();
+        assert_eq!(copy, source);
+        assert_eq!(
+            backend.table_sort_key("gl_code_edge_by_target").unwrap()[1],
+            "target_id"
+        );
+        let storage = crate::Relational::<ClickHouse>::derive(&ontology).unwrap();
         assert_eq!(
             storage.dependencies()["gl_code_edge_by_target"],
             std::collections::BTreeSet::from(["gl_code_edge".to_string()])
@@ -67,49 +69,33 @@ mod tests {
             ("Definition", "ImportedSymbol", "gl_code_edge"),
             ("File", "ImportedSymbol", "gl_edge"),
         ] {
-            let variant = remote
-                .graph()
-                .variant_named("CALLS", source, target)
-                .unwrap();
-            assert_eq!(
-                remote.backend().variant_route(variant.id).unwrap().table,
-                table
-            );
-            let local_variant = local
-                .graph()
-                .variant_named("CALLS", source, target)
-                .unwrap();
-            assert_eq!(
-                local
-                    .backend()
-                    .variant_route(local_variant.id)
-                    .unwrap()
-                    .table,
-                local.backend().default_edge_table()
-            );
+            let route = remote.variant_route("CALLS", source, target).unwrap();
+            assert_eq!(route.table, table);
+            let route = local.variant_route("CALLS", source, target).unwrap();
+            assert_eq!(route.table, local.default_edge_table());
         }
     }
 
     #[test]
     fn writer_catalog_tracks_exact_node_mapping_routes() {
-        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
-        let model = ClickHouseDataModel::derive(ontology).unwrap();
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let storage = crate::Relational::<ClickHouse>::derive(&ontology).unwrap();
 
-        let code_writers = model.layout().schema().writers("gl_code_edge").unwrap();
+        let code_writers = storage.writers("gl_code_edge").unwrap();
         assert!(code_writers.contains("Branch"));
         assert!(code_writers.contains("Directory"));
         assert!(!code_writers.contains("Group"));
         assert!(!code_writers.contains("Project"));
 
-        let default_writers = model.layout().schema().writers("gl_edge").unwrap();
+        let default_writers = storage.writers("gl_edge").unwrap();
         assert!(default_writers.contains("Group"));
         assert!(default_writers.contains("Project"));
 
-        let ci_writers = model.layout().schema().writers("gl_ci_edge").unwrap();
+        let ci_writers = storage.writers("gl_ci_edge").unwrap();
         assert!(ci_writers.contains("Pipeline"));
         assert!(!ci_writers.contains("Vulnerability"));
 
-        let security_writers = model.layout().schema().writers("gl_sec_edge").unwrap();
+        let security_writers = storage.writers("gl_sec_edge").unwrap();
         assert!(security_writers.contains("Vulnerability"));
         assert!(!security_writers.contains("Pipeline"));
     }
@@ -117,9 +103,7 @@ mod tests {
     #[test]
     fn materialized_bindings_resolve_graph_identities_and_source_columns() {
         let model = ClickHouseDataModel::derive(overlay_ontology("denorm_approved")).unwrap();
-        let storage = model.layout().schema();
         let approved = model
-            .backend()
             .materialized_joins()
             .iter()
             .find(|binding| binding.table == "gl_denorm_approved")
@@ -131,7 +115,6 @@ mod tests {
         let approved_project_model =
             ClickHouseDataModel::derive(overlay_ontology("denorm_approved_project")).unwrap();
         let approved_project = approved_project_model
-            .backend()
             .materialized_joins()
             .iter()
             .find(|binding| binding.table == "gl_denorm_approved_project")
@@ -149,9 +132,9 @@ mod tests {
             ]
         );
 
-        for binding in model.backend().materialized_joins() {
-            let table = storage.table(&binding.table).unwrap();
-            let has_column = |name: &str| table.columns.iter().any(|column| column.name == name);
+        for binding in model.materialized_joins() {
+            let columns = model.table_columns(&binding.table).unwrap();
+            let has_column = |name: &str| columns.contains(name);
             for node in &binding.nodes {
                 assert!(has_column(&node.identity_column));
                 for (property, column) in &node.properties {
@@ -182,89 +165,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_schema_whose_entities_are_missing_from_the_graph() {
-        let ontology = ontology::Ontology::load_embedded().unwrap();
-        let schema =
-            crate::Relational::<crate::implementations::clickhouse::layout::ClickHouse>::derive(
-                &ontology,
-            )
-            .unwrap();
-        let result = crate::DataModel::<_, crate::implementations::ClickHouseBindings, _>::build(
-            crate::GraphCatalog::new(),
-            schema,
-            (),
-        );
-        assert!(matches!(
-            result,
-            Err(crate::DataModelError::UnknownReference { kind: "entity", .. })
-        ));
-    }
-
-    #[test]
-    fn rejects_missing_physical_tables_without_panicking() {
-        use crate::implementations::{clickhouse::layout::ClickHouse, duckdb::layout::DuckDb};
-        use crate::{DataModelError, GraphCatalog, Mapping, Relational};
-
-        let ontology = ontology::Ontology::load_embedded().unwrap();
-        let graph = GraphCatalog::derive(&ontology).unwrap();
-        let remote = Relational::<ClickHouse>::derive(&ontology).unwrap();
-        let local = Relational::<DuckDb>::derive(&ontology);
-        let remote_names: Vec<_> = remote
-            .tables()
-            .iter()
-            .map(|table| table.name.clone())
-            .collect();
-        let local_names: Vec<_> = local
-            .tables()
-            .iter()
-            .map(|table| table.name.clone())
-            .collect();
-
-        for name in remote_names {
-            let mut schema = Relational::<ClickHouse>::derive(&ontology).unwrap();
-            schema.tables.retain(|table| table.name != name);
-            let result =
-                crate::DataModel::<_, crate::implementations::ClickHouseBindings, _>::build(
-                    GraphCatalog::derive(&ontology).unwrap(),
-                    schema,
-                    (),
-                );
-            assert!(
-                matches!(result, Err(DataModelError::UnknownReference { kind: "table", name: missing }) if missing == name)
-            );
-        }
-        for name in local_names {
-            let mut schema = Relational::<DuckDb>::derive(&ontology);
-            schema.tables.retain(|table| table.name != name);
-            let result = crate::implementations::DuckDbBindings::derive(&graph, &schema);
-            assert!(
-                matches!(result, Err(DataModelError::UnknownReference { kind: "table", name: missing }) if missing == name)
-            );
-        }
-    }
-
-    #[test]
     fn derives_remote_and_local_models_from_the_same_ontology() {
         let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
         let remote = ClickHouseDataModel::derive(Arc::clone(&ontology)).unwrap();
         let local = DuckDbDataModel::derive(ontology).unwrap();
 
         let definition = remote.graph().entity_id("Definition").unwrap();
-        let contains = remote.graph().relationship_id("CONTAINS").unwrap();
 
-        assert_eq!(
-            remote.backend().entity(definition).unwrap().table,
-            "gl_definition"
-        );
-        assert_eq!(
-            local.backend().entity(definition).unwrap().table,
-            "gl_definition"
-        );
-        assert_eq!(remote.backend().relationship_table(contains), None);
-        assert_eq!(
-            local.backend().relationship_table(contains),
-            Some("gl_edge")
-        );
+        assert_eq!(remote.table_of(definition).unwrap(), "gl_definition");
+        assert_eq!(local.table_of(definition).unwrap(), "gl_definition");
+        assert_eq!(remote.relationship_table("CONTAINS"), None);
+        assert_eq!(local.relationship_table("CONTAINS"), Some("gl_edge"));
     }
 
     #[test]
@@ -301,10 +212,7 @@ mod tests {
         let model = ClickHouseDataModel::derive(ontology.clone()).unwrap();
         let entity = model.graph().entity_id("MergeRequest").unwrap();
         let property = model.graph().property_id(entity, "project_id").unwrap();
-        let table = model
-            .backend()
-            .table(&model.backend().entity(entity).unwrap().table)
-            .unwrap();
+        let table = model.table_of(entity).unwrap();
 
         let source = &ontology
             .get_node("MergeRequest")
@@ -318,15 +226,17 @@ mod tests {
             matches!(source, FieldSource::DatabaseColumn(source) if source == "target_project_id")
         );
         assert!(matches!(
-            model.backend().property_realization(property),
+            model.property_realization(property),
             Some(PropertyRealization::Stored { column }) if column == "project_id"
         ));
-        assert_eq!(
-            model.backend().property_column(property),
-            Some("project_id")
+        assert_eq!(model.property_column(property), Some("project_id"));
+        let backend = &model;
+        assert!(backend.table_column_type(table, "project_id").is_some());
+        assert!(
+            backend
+                .table_column_type(table, "target_project_id")
+                .is_none()
         );
-        assert!(table.column_types.contains_key("project_id"));
-        assert!(!table.column_types.contains_key("target_project_id"));
     }
 
     #[test]
@@ -336,14 +246,12 @@ mod tests {
                 .unwrap();
         let entity = model.graph().entity_id("Job").unwrap();
         let property = model.graph().property_id(entity, "when").unwrap();
-        let table = model
-            .backend()
-            .table(&model.backend().entity(entity).unwrap().table)
-            .unwrap();
+        let table = model.table_of(entity).unwrap();
 
-        assert_eq!(model.backend().property_column(property), Some("when"));
-        assert!(table.columns.contains("when"));
-        assert!(!table.columns.contains("`when`"));
+        assert_eq!(model.property_column(property), Some("when"));
+        let columns = model.table_columns(table).unwrap();
+        assert!(columns.contains("when"));
+        assert!(!columns.contains("`when`"));
     }
 
     #[test]

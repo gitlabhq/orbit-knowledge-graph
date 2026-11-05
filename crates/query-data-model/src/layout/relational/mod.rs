@@ -4,8 +4,7 @@ pub mod materialized;
 pub use mapping::VariantRoute;
 pub use mapping::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint,
-    ForeignKey, PathColumn, PropertyRealization, RelationalMapping, RelationshipRoute,
-    TraversalPathLookup,
+    ForeignKey, PathColumn, PropertyRealization, RelationshipRoute, TraversalPathLookup,
 };
 pub use materialized::{MaterializedJoin, MaterializedNode, MaterializedRelationship};
 use std::fmt::Debug;
@@ -48,13 +47,5 @@ impl<B: RelationalBackend> Relational<B> {
 
     pub fn table(&self, name: &str) -> Option<&Table<B>> {
         self.tables.iter().find(|table| table.name == name)
-    }
-
-    pub(crate) fn require_table(&self, name: &str) -> Result<&Table<B>, crate::DataModelError> {
-        self.table(name)
-            .ok_or_else(|| crate::DataModelError::UnknownReference {
-                kind: "table",
-                name: name.to_string(),
-            })
     }
 }

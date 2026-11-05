@@ -187,23 +187,10 @@ pub struct ReorderedCopy {
     pub source: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct EdgeRoute {
-    pub relationship: String,
-    pub source: String,
-    pub target: String,
-    pub table: String,
-    pub foreign_key: Option<String>,
-}
-
 #[derive(Debug)]
 pub struct Metadata {
     copies: Vec<ReorderedCopy>,
     dependencies: BTreeMap<String, BTreeSet<String>>,
-    pub(crate) entities: Vec<crate::implementations::EntityFacts>,
-    pub(crate) default_edge_table: String,
-    pub(crate) denormalized: Vec<ontology::DenormalizedProperty>,
-    pub(crate) traversal_path_lookups: Vec<ontology::TraversalPathLookup>,
     auxiliary_tables: Vec<AuxiliaryTable>,
     dictionaries: Vec<Dictionary>,
     views: Vec<MaterializedView>,
@@ -211,8 +198,6 @@ pub struct Metadata {
     graph_tables: Vec<GraphTable>,
     joins: Vec<MaterializedJoin>,
     writers: BTreeMap<String, BTreeSet<String>>,
-    edge_routes: Vec<EdgeRoute>,
-    relationship_tables: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl crate::Relational<ClickHouse> {
@@ -269,13 +254,5 @@ impl crate::Relational<ClickHouse> {
 
     pub fn writers(&self, table: &str) -> Option<&BTreeSet<String>> {
         self.metadata.writers.get(table)
-    }
-
-    pub fn edge_routes(&self) -> &[EdgeRoute] {
-        &self.metadata.edge_routes
-    }
-
-    pub fn relationship_tables(&self, kind: &str) -> Option<&BTreeSet<String>> {
-        self.metadata.relationship_tables.get(kind)
     }
 }

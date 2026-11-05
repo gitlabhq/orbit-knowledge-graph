@@ -5,11 +5,21 @@ use ontology::{EdgeVariantScope, FieldSelectivity, TraversalPathKind};
 
 use crate::catalog::{Catalog, Model, StorageBackend};
 use crate::implementations::relational::RelationalFacts;
+use crate::layout::relational::RelationshipRoute;
 use crate::{
-    DataModelError, DenormalizedCatalog, EntityAuthConfig, EntityId, ForeignKey, GitLabPolicy,
-    GraphCatalog, MaterializedJoin, OrbitQueryModel, PathColumn, PropertyId, PropertyRealization,
-    RelationalMapping, RelationshipId, RelationshipVariantId, TraversalPathLookup, VariantRoute,
+    DataModelError, DenormalizedCatalog, Entity, EntityId, ForeignKey, GraphCatalog,
+    MaterializedJoin, OrbitQueryModel, PathColumn, Property, PropertyId, PropertyRealization,
+    RelationshipId, RelationshipVariant, RelationshipVariantId, TraversalPathLookup, VariantRoute,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityAuthConfig {
+    pub resource_type: String,
+    pub ability: String,
+    pub auth_id_column: String,
+    pub owner_entity: Option<String>,
+    pub required_access_level: u32,
+}
 
 pub trait QueryFacts: RelationalFacts + std::fmt::Debug + Send + Sync {
     const SELECTIVE_LATEST_ROWS: bool;
@@ -31,7 +41,7 @@ pub trait QueryFacts: RelationalFacts + std::fmt::Debug + Send + Sync {
 }
 
 #[derive(Debug)]
-pub struct QueryModel<B: StorageBackend>
+struct Bindings<B: StorageBackend>
 where
     B::Store: QueryFacts,
 {
@@ -48,11 +58,11 @@ where
     trusted: bool,
 }
 
-impl<B: StorageBackend> QueryModel<B>
+impl<B: StorageBackend> Bindings<B>
 where
     B::Store: QueryFacts,
 {
-    pub fn new(model: &Arc<Model>, connection: &str) -> Result<Self, DataModelError> {
+    fn new(model: &Arc<Model>, connection: &str) -> Result<Self, DataModelError> {
         let catalog = model.physical::<B>(connection)?;
         let graph = catalog.graph();
         let stores: Vec<_> = catalog.stores().collect();
@@ -213,54 +223,53 @@ where
         })
     }
 
-    pub fn catalog(&self) -> &Catalog<B> {
-        &self.catalog
-    }
-
-    fn home(&self, entity: EntityId) -> Option<(&crate::catalog::Store, &B::Store)> {
+    pub(crate) fn home(&self, entity: EntityId) -> Option<(&crate::catalog::Store, &B::Store)> {
         self.catalog.stores().nth(self.homes[entity.index()]?)
     }
 
-    fn facts_of(&self, property: PropertyId) -> Option<&B::Store> {
+    pub(crate) fn facts_of(&self, property: PropertyId) -> Option<&B::Store> {
         let entity = self.graph_catalog().property(property).entity;
         self.home(entity).map(|(_, facts)| facts)
     }
 
-    fn graph_catalog(&self) -> &GraphCatalog {
+    pub(crate) fn graph_catalog(&self) -> &GraphCatalog {
         self.catalog.graph()
     }
 
-    fn table(&self, name: &str) -> Option<&crate::implementations::relational::TableFacts> {
+    pub(crate) fn table(
+        &self,
+        name: &str,
+    ) -> Option<&crate::implementations::relational::TableFacts> {
         self.catalog
             .stores()
             .find_map(|(_, facts)| facts.table(name))
     }
 }
 
-impl<B: StorageBackend + std::fmt::Debug> RelationalMapping for QueryModel<B>
+impl<B: StorageBackend> Bindings<B>
 where
     B::Store: QueryFacts,
 {
-    fn supports_selective_latest_rows(&self) -> bool {
+    pub(crate) fn supports_selective_latest_rows(&self) -> bool {
         B::Store::SELECTIVE_LATEST_ROWS
     }
 
-    fn supports_deferred_node_loading(&self) -> bool {
+    pub(crate) fn supports_deferred_node_loading(&self) -> bool {
         B::Store::DEFERRED_NODE_LOADING
     }
 
-    fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
+    pub(crate) fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
         self.routes[variant.index()].as_ref()
     }
 
-    fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
+    pub(crate) fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
         self.catalog
             .stores()
             .flat_map(|(_, facts)| facts.copies_of(table))
             .collect()
     }
 
-    fn materialized_joins(&self) -> &[MaterializedJoin] {
+    pub(crate) fn materialized_joins(&self) -> &[MaterializedJoin] {
         self.catalog
             .stores()
             .map(|(_, facts)| facts.joins())
@@ -268,18 +277,18 @@ where
             .unwrap_or_default()
     }
 
-    fn entity_table(&self, entity: EntityId) -> Option<&str> {
+    pub(crate) fn entity_table(&self, entity: EntityId) -> Option<&str> {
         let (store, _) = self.home(entity)?;
         Some(&store.source(entity)?.table)
     }
 
-    fn entity_has_traversal_path(&self, entity: EntityId) -> bool {
+    pub(crate) fn entity_has_traversal_path(&self, entity: EntityId) -> bool {
         self.home(entity)
             .and_then(|(store, _)| store.source(entity))
             .is_some_and(|source| source.path_column.is_some())
     }
 
-    fn entity_is_global(&self, entity: EntityId) -> bool {
+    pub(crate) fn entity_is_global(&self, entity: EntityId) -> bool {
         !self.trusted
             && self
                 .catalog
@@ -289,12 +298,12 @@ where
                 .is_some_and(|access| access.scope == crate::catalog::Scope::Global)
     }
 
-    fn entity_high_fan_out(&self, entity: EntityId) -> bool {
+    pub(crate) fn entity_high_fan_out(&self, entity: EntityId) -> bool {
         self.home(entity)
             .is_some_and(|(_, facts)| facts.high_fan_out(entity))
     }
 
-    fn property_is_foreign_key(&self, property: PropertyId) -> bool {
+    pub(crate) fn property_is_foreign_key(&self, property: PropertyId) -> bool {
         B::Store::REFERENCE_HINTS
             && !self
                 .graph_catalog()
@@ -303,56 +312,70 @@ where
                 .is_empty()
     }
 
-    fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
+    pub(crate) fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
         &self.defaults[entity.index()]
     }
 
-    fn property_realization(&self, property: PropertyId) -> Option<&PropertyRealization> {
+    pub(crate) fn property_column(&self, property: PropertyId) -> Option<&str> {
+        match self.property_realization(property)? {
+            PropertyRealization::Stored { column } => Some(column),
+            PropertyRealization::Virtual(_) => None,
+        }
+    }
+
+    pub(crate) fn property_realization(
+        &self,
+        property: PropertyId,
+    ) -> Option<&PropertyRealization> {
         self.realizations[property.index()].as_ref()
     }
 
-    fn property_selectivity(&self, property: PropertyId) -> Option<FieldSelectivity> {
+    pub(crate) fn property_selectivity(&self, property: PropertyId) -> Option<FieldSelectivity> {
         Some(self.graph_catalog().property(property).selectivity)
     }
 
-    fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
+    pub(crate) fn table_column_type(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Option<ontology::DataType> {
         self.table(table)?.column_types.get(column).copied()
     }
 
-    fn has_text_index(&self, property: PropertyId) -> bool {
+    pub(crate) fn has_text_index(&self, property: PropertyId) -> bool {
         self.facts_of(property)
             .is_some_and(|facts| facts.text_index(property))
     }
 
-    fn null_as_epoch(&self, property: PropertyId) -> bool {
+    pub(crate) fn null_as_epoch(&self, property: PropertyId) -> bool {
         self.facts_of(property)
             .is_some_and(|facts| facts.null_as_epoch(property))
     }
 
-    fn property_unique(&self, property: PropertyId) -> bool {
+    pub(crate) fn property_unique(&self, property: PropertyId) -> bool {
         self.graph_catalog().property(property).unique
     }
 
-    fn property_mutable(&self, property: PropertyId) -> bool {
+    pub(crate) fn property_mutable(&self, property: PropertyId) -> bool {
         self.graph_catalog().property(property).mutable
     }
 
-    fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {
+    pub(crate) fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {
         self.table(table)?.path_columns.as_deref()
     }
 
-    fn default_edge_table(&self) -> &str {
+    pub(crate) fn default_edge_table(&self) -> &str {
         &self.default_edge_table
     }
 
-    fn relationship_table(&self, relationship: RelationshipId) -> Option<&str> {
+    pub(crate) fn relationship_table(&self, relationship: RelationshipId) -> Option<&str> {
         match self.relationship_tables[relationship.index()].as_slice() {
             [table] => Some(table),
             _ => None,
         }
     }
 
-    fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String> {
+    pub(crate) fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String> {
         if relationships.is_empty() {
             return self.edge_tables.clone();
         }
@@ -368,7 +391,7 @@ where
             .collect()
     }
 
-    fn foreign_key(
+    pub(crate) fn foreign_key(
         &self,
         graph: &GraphCatalog,
         relationships: &[RelationshipId],
@@ -377,21 +400,21 @@ where
     ) -> Option<ForeignKey> {
         let mut keys = relationships.iter().map(|relationship| {
             let variant = graph.variant_id(*relationship, source, target)?;
-            RelationalMapping::variant_route(self, variant)?.foreign_key
+            self.variant_route(variant)?.foreign_key
         });
         let first = keys.next()??;
         keys.all(|key| key == Some(first)).then_some(first)
     }
 
-    fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
+    pub(crate) fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
         self.table(table)?.columns.as_ref()
     }
 
-    fn table_sort_key(&self, table: &str) -> Option<&[String]> {
+    pub(crate) fn table_sort_key(&self, table: &str) -> Option<&[String]> {
         Some(&self.table(table)?.sort_key)
     }
 
-    fn denormalized(&self) -> &DenormalizedCatalog {
+    pub(crate) fn denormalized(&self) -> &DenormalizedCatalog {
         static EMPTY: LazyLock<DenormalizedCatalog> = LazyLock::new(DenormalizedCatalog::default);
         self.catalog
             .stores()
@@ -399,7 +422,7 @@ where
             .map_or(&EMPTY, |(_, facts)| facts.denormalized())
     }
 
-    fn traversal_path_lookup(
+    pub(crate) fn traversal_path_lookup(
         &self,
         entity: EntityId,
         kind: TraversalPathKind,
@@ -408,68 +431,455 @@ where
     }
 }
 
-impl<B: StorageBackend + std::fmt::Debug> GitLabPolicy for QueryModel<B>
+impl<B: StorageBackend> Bindings<B>
 where
     B::Store: QueryFacts,
 {
-    fn is_hidden(&self, property: PropertyId) -> bool {
+    pub(crate) fn is_hidden(&self, property: PropertyId) -> bool {
         self.catalog.model().access().property(property).hidden
     }
 
-    fn variant_scope(&self, variant: RelationshipVariantId) -> Option<EdgeVariantScope> {
+    pub(crate) fn variant_scope(&self, variant: RelationshipVariantId) -> Option<EdgeVariantScope> {
         if self.trusted {
             return None;
         }
         self.catalog.model().access().variant_scope(variant)
     }
 
-    fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId> {
+    pub(crate) fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId> {
         &self.anchor_foreign_keys
     }
 
-    fn is_admin_only(&self, property: PropertyId) -> bool {
+    pub(crate) fn is_admin_only(&self, property: PropertyId) -> bool {
         !self.trusted && self.catalog.model().access().property(property).admin_only
     }
 
-    fn is_filterable(&self, property: PropertyId) -> bool {
+    pub(crate) fn is_filterable(&self, property: PropertyId) -> bool {
         self.catalog.model().access().property(property).filterable
     }
 
-    fn is_like_allowed(&self, property: PropertyId) -> bool {
+    pub(crate) fn is_like_allowed(&self, property: PropertyId) -> bool {
         self.catalog.model().access().property(property).like
     }
 
-    fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
+    pub(crate) fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
         &self.entity_auth
     }
 
-    fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
+    pub(crate) fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
         let name = &self.graph_catalog().entity(entity).name;
         Some(&self.entity_auth.get(name)?.auth_id_column)
     }
 
-    fn required_access_level(&self, entity: EntityId) -> Option<u32> {
+    pub(crate) fn required_access_level(&self, entity: EntityId) -> Option<u32> {
         let name = &self.graph_catalog().entity(entity).name;
         Some(self.entity_auth.get(name)?.required_access_level)
     }
 }
 
-impl<B: StorageBackend + std::fmt::Debug> OrbitQueryModel for QueryModel<B>
+#[derive(Debug)]
+pub struct QueryModel<B: StorageBackend>
 where
     B::Store: QueryFacts,
 {
-    type BackendCatalog = Self;
-    type AuthorizationCatalog = Self;
+    bindings: Bindings<B>,
+}
 
+impl<B: StorageBackend> QueryModel<B>
+where
+    B::Store: QueryFacts,
+{
+    pub fn new(model: &Arc<Model>, connection: &str) -> Result<Self, DataModelError> {
+        Ok(Self {
+            bindings: Bindings::new(model, connection)?,
+        })
+    }
+
+    pub fn catalog(&self) -> &Catalog<B> {
+        &self.bindings.catalog
+    }
+}
+
+impl<B: StorageBackend> OrbitQueryModel for QueryModel<B>
+where
+    B::Store: QueryFacts,
+{
     fn graph(&self) -> &GraphCatalog {
-        self.graph_catalog()
+        self.bindings.graph_catalog()
     }
 
-    fn query_backend(&self) -> &Self {
-        self
+    fn table_of(&self, entity: EntityId) -> Option<&str> {
+        self.bindings.entity_table(entity)
     }
 
-    fn query_authorization(&self) -> &Self {
-        self
+    fn property_is_foreign_key(&self, property: PropertyId) -> bool {
+        self.bindings.property_is_foreign_key(property)
+    }
+
+    fn required_access_level(&self, entity: EntityId) -> Option<u32> {
+        self.bindings.required_access_level(entity)
+    }
+
+    fn materialized_joins(&self) -> &[MaterializedJoin] {
+        self.bindings.materialized_joins()
+    }
+
+    fn property_is_hidden(&self, property: PropertyId) -> bool {
+        self.bindings.is_hidden(property)
+    }
+
+    fn supports_deferred_node_loading(&self) -> bool {
+        self.bindings.supports_deferred_node_loading()
+    }
+
+    fn supports_selective_latest_rows(&self) -> bool {
+        self.bindings.supports_selective_latest_rows()
+    }
+
+    fn entity(&self, name: &str) -> Option<&Entity> {
+        self.graph().entity_named(name)
+    }
+
+    fn property(&self, entity: &str, property: &str) -> Option<&Property> {
+        self.graph().property_named(entity, property)
+    }
+
+    fn property_is_nullable(&self, entity: &str, property: &str) -> bool {
+        self.property(entity, property)
+            .is_some_and(|property| property.nullable)
+    }
+
+    fn null_as_epoch(&self, property: PropertyId) -> bool {
+        self.bindings.null_as_epoch(property)
+    }
+
+    fn null_as_epoch_properties(&self, entity: EntityId) -> HashMap<String, ontology::DataType> {
+        self.graph()
+            .entity(entity)
+            .properties
+            .iter()
+            .filter(|property| self.null_as_epoch(**property))
+            .map(|property| {
+                let property = self.graph().property(*property);
+                (property.name.clone(), property.data_type)
+            })
+            .collect()
+    }
+
+    fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property> {
+        self.graph()
+            .property_id(entity, property)
+            .map(|property| self.graph().property(property))
+    }
+
+    fn entity_table(&self, entity: &str) -> Option<&str> {
+        let entity = self.graph().entity_id(entity)?;
+        self.bindings.entity_table(entity)
+    }
+
+    fn entity_has_traversal_path(&self, entity: &str) -> bool {
+        self.graph()
+            .entity_id(entity)
+            .is_some_and(|entity| self.bindings.entity_has_traversal_path(entity))
+    }
+
+    fn entity_is_global(&self, entity: &str) -> bool {
+        self.graph()
+            .entity_id(entity)
+            .is_some_and(|entity| self.bindings.entity_is_global(entity))
+    }
+
+    fn entity_high_fan_out(&self, entity: &str) -> bool {
+        self.graph()
+            .entity_id(entity)
+            .is_some_and(|entity| self.bindings.entity_high_fan_out(entity))
+    }
+
+    fn property_column_named(&self, entity: &str, property: &str) -> Option<&str> {
+        let property = self.property(entity, property)?;
+        self.property_column(property.id)
+    }
+
+    fn property_column(&self, property: PropertyId) -> Option<&str> {
+        self.bindings.property_column(property)
+    }
+
+    fn property_is_stored(&self, property: PropertyId) -> bool {
+        self.property_column(property).is_some()
+    }
+
+    fn property_realization(&self, property: PropertyId) -> Option<&PropertyRealization> {
+        self.bindings.property_realization(property)
+    }
+
+    fn property_selectivity(&self, property: PropertyId) -> ontology::FieldSelectivity {
+        self.bindings
+            .property_selectivity(property)
+            .unwrap_or_default()
+    }
+
+    fn property_is_virtual(&self, entity: EntityId, property: &str) -> bool {
+        self.virtual_source_for_entity_id(entity, property)
+            .is_some()
+    }
+
+    fn virtual_source_for_entity_id(
+        &self,
+        entity: EntityId,
+        property: &str,
+    ) -> Option<&ontology::VirtualSource> {
+        let property = self.graph().property_id(entity, property)?;
+        let PropertyRealization::Virtual(source) = self.property_realization(property)? else {
+            return None;
+        };
+        Some(source)
+    }
+
+    fn virtual_source(&self, entity: &str, property: &str) -> Option<&ontology::VirtualSource> {
+        let entity = self.graph().entity_id(entity)?;
+        self.virtual_source_for_entity_id(entity, property)
+    }
+
+    fn relationship_exists(&self, relationship: &str) -> bool {
+        self.graph().relationship_id(relationship).is_some()
+    }
+
+    fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
+        self.bindings.default_properties(entity)
+    }
+
+    fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
+        self.bindings.table_column_type(table, column)
+    }
+
+    fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
+        self.bindings.table_columns(table)
+    }
+
+    fn table_sort_key(&self, table: &str) -> Option<&[String]> {
+        self.bindings.table_sort_key(table)
+    }
+
+    fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
+        self.bindings.equivalent_layouts(table)
+    }
+
+    fn in_sort_key(&self, table: &str, column: &str) -> bool {
+        self.table_sort_key(table)
+            .is_some_and(|key| key.iter().any(|sort_column| sort_column == column))
+    }
+
+    fn has_text_index(&self, property: PropertyId) -> bool {
+        self.bindings.has_text_index(property)
+    }
+
+    fn property_unique(&self, property: PropertyId) -> bool {
+        self.bindings.property_unique(property)
+    }
+
+    fn property_mutable(&self, property: PropertyId) -> bool {
+        self.bindings.property_mutable(property)
+    }
+
+    fn admin_only(&self, entity: &str, property: &str) -> bool {
+        self.property(entity, property)
+            .is_some_and(|property| self.bindings.is_admin_only(property.id))
+    }
+
+    fn entity_auth(&self) -> &HashMap<String, crate::EntityAuthConfig> {
+        self.bindings.entity_auth()
+    }
+
+    fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId> {
+        self.bindings.anchor_foreign_keys()
+    }
+
+    fn entity_minimum_access_level(&self, entity: &str) -> Option<u32> {
+        let entity = self.graph().entity_id(entity)?;
+        self.bindings.required_access_level(entity)
+    }
+
+    fn property_is_admin_only(&self, property: PropertyId) -> bool {
+        self.bindings.is_admin_only(property)
+    }
+
+    fn property_is_filterable(&self, entity: &str, property: &str) -> bool {
+        self.property(entity, property)
+            .is_some_and(|property| self.bindings.is_filterable(property.id))
+    }
+
+    fn property_allows_like(&self, entity: &str, property: &str) -> bool {
+        self.property(entity, property)
+            .is_some_and(|property| self.bindings.is_like_allowed(property.id))
+    }
+
+    fn property_is_free_text(&self, entity: &str, property: &str) -> bool {
+        self.property(entity, property)
+            .is_some_and(|property| match property.data_type {
+                ontology::DataType::Uuid => true,
+                ontology::DataType::String => {
+                    self.property_selectivity(property.id) != ontology::FieldSelectivity::Low
+                }
+                _ => false,
+            })
+    }
+
+    fn entity_authorized_by_namespace(&self, entity: &str) -> bool {
+        self.entity_auth()
+            .get(entity)
+            .is_some_and(|auth| matches!(auth.resource_type.as_str(), "project" | "group"))
+    }
+
+    fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
+        self.bindings.redaction_id_column(entity)
+    }
+
+    fn table_has_path_columns(&self, table: &str) -> bool {
+        self.bindings
+            .table_path_columns(table)
+            .is_none_or(|columns| !columns.is_empty())
+    }
+
+    fn table_minimum_access_level(&self, table: &str) -> u32 {
+        self.bindings
+            .table_path_columns(table)
+            .into_iter()
+            .flatten()
+            .filter_map(|column| column.entity)
+            .filter_map(|entity| self.bindings.required_access_level(entity))
+            .max()
+            .unwrap_or(ontology::RequiredRole::Reporter.as_access_level())
+    }
+
+    fn table_path_columns(&self, table: &str) -> Option<&[crate::PathColumn]> {
+        self.bindings.table_path_columns(table)
+    }
+
+    fn relationship_table(&self, relationship: &str) -> Option<&str> {
+        let relationship = self.graph().relationship_id(relationship)?;
+        self.bindings.relationship_table(relationship)
+    }
+
+    fn default_edge_table(&self) -> &str {
+        self.bindings.default_edge_table()
+    }
+
+    fn denormalized(&self) -> &DenormalizedCatalog {
+        self.bindings.denormalized()
+    }
+
+    fn relationship_tables(&self, relationships: &[String]) -> Vec<String> {
+        let relationships: Vec<_> = relationships
+            .iter()
+            .filter_map(|relationship| self.graph().relationship_id(relationship))
+            .collect();
+        self.bindings.edge_tables(&relationships)
+    }
+
+    fn relationship_tables_between(
+        &self,
+        relationships: &[String],
+        source: &str,
+        target: &str,
+    ) -> Vec<String> {
+        let graph = self.graph();
+        let (Some(source), Some(target)) = (graph.entity_id(source), graph.entity_id(target))
+        else {
+            return Vec::new();
+        };
+        let any = relationships.is_empty() || relationships.iter().any(|kind| kind == "*");
+        graph
+            .hops(source, crate::Direction::Outgoing)
+            .filter(|hop| {
+                hop.to == target
+                    && (any || relationships.contains(&graph.relationship(hop.relationship).name))
+            })
+            .filter_map(|hop| self.bindings.variant_route(hop.variant))
+            .map(|route| route.table.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    fn redaction_id_column_named(&self, entity: &str) -> Option<&str> {
+        let entity = self.graph().entity_id(entity)?;
+        self.redaction_id_column(entity)
+    }
+
+    fn relationship_route(&self, relationship: &str) -> Option<RelationshipRoute<'_>> {
+        let mut routes = self.relationship_routes(relationship);
+        (routes.len() == 1).then(|| routes.remove(0))
+    }
+
+    fn variant_route(
+        &self,
+        relationship: &str,
+        source: &str,
+        target: &str,
+    ) -> Option<&VariantRoute> {
+        let relationship = self.graph().relationship_id(relationship)?;
+        let source = self.graph().entity_id(source)?;
+        let target = self.graph().entity_id(target)?;
+        self.bindings
+            .variant_route(self.graph().variant_id(relationship, source, target)?)
+    }
+
+    fn relationship_routes(&self, relationship: &str) -> Vec<RelationshipRoute<'_>> {
+        let Some(relationship) = self.graph().relationship_id(relationship) else {
+            return Vec::new();
+        };
+        let mut routes = std::collections::BTreeMap::<&str, Vec<&RelationshipVariant>>::new();
+        for id in &self.graph().relationship(relationship).variants {
+            if let Some(route) = self.bindings.variant_route(*id) {
+                routes
+                    .entry(&route.table)
+                    .or_default()
+                    .push(self.graph().variant(*id));
+            }
+        }
+        routes
+            .into_iter()
+            .map(|(table, variants)| RelationshipRoute { table, variants })
+            .collect()
+    }
+
+    fn foreign_key(
+        &self,
+        relationships: &[String],
+        source: &str,
+        target: &str,
+    ) -> Option<ForeignKey> {
+        let relationships: Vec<_> = relationships
+            .iter()
+            .filter_map(|relationship| self.graph().relationship_id(relationship))
+            .collect();
+        let source = self.graph().entity_id(source)?;
+        let target = self.graph().entity_id(target)?;
+        self.bindings
+            .foreign_key(self.graph(), &relationships, source, target)
+    }
+
+    fn variant_scope(
+        &self,
+        relationship: &str,
+        source: &str,
+        target: &str,
+    ) -> Option<ontology::EdgeVariantScope> {
+        let relationship = self.graph().relationship_id(relationship)?;
+        let source = self.graph().entity_id(source)?;
+        let target = self.graph().entity_id(target)?;
+        let variant = self.graph().variant_id(relationship, source, target)?;
+        self.bindings.variant_scope(variant)
+    }
+
+    fn traversal_path_lookup(
+        &self,
+        entity: &str,
+        kind: ontology::TraversalPathKind,
+    ) -> Option<(&str, &str)> {
+        let entity = self.graph().entity_id(entity)?;
+        let lookup = self.bindings.traversal_path_lookup(entity, kind)?;
+        let column = self.bindings.property_column(lookup.property)?;
+        Some((&lookup.table, column))
     }
 }

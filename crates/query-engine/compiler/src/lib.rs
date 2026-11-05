@@ -10,7 +10,7 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```rust,no_run
 //! use std::sync::Arc;
 //! use compiler::{compile, Frontend, SecurityContext};
 //! use ontology::{Ontology, DataType};

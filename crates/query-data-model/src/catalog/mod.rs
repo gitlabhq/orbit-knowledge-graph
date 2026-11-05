@@ -16,7 +16,7 @@ pub use store::{DeclaredRoute, Source, Store};
 
 use std::collections::HashSet;
 
-use sha2::{Digest, Sha256};
+use sha2::{Digest as _, Sha256};
 
 use crate::spec::Fragment;
 use crate::{DataModelError, GraphCatalog, PropertyId};
@@ -105,12 +105,18 @@ impl Model {
 }
 
 fn identity(fragments: &[Fragment]) -> Result<ModelId, DataModelError> {
-    let mut hasher = Sha256::new();
-    for fragment in fragments {
-        let yaml = fragment
-            .to_yaml()
-            .map_err(|error| DataModelError::Invalid(error.to_string()))?;
-        hasher.update(yaml.as_bytes());
+    struct Digest<'a>(&'a mut Sha256);
+    impl std::io::Write for Digest<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
+    let mut hasher = Sha256::new();
+    serde_json::to_writer(Digest(&mut hasher), fragments)
+        .map_err(|error| DataModelError::Invalid(error.to_string()))?;
     Ok(ModelId(hasher.finalize().into()))
 }

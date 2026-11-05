@@ -4,7 +4,7 @@ use ontology::EnumType;
 #[cfg(test)]
 use ontology::Ontology;
 use query_data_model::ClickHouseDataModel;
-use query_data_model::EntityAuthConfig;
+use query_data_model::{EntityAuthConfig, OrbitQueryModel};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, HashMap};
 /// directly without going through `compile()`.
 pub fn build_entity_auth(ontology: &ontology::Ontology) -> HashMap<String, EntityAuthConfig> {
     ClickHouseDataModel::derive(std::sync::Arc::new(ontology.clone()))
-        .map(|model| model.authorization().entity_auth().clone())
+        .map(|model| model.entity_auth().clone())
         .unwrap_or_default()
 }
 

@@ -319,7 +319,9 @@ fn edge_columns(columns: &[ontology::EdgeColumn]) -> IndexMap<String, String> {
 }
 
 fn graph_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
-    let layout = crate::Relational::<ClickHouse>::derive(ontology)?;
+    let layout = (!ontology.denormalized_joins().is_empty())
+        .then(|| crate::Relational::<ClickHouse>::derive(ontology))
+        .transpose()?;
     let relational = ClickHouseOptions {
         version_column: Some(ontology::VERSION_COLUMN.to_string()),
         deleted_column: Some(ontology::DELETED_COLUMN.to_string()),
@@ -367,9 +369,9 @@ fn graph_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
             })
             .collect(),
         joins: layout
-            .joins()
             .iter()
-            .map(|join| {
+            .flat_map(|layout| layout.joins().iter().map(move |join| (layout, join)))
+            .map(|(layout, join)| {
                 let spec = JoinSpec {
                     sort_key: layout
                         .table(&join.table)

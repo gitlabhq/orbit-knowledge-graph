@@ -246,39 +246,12 @@ impl crate::Relational<ClickHouse> {
                 source: declaration.source.clone(),
             });
         }
-        let edge_routes = ontology
-            .edges()
-            .map(|edge| EdgeRoute {
-                relationship: edge.relationship_kind.clone(),
-                source: edge.source_kind.clone(),
-                target: edge.target_kind.clone(),
-                table: edge.destination_table.clone(),
-                foreign_key: edge.fk_column.clone(),
-            })
-            .collect();
-        let relationship_tables = ontology
-            .edge_names()
-            .map(|kind| {
-                (
-                    kind.to_string(),
-                    ontology
-                        .edge_tables_for_relationship(kind)
-                        .into_iter()
-                        .map(String::from)
-                        .collect(),
-                )
-            })
-            .collect();
         let writers = ontology.table_writers();
         Ok(Self {
             tables,
             metadata: Metadata {
                 copies,
                 dependencies,
-                entities: crate::implementations::entity_facts(ontology, false),
-                default_edge_table: ontology.edge_table().to_string(),
-                denormalized: ontology.denormalized_properties().to_vec(),
-                traversal_path_lookups: ontology.traversal_path_lookups().to_vec(),
                 auxiliary_tables: ontology
                     .auxiliary_tables()
                     .iter()
@@ -324,8 +297,6 @@ impl crate::Relational<ClickHouse> {
                     .collect(),
                 joins,
                 writers,
-                edge_routes,
-                relationship_tables,
             },
         })
     }

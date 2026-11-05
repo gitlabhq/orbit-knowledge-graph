@@ -1,9 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use ontology::{DataType, EnumType, Ontology};
-
-use crate::DataModelError;
-use crate::catalog::Diagnostics;
+use ontology::{DataType, EnumType};
 
 use super::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
@@ -69,14 +66,6 @@ pub struct GraphCatalog {
 impl GraphCatalog {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub(crate) fn derive(ontology: &Ontology) -> Result<Self, DataModelError> {
-        let fragments = crate::from_ontology::graph_fragments(ontology)?;
-        let mut diagnostics = Diagnostics::default();
-        let graph = Self::from_spec(fragments, &mut diagnostics);
-        diagnostics.finish()?;
-        Ok(graph)
     }
 
     pub fn entities(&self) -> impl Iterator<Item = &Entity> {
