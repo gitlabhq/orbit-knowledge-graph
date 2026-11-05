@@ -1,0 +1,8 @@
+kind: authorization
+package: gitlab.container_registry
+entities:
+  ContainerRepository:
+    scope: namespace
+    role: reporter
+    redaction: {resource: container_repository, ability: read_container_image}
+properties: {ContainerRepository.traversal_path: {hidden: true, filterable: false}}

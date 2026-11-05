@@ -1,0 +1,79 @@
+kind: authorization
+package: gitlab
+relationships:
+  APPROVED: prune_to_target
+  ASSIGNED: prune_to_target
+  AUTHORED: prune_to_target
+  AUTO_CANCELED_BY: same_namespace
+  BUILT_BY: same_namespace
+  CALLS: same_namespace
+  CHILD_OF: prune_to_source
+  CLOSED: prune_to_target
+  CLOSES: prune_to_source
+  CONFIRMED_BY: prune_to_target
+  CONTAINS:
+    variants:
+      Group -> Group: same_namespace
+      Group -> Project: same_namespace
+      User -> Project: prune_to_target
+      Project -> Branch: same_namespace
+      Branch -> Directory: same_namespace
+      Branch -> File: same_namespace
+      Directory -> Directory: same_namespace
+      Directory -> File: same_namespace
+
+  CREATED_FOR_MR: prune_to_source
+  CREATED_MR: prune_to_source
+  CREATOR: prune_to_target
+  DECLARES_DEPENDENCY: same_namespace
+  DEFINES: same_namespace
+  DEPLOYED_BY: prune_to_target
+  DEPLOYED_TO: prune_to_target
+  DETECTED_BY: {variants: {VulnerabilityOccurrence -> VulnerabilityScanner: same_namespace}}
+  DISMISSED_BY: prune_to_target
+  EXTENDS: same_namespace
+  FIXES: prune_to_target
+  HAS_DIFF: same_namespace
+  HAS_FILE: same_namespace
+  HAS_FINDING: same_namespace
+  HAS_HEAD_PIPELINE: same_namespace
+  HAS_IDENTIFIER: {variants: {VulnerabilityOccurrence -> VulnerabilityIdentifier: same_namespace}}
+  HAS_JOB: same_namespace
+  HAS_LABEL: prune_to_source
+  HAS_LATEST_DIFF: same_namespace
+  HAS_PACKAGE_FILE: same_namespace
+  HAS_STAGE: same_namespace
+  HAS_VULNERABILITY: same_namespace
+  IMPORTS:
+    variants:
+      File -> ImportedSymbol: same_namespace
+      ImportedSymbol -> Definition: prune_to_source
+
+  IN_ENVIRONMENT: same_namespace
+  IN_GROUP: namespace_anchor
+  IN_MILESTONE: prune_to_source
+  IN_PIPELINE: same_namespace
+  IN_PROJECT: namespace_anchor
+  LAST_EDITED_BY: prune_to_target
+  MEMBER_OF: prune_to_target
+  MERGED: prune_to_target
+  MERGED_AT_COMMIT: same_namespace
+  OCCURRENCE_OF: same_namespace
+  ON_BRANCH: same_namespace
+  OWNER: prune_to_target
+  RAN_BY: same_namespace
+  RELATED_TO: prune_to_source
+  REOPENED: prune_to_target
+  RESOLVED_BY: prune_to_target
+  REVIEWER: prune_to_target
+  RUNS_ON: prune_to_source
+  SCANS: same_namespace
+  SOURCE_PROJECT: prune_to_source
+  TRIGGERED:
+    variants:
+      User -> Pipeline: prune_to_target
+      MergeRequest -> Pipeline: same_namespace
+      User -> Job: prune_to_target
+
+  TRIGGERS_PIPELINE: prune_to_target
+  UPDATED_BY: prune_to_target

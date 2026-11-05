@@ -8,7 +8,9 @@ license = "MIT"
 indexmap = { workspace = true, features = ["serde"] }
 ontology = { path = "../ontology" }
 orbit-utils = { path = "../utils" }
+rust-embed = { workspace = true, features = ["include-exclude"] }
 serde = { workspace = true }
+serde-saphyr = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }

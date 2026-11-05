@@ -1,0 +1,83 @@
+kind: graph
+package: gitlab.packages
+domain: packages
+entities:
+  Dependency:
+    description: >-
+      A dependency declared by a package in the GitLab package registry (name and
+      version pattern)
+    label: name
+    defaults: [id, name, version_pattern]
+    properties:
+      id: {type: int64, description: Unique ID.}
+      name: {type: string, description: Dependency name.}
+      version_pattern:
+        type: string
+        description: Declared version pattern (for example, ^1.2.0).
+      project_id: {type: int64, description: Owning project ID., references: [Project]}
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  Package:
+    description: >-
+      A package published to the GitLab package registry (npm, Maven, PyPI, NuGet,
+      and other formats)
+    label: name
+    defaults: [id, name, version, package_type, status]
+    properties:
+      id: {type: int64, description: Unique ID.}
+      name: {type: string, description: Package name.}
+      version: {type: string?, description: Package version.}
+      package_type:
+        type: enum
+        description: Package format.
+        values:
+          1: maven
+          2: npm
+          3: conan
+          4: nuget
+          5: pypi
+          6: composer
+          7: generic
+          8: golang
+          9: debian
+          10: rubygems
+          11: helm
+          12: terraform_module
+          13: rpm
+          14: ml_model
+          15: cargo
+      status:
+        type: enum
+        description: Package lifecycle status.
+        values:
+          0: default
+          1: hidden
+          2: processing
+          3: error
+          4: pending_destruction
+          5: deprecated
+      created_at: {type: timestamp?, description: Creation timestamp.}
+      updated_at: {type: timestamp?, description: Last update timestamp.}
+      project_id: {type: int64, description: Owning project ID., references: [Project]}
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  PackageFile:
+    description: >-
+      A file belonging to a package in the GitLab package registry (the stored
+      artifact, for example a .whl, .jar, or .tgz)
+    label: file_name
+    defaults: [id, file_name, size, file_sha256, status]
+    properties:
+      id: {type: int64, description: Unique ID.}
+      file_name: {type: string, description: File name.}
+      size: {type: int64?, description: File size in bytes.}
+      file_sha256: {type: string?, description: SHA-256 checksum of the file.}
+      status:
+        type: enum
+        description: File lifecycle status.
+        values: {0: default, 1: pending_destruction, 2: processing, 3: error}
+      created_at: {type: timestamp?, description: Creation timestamp.}
+      updated_at: {type: timestamp?, description: Last update timestamp.}
+      project_id: {type: int64, description: Owning project ID., references: [Project]}
+      package_id: {type: int64, description: Owning package ID., references: [Package]}
+      traversal_path: {type: string, description: Namespace path for authz.}

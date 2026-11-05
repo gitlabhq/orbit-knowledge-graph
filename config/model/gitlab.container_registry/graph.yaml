@@ -1,0 +1,21 @@
+kind: graph
+package: gitlab.container_registry
+domain: container_registry
+entities:
+  ContainerRepository:
+    description: A container image repository in a project's container registry
+    label: name
+    defaults: [id, name, status]
+    properties:
+      id: {type: int64, description: Unique ID.}
+      name: {type: string, description: Repository name (path within the project).}
+      status:
+        type: enum
+        description: >-
+          Deletion lifecycle status. Empty string when the repository is active (no
+          deletion scheduled).
+        values: {0: delete_scheduled, 1: delete_failed, 2: delete_ongoing}
+      created_at: {type: timestamp, description: Creation timestamp.}
+      updated_at: {type: timestamp, description: Last update timestamp.}
+      project_id: {type: int64, description: Owning project ID., references: [Project]}
+      traversal_path: {type: string, description: Namespace path for authz.}

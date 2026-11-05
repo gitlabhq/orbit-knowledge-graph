@@ -1,0 +1,161 @@
+kind: graph
+package: gitlab.core
+domain: core
+entities:
+  Group:
+    description: A GitLab group (top-level group or subgroup)
+    label: name
+    defaults: [id, name, full_path, visibility_level]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      full_path: {type: string, description: Full path (e.g. gitlab-org/quality)., unique: true}
+      name: {type: string, description: Display name.}
+      description: {type: string, description: Description text.}
+      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      updated_at: {type: timestamp?, description: Last update timestamp.}
+      visibility_level:
+        type: enum
+        description: Visibility level.
+        values: {0: private, 10: internal, 20: public}
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  Note:
+    description: A comment or annotation on a GitLab object (issue, merge request, commit, etc.)
+    label: id
+    defaults: [id, noteable_type, noteable_id, created_at]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      note: {type: string, description: Text content (markdown).}
+      noteable_type:
+        type: enum
+        description: Type of object the note is attached to.
+        immutable: true
+        values:
+          0: Issue
+          1: MergeRequest
+          2: Commit
+          3: Snippet
+          4: WikiPage::Meta
+          5: DesignManagement::Design
+          6: AlertManagement::Alert
+          7: Vulnerability
+          8: AbuseReport
+          9: ComplianceManagement::Projects::ComplianceViolation
+        stored_as_text: true
+      noteable_id:
+        type: int64?
+        description: ID of the attached object. Null for commits.
+        immutable: true
+        references: [WorkItem]
+      line_code: {type: string, description: Line position identifier for diff notes.}
+      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      updated_at: {type: timestamp?, description: Last update timestamp.}
+      discussion_id: {type: string?, description: Discussion thread ID., immutable: true}
+      resolved_at: {type: timestamp?, description: Resolution timestamp.}
+      internal:
+        type: boolean
+        description: Only visible to users with Reporter+ access on the parent resource.
+      confidential:
+        type: boolean?
+        description: "Legacy alias for internal; synced on create. Being renamed per gitlab#367923."
+      commit_id: {type: string, description: Commit SHA for commit notes., immutable: true}
+      st_diff: {type: string, description: Serialized diff snippet for diff notes.}
+      project_id:
+        type: int64?
+        description: Owning project ID.
+        immutable: true
+        references: [Project]
+      author_id: {type: int64?, description: Author user ID., immutable: true, references: [User]}
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  Project:
+    description: A GitLab project/repository
+    label: name
+    defaults: [id, name, full_path, visibility_level]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      full_path: {type: string, description: Full path (e.g. gitlab-org/gitlab)., unique: true}
+      name: {type: string, description: Display name.}
+      description: {type: string, description: Description text.}
+      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      updated_at: {type: timestamp?, description: Last update timestamp.}
+      visibility_level:
+        type: enum
+        description: Visibility level.
+        values: {0: private, 10: internal, 20: public}
+      archived: {type: boolean, description: Archived flag.}
+      star_count: {type: int64, description: Number of stars.}
+      last_activity_at: {type: timestamp?, description: Last activity timestamp.}
+      traversal_path: {type: string, description: Namespace path for authz.}
+
+  User:
+    description: A GitLab user account
+    label: username
+    defaults: [id, username, name, state]
+    properties:
+      id: {type: int64, description: Unique ID., immutable: true}
+      username: {type: string, description: Unique handle., unique: true}
+      email:
+        type: string
+        description: >-
+          Primary email. Admins only until per-cell authz lands (gated by
+          `read_user_email_address`).
+        unique: true
+      name: {type: string, description: Display name.}
+      first_name: {type: string, description: First name. Not on any public surface; admins only.}
+      last_name: {type: string, description: Last name. Not on any public surface; admins only.}
+      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      updated_at:
+        type: timestamp?
+        description: Last update timestamp. Not on any public surface; admins only.
+      state:
+        type: enum
+        description: Account state.
+        values:
+          0: active
+          1: blocked
+          2: ldap_blocked
+          3: blocked_pending_approval
+          4: banned
+          5: deactivated
+        stored_as_text: true
+      avatar_url:
+        type: string?
+        description: Avatar upload filename (not a URL; the full URL is computed at runtime).
+      public_email: {type: string, description: "Public email, if set."}
+      preferred_language:
+        type: string
+        description: >-
+          Preferred UI language. Self-only on REST; admins only until per-cell authz
+          lands.
+      last_activity_on: {type: date?, description: Last activity date.}
+      private_profile:
+        type: boolean
+        description: Private profile flag. Self-only on REST; admins only here.
+      is_admin: {type: boolean, description: Instance administrator flag.}
+      is_auditor: {type: boolean, description: Auditor role flag.}
+      is_external:
+        type: boolean
+        description: >-
+          External user flag. Self-only on REST, admin-only via UserWithAdmin; admins
+          only here.
+      user_type:
+        type: enum
+        description: Account type.
+        immutable: true
+        values:
+          0: human
+          1: support_bot
+          2: alert_bot
+          3: visual_review_bot
+          4: service_user
+          5: ghost
+          6: project_bot
+          8: security_bot
+          9: automation_bot
+          10: security_policy_bot
+          11: admin_bot
+          13: service_account
+          15: placeholder
+          16: duo_code_review_bot
+          17: import_user

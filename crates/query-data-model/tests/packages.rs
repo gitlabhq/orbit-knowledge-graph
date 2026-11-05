@@ -1,34 +1,52 @@
 use std::sync::Arc;
 
-use query_data_model::Model;
 use query_data_model::catalog::{RowFilter, Scope};
-use query_data_model::from_ontology::from_ontology;
+use query_data_model::from_ontology::{from_ontology, packages};
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::spec::Fragment;
+use query_data_model::{Model, Packages};
 
-fn model() -> (Arc<Model>, ontology::Ontology) {
-    let ontology = ontology::Ontology::load_embedded().unwrap();
-    let model = Arc::new(Model::load(&from_ontology(&ontology).unwrap()).unwrap());
-    (model, ontology)
+fn fragments(packages: &Packages) -> Vec<Fragment> {
+    packages
+        .sources()
+        .iter()
+        .map(|(path, yaml)| Fragment::parse(yaml).unwrap_or_else(|error| panic!("{path}: {error}")))
+        .collect()
+}
+
+fn model() -> Arc<Model> {
+    Packages::embedded().load().unwrap()
 }
 
 #[test]
-fn converted_spec_round_trips_through_yaml() {
+fn checked_in_packages_match_the_ontology() {
     let ontology = ontology::Ontology::load_embedded().unwrap();
-    for fragment in from_ontology(&ontology).unwrap() {
-        let yaml = fragment.to_yaml().unwrap();
+    let expected = from_ontology(&ontology).unwrap();
+    let checked_in = fragments(&Packages::embedded());
+    assert_eq!(checked_in.len(), expected.len());
+    for (checked_in, expected) in checked_in.iter().zip(&expected) {
         assert_eq!(
-            Fragment::parse(&yaml).unwrap(),
-            fragment,
-            "{}",
-            fragment.package()
+            checked_in,
+            expected,
+            "config/model/{} drifted from config/ontology",
+            expected.package()
         );
     }
 }
 
 #[test]
+fn rendered_packages_parse_back_to_their_fragments() {
+    let ontology = ontology::Ontology::load_embedded().unwrap();
+    assert_eq!(
+        fragments(&packages(&ontology).unwrap()),
+        from_ontology(&ontology).unwrap()
+    );
+}
+
+#[test]
 fn graph_matches_ontology_fields() {
-    let (model, ontology) = model();
+    let ontology = ontology::Ontology::load_embedded().unwrap();
+    let model = model();
     let graph = model.graph();
     for property in graph.properties() {
         let entity = &graph.entity(property.entity).name;
@@ -50,7 +68,7 @@ fn graph_matches_ontology_fields() {
 
 #[test]
 fn graph_store_entities_filter_on_their_own_path_column() {
-    let (model, _) = model();
+    let model = model();
     let catalog = model.physical::<ClickHouse>("main").unwrap();
     let store = catalog.store("graph").unwrap();
     for entity in model.graph().entities() {

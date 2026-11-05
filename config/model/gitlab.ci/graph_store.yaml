@@ -1,0 +1,216 @@
+kind: storage
+package: gitlab.ci
+store: graph
+entities:
+  Deployment:
+    backend:
+      primary_key: [traversal_path, id]
+      columns:
+        id: {codec: [T64, ZSTD(1)]}
+        iid: {codec: [T64, ZSTD(1)]}
+        project_id: {codec: [T64, ZSTD(1)]}
+        ref: {default: "''", codec: [ZSTD(1)]}
+        tag: {default: "false"}
+        sha: {default: "''", codec: [ZSTD(1)]}
+        status: {default: "''", codec: [LZ4]}
+        deployable_type: {default: "''", codec: [ZSTD(1)]}
+        deployable_id: {codec: [Delta(8), LZ4]}
+        on_stop: {default: "''", codec: [ZSTD(1)]}
+        archived: {default: "false"}
+        created_at: {codec: [Delta(8), ZSTD(1)]}
+        finished_at: {codec: [Delta(8), ZSTD(1)]}
+        updated_at: {codec: [Delta(8), ZSTD(1)]}
+        environment_id: {codec: [T64, ZSTD(1)]}
+        user_id: {codec: [Delta(8), LZ4]}
+        traversal_path: {default: "'0/'", codec: [ZSTD(1)]}
+      indexes:
+        _deleted: minmax
+        status: {type: set(8), granularity: 2}
+        archived: minmax
+        id: bloom_filter(0.0001)
+        ref: text
+        project_id: bloom_filter(0.0001)
+        environment_id: bloom_filter(0.0001)
+        user_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, finished_at, updated_at]
+      path_lookups: {id: {table: gl_deployment, key: id}}
+
+  Environment:
+    backend:
+      primary_key: [traversal_path, id]
+      columns:
+        id: {codec: [T64, ZSTD(1)]}
+        project_id: {codec: [T64, ZSTD(1)]}
+        name: {default: "''", codec: [ZSTD(1)]}
+        slug: {default: "''", codec: [ZSTD(1)]}
+        external_url: {default: "''", codec: [ZSTD(1)]}
+        environment_type: {default: "''", codec: [ZSTD(1)]}
+        state: {default: "'available'", codec: [LZ4]}
+        tier: {default: "''", codec: [LZ4]}
+        auto_stop_at: {codec: [Delta(8), ZSTD(1)]}
+        auto_delete_at: {codec: [Delta(8), ZSTD(1)]}
+        auto_stop_setting: {default: "'always'", codec: [LZ4]}
+        cluster_agent_id: {codec: [Delta(8), LZ4]}
+        kubernetes_namespace: {default: "''", codec: [ZSTD(1)]}
+        flux_resource_path: {default: "''", codec: [ZSTD(1)]}
+        description: {default: "''", codec: [ZSTD(3)]}
+        created_at: {codec: [Delta(8), ZSTD(1)]}
+        updated_at: {codec: [Delta(8), ZSTD(1)]}
+        merge_request_id: {codec: [Delta(8), LZ4]}
+        traversal_path: {default: "'0/'", codec: [ZSTD(1)]}
+      indexes:
+        _deleted: minmax
+        state: {type: set(4), granularity: 2}
+        tier: {type: set(8), granularity: 2}
+        environment_type: text
+        id: bloom_filter(0.0001)
+        name: text
+        project_id: bloom_filter(0.0001)
+        merge_request_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [auto_stop_at, auto_delete_at, created_at, updated_at]
+      path_lookups: {id: {table: gl_environment, key: id}}
+
+  Job:
+    backend:
+      primary_key: [traversal_path, id]
+      columns:
+        id: {codec: [T64, ZSTD(1)]}
+        name: {default: "''", codec: [ZSTD(1)]}
+        status: {default: "''", codec: [LZ4]}
+        ref: {default: "''", codec: [ZSTD(1)]}
+        tag: {}
+        allow_failure: {default: "false"}
+        coverage: {default: "''", codec: [ZSTD(1)]}
+        environment: {default: "''", codec: [ZSTD(1)]}
+        when: {default: "''", codec: [LZ4]}
+        retried: {}
+        failure_reason: {type: String, default: "''", codec: [ZSTD(1)]}
+        created_at: {codec: [Delta(8), ZSTD(1)]}
+        started_at: {codec: [Delta(8), ZSTD(1)]}
+        finished_at: {codec: [Delta(8), ZSTD(1)]}
+        queued_at: {codec: [Delta(8), ZSTD(1)]}
+        duration: {codec: [Delta(8), LZ4]}
+        queued_duration: {codec: [Delta(8), LZ4]}
+        type: {type: LowCardinality(String), default: "''", codec: [LZ4]}
+        runner_id: {codec: [Delta(8), LZ4]}
+        timeout: {codec: [Delta(8), LZ4]}
+        timeout_source: {default: "''", codec: [LZ4]}
+        exit_code: {codec: [Delta(8), LZ4]}
+        scheduling_type: {default: "''", codec: [LZ4]}
+        project_id: {codec: [T64, ZSTD(1)]}
+        user_id: {codec: [Delta(8), LZ4]}
+        upstream_pipeline_id: {codec: [Delta(8), LZ4]}
+        stage_id: {codec: [Delta(8), LZ4]}
+        pipeline_id: {codec: [Delta(8), LZ4]}
+        auto_canceled_by_id: {codec: [Delta(8), LZ4]}
+        traversal_path: {default: "'0/'", codec: [ZSTD(1)]}
+      indexes:
+        _deleted: minmax
+        status: {type: set(16), granularity: 2}
+        allow_failure: minmax
+        retried: minmax
+        id: bloom_filter(0.0001)
+        name: text
+        ref: text
+        project_id: bloom_filter(0.0001)
+        user_id: bloom_filter(0.0001)
+        upstream_pipeline_id: bloom_filter(0.0001)
+        stage_id: bloom_filter(0.0001)
+        pipeline_id: bloom_filter(0.0001)
+        runner_id: bloom_filter(0.0001)
+        auto_canceled_by_id: bloom_filter(0.0001)
+        failure_reason: {type: set(64), granularity: 2}
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      high_fan_out: [pipeline_id]
+      epoch_nulls: [created_at, started_at, finished_at, queued_at]
+      path_lookups: {id: {table: gl_job, key: id}}
+
+  Pipeline:
+    backend:
+      primary_key: [traversal_path, id]
+      columns:
+        id: {codec: [T64, ZSTD(1)]}
+        iid: {codec: [Delta(8), LZ4]}
+        sha: {default: "''", codec: [ZSTD(1)]}
+        ref: {default: "''", codec: [ZSTD(1)]}
+        status: {default: "''", codec: [LZ4]}
+        source: {default: "''", codec: [LZ4]}
+        tag: {default: "false"}
+        duration: {codec: [Delta(8), LZ4]}
+        failure_reason: {type: String, default: "''", codec: [ZSTD(1)]}
+        created_at: {codec: [Delta(8), ZSTD(1)]}
+        started_at: {codec: [Delta(8), ZSTD(1)]}
+        finished_at: {codec: [Delta(8), ZSTD(1)]}
+        committed_at: {codec: [Delta(8), ZSTD(1)]}
+        updated_at: {codec: [Delta(8), ZSTD(1)]}
+        before_sha: {default: "''", codec: [ZSTD(1)]}
+        yaml_errors: {default: "''", codec: [ZSTD(3)]}
+        protected: {}
+        project_id: {codec: [T64, ZSTD(1)]}
+        user_id: {codec: [Delta(8), LZ4]}
+        merge_request_id: {codec: [Delta(8), LZ4]}
+        auto_canceled_by_id: {codec: [Delta(8), LZ4]}
+        traversal_path: {default: "'0/'", codec: [ZSTD(1)]}
+      indexes:
+        _deleted: minmax
+        status: {type: set(16), granularity: 2}
+        tag: minmax
+        id: bloom_filter(0.0001)
+        source: {type: set(20), granularity: 2}
+        ref: text
+        project_id: bloom_filter(0.0001)
+        user_id: bloom_filter(0.0001)
+        merge_request_id: bloom_filter(0.0001)
+        auto_canceled_by_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, started_at, finished_at, committed_at, updated_at]
+      path_lookups: {id: {table: gl_pipeline, key: id}}
+
+  Runner:
+    path_column: null
+    backend:
+      sort_key: [id]
+      primary_key: [id]
+      columns:
+        id: {codec: [T64, ZSTD(1)]}
+        runner_type: {default: "''", codec: [LZ4]}
+        name: {default: "''", codec: [ZSTD(1)]}
+        description: {default: "''", codec: [ZSTD(1)]}
+        active: {default: "true"}
+        locked: {default: "false"}
+        run_untagged: {default: "true"}
+        access_level: {default: "''", codec: [LZ4]}
+        maximum_timeout: {codec: [Delta(8), LZ4]}
+        organization_id: {codec: [Delta(8), LZ4]}
+        created_at: {codec: [Delta(8), ZSTD(1)]}
+        contacted_at: {codec: [Delta(8), ZSTD(1)]}
+      indexes: {_deleted: minmax, runner_type: {type: set(4), granularity: 2}, name: text}
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, contacted_at]
+
+  Stage:
+    backend:
+      primary_key: [traversal_path, id]
+      columns:
+        id: {codec: [T64, ZSTD(1)]}
+        name: {default: "''", codec: [ZSTD(1)]}
+        status: {default: "''", codec: [LZ4]}
+        position: {codec: [Delta(8), LZ4]}
+        created_at: {codec: [Delta(8), ZSTD(1)]}
+        updated_at: {codec: [Delta(8), ZSTD(1)]}
+        project_id: {codec: [T64, ZSTD(1)]}
+        pipeline_id: {codec: [Delta(8), LZ4]}
+        traversal_path: {default: "'0/'", codec: [ZSTD(1)]}
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        name: text
+        status: {type: set(16), granularity: 2}
+        project_id: bloom_filter(0.0001)
+        pipeline_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      high_fan_out: [pipeline_id]
+      epoch_nulls: [created_at, updated_at]
+      path_lookups: {id: {table: gl_stage, key: id}}

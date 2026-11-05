@@ -1,0 +1,18 @@
+kind: storage
+package: gitlab.source_code
+store: local
+entities:
+  Definition:
+    table: gl_definition
+    exclude: [content]
+    backend: {sort_key: [traversal_path, project_id, branch, id]}
+
+  Directory: {table: gl_directory, backend: {sort_key: [traversal_path, project_id, branch, id]}}
+  File:
+    table: gl_file
+    exclude: [content]
+    backend: {sort_key: [traversal_path, project_id, branch, id]}
+
+  ImportedSymbol:
+    table: gl_imported_symbol
+    backend: {sort_key: [traversal_path, project_id, branch, id]}

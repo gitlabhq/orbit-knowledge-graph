@@ -1,0 +1,27 @@
+kind: authorization
+package: gitlab.ci
+entities:
+  Deployment:
+    scope: namespace
+    role: reporter
+    redaction: {resource: deployment, ability: read_deployment}
+
+  Environment:
+    scope: namespace
+    role: reporter
+    redaction: {resource: environment, ability: read_environment}
+
+  Job: {scope: namespace, role: reporter, redaction: {resource: ci_build, ability: read_build}}
+  Pipeline:
+    scope: namespace
+    role: reporter
+    redaction: {resource: ci_pipeline, ability: read_pipeline}
+
+  Runner: {scope: global, role: reporter, redaction: {resource: ci_runner, ability: read_runner}}
+  Stage: {scope: namespace, role: reporter, redaction: {resource: ci_stage, ability: read_build}}
+properties:
+  Deployment.traversal_path: {hidden: true, filterable: false}
+  Environment.traversal_path: {hidden: true, filterable: false}
+  Job.traversal_path: {hidden: true, filterable: false}
+  Pipeline.traversal_path: {hidden: true, filterable: false}
+  Stage.traversal_path: {hidden: true, filterable: false}

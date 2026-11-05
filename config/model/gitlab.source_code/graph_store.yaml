@@ -1,0 +1,139 @@
+kind: storage
+package: gitlab.source_code
+store: graph
+entities:
+  Branch:
+    backend:
+      sort_key: [traversal_path, project_id, id]
+      columns:
+        id: {codec: [T64, ZSTD(1)]}
+        traversal_path: {codec: [ZSTD(1)]}
+        project_id: {codec: [T64, ZSTD(1)]}
+        name: {codec: [ZSTD(1)]}
+        is_default: {default: "true"}
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        name: text
+      path_lookups: {id: {table: gl_branch, key: id}}
+
+  Commit:
+    backend:
+      sort_key: [traversal_path, project_id, id]
+      columns:
+        id: {codec: [Delta(8), LZ4]}
+        traversal_path: {codec: [ZSTD(1)]}
+        project_id: {codec: [Delta(8), LZ4]}
+        sha: {codec: [ZSTD(1)]}
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        sha: bloom_filter(0.0001)
+      path_lookups: {id: {table: gl_commit, key: id}}
+
+  Definition:
+    backend:
+      sort_key: [traversal_path, project_id, branch, id]
+      columns:
+        id: {codec: [T64, ZSTD(1)]}
+        traversal_path: {codec: [ZSTD(1)]}
+        project_id: {codec: [T64, ZSTD(1)]}
+        branch: {codec: [ZSTD(1)]}
+        commit_sha: {default: "''", codec: [ZSTD(1)]}
+        file_path: {codec: [ZSTD(9)]}
+        fqn: {codec: [ZSTD(9)]}
+        name: {codec: [ZSTD(9)]}
+        definition_type: {type: LowCardinality(String), codec: [LZ4]}
+        start_line: {codec: [T64, ZSTD(1)]}
+        end_line: {codec: [T64, ZSTD(1)]}
+        start_byte: {codec: [T64, ZSTD(1)]}
+        end_byte: {codec: [T64, ZSTD(1)]}
+        start_char: {codec: [T64, ZSTD(1)]}
+        end_char: {codec: [T64, ZSTD(1)]}
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        name: text
+        fqn: text
+        file_path: text
+        definition_type: {type: set(20), granularity: 2}
+      settings: {index_granularity: "1024"}
+      path_lookups: {id: {table: gl_definition, key: id}}
+
+  Directory:
+    backend:
+      sort_key: [traversal_path, project_id, branch, id]
+      columns:
+        id: {codec: [T64, ZSTD(1)]}
+        traversal_path: {codec: [ZSTD(1)]}
+        project_id: {codec: [T64, ZSTD(1)]}
+        branch: {codec: [ZSTD(1)]}
+        commit_sha: {default: "''", codec: [ZSTD(1)]}
+        path: {codec: [ZSTD(3)]}
+        name: {codec: [ZSTD(1)]}
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        name: text
+        path: text
+      settings: {index_granularity: "1024"}
+      path_lookups: {id: {table: gl_directory, key: id}}
+
+  File:
+    backend:
+      sort_key: [traversal_path, project_id, branch, id]
+      columns:
+        id: {codec: [T64, ZSTD(1)]}
+        traversal_path: {codec: [ZSTD(1)]}
+        project_id: {codec: [T64, ZSTD(1)]}
+        branch: {codec: [ZSTD(1)]}
+        commit_sha: {default: "''", codec: [ZSTD(1)]}
+        path: {codec: [ZSTD(3)]}
+        name: {codec: [ZSTD(1)]}
+        extension: {type: LowCardinality(String), codec: [LZ4]}
+        language: {type: LowCardinality(String), codec: [LZ4]}
+        size_bytes: {default: "0", codec: [T64, ZSTD(1)]}
+        reason: {type: LowCardinality(String), default: "''", codec: [LZ4]}
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        name: text
+        path: text
+      settings: {index_granularity: "1024"}
+      path_lookups: {id: {table: gl_file, key: id}}
+
+  ImportedSymbol:
+    backend:
+      sort_key: [traversal_path, project_id, branch, id]
+      columns:
+        id: {codec: [T64, ZSTD(1)]}
+        traversal_path: {codec: [ZSTD(1)]}
+        project_id: {codec: [T64, ZSTD(1)]}
+        branch: {codec: [ZSTD(1)]}
+        commit_sha: {default: "''", codec: [ZSTD(1)]}
+        file_path: {codec: [ZSTD(9)]}
+        import_type: {type: LowCardinality(String), codec: [LZ4]}
+        import_path: {codec: [ZSTD(9)]}
+        identifier_name: {default: "''", codec: [ZSTD(9)]}
+        identifier_alias: {default: "''", codec: [ZSTD(9)]}
+        start_line: {codec: [T64, ZSTD(1)]}
+        end_line: {codec: [T64, ZSTD(1)]}
+        start_byte: {codec: [T64, ZSTD(1)]}
+        end_byte: {codec: [T64, ZSTD(1)]}
+        start_char: {codec: [T64, ZSTD(1)]}
+        end_char: {codec: [T64, ZSTD(1)]}
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        identifier_name: bloom_filter(0.0001)
+        file_path: text
+        import_path: text
+        import_type: {type: set(10), granularity: 2}
+      settings: {index_granularity: "1024"}
+      path_lookups: {id: {table: gl_imported_symbol, key: id}}

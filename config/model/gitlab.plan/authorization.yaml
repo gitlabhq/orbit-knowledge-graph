@@ -1,0 +1,17 @@
+kind: authorization
+package: gitlab.plan
+entities:
+  Label: {scope: namespace, role: reporter, redaction: {resource: label, ability: read_label}}
+  Milestone:
+    scope: namespace
+    role: reporter
+    redaction: {resource: milestone, ability: read_milestone}
+
+  WorkItem:
+    scope: namespace
+    role: reporter
+    redaction: {resource: work_item, ability: read_work_item}
+properties:
+  Label.traversal_path: {hidden: true, filterable: false}
+  Milestone.traversal_path: {hidden: true, filterable: false}
+  WorkItem.traversal_path: {hidden: true, filterable: false}

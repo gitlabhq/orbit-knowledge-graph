@@ -1,0 +1,21 @@
+kind: authorization
+package: gitlab.code_review
+entities:
+  MergeRequest:
+    scope: namespace
+    role: reporter
+    redaction: {resource: merge_request, ability: read_merge_request}
+
+  MergeRequestDiff:
+    scope: namespace
+    role: reporter
+    redaction: {resource: merge_request, ability: read_merge_request, id: merge_request_id}
+
+  MergeRequestDiffFile:
+    scope: namespace
+    role: reporter
+    redaction: {resource: merge_request, ability: read_merge_request, id: merge_request_id}
+properties:
+  MergeRequest.traversal_path: {hidden: true, filterable: false}
+  MergeRequestDiff.traversal_path: {hidden: true, filterable: false}
+  MergeRequestDiffFile.traversal_path: {hidden: true, filterable: false}
