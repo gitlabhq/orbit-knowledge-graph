@@ -156,3 +156,31 @@ fn graph_store_entities_filter_on_their_own_path_column() {
         assert_eq!(guard.filter, expected, "{}", entity.name);
     }
 }
+
+#[test]
+fn code_edges_bind_project_and_branch_attributes_in_the_graph_store_only() {
+    let model = model();
+    let graph = model.graph();
+    let catalog = model.physical::<ClickHouse>("main").unwrap();
+    let store = catalog.store("graph").unwrap();
+    let column = |relationship: &str, source: &str, target: &str| {
+        let variant = graph.variant_named(relationship, source, target).unwrap();
+        let branch = graph.attribute_id(variant.relationship, "branch").unwrap();
+        store.attribute_column(variant.id, branch)
+    };
+    assert_eq!(column("CALLS", "Definition", "Definition"), Some("branch"));
+    assert_eq!(column("CONTAINS", "Branch", "File"), Some("branch"));
+    assert_eq!(column("CONTAINS", "Group", "Project"), None);
+    let unbound = |store: &query_data_model::catalog::Store| {
+        graph
+            .variants()
+            .all(|variant| store.attribute_columns(variant.id).next().is_none())
+    };
+    assert!(
+        model
+            .stores()
+            .iter()
+            .filter(|store| store.name != "graph")
+            .all(unbound)
+    );
+}

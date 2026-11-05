@@ -2867,6 +2867,7 @@ relationships:
       Package -> Pipeline: {backend: {table: gl_ci_edge}}
       PackageFile -> Pipeline: {backend: {table: gl_ci_edge}}
 
+  CALLS: {columns: {project_id: project_id, branch: branch}}
   CHILD_OF: {variants: {Pipeline -> Pipeline: {backend: {table: gl_ci_edge}}}}
   CLOSED:
     variants: {User -> WorkItem: {fk: closed_by_id}, User -> MergeRequest: {fk: closed_by_id}}
@@ -2874,10 +2875,20 @@ relationships:
   CONFIRMED_BY:
     variants: {User -> Vulnerability: {fk: confirmed_by_id, backend: {table: gl_sec_edge}}}
 
-  CONTAINS: {variants: {Project -> Branch: {backend: {table: gl_code_edge}}}}
+  CONTAINS:
+    variants:
+      Project -> Branch:
+        columns: {project_id: project_id, branch: branch}
+        backend: {table: gl_code_edge}
+      Branch -> Directory: {columns: {project_id: project_id, branch: branch}}
+      Branch -> File: {columns: {project_id: project_id, branch: branch}}
+      Directory -> Directory: {columns: {project_id: project_id, branch: branch}}
+      Directory -> File: {columns: {project_id: project_id, branch: branch}}
+
   CREATED_FOR_MR:
     variants: {Environment -> MergeRequest: {fk: merge_request_id, backend: {table: gl_ci_edge}}}
 
+  DEFINES: {columns: {project_id: project_id, branch: branch}}
   DEPLOYED_BY: {variants: {User -> Deployment: {fk: user_id, backend: {table: gl_ci_edge}}}}
   DEPLOYED_TO: {variants: {MergeRequest -> Deployment: {backend: {table: gl_ci_edge}}}}
   DETECTED_BY:
@@ -2890,6 +2901,7 @@ relationships:
   DISMISSED_BY:
     variants: {User -> Vulnerability: {fk: dismissed_by_id, backend: {table: gl_sec_edge}}}
 
+  EXTENDS: {columns: {project_id: project_id, branch: branch}}
   FIXES: {variants: {MergeRequest -> Vulnerability: {backend: {table: gl_sec_edge}}}}
   HAS_DIFF:
     variants:
@@ -2930,6 +2942,7 @@ relationships:
   HAS_PACKAGE_FILE: {variants: {Package -> PackageFile: {fk: package_id}}}
   HAS_STAGE: {variants: {Pipeline -> Stage: {fk: pipeline_id, backend: {table: gl_ci_edge}}}}
   HAS_VULNERABILITY: {variants: {Package -> Vulnerability: {backend: {table: gl_sec_edge}}}}
+  IMPORTS: {columns: {project_id: project_id, branch: branch}}
   IN_ENVIRONMENT:
     variants: {Deployment -> Environment: {fk: environment_id, backend: {table: gl_ci_edge}}}
 
@@ -2963,7 +2976,10 @@ relationships:
       Milestone -> Project: {fk: project_id}
       Label -> Project: {fk: project_id}
       SecurityScan -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
-      Branch -> Project: {fk: project_id, backend: {table: gl_code_edge}}
+      Branch -> Project:
+        fk: project_id
+        columns: {project_id: project_id, branch: branch}
+        backend: {table: gl_code_edge}
       Deployment -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
       Environment -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
       MergeRequestDiff -> Project: {fk: project_id, backend: {table: gl_diff_edge}}
@@ -2985,6 +3001,7 @@ relationships:
         fk: vulnerability_id
         backend: {table: gl_sec_edge}
 
+  ON_BRANCH: {columns: {project_id: project_id, branch: branch}}
   RAN_BY: {variants: {SecurityScan -> Job: {fk: build_id, backend: {table: gl_ci_edge}}}}
   RESOLVED_BY:
     variants: {User -> Vulnerability: {fk: resolved_by_id, backend: {table: gl_sec_edge}}}

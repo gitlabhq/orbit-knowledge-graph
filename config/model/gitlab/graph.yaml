@@ -25,6 +25,7 @@ relationships:
     - File -> Definition
     - Definition -> ImportedSymbol
     - File -> ImportedSymbol
+    attributes: {project_id: int64, branch: string}
 
   CHILD_OF:
     description: >-
@@ -53,6 +54,7 @@ relationships:
     - Branch -> File
     - Directory -> Directory
     - Directory -> File
+    attributes: {project_id: int64, branch: string}
 
   CREATED_FOR_MR:
     description: Environment was first created by a merge request pipeline
@@ -70,6 +72,7 @@ relationships:
   DEFINES:
     description: Definition relationships in source code
     variants: [File -> Definition, Definition -> Definition]
+    attributes: {project_id: int64, branch: string}
 
   DEPLOYED_BY: {description: User who triggered a deployment, variants: [User -> Deployment]}
   DEPLOYED_TO:
@@ -86,6 +89,7 @@ relationships:
       Supertype relationships in source code (inheritance, interface implementation,
       struct embedding, mixin composition)
     variants: [Definition -> Definition]
+    attributes: {project_id: int64, branch: string}
 
   FIXES:
     description: Merge request fixes a vulnerability
@@ -145,6 +149,7 @@ relationships:
   IMPORTS:
     description: Import relationships in source code
     variants: [File -> ImportedSymbol, ImportedSymbol -> Definition]
+    attributes: {project_id: int64, branch: string}
 
   IN_ENVIRONMENT:
     description: Deployment targets an environment
@@ -189,6 +194,7 @@ relationships:
     - ContainerRepository -> Project
     - Dependency -> Project
     - AgentSession -> Project
+    attributes: {project_id: int64, branch: string}
 
   LAST_EDITED_BY:
     description: User who most recently edited an entity's content (title/description)
@@ -220,6 +226,7 @@ relationships:
   ON_BRANCH:
     description: Code entities belong to a specific branch
     variants: [Directory -> Branch, File -> Branch]
+    attributes: {project_id: int64, branch: string}
 
   OWNER:
     description: Ownership relationship between users and groups/projects

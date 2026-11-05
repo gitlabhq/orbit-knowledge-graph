@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use indexmap::IndexMap;
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use ontology::constants::{DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS};
 use ontology::{
     DataType, EdgeVariantScope, EnumType, FieldSelectivity, FieldSource, NodeRefKind, Ontology,
     RequiredRole,
@@ -16,10 +16,10 @@ use crate::implementations::clickhouse::schema::Schema;
 use crate::implementations::duckdb::backend::DuckDbSource;
 use crate::implementations::relational::{EdgeTableSpec, RelationalOptions};
 use crate::spec::{
-    AuthorizationFragment, BackendOptions, EngineSpec, EntityAccessSpec, EntitySpec, Fragment,
-    GraphFragment, LookupSpec, PropertyAccessSpec, PropertyDetail, PropertySpec, RedactionSpec,
-    RelationshipSpec, ScopeSpec, ScopeVariants, ServiceFragment, SourceSpec, StorageFragment,
-    encode_options, format_variant,
+    AttributeSpec, AuthorizationFragment, BackendOptions, EngineSpec, EntityAccessSpec, EntitySpec,
+    Fragment, GraphFragment, LookupSpec, PropertyAccessSpec, PropertyDetail, PropertySpec,
+    RedactionSpec, RelationshipSpec, ScopeSpec, ScopeVariants, ServiceFragment, SourceSpec,
+    StorageFragment, encode_options, format_variant,
 };
 use crate::{ClickHouseDataModel, DataModelError, DuckDbDataModel, Model, Packages};
 
@@ -173,12 +173,23 @@ pub(crate) fn graph_fragments(ontology: &Ontology) -> Result<Vec<GraphFragment>,
         relationships: ontology
             .edge_names()
             .map(|name| {
-                let variants = ontology
+                let edges: Vec<_> = ontology
                     .get_edge(name)
                     .unwrap_or_default()
                     .iter()
                     .filter(|edge| !edge.source_kind.is_empty() && !edge.target_kind.is_empty())
+                    .collect();
+                let variants = edges
+                    .iter()
                     .map(|edge| format_variant(&edge.source_kind, &edge.target_kind))
+                    .collect();
+                let attributes = edges
+                    .iter()
+                    .flat_map(|edge| attribute_columns(ontology, &edge.destination_table))
+                    .map(|column| {
+                        let word = type_word(column.data_type).to_string();
+                        (column.name.clone(), AttributeSpec::Type(word))
+                    })
                     .collect();
                 let description = ontology.get_edge_description(name).map(str::to_string);
                 (
@@ -186,13 +197,24 @@ pub(crate) fn graph_fragments(ontology: &Ontology) -> Result<Vec<GraphFragment>,
                     RelationshipSpec {
                         description,
                         variants,
-                        attributes: IndexMap::new(),
+                        attributes,
                     },
                 )
             })
             .collect(),
     });
     Ok(fragments)
+}
+
+fn attribute_columns<'a>(
+    ontology: &'a Ontology,
+    table: &str,
+) -> impl Iterator<Item = &'a ontology::EdgeColumn> {
+    ontology
+        .edge_table_config(table)
+        .into_iter()
+        .flat_map(|config| &config.columns)
+        .filter(|column| !EDGE_RESERVED_COLUMNS.contains(&column.name.as_str()))
 }
 
 type RoutedReferences<'a> = HashMap<(&'a str, &'a str), Vec<&'a str>>;

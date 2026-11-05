@@ -7,7 +7,7 @@ use ontology::{
     DataType, Ontology, StorageColumn, StorageIndex, StorageProjection, TraversalPathKind,
 };
 
-use super::{PLATFORM, options};
+use super::{PLATFORM, attribute_columns, options};
 use crate::DataModelError;
 use crate::implementations::clickhouse::schema::{default_index_name, storage_type};
 use crate::implementations::clickhouse::spec::{
@@ -303,11 +303,26 @@ fn routes(
     };
     let mut relationships = IndexMap::new();
     for name in ontology.edge_names() {
+        let edges: Vec<_> = ontology
+            .get_edge(name)
+            .unwrap_or_default()
+            .iter()
+            .filter(|edge| !edge.source_kind.is_empty() && !edge.target_kind.is_empty())
+            .collect();
+        let bindings: Vec<IndexMap<String, String>> = edges
+            .iter()
+            .map(|edge| {
+                attribute_columns(ontology, &edge.destination_table)
+                    .map(|column| (column.name.clone(), column.name.clone()))
+                    .collect()
+            })
+            .collect();
+        let shared = match bindings.split_first() {
+            Some((first, rest)) if rest.iter().all(|columns| columns == first) => first.clone(),
+            _ => IndexMap::new(),
+        };
         let mut variants = IndexMap::new();
-        for edge in ontology.get_edge(name).unwrap_or_default() {
-            if edge.source_kind.is_empty() || edge.target_kind.is_empty() {
-                continue;
-            }
+        for (edge, columns) in edges.into_iter().zip(bindings) {
             let expected =
                 routing.edge_table_for(domain_of(&edge.source_kind), domain_of(&edge.target_kind));
             let table = (Some(edge.destination_table.as_str()) != expected)
@@ -316,7 +331,11 @@ fn routes(
                 fk: edge.fk_column.clone().filter(|column| {
                     holds(&edge.source_kind, column) || holds(&edge.target_kind, column)
                 }),
-                columns: IndexMap::new(),
+                columns: if shared.is_empty() {
+                    columns
+                } else {
+                    IndexMap::new()
+                },
                 backend: options(RelationalRoute { table })?,
                 variants: IndexMap::new(),
             };
@@ -324,8 +343,9 @@ fn routes(
                 variants.insert(format_variant(&edge.source_kind, &edge.target_kind), route);
             }
         }
-        if !variants.is_empty() {
+        if !variants.is_empty() || !shared.is_empty() {
             let route = RouteSpec {
+                columns: shared,
                 variants,
                 ..RouteSpec::default()
             };
