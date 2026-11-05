@@ -1,14 +1,15 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use duckdb_client::DuckDbClient;
+use duckdb_client::{DuckDbClient, OpenMode};
 use serde_json::json;
 use strum::{AsRefStr, Display};
 
 use super::lock_database;
 use crate::workspace::{GitInfo, project_id_from_path};
 
-pub const MANIFEST_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/orbit_cli/manifest.sql"));
+pub const MANIFEST_DDL: &str =
+    include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/orbit_cli/manifest.sql"));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
@@ -100,7 +101,7 @@ pub fn read(path: &Path, query: &str) -> Result<Vec<arrow::record_batch::RecordB
         return Ok(Vec::new());
     }
     let _lock = lock_database(path)?;
-    let client = DuckDbClient::open_read_only(path)
+    let client = DuckDbClient::open(OpenMode::ReadOnly(path))
         .with_context(|| format!("failed to open {}", path.display()))?;
     if !super::schema::table_exists(&client, "_orbit_manifest")? {
         return Ok(Vec::new());

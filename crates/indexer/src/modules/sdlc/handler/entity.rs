@@ -170,7 +170,7 @@ impl EntityHandler {
             .prepare()
             .with(WatermarkFilter {
                 column: &self.plan.watermark_column,
-                last: window.floor.unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+                floor: window.floor,
                 current: window.target,
             })
             .with(

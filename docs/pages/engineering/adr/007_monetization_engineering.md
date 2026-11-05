@@ -116,7 +116,7 @@ That risk is acceptable for Phase 1 analytics, and Phase 3 closes it.
 Orbit uses the source type in three places:
 
 - The billable event, as an Orbit feature name for each source type
-- The quota check, which runs only for MCP and REST
+- The quota check, which runs for every source type and sends the feature name of the source type to CustomersDot
 - The quota metrics and the query analytics context, so dashboards show quota decisions and billing volume by channel
 
 Query pipeline latency metrics stay labeled by query type.
