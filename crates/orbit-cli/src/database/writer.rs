@@ -4,13 +4,13 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
-use duckdb_client::DuckDbClient;
+use duckdb_client::{DuckDbClient, OpenMode};
 use ontology::Ontology;
 
 use super::{locks::lock_database_waiting, schema};
 use crate::workspace::GitInfo;
 
-const GRAPH_SCHEMA: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+const GRAPH_SCHEMA: &str = include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/graph_local.sql"));
 
 pub struct GraphWriter {
     client: DuckDbClient,
@@ -22,7 +22,7 @@ impl GraphWriter {
         let lock = lock_database_waiting(path, wait)?;
         let revision = format!("{}:{}", git.project_id, git.commit_sha);
         if path.exists() {
-            let client = DuckDbClient::open_read_only(path)?;
+            let client = DuckDbClient::open(OpenMode::ReadOnly(path))?;
             if let Some(owner) = schema::stored_meta(&client, "revision")? {
                 anyhow::ensure!(
                     owner == revision,

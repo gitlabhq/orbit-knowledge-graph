@@ -69,35 +69,28 @@ To see the current schema, use one of these methods:
 Each language gets files, directories, and definitions.
 Most languages also get imports and cross-file calls.
 
-| Language | File extensions |
-|----------|-----------------|
-| Bash/Shell | `.sh`, `.bash`, `.zsh` |
-| C | `.c`, `.h` |
-| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx` |
-| C# | `.cs` |
-| Elixir | `.ex`, `.exs` |
-| Go | `.go` |
-| HCL (Terraform) | `.tf`, `.tfvars` |
-| Java | `.java` |
-| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, `.json` |
-| Kotlin | `.kt`, `.kts` |
-| Lua | `.lua` |
-| PHP | `.php`, `.phtml`, `.php3`, `.php4`, `.php5`, `.php7`, `.phps` |
-| Python | `.py` |
-| Ruby | `.rb`, `.rbw`, `.rake`, `.gemspec` |
-| Rust | `.rs` |
-| Scala | `.scala`, `.sc` |
-| Swift | `.swift` |
-| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` |
-| YAML | `.yml`, `.yaml` |
-| Zig | `.zig` |
-
-Some languages have limits:
-
-- Bash/Shell: function definitions and `source` or `.` imports only. No cross-file calls.
-- Rust: cross-file `CALLS` and `EXTENDS` relationships. No other reference relationships.
-- YAML: anchors and aliases. Mapping keys become definitions only in GitLab CI, ArgoCD,
-  Helm, and Docker Compose files. No cross-file references.
+| Language | File extensions | Limits |
+|----------|-----------------|--------|
+| Bash/Shell | `.sh`, `.bash`, `.zsh` | Function definitions and `source` or `.` imports only. No cross-file calls. |
+| C | `.c`, `.h` | None |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx` | None |
+| C# | `.cs` | None |
+| Elixir | `.ex`, `.exs` | None |
+| Go | `.go` | None |
+| HCL (Terraform) | `.tf`, `.tfvars` | None |
+| Java | `.java` | None |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, `.json` | None |
+| Kotlin | `.kt`, `.kts` | None |
+| Lua | `.lua` | Cross-file calls on module tables loaded with `require` only. No cross-file calls to global functions. |
+| PHP | `.php`, `.phtml`, `.php3`, `.php4`, `.php5`, `.php7`, `.phps` | None |
+| Python | `.py` | None |
+| Ruby | `.rb`, `.rbw`, `.rake`, `.gemspec` | None |
+| Rust | `.rs` | Cross-file `CALLS` and `EXTENDS` relationships. No other reference relationships. |
+| Scala | `.scala`, `.sc` | None |
+| Swift | `.swift` | No cross-file calls. |
+| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | None |
+| YAML | `.yml`, `.yaml` | Anchors and aliases. Mapping keys become definitions only in GitLab CI, ArgoCD, Helm, and Docker Compose files. No cross-file references. |
+| Zig | `.zig` | No cross-file calls. |
 
 Files in other languages still get a `File` node, with no definitions.
 

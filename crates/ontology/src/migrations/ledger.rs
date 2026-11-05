@@ -6,7 +6,7 @@ use super::EdgeRows;
 use super::scope::{LedgerScope, MigrationScope, sdlc_entity_names};
 use crate::Ontology;
 
-/// Ledger path relative to `CONFIG_DIR`.
+/// Ledger path relative to `ORBIT_CONFIG_DIR`.
 pub const LEDGER_FILE: &str = "schema-migrations.yaml";
 
 const LEDGER_HEADER: &str = "\
@@ -29,7 +29,8 @@ const LEDGER_HEADER: &str = "\
 # version with no entry is treated as \"*\", which also makes pruning old entries safe.
 ";
 
-const EMBEDDED_LEDGER: &str = include_str!(concat!(env!("CONFIG_DIR"), "/schema-migrations.yaml"));
+const EMBEDDED_LEDGER: &str =
+    include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/schema-migrations.yaml"));
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

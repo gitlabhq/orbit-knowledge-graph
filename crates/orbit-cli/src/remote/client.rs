@@ -480,7 +480,7 @@ fn parse_credential_helper_response(json: &[u8]) -> Option<ResolvedEndpoint> {
 fn build_user_agent(get_env: impl Fn(&str) -> Option<String>) -> String {
     let mut ua = format!(
         "orbit/{} ({}, {})",
-        env!("ORBIT_VERSION"),
+        crate::version::get(),
         std::env::consts::OS,
         std::env::consts::ARCH,
     );
@@ -796,7 +796,7 @@ mod tests {
         let ua = build_user_agent(env_from(&[]));
         let expected = format!(
             "orbit/{} ({}, {})",
-            env!("ORBIT_VERSION"),
+            crate::version::get(),
             std::env::consts::OS,
             std::env::consts::ARCH,
         );
