@@ -16,7 +16,7 @@ use std::sync::Arc;
 use format::ExpectedIndex;
 use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
-use query_engine::compiler::passes::codegen::clickhouse::cte_statements;
+use query_engine::compiler::passes::codegen::cte_statements;
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ParameterizedQuery,
     ResultContext, SecurityContext,
@@ -343,7 +343,7 @@ async fn run_frontend(
     }
 
     if !expect.indexes_used.is_empty() {
-        assert_indexes_used(ctx, &compiled, &expect.indexes_used, label).await;
+        assert_indexes_used(ctx, data_model, &compiled, &expect.indexes_used, label).await;
     }
 
     if !expect.pages.is_empty() {
@@ -377,7 +377,7 @@ async fn run_frontend(
         let compiled = assert_compilation(compiled, expect, frontend_key, label)
             .expect("repeated query should compile");
         if !expect.indexes_used.is_empty() {
-            assert_indexes_used(ctx, &compiled, &expect.indexes_used, label).await;
+            assert_indexes_used(ctx, data_model, &compiled, &expect.indexes_used, label).await;
         }
         let output = execute_output(
             ctx,
@@ -395,13 +395,14 @@ async fn run_frontend(
 
 async fn assert_indexes_used(
     ctx: &TestContext,
+    data_model: &query_data_model::ClickHouseDataModel,
     compiled: &CompiledQueryContext,
     expected: &[ExpectedIndex],
     label: &str,
 ) {
     let query = &compiled.base;
     let plan = ctx.explain_plan(query).await;
-    let ctes = cte_statements(&compiled.ast).expect("CTE statements render");
+    let ctes = cte_statements(&compiled.ast, data_model.catalog()).expect("CTE statements render");
     for ExpectedIndex { table, index } in expected {
         let mut cte_plans = Vec::new();
         let mut scans = Vec::new();

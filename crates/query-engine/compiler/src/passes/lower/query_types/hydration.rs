@@ -164,11 +164,14 @@ mod tests {
     use crate::passes::plan::{HydrationCompileOptions, plan_clickhouse};
     use crate::passes::result_contract::ResultContext;
     use orbit_server_config::QueryConfig;
+    use query_data_model::ClickHouseDataModel;
+    use std::sync::LazyLock;
+
+    static MODEL: LazyLock<ClickHouseDataModel> =
+        LazyLock::new(|| ClickHouseDataModel::embedded().unwrap());
 
     fn render(node: &Node) -> String {
-        codegen(node, ResultContext::new(), QueryConfig::default())
-            .unwrap()
-            .sql
+        render_with_params(node).0
     }
 
     fn render_with_params(
@@ -177,7 +180,13 @@ mod tests {
         String,
         std::collections::HashMap<String, crate::passes::codegen::ParamValue>,
     ) {
-        let q = codegen(node, ResultContext::new(), QueryConfig::default()).unwrap();
+        let q = codegen(
+            node,
+            MODEL.catalog(),
+            ResultContext::new(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         (q.sql, q.params)
     }
 
@@ -206,7 +215,6 @@ mod tests {
     }
 
     fn emit(nodes: &[InputNode], dynamic: bool) -> Node {
-        let model = query_data_model::ClickHouseDataModel::embedded().unwrap();
         let input = Input {
             query_type: QueryType::Hydration,
             nodes: nodes.to_vec(),
@@ -214,7 +222,7 @@ mod tests {
         };
         let plan = plan_clickhouse(
             &input,
-            &model,
+            &MODEL,
             HydrationCompileOptions {
                 dynamic,
                 path_segment_budget: None,

@@ -2158,7 +2158,9 @@ fn cte_statements_carry_the_ctes_they_read() {
         &test_ctx(),
     )
     .unwrap();
-    let statements = compiler::passes::codegen::clickhouse::cte_statements(&compiled.ast).unwrap();
+    let statements =
+        compiler::passes::codegen::cte_statements(&compiled.ast, embedded_model().catalog())
+            .unwrap();
     assert!(
         statements
             .iter()

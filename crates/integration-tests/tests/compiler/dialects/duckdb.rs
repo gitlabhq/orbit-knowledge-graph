@@ -12,6 +12,11 @@ fn parse_duckdb(json: &str) -> ParsedSql {
     ParsedSql::from_query(&compile(json).base)
 }
 
+fn local_codegen(ast: &compiler::Node) -> compiler::ParameterizedQuery {
+    let model = integration_testkit::load_local_data_model();
+    compiler::duckdb_codegen(ast, model.catalog(), Default::default()).unwrap()
+}
+
 #[test]
 fn cycles_are_rejected() {
     let local = embedded_local_model();
@@ -79,7 +84,7 @@ fn canonical_functions_execute_in_duckdb() {
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("functions.duckdb")).unwrap();
     database
-        .initialize_schema("CREATE TABLE source(id BIGINT); INSERT INTO source VALUES (1);")
+        .initialize_schema("CREATE TABLE gl_file(id BIGINT); INSERT INTO gl_file VALUES (1);")
         .unwrap();
     let array = || Expr::func(Function::Array, vec![Expr::int(1), Expr::int(2)]);
     let positive = || Expr::lambda("x", Expr::binary(Op::Gt, Expr::ident("x"), Expr::int(1)));
@@ -150,10 +155,10 @@ fn canonical_functions_execute_in_duckdb() {
     ] {
         let ast = Node::Query(Box::new(Query {
             select: vec![SelectExpr::new(expression, "value")],
-            from: TableRef::scan("source", "s"),
+            from: TableRef::scan("gl_file", "s"),
             ..Default::default()
         }));
-        let query = compiler::passes::codegen::duckdb::codegen(&ast, Default::default()).unwrap();
+        let query = local_codegen(&ast);
         let result = database.query_arrow(&query.render()).unwrap();
         assert_eq!(
             arrow::util::display::array_value_to_string(result[0].column(0), 0).unwrap(),
@@ -172,20 +177,20 @@ fn week_buckets_start_sunday_and_return_dates() {
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("weeks.duckdb")).unwrap();
-    database.initialize_schema("CREATE TABLE events(created_at TIMESTAMP); INSERT INTO events VALUES ('2026-10-03 23:59:59'), ('2026-10-04 00:00:00'), ('2026-10-05 12:00:00');").unwrap();
+    database.initialize_schema("CREATE TABLE gl_file(name TIMESTAMP); INSERT INTO gl_file VALUES ('2026-10-03 23:59:59'), ('2026-10-04 00:00:00'), ('2026-10-05 12:00:00');").unwrap();
     let ast = Node::Query(Box::new(Query {
         select: vec![SelectExpr::new(
             Expr::TimeBucket {
                 unit: TruncateUnit::Week,
-                value: Box::new(Expr::col("e", "created_at")),
+                value: Box::new(Expr::col("e", "name")),
             },
             "bucket",
         )],
-        from: TableRef::scan("events", "e"),
-        order_by: vec![compiler::ast::OrderExpr::asc(Expr::col("e", "created_at"))],
+        from: TableRef::scan("gl_file", "e"),
+        order_by: vec![compiler::ast::OrderExpr::asc(Expr::col("e", "name"))],
         ..Default::default()
     }));
-    let query = compiler::passes::codegen::duckdb::codegen(&ast, Default::default()).unwrap();
+    let query = local_codegen(&ast);
     let result = database.query_arrow(&query.render()).unwrap();
     assert_eq!(
         result[0].column(0).data_type(),
@@ -204,12 +209,12 @@ fn temporal_parameters_bind_and_render_without_clickhouse_syntax() {
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("parameters.duckdb")).unwrap();
-    database.initialize_schema("CREATE TABLE events(created_at TIMESTAMPTZ); INSERT INTO events VALUES ('2026-10-05T01:02:03.123456Z');").unwrap();
+    database.initialize_schema("CREATE TABLE gl_file(name TIMESTAMPTZ); INSERT INTO gl_file VALUES ('2026-10-05T01:02:03.123456Z');").unwrap();
     let ast = Node::Query(Box::new(Query {
-        select: vec![SelectExpr::col("e", "created_at")],
-        from: TableRef::scan("events", "e"),
+        select: vec![SelectExpr::col("e", "name")],
+        from: TableRef::scan("gl_file", "e"),
         where_clause: Some(Expr::eq(
-            Expr::col("e", "created_at"),
+            Expr::col("e", "name"),
             Expr::param(
                 SqlType::Timestamp {
                     precision: 6,
@@ -220,7 +225,7 @@ fn temporal_parameters_bind_and_render_without_clickhouse_syntax() {
         )),
         ..Default::default()
     }));
-    let compiled = compiler::passes::codegen::duckdb::codegen(&ast, Default::default()).unwrap();
+    let compiled = local_codegen(&ast);
     assert!(!compiled.render().contains("toDateTime"));
     let parameter = compiled.params.get("p1").unwrap();
     let parameters = duckdb_client::to_sql_params(&[parameter]);
@@ -240,7 +245,7 @@ fn nested_cte_codegen_executes_with_its_local_definition() {
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("nested.duckdb")).unwrap();
     database
-        .initialize_schema("CREATE TABLE nodes(id BIGINT); INSERT INTO nodes VALUES (7);")
+        .initialize_schema("CREATE TABLE gl_file(id BIGINT); INSERT INTO gl_file VALUES (7);")
         .unwrap();
     let ast = Node::Query(Box::new(Query {
         ctes: vec![Cte::new(
@@ -250,35 +255,35 @@ fn nested_cte_codegen_executes_with_its_local_definition() {
                     "seed",
                     Query {
                         select: vec![SelectExpr::col("n", "id")],
-                        from: TableRef::scan("nodes", "n"),
+                        from: TableRef::scan("gl_file", "n"),
                         ..Default::default()
                     },
                 )],
                 select: vec![SelectExpr::col("s", "id")],
-                from: TableRef::scan("seed", "s"),
+                from: TableRef::cte("seed", "s"),
                 ..Default::default()
             },
         )],
         select: vec![SelectExpr::new(Expr::col("r", "id"), "id")],
-        from: TableRef::scan("result", "r"),
+        from: TableRef::cte("result", "r"),
         ..Default::default()
     }));
-    let query = compiler::passes::codegen::duckdb::codegen(&ast, Default::default()).unwrap();
+    let query = local_codegen(&ast);
     let result = database.query_arrow(&query.render()).unwrap();
     assert_eq!(
         arrow::util::display::array_value_to_string(result[0].column(0), 0).unwrap(),
         "7"
     );
-    let Node::Query(arm) = ast else {
+    let Node::Query(mut union) = ast else {
         unreachable!()
     };
-    let union = Node::Query(Box::new(Query {
+    union.union_all.push(Query {
         select: vec![SelectExpr::col("n", "id")],
-        from: TableRef::scan("nodes", "n"),
-        union_all: vec![*arm],
+        from: TableRef::scan("gl_file", "n"),
         ..Default::default()
-    }));
-    let query = compiler::passes::codegen::duckdb::codegen(&union, Default::default()).unwrap();
+    });
+    let union = Node::Query(union);
+    let query = local_codegen(&union);
     let result = database.query_arrow(&query.render()).unwrap();
     assert_eq!(
         result.iter().map(|batch| batch.num_rows()).sum::<usize>(),
@@ -294,7 +299,7 @@ fn semantic_aggregate_codegen_preserves_null_and_empty_input_results() {
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("aggregate.duckdb")).unwrap();
-    database.initialize_schema("CREATE TABLE measurements(value BIGINT, keep BOOLEAN); INSERT INTO measurements VALUES (2, true), (2, true), (NULL, true), (9, false);").unwrap();
+    database.initialize_schema("CREATE TABLE gl_definition(start_line BIGINT, end_line BIGINT); INSERT INTO gl_definition VALUES (2, 1), (2, 1), (NULL, 1), (9, 0);").unwrap();
     for (function, argument, distinct, filtered, expected) in [
         (AggFunction::Count, false, false, false, "4"),
         (AggFunction::Count, true, false, false, "3"),
@@ -313,18 +318,18 @@ fn semantic_aggregate_codegen_preserves_null_and_empty_input_results() {
                 select: vec![SelectExpr::new(
                     Expr::Aggregate {
                         function,
-                        argument: argument.then(|| Box::new(Expr::col("m", "value"))),
+                        argument: argument.then(|| Box::new(Expr::col("m", "start_line"))),
                         distinct,
-                        condition: filtered.then(|| Box::new(Expr::col("m", "keep"))),
+                        condition: filtered
+                            .then(|| Box::new(Expr::eq(Expr::col("m", "end_line"), Expr::int(1)))),
                     },
                     "result",
                 )],
-                from: TableRef::scan("measurements", "m"),
+                from: TableRef::scan("gl_definition", "m"),
                 where_clause: empty.then(|| Expr::lit(false)),
                 ..Default::default()
             }));
-            let query =
-                compiler::passes::codegen::duckdb::codegen(&ast, Default::default()).unwrap();
+            let query = local_codegen(&ast);
             let results = database.query_arrow(&query.render()).unwrap();
             let actual =
                 arrow::util::display::array_value_to_string(results[0].column(0), 0).unwrap();

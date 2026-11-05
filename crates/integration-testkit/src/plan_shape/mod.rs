@@ -64,6 +64,7 @@ struct HydrationSetup {
 struct PhysicalAssertions {
     planned: Option<Assertions>,
     emitted: Option<Assertions>,
+    rejected: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -232,6 +233,7 @@ fn check<M: OrbitQueryModel>(
     backend: &str,
     path: &Path,
     build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
+    codegen: impl Fn(&compiler::Node) -> Result<(), String>,
 ) -> Result<(), Vec<String>> {
     let mut failures = Vec::new();
     for (language, raw) in &scenario.query {
@@ -306,6 +308,14 @@ fn check<M: OrbitQueryModel>(
         }
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
         let assertions = &scenario.physical[backend];
+        if let Some(rejected) = &assertions.rejected {
+            match codegen(&lowered.ast) {
+                Err(error) if error.contains(rejected.as_str()) => {}
+                Err(error) => failures.push(format!("{label}: expected {rejected}, got {error}")),
+                Ok(()) => failures.push(format!("{label}: expected {rejected}, got a plan")),
+            }
+            continue;
+        }
         if assertions.planned.is_none() && assertions.emitted.is_none() {
             failures.push(format!("{label}: missing assertion targets"));
             continue;
@@ -321,20 +331,8 @@ fn check<M: OrbitQueryModel>(
                 failures.push(error);
             }
         }
-        match backend {
-            "clickhouse" => {
-                if let Err(error) = compiler::emit_simple_query(&lowered.ast) {
-                    failures.push(format!("{label}: {error}"));
-                }
-            }
-            "duckdb" => {
-                if let Err(error) =
-                    compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default())
-                {
-                    failures.push(format!("{label}: {error}"));
-                }
-            }
-            _ => unreachable!(),
+        if let Err(error) = codegen(&lowered.ast) {
+            failures.push(format!("{label}: {error}"));
         }
     }
     if failures.is_empty() {
@@ -342,6 +340,18 @@ fn check<M: OrbitQueryModel>(
     } else {
         Err(failures)
     }
+}
+
+fn clickhouse_sql(ast: &compiler::Node, model: &ClickHouseDataModel) -> Result<(), String> {
+    compiler::codegen(ast, model.catalog(), Default::default(), Default::default())
+        .map(drop)
+        .map_err(|error| error.to_string())
+}
+
+fn duckdb_sql(ast: &compiler::Node, model: &DuckDbDataModel) -> Result<(), String> {
+    compiler::duckdb_codegen(ast, model.catalog(), Default::default())
+        .map(drop)
+        .map_err(|error| error.to_string())
 }
 
 pub fn run_dir(directory: &Path) {
@@ -395,17 +405,18 @@ fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
         for backend in scenario.physical.keys() {
             match backend.as_str() {
                 "clickhouse" => {
-                    if let Err(errors) =
-                        check(&scenario, remote, backend, path, |input, options| {
-                            plan::plan_clickhouse(input, remote, options)
-                        })
-                    {
+                    let build =
+                        |input: &Input, options| plan::plan_clickhouse(input, remote, options);
+                    if let Err(errors) = check(&scenario, remote, backend, path, build, |ast| {
+                        clickhouse_sql(ast, remote)
+                    }) {
                         failures.extend(errors);
                     }
                 }
                 "duckdb" => {
-                    if let Err(errors) = check(&scenario, local, backend, path, |input, options| {
-                        plan::plan_duckdb(input, local, options)
+                    let build = |input: &Input, options| plan::plan_duckdb(input, local, options);
+                    if let Err(errors) = check(&scenario, local, backend, path, build, |ast| {
+                        duckdb_sql(ast, local)
                     }) {
                         failures.extend(errors);
                     }
@@ -820,7 +831,14 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         };
         assert_eq!((actual_set, paths.len()), (set, expected_paths));
         let lowered = lower::emit(&plan, &input, None).unwrap();
-        let (sql, _) = compiler::emit_simple_query(&lowered.ast).unwrap();
+        let sql = compiler::codegen(
+            &lowered.ast,
+            model.catalog(),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap()
+        .sql;
         assert_eq!(sql.contains("arrayExists"), set);
         assert_eq!(
             sql.matches("startsWith").count(),
