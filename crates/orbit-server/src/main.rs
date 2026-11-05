@@ -191,13 +191,12 @@ async fn run_webserver(
     );
     info!("Content resolution enabled (GitlabClient configured)");
 
-    let observability_service = orbit_server_config::features::enabled(
-        orbit_server_config::Feature::ObservabilityColumns,
-    )
-    .then(|| config.observability.resolver_settings())
-    .flatten()
-    .as_ref()
-    .and_then(content::observability::build);
+    let observability_service =
+        orbit_server_config::features::enabled(orbit_server_config::Feature::ObservabilityColumns)
+            .then(|| config.observability.resolver_settings())
+            .flatten()
+            .as_ref()
+            .and_then(content::observability::build);
 
     match observability_service {
         Some(service) => {
