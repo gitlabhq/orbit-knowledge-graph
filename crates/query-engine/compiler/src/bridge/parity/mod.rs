@@ -67,7 +67,7 @@ fn first_difference(old: &str, new: &str) -> String {
     )
 }
 
-const MATCHED_AT_LEAST: usize = 946;
+const MATCHED_AT_LEAST: usize = 948;
 
 #[test]
 fn surfaces_build_the_same_input_as_the_frontends() {

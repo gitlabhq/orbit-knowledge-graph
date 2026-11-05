@@ -40,24 +40,23 @@ fn condition(
     value: &Value,
 ) -> Result<Predicate, SurfaceError> {
     let comparison = |comparison| Ok(left.compare(comparison, literal(property, value)?));
+    let pinned =
+        |value| literal(property, value).map(|value| crate::surface::pinned(property, value));
     let text = |matching| match value {
         Value::String(needle) => Ok(left.matches(matching, needle.clone())),
         _ => Err(not_text(property, value)),
     };
     match op {
-        "eq" => comparison(Comparison::Eq),
+        "eq" => Ok(left.eq(pinned(value)?)),
         "ne" => comparison(Comparison::Ne),
         "gt" => comparison(Comparison::Gt),
         "lt" => comparison(Comparison::Lt),
         "gte" => comparison(Comparison::Ge),
         "lte" => comparison(Comparison::Le),
         "in" => match value {
-            Value::Array(values) => Ok(left.one_of(
-                values
-                    .iter()
-                    .map(|value| literal(property, value))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
+            Value::Array(values) => {
+                Ok(left.one_of(values.iter().map(pinned).collect::<Result<Vec<_>, _>>()?))
+            }
             _ => Err(SurfaceError::schema(format!(
                 "filter on \"{property}\": \"in\" requires an array value"
             ))),

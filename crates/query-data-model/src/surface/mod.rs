@@ -1,7 +1,7 @@
 pub mod gql;
 pub mod json;
 
-use crate::plan::logical::{LogicalPlan, PlanError};
+use crate::plan::logical::{Literal, LogicalPlan, PlanError};
 
 #[derive(Debug)]
 pub struct Statement {
@@ -24,5 +24,14 @@ pub enum SurfaceError {
 impl SurfaceError {
     pub fn schema(message: impl Into<String>) -> Self {
         Self::Schema(message.into())
+    }
+}
+
+fn pinned(property: &str, literal: Literal) -> Literal {
+    match literal {
+        Literal::String(text) if property == "id" => text
+            .parse()
+            .map_or_else(|_| Literal::String(text), Literal::Int),
+        other => other,
     }
 }

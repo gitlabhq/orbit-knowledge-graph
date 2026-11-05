@@ -52,7 +52,7 @@ fn a_match_lowers_to_bindings_steps_and_projections() {
             "filter",
             "filter",
             "order",
-            "select graph,value,graph",
+            "select graph,value",
             "limit 5 10"
         ]
     );
@@ -99,7 +99,7 @@ fn aggregates_neighbors_and_paths_choose_their_operations() {
             "entities",
             "filter",
             "shortest",
-            "select graph,graph,graph",
+            "select graph",
             "limit 30 0"
         ]
     );

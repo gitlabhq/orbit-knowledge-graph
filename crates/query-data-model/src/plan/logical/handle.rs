@@ -87,19 +87,12 @@ impl<'m> Rows<'m> {
         construction: &Construction<Logical>,
         rows: tracking::Rows,
     ) -> Result<Self, PlanError> {
-        let mut bindings: Vec<(Option<String>, Binding<'m>)> = Vec::new();
+        let mut bindings = Vec::new();
         let mut columns = Vec::new();
         for output in construction.outputs(&rows)? {
             match construction.value(output)? {
                 (Some(name), LogicalType::Scalar(_)) => columns.push((name.to_string(), output)),
                 (_, LogicalType::Scalar(_)) => {}
-                (Some(name), _)
-                    if bindings
-                        .iter()
-                        .any(|(bound, _)| bound.as_deref() == Some(name)) =>
-                {
-                    return Err(PlanError::Duplicate(name.to_string()));
-                }
                 (name, kind) => bindings.push((
                     name.map(str::to_string),
                     Binding {
@@ -159,6 +152,17 @@ impl<'m> Rows<'m> {
 
     pub fn property(&self, name: &str) -> Result<Expr, PlanError> {
         self.endpoint()?.property(name)
+    }
+
+    pub(super) fn names(&self) -> impl Iterator<Item = &str> {
+        self.bindings.iter().filter_map(|(name, _)| name.as_deref())
+    }
+
+    pub(super) fn fresh(&self, name: &str) -> Result<(), PlanError> {
+        match self.binding(name) {
+            Ok(_) => Err(PlanError::Duplicate(name.to_string())),
+            Err(_) => Ok(()),
+        }
     }
 
     pub fn column(&self, name: &str) -> Result<Expr, PlanError> {

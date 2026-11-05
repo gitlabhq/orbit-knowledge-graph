@@ -16,6 +16,9 @@ impl<'m> LogicalBuilder<'m> {
         let (operation, to) = self.attempt(|catalog, construction| {
             let model = catalog.model();
             let start = Self::bound(from)?;
+            for name in step.node.iter().chain(&step.edge) {
+                rows.fresh(name)?;
+            }
             let relationships = relationships(construction, &step.relationships)?;
             let target = step
                 .target
@@ -74,6 +77,9 @@ impl<'m> LogicalBuilder<'m> {
     ) -> Result<Rows<'m>, PlanError> {
         let operation = self.attempt(|catalog, construction| {
             let start = Self::bound(from)?;
+            for name in std::iter::once(name).chain(edge) {
+                rows.fresh(name)?;
+            }
             let relationships = relationships(construction, via)?;
             catalog
                 .model()
@@ -106,6 +112,11 @@ impl<'m> LogicalBuilder<'m> {
     ) -> Result<Rows<'m>, PlanError> {
         let operation = self.attempt(|catalog, construction| {
             let (from, to) = (start.endpoint()?, end.endpoint()?);
+            start.fresh(name)?;
+            end.fresh(name)?;
+            if let Some(name) = end.names().find(|name| start.fresh(name).is_err()) {
+                return Err(PlanError::Duplicate(name.to_string()));
+            }
             let relationships = relationships(construction, via)?;
             range("path depth", Hops::ONE.max(max_depth), MAX_PATH_DEPTH)?;
             let (source, target) = (Self::bound(from)?, Self::bound(to)?);

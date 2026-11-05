@@ -12,6 +12,7 @@ pub(super) fn predicate(
     construction: &Construction<Logical>,
     predicate: &Predicate,
 ) -> Result<(), PlanError> {
+    looked_up(model, predicate)?;
     match predicate {
         Predicate::And(all) => all
             .iter()
@@ -53,6 +54,31 @@ pub(super) fn predicate(
             text(model, &typed, *matching, needle)
         }
     }
+}
+
+fn looked_up(model: &Model, leaf: &Predicate) -> Result<(), PlanError> {
+    let (Some(Expr::Property { property, .. }), Some(operator)) =
+        (leaf.exprs().first().copied(), leaf.operator())
+    else {
+        return Ok(());
+    };
+    let Some(lookup) = model.lookup(property) else {
+        return Ok(());
+    };
+    let name = &model.graph().property(property).name;
+    if lookup.disabled {
+        return Err(PlanError::shape(format!(
+            "{name} is looked up from {} that is not available yet",
+            lookup.service
+        )));
+    }
+    if !lookup.operators.iter().any(|allowed| allowed == operator) {
+        return Err(PlanError::shape(format!(
+            "{operator} is not supported on the looked-up property {name}; allowed: {}",
+            lookup.operators.join(", ")
+        )));
+    }
+    Ok(())
 }
 
 pub(super) fn filterable<'m>(

@@ -61,6 +61,7 @@ pub(super) fn entries(
         .iter()
         .map(|entry| {
             let value = literal(&entry.value, entry.from_temporal_literal)?;
+            let value = crate::surface::pinned(&entry.key.value, value);
             Ok(column(&entry.key.value)?.eq(value))
         })
         .collect()
@@ -100,7 +101,7 @@ fn leaf(leaf: Leaf<'_>, rows: &Rows<'_>, scope: &Scope<'_>) -> Result<Predicate,
                 None => return Err(not_relationship(span, name, scope)),
             };
             let value = value.ok_or_else(|| invalid(span, "type() compares with a value"))?;
-            return compare(kind, op, &value, false, span);
+            return compare(kind, "", op, &value, false, span);
         }
     };
     let Comparison {
@@ -140,7 +141,10 @@ fn leaf(leaf: Leaf<'_>, rows: &Rows<'_>, scope: &Scope<'_>) -> Result<Predicate,
             FilterOp::IsNotNull => Ok(left.is_null(false)),
             _ => Err(invalid(span, "this comparison needs a value")),
         },
-        (None, Some(value)) => compare(left, op, &value, from_temporal_literal, span),
+        (None, Some(value)) => {
+            let name = &property.property.value;
+            compare(left, name, op, &value, from_temporal_literal, span)
+        }
     }
 }
 
@@ -190,6 +194,7 @@ fn comparison_of(op: FilterOp) -> Option<Compare> {
 
 fn compare(
     left: Expr,
+    property: &str,
     op: FilterOp,
     value: &Value,
     temporal: bool,
@@ -204,8 +209,11 @@ fn compare(
             Value::Array(values) => Ok(left.one_of(
                 values
                     .iter()
-                    .map(|value| literal(value, temporal))
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .map(|value| {
+                        literal(value, temporal)
+                            .map(|value| crate::surface::pinned(property, value))
+                    })
+                    .collect::<Result<Vec<_>, SurfaceError>>()?,
             )),
             _ => Err(invalid(span, "IN takes a list")),
         },
@@ -219,7 +227,12 @@ fn compare(
         FilterOp::IsNotNull => Ok(left.is_null(false)),
         op => {
             let comparison = comparison_of(op).expect("the remaining operators compare");
-            Ok(left.compare(comparison, literal(value, temporal)?))
+            let value = literal(value, temporal)?;
+            let value = match comparison {
+                Compare::Eq => crate::surface::pinned(property, value),
+                _ => value,
+            };
+            Ok(left.compare(comparison, value))
         }
     }
 }

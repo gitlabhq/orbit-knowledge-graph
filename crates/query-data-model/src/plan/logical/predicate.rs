@@ -86,6 +86,31 @@ impl Predicate {
         }
     }
 
+    pub fn operator(&self) -> Option<&'static str> {
+        Some(match self {
+            Self::Compare { comparison, .. } => match comparison {
+                Comparison::Eq => "eq",
+                Comparison::Ne => "ne",
+                Comparison::Lt => "lt",
+                Comparison::Le => "lte",
+                Comparison::Gt => "gt",
+                Comparison::Ge => "gte",
+            },
+            Self::In { .. } => "in",
+            Self::Text { matching, .. } => match matching {
+                Matching::Contains => "contains",
+                Matching::StartsWith => "starts_with",
+                Matching::EndsWith => "ends_with",
+                Matching::Token => "token_match",
+                Matching::AllTokens => "all_tokens",
+                Matching::AnyTokens => "any_tokens",
+            },
+            Self::Null { null: true, .. } => "is_null",
+            Self::Null { null: false, .. } => "is_not_null",
+            Self::And(_) | Self::Not(_) => return None,
+        })
+    }
+
     pub fn leaves(&self) -> usize {
         match self {
             Self::And(all) => all.iter().map(Self::leaves).sum(),
