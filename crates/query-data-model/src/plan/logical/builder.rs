@@ -1,13 +1,9 @@
-use std::collections::BTreeSet;
-
 use super::{
-    Expr, Logical, LogicalCatalog, LogicalOperation, LogicalPlan, LogicalType, Measure, Order,
-    PlanError, Predicate, Rows, check,
+    Binding, Logical, LogicalCatalog, LogicalOperation, LogicalPlan, LogicalType, PlanError,
+    Predicate, Rows, Step, filter,
 };
-use crate::plan::tracking::{
-    self, Body, Construction, Declare, Declared, Named, Output, Outputs, Ref,
-};
-use crate::{Direction, EntityId, Model, RelationshipId};
+use crate::plan::tracking::{self, Body, Construction, Declare, Declared, Outputs, Ref};
+use crate::{Direction, EntityId, RelationshipId};
 
 pub struct LogicalBuilder<'m> {
     catalog: LogicalCatalog<'m>,
@@ -27,7 +23,7 @@ impl<'m> LogicalBuilder<'m> {
     }
 
     pub(super) fn view(&self, rows: tracking::Rows) -> Result<Rows<'m>, PlanError> {
-        Rows::view(self.catalog.model(), &self.construction, rows)
+        Rows::view(self.catalog, &self.construction, rows)
     }
 
     pub(super) fn finish(
@@ -37,23 +33,32 @@ impl<'m> LogicalBuilder<'m> {
         Ok(self.construction.finish(root?)?)
     }
 
-    fn connect(
+    pub(super) fn connect(
         &mut self,
         operation: LogicalOperation,
         inputs: Vec<Rows<'m>>,
         check: impl FnOnce(
-            &Model,
-            &Construction<Logical>,
+            LogicalCatalog<'m>,
+            &mut Construction<Logical>,
             &[Rows<'m>],
         ) -> Result<Outputs<LogicalType>, PlanError>,
     ) -> Result<Rows<'m>, PlanError> {
-        let model = self.catalog.model();
+        let catalog = self.catalog;
         self.construction.attempt(|construction| {
-            let outputs = check(model, construction, &inputs)?;
+            let outputs = check(catalog, construction, &inputs)?;
             let inputs = inputs.into_iter().map(Rows::into_inner).collect();
             let connected = construction.connect(operation, inputs, outputs)?;
-            Rows::view(model, construction, connected.rows)
+            Rows::view(catalog, construction, connected.rows)
         })
+    }
+
+    pub(super) fn attempt<T>(
+        &mut self,
+        step: impl FnOnce(LogicalCatalog<'m>, &mut Construction<Logical>) -> Result<T, PlanError>,
+    ) -> Result<T, PlanError> {
+        let catalog = self.catalog;
+        self.construction
+            .attempt(|construction| step(catalog, construction))
     }
 
     pub fn catalog(&self) -> LogicalCatalog<'m> {
@@ -65,11 +70,24 @@ impl<'m> LogicalBuilder<'m> {
     }
 
     pub fn entities(&mut self, entity: Declared<EntityId>) -> Result<Rows<'m>, PlanError> {
-        let id = self
-            .construction
-            .attempt(|construction| construction.declared(entity))?;
-        self.connect(LogicalOperation::Entities(id), Vec::new(), |model, _, _| {
-            Ok(binding(model, id))
+        let name = self.attempt(|catalog, construction| {
+            let id = construction.declared(entity)?;
+            Ok(catalog.model().graph().entity(id).name.clone())
+        })?;
+        self.entities_as(entity, &name)
+    }
+
+    pub fn entities_as(
+        &mut self,
+        entity: Declared<EntityId>,
+        name: &str,
+    ) -> Result<Rows<'m>, PlanError> {
+        let id = self.attempt(|_, construction| Ok(construction.declared(entity)?))?;
+        self.connect(LogicalOperation::Entities(id), Vec::new(), |_, _, _| {
+            Ok(Outputs::extend([Declare::named(
+                name,
+                LogicalType::Entity(id),
+            )]))
         })
     }
 
@@ -78,8 +96,9 @@ impl<'m> LogicalBuilder<'m> {
         self.connect(
             LogicalOperation::Filter(predicate),
             vec![rows],
-            |model, construction, _| {
-                check::predicate(model, construction, &checked)?;
+            |catalog, construction, _| {
+                super::limits::in_values(&checked)?;
+                filter::predicate(catalog.model(), construction, &checked)?;
                 Ok(Outputs::preserve())
             },
         )
@@ -91,7 +110,8 @@ impl<'m> LogicalBuilder<'m> {
         relationship: Declared<RelationshipId>,
         direction: Direction,
     ) -> Result<Rows<'m>, PlanError> {
-        self.follow_to(rows, relationship, direction, None)
+        let from = rows.endpoint()?;
+        self.traverse(rows, from, Step::new(direction).via([relationship]))
     }
 
     pub fn follow_to(
@@ -101,106 +121,13 @@ impl<'m> LogicalBuilder<'m> {
         direction: Direction,
         target: Option<Declared<EntityId>>,
     ) -> Result<Rows<'m>, PlanError> {
-        let model = self.catalog.model();
-        let (from, hops, to) = self.construction.attempt(|construction| {
-            let relationship = construction.declared(relationship)?;
-            let target = target
-                .map(|target| construction.declared(target))
-                .transpose()?;
-            let from = rows.endpoint()?;
-            let hops = model.connect(from.entity(), &[relationship], target, direction)?;
-            let reached: BTreeSet<EntityId> = hops.iter().map(|hop| hop.to).collect();
-            match Vec::from_iter(reached).as_slice() {
-                [to] => Ok((from, hops, *to)),
-                reached => Err(PlanError::Ambiguous {
-                    relationship: model.graph().relationship(relationship).name.clone(),
-                    endpoints: reached
-                        .iter()
-                        .map(|entity| model.graph().entity(*entity).name.clone())
-                        .collect(),
-                }),
-            }
-        })?;
-        let operation = LogicalOperation::Follow {
-            from: from.output(),
-            hops,
+        let from = rows.endpoint()?;
+        let step = Step::new(direction).via([relationship]);
+        let step = match target {
+            Some(target) => step.to(target),
+            None => step,
         };
-        self.connect(operation, vec![rows], |model, _, _| Ok(binding(model, to)))
-    }
-
-    pub fn aggregate(
-        &mut self,
-        rows: Rows<'m>,
-        groups: impl IntoIterator<Item = Named<Expr>>,
-        measures: impl IntoIterator<Item = Named<Measure>>,
-    ) -> Result<Rows<'m>, PlanError> {
-        let (groups, group_names): (Vec<_>, Vec<_>) = groups
-            .into_iter()
-            .map(|named| (named.item, named.name))
-            .unzip();
-        let (measures, measure_names): (Vec<_>, Vec<_>) = measures
-            .into_iter()
-            .map(|named| (named.item, named.name))
-            .unzip();
-        let operation = LogicalOperation::Aggregate {
-            groups: groups.clone(),
-            measures: measures.clone(),
-        };
-        self.connect(operation, vec![rows], |model, construction, _| {
-            let group_types = groups
-                .iter()
-                .map(|group| Ok(check::scalar(model, construction, *group)?.data_type));
-            let measure_types = measures
-                .iter()
-                .map(|measure| check::measure(model, construction, *measure));
-            declare(
-                group_names.into_iter().chain(measure_names),
-                group_types.chain(measure_types),
-            )
-        })
-    }
-
-    pub fn select(
-        &mut self,
-        rows: Rows<'m>,
-        items: impl IntoIterator<Item = Named<Expr>>,
-    ) -> Result<Rows<'m>, PlanError> {
-        let (exprs, names): (Vec<_>, Vec<_>) = items
-            .into_iter()
-            .map(|named| (named.item, named.name))
-            .unzip();
-        let operation = LogicalOperation::Select(exprs.clone());
-        self.connect(operation, vec![rows], |model, construction, _| {
-            let types = exprs
-                .iter()
-                .map(|expr| Ok(check::scalar(model, construction, *expr)?.data_type));
-            declare(names, types)
-        })
-    }
-
-    pub fn order(
-        &mut self,
-        rows: Rows<'m>,
-        keys: impl IntoIterator<Item = (Expr, Order)>,
-    ) -> Result<Rows<'m>, PlanError> {
-        let keys: Vec<_> = keys.into_iter().collect();
-        let checked: Vec<Expr> = keys.iter().map(|(key, _)| *key).collect();
-        self.connect(
-            LogicalOperation::Order(keys),
-            vec![rows],
-            |model, construction, _| {
-                for key in checked {
-                    check::scalar(model, construction, key)?;
-                }
-                Ok(Outputs::preserve())
-            },
-        )
-    }
-
-    pub fn limit(&mut self, rows: Rows<'m>, count: u64) -> Result<Rows<'m>, PlanError> {
-        self.connect(LogicalOperation::Limit(count), vec![rows], |_, _, _| {
-            Ok(Outputs::preserve())
-        })
+        self.traverse(rows, from, step)
     }
 
     pub fn share(
@@ -223,60 +150,7 @@ impl<'m> LogicalBuilder<'m> {
         Ok(self.construction.reconnect(from, to)?)
     }
 
-    pub fn union(&mut self, inputs: Vec<Rows<'m>>) -> Result<Rows<'m>, PlanError> {
-        self.connect(
-            LogicalOperation::Union,
-            inputs,
-            |_, construction, inputs| {
-                let signature = |rows: &Rows<'m>| {
-                    construction
-                        .outputs(rows.inner())?
-                        .into_iter()
-                        .map(|output| {
-                            let (name, value) = construction.value(output)?;
-                            Ok(Declare {
-                                name: name.map(str::to_string),
-                                value: *value,
-                            })
-                        })
-                        .collect::<Result<Vec<_>, PlanError>>()
-                };
-                let mut signatures = inputs.iter().map(signature);
-                let first = signatures.next().transpose()?.unwrap_or_default();
-                match signatures
-                    .find(|other| other.as_ref() != Ok(&first))
-                    .transpose()?
-                {
-                    Some(other) => Err(PlanError::Type {
-                        expr: "union".to_string(),
-                        expected: format!("{first:?}"),
-                        found: format!("{other:?}"),
-                    }),
-                    None => Ok(Outputs::replace(first.into_iter().map(Output::Declare))),
-                }
-            },
-        )
+    pub(super) fn bound(binding: Binding<'m>) -> Result<EntityId, PlanError> {
+        binding.entity().ok_or(PlanError::NoEntity)
     }
-}
-
-fn binding(model: &Model, entity: EntityId) -> Outputs<LogicalType> {
-    let name = &model.graph().entity(entity).name;
-    Outputs::extend([Declare::named(name, LogicalType::Entity(entity))])
-}
-
-fn declare(
-    names: impl IntoIterator<Item = String>,
-    types: impl Iterator<Item = Result<ontology::DataType, PlanError>>,
-) -> Result<Outputs<LogicalType>, PlanError> {
-    let outputs = names
-        .into_iter()
-        .zip(types)
-        .map(|(name, data_type)| {
-            Ok(Output::Declare(Declare::named(
-                name,
-                LogicalType::Scalar(data_type?),
-            )))
-        })
-        .collect::<Result<Vec<_>, PlanError>>()?;
-    Ok(Outputs::replace(outputs))
 }

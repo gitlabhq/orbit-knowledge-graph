@@ -1,13 +1,13 @@
 use ontology::DataType;
 
-use super::{Expr, Literal, Logical, LogicalType, Measure, PlanError, Predicate};
-use crate::plan::tracking::Construction;
+use super::{EdgeField, Expr, Logical, LogicalType, Measure, PlanError};
+use crate::plan::tracking::{Construction, Ref};
 use crate::{Model, Property};
 
 pub(super) struct Typed<'m> {
     pub(super) data_type: DataType,
-    property: Option<&'m Property>,
-    name: String,
+    pub(super) property: Option<&'m Property>,
+    pub(super) name: String,
 }
 
 pub(super) fn scalar<'m>(
@@ -16,18 +16,38 @@ pub(super) fn scalar<'m>(
     expr: Expr,
 ) -> Result<Typed<'m>, PlanError> {
     match expr {
-        Expr::Property { binding, property } => {
-            let property = model.graph().property(property);
-            let entity = &model.graph().entity(property.entity).name;
-            let name = format!("{entity}.{}", property.name);
-            match construction.value(binding)? {
-                (_, LogicalType::Entity(bound)) if *bound == property.entity => Ok(Typed {
-                    data_type: property.data_type,
-                    property: Some(property),
-                    name,
+        Expr::Property { binding, property } => property_of(model, construction, binding, property),
+        Expr::Truncate {
+            binding,
+            property,
+            unit,
+        } => {
+            let typed = property_of(model, construction, binding, property)?;
+            match typed.data_type {
+                DataType::Date | DataType::DateTime => Ok(typed),
+                found => Err(PlanError::Type {
+                    expr: format!("{} truncated to {unit:?}", typed.name),
+                    expected: "a Date or DateTime".to_string(),
+                    found: format!("{found:?}"),
                 }),
-                (_, found) => Err(mismatch(name, entity, *found)),
             }
+        }
+        Expr::Edge { binding, field } => match construction.value(binding)? {
+            (_, LogicalType::Edge) => Ok(Typed {
+                data_type: match field {
+                    EdgeField::Source | EdgeField::Target => DataType::Int,
+                    EdgeField::Kind | EdgeField::SourceKind | EdgeField::TargetKind => {
+                        DataType::String
+                    }
+                },
+                property: None,
+                name: format!("{field:?}"),
+            }),
+            (name, found) => Err(mismatch(name.unwrap_or("edge"), "a relationship", *found)),
+        },
+        Expr::Node(binding) => {
+            let (name, found) = construction.value(binding)?;
+            Err(mismatch(name.unwrap_or("node"), "a scalar", *found))
         }
         Expr::Output(output) => match construction.value(output)? {
             (name, LogicalType::Scalar(data_type)) => Ok(Typed {
@@ -40,7 +60,26 @@ pub(super) fn scalar<'m>(
     }
 }
 
-fn mismatch(expr: impl Into<String>, expected: &str, found: LogicalType) -> PlanError {
+fn property_of<'m>(
+    model: &'m Model,
+    construction: &Construction<Logical>,
+    binding: Ref,
+    property: crate::PropertyId,
+) -> Result<Typed<'m>, PlanError> {
+    let property = model.graph().property(property);
+    let entity = &model.graph().entity(property.entity).name;
+    let name = format!("{entity}.{}", property.name);
+    match construction.value(binding)? {
+        (_, LogicalType::Entity(bound)) if *bound == property.entity => Ok(Typed {
+            data_type: property.data_type,
+            property: Some(property),
+            name,
+        }),
+        (_, found) => Err(mismatch(name, entity, *found)),
+    }
+}
+
+pub(super) fn mismatch(expr: impl Into<String>, expected: &str, found: LogicalType) -> PlanError {
     PlanError::Type {
         expr: expr.into(),
         expected: expected.to_string(),
@@ -48,80 +87,19 @@ fn mismatch(expr: impl Into<String>, expected: &str, found: LogicalType) -> Plan
     }
 }
 
-pub(super) fn predicate(
+pub(super) fn group(
     model: &Model,
     construction: &Construction<Logical>,
-    predicate: &Predicate,
-) -> Result<(), PlanError> {
-    match predicate {
-        Predicate::And(all) => all
-            .iter()
-            .try_for_each(|predicate| self::predicate(model, construction, predicate)),
-        Predicate::Compare { left, right, .. } => {
-            let typed = filterable(model, construction, *left)?;
-            literal(&typed, right)
-        }
-        Predicate::Contains { left, .. } => {
-            let typed = filterable(model, construction, *left)?;
-            if typed.data_type != DataType::String {
-                return Err(PlanError::Type {
-                    expr: typed.name,
-                    expected: "String".to_string(),
-                    found: format!("{:?}", typed.data_type),
-                });
-            }
-            match typed.property {
-                Some(property) if !model.access().property(property.id).like => {
-                    Err(PlanError::NoSubstring(typed.name))
-                }
-                _ => Ok(()),
-            }
-        }
-    }
-}
-
-fn filterable<'m>(
-    model: &'m Model,
-    construction: &Construction<Logical>,
     expr: Expr,
-) -> Result<Typed<'m>, PlanError> {
-    let typed = scalar(model, construction, expr)?;
-    match typed.property {
-        Some(property) if !model.access().property(property.id).filterable => {
-            Err(PlanError::NotFilterable(typed.name))
-        }
-        _ => Ok(typed),
+) -> Result<LogicalType, PlanError> {
+    if let Expr::Node(binding) = expr {
+        return match construction.value(binding)? {
+            (_, kind @ LogicalType::Entity(_)) => Ok(*kind),
+            (name, found) => Err(mismatch(name.unwrap_or("node"), "an entity", *found)),
+        };
     }
-}
-
-fn literal(typed: &Typed<'_>, literal: &Literal) -> Result<(), PlanError> {
-    let allowed = typed
-        .property
-        .and_then(|property| property.enum_values.as_ref());
-    match (typed.data_type, literal) {
-        (DataType::Enum, Literal::String(value)) => match allowed {
-            Some(values) if !values.values().any(|allowed| allowed == value) => {
-                Err(PlanError::Value {
-                    property: typed.name.clone(),
-                    value: value.clone(),
-                    allowed: values.values().cloned().collect(),
-                })
-            }
-            _ => Ok(()),
-        },
-        (
-            DataType::String | DataType::Date | DataType::DateTime | DataType::Uuid,
-            Literal::String(_),
-        )
-        | (DataType::Int | DataType::Enum, Literal::Int(_))
-        | (DataType::Float, Literal::Float(_) | Literal::Int(_))
-        | (DataType::Bool, Literal::Bool(_)) => Ok(()),
-        (expected, found) => Err(PlanError::Type {
-            expr: typed.name.clone(),
-            expected: format!("{expected:?}"),
-            found: format!("{found:?}"),
-        }),
-    }
+    let typed = super::filter::filterable(model, construction, expr)?;
+    Ok(LogicalType::Scalar(typed.data_type))
 }
 
 pub(super) fn measure(
@@ -129,13 +107,31 @@ pub(super) fn measure(
     construction: &Construction<Logical>,
     mut measure: Measure,
 ) -> Result<DataType, PlanError> {
-    let Some(input) = measure.input() else {
+    let counts = matches!(measure, Measure::Count(_) | Measure::CountDistinct(_));
+    let Some(input) = measure.input().copied() else {
         return Ok(DataType::Int);
     };
-    let typed = scalar(model, construction, *input)?;
+    if counts {
+        if let Expr::Node(binding) = input {
+            group(model, construction, Expr::Node(binding))?;
+        } else {
+            scalar(model, construction, input)?;
+        }
+        return Ok(DataType::Int);
+    }
+    let typed = scalar(model, construction, input)?;
     match (measure, typed.data_type) {
-        (Measure::Sum(_), DataType::Int | DataType::Float)
-        | (Measure::Min(_) | Measure::Max(_), _) => Ok(typed.data_type),
+        (Measure::Sum(_), DataType::Int) => Ok(DataType::Int),
+        (Measure::Sum(_) | Measure::Avg(_), DataType::Int | DataType::Float) => Ok(DataType::Float),
+        (
+            Measure::Min(_) | Measure::Max(_),
+            DataType::Int | DataType::Float | DataType::Bool | DataType::Date | DataType::DateTime,
+        ) => Ok(typed.data_type),
+        (Measure::Min(_) | Measure::Max(_), found) => Err(PlanError::Type {
+            expr: typed.name,
+            expected: "an ordered scalar".to_string(),
+            found: format!("{found:?}"),
+        }),
         (_, found) => Err(PlanError::Type {
             expr: typed.name,
             expected: "a number".to_string(),

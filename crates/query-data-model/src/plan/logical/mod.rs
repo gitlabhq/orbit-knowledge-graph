@@ -1,18 +1,31 @@
 mod builder;
+mod catalog;
 mod check;
 mod error;
 mod expr;
+mod filter;
 mod handle;
+pub mod limits;
+mod measure;
+mod pattern;
+mod predicate;
+mod results;
+mod step;
+mod time;
 
 use ontology::DataType;
 
 pub use builder::LogicalBuilder;
-pub use error::PlanError;
-pub use expr::{Comparison, Expr, Literal, Measure, Order, Predicate, count};
+pub use catalog::LogicalCatalog;
+pub use error::{ErrorClass, PlanError};
+pub use expr::{EdgeField, Expr, Literal, Operand, TimeUnit};
 pub use handle::{Binding, Rows};
+pub use measure::{Columns, Measure, Order, Projection, count};
+pub use predicate::{Comparison, Matching, Predicate};
+pub use step::{Hops, Step};
 
-use crate::plan::tracking::{self, Body, Declared, Language, Plan, Ref};
-use crate::{EntityId, Hop, Model, RelationshipId};
+use crate::plan::tracking::{Body, Language, Plan, Ref};
+use crate::{Direction, EntityId, Hop, RelationshipId};
 
 #[derive(Debug)]
 pub struct Logical;
@@ -22,6 +35,9 @@ pub type LogicalPlan = Plan<Logical>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogicalType {
     Entity(EntityId),
+    Node,
+    Edge,
+    Path,
     Scalar(DataType),
 }
 
@@ -31,15 +47,32 @@ pub enum LogicalOperation {
     Filter(Predicate),
     Follow {
         from: Ref,
+        relationships: Vec<RelationshipId>,
+        direction: Direction,
+        range: Hops,
         hops: Vec<Hop>,
+    },
+    Neighbors {
+        from: Ref,
+        relationships: Vec<RelationshipId>,
+        direction: Direction,
+    },
+    Shortest {
+        from: Ref,
+        to: Ref,
+        relationships: Vec<RelationshipId>,
+        max_depth: u32,
     },
     Aggregate {
         groups: Vec<Expr>,
         measures: Vec<Measure>,
     },
-    Select(Vec<Expr>),
+    Select(Vec<Projection>),
     Order(Vec<(Expr, Order)>),
-    Limit(u64),
+    Limit {
+        rows: u64,
+        skip: u64,
+    },
     Union,
     Read(Body),
 }
@@ -51,7 +84,13 @@ impl Language for Logical {
     fn references(operation: &mut LogicalOperation, visit: &mut dyn FnMut(&mut Ref)) {
         match operation {
             LogicalOperation::Filter(predicate) => predicate.references(visit),
-            LogicalOperation::Follow { from, .. } => visit(from),
+            LogicalOperation::Follow { from, .. } | LogicalOperation::Neighbors { from, .. } => {
+                visit(from)
+            }
+            LogicalOperation::Shortest { from, to, .. } => {
+                visit(from);
+                visit(to);
+            }
             LogicalOperation::Aggregate { groups, measures } => {
                 let inputs = measures.iter_mut().filter_map(Measure::input);
                 groups
@@ -59,67 +98,16 @@ impl Language for Logical {
                     .chain(inputs)
                     .for_each(|expr| expr.references(visit));
             }
-            LogicalOperation::Select(exprs) => {
-                exprs.iter_mut().for_each(|expr| expr.references(visit))
+            LogicalOperation::Select(items) => {
+                items.iter_mut().for_each(|item| item.references(visit))
             }
             LogicalOperation::Order(keys) => {
                 keys.iter_mut().for_each(|(key, _)| key.references(visit))
             }
             LogicalOperation::Entities(_)
-            | LogicalOperation::Limit(_)
+            | LogicalOperation::Limit { .. }
             | LogicalOperation::Union
             | LogicalOperation::Read(_) => {}
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct LogicalCatalog<'m> {
-    model: &'m Model,
-}
-
-impl Model {
-    pub fn logical(&self) -> LogicalCatalog<'_> {
-        LogicalCatalog { model: self }
-    }
-}
-
-impl<'m> LogicalCatalog<'m> {
-    pub fn model(self) -> &'m Model {
-        self.model
-    }
-
-    pub fn entity(self, name: &str) -> Result<Declared<EntityId>, PlanError> {
-        Ok(Declared::new(self.model.id(), self.model.entity(name)?))
-    }
-
-    pub fn relationship(self, name: &str) -> Result<Declared<RelationshipId>, PlanError> {
-        Ok(Declared::new(
-            self.model.id(),
-            self.model.relationship(name)?,
-        ))
-    }
-
-    pub fn build(
-        self,
-        construct: impl FnOnce(&mut LogicalBuilder<'m>) -> Result<Rows<'m>, PlanError>,
-    ) -> Result<LogicalPlan, PlanError> {
-        let mut builder = LogicalBuilder::new(self, tracking::Construction::new(self.model.id()));
-        let root = construct(&mut builder).map(Rows::into_inner);
-        builder.finish(root)
-    }
-
-    pub fn rewrite(
-        self,
-        plan: LogicalPlan,
-        mut visit: impl FnMut(&mut LogicalBuilder<'m>, Rows<'m>) -> Result<Rows<'m>, PlanError>,
-    ) -> Result<LogicalPlan, PlanError> {
-        let construction = tracking::Construction::rewrite(plan, self.model.id())?;
-        let mut builder = LogicalBuilder::new(self, construction);
-        let root = tracking::rewrite(&mut builder, LogicalBuilder::construction, |q, rows| {
-            let rows = q.view(rows)?;
-            visit(q, rows).map(Rows::into_inner)
-        });
-        builder.finish(root)
     }
 }

@@ -7491,12 +7491,14 @@ dependencies = [
 name = "query-data-model"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "indexmap 2.14.2",
  "ontology",
  "orbit-utils",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "strum 0.28.0",
  "thiserror 2.0.18",
 ]
 

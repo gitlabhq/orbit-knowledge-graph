@@ -342,15 +342,23 @@ fn property_policy_and_types_are_checked_at_construction() {
     );
 
     let model = load(&["gitlab"]);
-    let catalog = model.logical();
-    let users = catalog.entity("User").unwrap();
-    let error = catalog.build(|q| {
-        let rows = q.entities(users)?;
-        let email = rows.property("email")?;
-        q.filter(rows, email.contains("@gitlab"))
-    });
+    let search = |catalog: query_data_model::plan::logical::LogicalCatalog<'_>| {
+        let users = catalog.entity("User").unwrap();
+        catalog
+            .build(|q| {
+                let rows = q.entities(users)?;
+                let email = rows.property("email")?;
+                q.filter(rows, email.contains("@gitlab"))
+            })
+            .unwrap_err()
+            .to_string()
+    };
     assert_eq!(
-        error.unwrap_err().to_string(),
+        search(model.logical()),
+        "User.email is available to administrators only"
+    );
+    assert_eq!(
+        search(model.logical().as_admin()),
         "User.email does not support substring matching"
     );
 }

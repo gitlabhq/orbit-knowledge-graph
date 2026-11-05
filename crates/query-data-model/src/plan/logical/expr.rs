@@ -1,10 +1,50 @@
+use super::{Comparison, Matching, Predicate};
 use crate::PropertyId;
 use crate::plan::tracking::{Named, Ref};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Expr {
-    Property { binding: Ref, property: PropertyId },
+    Property {
+        binding: Ref,
+        property: PropertyId,
+    },
+    Truncate {
+        binding: Ref,
+        property: PropertyId,
+        unit: TimeUnit,
+    },
+    Node(Ref),
+    Edge {
+        binding: Ref,
+        field: EdgeField,
+    },
     Output(Ref),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
+#[strum(serialize_all = "snake_case")]
+pub enum TimeUnit {
+    Minute,
+    Hour,
+    Day,
+    Week,
+    Month,
+    Quarter,
+    Year,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
+pub enum EdgeField {
+    #[strum(serialize = "relationship_kind")]
+    Kind,
+    #[strum(serialize = "source_id")]
+    Source,
+    #[strum(serialize = "source_kind")]
+    SourceKind,
+    #[strum(serialize = "target_id")]
+    Target,
+    #[strum(serialize = "target_kind")]
+    TargetKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -13,6 +53,7 @@ pub enum Literal {
     Int(i64),
     Float(f64),
     Bool(bool),
+    Temporal(String),
 }
 
 impl From<&str> for Literal {
@@ -39,91 +80,32 @@ impl From<bool> for Literal {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Comparison {
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-}
-
 #[derive(Debug, Clone, PartialEq)]
-pub enum Predicate {
-    Compare {
-        left: Expr,
-        comparison: Comparison,
-        right: Literal,
-    },
-    Contains {
-        left: Expr,
-        needle: String,
-    },
-    And(Vec<Predicate>),
+pub enum Operand {
+    Literal(Literal),
+    Expr(Expr),
 }
 
-impl Predicate {
-    pub(super) fn references(&mut self, visit: &mut dyn FnMut(&mut Ref)) {
-        match self {
-            Self::Compare { left, .. } | Self::Contains { left, .. } => left.references(visit),
-            Self::And(all) => all
-                .iter_mut()
-                .for_each(|predicate| predicate.references(visit)),
-        }
-    }
-
-    #[must_use]
-    pub fn and(self, other: Predicate) -> Predicate {
-        match self {
-            Self::And(mut all) => {
-                all.push(other);
-                Self::And(all)
-            }
-            first => Self::And(vec![first, other]),
-        }
+impl<T: Into<Literal>> From<T> for Operand {
+    fn from(value: T) -> Self {
+        Self::Literal(value.into())
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Measure {
-    Count,
-    Sum(Expr),
-    Min(Expr),
-    Max(Expr),
-}
-
-pub fn count() -> Measure {
-    Measure::Count
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Order {
-    Ascending,
-    Descending,
-}
-
-impl Measure {
-    pub(super) fn input(&mut self) -> Option<&mut Expr> {
-        match self {
-            Self::Count => None,
-            Self::Sum(expr) | Self::Min(expr) | Self::Max(expr) => Some(expr),
-        }
-    }
-
-    pub fn named(self, name: impl Into<String>) -> Named<Self> {
-        Named {
-            item: self,
-            name: name.into(),
-        }
+impl From<Expr> for Operand {
+    fn from(value: Expr) -> Self {
+        Self::Expr(value)
     }
 }
 
 impl Expr {
     pub(super) fn references(&mut self, visit: &mut dyn FnMut(&mut Ref)) {
         match self {
-            Self::Property { binding, .. } => visit(binding),
-            Self::Output(output) => visit(output),
+            Self::Property { binding, .. }
+            | Self::Truncate { binding, .. }
+            | Self::Edge { binding, .. }
+            | Self::Node(binding)
+            | Self::Output(binding) => visit(binding),
         }
     }
 
@@ -134,23 +116,23 @@ impl Expr {
         }
     }
 
-    pub fn eq(self, right: impl Into<Literal>) -> Predicate {
+    pub fn eq(self, right: impl Into<Operand>) -> Predicate {
         self.compare(Comparison::Eq, right)
     }
 
-    pub fn ne(self, right: impl Into<Literal>) -> Predicate {
+    pub fn ne(self, right: impl Into<Operand>) -> Predicate {
         self.compare(Comparison::Ne, right)
     }
 
-    pub fn gt(self, right: impl Into<Literal>) -> Predicate {
+    pub fn gt(self, right: impl Into<Operand>) -> Predicate {
         self.compare(Comparison::Gt, right)
     }
 
-    pub fn lt(self, right: impl Into<Literal>) -> Predicate {
+    pub fn lt(self, right: impl Into<Operand>) -> Predicate {
         self.compare(Comparison::Lt, right)
     }
 
-    pub fn compare(self, comparison: Comparison, right: impl Into<Literal>) -> Predicate {
+    pub fn compare(self, comparison: Comparison, right: impl Into<Operand>) -> Predicate {
         Predicate::Compare {
             left: self,
             comparison,
@@ -158,10 +140,26 @@ impl Expr {
         }
     }
 
-    pub fn contains(self, needle: impl Into<String>) -> Predicate {
-        Predicate::Contains {
+    pub fn one_of(self, values: impl IntoIterator<Item = Literal>) -> Predicate {
+        Predicate::In {
             left: self,
+            values: values.into_iter().collect(),
+        }
+    }
+
+    pub fn contains(self, needle: impl Into<String>) -> Predicate {
+        self.matches(Matching::Contains, needle)
+    }
+
+    pub fn matches(self, matching: Matching, needle: impl Into<String>) -> Predicate {
+        Predicate::Text {
+            left: self,
+            matching,
             needle: needle.into(),
         }
+    }
+
+    pub fn is_null(self, null: bool) -> Predicate {
+        Predicate::Null { left: self, null }
     }
 }
