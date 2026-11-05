@@ -44,10 +44,19 @@ pub struct ObservabilityConfig {
 /// The host map carries every tenant's ClickHouse password, so plain HTTP is
 /// only accepted for a loopback provisioner.
 fn transport_is_protected(url: &str) -> bool {
-    url.starts_with("https://")
-        || url.starts_with("http://127.0.0.1")
-        || url.starts_with("http://localhost")
-        || url.starts_with("http://[::1]")
+    if url.starts_with("https://") {
+        return true;
+    }
+
+    let Some(authority) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = authority.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority
+        .rsplit_once(':')
+        .map_or(authority, |(host, _port)| host);
+
+    matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1")
 }
 
 impl ObservabilityConfig {
@@ -144,10 +153,26 @@ mod tests {
             "http://127.0.0.1:3000",
             "http://localhost:3000",
             "http://[::1]:3000",
+            "http://localhost",
+            "http://127.0.0.1/api",
         ] {
             let mut config = complete();
             config.provisioner_url = Some(url.to_string());
             assert!(config.resolver_settings().is_some(), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_host_that_merely_starts_with_a_loopback_name_is_rejected() {
+        for url in [
+            "http://localhost.example.com",
+            "http://127.0.0.1.example.com",
+            "http://localhost.evil.test:3000",
+            "http://[::1].example.com",
+        ] {
+            let mut config = complete();
+            config.provisioner_url = Some(url.to_string());
+            assert!(config.resolver_settings().is_none(), "{url}");
         }
     }
 
