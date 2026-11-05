@@ -23,6 +23,7 @@ pub const SERVICE_NAME: &str = "observability";
 pub struct ObservabilityService {
     host_map: TenantHostMap,
     pool: TenantClientPool,
+    query_timeout: Duration,
 }
 
 impl ObservabilityService {
@@ -42,6 +43,7 @@ impl ObservabilityService {
                 Duration::from_secs(settings.host_map_retry_after_seconds),
             ),
             pool: TenantClientPool::new(),
+            query_timeout: Duration::from_secs(settings.query_timeout_seconds),
         })
     }
 
@@ -50,12 +52,15 @@ impl ObservabilityService {
             .get("traversal_path")
             .and_then(|value| value.coerce::<String>())?;
 
-        self.host_map.route_for(&traversal_path).await
+        self.host_map
+            .route_for(&orbit_utils::traversal_path::TraversalPath::new_unchecked(
+                traversal_path,
+            ))
+            .await
     }
 
     async fn evict_departed_tenants(&self) {
-        self.pool
-            .retain_databases(&self.host_map.live_databases().await);
+        self.pool.retain_routes(&self.host_map.live_routes().await);
     }
 }
 
@@ -108,14 +113,24 @@ impl ColumnResolver for ObservabilityService {
         }
 
         let futures = batches.iter().map(|(database, (route, keys))| async move {
-            let values = match traces::fetch(&self.pool, route, trace_lookup, keys).await {
-                Ok(values) => values,
-                Err(e) => {
+            let fetch = traces::fetch(&self.pool, route, trace_lookup, keys);
+
+            let values = match tokio::time::timeout(self.query_timeout, fetch).await {
+                Ok(Ok(values)) => values,
+                Ok(Err(e)) => {
                     warn!(
                         safe(ERROR_TYPE) = "observability_lookup",
                         safe(QUERY_NAME) = lookup,
                         expanded(ERROR_MESSAGE) = %e,
                         "observability lookup failed, resolving to null for this tenant"
+                    );
+                    HashMap::new()
+                }
+                Err(_) => {
+                    warn!(
+                        safe(ERROR_TYPE) = "observability_timeout",
+                        safe(QUERY_NAME) = lookup,
+                        "observability lookup timed out, resolving to null for this tenant"
                     );
                     HashMap::new()
                 }
@@ -152,5 +167,25 @@ pub fn build(settings: &ObservabilityResolverSettings) -> Option<Arc<Observabili
             );
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    /// A tenant whose server never answers must not hold the batch open for
+    /// longer than the configured query timeout.
+    #[tokio::test(start_paused = true)]
+    async fn a_stalled_tenant_is_cut_off_at_the_query_timeout() {
+        let query_timeout = Duration::from_secs(15);
+        let never_answers = async {
+            tokio::time::sleep(Duration::from_secs(600)).await;
+            Ok::<(), ()>(())
+        };
+
+        let outcome = tokio::time::timeout(query_timeout, never_answers).await;
+
+        assert!(outcome.is_err(), "the batch would stall on this tenant");
     }
 }
