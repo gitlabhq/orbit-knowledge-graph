@@ -1,13 +1,13 @@
-//! Arrow result decoding shared by the observability lookups.
-
 use std::collections::HashMap;
 
-use arrow::array::{Array, StringArray};
+use arrow::array::{Array, FixedSizeBinaryArray, LargeStringArray, StringArray};
 use arrow::record_batch::RecordBatch;
 
-/// Reads a two-column `(key, value)` result into a map. Both columns are
-/// projected as `String` by the lookup queries so one decoder serves all of
-/// them; typed conversion happens per lookup.
+/// Reads a two-column `(key, value)` result into a map.
+///
+/// ClickHouse does not render every text column as Arrow `Utf8`: a
+/// `FixedString(32)` such as `trace_id` arrives as `FixedSizeBinary`, which a
+/// plain `StringArray` downcast silently misses and turns into an empty result.
 pub fn two_string_columns(batches: &[RecordBatch]) -> HashMap<String, String> {
     let mut rows = HashMap::new();
 
@@ -16,25 +16,35 @@ pub fn two_string_columns(batches: &[RecordBatch]) -> HashMap<String, String> {
             continue;
         }
 
-        let (Some(keys), Some(values)) = (
-            batch.column(0).as_any().downcast_ref::<StringArray>(),
-            batch.column(1).as_any().downcast_ref::<StringArray>(),
-        ) else {
-            continue;
-        };
-
         for index in 0..batch.num_rows() {
-            if keys.is_null(index) || values.is_null(index) {
+            let (Some(key), Some(value)) = (text_at(batch, 0, index), text_at(batch, 1, index))
+            else {
                 continue;
-            }
-            rows.insert(
-                keys.value(index).to_string(),
-                values.value(index).to_string(),
-            );
+            };
+            rows.insert(key, value);
         }
     }
 
     rows
+}
+
+fn text_at(batch: &RecordBatch, column: usize, index: usize) -> Option<String> {
+    let column = batch.column(column);
+    if column.is_null(index) {
+        return None;
+    }
+
+    if let Some(values) = column.as_any().downcast_ref::<StringArray>() {
+        return Some(values.value(index).to_string());
+    }
+    if let Some(values) = column.as_any().downcast_ref::<LargeStringArray>() {
+        return Some(values.value(index).to_string());
+    }
+    if let Some(values) = column.as_any().downcast_ref::<FixedSizeBinaryArray>() {
+        return String::from_utf8(values.value(index).to_vec()).ok();
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -94,5 +104,27 @@ mod tests {
     #[test]
     fn no_batches_yield_no_rows() {
         assert!(two_string_columns(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_fixed_size_binary_value_is_read_as_text() {
+        let schema = Schema::new(vec![
+            Field::new("entity_id", DataType::Utf8, true),
+            Field::new("value", DataType::FixedSizeBinary(4), true),
+        ]);
+        let trace_ids =
+            FixedSizeBinaryArray::try_from_iter(vec![b"abcd".to_vec()].into_iter()).expect("array");
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![
+                Arc::new(StringArray::from(vec![Some("1")])),
+                Arc::new(trace_ids),
+            ],
+        )
+        .expect("batch");
+
+        let rows = two_string_columns(&[batch]);
+
+        assert_eq!(rows.get("1"), Some(&"abcd".to_string()));
     }
 }
