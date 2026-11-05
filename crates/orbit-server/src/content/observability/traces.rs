@@ -53,12 +53,12 @@ impl TraceLookup {
 
     fn projection(self) -> &'static str {
         match self {
-            Self::PipelineTraceId => "any(trace_id) AS value",
+            Self::PipelineTraceId => "toString(any(trace_id)) AS value",
             Self::JobSpanId => "any(span_id) AS value",
             Self::PipelineTraceDuration | Self::JobSpanDuration => {
                 "toString(max(duration_nano)) AS value"
             }
-            Self::PipelineTraceErrorCount => "toString(countIf(has_error)) AS value",
+            Self::PipelineTraceErrorCount => "toString(uniqExactIf(span_id, has_error)) AS value",
         }
     }
 
@@ -134,6 +134,10 @@ fn parse_epoch_seconds(text: &str) -> Option<i64> {
 }
 
 pub fn build_sql(lookup: TraceLookup) -> String {
+    if lookup == TraceLookup::PipelineTraceErrorCount {
+        return build_error_count_sql();
+    }
+
     format!(
         "SELECT attributes_string[{{attribute:String}}] AS entity_id, {projection} \
          FROM signoz_index_v3 \
@@ -144,6 +148,30 @@ pub fn build_sql(lookup: TraceLookup) -> String {
          GROUP BY entity_id",
         projection = lookup.projection()
     )
+}
+
+/// Only the pipeline span carries the pipeline id, so counting on that
+/// attribute alone misses every failing job. Resolves the trace first, then
+/// counts erroring spans across it, deduplicated by span id so a re-export
+/// does not count twice.
+fn build_error_count_sql() -> String {
+    "WITH traces AS ( \
+       SELECT attributes_string[{attribute:String}] AS entity_id, trace_id \
+       FROM signoz_index_v3 \
+       WHERE ts_bucket_start BETWEEN {from_bucket:UInt64} AND {to_bucket:UInt64} \
+       AND timestamp BETWEEN fromUnixTimestamp({from_unix:UInt64}) \
+       AND fromUnixTimestamp({to_unix:UInt64}) \
+       AND attributes_string[{attribute:String}] IN {ids:Array(String)} \
+       GROUP BY entity_id, trace_id \
+     ) \
+     SELECT t.entity_id AS entity_id, toString(uniqExactIf(s.span_id, s.has_error)) AS value \
+     FROM traces AS t \
+     INNER JOIN signoz_index_v3 AS s ON s.trace_id = t.trace_id \
+     WHERE s.ts_bucket_start BETWEEN {from_bucket:UInt64} AND {to_bucket:UInt64} \
+     AND s.timestamp BETWEEN fromUnixTimestamp({from_unix:UInt64}) \
+     AND fromUnixTimestamp({to_unix:UInt64}) \
+     GROUP BY entity_id"
+        .to_string()
 }
 
 /// The index table buckets by half hour, so the bucket bounds are rounded out
@@ -246,6 +274,40 @@ mod tests {
         assert!(sql.contains("{ids:Array(String)}"));
         assert!(sql.contains("{attribute:String}"));
         assert!(!sql.contains("cicd.pipeline.run.id"));
+    }
+
+    #[test]
+    fn the_error_count_spans_the_whole_trace_and_deduplicates() {
+        let sql = build_sql(TraceLookup::PipelineTraceErrorCount);
+
+        assert!(
+            sql.contains("s.trace_id = t.trace_id"),
+            "only the pipeline span carries the pipeline id, so a job failure \
+             is only visible by joining the trace: {sql}"
+        );
+        assert!(
+            sql.contains("uniqExactIf(s.span_id, s.has_error)"),
+            "a re-exported span must not count twice: {sql}"
+        );
+    }
+
+    #[test]
+    fn the_error_count_is_still_bounded_in_time_on_both_sides_of_the_join() {
+        let sql = build_sql(TraceLookup::PipelineTraceErrorCount);
+
+        assert_eq!(
+            sql.matches("ts_bucket_start BETWEEN").count(),
+            2,
+            "an unbounded join side scans the whole retention: {sql}"
+        );
+    }
+
+    #[test]
+    fn the_trace_id_projection_is_rendered_as_text() {
+        assert!(
+            build_sql(TraceLookup::PipelineTraceId).contains("toString(any(trace_id))"),
+            "trace_id is FixedString(32); projecting it raw relies on binary decoding"
+        );
     }
 
     #[test]
