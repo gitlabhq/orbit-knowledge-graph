@@ -27,7 +27,7 @@ fn compile(
     )
     .unwrap()
     .with_role(true, Some(AccessLevel::Owner as u32));
-    compiler::compile(&rendered, frontend, &ONTOLOGY, &security)
+    crate::compiler::parity::compile(&rendered, frontend, &ONTOLOGY, &security)
         .unwrap_or_else(|error| panic!("{} ({language:?}): {error}\n{rendered}", query.name))
 }
 

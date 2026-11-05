@@ -10,7 +10,7 @@ publish = false
 
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
-compiler = { path = "../query-engine/compiler" }
+compiler = { path = "../query-engine/compiler", features = ["parity"] }
 orbit-analytics = { path = "../orbit-analytics" }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }

@@ -63,9 +63,9 @@ pub fn compile_pair(
     ontology: &Arc<Ontology>,
     context: &SecurityContext,
 ) -> compiler::Result<compiler::CompiledQueryContext> {
-    let json_result = compiler::compile(json, compiler::Frontend::JsonDsl, ontology, context);
+    let json_result = super::parity::compile(json, compiler::Frontend::JsonDsl, ontology, context);
     let orbit_query_result =
-        compiler::compile(orbit_query, compiler::Frontend::Gql, ontology, context);
+        super::parity::compile(orbit_query, compiler::Frontend::Gql, ontology, context);
     match (json_result, orbit_query_result) {
         (Ok(json), Ok(orbit_query_result)) => {
             assert_eq!(

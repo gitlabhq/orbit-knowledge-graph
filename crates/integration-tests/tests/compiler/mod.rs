@@ -1,5 +1,6 @@
 mod dialects;
 mod ontology;
+mod parity;
 mod plan_shape;
 mod predicate_limits;
 mod setup;

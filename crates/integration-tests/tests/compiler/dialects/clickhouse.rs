@@ -1,8 +1,9 @@
+use crate::compiler::parity::compile;
 use crate::compiler::setup::{compile_pair, test_ctx, test_ontology};
 use crate::compiler::utils::has_param_value;
 use compiler::gql::{PreparedStatement, prepare};
 use compiler::input::DynamicColumnMode;
-use compiler::{Frontend, QueryError, compile};
+use compiler::{Frontend, QueryError};
 use ontology::introspection::{
     IntrospectionScope::{All, Local},
     build_compact_schema_response,
@@ -1467,7 +1468,7 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User {username: '\\uD800'}) RETURN u",
     ];
     for query in queries {
-        let error = compiler::compile(
+        let error = crate::compiler::parity::compile(
             query,
             compiler::Frontend::Gql,
             &test_ontology(),
@@ -1547,7 +1548,7 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
     }
     let query = "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u";
     assert!(
-        compiler::compile(
+        crate::compiler::parity::compile(
             query,
             compiler::Frontend::Gql,
             &test_ontology(),
@@ -1640,7 +1641,7 @@ fn native_conditions_need_a_column() {
         }],
     );
     for input in [empty_group, empty_property] {
-        let error = compiler::compile_input(
+        let error = crate::compiler::parity::compile_input(
             input,
             Default::default(),
             &crate::compiler::setup::embedded_ontology(),

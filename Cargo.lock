@@ -4466,6 +4466,7 @@ dependencies = [
  "arrow 60.1.0",
  "async-trait",
  "clickhouse-client",
+ "compiler",
  "duckdb-client",
  "futures",
  "gitalisk-core",

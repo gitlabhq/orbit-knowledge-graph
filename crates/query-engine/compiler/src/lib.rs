@@ -41,6 +41,8 @@ pub mod data_model;
 pub mod error;
 pub mod input;
 pub mod metrics;
+#[cfg(any(test, feature = "parity"))]
+pub mod parity;
 pub(crate) mod query_limits;
 
 pub mod tp_bounds;
@@ -118,7 +120,7 @@ pub fn compile_model(
     data_model: &Arc<query_data_model::ClickHouseDataModel>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    match fe {
+    let compiled = match fe {
         Frontend::JsonDsl => {
             let mut ctx = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
             ctx.set_raw(raw.to_string());
@@ -129,7 +131,12 @@ pub fn compile_model(
             ctx.set_raw(raw.to_string());
             finish(&mut ctx, config::run_clickhouse_gql)
         }
-    }
+    };
+    #[cfg(test)]
+    parity::assert_matches(&compiled, |compiled| {
+        parity::check_clickhouse(compiled, data_model)
+    });
+    compiled
 }
 
 /// Compile a graph query into DuckDB SQL for local execution.
@@ -147,7 +154,7 @@ pub fn compile_local(
     let ontology = Arc::new(ontology);
     let data_model = data_model::duckdb(Arc::clone(&ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    match fe {
+    let compiled = match fe {
         Frontend::JsonDsl => {
             let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&data_model));
             c.set_raw(raw.to_string());
@@ -158,7 +165,12 @@ pub fn compile_local(
             c.set_raw(raw.to_string());
             finish(&mut c, config::run_duckdb_gql)
         }
-    }
+    };
+    #[cfg(test)]
+    parity::assert_matches(&compiled, |compiled| {
+        parity::check_duckdb(compiled, &data_model)
+    });
+    compiled
 }
 
 /// Run only `validate` + `normalize`, returning the normalized [`Input`].
@@ -217,13 +229,18 @@ pub fn compile_input_model(
     let mut ctx = config::ChHydrationCtx::new(ctx.clone(), Arc::clone(data_model));
     ctx.set_input(input);
     ctx.set_hydration_options(options);
-    config::run_ch_hydration(&mut ctx)
+    let compiled = config::run_ch_hydration(&mut ctx)
         .and_then(|()| {
             ctx.take_output().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
             })
         })
-        .count_err()
+        .count_err();
+    #[cfg(test)]
+    parity::assert_matches(&compiled, |compiled| {
+        parity::check_clickhouse(compiled, data_model)
+    });
+    compiled
 }
 
 #[cfg(test)]

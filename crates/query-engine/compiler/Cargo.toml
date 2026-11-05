@@ -3,6 +3,9 @@ name = "compiler"
 version.workspace = true
 edition = "2024"
 
+[features]
+parity = []
+
 [dependencies]
 chrono = { workspace = true }
 orbit-observability = { workspace = true }
