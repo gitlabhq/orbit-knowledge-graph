@@ -5,6 +5,7 @@ pub mod from_ontology;
 pub mod generic;
 pub mod implementations;
 pub mod models;
+pub mod plan;
 pub mod query_model;
 pub mod spec;
 

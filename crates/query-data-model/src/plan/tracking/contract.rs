@@ -1,0 +1,70 @@
+use super::{OutputId, Ref};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Declare<V> {
+    pub name: Option<String>,
+    pub value: V,
+}
+
+impl<V> Declare<V> {
+    pub fn named(name: impl Into<String>, value: V) -> Self {
+        Self {
+            name: Some(name.into()),
+            value,
+        }
+    }
+
+    pub fn anonymous(value: V) -> Self {
+        Self { name: None, value }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Output<V> {
+    Keep(Ref),
+    Declare(Declare<V>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Outputs<V> {
+    Preserve(Vec<Declare<V>>),
+    Replace(Vec<Output<V>>),
+}
+
+impl<V> Outputs<V> {
+    pub fn preserve() -> Self {
+        Self::Preserve(Vec::new())
+    }
+
+    pub fn extend(declared: impl IntoIterator<Item = Declare<V>>) -> Self {
+        Self::Preserve(declared.into_iter().collect())
+    }
+
+    pub fn replace(outputs: impl IntoIterator<Item = Output<V>>) -> Self {
+        Self::Replace(outputs.into_iter().collect())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Item {
+    Keep(OutputId),
+    Own(OutputId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Spec {
+    Preserve(Vec<OutputId>),
+    Replace(Vec<Item>),
+}
+
+impl Spec {
+    pub(super) fn remap(&mut self, map: impl Fn(OutputId) -> OutputId) {
+        if let Self::Replace(items) = self {
+            for item in items {
+                if let Item::Keep(id) = item {
+                    *id = map(*id);
+                }
+            }
+        }
+    }
+}
