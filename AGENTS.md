@@ -26,6 +26,8 @@ Commits title and keep it there through review.
 When ready for CI, remove `[skip ci]` from the title, then start a pipeline.
 Editing the title alone starts no pipeline.
 
+When the MR is ready to be reviewed, add the `~workflow::ready for review` label. This is not the same as marking the MR ready.
+
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
 ```shell
