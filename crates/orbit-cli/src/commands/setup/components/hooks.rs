@@ -3,15 +3,13 @@ use std::collections::BTreeSet;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
+use super::json;
 use super::{
     Installer, Report, backup_once, file_mentions, remove_file_and_empty_parents,
     write_unless_unchanged,
 };
-use super::{codex_trust, json};
 use crate::commands::setup::Target;
-use crate::commands::setup::spec::{
-    self, Agent, HookTrust, JsonMerge, Registration, ScopedPath, TemplateFile,
-};
+use crate::commands::setup::spec::{self, Agent, Registration, ScopedPath, TemplateFile};
 
 pub(super) struct Hooks;
 
@@ -75,7 +73,9 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
             .with_context(|| format!("failed to update {}", path.display()))?;
         let installed = json::render(&root)?;
         write_unless_unchanged(&path, &label, &installed, "orbit entries installed", report)?;
-        trust(merge, &entries, &path, &label, target, report);
+        if let Some(note) = &merge.review_note {
+            report.note(&label, format!("WARNING: {note}"));
+        }
     }
 
     install_files(
@@ -85,36 +85,6 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
         report,
     )?;
     remove_retired(agent, false, target, report)
-}
-
-fn trust(
-    merge: &JsonMerge,
-    entries: &[Value],
-    path: &std::path::Path,
-    label: &str,
-    target: &Target,
-    report: &mut Report,
-) {
-    let Some(HookTrust::Codex) = merge.trust else {
-        return;
-    };
-    let cwd = match target {
-        Target::Project(root) => root.clone(),
-        Target::Global(machine) => machine.home().to_path_buf(),
-    };
-    let commands: Vec<String> = entries
-        .iter()
-        .flat_map(|entry| entry["hooks"].as_array().into_iter().flatten())
-        .filter_map(|hook| hook["command"].as_str().map(str::to_string))
-        .collect();
-    match codex_trust::trust_hooks(&cwd, path, &commands) {
-        Ok(None | Some(0)) => {}
-        Ok(Some(_)) => report.note(label, "orbit hook trusted"),
-        Err(error) => report.note(
-            label,
-            format!("WARNING: Codex skips the Orbit hook; {error}"),
-        ),
-    }
 }
 
 fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Result<()> {

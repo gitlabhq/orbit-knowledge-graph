@@ -149,43 +149,19 @@ pub(crate) async fn install(
     for warning in missing_instructions(&selection, &report) {
         tui::warning(warning);
     }
-    if !selection.components.contains(&Component::Instructions) {
-        for file in components::files_with_old_block(&selection.agents, &target) {
-            tui::warning(format!(
-                "{file} still has the instruction block of an earlier release; the agent \
-                 also loads the current instructions, so remove the block or rerun without \
-                 --skip instructions"
-            ));
-        }
-    }
     tui::card(
         "Configured",
         summary::format_configured_per_agent(&plan, &report),
     )?;
-    let loads_instructions = selection.agents.iter().any(|agent| {
-        selection
-            .components
-            .contains(&agent.instructions_component())
-    });
-    if loads_instructions && !spec::reaches_gitlab() {
-        let rerun = selection.components.contains(&Component::Hooks)
-            && selection.agents.iter().any(|agent| {
-                agent
-                    .json_merges
-                    .iter()
-                    .any(|merge| merge.path == ["hooks", "PreToolUse"])
-            });
-        let mut body =
-            "Not signed in, so agent instructions cover local code only. Run `glab auth \
-                        login`; new sessions then add GitLab search."
-                .to_string();
-        if rerun {
-            body.push_str(&format!(
-                " Run `{} setup` again so the search reminder points at GitLab too.",
+    if !spec::reaches_gitlab() {
+        tui::card(
+            "GitLab",
+            format!(
+                "Not signed in, so agent instructions cover local code only. Run `glab auth \
+                 login`, then `{} setup` again to add GitLab search.",
                 spec::launcher()
-            ));
-        }
-        tui::card("GitLab", body)?;
+            ),
+        )?;
     }
 
     let index_outcome = match index_repo::repository_root(&target) {
@@ -405,7 +381,7 @@ impl Component {
 
     fn label(self) -> &'static str {
         match self {
-            Component::Instructions => "old instruction block",
+            Component::Instructions => "instructions",
             Component::Hooks => "hooks",
             Component::Skill => "skill",
             Component::AgentPlugins => "agent plugins",

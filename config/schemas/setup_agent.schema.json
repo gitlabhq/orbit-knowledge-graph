@@ -180,10 +180,9 @@
           "minItems": 1,
           "description": "Entries orbit owns at path. `{{orbit}}` in any nested string resolves to the launcher command."
         },
-        "trust": {
+        "review_note": {
           "type": "string",
-          "enum": ["codex"],
-          "description": "Mark the written hooks trusted so the assistant runs them without review. `codex` records the trust through `codex app-server`."
+          "description": "Shown after install when the assistant runs a new hook only after the person reviews it."
         }
       }
     },

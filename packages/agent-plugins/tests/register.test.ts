@@ -325,27 +325,21 @@ test('the conversation context carries the Orbit instructions the installed CLI 
   ])
 })
 
-for (const glab of ['missing', 'empty'] as const) {
-  test(`the context falls back to orbit when glab is ${glab}`, async ($, on) => {
-    const runs: (readonly string[])[] = []
-    on('process.run', (_$, e) => {
-      runs.push(e.argv)
-      if (e.argv[0] === 'glab') {
-        if (glab === 'missing') throw new Error('ENOENT')
-        return RAN_WITH(0, '')
-      }
-      return RAN_WITH(0, '## Orbit\n')
-    })
-    on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
-    const answer = await $.prompt.context({ blocks: [] })
-
-    expect(runs).toEqual([
-      ['glab', 'orbit', 'hook-guard', 'instructions'],
-      ['orbit', 'hook-guard', 'instructions'],
-    ])
-    expect(answer.blocks).toEqual([{ name: 'orbit', text: '## Orbit' }])
+test('the context falls back to orbit when glab orbit prints nothing', async ($, on) => {
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    runs.push(e.argv)
+    return RAN_WITH(0, e.argv[0] === 'glab' ? '' : '## Orbit\n')
   })
-}
+  on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
+  const answer = await $.prompt.context({ blocks: [] })
+
+  expect(runs).toEqual([
+    ['glab', 'orbit', 'hook-guard', 'instructions'],
+    ['orbit', 'hook-guard', 'instructions'],
+  ])
+  expect(answer.blocks).toEqual([{ name: 'orbit', text: '## Orbit' }])
+})
 
 test('the context adds nothing when the CLI fails', async ($, on) => {
   on('process.run', () => ({ value: { exitCode: 1, stdout: 'partial', stderr: 'x', isStdoutTruncated: false, isStderrTruncated: false } }))

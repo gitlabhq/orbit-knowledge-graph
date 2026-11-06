@@ -221,15 +221,7 @@ pub(super) struct JsonMerge {
     pub(super) marker: String,
     pub(super) entries: Vec<Value>,
     #[serde(default)]
-    pub(super) trust: Option<HookTrust>,
-}
-
-/// How the assistant records that the person accepted a hook, so setup can do it for the hooks
-/// it writes: `codex` asks `codex app-server` to trust them.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub(super) enum HookTrust {
-    Codex,
+    pub(super) review_note: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

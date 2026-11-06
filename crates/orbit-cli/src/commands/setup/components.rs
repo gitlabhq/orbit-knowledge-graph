@@ -1,5 +1,4 @@
 pub(super) mod agent_plugins;
-mod codex_trust;
 mod hooks;
 mod instructions;
 pub(super) mod json;
@@ -41,18 +40,6 @@ pub(super) fn installed_agents(components: &BTreeSet<Component>, target: &Target
 
 fn file_mentions(path: &Path, marker: &str) -> bool {
     std::fs::read_to_string(path).is_ok_and(|text| text.contains(marker))
-}
-
-pub(super) fn files_with_old_block(agents: &[Agent], target: &Target) -> Vec<String> {
-    let mut files: Vec<String> = Vec::new();
-    for agent in agents {
-        for label in instructions::files_with_block(*agent, target) {
-            if !files.contains(&label) {
-                files.push(label);
-            }
-        }
-    }
-    files
 }
 
 pub(super) fn installer_for(component: Component) -> &'static dyn Installer {
