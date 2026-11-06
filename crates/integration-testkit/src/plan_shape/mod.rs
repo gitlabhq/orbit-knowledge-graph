@@ -1,3 +1,4 @@
+mod emitted;
 mod explain;
 mod operator;
 mod pattern;
@@ -9,8 +10,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use compiler::input::Input;
+use compiler::passes::codegen::RelationalModel;
 use compiler::passes::{frontend, lower, normalize, page, plan, response_policy};
-use query_data_model::{ClickHouseDataModel, DuckDbDataModel, Model, OrbitQueryModel};
+use query_data_model::{ClickHouseDataModel, DuckDbDataModel, Model};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -227,13 +229,12 @@ impl Assertions {
     }
 }
 
-fn check<M: OrbitQueryModel>(
+fn check<M: RelationalModel>(
     scenario: &Scenario,
     model: &M,
     backend: &str,
     path: &Path,
     build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
-    codegen: impl Fn(&compiler::Node) -> Result<(), String>,
 ) -> Result<(), Vec<String>> {
     let mut failures = Vec::new();
     for (language, raw) in &scenario.query {
@@ -293,26 +294,27 @@ fn check<M: OrbitQueryModel>(
         };
         let tp_bounds =
             (backend == "clickhouse").then(|| compiler::tp_bounds::TpBounds::derive(&input, model));
-        let mut lowered = match lower::emit(&plan, &input, tp_bounds.as_ref()) {
-            Ok(lowered) => lowered,
-            Err(error) => {
-                failures.push(format!("{label}: {error}"));
-                continue;
-            }
-        };
-        if backend == "clickhouse" {
-            response_policy::apply_text_excerpts(&mut lowered.ast, &input, model);
-        }
-        if scenario.hydration.is_none() {
-            page::apply(&mut lowered.ast, &input, &lowered.metadata);
-        }
-        let (planned, emitted) = explain::physical(&plan, &lowered.ast);
+        let planned = explain::physical(&plan);
+        let relational = lower::emit(&plan, &input, tp_bounds.as_ref(), model)
+            .and_then(|lowered| {
+                let relational = match backend {
+                    "clickhouse" => {
+                        response_policy::apply_text_excerpts(lowered.plan, model, &input)?
+                    }
+                    _ => lowered.plan,
+                };
+                match scenario.hydration {
+                    Some(_) => Ok(relational),
+                    None => page::apply(relational, model, &input, &lowered.metadata),
+                }
+            })
+            .map_err(|error| error.to_string());
         let assertions = &scenario.physical[backend];
         if let Some(rejected) = &assertions.rejected {
-            match codegen(&lowered.ast) {
+            match relational {
                 Err(error) if error.contains(rejected.as_str()) => {}
                 Err(error) => failures.push(format!("{label}: expected {rejected}, got {error}")),
-                Ok(()) => failures.push(format!("{label}: expected {rejected}, got a plan")),
+                Ok(_) => failures.push(format!("{label}: expected {rejected}, got a plan")),
             }
             continue;
         }
@@ -320,6 +322,14 @@ fn check<M: OrbitQueryModel>(
             failures.push(format!("{label}: missing assertion targets"));
             continue;
         }
+        let relational = match relational {
+            Ok(relational) => relational,
+            Err(error) => {
+                failures.push(format!("{label}: {error}"));
+                continue;
+            }
+        };
+        let emitted = emitted::tree(&relational, model.catalog());
         for (phase, assertions, actual) in [
             ("planned", &assertions.planned, planned),
             ("emitted", &assertions.emitted, emitted),
@@ -331,27 +341,12 @@ fn check<M: OrbitQueryModel>(
                 failures.push(error);
             }
         }
-        if let Err(error) = codegen(&lowered.ast) {
-            failures.push(format!("{label}: {error}"));
-        }
     }
     if failures.is_empty() {
         Ok(())
     } else {
         Err(failures)
     }
-}
-
-fn clickhouse_sql(ast: &compiler::Node, model: &ClickHouseDataModel) -> Result<(), String> {
-    compiler::codegen(ast, model.catalog(), Default::default(), Default::default())
-        .map(drop)
-        .map_err(|error| error.to_string())
-}
-
-fn duckdb_sql(ast: &compiler::Node, model: &DuckDbDataModel) -> Result<(), String> {
-    compiler::duckdb_codegen(ast, model.catalog(), Default::default())
-        .map(drop)
-        .map_err(|error| error.to_string())
 }
 
 pub fn run_dir(directory: &Path) {
@@ -407,17 +402,13 @@ fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
                 "clickhouse" => {
                     let build =
                         |input: &Input, options| plan::plan_clickhouse(input, remote, options);
-                    if let Err(errors) = check(&scenario, remote, backend, path, build, |ast| {
-                        clickhouse_sql(ast, remote)
-                    }) {
+                    if let Err(errors) = check(&scenario, remote, backend, path, build) {
                         failures.extend(errors);
                     }
                 }
                 "duckdb" => {
                     let build = |input: &Input, options| plan::plan_duckdb(input, local, options);
-                    if let Err(errors) = check(&scenario, local, backend, path, build, |ast| {
-                        duckdb_sql(ast, local)
-                    }) {
+                    if let Err(errors) = check(&scenario, local, backend, path, build) {
                         failures.extend(errors);
                     }
                 }
@@ -830,21 +821,14 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             HydrationPathFilter::PrefixSet(paths) => (true, paths),
         };
         assert_eq!((actual_set, paths.len()), (set, expected_paths));
-        let lowered = lower::emit(&plan, &input, None).unwrap();
-        let sql = compiler::codegen(
-            &lowered.ast,
-            model.catalog(),
-            Default::default(),
-            Default::default(),
-        )
-        .unwrap()
-        .sql;
+        let lowered = lower::emit(&plan, &input, None, &model).unwrap();
+        let sql = model.catalog().render(&lowered.plan).sql;
         assert_eq!(sql.contains("arrayExists"), set);
         assert_eq!(
             sql.matches("startsWith").count(),
             if set { 1 } else { expected_paths }
         );
-        let (planned, _) = explain::physical(&plan, &lowered.ast);
+        let planned = explain::physical(&plan);
         let mode = if set { "SET" } else { "UNION" };
         Assertions {
             expect: vec![format!(

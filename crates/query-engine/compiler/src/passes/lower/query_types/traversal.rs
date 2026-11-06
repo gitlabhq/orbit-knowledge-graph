@@ -1,17 +1,54 @@
-use super::Emitted;
-use crate::ast::*;
+use query_data_model::implementations::relational::RelationalBackend;
+use query_data_model::implementations::relational::plan::{Order, Relation, RelationalBuilder};
+
 use crate::constants::EDGE_KIND_SUFFIX;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, OrderDirection};
-use crate::passes::lower::{graph, predicates};
+use crate::passes::lower::build::predicates::Lowering;
+use crate::passes::lower::build::{Built, computed};
+use crate::passes::lower::{NodeBinding, Term, graph};
+use crate::passes::plan::predicates::OutputValue;
 use crate::passes::plan::{EdgeRelation, Plan, Traversal, property_value};
 use crate::tp_bounds::TpBounds;
 
-pub(crate) fn emit(
+pub(crate) struct Shape {
+    order: Option<(OutputValue, bool)>,
+}
+
+pub(crate) fn shape(plan: &Plan<Traversal>, input: &Input) -> Result<Shape> {
+    let execution = &plan.operation.execution;
+    let order = match (&input.order_by, &input.relationship_return.sort) {
+        (Some(order), _) => Some((
+            property_value(
+                &plan.nodes,
+                &order.node,
+                execution.property(&order.node, &order.property),
+            ),
+            order.direction == OrderDirection::Desc,
+        )),
+        (None, Some(sort)) => {
+            let edge_type = plan
+                .relations
+                .iter()
+                .find(|hop| hop.input_index == sort.relationship)
+                .and_then(|hop| edge_type(plan, hop))
+                .ok_or_else(|| {
+                    QueryError::Lowering("sorted relationship has no edge type column".into())
+                })?;
+            Some((edge_type.clone(), sort.direction == OrderDirection::Desc))
+        }
+        (None, None) => None,
+    };
+    Ok(Shape { order })
+}
+
+pub(crate) fn emit<B: RelationalBackend>(
+    q: &mut RelationalBuilder<'_, B>,
     plan: &Plan<Traversal>,
     input: &Input,
+    shape: &Shape,
     tp_bounds: Option<&TpBounds>,
-) -> Result<Emitted> {
+) -> Built<Relation> {
     let execution = &plan.operation.execution;
     let mut read = super::super::redaction_columns(plan, execution);
     read.extend(
@@ -20,80 +57,71 @@ pub(crate) fn emit(
             .iter()
             .map(|order| execution.property(&order.node, &order.property)),
     );
-    let mut output = graph::execute(execution, &read, tp_bounds);
-    let nodes = output.take_bindings(plan, input)?;
-    let mut query = output.into_query(vec![], vec![], vec![], input.limit);
-    query.order_by = match (&input.order_by, &input.relationship_return.sort) {
-        (Some(order), _) => vec![ordered(
-            predicates::output_value(&property_value(
-                &plan.nodes,
-                &order.node,
-                execution.property(&order.node, &order.property),
-            )),
-            order.direction,
-        )],
-        (None, Some(sort)) => {
-            let edge_type = plan
-                .relations
-                .iter()
-                .find(|hop| hop.input_index == sort.relationship)
-                .and_then(|hop| edge_type(&query, hop))
-                .ok_or_else(|| {
-                    QueryError::Lowering("sorted relationship has no edge type column".into())
-                })?;
-            vec![ordered(edge_type, sort.direction)]
-        }
-        (None, None) => Vec::new(),
+    let executed = graph::execute(q, execution, &read, tp_bounds)?;
+    let rows = executed.reads.filter(q, executed.source)?;
+    let lowering = Lowering {
+        scope: &[&rows],
+        shared: &executed.reads.shared,
     };
+    let items = lowering.projections::<B>(&execution.outputs)?;
+    let (rows, columns) = computed(q, rows, items)?;
+    let rows = match &shape.order {
+        Some((value, descending)) => {
+            let lowering = Lowering {
+                scope: &[&rows],
+                shared: &executed.reads.shared,
+            };
+            let value = lowering.output::<B>(value)?;
+            let order = Order {
+                value,
+                descending: *descending,
+            };
+            q.order(rows, vec![order])?
+        }
+        None => rows,
+    };
+    let rows = q.limit(rows, Some(input.limit), None)?;
+    q.select(rows, columns)
+}
+
+pub(crate) fn stable_order(
+    plan: &Plan<Traversal>,
+    input: &Input,
+    nodes: &std::collections::HashMap<String, NodeBinding>,
+) -> Vec<Term> {
     let identities = input
         .nodes
         .iter()
         .filter_map(|node| nodes.get(&node.id))
         .map(|binding| binding.identity().clone());
-    let stable_order = if input.relationships.is_empty() {
-        identities.map(OrderExpr::asc).collect()
-    } else {
-        identities
-            .fold(Vec::new(), |mut order, identity| {
-                if !order.contains(&identity) {
-                    order.push(identity);
-                }
-                order
-            })
-            .into_iter()
-            .chain(multi_type_edge_types(&query, &plan.relations))
-            .map(OrderExpr::asc)
-            .collect()
-    };
-    Ok(Emitted {
-        ast: Node::Query(Box::new(query)),
-        nodes,
-        stable_order,
-    })
-}
-
-fn ordered(expr: Expr, direction: OrderDirection) -> OrderExpr {
-    if direction == OrderDirection::Desc {
-        OrderExpr::desc(expr)
-    } else {
-        OrderExpr::asc(expr)
+    if input.relationships.is_empty() {
+        return identities.collect();
     }
-}
-
-fn multi_type_edge_types(query: &Query, relations: &[EdgeRelation]) -> Vec<Expr> {
-    relations
+    let mut order: Vec<Term> = Vec::new();
+    for identity in identities {
+        if !order.contains(&identity) {
+            order.push(identity);
+        }
+    }
+    let edge_types = plan
+        .relations
         .iter()
         .filter(|hop| {
             hop.max_hops == 1
                 && (hop.rel_types.len() > 1
                     || crate::passes::normalize::is_wildcard(&hop.rel_types))
         })
-        .filter_map(|hop| edge_type(query, hop))
-        .collect()
+        .filter_map(|hop| edge_type(plan, hop))
+        .map(|value| Term::Value(Box::new(value.clone())));
+    order.into_iter().chain(edge_types).collect()
 }
 
-fn edge_type(query: &Query, relation: &EdgeRelation) -> Option<Expr> {
-    query
-        .selected(&format!("{}{}", relation.column_prefix(), EDGE_KIND_SUFFIX))
-        .cloned()
+fn edge_type<'p>(plan: &'p Plan<Traversal>, relation: &EdgeRelation) -> Option<&'p OutputValue> {
+    let name = format!("{}{}", relation.column_prefix(), EDGE_KIND_SUFFIX);
+    plan.operation
+        .execution
+        .outputs
+        .iter()
+        .find(|output| output.name == name)
+        .map(|output| &output.value)
 }

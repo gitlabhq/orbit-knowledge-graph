@@ -1,3 +1,4 @@
+mod block;
 mod builder;
 mod error;
 mod expr;
@@ -9,6 +10,7 @@ use std::marker::PhantomData;
 
 use ontology::DataType;
 
+pub use block::Block;
 pub use builder::{Aggregated, Detached, RelationalBuilder, Subquery};
 pub use error::RelationalError;
 pub use expr::{BinaryOp, Expr, Function, TextMatch, TimeUnit, UnaryOp};
@@ -73,6 +75,14 @@ impl<B: RelationalBackend> Catalog<B> {
             })
             .map(|table| Declared::new(self.model().id(), table))
             .ok_or_else(|| RelationalError::UnknownTable(name.to_string()))
+    }
+
+    pub fn table_name(&self, table: Table) -> &str {
+        let (_, facts) = self
+            .stores()
+            .nth(table.store)
+            .expect("declared tables name a store of their catalog");
+        &facts.relational().tables[table.index].name
     }
 
     pub fn build<'c>(

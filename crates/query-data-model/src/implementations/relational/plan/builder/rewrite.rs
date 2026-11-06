@@ -2,7 +2,9 @@ use super::RelationalBuilder;
 use crate::implementations::relational::RelationalBackend;
 use crate::implementations::relational::plan::relation::Visible;
 use crate::implementations::relational::plan::stage::Stage;
-use crate::implementations::relational::plan::{Operation, Relation, RelationalError, Selection};
+use crate::implementations::relational::plan::{
+    Column, Operation, Relation, RelationalError, Selection,
+};
 use crate::plan::tracking::{Ref, Rows};
 
 #[derive(Debug, Clone)]
@@ -46,6 +48,10 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
 
     pub fn reconnect(&mut self, from: Ref, to: Ref) -> Result<(), RelationalError> {
         Ok(self.construction.reconnect(from, to)?)
+    }
+
+    pub fn expose(&mut self, column: Column) -> Result<(), RelationalError> {
+        Ok(self.construction.expose(column.output)?)
     }
 
     pub(super) fn remember(&mut self, relation: &Relation) {

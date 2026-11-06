@@ -1,5 +1,5 @@
-use super::query::Block;
 use super::{Dialect, Renderer};
+use crate::implementations::relational::plan::Block;
 use crate::implementations::relational::plan::{JoinKind, Operation, Selection, Sharing};
 use crate::plan::tracking::NodeId;
 

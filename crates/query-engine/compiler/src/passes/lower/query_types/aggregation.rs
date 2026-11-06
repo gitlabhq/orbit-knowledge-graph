@@ -1,23 +1,28 @@
-use super::Emitted;
-use crate::ast::*;
-use crate::error::Result;
-use crate::input::{Input, OrderDirection};
-use crate::passes::lower::predicates::{output_value, predicate};
-use crate::passes::lower::{EmitOutput, graph};
+use query_data_model::implementations::relational::RelationalBackend;
+use query_data_model::implementations::relational::plan::{
+    AggregateFunction, Expr, Measure, Order, Relation, RelationalBuilder, TimeUnit,
+};
+
+use crate::input::{AggFunction, Input, OrderDirection, TruncateUnit};
+use crate::passes::lower::build::predicates::Lowering;
+use crate::passes::lower::build::{Built, computed, conjoin, named};
+use crate::passes::lower::{Term, columns, graph};
 use crate::passes::plan::predicates::OutputValue;
-use crate::passes::plan::query_types::aggregation::{AggregationPlan, Group};
+use crate::passes::plan::query_types::aggregation::Group;
 use crate::passes::plan::{Aggregation, Plan};
 use crate::tp_bounds::TpBounds;
 
-pub(crate) fn emit(
+pub(crate) fn emit<B: RelationalBackend>(
+    q: &mut RelationalBuilder<'_, B>,
     plan: &Plan<Aggregation>,
     input: &Input,
     tp_bounds: Option<&TpBounds>,
-) -> Result<Emitted> {
+) -> Built<Relation> {
     let result = &plan.operation.result;
-    let mut read = super::super::redaction_columns(plan, &plan.operation.execution);
+    let execution = &plan.operation.execution;
+    let mut read = super::super::redaction_columns(plan, execution);
     for condition in &result.condition {
-        super::super::columns::referenced(&predicate(condition), &mut read);
+        columns::referenced(condition, &mut read);
     }
     read.extend(
         result
@@ -32,65 +37,119 @@ pub(crate) fn emit(
             .and_then(OutputValue::column)
             .cloned()
     }));
-    let mut output = graph::execute(&plan.operation.execution, &read, tp_bounds);
-    let nodes = output.take_bindings(plan, input)?;
-    let query = aggregation(&plan.operation.result, output, input.limit);
-    let stable_order = query.group_by.iter().cloned().map(OrderExpr::asc).collect();
-    Ok(Emitted {
-        ast: Node::Query(Box::new(query)),
-        nodes,
-        stable_order,
-    })
+    let executed = graph::execute(q, execution, &read, tp_bounds)?;
+    let rows = executed.reads.filter(q, executed.source)?;
+    let lowering = Lowering {
+        scope: &[&rows],
+        shared: &executed.reads.shared,
+    };
+    let mut groups = Vec::new();
+    for value in &result.groups {
+        groups.push(group::<B>(&lowering, value)?);
+    }
+    let mut outputs = Vec::new();
+    for (value, name) in &result.group_outputs {
+        outputs.push((name.clone(), group::<B>(&lowering, value)?));
+    }
+    let mut measures: Vec<Measure> = Vec::new();
+    let mut keys = Vec::new();
+    let mut picks = Vec::new();
+    for measure in &result.measures {
+        let key = (measure.function, &measure.argument, measure.distinct);
+        if let Some(position) = keys.iter().position(|existing| *existing == key) {
+            picks.push((measure.name.clone(), position));
+            continue;
+        }
+        keys.push(key);
+        let mut condition = Vec::new();
+        for predicate in &result.condition {
+            condition.push(lowering.predicate(q, predicate)?);
+        }
+        let args = match &measure.argument {
+            Some(value) => vec![lowering.output::<B>(value)?],
+            None => Vec::new(),
+        };
+        let lowered = Measure {
+            function: function(measure.function),
+            args,
+            distinct: measure.distinct,
+            condition: conjoin(condition),
+        };
+        measures.push(lowered);
+        picks.push((measure.name.clone(), measures.len() - 1));
+    }
+    let projections = lowering.projections::<B>(&execution.outputs)?;
+    let aggregated = q.aggregate(rows, groups.clone(), measures)?;
+    let bound = |value: Expr| match groups.iter().position(|group| *group == value) {
+        Some(index) => aggregated.groups[index].expr(),
+        None => value,
+    };
+    let mut items: Vec<(String, Expr)> = outputs
+        .into_iter()
+        .map(|(name, value)| (name, bound(value)))
+        .collect();
+    items.extend(
+        picks
+            .into_iter()
+            .map(|(name, position)| (name, aggregated.measures[position].expr())),
+    );
+    items.extend(
+        projections
+            .into_iter()
+            .map(|(name, value)| (name, bound(value))),
+    );
+    let (rows, columns) = computed(q, aggregated.rows, items)?;
+    let rows = match &result.order {
+        Some(order) => {
+            let value = named(&[&rows], &order.column)?;
+            let order = Order {
+                value,
+                descending: order.direction == OrderDirection::Desc,
+            };
+            q.order(rows, vec![order])?
+        }
+        None => rows,
+    };
+    let rows = q.limit(rows, Some(input.limit), None)?;
+    q.select(rows, columns)
 }
 
-fn group(value: &Group) -> Expr {
-    let column = output_value(&value.value);
-    match value.truncate {
+fn group<B: RelationalBackend>(lowering: &Lowering<'_>, value: &Group) -> Built<Expr> {
+    let column = lowering.output::<B>(&value.value)?;
+    Ok(match value.truncate {
         Some(unit) => Expr::TimeBucket {
-            unit,
+            unit: time_unit(unit),
             value: Box::new(column),
         },
         None => column,
+    })
+}
+
+pub(crate) fn stable_order(plan: &Plan<Aggregation>) -> Vec<Term> {
+    (0..plan.operation.result.groups.len())
+        .map(Term::Group)
+        .collect()
+}
+
+fn function(function: AggFunction) -> AggregateFunction {
+    match function {
+        AggFunction::Count => AggregateFunction::Count,
+        AggFunction::Sum => AggregateFunction::Sum,
+        AggFunction::Avg => AggregateFunction::Avg,
+        AggFunction::Min => AggregateFunction::Min,
+        AggFunction::Max => AggregateFunction::Max,
+        AggFunction::Collect => AggregateFunction::Collect,
     }
 }
 
-fn aggregation(plan: &AggregationPlan, output: EmitOutput, limit: u32) -> Query {
-    let condition = Expr::conjoin(plan.condition.iter().map(predicate).collect());
-    let select = plan
-        .group_outputs
-        .iter()
-        .map(|(value, name)| SelectExpr::new(group(value), name))
-        .chain(plan.measures.iter().map(|measure| {
-            SelectExpr::new(
-                Expr::Aggregate {
-                    function: measure.function,
-                    argument: measure
-                        .argument
-                        .as_ref()
-                        .map(|value| Box::new(output_value(value))),
-                    distinct: measure.distinct,
-                    condition: condition.clone().map(Box::new),
-                },
-                &measure.name,
-            )
-        }))
-        .collect();
-    let order = plan
-        .order
-        .iter()
-        .map(|order| {
-            let value = Expr::ident(&order.column);
-            if order.direction == OrderDirection::Desc {
-                OrderExpr::desc(value)
-            } else {
-                OrderExpr::asc(value)
-            }
-        })
-        .collect();
-    output.into_query(
-        select,
-        plan.groups.iter().map(group).collect(),
-        order,
-        limit,
-    )
+fn time_unit(unit: TruncateUnit) -> TimeUnit {
+    match unit {
+        TruncateUnit::Minute => TimeUnit::Minute,
+        TruncateUnit::Hour => TimeUnit::Hour,
+        TruncateUnit::Day => TimeUnit::Day,
+        TruncateUnit::Week => TimeUnit::Week,
+        TruncateUnit::Month => TimeUnit::Month,
+        TruncateUnit::Quarter => TimeUnit::Quarter,
+        TruncateUnit::Year => TimeUnit::Year,
+    }
 }

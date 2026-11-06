@@ -1,39 +1,46 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
+pub(crate) mod build;
 mod columns;
-mod graph;
-mod predicates;
+pub(crate) mod graph;
 pub mod query_types;
-pub(crate) mod sql;
 
-use crate::ast::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
 use crate::tp_bounds::TpBounds;
 use std::collections::HashMap;
 
 use super::plan::graph::ExecutionPlan;
-use super::plan::predicates::Column;
+use super::plan::predicates::{Column, OutputValue};
 use super::plan::{Plan, QueryPlan};
 
 #[derive(Clone, Default)]
 pub struct LoweredMetadata {
     pub nodes: HashMap<String, NodeBinding>,
     pub edges: Vec<LoweredEdge>,
-    pub stable_order: Vec<OrderExpr>,
+    pub stable_order: Vec<Term>,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum Term {
+    Column(Column),
+    Value(Box<OutputValue>),
+    Id(i64),
+    Output(String),
+    Text(Column),
+    Group(usize),
 }
 
 #[derive(Clone)]
 pub enum NodeBinding {
     Filtered,
     Values {
-        identity: Expr,
+        identity: Term,
         table_alias: Option<String>,
-        traversal_path: Option<Expr>,
+        traversal_path: Option<Column>,
     },
-    Projected {
-        role_identity: Option<Expr>,
-    },
+    Projected,
 }
 
 impl NodeBinding {
@@ -41,16 +48,16 @@ impl NodeBinding {
         alias: &str,
         column: &str,
         table_alias: Option<String>,
-        traversal_path: Option<Expr>,
+        traversal_path: Option<Column>,
     ) -> Self {
         Self::Values {
-            identity: Expr::col(alias, column),
+            identity: Term::Column(Column::new(alias, column)),
             table_alias,
             traversal_path,
         }
     }
 
-    fn identity(&self) -> &Expr {
+    fn identity(&self) -> &Term {
         let Self::Values { identity, .. } = self else {
             unreachable!("projected bindings supply their own ordering")
         };
@@ -66,80 +73,50 @@ pub struct LoweredEdge {
     pub relationship: usize,
 }
 
-pub struct LoweredQuery {
-    pub ast: Node,
+pub struct LoweredQuery<P> {
+    pub plan: P,
     pub metadata: LoweredMetadata,
 }
 
-pub struct EmitOutput {
-    pub from: TableRef,
-    pub where_parts: Vec<Expr>,
-    pub select: Vec<SelectExpr>,
-    pub ctes: Vec<Cte>,
-    pub nodes: HashMap<String, NodeBinding>,
-}
-
-impl EmitOutput {
-    fn take_bindings<T>(
-        &mut self,
-        plan: &Plan<T>,
-        input: &Input,
-    ) -> Result<HashMap<String, NodeBinding>> {
-        for node in input
-            .nodes
-            .iter()
-            .filter(|node| plan.nodes.contains_key(&node.id))
-        {
-            if self.nodes.contains_key(&node.id) {
-                continue;
+fn bindings<T>(
+    plan: &Plan<T>,
+    input: &Input,
+    mut nodes: HashMap<String, NodeBinding>,
+) -> Result<HashMap<String, NodeBinding>> {
+    for node in input
+        .nodes
+        .iter()
+        .filter(|node| plan.nodes.contains_key(&node.id))
+    {
+        if nodes.contains_key(&node.id) {
+            continue;
+        }
+        let source = plan.node_edge_mappings.get(&node.id).ok_or_else(|| {
+            QueryError::Lowering(format!("node '{}' has no emitted identity", node.id))
+        })?;
+        let binding = match (nodes.get(&source.0), node.node_ids.as_slice()) {
+            (
+                Some(NodeBinding::Values {
+                    table_alias: Some(alias),
+                    ..
+                }),
+                _,
+            ) => NodeBinding::source(alias, &source.1, None, None),
+            (_, [id]) => NodeBinding::Values {
+                identity: Term::Id(*id),
+                table_alias: None,
+                traversal_path: None,
+            },
+            _ => {
+                return Err(QueryError::Lowering(format!(
+                    "node '{}' has no emitted identity",
+                    node.id
+                )));
             }
-            let source = plan.node_edge_mappings.get(&node.id).ok_or_else(|| {
-                QueryError::Lowering(format!("node '{}' has no emitted identity", node.id))
-            })?;
-            let binding = match (self.nodes.get(&source.0), node.node_ids.as_slice()) {
-                (
-                    Some(NodeBinding::Values {
-                        table_alias: Some(alias),
-                        ..
-                    }),
-                    _,
-                ) => NodeBinding::source(alias, &source.1, None, None),
-                (_, [id]) => NodeBinding::Values {
-                    identity: Expr::lit(*id),
-                    table_alias: None,
-                    traversal_path: None,
-                },
-                _ => {
-                    return Err(QueryError::Lowering(format!(
-                        "node '{}' has no emitted identity",
-                        node.id
-                    )));
-                }
-            };
-            self.nodes.insert(node.id.clone(), binding);
-        }
-        Ok(std::mem::take(&mut self.nodes))
+        };
+        nodes.insert(node.id.clone(), binding);
     }
-
-    pub fn into_query(
-        self,
-        mut select: Vec<SelectExpr>,
-        group_by: Vec<Expr>,
-        order_by: Vec<OrderExpr>,
-        limit: u32,
-    ) -> Query {
-        select.extend(self.select);
-        Query {
-            ctes: self.ctes,
-            select,
-            from: self.from,
-            where_clause: Expr::conjoin(self.where_parts),
-            group_by,
-            order_by,
-            limit: Some(limit),
-            ..Default::default()
-        }
-    }
+    Ok(nodes)
 }
 
 fn redaction_columns<T>(plan: &Plan<T>, execution: &ExecutionPlan) -> Vec<Column> {
@@ -154,13 +131,53 @@ fn redaction_columns<T>(plan: &Plan<T>, execution: &ExecutionPlan) -> Vec<Column
         .collect()
 }
 
-pub fn emit(plan: &QueryPlan, input: &Input, tp_bounds: Option<&TpBounds>) -> Result<LoweredQuery> {
-    let emitted = match plan {
-        QueryPlan::Traversal(plan) => query_types::traversal::emit(plan, input, tp_bounds)?,
-        QueryPlan::Aggregation(plan) => query_types::aggregation::emit(plan, input, tp_bounds)?,
-        QueryPlan::Neighbors(plan) => query_types::neighbors::emit(plan, input)?,
-        QueryPlan::PathFinding(plan) => query_types::pathfinding::emit(plan, input)?,
-        QueryPlan::Hydration(plan) => query_types::hydration::emit(plan)?,
+pub fn emit<M: RelationalModel>(
+    plan: &QueryPlan,
+    input: &Input,
+    tp_bounds: Option<&TpBounds>,
+    model: &M,
+) -> Result<LoweredQuery<PlanOf<M>>> {
+    let catalog = model.catalog();
+    let (built, nodes, stable_order) = match plan {
+        QueryPlan::Traversal(plan) => {
+            let nodes = bindings(plan, input, graph::bindings(&plan.operation.execution))?;
+            let shape = query_types::traversal::shape(plan, input)?;
+            let built = catalog
+                .build(|q| query_types::traversal::emit(q, plan, input, &shape, tp_bounds))
+                .map_err(rejected)?;
+            let stable_order = query_types::traversal::stable_order(plan, input, &nodes);
+            (built, nodes, stable_order)
+        }
+        QueryPlan::Aggregation(plan) => {
+            let nodes = bindings(plan, input, graph::bindings(&plan.operation.execution))?;
+            let built = catalog
+                .build(|q| query_types::aggregation::emit(q, plan, input, tp_bounds))
+                .map_err(rejected)?;
+            let stable_order = query_types::aggregation::stable_order(plan);
+            (built, nodes, stable_order)
+        }
+        QueryPlan::Neighbors(plan) => {
+            let built = catalog
+                .build(|q| query_types::neighbors::emit(q, plan, input))
+                .map_err(rejected)?;
+            let center = (plan.operation.center.clone(), NodeBinding::Projected);
+            let stable_order = query_types::neighbors::stable_order(plan);
+            (built, HashMap::from([center]), stable_order)
+        }
+        QueryPlan::PathFinding(plan) => {
+            let built = catalog
+                .build(|q| query_types::pathfinding::emit(q, plan, input))
+                .map_err(rejected)?;
+            let stable_order = query_types::pathfinding::stable_order();
+            (built, HashMap::new(), stable_order)
+        }
+        QueryPlan::Hydration(plan) => {
+            query_types::hydration::check(plan)?;
+            let built = catalog
+                .build(|q| query_types::hydration::emit(q, plan))
+                .map_err(rejected)?;
+            (built, HashMap::new(), Vec::new())
+        }
     };
     let edges = plan
         .relations()
@@ -173,11 +190,11 @@ pub fn emit(plan: &QueryPlan, input: &Input, tp_bounds: Option<&TpBounds>) -> Re
         })
         .collect();
     Ok(LoweredQuery {
-        ast: emitted.ast,
+        plan: built,
         metadata: LoweredMetadata {
-            nodes: emitted.nodes,
+            nodes,
             edges,
-            stable_order: emitted.stable_order,
+            stable_order,
         },
     })
 }

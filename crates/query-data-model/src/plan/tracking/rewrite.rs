@@ -19,6 +19,7 @@ struct Visit {
     new: NodeId,
     contract: Vec<OutputId>,
     reconnect: Vec<(OutputId, OutputId)>,
+    exposed: Vec<OutputId>,
 }
 
 impl<L: Language> Pending<L> {
@@ -101,6 +102,23 @@ impl<L: Language> Construction<L> {
         })
     }
 
+    pub fn expose(&mut self, output: Ref) -> Result<(), Rejected> {
+        self.attempt(|this| {
+            let plan = this.arena.plan;
+            let visit = this
+                .pending
+                .as_mut()
+                .and_then(|pending| pending.visiting.as_mut());
+            match visit {
+                Some(visit) if output.plan == plan => {
+                    visit.exposed.push(output.output);
+                    Ok(())
+                }
+                _ => Err(Rejected::BadReconnection),
+            }
+        })
+    }
+
     pub fn visiting(&self) -> Option<NodeId> {
         let pending = self.pending.as_ref()?;
         pending.visiting.as_ref().map(|visit| visit.old)
@@ -156,6 +174,7 @@ impl<L: Language> Construction<L> {
                 new,
                 contract: this.arena.nodes[new.0].contract.clone(),
                 reconnect: Vec::new(),
+                exposed: Vec::new(),
             });
             Ok(Some(this.rows(new)))
         })
@@ -215,9 +234,9 @@ fn check_boundary<L: Language>(
         .contract
         .iter()
         .filter(|output| !exposed.contains(output) && !from(output));
-    let extra = exposed
-        .iter()
-        .filter(|output| !visit.contract.contains(output) && !to(output));
+    let extra = exposed.iter().filter(|output| {
+        !visit.contract.contains(output) && !to(output) && (body || !visit.exposed.contains(output))
+    });
     let changed: Vec<String> = missing
         .chain(extra)
         .chain(visit.reconnect.iter().filter(|_| body).map(|(old, _)| old))

@@ -11,7 +11,7 @@ use serde_json::Value;
 use super::plan::{Expr, Function, Measure, ReadMode, RelationalPlan, TextMatch, TimeUnit};
 use super::{RelationalBackend, RelationalFacts};
 use crate::catalog::Catalog;
-use crate::plan::tracking::{NodeId, Ref};
+use crate::plan::tracking::{BodyId, NodeId, Ref};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParameterizedSql {
@@ -51,6 +51,33 @@ impl<'p, D: Dialect> Renderer<'p, D> {
         plan: &'p RelationalPlan<D::Backend>,
         dialect: D,
     ) -> ParameterizedSql {
+        Self::statement_of(catalog, plan, &plan.with, plan.plan.root(), dialect)
+    }
+
+    pub fn shared(
+        catalog: &'p Catalog<D::Backend>,
+        plan: &'p RelationalPlan<D::Backend>,
+        dialect: impl Fn() -> D,
+    ) -> Vec<(String, ParameterizedSql)> {
+        plan.with
+            .iter()
+            .enumerate()
+            .map(|(position, body)| {
+                let (name, root) = plan.plan.body(*body);
+                let sql =
+                    Self::statement_of(catalog, plan, &plan.with[..position], root, dialect());
+                (name.to_string(), sql)
+            })
+            .collect()
+    }
+
+    fn statement_of(
+        catalog: &'p Catalog<D::Backend>,
+        plan: &'p RelationalPlan<D::Backend>,
+        with: &[BodyId],
+        root: NodeId,
+        dialect: D,
+    ) -> ParameterizedSql {
         let mut owners = HashMap::new();
         for node in plan.plan.nodes() {
             for (position, output) in plan.plan.outputs(node).enumerate() {
@@ -63,7 +90,7 @@ impl<'p, D: Dialect> Renderer<'p, D> {
             owners,
             dialect,
         };
-        let sql = renderer.statement(&plan.with, plan.plan.root());
+        let sql = renderer.statement(with, root);
         ParameterizedSql {
             sql,
             parameters: renderer.dialect.into_parameters(),

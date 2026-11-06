@@ -197,6 +197,42 @@ fn find_state_ty(fields: &[Field], name: &Ident) -> Type {
         .clone()
 }
 
+fn concrete(ty: Type, model: &Type) -> proc_macro2::TokenStream {
+    substitute(quote! { #ty }, &quote! { #model })
+}
+
+fn substitute(
+    tokens: proc_macro2::TokenStream,
+    model: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    use proc_macro2::{Group, TokenTree};
+    let tokens: Vec<TokenTree> = tokens.into_iter().collect();
+    let mut out = proc_macro2::TokenStream::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        let names_model = matches!(
+            &tokens[index..],
+            [TokenTree::Ident(this), TokenTree::Punct(a), TokenTree::Punct(b), TokenTree::Ident(name), ..]
+                if this == "Self" && a.as_char() == ':' && b.as_char() == ':' && name == "Model"
+        );
+        if names_model {
+            out.extend(model.clone());
+            index += 4;
+            continue;
+        }
+        match &tokens[index] {
+            TokenTree::Group(group) => {
+                let mut replaced = Group::new(group.delimiter(), substitute(group.stream(), model));
+                replaced.set_span(group.span());
+                out.extend([TokenTree::Group(replaced)]);
+            }
+            token => out.extend([token.clone()]),
+        }
+        index += 1;
+    }
+    out
+}
+
 fn phases_with_access(phases: &[PhaseDecl], field: &Ident) -> Vec<String> {
     phases
         .iter()
@@ -230,7 +266,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
     }
 
     trait_sigs.push(quote! {
-        type Model: query_data_model::OrbitQueryModel + Send + Sync;
+        type Model: crate::passes::codegen::RelationalModel + Send + Sync;
         fn data_model(&self) -> &Self::Model;
         fn current_phase(&self) -> &'static str;
         fn set_current_phase(&mut self, phase: &'static str);
@@ -273,7 +309,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
             .state
             .iter()
             .map(|n| {
-                let ty = find_state_ty(&ctx.state_fields, n);
+                let ty = concrete(find_state_ty(&ctx.state_fields, n), model_ty);
                 quote! { #n: Option<#ty> }
             })
             .collect();

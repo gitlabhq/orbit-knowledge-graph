@@ -45,7 +45,6 @@ pub mod config;
 pub mod passes;
 
 pub use ast::ddl;
-pub use ast::{Expr, Insert, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
     EDGE_DST_KIND_SUFFIX, EDGE_DST_SUFFIX, EDGE_KIND_SUFFIX, EDGE_SRC_KIND_SUFFIX, EDGE_SRC_SUFFIX,
     edge_kinds_column, hydration_node_alias, internal_column_prefix, neighbor_id_column,
@@ -63,9 +62,9 @@ use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
 
 pub use analytics::ExecMetrics;
 pub use passes::codegen::{
-    CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect, codegen,
+    CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
     ddl::duckdb::emit_create_table as emit_duckdb_create_table, ddl::duckdb::generate_local_ddl,
-    ddl::generate_local_tables, duckdb_codegen,
+    ddl::generate_local_tables,
 };
 pub use passes::frontend::{Frontend, gql};
 pub use passes::hydrate::{
@@ -92,6 +91,35 @@ fn finish<C: config::CompilerCtx>(
             })
         })
         .count_err()
+}
+
+/// Each CTE body of the compiled ClickHouse plan as a statement tests can EXPLAIN.
+pub fn cte_statements(
+    raw: &str,
+    fe: Frontend,
+    data_model: &Arc<ClickHouseDataModel>,
+    ctx: &SecurityContext,
+) -> Result<Vec<passes::codegen::CteStatement>> {
+    let shared = |plan: &Option<passes::codegen::ClickHousePlan>| {
+        let plan = plan.as_ref().ok_or_else(|| {
+            error::QueryError::PipelineInvariant("pipeline did not produce a plan".into())
+        })?;
+        Ok(passes::codegen::cte_statements(plan, data_model.catalog()))
+    };
+    match fe {
+        Frontend::JsonDsl => {
+            let mut ctx = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
+            ctx.set_raw(raw.to_string());
+            config::run_clickhouse_json_dsl(&mut ctx)?;
+            shared(ctx.relational())
+        }
+        Frontend::Gql => {
+            let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
+            ctx.set_raw(raw.to_string());
+            config::run_clickhouse_gql(&mut ctx)?;
+            shared(ctx.relational())
+        }
+    }
 }
 
 #[must_use = "the compiled query context should be used"]
