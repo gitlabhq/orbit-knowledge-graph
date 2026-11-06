@@ -340,6 +340,16 @@ impl Agent {
     pub(super) fn has_ui(self) -> bool {
         self.plugin.is_some() || self.ui_files(true).next().is_some()
     }
+
+    /// The component whose files make the agent load the Orbit instructions: the Claude Code
+    /// plugin, or the hook files and extensions of the other agents.
+    pub(super) fn instructions_component(self) -> super::Component {
+        if self.plugin.is_some() {
+            super::Component::AgentPlugins
+        } else {
+            super::Component::Hooks
+        }
+    }
 }
 
 pub(super) fn agents() -> impl Iterator<Item = Agent> {

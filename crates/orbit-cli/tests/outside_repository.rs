@@ -213,10 +213,33 @@ fn setup_says_when_the_agent_plugin_is_skipped_and_leaves_it_off_the_configured_
         "{printed}"
     );
     assert!(printed.contains("2.1.287+ (you have 2.1.286)"), "{printed}");
+    assert_eq!(
+        printed.matches("WARNING: Orbit plugin requires").count(),
+        1,
+        "{printed}"
+    );
+    assert!(
+        printed.contains("Claude Code gets no Orbit instructions"),
+        "{printed}"
+    );
     let card = configured_card(&printed);
     assert!(card.contains("Claude Code   hooks, skill  "), "{printed}");
     assert!(!card.contains("agent plugins"), "{printed}");
     assert!(!home.path().join(".claude/orbit").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn skipping_the_component_that_loads_the_instructions_warns() {
+    let (_home, printed) = setup_with_claude_version("99.0.0", &["--skip", "agent-plugins"]);
+    assert!(
+        printed
+            .contains("Claude Code gets no Orbit instructions: they load from the agent plugins"),
+        "{printed}"
+    );
+
+    let (_home, printed) = setup_with_claude_version("99.0.0", &["--skip", "hooks"]);
+    assert!(!printed.contains("gets no Orbit instructions"), "{printed}");
 }
 
 #[cfg(unix)]

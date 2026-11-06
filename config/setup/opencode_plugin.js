@@ -25,7 +25,7 @@ function run(command, args) {
   });
 }
 
-async function instructions() {
+async function loadInstructions() {
   for (const [command, prefix] of LAUNCHERS) {
     const text = await run(command, [...prefix, "hook-guard", "instructions"]);
     if (text !== null) return text;
@@ -55,9 +55,10 @@ export default {
   },
   async server() {
     let reminded = false;
+    const instructions = loadInstructions();
     return {
       "experimental.chat.system.transform": async (_input, output) => {
-        const text = await instructions();
+        const text = await instructions;
         if (text && !output.system.includes(text)) output.system.push(text);
       },
       "tool.execute.after": async (input, output) => {

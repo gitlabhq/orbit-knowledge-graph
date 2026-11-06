@@ -75,7 +75,7 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
             .with_context(|| format!("failed to update {}", path.display()))?;
         let installed = json::render(&root)?;
         write_unless_unchanged(&path, &label, &installed, "orbit entries installed", report)?;
-        trust(merge, &path, &label, target, report);
+        trust(merge, &entries, &path, &label, target, report);
     }
 
     install_files(
@@ -89,6 +89,7 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
 
 fn trust(
     merge: &JsonMerge,
+    entries: &[Value],
     path: &std::path::Path,
     label: &str,
     target: &Target,
@@ -101,7 +102,12 @@ fn trust(
         Target::Project(root) => root.clone(),
         Target::Global(machine) => machine.home().to_path_buf(),
     };
-    match codex_trust::trust_hooks(&cwd, path, &merge.marker) {
+    let commands: Vec<String> = entries
+        .iter()
+        .flat_map(|entry| entry["hooks"].as_array().into_iter().flatten())
+        .filter_map(|hook| hook["command"].as_str().map(str::to_string))
+        .collect();
+    match codex_trust::trust_hooks(&cwd, path, &commands) {
         Ok(0) => {}
         Ok(_) => report.note(label, "orbit hook trusted"),
         Err(error) => report.note(

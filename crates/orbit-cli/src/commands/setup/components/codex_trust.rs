@@ -3,14 +3,19 @@ use std::path::Path;
 use serde_json::Value;
 
 #[cfg(test)]
-pub(super) fn trust_hooks(_cwd: &Path, _hooks_file: &Path, _marker: &str) -> Result<usize, String> {
+pub(super) fn trust_hooks(
+    _cwd: &Path,
+    _hooks_file: &Path,
+    _commands: &[String],
+) -> Result<usize, String> {
     Ok(0)
 }
 
 #[cfg(not(test))]
 pub(super) use app_server::trust_hooks;
 
-fn ours<'a>(listed: &'a Value, hooks_file: &Path, marker: &str) -> Vec<&'a Value> {
+/// The `SessionStart` hooks in `hooks_file` that run exactly a command setup wrote there.
+fn ours<'a>(listed: &'a Value, hooks_file: &Path, commands: &[String]) -> Vec<&'a Value> {
     let wanted = dunce::canonicalize(hooks_file).unwrap_or_else(|_| hooks_file.to_path_buf());
     listed["data"]
         .as_array()
@@ -23,9 +28,10 @@ fn ours<'a>(listed: &'a Value, hooks_file: &Path, marker: &str) -> Vec<&'a Value
                 dunce::canonicalize(source).unwrap_or_else(|_| source.to_path_buf()) == wanted
             });
             same_file
+                && hook["eventName"] == "sessionStart"
                 && hook["command"]
                     .as_str()
-                    .is_some_and(|command| command.contains(marker))
+                    .is_some_and(|command| commands.iter().any(|ours| ours == command))
         })
         .collect()
 }
@@ -47,7 +53,7 @@ mod app_server {
     pub(in crate::commands::setup) fn trust_hooks(
         cwd: &Path,
         hooks_file: &Path,
-        marker: &str,
+        commands: &[String],
     ) -> Result<usize, String> {
         let mut server = AppServer::start(cwd)?;
         server.request(
@@ -56,7 +62,7 @@ mod app_server {
         )?;
         server.notify("initialized")?;
         let listed = server.request("hooks/list", json!({ "cwds": [cwd] }))?;
-        let hooks = ours(&listed, hooks_file, marker);
+        let hooks = ours(&listed, hooks_file, commands);
         let edits: Vec<Value> = hooks
             .iter()
             .filter(|hook| hook["trustStatus"] != "trusted")
@@ -165,22 +171,25 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn only_the_orbit_hooks_in_the_written_file_are_trusted() {
+    fn only_the_session_start_hook_setup_wrote_is_trusted() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("hooks.json");
         std::fs::write(&file, "{}").unwrap();
         let other = dir.path().join("other.json");
+        let ours_command = "orbit hook-guard instructions";
+        let hook = |key: &str, path: &Path, event: &str, command: &str| json!({ "key": key, "sourcePath": path, "eventName": event, "command": command });
         let listed = json!({ "data": [{ "hooks": [
-            { "key": "a", "sourcePath": file, "command": "orbit hook-guard instructions" },
-            { "key": "b", "sourcePath": file, "command": "their-hook" },
-            { "key": "c", "sourcePath": other, "command": "orbit hook-guard instructions" },
+            hook("ours", &file, "sessionStart", ours_command),
+            hook("lookalike", &file, "sessionStart", "scripts/hook-guard-lint.sh"),
+            hook("pre_tool", &file, "preToolUse", ours_command),
+            hook("other_file", &other, "sessionStart", ours_command),
         ] }] });
 
-        let keys: Vec<&str> = ours(&listed, &file, "hook-guard")
+        let keys: Vec<&str> = ours(&listed, &file, &[ours_command.to_string()])
             .iter()
             .map(|hook| hook["key"].as_str().unwrap())
             .collect();
 
-        assert_eq!(keys, ["a"]);
+        assert_eq!(keys, ["ours"]);
     }
 }

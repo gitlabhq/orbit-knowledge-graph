@@ -102,10 +102,16 @@ pub(crate) async fn install(
         .filter(|agent| agent.has_ui())
         .map(|agent| agent.title.as_str())
         .collect();
+    let plugin_instructions: Vec<&str> = selection
+        .agents
+        .iter()
+        .filter(|agent| agent.instructions_component() == Component::AgentPlugins)
+        .map(|agent| agent.title.as_str())
+        .collect();
     if interactive
         && options.ask_agent_plugins
         && !ui_agents.is_empty()
-        && !ask_install_agent_plugins(&ui_agents)?
+        && !ask_install_agent_plugins(&ui_agents, &plugin_instructions)?
     {
         selection.components.remove(&Component::AgentPlugins);
     }
@@ -140,6 +146,9 @@ pub(crate) async fn install(
     let report = apply_and_report(&options, |report| {
         components::install(&selection, &target, report)
     })?;
+    for warning in missing_instructions(&selection, &report) {
+        tui::warning(warning);
+    }
     tui::card(
         "Configured",
         summary::format_configured_per_agent(&plan, &report),
@@ -222,6 +231,29 @@ pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> 
     Ok(finish(&selection, Outcome::Applied))
 }
 
+/// Agents left without Orbit instructions because the component that loads them was skipped or
+/// could not be installed.
+fn missing_instructions(selection: &Selection, report: &Report) -> Vec<String> {
+    let skipped: Vec<&str> = report.skipped_agent_plugins().collect();
+    selection
+        .agents
+        .iter()
+        .filter_map(|agent| {
+            let component = agent.instructions_component();
+            let installed = selection.components.contains(&component)
+                && !(component == Component::AgentPlugins
+                    && skipped.contains(&agent.title.as_str()));
+            (!installed).then(|| {
+                format!(
+                    "{} gets no Orbit instructions: they load from the {}, which this run skipped",
+                    agent.title,
+                    component.label()
+                )
+            })
+        })
+        .collect()
+}
+
 fn ask_which_agents(
     selection: Selection,
     question: &str,
@@ -238,7 +270,7 @@ const INSTALL_AGENT_PLUGINS: &str = "install";
 const SKIP_AGENT_PLUGINS: &str = "skip";
 
 /// Asks whether to install the agent plugins, starting on the recommended install.
-fn ask_install_agent_plugins(ui_agents: &[&str]) -> Result<bool> {
+fn ask_install_agent_plugins(ui_agents: &[&str], plugin_instructions: &[&str]) -> Result<bool> {
     let choices = [
         tui::Choice {
             key: INSTALL_AGENT_PLUGINS.to_string(),
@@ -249,7 +281,10 @@ fn ask_install_agent_plugins(ui_agents: &[&str]) -> Result<bool> {
         tui::Choice {
             key: SKIP_AGENT_PLUGINS.to_string(),
             label: "Skip the agent plugins".to_string(),
-            hint: String::new(),
+            hint: match plugin_instructions {
+                [] => String::new(),
+                agents => format!("{} gets no Orbit instructions", agents.join(" and ")),
+            },
             section: None,
         },
     ];
@@ -276,7 +311,11 @@ fn apply_and_report(
         for outcome in &report.outcomes {
             if outcome.action == components::KEPT_RETIRED {
                 tui::warning(format!("{}: {}", outcome.label, outcome.action));
-            } else if let Some(warning) = outcome.action.strip_prefix("WARNING: ") {
+            } else if let Some(warning) = outcome
+                .action
+                .strip_prefix("WARNING: ")
+                .filter(|_| outcome.skipped_plugin_agent.is_none())
+            {
                 tui::warning(format!("{}: {warning}", outcome.label));
             }
         }
@@ -1861,6 +1900,37 @@ mod tests {
         assert!(!home.path().join(".claude/CLAUDE.md").exists());
         assert!(home.path().join(".claude/settings.json").is_file());
         assert!(!home.path().join(".claude.json").exists());
+    }
+
+    #[test]
+    fn agents_without_the_component_that_loads_the_instructions_are_named() {
+        let named = |agents: &[&str], skip: &[Component], skipped_plugin: bool| {
+            let selection = Selection {
+                agents: agents
+                    .iter()
+                    .map(|name| spec::agent_named(name).unwrap())
+                    .collect(),
+                components: Component::from_flags(&[], skip).unwrap(),
+                skill: SkillRequest::default(),
+            };
+            let mut report = Report::default();
+            if skipped_plugin {
+                report.note_plugin_skipped("Claude Code", "plugin", "too old");
+            }
+            missing_instructions(&selection, &report)
+        };
+        let every = ["claude", "codex", "duo", "opencode", "pi"];
+
+        assert!(named(&every, &[], false).is_empty());
+        let without_hooks = named(&every, &[Component::Hooks], false);
+        assert_eq!(without_hooks.len(), 4, "{without_hooks:?}");
+        assert!(
+            !without_hooks
+                .iter()
+                .any(|line| line.starts_with("Claude Code"))
+        );
+        assert_eq!(named(&every, &[Component::AgentPlugins], false).len(), 1);
+        assert_eq!(named(&["claude"], &[], true).len(), 1);
     }
 
     #[test]
