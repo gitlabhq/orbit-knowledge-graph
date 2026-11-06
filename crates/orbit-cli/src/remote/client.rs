@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use cynic::{GraphQlResponse, Operation};
 use serde::de::DeserializeOwned;
@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::api::{Api, ErrorExtensions};
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
+use super::retry;
 
 const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -150,6 +151,7 @@ impl OrbitClient {
                     .get(self.url(GREP_PATH))
                     .query(params)
                     .timeout(GREP_REQUEST_TIMEOUT),
+                true,
             )
             .await?;
         read_body(response).await
@@ -199,6 +201,7 @@ impl OrbitClient {
                     .post(self.url(path))
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
                     .body(body),
+                false,
             )
             .await?;
         read_body(response).await
@@ -210,7 +213,7 @@ impl OrbitClient {
         params: &[(&str, String)],
     ) -> Result<Vec<u8>, RemoteError> {
         let response = self
-            .send(self.http.get(self.url(path)).query(params))
+            .send(self.http.get(self.url(path)).query(params), true)
             .await?;
         read_body(response).await
     }
@@ -219,36 +222,61 @@ impl OrbitClient {
         format!("{}{path}", self.endpoint.base_url.trim_end_matches('/'))
     }
 
-    /// Retries once only when the connection failed, so the server never saw the request. A timeout or a
-    /// server error is not retried: the server may have run the query, and a graph query is billed.
+    /// Retries with jittered exponential backoff, but only where re-sending cannot run or bill a
+    /// query twice: a failed connection (the server never saw the request) and a rate limit, which
+    /// is enforced before the query runs. A timeout or server error is not retried by default.
+    /// `retry_unavailable` also retries a 503, for endpoints that do not run a query.
     async fn send(
         &self,
         request: reqwest::RequestBuilder,
+        retry_unavailable: bool,
     ) -> Result<reqwest::Response, RemoteError> {
+        let max_retries = retry::max_retries();
+        let mut retries = 0_u32;
+        let mut waited = Duration::ZERO;
         let mut pending = Some(request);
-        let mut attempt = 0_u8;
-        let response = loop {
-            attempt += 1;
+        loop {
             let current = pending.take().expect("a request remains");
-            pending = current.try_clone().filter(|_| attempt == 1);
-            match self.send_raw(current).await {
-                Ok(response) => break response,
-                Err(error) if pending.is_some() && error.is_connect() => {}
+            pending = current.try_clone().filter(|_| retries < max_retries);
+            let retryable = match self.send_raw(current).await {
+                Ok(response) if response.status().is_success() => return Ok(response),
+                Ok(response) => {
+                    let status = response.status().as_u16();
+                    let retry_after = response
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| retry::parse_retry_after(value, SystemTime::now()));
+                    let body = response.text().await.unwrap_or_default();
+                    let error = map_http_error(status, &body);
+                    if pending.is_none() || !retry::is_retryable_status(status, retry_unavailable) {
+                        return Err(error);
+                    }
+                    (format!("HTTP {status}"), retry_after, error)
+                }
                 Err(error) => {
-                    return Err(RemoteError::new(
+                    let failure = RemoteError::new(
                         EXIT_GENERIC,
                         request_failure_message("Orbit request", &error),
-                    ));
+                    );
+                    if pending.is_none() || !error.is_connect() {
+                        return Err(failure);
+                    }
+                    ("connection failed".to_string(), None, failure)
                 }
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        };
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(map_http_error(status.as_u16(), &body));
+            };
+            let (reason, retry_after, error) = retryable;
+            retries += 1;
+            let Some(delay) = retry::next_delay(retries, retry_after, waited) else {
+                return Err(error);
+            };
+            eprintln!(
+                "orbit: {reason}; retrying in {:.1}s (retry {retries}/{max_retries})",
+                delay.as_secs_f32()
+            );
+            tokio::time::sleep(delay).await;
+            waited += delay;
         }
-        Ok(response)
     }
 
     async fn send_authenticated(

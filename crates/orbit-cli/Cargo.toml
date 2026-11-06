@@ -51,6 +51,8 @@ globset = { workspace = true }
 reqwest = { workspace = true, features = ["gzip", "brotli", "zstd"] }
 rust-embed = { workspace = true, features = ["include-exclude"] }
 rustls = { workspace = true }
+rand = { workspace = true }
+httpdate = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 rustc-hash = { workspace = true }

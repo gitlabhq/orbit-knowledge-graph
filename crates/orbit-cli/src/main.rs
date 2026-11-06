@@ -35,6 +35,16 @@ const DETACHED_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
     after_help = descriptions::summary("cli")
 )]
 struct Cli {
+    /// How many times to retry a rate-limited or unreachable request, with exponential backoff.
+    /// 0 disables retries.
+    #[arg(
+        long,
+        global = true,
+        env = "ORBIT_RETRIES",
+        value_name = "N",
+        default_value_t = remote::retry::DEFAULT_RETRIES
+    )]
+    retries: u32,
     #[command(subcommand)]
     command: Commands,
 }
@@ -791,6 +801,7 @@ async fn main() -> Result<()> {
         anyhow::bail!("run `glab orbit update` to update Orbit");
     }
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
+    remote::retry::configure(cli.retries);
     match &cli.command {
         Commands::HookGuard { kind, gitlab, .. } => {
             let started = Instant::now();
