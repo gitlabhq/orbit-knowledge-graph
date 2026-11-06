@@ -1,8 +1,26 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    link_downloaded_duckdb();
     export_current_ontology_archive_path();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
+}
+
+/// libduckdb-sys 2.0 adds no rpath for a downloaded libduckdb, so a debug `gkg-server` run
+/// outside Cargo finds the library only through this one. Release builds compile DuckDB in.
+fn link_downloaded_duckdb() {
+    println!("cargo:rerun-if-env-changed=DUCKDB_DOWNLOAD_LIB");
+    let downloads = std::env::var("DUCKDB_DOWNLOAD_LIB")
+        .is_ok_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true"));
+    let unix = std::env::var("CARGO_CFG_TARGET_FAMILY")
+        .is_ok_and(|families| families.split(',').any(|family| family == "unix"));
+    let debug = std::env::var("PROFILE").is_ok_and(|profile| profile == "debug");
+    if !(downloads && unix && debug) {
+        return;
+    }
+    if let Ok(lib_dir) = std::env::var("DEP_DUCKDB_INCLUDE") {
+        println!("cargo:rustc-link-arg-bin=gkg-server=-Wl,-rpath,{lib_dir}");
+    }
 }
 
 /// Points `ONTOLOGY_ARCHIVE_PATH` at the bundled archive for the current

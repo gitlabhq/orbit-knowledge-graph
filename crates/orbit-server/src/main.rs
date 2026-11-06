@@ -118,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
                     ontology,
                     serving,
                     shutdown,
-                    indexer_datafusion::sql_transform(),
+                    indexer_duckdb::sql_transform()?,
                 )
                 .await
                 .map_err(Into::into)

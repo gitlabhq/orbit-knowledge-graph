@@ -651,7 +651,7 @@ fips-check:
   script:
     - ./scripts/checks/fips/aws-lc/check-graph.sh
     - mise run fips:duckdb:check
-    - cargo build -p orbit-server --locked
+    - cargo build -p orbit-server --locked --features libduckdb-sys/bundled
     - ./scripts/checks/fips/aws-lc/check-binary.sh target/debug/gkg-server
     - sccache --show-stats || true
 
