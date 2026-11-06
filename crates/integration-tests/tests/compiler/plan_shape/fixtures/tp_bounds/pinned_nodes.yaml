@@ -6,7 +6,10 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {id: 7}) RETURN mr LIMIT 1
     logical:
-      expect: ["(NodeScan MergeRequest AS mr)"]
+      gql:
+        expect: ["(Limit 1 (Select mr (Filter mr.id = 7 (Entities MergeRequest AS mr))))"]
+      json:
+        expect: ["(Limit 1 (Select mr (Filter mr.id IN [7] (Entities MergeRequest AS mr))))"]
     physical:
       clickhouse:
         emitted:
@@ -20,7 +23,10 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {id: 7})-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff) RETURN d.id LIMIT 10
     logical:
-      expect: ["(EdgeScan HAS_LATEST_DIFF mr->d AS e0)"]
+      gql:
+        expect: ["(Follow HAS_LATEST_DIFF mr->d AS e0 (Filter mr.id = 7 (Entities MergeRequest AS mr)))"]
+      json:
+        expect: ["(Follow HAS_LATEST_DIFF mr->d AS e0 (Filter mr.id IN [7] (Entities MergeRequest AS mr)))"]
     physical:
       clickhouse:
         emitted:
@@ -35,7 +41,10 @@ cases:
       gql: |
         MATCH (pl:Pipeline {id: 7})-[:HAS_JOB]->(j:Job) RETURN j.name LIMIT 100
     logical:
-      expect: ["(EdgeScan HAS_JOB pl->j AS e0)"]
+      gql:
+        expect: ["(Follow HAS_JOB pl->j AS e0 (Filter pl.id = 7 (Entities Pipeline AS pl)))"]
+      json:
+        expect: ["(Follow HAS_JOB pl->j AS e0 (Filter pl.id IN [7] (Entities Pipeline AS pl)))"]
     physical:
       clickhouse:
         emitted:
@@ -48,7 +57,7 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {project_id: 100}) RETURN mr.iid LIMIT 10
     logical:
-      expect: ["(Filter mr.project_id = 100 (NodeScan MergeRequest AS mr))"]
+      expect: ["(Filter mr.project_id = 100 (Entities MergeRequest AS mr))"]
     physical:
       clickhouse:
         emitted:
