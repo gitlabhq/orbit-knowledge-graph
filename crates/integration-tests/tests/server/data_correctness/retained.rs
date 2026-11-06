@@ -1,6 +1,6 @@
 use compiler::passes::codegen::render;
 use integration_testkit::visitor::NodeExt;
-use integration_testkit::{TestContext, load_data_model};
+use integration_testkit::{TestContext, load_data_model, t};
 use orbit_utils::query_types::SqlType;
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::relational::plan::{
@@ -89,7 +89,7 @@ fn semantic(
 ) -> Result<Relation, RelationalError> {
     let result = q.cte("result", false, |q| {
         let seed = q.cte("seed", false, |q| {
-            let table = q.catalog().table("gl_merge_request")?;
+            let table = q.catalog().table(&t("gl_merge_request"))?;
             let rows = q.scan(table, ReadMode::Raw, "m")?;
             q.select_all(rows)
         })?;
@@ -114,7 +114,7 @@ fn semantic(
     if !union {
         return Ok(rows);
     }
-    let table = q.catalog().table("gl_merge_request")?;
+    let table = q.catalog().table(&t("gl_merge_request"))?;
     let one = q.scan(table, ReadMode::Raw, "one")?;
     let zero = Expr::Parameter {
         data_type: SqlType::Int64,
@@ -130,10 +130,15 @@ fn semantic(
 async fn semantic_aggregate_and_nested_cte_codegen_execute() {
     let model = load_data_model();
     let ctx = TestContext::new(&[]).await;
-    ctx.execute("CREATE TABLE gl_merge_request(iid Nullable(Int64), draft Bool) ENGINE=Memory")
-        .await;
-    ctx.execute("INSERT INTO gl_merge_request VALUES (2,true),(2,true),(NULL,true),(9,false)")
-        .await;
+    let table = t("gl_merge_request");
+    ctx.execute(&format!(
+        "CREATE TABLE {table}(iid Nullable(Int64), draft Bool) ENGINE=Memory"
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {table} VALUES (2,true),(2,true),(NULL,true),(9,false)"
+    ))
+    .await;
     let render = |union, argument, distinct| {
         let plan = model
             .catalog()
