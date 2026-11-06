@@ -8,7 +8,10 @@ cases:
         WHERE d.id >= 1 AND d.id <= 10 AND NOT d.id IN [3, 4]
         RETURN d.name
     logical:
-      expect: ["(Filter NOT (d.id IN [3, 4]) (_))"]
+      gql:
+        expect: ["(Filter d.id >= 1, d.id <= 10, NOT (d.id IN [3, 4]) (Entities Definition AS d))"]
+      json:
+        expect: ["(Filter d.id >= 1, d.id <= 10, NOT ((d.id IN [3, 4])) (Entities Definition AS d))"]
     physical:
       clickhouse:
         planned:
@@ -24,9 +27,13 @@ cases:
         WHERE NOT b.name = 'skip'
         RETURN b.name
     logical:
-      expect:
-        - "(Filter b.name != 'skip' (NodeScan Definition AS b))"
-      reject: ["(Filter NOT (b.name = 'skip') (_))"]
+      gql:
+        expect:
+          - "(Filter NOT (b.name = 'skip') (Follow CALLS a->b AS e0 (Filter a.id = 12000 (Entities Definition AS a))))"
+      json:
+        expect:
+          - "(Filter b.name != 'skip' (Follow CALLS a->b AS e0 (Filter a.id IN [12000] (Entities Definition AS a))))"
+        reject: ["(Filter NOT (b.name = 'skip') (_))"]
     physical:
       clickhouse:
         planned:

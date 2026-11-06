@@ -9,7 +9,7 @@ cases:
 
     logical:
       expect:
-        - (Filter mr.title = 'Ship feature E' (_))
+        - (Filter mr.title = 'Ship feature E' (Entities MergeRequest AS mr))
 
     physical:
       clickhouse:
@@ -27,7 +27,7 @@ cases:
 
     logical:
       expect:
-        - (Filter mr.title IN ['Ship feature E', 'Ship feature F'] (_))
+        - (Filter mr.title IN ['Ship feature E', 'Ship feature F'] (Entities MergeRequest AS mr))
 
     physical:
       clickhouse:
@@ -45,7 +45,7 @@ cases:
 
     logical:
       expect:
-        - (Filter mr.state = 'merged' (_))
+        - (Filter mr.state = 'merged' (Entities MergeRequest AS mr))
 
     physical:
       clickhouse:
