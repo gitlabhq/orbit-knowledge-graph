@@ -8,6 +8,7 @@ detect:
   - "$GLAB_CONFIG_DIR/bin/duo"
   - "$XDG_CONFIG_HOME/glab-cli/bin/duo"
   - "~/.config/glab-cli/bin/duo"
+  - "~/Library/Application Support/glab-cli/bin/duo"
 instruction_file:
   project: AGENTS.md
   global: "~/.gitlab/duo/AGENTS.md"

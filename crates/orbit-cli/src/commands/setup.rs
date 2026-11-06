@@ -519,17 +519,19 @@ mod tests {
 
     #[test]
     fn setup_detects_duo_from_the_binary_glab_installed_before_its_first_run() {
-        let home = tempfile::tempdir().unwrap();
-        let bin = home.path().join(".config/glab-cli/bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        std::fs::write(bin.join("duo"), "").unwrap();
-        let machine = Machine::new(home.path().to_path_buf(), BTreeMap::new());
+        for glab_config_dir in [".config/glab-cli", "Library/Application Support/glab-cli"] {
+            let home = tempfile::tempdir().unwrap();
+            let bin = home.path().join(glab_config_dir).join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::fs::write(bin.join("duo"), "").unwrap();
+            let machine = Machine::new(home.path().to_path_buf(), BTreeMap::new());
 
-        let dir = tempfile::tempdir().unwrap();
-        let run = install(options_for(&[]), project(dir.path()), &machine).unwrap();
+            let dir = tempfile::tempdir().unwrap();
+            let run = install(options_for(&[]), project(dir.path()), &machine).unwrap();
 
-        assert_eq!(run.detected_agents, ["duo"]);
-        assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
+            assert_eq!(run.detected_agents, ["duo"], "{glab_config_dir}");
+            assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
+        }
     }
 
     #[test]
