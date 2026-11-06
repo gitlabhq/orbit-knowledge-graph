@@ -165,8 +165,8 @@ fn build_error_count_sql() -> String {
        GROUP BY entity_id, trace_id \
      ) \
      SELECT t.entity_id AS entity_id, toString(uniqExactIf(s.span_id, s.has_error)) AS value \
-     FROM traces AS t \
-     INNER JOIN signoz_index_v3 AS s ON s.trace_id = t.trace_id \
+     FROM signoz_index_v3 AS s \
+     INNER JOIN traces AS t ON s.trace_id = t.trace_id \
      WHERE s.ts_bucket_start BETWEEN {from_bucket:UInt64} AND {to_bucket:UInt64} \
      AND s.timestamp BETWEEN fromUnixTimestamp({from_unix:UInt64}) \
      AND fromUnixTimestamp({to_unix:UInt64}) \
@@ -289,6 +289,17 @@ mod tests {
             sql.contains("uniqExactIf(s.span_id, s.has_error)"),
             "a re-exported span must not count twice: {sql}"
         );
+    }
+
+    /// ClickHouse builds the hash from the right side, so the span table has
+    /// to stream rather than be hashed.
+    #[test]
+    fn the_error_count_joins_the_small_side_on_the_right() {
+        let sql = build_sql(TraceLookup::PipelineTraceErrorCount);
+        let span_table = sql.find("FROM signoz_index_v3 AS s").expect("span table");
+        let joined = sql.find("INNER JOIN traces AS t").expect("trace cte");
+
+        assert!(span_table < joined, "the span table is being hashed: {sql}");
     }
 
     #[test]
