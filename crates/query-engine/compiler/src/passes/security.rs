@@ -37,7 +37,6 @@ use serde_json::Value;
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::{QueryError, Result};
 use crate::passes::codegen::ClickHousePlan;
-use crate::passes::security_check::table_name;
 pub use crate::types::SecurityContext;
 
 static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
@@ -122,7 +121,7 @@ fn guards(
                 let Operation::Scan { table, .. } = graph.operation(scan) else {
                     return None;
                 };
-                let table = table_name(catalog, *table);
+                let table = catalog.table_name(*table);
                 if !pattern.is_match(table) || !model.table_has_path_columns(table) {
                     return None;
                 }

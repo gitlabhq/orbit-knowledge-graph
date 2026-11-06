@@ -77,6 +77,14 @@ impl<B: RelationalBackend> Catalog<B> {
             .ok_or_else(|| RelationalError::UnknownTable(name.to_string()))
     }
 
+    pub fn table_name(&self, table: Table) -> &str {
+        let (_, facts) = self
+            .stores()
+            .nth(table.store)
+            .expect("declared tables name a store of their catalog");
+        &facts.relational().tables[table.index].name
+    }
+
     pub fn build<'c>(
         &'c self,
         construct: impl FnOnce(&mut RelationalBuilder<'c, B>) -> Result<Relation, RelationalError>,

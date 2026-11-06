@@ -1,4 +1,3 @@
-use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
 use compiler::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
 use compiler::passes::plan::QueryPlan;
 use compiler::passes::plan::graph::{
@@ -11,11 +10,11 @@ use std::collections::HashMap;
 use super::operator::Operator;
 use super::pattern::Expression as Tree;
 
-fn leaf(label: Operator, text: impl Into<String>) -> Tree {
+pub(super) fn leaf(label: Operator, text: impl Into<String>) -> Tree {
     Tree::node(label, text, vec![])
 }
 
-fn filter(predicates: Vec<String>, input: Tree) -> Tree {
+pub(super) fn filter(predicates: Vec<String>, input: Tree) -> Tree {
     if predicates.is_empty() {
         return input;
     }
@@ -218,8 +217,8 @@ fn property_filter(alias: &str, property: &str, filter: &InputFilter) -> String 
     format!("{alias}.{property} {operator} {value}")
 }
 
-pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
-    let planned = match plan {
+pub fn physical(plan: &QueryPlan) -> Tree {
+    match plan {
         QueryPlan::Traversal(plan) => execution_tree(&plan.operation.execution),
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
@@ -403,12 +402,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 })
                 .collect(),
         ),
-    };
-    let emitted = match ast {
-        Node::Query(value) => query(value),
-        Node::Insert(_) => leaf(Operator::Insert, ""),
-    };
-    (planned, emitted)
+    }
 }
 
 fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
@@ -654,7 +648,7 @@ fn membership_columns(columns: &[Column]) -> String {
     }
 }
 
-fn membership_keys(keys: &[String]) -> String {
+pub(super) fn membership_keys(keys: &[String]) -> String {
     match keys {
         [key] => key.clone(),
         _ => format!("({})", keys.join(", ")),
@@ -720,7 +714,7 @@ fn planned_projections(values: &[Projection]) -> String {
         .join(", ")
 }
 
-fn scan(table: &str, alias: &str, final_: bool) -> Tree {
+pub(super) fn scan(table: &str, alias: &str, final_: bool) -> Tree {
     let scan = leaf(Operator::Scan, format!("Table({table}) AS {alias}"));
     if final_ {
         Tree::node(Operator::Deduplicate, "Final", vec![scan])
@@ -729,23 +723,11 @@ fn scan(table: &str, alias: &str, final_: bool) -> Tree {
     }
 }
 
-fn join_head(kind: &str, condition: &Expr) -> String {
-    format!(
-        "{}ON {}",
-        if kind == "INNER" {
-            String::new()
-        } else {
-            format!("{kind} ")
-        },
-        expression(condition)
-    )
-}
-
 fn text_literal(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
-fn literal(value: &serde_json::Value) -> String {
+pub(super) fn literal(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(value) => text_literal(value),
         serde_json::Value::Array(values) => format!(
@@ -756,223 +738,7 @@ fn literal(value: &serde_json::Value) -> String {
     }
 }
 
-fn expression(value: &Expr) -> String {
-    match value {
-        Expr::EmptyTupleArray(fields) => format!("empty_tuple_array({fields:?})"),
-        Expr::TextSearch { mode, value, query } => {
-            format!("{mode}({}, {})", expression(value), expression(query))
-        }
-        Expr::TimeBucket { unit, value } => {
-            format!("bucket({}, {})", unit.name(), expression(value))
-        }
-        Expr::Aggregate {
-            function,
-            argument,
-            distinct,
-            condition,
-        } => {
-            let argument = argument
-                .as_ref()
-                .map(|value| expression(value))
-                .unwrap_or_default();
-            let mut value = format!(
-                "{}({}{argument})",
-                function.to_string().to_uppercase(),
-                if *distinct { "DISTINCT " } else { "" }
-            );
-            if let Some(condition) = condition {
-                value.push_str(&format!(" FILTER [{}]", expression(condition)));
-            }
-            value
-        }
-        Expr::Column { table, column } => format!("{table}.{column}"),
-        Expr::Identifier(name) => name.clone(),
-        Expr::Literal(value) | Expr::Param { value, .. } => literal(value),
-        Expr::FuncCall { name, args } => format!(
-            "{name}({})",
-            args.iter().map(expression).collect::<Vec<_>>().join(", ")
-        ),
-        Expr::BinaryOp { op, left, right } => {
-            let operand = |value: &Expr| {
-                let text = expression(value);
-                if matches!(value, Expr::BinaryOp { op: child, .. } if child != op || !matches!(op, Op::And | Op::Or))
-                {
-                    format!("({text})")
-                } else {
-                    text
-                }
-            };
-            format!("{} {op} {}", operand(left), operand(right))
-        }
-        Expr::UnaryOp {
-            op: op @ (Op::IsNull | Op::IsNotNull),
-            expr,
-        } => format!("{} {op}", expression(expr)),
-        Expr::UnaryOp { op, expr } => format!("{op}({})", expression(expr)),
-        Expr::Lambda { param, body } => format!("{param} -> {}", expression(body)),
-        Expr::InSubquery {
-            expr,
-            cte_name,
-            columns,
-        } => format!(
-            "{} IN {cte_name}.{}",
-            expression(expr),
-            membership_keys(columns)
-        ),
-        Expr::InSelect { expr, .. } => format!("{} IN subquery", expression(expr)),
-        Expr::Scalar(query) => format!("scalar({})", scalar(query)),
-        Expr::Star => "*".into(),
-    }
-}
-
-fn scalar(value: &Query) -> String {
-    let source = match &value.from {
-        TableRef::Scan { table, alias, .. } => format!("{table} AS {alias}"),
-        _ => "subquery".into(),
-    };
-    match &value.where_clause {
-        Some(predicate) => format!("{source} WHERE {}", expression(predicate)),
-        None => source,
-    }
-}
-
-fn query_filter(predicate: &Expr, input: Tree) -> Tree {
-    match predicate {
-        Expr::BinaryOp {
-            op: Op::And,
-            left,
-            right,
-        } => query_filter(right, query_filter(left, input)),
-        Expr::InSelect { expr, query: keys } => Tree::node(
-            Operator::SemiJoin,
-            format!("{} IN subquery", expression(expr)),
-            vec![input, query(keys)],
-        ),
-        _ => filter(vec![expression(predicate)], input),
-    }
-}
-
-fn projections(values: &[SelectExpr]) -> String {
-    values
-        .iter()
-        .map(|value| {
-            value.alias.as_ref().map_or_else(
-                || expression(&value.expr),
-                |alias| format!("{} AS {alias}", expression(&value.expr)),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn relation(value: &TableRef) -> Tree {
-    match value {
-        TableRef::Scan {
-            table,
-            alias,
-            final_,
-            ..
-        } => scan(table, alias, *final_),
-        TableRef::Cte { name, alias } => scan(name, alias, false),
-        TableRef::Join {
-            join_type,
-            left,
-            right,
-            on,
-        } => Tree::node(
-            Operator::Join,
-            join_head(&join_type.to_string(), on),
-            vec![relation(left), relation(right)],
-        ),
-        TableRef::Subquery {
-            query: inner,
-            alias,
-        } => Tree::node(Operator::Bind, alias, vec![query(inner)]),
-        TableRef::Union { queries, alias } => Tree::node(
-            Operator::Union,
-            format!("ALL AS {alias}"),
-            queries.iter().map(query).collect(),
-        ),
-    }
-}
-
-fn query(value: &Query) -> Tree {
-    let mut tree = relation(&value.from);
-    if let Some(predicate) = &value.where_clause {
-        tree = query_filter(predicate, tree);
-    }
-    let projection = projections(&value.select);
-    let aggregate = !value.group_by.is_empty()
-        || value
-            .select
-            .iter()
-            .any(|value| matches!(value.expr, Expr::Aggregate { .. }));
-    if !aggregate {
-        tree = Tree::node(Operator::Project, projection, vec![tree]);
-    } else {
-        let items = value
-            .group_by
-            .iter()
-            .map(|key| format!("group {}", expression(key)))
-            .chain([projection])
-            .collect::<Vec<_>>()
-            .join(", ");
-        tree = Tree::node(Operator::Aggregate, items, vec![tree]);
-    }
-    if let Some(predicate) = &value.having {
-        tree = query_filter(predicate, tree);
-    }
-    if value.distinct {
-        tree = Tree::node(Operator::Distinct, "", vec![tree]);
-    }
-    if !value.union_all.is_empty() {
-        tree = Tree::node(
-            Operator::Union,
-            "ALL",
-            std::iter::once(tree)
-                .chain(value.union_all.iter().map(query))
-                .collect(),
-        );
-    }
-    tree = sort(
-        tree,
-        value
-            .order_by
-            .iter()
-            .map(|order| (expression(&order.expr), order.desc)),
-    );
-    if let Some((limit, keys)) = &value.limit_by {
-        tree = Tree::node(
-            Operator::Deduplicate,
-            format!(
-                "LimitBy {limit} BY {}",
-                keys.iter().map(expression).collect::<Vec<_>>().join(", ")
-            ),
-            vec![tree],
-        );
-    }
-    if let Some(offset) = value.offset {
-        tree = Tree::node(Operator::Offset, offset.to_string(), vec![tree]);
-    }
-    if let Some(limit) = value.limit {
-        tree = Tree::node(Operator::Limit, limit.to_string(), vec![tree]);
-    }
-    if !value.ctes.is_empty() {
-        tree = Tree::node(
-            Operator::With,
-            "",
-            value
-                .ctes
-                .iter()
-                .map(|cte| Tree::node(Operator::Cte, &cte.name, vec![query(&cte.query)]))
-                .chain([tree])
-                .collect(),
-        );
-    }
-    tree
-}
-
-fn sort(input: Tree, keys: impl Iterator<Item = (String, bool)>) -> Tree {
+pub(super) fn sort(input: Tree, keys: impl Iterator<Item = (String, bool)>) -> Tree {
     let keys: Vec<_> = keys
         .map(|(value, descending)| format!("{value}{}", if descending { " DESC" } else { "" }))
         .collect();
@@ -1010,13 +776,4 @@ fn exact_assertions_preserve_nested_filter_order() {
             "planned",
         )
         .unwrap();
-    let emitted = query_filter(
-        &Expr::conjoin(vec![
-            Expr::eq(Expr::col("p", "id"), Expr::int(1)),
-            Expr::eq(Expr::col("p", "star_count"), Expr::int(2)),
-        ])
-        .unwrap(),
-        scan("gl_project", "p", false),
-    );
-    assertions.check(&emitted, "emitted").unwrap();
 }

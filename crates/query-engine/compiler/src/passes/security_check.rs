@@ -9,9 +9,8 @@ use std::collections::HashMap;
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::Catalog;
 use query_data_model::implementations::clickhouse::ClickHouse;
-use query_data_model::implementations::relational::RelationalFacts;
 use query_data_model::implementations::relational::plan::{
-    BinaryOp, Expr, Function, Operation, Relational, Table,
+    BinaryOp, Expr, Function, Operation, Relational,
 };
 use query_data_model::plan::tracking::{NodeId, Plan, Ref};
 use serde_json::Value;
@@ -35,7 +34,7 @@ pub fn verify(
         let Operation::Scan { table, alias, .. } = graph.operation(node) else {
             continue;
         };
-        let table = table_name(catalog, *table);
+        let table = catalog.table_name(*table);
         let Some(columns) = model.table_path_columns(table) else {
             return Err(QueryError::Security(format!(
                 "post-check failed: unresolved table '{table}'"
@@ -65,14 +64,6 @@ pub fn verify(
         }
     }
     Ok(())
-}
-
-pub(super) fn table_name(catalog: &Catalog<ClickHouse>, table: Table) -> &str {
-    let (_, facts) = catalog
-        .stores()
-        .nth(table.store())
-        .expect("plans scan tables of their catalog");
-    &facts.relational().tables[table.index()].name
 }
 
 fn join_filters<'p>(
