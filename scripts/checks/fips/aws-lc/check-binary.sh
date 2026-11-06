@@ -24,6 +24,14 @@ if grep -q ' _\?aws_lc_[0-9]' <<<"$symbols"; then
   exit 1
 fi
 
+# DuckDB compiles mbedtls in for hashing and its encryption fallback. Its TLS, X.509 and network
+# modules must never link, so all TLS stays in the FIPS module.
+if grep -qE 'mbedtls_(ssl|x509|net)_' <<<"$symbols"; then
+  echo "FAIL: $binary links mbedtls TLS, X.509 or network code; only the AWS-LC FIPS module may do TLS" >&2
+  exit 1
+fi
+mbedtls_symbols=$(grep -c 'mbedtls_' <<<"$symbols" || true)
+
 "$binary" --help >/dev/null
 
-echo "OK: $binary links the AWS-LC FIPS module ($fips_symbols symbols) and passes FIPS self-tests"
+echo "OK: $binary links the AWS-LC FIPS module ($fips_symbols symbols) and passes FIPS self-tests; DuckDB's mbedtls has $mbedtls_symbols crypto symbols and no TLS"
