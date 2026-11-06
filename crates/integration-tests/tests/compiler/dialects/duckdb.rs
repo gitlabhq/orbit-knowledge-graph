@@ -3,6 +3,13 @@
 use crate::compiler::setup::{embedded_local_model, local_model, test_ontology};
 use crate::compiler::utils::ParsedSql;
 use compiler::{Frontend, compile_local};
+use orbit_utils::query_types::{SqlType, TimeZone};
+use query_data_model::implementations::duckdb::DuckDb;
+use query_data_model::implementations::relational::plan::{
+    AggregateFunction, BinaryOp, Expr, Function, Measure, Order, ReadMode, Relation,
+    RelationalBuilder, RelationalError, TimeUnit,
+};
+use query_data_model::plan::tracking::Declare;
 
 fn compile(json: &str) -> compiler::passes::codegen::CompiledQueryContext {
     compile_local(json, Frontend::JsonDsl, &local_model(&test_ontology())).unwrap()
@@ -12,9 +19,69 @@ fn parse_duckdb(json: &str) -> ParsedSql {
     ParsedSql::from_query(&compile(json).base)
 }
 
-fn local_codegen(ast: &compiler::Node) -> compiler::ParameterizedQuery {
+fn local(
+    construct: impl FnOnce(&mut Builder<'_>) -> Result<Relation, RelationalError>,
+) -> compiler::ParameterizedQuery {
     let model = integration_testkit::load_local_data_model();
-    compiler::duckdb_codegen(ast, model.catalog(), Default::default()).unwrap()
+    let plan = model.catalog().build(construct).unwrap();
+    compiler::passes::codegen::render(&plan, &*model, Default::default(), Default::default())
+}
+
+type Builder<'c> = RelationalBuilder<'c, DuckDb>;
+
+fn scan(q: &mut Builder<'_>, table: &str, alias: &str) -> Result<Relation, RelationalError> {
+    let table = q.catalog().table(table)?;
+    q.scan(table, ReadMode::Current, alias)
+}
+
+fn named(
+    q: &mut Builder<'_>,
+    rows: Relation,
+    items: Vec<(&str, Expr)>,
+) -> Result<Relation, RelationalError> {
+    let items = items
+        .into_iter()
+        .map(|(name, value)| Declare::named(name, value))
+        .collect();
+    let (rows, columns) = q.compute(rows, items)?;
+    q.select(rows, columns)
+}
+
+fn int(value: i64) -> Expr {
+    Expr::Parameter {
+        data_type: SqlType::Int64,
+        value: value.into(),
+    }
+}
+
+fn text(value: &str) -> Expr {
+    Expr::Parameter {
+        data_type: SqlType::String,
+        value: value.into(),
+    }
+}
+
+fn call(function: Function, args: Vec<Expr>) -> Expr {
+    Expr::Call { function, args }
+}
+
+fn lambda(body: Expr) -> Expr {
+    Expr::Lambda {
+        param: "x".into(),
+        body: Box::new(body),
+    }
+}
+
+fn binary(op: BinaryOp, left: Expr, right: Expr) -> Expr {
+    Expr::Binary {
+        op,
+        left: Box::new(left),
+        right: Box::new(right),
+    }
+}
+
+fn variable() -> Expr {
+    Expr::Variable("x".into())
 }
 
 #[test]
@@ -78,87 +145,62 @@ fn fused_neighbors_execute_both_directions_including_self_loops() {
 
 #[test]
 fn canonical_functions_execute_in_duckdb() {
-    use compiler::ast::{Expr, Function, Node, Op, Query, SelectExpr, TableRef};
-
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("functions.duckdb")).unwrap();
     database
         .initialize_schema("CREATE TABLE gl_file(id BIGINT); INSERT INTO gl_file VALUES (1);")
         .unwrap();
-    let array = || Expr::func(Function::Array, vec![Expr::int(1), Expr::int(2)]);
-    let positive = || Expr::lambda("x", Expr::binary(Op::Gt, Expr::ident("x"), Expr::int(1)));
+    let array = || call(Function::Array, vec![int(1), int(2)]);
+    let positive = || lambda(binary(BinaryOp::Gt, variable(), int(1)));
     for (expression, expected) in [
         (
-            Expr::EmptyTupleArray(vec![
-                compiler::ast::SqlType::Int64,
-                compiler::ast::SqlType::String,
-            ]),
+            Expr::EmptyArray(vec![SqlType::Int64, SqlType::String]),
             "[]",
         ),
+        (call(Function::ByteLength, vec![text("é")]), "2"),
         (
-            Expr::func(Function::ByteLength, vec![Expr::string("é")]),
-            "2",
-        ),
-        (
-            Expr::func(
-                Function::Substring,
-                vec![Expr::string("éclair"), Expr::int(1), Expr::int(2)],
-            ),
+            call(Function::Substring, vec![text("éclair"), int(1), int(2)]),
             "éc",
         ),
         (
-            Expr::func(Function::ArrayFilter, vec![positive(), array()]),
+            call(Function::ArrayFilter, vec![positive(), array()]),
             "[2]",
         ),
         (
-            Expr::func(
+            call(
                 Function::ArrayMap,
-                vec![
-                    Expr::lambda("x", Expr::binary(Op::Add, Expr::ident("x"), Expr::int(1))),
-                    array(),
-                ],
+                vec![lambda(binary(BinaryOp::Add, variable(), int(1))), array()],
             ),
             "[2, 3]",
         ),
         (
-            Expr::func(Function::ArrayExists, vec![positive(), array()]),
+            call(Function::ArrayExists, vec![positive(), array()]),
             "true",
         ),
         (
-            Expr::func(
+            call(
                 Function::TupleElement,
-                vec![
-                    Expr::func(Function::Tuple, vec![Expr::int(7), Expr::string("x")]),
-                    Expr::int(1),
-                ],
+                vec![call(Function::Tuple, vec![int(7), text("x")]), int(1)],
             ),
             "7",
         ),
         (
-            Expr::func(
-                Function::CountSubstrings,
-                vec![Expr::string("1/2/"), Expr::string("/")],
-            ),
+            call(Function::CountSubstrings, vec![text("1/2/"), text("/")]),
             "2",
         ),
         (
-            Expr::func(
+            call(
                 Function::ToJson,
-                vec![Expr::func(
-                    Function::Object,
-                    vec![Expr::string("k"), Expr::string("v")],
-                )],
+                vec![call(Function::Object, vec![text("k"), text("v")])],
             ),
             "{\"k\":\"v\"}",
         ),
     ] {
-        let ast = Node::Query(Box::new(Query {
-            select: vec![SelectExpr::new(expression, "value")],
-            from: TableRef::scan("gl_file", "s"),
-            ..Default::default()
-        }));
-        let query = local_codegen(&ast);
+        let query = local(|q| {
+            let rows = scan(q, "gl_file", "s")?;
+            named(q, rows, vec![("value", expression)])
+        });
         let result = database.query_arrow(&query.render()).unwrap();
         assert_eq!(
             arrow::util::display::array_value_to_string(result[0].column(0), 0).unwrap(),
@@ -171,26 +213,25 @@ fn canonical_functions_execute_in_duckdb() {
 
 #[test]
 fn week_buckets_start_sunday_and_return_dates() {
-    use compiler::ast::{Expr, Node, Query, SelectExpr, TableRef};
-    use compiler::input::TruncateUnit;
-
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("weeks.duckdb")).unwrap();
     database.initialize_schema("CREATE TABLE gl_file(name TIMESTAMP); INSERT INTO gl_file VALUES ('2026-10-03 23:59:59'), ('2026-10-04 00:00:00'), ('2026-10-05 12:00:00');").unwrap();
-    let ast = Node::Query(Box::new(Query {
-        select: vec![SelectExpr::new(
-            Expr::TimeBucket {
-                unit: TruncateUnit::Week,
-                value: Box::new(Expr::col("e", "name")),
-            },
-            "bucket",
-        )],
-        from: TableRef::scan("gl_file", "e"),
-        order_by: vec![compiler::ast::OrderExpr::asc(Expr::col("e", "name"))],
-        ..Default::default()
-    }));
-    let query = local_codegen(&ast);
+    let query = local(|q| {
+        let rows = scan(q, "gl_file", "e")?;
+        let name = rows.qualified("e", "name")?.expr();
+        let bucket = Expr::TimeBucket {
+            unit: TimeUnit::Week,
+            value: Box::new(name.clone()),
+        };
+        let (rows, columns) = q.compute(rows, vec![Declare::named("bucket", bucket)])?;
+        let order = Order {
+            value: name,
+            descending: false,
+        };
+        let rows = q.order(rows, vec![order])?;
+        q.select(rows, columns)
+    });
     let result = database.query_arrow(&query.render()).unwrap();
     assert_eq!(
         result[0].column(0).data_type(),
@@ -204,28 +245,23 @@ fn week_buckets_start_sunday_and_return_dates() {
 
 #[test]
 fn temporal_parameters_bind_and_render_without_clickhouse_syntax() {
-    use compiler::ast::{Expr, Node, Query, SelectExpr, SqlType, TableRef, TimeZone};
-
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("parameters.duckdb")).unwrap();
     database.initialize_schema("CREATE TABLE gl_file(name TIMESTAMPTZ); INSERT INTO gl_file VALUES ('2026-10-05T01:02:03.123456Z');").unwrap();
-    let ast = Node::Query(Box::new(Query {
-        select: vec![SelectExpr::col("e", "name")],
-        from: TableRef::scan("gl_file", "e"),
-        where_clause: Some(Expr::eq(
-            Expr::col("e", "name"),
-            Expr::param(
-                SqlType::Timestamp {
-                    precision: 6,
-                    timezone: Some(TimeZone::Utc),
-                },
-                "2026-10-05T01:02:03.123456Z",
-            ),
-        )),
-        ..Default::default()
-    }));
-    let compiled = local_codegen(&ast);
+    let compiled = local(|q| {
+        let rows = scan(q, "gl_file", "e")?;
+        let name = rows.qualified("e", "name")?.expr();
+        let instant = Expr::Parameter {
+            data_type: SqlType::Timestamp {
+                precision: 6,
+                timezone: Some(TimeZone::Utc),
+            },
+            value: "2026-10-05T01:02:03.123456Z".into(),
+        };
+        let rows = q.filter(rows, binary(BinaryOp::Eq, name.clone(), instant))?;
+        named(q, rows, vec![("name", name)])
+    });
     assert!(!compiled.render().contains("toDateTime"));
     let parameter = compiled.params.get("p1").unwrap();
     let parameters = duckdb_client::to_sql_params(&[parameter]);
@@ -237,53 +273,44 @@ fn temporal_parameters_bind_and_render_without_clickhouse_syntax() {
     assert_eq!(bound[0].num_rows(), 1);
 }
 
+fn nested(q: &mut Builder<'_>, union: bool) -> Result<Relation, RelationalError> {
+    let result = q.cte("result", false, |q| {
+        let seed = q.cte("seed", false, |q| {
+            let rows = scan(q, "gl_file", "n")?;
+            let id = rows.qualified("n", "id")?.expr();
+            named(q, rows, vec![("id", id)])
+        })?;
+        let rows = q.read(&seed, Some("s"))?;
+        let id = rows.qualified("s", "id")?.expr();
+        named(q, rows, vec![("id", id)])
+    })?;
+    let rows = q.read(&result, Some("r"))?;
+    let id = rows.qualified("r", "id")?.expr();
+    let rows = named(q, rows, vec![("id", id)])?;
+    if !union {
+        return Ok(rows);
+    }
+    let other = scan(q, "gl_file", "n")?;
+    let id = other.qualified("n", "id")?.expr();
+    let other = named(q, other, vec![("id", id)])?;
+    q.union(vec![rows, other])
+}
+
 #[test]
 fn nested_cte_codegen_executes_with_its_local_definition() {
-    use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
-
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("nested.duckdb")).unwrap();
     database
         .initialize_schema("CREATE TABLE gl_file(id BIGINT); INSERT INTO gl_file VALUES (7);")
         .unwrap();
-    let ast = Node::Query(Box::new(Query {
-        ctes: vec![Cte::new(
-            "result",
-            Query {
-                ctes: vec![Cte::new(
-                    "seed",
-                    Query {
-                        select: vec![SelectExpr::col("n", "id")],
-                        from: TableRef::scan("gl_file", "n"),
-                        ..Default::default()
-                    },
-                )],
-                select: vec![SelectExpr::col("s", "id")],
-                from: TableRef::cte("seed", "s"),
-                ..Default::default()
-            },
-        )],
-        select: vec![SelectExpr::new(Expr::col("r", "id"), "id")],
-        from: TableRef::cte("result", "r"),
-        ..Default::default()
-    }));
-    let query = local_codegen(&ast);
+    let query = local(|q| nested(q, false));
     let result = database.query_arrow(&query.render()).unwrap();
     assert_eq!(
         arrow::util::display::array_value_to_string(result[0].column(0), 0).unwrap(),
         "7"
     );
-    let Node::Query(mut union) = ast else {
-        unreachable!()
-    };
-    union.union_all.push(Query {
-        select: vec![SelectExpr::col("n", "id")],
-        from: TableRef::scan("gl_file", "n"),
-        ..Default::default()
-    });
-    let union = Node::Query(union);
-    let query = local_codegen(&union);
+    let query = local(|q| nested(q, true));
     let result = database.query_arrow(&query.render()).unwrap();
     assert_eq!(
         result.iter().map(|batch| batch.num_rows()).sum::<usize>(),
@@ -293,56 +320,58 @@ fn nested_cte_codegen_executes_with_its_local_definition() {
 
 #[test]
 fn semantic_aggregate_codegen_preserves_null_and_empty_input_results() {
-    use compiler::ast::{Expr, Node, Query, SelectExpr, TableRef};
-    use compiler::input::AggFunction;
+    use AggregateFunction as F;
 
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("aggregate.duckdb")).unwrap();
     database.initialize_schema("CREATE TABLE gl_definition(start_line BIGINT, end_line BIGINT); INSERT INTO gl_definition VALUES (2, 1), (2, 1), (NULL, 1), (9, 0);").unwrap();
     for (function, argument, distinct, filtered, expected) in [
-        (AggFunction::Count, false, false, false, "4"),
-        (AggFunction::Count, true, false, false, "3"),
-        (AggFunction::Count, false, false, true, "3"),
-        (AggFunction::Count, true, false, true, "2"),
-        (AggFunction::Count, true, true, true, "1"),
-        (AggFunction::Sum, true, false, true, "4"),
-        (AggFunction::Avg, true, false, true, "2.0"),
-        (AggFunction::Min, true, false, true, "2"),
-        (AggFunction::Max, true, false, true, "2"),
-        (AggFunction::Collect, true, false, true, "[2, 2]"),
-        (AggFunction::Collect, true, true, true, "[2]"),
+        (F::Count, false, false, false, "4"),
+        (F::Count, true, false, false, "3"),
+        (F::Count, false, false, true, "3"),
+        (F::Count, true, false, true, "2"),
+        (F::Count, true, true, true, "1"),
+        (F::Sum, true, false, true, "4"),
+        (F::Avg, true, false, true, "2.0"),
+        (F::Min, true, false, true, "2"),
+        (F::Max, true, false, true, "2"),
+        (F::Collect, true, false, true, "[2, 2]"),
+        (F::Collect, true, true, true, "[2]"),
     ] {
         for empty in [false, true] {
-            let ast = Node::Query(Box::new(Query {
-                select: vec![SelectExpr::new(
-                    Expr::Aggregate {
-                        function,
-                        argument: argument.then(|| Box::new(Expr::col("m", "start_line"))),
-                        distinct,
-                        condition: filtered
-                            .then(|| Box::new(Expr::eq(Expr::col("m", "end_line"), Expr::int(1)))),
-                    },
-                    "result",
-                )],
-                from: TableRef::scan("gl_definition", "m"),
-                where_clause: empty.then(|| Expr::lit(false)),
-                ..Default::default()
-            }));
-            let query = local_codegen(&ast);
+            let query = local(|q| {
+                let rows = scan(q, "gl_definition", "m")?;
+                let rows = match empty {
+                    true => {
+                        let none = Expr::Parameter {
+                            data_type: SqlType::Bool,
+                            value: false.into(),
+                        };
+                        q.filter(rows, none)?
+                    }
+                    false => rows,
+                };
+                let start = rows.qualified("m", "start_line")?.expr();
+                let end = rows.qualified("m", "end_line")?.expr();
+                let measure = Measure {
+                    function,
+                    args: argument.then_some(start).into_iter().collect(),
+                    distinct,
+                    condition: filtered.then(|| binary(BinaryOp::Eq, end, int(1))),
+                };
+                let aggregated = q.aggregate(rows, Vec::new(), vec![measure])?;
+                let value = aggregated.measures[0].expr();
+                named(q, aggregated.rows, vec![("result", value)])
+            });
             let results = database.query_arrow(&query.render()).unwrap();
             let actual =
                 arrow::util::display::array_value_to_string(results[0].column(0), 0).unwrap();
-            let expected = if empty {
-                if function == AggFunction::Count {
-                    "0"
-                } else if function == AggFunction::Collect {
-                    "[]"
-                } else {
-                    ""
-                }
-            } else {
-                expected
+            let expected = match (empty, function) {
+                (false, _) => expected,
+                (true, F::Count) => "0",
+                (true, F::Collect) => "[]",
+                (true, _) => "",
             };
             assert_eq!(actual, expected, "{}", query.sql);
         }

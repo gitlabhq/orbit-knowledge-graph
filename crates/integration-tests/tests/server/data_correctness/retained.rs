@@ -1,8 +1,12 @@
-use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
-use compiler::input::AggFunction;
-use compiler::passes::codegen::codegen;
+use compiler::passes::codegen::render;
 use integration_testkit::visitor::NodeExt;
 use integration_testkit::{TestContext, load_data_model};
+use orbit_utils::query_types::SqlType;
+use query_data_model::implementations::clickhouse::ClickHouse;
+use query_data_model::implementations::relational::plan::{
+    AggregateFunction, Expr, Measure, ReadMode, Relation, RelationalBuilder, RelationalError,
+};
+use query_data_model::plan::tracking::Declare;
 
 use super::helpers::run_query;
 use crate::common::compile_and_execute;
@@ -77,6 +81,51 @@ pub(super) async fn path_finding_code_filtered_endpoints_stay_on_same_traversal_
     );
 }
 
+fn semantic(
+    q: &mut RelationalBuilder<'_, ClickHouse>,
+    argument: bool,
+    distinct: bool,
+    union: bool,
+) -> Result<Relation, RelationalError> {
+    let result = q.cte("result", false, |q| {
+        let seed = q.cte("seed", false, |q| {
+            let table = q.catalog().table("gl_merge_request")?;
+            let rows = q.scan(table, ReadMode::Raw, "m")?;
+            q.select_all(rows)
+        })?;
+        let rows = q.read(&seed, Some("s"))?;
+        let iid = rows.qualified("s", "iid")?.expr();
+        let draft = rows.qualified("s", "draft")?.expr();
+        let measure = Measure {
+            function: AggregateFunction::Count,
+            args: argument.then_some(iid).into_iter().collect(),
+            distinct,
+            condition: Some(draft),
+        };
+        let aggregated = q.aggregate(rows, Vec::new(), vec![measure])?;
+        let count = aggregated.measures[0].expr();
+        let (rows, columns) = q.compute(aggregated.rows, vec![Declare::named("n", count)])?;
+        q.select(rows, columns)
+    })?;
+    let rows = q.read(&result, Some("r"))?;
+    let n = rows.qualified("r", "n")?.expr();
+    let (rows, columns) = q.compute(rows, vec![Declare::named("n", n)])?;
+    let rows = q.select(rows, columns)?;
+    if !union {
+        return Ok(rows);
+    }
+    let table = q.catalog().table("gl_merge_request")?;
+    let one = q.scan(table, ReadMode::Raw, "one")?;
+    let zero = Expr::Parameter {
+        data_type: SqlType::Int64,
+        value: 0.into(),
+    };
+    let (one, columns) = q.compute(one, vec![Declare::named("n", zero)])?;
+    let one = q.limit(one, Some(1), None)?;
+    let one = q.select(one, columns)?;
+    q.union(vec![rows, one])
+}
+
 #[tokio::test]
 async fn semantic_aggregate_and_nested_cte_codegen_execute() {
     let model = load_data_model();
@@ -85,68 +134,22 @@ async fn semantic_aggregate_and_nested_cte_codegen_execute() {
         .await;
     ctx.execute("INSERT INTO gl_merge_request VALUES (2,true),(2,true),(NULL,true),(9,false)")
         .await;
+    let render = |union, argument, distinct| {
+        let plan = model
+            .catalog()
+            .build(|q| semantic(q, argument, distinct, union))
+            .unwrap();
+        render(&plan, &*model, Default::default(), Default::default()).render()
+    };
     for (argument, distinct, expected) in
         [(false, false, "3"), (true, false, "2"), (true, true, "1")]
     {
-        let ast = Node::Query(Box::new(Query {
-            ctes: vec![Cte::new(
-                "result",
-                Query {
-                    ctes: vec![Cte::new(
-                        "seed",
-                        Query {
-                            select: vec![SelectExpr::star()],
-                            from: TableRef::scan("gl_merge_request", "m"),
-                            ..Default::default()
-                        },
-                    )],
-                    select: vec![SelectExpr::new(
-                        Expr::Aggregate {
-                            function: AggFunction::Count,
-                            argument: argument.then(|| Box::new(Expr::col("s", "iid"))),
-                            distinct,
-                            condition: Some(Box::new(Expr::col("s", "draft"))),
-                        },
-                        "n",
-                    )],
-                    from: TableRef::cte("seed", "s"),
-                    ..Default::default()
-                },
-            )],
-            select: vec![SelectExpr::col("r", "n")],
-            from: TableRef::cte("result", "r"),
-            ..Default::default()
-        }));
-        let compiled = codegen(
-            &ast,
-            model.catalog(),
-            Default::default(),
-            Default::default(),
-        )
-        .unwrap();
-        let result = ctx.query(&compiled.render()).await;
+        let result = ctx.query(&render(false, argument, distinct)).await;
         assert_eq!(
             arrow::util::display::array_value_to_string(result[0].column(0), 0).unwrap(),
             expected
         );
-        let Node::Query(mut union) = ast else {
-            unreachable!()
-        };
-        union.union_all.push(Query {
-            select: vec![SelectExpr::new(Expr::int(0), "n")],
-            from: TableRef::scan("gl_merge_request", "one"),
-            limit: Some(1),
-            ..Default::default()
-        });
-        let union = Node::Query(union);
-        let compiled = codegen(
-            &union,
-            model.catalog(),
-            Default::default(),
-            Default::default(),
-        )
-        .unwrap();
-        let result = ctx.query(&compiled.render()).await;
+        let result = ctx.query(&render(true, argument, distinct)).await;
         assert_eq!(
             result.iter().map(|batch| batch.num_rows()).sum::<usize>(),
             2
