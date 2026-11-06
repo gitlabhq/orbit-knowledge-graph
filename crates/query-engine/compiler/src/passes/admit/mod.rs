@@ -1,6 +1,8 @@
 //! Rejects queries past the engine limits: predicate and filter caps,
 //! virtual-column and text-index rules, and scans with no selective node.
 
+#[cfg(test)]
+mod contract;
 mod facts;
 mod limits;
 mod rules;

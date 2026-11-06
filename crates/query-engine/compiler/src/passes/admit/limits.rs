@@ -6,10 +6,10 @@ use super::facts::{Anchor, Fact};
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
 
-const MAX_PREDICATES: usize = 16;
-const MAX_FILTERS_PER_NODE: usize = 10;
-const MAX_FILTERS_PER_REL: usize = 5;
-const MAX_FILTER_ENTRIES_PER_PROPERTY: usize = 10;
+pub(super) const MAX_PREDICATES: usize = 16;
+pub(super) const MAX_FILTERS_PER_NODE: usize = 10;
+pub(super) const MAX_FILTERS_PER_REL: usize = 5;
+pub(super) const MAX_FILTER_ENTRIES_PER_PROPERTY: usize = 10;
 
 pub(super) fn predicates(facts: &[Fact<'_>]) -> Result<()> {
     let count = facts.len();

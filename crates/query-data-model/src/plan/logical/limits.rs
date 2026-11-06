@@ -4,6 +4,7 @@ use super::{Expr, PlanError, Predicate};
 use crate::Model;
 
 pub const RESERVED_PREFIX: &str = "_orbit_";
+pub const MAX_NODES: usize = 5;
 pub const MAX_HOPS: u32 = 3;
 pub const MAX_PATH_DEPTH: u32 = 3;
 pub const MAX_RELATIONSHIP_TYPES: usize = 10;

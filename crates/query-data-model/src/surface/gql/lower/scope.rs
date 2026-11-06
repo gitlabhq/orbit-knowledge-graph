@@ -4,9 +4,8 @@ use super::super::ast::{MapEntry, NodePattern, Pattern, PatternElement, Range, R
 use super::super::errors::invalid;
 use crate::Direction;
 use crate::plan::logical::Hops;
+use crate::plan::logical::limits::MAX_NODES;
 use crate::surface::SurfaceError;
-
-const MAX_NODES: usize = 5;
 
 pub(super) struct Node<'i> {
     pub alias: String,
