@@ -66,13 +66,8 @@ pub struct LoweredEdge {
     pub relationship: usize,
 }
 
-pub enum Lowered<P> {
-    Ast(Node),
-    Plan(P),
-}
-
 pub struct LoweredQuery<P> {
-    pub lowered: Lowered<P>,
+    pub plan: P,
     pub metadata: LoweredMetadata,
 }
 
@@ -136,7 +131,7 @@ pub fn emit<M: RelationalModel>(
     model: &M,
 ) -> Result<LoweredQuery<PlanOf<M>>> {
     let catalog = model.catalog();
-    let (lowered, nodes, stable_order) = match plan {
+    let (built, nodes, stable_order) = match plan {
         QueryPlan::Traversal(plan) => {
             let nodes = bindings(plan, input, graph::bindings(&plan.operation.execution))?;
             let shape = query_types::traversal::shape(plan, input)?;
@@ -144,7 +139,7 @@ pub fn emit<M: RelationalModel>(
                 .build(|q| query_types::traversal::emit(q, plan, input, &shape, tp_bounds))
                 .map_err(rejected)?;
             let stable_order = query_types::traversal::stable_order(plan, input, &nodes);
-            (Lowered::Plan(built), nodes, stable_order)
+            (built, nodes, stable_order)
         }
         QueryPlan::Aggregation(plan) => {
             let nodes = bindings(plan, input, graph::bindings(&plan.operation.execution))?;
@@ -152,7 +147,7 @@ pub fn emit<M: RelationalModel>(
                 .build(|q| query_types::aggregation::emit(q, plan, input, tp_bounds))
                 .map_err(rejected)?;
             let stable_order = query_types::aggregation::stable_order(plan);
-            (Lowered::Plan(built), nodes, stable_order)
+            (built, nodes, stable_order)
         }
         QueryPlan::Neighbors(plan) => {
             let built = catalog
@@ -160,15 +155,21 @@ pub fn emit<M: RelationalModel>(
                 .map_err(rejected)?;
             let center = (plan.operation.center.clone(), NodeBinding::Projected);
             let stable_order = query_types::neighbors::stable_order(plan);
-            (Lowered::Plan(built), HashMap::from([center]), stable_order)
+            (built, HashMap::from([center]), stable_order)
         }
-        QueryPlan::PathFinding(plan) => ast(query_types::pathfinding::emit(plan, input)?),
+        QueryPlan::PathFinding(plan) => {
+            let built = catalog
+                .build(|q| query_types::pathfinding::emit(q, plan, input))
+                .map_err(rejected)?;
+            let stable_order = query_types::pathfinding::stable_order();
+            (built, HashMap::new(), stable_order)
+        }
         QueryPlan::Hydration(plan) => {
             query_types::hydration::check(plan)?;
             let built = catalog
                 .build(|q| query_types::hydration::emit(q, plan))
                 .map_err(rejected)?;
-            (Lowered::Plan(built), HashMap::new(), Vec::new())
+            (built, HashMap::new(), Vec::new())
         }
     };
     let edges = plan
@@ -182,21 +183,11 @@ pub fn emit<M: RelationalModel>(
         })
         .collect();
     Ok(LoweredQuery {
-        lowered,
+        plan: built,
         metadata: LoweredMetadata {
             nodes,
             edges,
             stable_order,
         },
     })
-}
-
-type Parts<P> = (Lowered<P>, HashMap<String, NodeBinding>, Vec<OrderExpr>);
-
-fn ast<P>(emitted: query_types::Emitted) -> Parts<P> {
-    (
-        Lowered::Ast(emitted.ast),
-        emitted.nodes,
-        emitted.stable_order,
-    )
 }

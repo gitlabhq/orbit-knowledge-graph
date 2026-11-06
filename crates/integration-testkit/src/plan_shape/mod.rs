@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use compiler::input::Input;
-use compiler::passes::codegen::{self, RelationalModel};
+use compiler::passes::codegen::RelationalModel;
 use compiler::passes::{frontend, lower, normalize, page, plan, response_policy};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, Model};
 use serde::Deserialize;
@@ -297,15 +297,11 @@ fn check<M: RelationalModel>(
         let planned = explain::physical(&plan);
         let relational = lower::emit(&plan, &input, tp_bounds.as_ref(), model)
             .and_then(|lowered| {
-                let relational = match lowered.lowered {
-                    lower::Lowered::Ast(ast) => codegen::build(&ast, model.catalog(), M::DIALECT)?,
-                    lower::Lowered::Plan(plan) => plan,
-                };
                 let relational = match backend {
                     "clickhouse" => {
-                        response_policy::apply_text_excerpts(relational, model, &input)?
+                        response_policy::apply_text_excerpts(lowered.plan, model, &input)?
                     }
-                    _ => relational,
+                    _ => lowered.plan,
                 };
                 match scenario.hydration {
                     Some(_) => Ok(relational),
@@ -826,10 +822,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         };
         assert_eq!((actual_set, paths.len()), (set, expected_paths));
         let lowered = lower::emit(&plan, &input, None, &model).unwrap();
-        let lower::Lowered::Plan(relational) = lowered.lowered else {
-            panic!("hydration lowers to a relational plan");
-        };
-        let sql = model.catalog().render(&relational).sql;
+        let sql = model.catalog().render(&lowered.plan).sql;
         assert_eq!(sql.contains("arrayExists"), set);
         assert_eq!(
             sql.matches("startsWith").count(),

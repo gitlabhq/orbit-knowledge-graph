@@ -4,13 +4,12 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::Node;
 use crate::error::{QueryError, Result};
 use crate::input::Input;
-use crate::passes::codegen::{CompiledQueryContext, RelationalModel};
+use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
-use crate::passes::lower::{Lowered, LoweredMetadata};
+use crate::passes::lower::LoweredMetadata;
 use crate::passes::plan::HydrationCompileOptions;
 use crate::passes::plan::QueryPlan;
 use crate::passes::result_contract::ResultContext;
@@ -35,7 +34,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub tp_bounds: crate::tp_bounds::TpBounds,
         pub hydration_options: HydrationCompileOptions,
         pub query_plan: QueryPlan,
-        pub node: Node,
         pub lowered_metadata: LoweredMetadata,
         pub result_ctx: ResultContext,
         pub query_config: QueryConfig,
@@ -94,7 +92,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         lower {
             reads_env: [data_model]
             reads_state: [input, tp_bounds]
-            mutates: [query_plan, node, relational, lowered_metadata]
+            mutates: [query_plan, relational, lowered_metadata]
         }
         paginate {
             reads_env: [data_model]
@@ -125,11 +123,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [security_ctx, data_model]
             mutates: [relational]
         }
-        build_plan {
-            reads_env: [data_model]
-            reads_state: [node]
-            mutates: [relational]
-        }
         security_check {
             reads_env: [security_ctx, data_model]
             reads_state: [relational]
@@ -137,7 +130,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         codegen {
             reads_env: [data_model]
             reads_state: [input]
-            mutates: [node, relational, result_ctx, query_config, hydration_plan, output]
+            mutates: [relational, result_ctx, query_config, hydration_plan, output]
         }
     }
 
@@ -145,32 +138,32 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, build_plan, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
+            state: [raw, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, build_plan, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
+            state: [raw, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, build_plan, response_policy, result_contract, settings, security, security_check, codegen]
+            state: [input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, security_check, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, build_plan, result_contract, paginate, codegen]
+            state: [raw, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, result_contract, paginate, codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, build_plan, result_contract, paginate, codegen]
+            state: [raw, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, result_contract, paginate, codegen]
         }
         validate_normalize_gql {
             model: query_data_model::ClickHouseDataModel
@@ -293,10 +286,7 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
         ctx.data_model(),
     )?;
     ctx.set_query_plan(query_plan);
-    match lowered.lowered {
-        Lowered::Ast(node) => ctx.set_node(node),
-        Lowered::Plan(plan) => ctx.set_relational(plan),
-    }
+    ctx.set_relational(lowered.plan);
     ctx.set_lowered_metadata(lowered.metadata);
     Ok(())
 }
@@ -334,15 +324,6 @@ fn paginate(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = require(ctx.input().as_ref(), "input")?;
     let metadata = require(ctx.lowered_metadata().as_ref(), "lowered_metadata")?;
     let plan = page::apply(plan, ctx.data_model(), input, metadata)?;
-    ctx.set_relational(plan);
-    Ok(())
-}
-
-fn build_plan<C: CompilerCtx>(ctx: &mut C) -> Result<()> {
-    let Some(node) = ctx.node().as_ref() else {
-        return Ok(());
-    };
-    let plan = codegen::build(node, ctx.data_model().catalog(), C::Model::DIALECT)?;
     ctx.set_relational(plan);
     Ok(())
 }
@@ -387,7 +368,6 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
     let query_config = ctx.take_query_config().unwrap_or_default();
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
-    let node = ctx.take_node().unwrap_or(Node::Query(Box::default()));
     let input = require(ctx.input().clone(), "input")?;
     let plan = require(ctx.relational().as_ref(), "relational")?;
     let base = codegen::render(plan, ctx.data_model(), result_context, query_config);
@@ -395,7 +375,7 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
         query_type,
-        ast: node,
+        ast: crate::ast::Node::Query(Box::default()),
         base,
         hydration,
         input,

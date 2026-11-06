@@ -5,6 +5,7 @@ pub(crate) mod sources;
 use orbit_utils::query_types::SqlType;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Column, Expr, Function, ReadMode, Relation, RelationalBuilder, RelationalError,
+    Subquery,
 };
 use query_data_model::implementations::relational::{CurrentRows, RelationalBackend};
 use query_data_model::plan::tracking::Declare;
@@ -168,6 +169,24 @@ pub(crate) fn filtered<B: RelationalBackend>(
         Some(predicate) => q.filter(rows, predicate),
         None => Ok(rows),
     }
+}
+
+pub(crate) fn membership<B: RelationalBackend>(
+    q: &mut RelationalBuilder<'_, B>,
+    value: Expr,
+    body: &Subquery,
+    name: &str,
+    keys: &[&str],
+) -> Built<Expr> {
+    let keys = q.subquery(name, |q| {
+        let rows = q.read(body, None)?;
+        let keys = keys
+            .iter()
+            .map(|key| rows.column(key))
+            .collect::<Built<Vec<_>>>()?;
+        q.select(rows, keys)
+    })?;
+    Ok(keys.contains(value))
 }
 
 pub(crate) fn computed<B: RelationalBackend>(

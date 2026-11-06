@@ -121,15 +121,8 @@ impl Lowering<'_> {
                 };
                 let body = self.shared.get(*relation)?.clone();
                 let name = crate::passes::lower::graph::relation_name(*relation);
-                let keys = q.subquery(&name, |q| {
-                    let rows = q.read(&body, None)?;
-                    let keys = keys
-                        .iter()
-                        .map(|key| rows.column(key))
-                        .collect::<Built<Vec<_>>>()?;
-                    q.select(rows, keys)
-                })?;
-                keys.contains(value)
+                let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+                super::membership(q, value, &body, &name, &keys)?
             }
         })
     }

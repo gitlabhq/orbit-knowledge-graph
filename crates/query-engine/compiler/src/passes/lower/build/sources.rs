@@ -74,6 +74,27 @@ pub(crate) fn edge_scan<B: RelationalBackend>(
     Ok((q.read(&body, Some(alias))?, Vec::new()))
 }
 
+pub(crate) fn final_edge_scan<B: RelationalBackend>(
+    q: &mut RelationalBuilder<'_, B>,
+    tables: &[String],
+    alias: &str,
+) -> Built<Relation> {
+    if let [table] = tables {
+        return scan(q, table, alias, true);
+    }
+    let inner = union_arm_alias(alias);
+    let body = q.subquery(alias, |q| {
+        let mut arms = Vec::new();
+        for table in tables {
+            let rows = scan(q, table, &inner, true)?;
+            let items = columns(&[&rows], &inner, edge_columns(), stored::<B>())?;
+            arms.push(select(q, rows, items)?);
+        }
+        q.union(arms)
+    })?;
+    q.read(&body, Some(alias))
+}
+
 pub(crate) fn dedup<B: RelationalBackend>(
     q: &mut RelationalBuilder<'_, B>,
     alias: &str,
