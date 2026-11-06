@@ -26,12 +26,6 @@ fn bucket(unix: i64) -> u64 {
     (unix / 1_800 * 1_800) as u64
 }
 
-/// The settings profile o11y_provisioner declares in
-/// clickhouse_configs/users.xml, and the user and grants
-/// ClickhouseMigrationRunner#grant_orbit_reader_script creates against it.
-/// Production also restricts the user with HOST IP, which a container test
-/// cannot reproduce. The readonly profile is the part that matters here: a
-/// client sending a session setting it does not fix is rejected with code 164.
 const ORBIT_READER_PASSWORD: &str = "orbit-test-secret";
 
 /// Users and profiles are server-wide while databases are per test, so both
@@ -44,6 +38,12 @@ fn reader_profile(ctx: &TestContext) -> String {
     format!("orbit_reader_profile_{}", ctx.config.database)
 }
 
+/// The settings profile o11y_provisioner declares in
+/// clickhouse_configs/users.xml, and the user and grants
+/// ClickhouseMigrationRunner#grant_orbit_reader_script creates against it.
+/// Production also restricts the user with HOST IP, which a container test
+/// cannot reproduce. What this does reproduce is the readonly profile, which
+/// rejects any session setting it does not fix with code 164.
 async fn create_orbit_reader(ctx: &TestContext) {
     let user = reader_user(ctx);
     let profile = reader_profile(ctx);
