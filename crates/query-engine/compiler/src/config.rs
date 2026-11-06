@@ -80,6 +80,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         restrict {
             reads_env: [data_model, security_ctx]
+            reads_state: [statement]
+        }
+        restrict_hydration {
+            reads_env: [data_model, security_ctx]
             reads_state: [input]
         }
         plan_clickhouse {
@@ -147,19 +151,19 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, statement, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, normalize, bridge, admit, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
+            phases: [json_dsl_parse, normalize, restrict, bridge, admit, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, statement, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse, normalize, bridge, admit, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
+            phases: [gql_parse, normalize, restrict, bridge, admit, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, security_check, codegen]
+            phases: [restrict_hydration, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, security_check, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
@@ -240,13 +244,20 @@ fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn restrict<C>(ctx: &mut C) -> Result<()>
-where
-    C: CompilerCtx,
-    C::Model: query_data_model::OrbitQueryModel,
-{
+fn restrict(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let statement = require(ctx.statement().as_ref(), "statement")?;
+    let model = ctx.data_model();
+    restrict::restrict(
+        &statement.plan,
+        model.catalog().model(),
+        model,
+        ctx.security_ctx(),
+    )
+}
+
+fn restrict_hydration(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = require(ctx.input().as_ref(), "input")?;
-    restrict::restrict(input, ctx.data_model(), ctx.security_ctx())
+    restrict::restrict_hydration(input, ctx.data_model(), ctx.security_ctx())
 }
 
 fn plan_clickhouse(
