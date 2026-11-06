@@ -182,3 +182,17 @@ fn a_match_declares_its_nodes_in_written_order() {
         .collect();
     assert_eq!(order, ["u", "mr", "pipe", "p"]);
 }
+
+#[test]
+fn shortest_paths_need_a_walk_within_the_depth_not_a_direct_variant() {
+    let shortest = |depth: u32| {
+        plan(&format!(
+            "MATCH p = ANY SHORTEST (u:User {{id: 1}})-[:AUTHORED|IN_PROJECT*1..{depth}]->(x:Project {{id: 2}}) RETURN p"
+        ))
+    };
+    shortest(2).expect("User AUTHORED MergeRequest IN_PROJECT Project is two hops");
+    let SurfaceError::Plan(error) = shortest(1).unwrap_err() else {
+        panic!("no single AUTHORED or IN_PROJECT hop reaches Project from User");
+    };
+    assert_eq!(error.class(), ErrorClass::Connectivity);
+}
