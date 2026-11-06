@@ -304,11 +304,12 @@ fn check<M: RelationalModel>(
         if backend == "clickhouse" {
             response_policy::apply_text_excerpts(&mut lowered.ast, &input, model);
         }
-        if scenario.hydration.is_none() {
-            page::apply(&mut lowered.ast, &input, &lowered.metadata);
-        }
         let planned = explain::physical(&plan);
         let relational = codegen::build(&lowered.ast, model.catalog(), M::DIALECT)
+            .and_then(|relational| match scenario.hydration {
+                Some(_) => Ok(relational),
+                None => page::apply(relational, model, &input, &lowered.metadata),
+            })
             .map_err(|error| error.to_string());
         let assertions = &scenario.physical[backend];
         if let Some(rejected) = &assertions.rejected {

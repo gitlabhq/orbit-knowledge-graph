@@ -4,6 +4,8 @@
 pub mod ddl;
 mod import;
 
+pub(crate) use import::resolve;
+
 use orbit_server_config::QueryConfig;
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::duckdb::DuckDb;
@@ -166,7 +168,7 @@ pub fn cte_statements(ast: &Node, catalog: &Catalog<ClickHouse>) -> Result<Vec<C
         .collect()
 }
 
-fn rejected(error: RelationalError) -> QueryError {
+pub(crate) fn rejected(error: RelationalError) -> QueryError {
     QueryError::Codegen(error.to_string())
 }
 
