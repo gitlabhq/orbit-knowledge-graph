@@ -63,6 +63,8 @@ pub struct ScenarioConfig {
     pub redaction: Option<PresetOr<RedactionConfig>>,
     #[serde(default)]
     pub duckdb: bool,
+    #[serde(default)]
+    pub skip: BTreeMap<String, String>,
 }
 
 /// Either a preset name (string) or an inline value.

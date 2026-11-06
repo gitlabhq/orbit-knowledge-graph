@@ -293,6 +293,9 @@ async fn run_case(
         }
         let name = &step_label(name, index, steps.len());
         for (frontend_key, query_str) in &step.query {
+            if cfg.skip.contains_key(frontend_key) {
+                continue;
+            }
             let frontend = frontend_key
                 .parse::<Frontend>()
                 .unwrap_or_else(|_| panic!("{name}: unknown query language '{frontend_key}'"));

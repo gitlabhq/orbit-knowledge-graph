@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -43,7 +43,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
             run_step(
                 &database,
                 &data_model,
-                step,
+                (step, &config.skip),
                 &step_label(&name, index, steps.len()),
             );
         }
@@ -55,10 +55,14 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
 fn run_step(
     database: &DuckDbClient,
     data_model: &Arc<DuckDbDataModel>,
-    step: &QueryStep,
+    (step, skip): (&QueryStep, &BTreeMap<String, String>),
     name: &str,
 ) {
-    for (key, query) in &step.query {
+    for (key, query) in step
+        .query
+        .iter()
+        .filter(|(key, _)| !skip.contains_key(*key))
+    {
         let frontend: Frontend = key
             .parse()
             .unwrap_or_else(|_| panic!("{name}: unknown query language '{key}'"));
