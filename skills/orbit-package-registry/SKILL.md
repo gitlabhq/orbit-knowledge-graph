@@ -1,7 +1,7 @@
 ---
 name: orbit-package-registry
 description: Use Orbit graph queries to answer questions about GitLab Package Registry packages and Container Registry repositories across projects and groups. It covers package versions and their files, declared dependencies, known vulnerabilities, and the pipelines that built them. Load it with the `orbit` skill. Skip it for one project's package list or for publishing, which `glab` and the package manager handle.
-version: 0.1.0
+version: 0.1.1
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
@@ -18,9 +18,13 @@ Use these rules and recipes with the `orbit` skill, which covers query syntax,
 schema discovery, and the iteration budget. Run each recipe with
 `glab orbit query "<query>"`, because the recipes contain single-quoted strings.
 
+These nodes are the free-tier GitLab Package Registry and Container Registry.
+Artifact Registry (Artifact Central) data is not in Orbit. When asked about
+Artifact Registry, say so, and do not list free-tier packages in its place.
+
 ## Rules
 
-- Package and container questions use `Package`, `PackageFile`, `Dependency`, and `ContainerRepository`. This is the free-tier Package Registry and Container Registry. Artifact Registry data is not in Orbit, so do not report these results as Artifact Registry packages.
+- Package and container questions use `Package`, `PackageFile`, `Dependency`, and `ContainerRepository`.
 - `Package` holds one row per package version.
 - To count packages the way GitLab lists them, filter `p.status IN ['default', 'error', 'deprecated']`. Without it, counts include `hidden` packages, packages still `processing`, and packages `pending_destruction`.
 - To scope packages to a group, join to the project and filter its path: `MATCH (p:Package)-[:IN_PROJECT]->(pr:Project) WHERE pr.full_path STARTS WITH 'gitlab-org/'`. Walking `Group` and `CONTAINS` to a fixed depth misses deeper subgroups.
