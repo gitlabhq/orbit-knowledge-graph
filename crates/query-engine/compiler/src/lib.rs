@@ -45,7 +45,6 @@ pub mod config;
 pub mod passes;
 
 pub use ast::ddl;
-pub use ast::{Expr, Insert, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
     EDGE_DST_KIND_SUFFIX, EDGE_DST_SUFFIX, EDGE_KIND_SUFFIX, EDGE_SRC_KIND_SUFFIX, EDGE_SRC_SUFFIX,
     edge_kinds_column, hydration_node_alias, internal_column_prefix, neighbor_id_column,
@@ -63,9 +62,9 @@ use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
 
 pub use analytics::ExecMetrics;
 pub use passes::codegen::{
-    CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect, codegen,
+    CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
     ddl::duckdb::emit_create_table as emit_duckdb_create_table, ddl::duckdb::generate_local_ddl,
-    ddl::generate_local_tables, duckdb_codegen,
+    ddl::generate_local_tables,
 };
 pub use passes::frontend::{Frontend, gql};
 pub use passes::hydrate::{

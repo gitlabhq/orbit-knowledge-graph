@@ -2,7 +2,6 @@
 //! the backend catalog.
 
 pub mod ddl;
-mod import;
 
 use orbit_server_config::QueryConfig;
 use query_data_model::implementations::clickhouse::ClickHouse;
@@ -15,12 +14,12 @@ use query_data_model::{
     Catalog, ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, QueryModel,
 };
 
-use crate::ast::{Node, SqlType};
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::result_contract::ResultContext;
 pub use orbit_utils::query_types::ParamValue;
+use orbit_utils::query_types::SqlType;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -61,14 +60,6 @@ impl RelationalModel for DuckDbDataModel {
     }
 }
 
-pub fn build<B: RelationalBackend>(
-    ast: &Node,
-    catalog: &Catalog<B>,
-    dialect: SqlDialect,
-) -> Result<RelationalPlan<B>> {
-    import::build(ast, catalog, dialect).map_err(rejected)
-}
-
 pub fn configure(
     plan: ClickHousePlan,
     catalog: &Catalog<ClickHouse>,
@@ -103,39 +94,6 @@ pub fn render<M: RelationalModel>(
         query_config,
         dialect: M::DIALECT,
     }
-}
-
-pub fn codegen(
-    ast: &Node,
-    catalog: &Catalog<ClickHouse>,
-    result_context: ResultContext,
-    query_config: QueryConfig,
-) -> Result<ParameterizedQuery> {
-    let plan = build(ast, catalog, SqlDialect::ClickHouse)?;
-    let plan = configure(plan, catalog, &query_config)?;
-    let rendered = catalog.render(&plan);
-    Ok(ParameterizedQuery {
-        sql: rendered.sql,
-        params: rendered.parameters,
-        result_context,
-        query_config,
-        dialect: SqlDialect::ClickHouse,
-    })
-}
-
-pub fn duckdb_codegen(
-    ast: &Node,
-    catalog: &Catalog<DuckDb>,
-    result_context: ResultContext,
-) -> Result<ParameterizedQuery> {
-    let rendered = catalog.render(&build(ast, catalog, SqlDialect::DuckDb)?);
-    Ok(ParameterizedQuery {
-        sql: rendered.sql,
-        params: rendered.parameters,
-        result_context,
-        query_config: QueryConfig::default(),
-        dialect: SqlDialect::DuckDb,
-    })
 }
 
 /// A CTE's name, its body as a statement of its own with the CTEs before it attached, and its parameters.
