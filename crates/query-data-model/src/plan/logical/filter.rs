@@ -17,7 +17,10 @@ pub(super) fn predicate(
         Predicate::And(all) => all
             .iter()
             .try_for_each(|predicate| self::predicate(model, construction, predicate)),
-        Predicate::Not(inner) => self::predicate(model, construction, inner),
+        Predicate::Not(inner) => {
+            negated(model, inner)?;
+            self::predicate(model, construction, inner)
+        }
         Predicate::Null { left, .. } => filterable(model, construction, *left).map(drop),
         Predicate::In { left, values } => {
             let typed = filterable(model, construction, *left)?;
@@ -54,6 +57,20 @@ pub(super) fn predicate(
             text(&typed, *matching, needle)
         }
     }
+}
+
+fn negated(model: &Model, predicate: &Predicate) -> Result<(), PlanError> {
+    for leaf in predicate.leaf_predicates() {
+        if let Some(Expr::Property { property, .. }) = leaf.exprs().first().copied()
+            && model.lookup(property).is_some()
+        {
+            return Err(PlanError::shape(format!(
+                "{} is a virtual column and cannot be used under NOT",
+                model.graph().property(property).name
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn looked_up(model: &Model, leaf: &Predicate) -> Result<(), PlanError> {

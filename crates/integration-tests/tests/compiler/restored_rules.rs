@@ -103,3 +103,15 @@ fn shortest_path_type_conditions_keep_their_rejections() {
         "type(r) excludes every relationship type the pattern allows",
     );
 }
+
+#[test]
+fn virtual_properties_are_rejected_under_not() {
+    for query in [
+        "MATCH (f:File {id: 13000}) WHERE NOT f.content = 'secret' RETURN f.name",
+        "MATCH (f:File {id: 13000}) WHERE NOT NOT f.content = 'secret' RETURN f.name",
+    ] {
+        let message = rejected(query, Frontend::Gql);
+        assert!(message.contains("virtual column"), "{query}: {message}");
+        assert!(!message.contains("secret"), "{query}: {message}");
+    }
+}
