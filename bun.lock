@@ -28,6 +28,9 @@
         "typescript": "catalog:",
       },
     },
+    "packages/agent-plugins-nightly": {
+      "name": "@orbit/agent-plugins-nightly",
+    },
     "packages/site": {
       "name": "@orbit/site",
       "dependencies": {
@@ -223,6 +226,8 @@
     "@octokit/types": ["@octokit/types@18.0.0", "", { "dependencies": { "@octokit/openapi-types": "^29.0.1" } }, "sha512-l6bAF43PNxkJp6g+W4PjoUSSkxHomXw2nOum5CTftJz1NlV3vu93NImgOYtLf6CbBUb5j+fiuzW0PPQ5JTSvZA=="],
 
     "@orbit/agent-plugins": ["@orbit/agent-plugins@workspace:packages/agent-plugins"],
+
+    "@orbit/agent-plugins-nightly": ["@orbit/agent-plugins-nightly@workspace:packages/agent-plugins-nightly"],
 
     "@orbit/site": ["@orbit/site@workspace:packages/site"],
 
