@@ -16,7 +16,7 @@ cases:
         MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
         RETURN u{.id, .username}, count(mr) AS mr_count
     logical:
-      expect: ["(Aggregate group u AS u, COUNT(mr) AS mr_count (_))"]
+      expect: ["(Aggregate group u AS u, COUNT(mr) AS mr_count (Filter mr.state = 'merged' (Follow AUTHORED u->mr AS e0 (Entities User AS u))))"]
     physical:
       clickhouse:
         planned:
@@ -42,7 +42,7 @@ cases:
         MATCH (u:User)-[:MERGED]->(mr:MergeRequest {state: 'merged'})
         RETURN u.id, u.username, mr.id, mr.title, mr.merged_at
     logical:
-      expect: ["(Filter mr.state = 'merged' (_))"]
+      expect: ["(Filter mr.state = 'merged' (Follow MERGED u->mr AS e0 (Entities User AS u)))"]
     physical:
       clickhouse:
         planned:
@@ -72,7 +72,7 @@ cases:
         MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'merged'})
         RETURN p.id, mr.id
     logical:
-      expect: ["(Filter mr.state = 'merged' (_))"]
+      expect: ["(Filter mr.state = 'merged' (Follow IN_PROJECT p<-mr AS e1 (Follow CONTAINS g->p AS e0 (_))))"]
     physical:
       clickhouse:
         planned:

@@ -16,7 +16,7 @@ query:
 
 logical:
   expect:
-    - (EdgeScan AUTO_CANCELED_BY canceled->canceling AS e0)
+    - (Follow AUTO_CANCELED_BY canceling<-canceled AS e0 (Filter canceling.status = 'success' (Entities Pipeline AS canceling)))
 
 physical:
   clickhouse:

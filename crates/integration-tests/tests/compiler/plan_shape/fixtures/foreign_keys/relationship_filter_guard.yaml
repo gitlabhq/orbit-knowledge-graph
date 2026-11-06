@@ -9,7 +9,7 @@ query:
 
 logical:
   expect:
-    - (EdgeScan AUTHORED u->mr AS e0 ...)
+    - (Filter e0.source_id = 999999 (Follow AUTHORED u->mr AS e0 (_)))
 
 physical:
   clickhouse:

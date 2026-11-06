@@ -26,7 +26,7 @@ query:
 
 logical:
   expect:
-    - (Aggregate group f.old_path AS f_old_path, COUNT(f) AS appearances (_))
+    - (Aggregate group f.old_path AS f_old_path, COUNT(f) AS appearances (Follow HAS_FILE d->f AS e2 (Follow HAS_LATEST_DIFF mr->d AS e1 (Follow TRIGGERED pl<-mr AS e0 (Filter pl.status = 'failed', pl.source = 'merge_request_event' (Entities Pipeline AS pl))))))
 
 physical:
   clickhouse:

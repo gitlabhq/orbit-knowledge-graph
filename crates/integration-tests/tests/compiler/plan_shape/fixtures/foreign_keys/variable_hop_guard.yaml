@@ -8,7 +8,7 @@ query:
 
 logical:
   expect:
-    - (NodeScan User AS u)
+    - (Follow AUTHORED u->mr AS e0 HOPS 2..2 (Filter ... (Entities User AS u)))
 
 physical:
   clickhouse:

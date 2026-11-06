@@ -11,7 +11,7 @@ missing_frontends:
 
 logical:
   expect:
-    - (EdgeScan IN_PROJECT mr->p AS e1)
+    - (Filter p.id = 1000, NOT ((contains(p.name, 'Public')) AND (mr.state = 'opened')) (Follow IN_PROJECT mr->p AS e1 (Follow AUTHORED u->mr AS e0 (Entities User AS u))))
 
 physical:
   clickhouse:

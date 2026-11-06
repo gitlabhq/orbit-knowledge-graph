@@ -17,8 +17,7 @@ query:
 
 logical:
   expect:
-    - (Filter u.username = 'alice' (NodeScan User AS u))
-    - (Aggregate COUNT(mr) AS n (_))
+    - (Aggregate COUNT(mr) AS n (Filter u.username = 'alice' (Follow AUTHORED mr<-u AS e0 (_))))
 
 physical:
   clickhouse:
