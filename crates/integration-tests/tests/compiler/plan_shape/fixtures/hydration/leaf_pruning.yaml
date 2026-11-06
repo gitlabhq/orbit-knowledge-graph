@@ -13,7 +13,7 @@ hydration:
 
 logical:
   expect:
-    - (Input hydration (...))
+    - (Limit 30 (Select f{path} (Filter f.id IN [1, 2] (Entities File AS f))))
 
 physical:
   clickhouse:

@@ -12,7 +12,12 @@ hydration:
     d: ["1/100/"]
 
 logical:
-  expect: ["(Input hydration (...))"]
+  gql:
+    expect:
+      - (Limit 30 (Select f{path}, d{name} (Filter d.id = 2 (Follow DEFINES f->d AS e0 (Filter f.id = 1 (Entities File AS f))))))
+  json:
+    expect:
+      - (Limit 30 (Select f{path}, d{name} (Filter d.id IN [2] (Follow DEFINES f->d AS e0 (Filter f.id IN [1] (Entities File AS f))))))
 
 physical:
   clickhouse:
