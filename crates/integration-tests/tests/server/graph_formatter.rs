@@ -2009,7 +2009,7 @@ async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{
-                "type": "MEMBER_OF",
+                "type": ["MEMBER_OF", "CONTAINS"],
                 "from": "u",
                 "to": "g",
                 "hops": [1, 2]
@@ -2051,7 +2051,7 @@ async fn traversal_variable_length_floor_skips_shallow(ctx: &TestContext) {
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{
-                "type": "MEMBER_OF",
+                "type": ["MEMBER_OF", "CONTAINS"],
                 "from": "u",
                 "to": "g",
                 "hops": [2, 3]
@@ -2090,7 +2090,7 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{
-                "type": "MEMBER_OF",
+                "type": ["MEMBER_OF", "CONTAINS"],
                 "from": "u",
                 "to": "g",
                 "hops": [1, 3]
