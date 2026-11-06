@@ -232,10 +232,6 @@ impl OrbitClient {
         format!("{}{path}", self.endpoint.base_url.trim_end_matches('/'))
     }
 
-    /// Retries with jittered exponential backoff, but only where re-sending cannot run or bill a
-    /// query twice: a failed connection (the server never saw the request) and a rate limit, which
-    /// is enforced before the query runs. A timeout or server error is not retried by default.
-    /// The policy decides whether a 503 is retried and how long the call may wait in total.
     async fn send(
         &self,
         request: reqwest::RequestBuilder,
