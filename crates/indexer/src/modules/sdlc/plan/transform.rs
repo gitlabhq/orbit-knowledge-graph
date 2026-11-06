@@ -2,6 +2,8 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use indexmap::IndexMap;
+
 use ontology::{
     DataType, DenormDirection, EdgeMapping, EnumType, EtlScope, Field, NodeEntity, NodeRef,
     NodeRefKind, Ontology, StorageColumn,
@@ -596,70 +598,66 @@ fn edge_queries(selects: Vec<EdgeSelect>, ontology: &Ontology) -> Vec<Transforma
 }
 
 fn edge_union_sql(selects: &[EdgeSelect], sort_key: &[String]) -> String {
-    let all_tags: Vec<&str> = selects
-        .iter()
-        .flat_map(|select| select.tags.iter().map(String::as_str))
-        .filter(|tags| *tags != NO_TAGS)
-        .collect();
-    let mut shared: Vec<&str> = Vec::new();
-    for tags in &all_tags {
-        if all_tags.iter().filter(|other| *other == tags).count() > 1 && !shared.contains(tags) {
-            shared.push(tags);
+    let mut uses: IndexMap<&str, usize> = IndexMap::new();
+    for tags in selects.iter().flat_map(|select| &select.tags) {
+        if tags != NO_TAGS {
+            *uses.entry(tags.as_str()).or_default() += 1;
         }
     }
+    let shared: Vec<&str> = uses
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .map(|(tags, _)| tags)
+        .collect();
     let shared_column = |index: usize| quote_ident(&format!("_tags_{index}"));
-    let from = if shared.is_empty() {
-        SOURCE_DATA_TABLE.to_string()
-    } else {
-        quote_ident(TAGGED_TABLE)
+    let tag_sql = |tags: &String| {
+        shared
+            .iter()
+            .position(|candidate| candidate == tags)
+            .map_or_else(|| tags.clone(), shared_column)
+    };
+    let from = match shared.is_empty() {
+        true => SOURCE_DATA_TABLE.to_string(),
+        false => quote_ident(TAGGED_TABLE),
     };
 
-    let branches: Vec<String> = selects
+    let mut sql = selects
         .iter()
         .map(|select| {
-            let tags =
-                select
-                    .tags
-                    .iter()
-                    .zip(["source_tags", "target_tags"])
-                    .map(|(tags, name)| {
-                        let tags = shared
-                            .iter()
-                            .position(|candidate| candidate == tags)
-                            .map_or_else(|| tags.clone(), shared_column);
-                        format!("{tags} AS {name}")
-                    });
-            let columns: Vec<String> = select.columns.iter().cloned().chain(tags).collect();
-            let mut sql = format!("SELECT {} FROM {from}", columns.join(", "));
-            if let Some(filter) = &select.filter {
-                sql.push_str(" WHERE ");
-                sql.push_str(filter);
-            }
-            sql
+            let [source_tags, target_tags] = &select.tags;
+            let filter = select
+                .filter
+                .as_ref()
+                .map(|filter| format!(" WHERE {filter}"));
+            format!(
+                "SELECT {}, {} AS source_tags, {} AS target_tags FROM {from}{}",
+                select.columns.join(", "),
+                tag_sql(source_tags),
+                tag_sql(target_tags),
+                filter.unwrap_or_default()
+            )
         })
-        .collect();
-
-    let mut sql = branches.join(" UNION ALL ");
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
     if !shared.is_empty() {
         let columns: Vec<String> = shared
             .iter()
             .enumerate()
             .map(|(index, tags)| format!("{tags} AS {}", shared_column(index)))
             .collect();
+        let cte = format!("SELECT *, {} FROM {SOURCE_DATA_TABLE}", columns.join(", "));
         sql = format!(
-            "WITH {} AS MATERIALIZED (SELECT *, {} FROM {SOURCE_DATA_TABLE}) {sql}",
-            quote_ident(TAGGED_TABLE),
-            columns.join(", ")
+            "WITH {} AS MATERIALIZED ({cte}) {sql}",
+            quote_ident(TAGGED_TABLE)
         );
     }
     if !sort_key.is_empty() {
-        let sort_key: Vec<String> = sort_key
+        let keys: Vec<String> = sort_key
             .iter()
             .map(String::as_str)
             .map(quote_ident)
             .collect();
-        sql.push_str(" ORDER BY ");
-        sql.push_str(&sort_key.join(", "));
+        sql = format!("{sql} ORDER BY {}", keys.join(", "));
     }
     sql
 }
