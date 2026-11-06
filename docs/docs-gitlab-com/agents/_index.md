@@ -37,7 +37,8 @@ To set up your agent:
 1. Run `glab orbit setup`.
    On first use, `glab` asks to download the GitLab Orbit CLI.
 1. In the list of agents, keep or clear the agents that setup selected, then press <kbd>Enter</kbd>.
-1. When setup asks to install the agent plugins, press <kbd>Enter</kbd>.
+1. When setup asks about the agent plugins, keep **Install the agent plugins** selected, then press <kbd>Enter</kbd>.
+   To leave them out, select **Skip the agent plugins**.
 
 Setup installs the GitLab Orbit skill for your agents and a [plugin that shows GitLab Orbit calls in Claude Code](#show-gitlab-orbit-calls-in-claude-code).
 It then indexes the repository for code search.
@@ -114,19 +115,19 @@ Setup follows these rules:
 
 ## Show GitLab Orbit calls in Claude Code
 
-`glab orbit setup` installs a plugin for Claude Code that marks each GitLab Orbit call in the transcript, for example `◎ Searched code  login`.
+`glab orbit setup` can install a plugin for Claude Code that marks each GitLab Orbit call in the transcript, for example `◎ Searched code  login`.
 The plugin also shows a summary of the session's calls below the prompt.
 
 Prerequisites:
 
 - Claude Code 2.1.287 or later.
 
-To install the plugin, run `glab orbit setup` and keep the default answer when setup asks about the agent plugins.
+To install the plugin, run `glab orbit setup` and select **Install the agent plugins**.
 Then start a new Claude Code session.
 
 To turn off the plugin, in Claude Code, run `/plugin` and turn off `gitlab-orbit`.
-Running `glab orbit setup` again turns the plugin back on.
-To set up without it, run `glab orbit setup --skip agent-plugins`.
+If you run `glab orbit setup` again and install the agent plugins, the plugin turns back on.
+To set up without it, select **Skip the agent plugins**, or run `glab orbit setup --skip agent-plugins`.
 
 ## Remove the setup
 
