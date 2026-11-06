@@ -1,6 +1,6 @@
 ---
 name: orbit-package-registry
-description: Use Orbit graph queries to answer questions about GitLab Package Registry packages and Container Registry repositories across projects and groups. It covers package versions and their files, declared dependencies, known vulnerabilities, and the pipelines that built them. Load it with the `orbit` skill. Skip it for one project's package list or for publishing, which `glab` and the package manager handle.
+description: Use Orbit graph queries to answer questions about GitLab Package Registry packages and Container Registry repositories across projects and groups. Use it to find which projects host a package. It covers package versions and their files, declared dependencies, known vulnerabilities, and the pipelines that built them. Load it with the `orbit` skill. Skip it for one project's package list or for publishing, which `glab` and the package manager handle.
 version: 0.1.1
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
@@ -35,9 +35,21 @@ Artifact Registry, say so, and do not list free-tier packages in its place.
 - Reading a vulnerability needs the Security Manager role or higher on the project that holds it. Without it, the query returns no rows, which looks the same as no known vulnerabilities.
 - Vulnerabilities in a package's project are not that package's vulnerabilities. Only a `HAS_VULNERABILITY` link ties a vulnerability to a package version.
 - `ContainerRepository` has no tags. Read the tag count from the Container Registry API with the repository `id`, and no `/api/v4/` prefix: `glab api "registry/repositories/<id>?tags_count=true"`.
-- A response with `has_more: true` or `truncated: true` is not the full result. Count with an aggregate query, or page with `SKIP`, before you say how many there are or that you found them all.
+- A response with `has_more: true` or `truncated: true`, or one cut short by `LIMIT`, is not the full result. Never generalize from that page, such as saying all rows belong to one project. Group and count instead, as in [the recipe](#projects-that-host-a-package), or page with `SKIP`.
 
 ## Recipes
+
+### Projects that host a package
+
+One package name can be published in more than one project. Group by project
+in one query rather than listing versions, which hides the smaller projects.
+
+```gql orbit-query
+MATCH (p:Package {name: '@gitlab/frontend-utils'})-[:IN_PROJECT]->(pr:Project)
+RETURN pr.full_path, count(p) AS versions
+ORDER BY versions DESC
+LIMIT 10
+```
 
 ### Packages in a project, by type
 
