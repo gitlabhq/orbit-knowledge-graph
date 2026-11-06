@@ -18,7 +18,7 @@ use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use query_engine::compiler::cte_statements;
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ParameterizedQuery,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ParameterizedQuery, Realm,
     ResultContext, SecurityContext,
 };
 use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
@@ -44,6 +44,7 @@ pub use format::{
     ScenarioConfig, SecurityOverride,
 };
 
+use orbit_server::auth::{Claims, SourceType, TraversalPathClaim};
 use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
 use orbit_server::redaction::QueryResult;
 
@@ -594,6 +595,7 @@ async fn compile_like_server(
 ) -> Result<Arc<CompiledQueryContext>, PipelineError> {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::clone(data_model));
+    server_extensions.insert(claims_for(security));
     let mut pipeline_ctx = QueryPipelineContext {
         frontend,
         query_json: query.to_owned(),
@@ -637,6 +639,7 @@ async fn execute_output(
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
     server_extensions.insert(Arc::clone(data_model));
+    server_extensions.insert(claims_for(security));
     server_extensions.insert(resolver_registry);
 
     let mut pipeline_ctx = QueryPipelineContext {
@@ -1208,6 +1211,51 @@ fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
     ctx
 }
 
+fn claims_for(security: &SecurityContext) -> Claims {
+    Claims {
+        sub: "user:1".into(),
+        iss: "gitlab".into(),
+        aud: "gitlab-knowledge-graph".into(),
+        iat: 0,
+        exp: i64::MAX,
+        user_id: 1,
+        username: "scenario".into(),
+        admin: security.admin,
+        organization_id: Some(security.org_id as u64),
+        min_access_level: security.access_level.map(|level| level as u32),
+        group_traversal_ids: security
+            .traversal_paths
+            .iter()
+            .map(|path| TraversalPathClaim {
+                path: path.path.clone(),
+                access_levels: path.access_levels.clone(),
+            })
+            .collect(),
+        source_type: SourceType::Rest,
+        ai_session_id: None,
+        request_id: None,
+        instance_id: None,
+        unique_instance_id: None,
+        instance_version: None,
+        global_user_id: None,
+        host_name: None,
+        root_namespace_id: None,
+        deployment_type: None,
+        realm: security.realm.map(|realm| {
+            match realm {
+                Realm::SaaS => "saas",
+                Realm::SelfManaged => "self-managed",
+                Realm::Dedicated => "dedicated",
+            }
+            .into()
+        }),
+        is_gitlab_team_member: Some(security.is_gitlab_team_member),
+        user_type: None,
+        token_type: None,
+        license_checksum: None,
+    }
+}
+
 fn build_redaction(config: &Option<RedactionConfig>) -> MockRedactionService {
     let mut svc = MockRedactionService::new();
     if let Some(config) = config {
@@ -1249,6 +1297,52 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
 mod tests {
     use super::*;
     use query_engine::compiler::compile;
+
+    #[test]
+    fn scenario_claims_rebuild_the_scenario_security_context() {
+        let security = build_security(&Some(SecurityOverride {
+            admin: None,
+            paths: None,
+            authorized_paths: Some(vec![format::AuthorizedPathSpec {
+                path: "1/100/".into(),
+                access_level: AccessLevel::Developer as u32,
+            }]),
+            org_id: Some(1),
+            access_level: None,
+        }));
+        let claims = claims_for(&security);
+        assert!(!claims.admin);
+        let rebuilt = orbit_server::auth::build_security_context(&claims).unwrap();
+        assert_eq!(format!("{rebuilt:?}"), format!("{security:?}"));
+    }
+
+    #[test]
+    fn scenario_claims_carry_admin_only_from_the_security_context() {
+        let admin = build_security(&Some(SecurityOverride {
+            admin: Some(true),
+            paths: None,
+            authorized_paths: None,
+            org_id: None,
+            access_level: None,
+        }));
+        assert!(claims_for(&admin).admin);
+        assert!(!claims_for(&build_security(&None)).admin);
+    }
+
+    #[tokio::test]
+    async fn gql_routes_through_the_server_stages_without_admin() {
+        let data_model = load_data_model();
+        let ontology = load_ontology();
+        let security = build_security(&None);
+        compile_like_server(
+            "MATCH (u:User {id: 1}) RETURN u.username LIMIT 5",
+            Frontend::Gql,
+            (&data_model, &ontology),
+            &security,
+        )
+        .await
+        .unwrap();
+    }
 
     #[test]
     fn json_and_gql_keys_map_to_their_frontends() {
