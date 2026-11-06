@@ -14,21 +14,18 @@ function hasGraph() {
   return existsSync(join(root, "local", "manifest.duckdb"));
 }
 
-const LAUNCHERS = [["orbit", []], ["glab", ["orbit"]]];
+const LAUNCHERS = [["glab", ["orbit"]], ["orbit", []]];
 
 function run(command, args) {
   return new Promise((resolve) => {
-    execFile(command, args, { timeout: 9000 }, (error, stdout) => {
-      if (error && error.code === "ENOENT") return resolve(null);
-      resolve(error ? "" : String(stdout).trim());
-    });
+    execFile(command, args, { timeout: 9000 }, (error, stdout) => resolve(error ? "" : String(stdout).trim()));
   });
 }
 
 async function loadInstructions() {
   for (const [command, prefix] of LAUNCHERS) {
     const text = await run(command, [...prefix, "hook-guard", "instructions"]);
-    if (text !== null) return text;
+    if (text) return text;
   }
   return "";
 }

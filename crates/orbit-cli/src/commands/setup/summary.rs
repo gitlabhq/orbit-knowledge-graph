@@ -13,6 +13,7 @@ use crate::tui::{Choice, align_columns};
 pub(super) fn join_component_labels(components: &BTreeSet<Component>) -> String {
     components
         .iter()
+        .filter(|component| **component != Component::Instructions)
         .map(|component| component.label())
         .collect::<Vec<_>>()
         .join(", ")
@@ -62,8 +63,9 @@ pub(super) fn format_configured_per_agent(plan: &Plan, report: &Report) -> Strin
                     .components
                     .iter()
                     .filter(|(component, _)| {
-                        *component != Component::AgentPlugins
-                            || !skipped.contains(&agent.title.as_str())
+                        *component != Component::Instructions
+                            && (*component != Component::AgentPlugins
+                                || !skipped.contains(&agent.title.as_str()))
                     })
                     .cloned()
                     .collect(),

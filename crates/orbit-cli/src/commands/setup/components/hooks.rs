@@ -108,8 +108,8 @@ fn trust(
         .filter_map(|hook| hook["command"].as_str().map(str::to_string))
         .collect();
     match codex_trust::trust_hooks(&cwd, path, &commands) {
-        Ok(0) => {}
-        Ok(_) => report.note(label, "orbit hook trusted"),
+        Ok(None | Some(0)) => {}
+        Ok(Some(_)) => report.note(label, "orbit hook trusted"),
         Err(error) => report.note(
             label,
             format!("WARNING: Codex skips the Orbit hook; {error}"),

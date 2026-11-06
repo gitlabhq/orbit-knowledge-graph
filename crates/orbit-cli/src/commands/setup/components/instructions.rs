@@ -42,6 +42,12 @@ impl Installer for Instructions {
     }
 }
 
+pub(super) fn files_with_block(agent: Agent, target: &Target) -> Vec<String> {
+    holding_block(&[agent], target)
+        .map(|files| files.into_iter().map(|(_, label)| label).collect())
+        .unwrap_or_default()
+}
+
 fn holding_block(agents: &[Agent], target: &Target) -> Result<Vec<(PathBuf, String)>> {
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     let mut canonicals: Vec<PathBuf> = Vec::new();

@@ -10,7 +10,7 @@ json_merges:
       project: .codex/hooks.json
       global: "${CODEX_HOME:-~/.codex}/hooks.json"
     path: [hooks, SessionStart]
-    marker: hook-guard
+    marker: hook-guard instructions
     trust: codex
     entries:
       - hooks:

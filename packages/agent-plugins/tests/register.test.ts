@@ -305,39 +305,47 @@ test('the status line starts over when the session ends, and counts only what fo
   expect(runs.length).toBe(2)
 })
 
+const RAN_WITH = (exitCode: number, stdout: string) => ({
+  value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+})
+
 test('the conversation context carries the Orbit instructions the installed CLI prints', async ($, on) => {
   const runs: (readonly string[])[] = []
   on('process.run', (_$, e) => {
     runs.push(e.argv)
-    const stdout = e.argv[0] === 'orbit' ? '## Orbit\n\n- MANDATORY: `orbit grep`\n' : ''
-    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return RAN_WITH(0, e.argv[0] === 'glab' ? '## Orbit\n\n- MANDATORY: `glab orbit grep`\n' : '')
   })
   on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
   const answer = await $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'mine' }] })
 
-  expect(runs).toEqual([['orbit', 'hook-guard', 'instructions']])
+  expect(runs).toEqual([['glab', 'orbit', 'hook-guard', 'instructions']])
   expect(answer.blocks).toEqual([
     { name: 'claudeMd', text: 'mine' },
-    { name: 'orbit', text: '## Orbit\n\n- MANDATORY: `orbit grep`' },
+    { name: 'orbit', text: '## Orbit\n\n- MANDATORY: `glab orbit grep`' },
   ])
 })
 
-test('the context falls back to glab orbit when orbit cannot start', async ($, on) => {
-  const runs: (readonly string[])[] = []
-  on('process.run', (_$, e) => {
-    runs.push(e.argv)
-    if (e.argv[0] === 'orbit') throw new Error('ENOENT')
-    return { value: { exitCode: 0, stdout: '## Orbit\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+for (const glab of ['missing', 'empty'] as const) {
+  test(`the context falls back to orbit when glab is ${glab}`, async ($, on) => {
+    const runs: (readonly string[])[] = []
+    on('process.run', (_$, e) => {
+      runs.push(e.argv)
+      if (e.argv[0] === 'glab') {
+        if (glab === 'missing') throw new Error('ENOENT')
+        return RAN_WITH(0, '')
+      }
+      return RAN_WITH(0, '## Orbit\n')
+    })
+    on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
+    const answer = await $.prompt.context({ blocks: [] })
+
+    expect(runs).toEqual([
+      ['glab', 'orbit', 'hook-guard', 'instructions'],
+      ['orbit', 'hook-guard', 'instructions'],
+    ])
+    expect(answer.blocks).toEqual([{ name: 'orbit', text: '## Orbit' }])
   })
-  on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
-  const answer = await $.prompt.context({ blocks: [] })
-
-  expect(runs).toEqual([
-    ['orbit', 'hook-guard', 'instructions'],
-    ['glab', 'orbit', 'hook-guard', 'instructions'],
-  ])
-  expect(answer.blocks).toEqual([{ name: 'orbit', text: '## Orbit' }])
-})
+}
 
 test('the context adds nothing when the CLI fails', async ($, on) => {
   on('process.run', () => ({ value: { exitCode: 1, stdout: 'partial', stderr: 'x', isStdoutTruncated: false, isStderrTruncated: false } }))

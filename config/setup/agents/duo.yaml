@@ -10,7 +10,7 @@ json_merges:
       project: .gitlab/duo/hooks.json
       global: "~/.gitlab/duo/hooks.json"
     path: [hooks, SessionStart]
-    marker: hook-guard
+    marker: hook-guard instructions
     entries:
       - hooks:
           - type: command

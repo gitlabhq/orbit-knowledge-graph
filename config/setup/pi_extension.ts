@@ -1,21 +1,12 @@
-import { existsSync } from "fs";
-import { delimiter, join } from "path";
-
-const LAUNCHERS: [string, string[]][] = [["orbit", []], ["glab", ["orbit"]]];
-
-function onPath(command: string): boolean {
-  const extensions = process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE").split(";") : [""];
-  return (process.env.PATH ?? "")
-    .split(delimiter)
-    .some((dir) => dir && extensions.some((extension) => existsSync(join(dir, command + extension))));
-}
+const LAUNCHERS: [string, string[]][] = [["glab", ["orbit"]], ["orbit", []]];
 
 async function loadInstructions(pi: any): Promise<string> {
-  const launcher = LAUNCHERS.find(([command]) => onPath(command));
-  if (!launcher) return "";
-  const [command, prefix] = launcher;
-  const run = await pi.exec(command, [...prefix, "hook-guard", "instructions"], { timeout: 9000 }).catch(() => null);
-  return run && run.code === 0 ? String(run.stdout).trim() : "";
+  for (const [command, prefix] of LAUNCHERS) {
+    const run = await pi.exec(command, [...prefix, "hook-guard", "instructions"], { timeout: 9000 }).catch(() => null);
+    const text = run && run.code === 0 ? String(run.stdout).trim() : "";
+    if (text) return text;
+  }
+  return "";
 }
 
 export default function (pi: any) {
