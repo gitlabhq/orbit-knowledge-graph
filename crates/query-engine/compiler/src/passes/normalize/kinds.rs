@@ -9,6 +9,8 @@ use query_data_model::{Direction, RelationshipId};
 use crate::error::{QueryError, Result};
 use crate::logical::{Leaf, Literals, Query};
 
+type Condition = (Vec<String>, bool);
+
 pub(super) struct Narrowed {
     pub names: Vec<String>,
     pub ids: Vec<RelationshipId>,
@@ -98,7 +100,7 @@ fn infer(
 fn apply(
     query: Query<'_>,
     mut types: Vec<String>,
-    conditions: Option<&Vec<(Vec<String>, bool)>>,
+    conditions: Option<&Vec<Condition>>,
 ) -> Result<Vec<String>> {
     for (names, negated) in conditions.into_iter().flatten() {
         if types.is_empty() {
@@ -117,8 +119,8 @@ fn apply(
     Ok(types)
 }
 
-fn conditions(query: Query<'_>) -> Result<HashMap<Ref, Vec<(Vec<String>, bool)>>> {
-    let mut found: HashMap<Ref, Vec<(Vec<String>, bool)>> = HashMap::new();
+fn conditions(query: Query<'_>) -> Result<HashMap<Ref, Vec<Condition>>> {
+    let mut found: HashMap<Ref, Vec<Condition>> = HashMap::new();
     for leaf in query.conjuncts().into_iter().filter_map(type_leaf) {
         let names = names(leaf).ok_or_else(|| {
             QueryError::Validation(

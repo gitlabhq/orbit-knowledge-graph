@@ -21,7 +21,7 @@ pub enum Unresolved {
         to: String,
         relationships: String,
         connecting: Vec<String>,
-        reversed: Option<Reversed>,
+        reversed: Option<Box<Reversed>>,
     },
 }
 
@@ -39,7 +39,7 @@ fn named(relationships: &str) -> String {
     }
 }
 
-fn hint(from: &str, to: &str, connecting: &[String], reversed: &Option<Reversed>) -> String {
+fn hint(from: &str, to: &str, connecting: &[String], reversed: &Option<Box<Reversed>>) -> String {
     match (connecting, reversed) {
         (_, Some(reversed)) => format!(
             "{} goes from {} to {}; reverse the arrow",
@@ -146,7 +146,7 @@ impl Model {
         relationships: &[RelationshipId],
         to: EntityId,
         direction: Direction,
-    ) -> Option<Reversed> {
+    ) -> Option<Box<Reversed>> {
         let names: BTreeSet<&str> = self
             .graph
             .hops(to, direction)
@@ -160,10 +160,12 @@ impl Model {
             Direction::Incoming => (from, to),
             Direction::Both => return None,
         };
-        (!names.is_empty()).then(|| Reversed {
-            relationships: names.into_iter().collect::<Vec<_>>().join("|"),
-            source: source.name.clone(),
-            target: target.name.clone(),
+        (!names.is_empty()).then(|| {
+            Box::new(Reversed {
+                relationships: names.into_iter().collect::<Vec<_>>().join("|"),
+                source: source.name.clone(),
+                target: target.name.clone(),
+            })
         })
     }
 }

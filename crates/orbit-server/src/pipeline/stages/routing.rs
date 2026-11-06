@@ -47,10 +47,7 @@ impl PipelineStage for RoutingStage {
     ) -> Result<Self::Output, PipelineError> {
         match ctx.frontend {
             Frontend::JsonDsl => Ok(RoutingOutput::Query),
-            Frontend::Gql => match Self::route(ctx)
-                .map_err(PipelineError::from)
-                .inspect_err(|error| obs.record_error(error))?
-            {
+            Frontend::Gql => match Self::route(ctx).inspect_err(|error| obs.record_error(error))? {
                 RoutedStatement::Query(query) => {
                     ctx.phases.insert(*query);
                     Ok(RoutingOutput::Query)
