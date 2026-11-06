@@ -187,7 +187,6 @@ pub struct ParameterizedQuery {
 #[derive(Debug, Clone)]
 pub struct CompiledQueryContext {
     pub query_type: QueryType,
-    pub ast: Node,
     pub base: ParameterizedQuery,
     pub hydration: HydrationPlan,
     pub input: Input,

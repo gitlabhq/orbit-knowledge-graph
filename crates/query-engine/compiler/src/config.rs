@@ -375,7 +375,6 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
         query_type,
-        ast: crate::ast::Node::Query(Box::default()),
         base,
         hydration,
         input,
