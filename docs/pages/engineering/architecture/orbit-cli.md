@@ -32,9 +32,9 @@ the other ways to install the CLI.
 ### 2. Connect AI agents
 
 The `glab orbit setup` command finds the AI agents on your machine: Claude
-Code, Codex, GitLab Duo, OpenCode, and pi. It installs the plugin, hook, or
-extension through which each agent loads the Orbit instructions from the CLI
-when a session starts, and the Orbit skill. Then it indexes the current
+Code, Codex, GitLab Duo, OpenCode, and pi. It installs the Orbit skill and the
+plugin, hook, or extension each agent uses. That integration loads the Orbit
+instructions from the CLI when a session starts. Then setup indexes the current
 repository. The
 `glab orbit uninstall` command removes what setup wrote, except files you
 edited since.
