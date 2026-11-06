@@ -36,7 +36,7 @@ const DETACHED_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 )]
 struct Cli {
     /// How many times to retry a rate-limited or unreachable request, with exponential backoff.
-    /// 0 disables retries.
+    /// 0 disables retries; pass it when your caller handles 429 itself.
     #[arg(
         long,
         global = true,

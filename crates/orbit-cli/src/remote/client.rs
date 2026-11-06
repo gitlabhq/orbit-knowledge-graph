@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::api::{Api, ErrorExtensions};
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
-use super::retry;
+use super::retry::{self, Policy};
 
 const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -161,18 +161,18 @@ impl OrbitClient {
                     .get(self.url(GREP_PATH))
                     .query(params)
                     .timeout(GREP_REQUEST_TIMEOUT),
-                true,
+                Policy::BEST_EFFORT,
             )
             .await?;
         read_body(response).await
     }
 
     pub(crate) async fn post_context(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
-        self.post_json(CONTEXT_PATH, body).await
+        self.post_json(CONTEXT_PATH, body, Policy::QUERY).await
     }
 
     pub(crate) async fn query_raw(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
-        self.post_json(QUERY_PATH, body).await
+        self.post_json(QUERY_PATH, body, Policy::QUERY).await
     }
 
     pub(crate) async fn grep_query(&self, body: Vec<u8>) -> Result<(u16, Vec<u8>), RemoteError> {
@@ -216,7 +216,9 @@ impl OrbitClient {
                 format!("could not encode GraphQL query: {error}"),
             )
         })?;
-        let body = self.post_json(GRAPHQL_PATH, request).await?;
+        let body = self
+            .post_json(GRAPHQL_PATH, request, Policy::READ_ONLY)
+            .await?;
         let response: GraphQlResponse<Q, ErrorExtensions> =
             serde_json::from_slice(&body).map_err(|error| {
                 RemoteError::new(
@@ -228,14 +230,19 @@ impl OrbitClient {
         Ok((api == Api::Graphql).then_some(response))
     }
 
-    async fn post_json(&self, path: &str, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+    async fn post_json(
+        &self,
+        path: &str,
+        body: Vec<u8>,
+        policy: Policy,
+    ) -> Result<Vec<u8>, RemoteError> {
         let response = self
             .send(
                 self.http
                     .post(self.url(path))
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
                     .body(body),
-                false,
+                policy,
             )
             .await?;
         read_body(response).await
@@ -247,7 +254,10 @@ impl OrbitClient {
         params: &[(&str, String)],
     ) -> Result<Vec<u8>, RemoteError> {
         let response = self
-            .send(self.http.get(self.url(path)).query(params), true)
+            .send(
+                self.http.get(self.url(path)).query(params),
+                Policy::READ_ONLY,
+            )
             .await?;
         read_body(response).await
     }
@@ -259,11 +269,11 @@ impl OrbitClient {
     /// Retries with jittered exponential backoff, but only where re-sending cannot run or bill a
     /// query twice: a failed connection (the server never saw the request) and a rate limit, which
     /// is enforced before the query runs. A timeout or server error is not retried by default.
-    /// `retry_unavailable` also retries a 503, for endpoints that do not run a query.
+    /// The policy decides whether a 503 is retried and how long the call may wait in total.
     async fn send(
         &self,
         request: reqwest::RequestBuilder,
-        retry_unavailable: bool,
+        policy: Policy,
     ) -> Result<reqwest::Response, RemoteError> {
         let max_retries = retry::max_retries();
         let mut retries = 0_u32;
@@ -282,8 +292,15 @@ impl OrbitClient {
                         .and_then(|value| value.to_str().ok())
                         .and_then(|value| retry::parse_retry_after(value, SystemTime::now()));
                     let body = response.text().await.unwrap_or_default();
-                    let error = map_http_error(status, &body);
-                    if pending.is_none() || !retry::is_retryable_status(status, retry_unavailable) {
+                    let mut error = map_http_error(status, &body);
+                    if status == 429 {
+                        error
+                            .message
+                            .push_str(&retry::rate_limit_note(retries, retry_after));
+                    }
+                    if pending.is_none()
+                        || !retry::is_retryable_status(status, policy.retry_unavailable)
+                    {
                         return Err(error);
                     }
                     (format!("HTTP {status}"), retry_after, error)
@@ -301,7 +318,8 @@ impl OrbitClient {
             };
             let (reason, retry_after, error) = retryable;
             retries += 1;
-            let Some(delay) = retry::next_delay(retries, retry_after, waited) else {
+            let Some(delay) = retry::next_delay(retries, retry_after, waited, policy.wait_budget)
+            else {
                 return Err(error);
             };
             eprintln!(
