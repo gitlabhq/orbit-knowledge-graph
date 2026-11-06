@@ -294,22 +294,23 @@ fn check<M: RelationalModel>(
         };
         let tp_bounds =
             (backend == "clickhouse").then(|| compiler::tp_bounds::TpBounds::derive(&input, model));
-        let lowered = match lower::emit(&plan, &input, tp_bounds.as_ref()) {
-            Ok(lowered) => lowered,
-            Err(error) => {
-                failures.push(format!("{label}: {error}"));
-                continue;
-            }
-        };
         let planned = explain::physical(&plan);
-        let relational = codegen::build(&lowered.ast, model.catalog(), M::DIALECT)
-            .and_then(|relational| match backend {
-                "clickhouse" => response_policy::apply_text_excerpts(relational, model, &input),
-                _ => Ok(relational),
-            })
-            .and_then(|relational| match scenario.hydration {
-                Some(_) => Ok(relational),
-                None => page::apply(relational, model, &input, &lowered.metadata),
+        let relational = lower::emit(&plan, &input, tp_bounds.as_ref(), model)
+            .and_then(|lowered| {
+                let relational = match lowered.lowered {
+                    lower::Lowered::Ast(ast) => codegen::build(&ast, model.catalog(), M::DIALECT)?,
+                    lower::Lowered::Plan(plan) => plan,
+                };
+                let relational = match backend {
+                    "clickhouse" => {
+                        response_policy::apply_text_excerpts(relational, model, &input)?
+                    }
+                    _ => relational,
+                };
+                match scenario.hydration {
+                    Some(_) => Ok(relational),
+                    None => page::apply(relational, model, &input, &lowered.metadata),
+                }
             })
             .map_err(|error| error.to_string());
         let assertions = &scenario.physical[backend];
@@ -824,9 +825,12 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             HydrationPathFilter::PrefixSet(paths) => (true, paths),
         };
         assert_eq!((actual_set, paths.len()), (set, expected_paths));
-        let lowered = lower::emit(&plan, &input, None).unwrap();
+        let lowered = lower::emit(&plan, &input, None, &model).unwrap();
+        let lower::Lowered::Ast(ast) = lowered.lowered else {
+            panic!("hydration lowers to an AST");
+        };
         let sql = compiler::codegen(
-            &lowered.ast,
+            &ast,
             model.catalog(),
             Default::default(),
             Default::default(),

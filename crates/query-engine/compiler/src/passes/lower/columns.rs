@@ -3,13 +3,11 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use ontology::constants::{DELETED_COLUMN, RELATIONSHIP_KIND_COLUMN, VERSION_COLUMN};
+
 use super::graph::exposed_alias;
-use super::predicates::{column, predicate, projections};
-use super::sql::latest_row_dedup;
-use crate::ast::Expr;
-use crate::ast::visit::visit_expressions;
 use crate::passes::plan::graph::{ExecutionPlan, RelationId, RelationNode};
-use crate::passes::plan::predicates::{Column, Predicate};
+use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
 use crate::passes::plan::reuse::RelationUsage;
 
 type Consumer = (Option<RelationId>, Option<String>);
@@ -45,9 +43,7 @@ pub(super) fn required_columns(
         }
     }
     let mut root_columns = root.to_vec();
-    for select in projections(&plan.outputs) {
-        referenced(&select.expr, &mut root_columns);
-    }
+    projected(&plan.outputs, &mut root_columns);
     for binding in &plan.bindings {
         root_columns.push(Column::new(&binding.alias, &binding.column));
         root_columns.extend(binding.traversal_path.clone());
@@ -74,9 +70,7 @@ pub(super) fn required_columns(
                         return (id, BTreeSet::new());
                     }
                     aliases.extend(exposed_alias(*parent, graph));
-                    for expr in node_expressions(node) {
-                        referenced(&expr, &mut columns);
-                    }
+                    node_columns(node, &mut columns);
                     if !matches!(node, RelationNode::Project { .. }) {
                         queue.push(*parent);
                     }
@@ -93,32 +87,74 @@ pub(super) fn required_columns(
         .collect()
 }
 
-pub(super) fn referenced(expr: &Expr, out: &mut Vec<Column>) {
-    let _ = visit_expressions(expr, &mut |expr| {
-        if let Expr::Column { table, column } = expr {
-            out.push(Column::new(table, column));
+pub(super) fn referenced(predicate: &Predicate, out: &mut Vec<Column>) {
+    match predicate {
+        Predicate::Boolean(expression) => {
+            for leaf in expression.leaves() {
+                referenced(leaf, out);
+            }
         }
-        Ok(())
-    });
+        Predicate::Property { column, filter, .. } => {
+            out.push(column.clone());
+            if let Some((alias, property)) = &filter.rhs_column {
+                out.push(Column::new(alias, property));
+            }
+        }
+        Predicate::Ids { column, .. }
+        | Predicate::IdRange { column, .. }
+        | Predicate::EntityKind { column, .. }
+        | Predicate::Tags { column, .. } => out.push(column.clone()),
+        Predicate::Live { alias } => out.push(Column::new(alias, DELETED_COLUMN)),
+        Predicate::ColumnEq { left, right } => out.extend([left.clone(), right.clone()]),
+        Predicate::RelationshipKinds { alias, kinds } => {
+            if !crate::passes::normalize::is_wildcard(kinds) {
+                out.push(Column::new(alias, RELATIONSHIP_KIND_COLUMN));
+            }
+        }
+        Predicate::Membership { columns, .. } => out.extend(columns.iter().cloned()),
+    }
 }
 
-fn node_expressions(node: &RelationNode) -> Vec<Expr> {
-    let mut exprs: Vec<Expr> = node.predicates().iter().map(predicate).collect();
+pub(super) fn value_columns(value: &OutputValue, out: &mut Vec<Column>) {
+    match value {
+        OutputValue::Column(column) | OutputValue::EpochAsNull(column, _) => {
+            out.push(column.clone())
+        }
+        OutputValue::Text(_) | OutputValue::Depth(_) => {}
+        OutputValue::Path(steps) => {
+            for (id, kind) in steps {
+                out.extend([id.clone(), kind.clone()]);
+            }
+        }
+        OutputValue::PathAppend { path, id, kind }
+        | OutputValue::PathPrepend { path, id, kind } => {
+            out.extend([path.clone(), id.clone(), kind.clone()]);
+        }
+    }
+}
+
+fn projected(outputs: &[Projection], out: &mut Vec<Column>) {
+    for output in outputs {
+        value_columns(&output.value, out);
+    }
+}
+
+fn node_columns(node: &RelationNode, out: &mut Vec<Column>) {
+    for predicate in node.predicates() {
+        referenced(predicate, out);
+    }
     match node {
         RelationNode::Join { endpoints, .. } => {
-            exprs.extend([column(&endpoints.0), column(&endpoints.1)]);
+            out.extend([endpoints.0.clone(), endpoints.1.clone()]);
         }
         RelationNode::Latest {
             alias, sort_key, ..
         } => {
-            let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
-            exprs.extend(order_by.into_iter().map(|order| order.expr));
-            exprs.extend(limit_by.into_iter().flat_map(|(_, keys)| keys));
+            out.extend(sort_key.iter().map(|key| Column::new(alias, key)));
+            out.push(Column::new(alias, VERSION_COLUMN));
+            out.extend(sort_key.iter().map(|key| Column::new(alias, key)));
         }
-        RelationNode::Project { outputs, .. } => {
-            exprs.extend(projections(outputs).into_iter().map(|select| select.expr));
-        }
+        RelationNode::Project { outputs, .. } => projected(outputs, out),
         _ => {}
     }
-    exprs
 }

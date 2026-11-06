@@ -10,7 +10,7 @@ use crate::input::Input;
 use crate::passes::codegen::{CompiledQueryContext, RelationalModel};
 use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
-use crate::passes::lower::LoweredMetadata;
+use crate::passes::lower::{Lowered, LoweredMetadata};
 use crate::passes::plan::HydrationCompileOptions;
 use crate::passes::plan::QueryPlan;
 use crate::passes::result_contract::ResultContext;
@@ -92,8 +92,9 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [tp_bounds]
         }
         lower {
+            reads_env: [data_model]
             reads_state: [input, tp_bounds]
-            mutates: [query_plan, node, lowered_metadata]
+            mutates: [query_plan, node, relational, lowered_metadata]
         }
         paginate {
             reads_env: [data_model]
@@ -285,9 +286,17 @@ fn tp_bounds(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     let input = require(ctx.input().clone(), "input")?;
-    let lowered = lower::emit(&query_plan, &input, ctx.tp_bounds().as_ref())?;
+    let lowered = lower::emit(
+        &query_plan,
+        &input,
+        ctx.tp_bounds().as_ref(),
+        ctx.data_model(),
+    )?;
     ctx.set_query_plan(query_plan);
-    ctx.set_node(lowered.ast);
+    match lowered.lowered {
+        Lowered::Ast(node) => ctx.set_node(node),
+        Lowered::Plan(plan) => ctx.set_relational(plan),
+    }
     ctx.set_lowered_metadata(lowered.metadata);
     Ok(())
 }
@@ -330,7 +339,9 @@ fn paginate(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn build_plan<C: CompilerCtx>(ctx: &mut C) -> Result<()> {
-    let node = require(ctx.node().as_ref(), "node")?;
+    let Some(node) = ctx.node().as_ref() else {
+        return Ok(());
+    };
     let plan = codegen::build(node, ctx.data_model().catalog(), C::Model::DIALECT)?;
     ctx.set_relational(plan);
     Ok(())
@@ -376,7 +387,7 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
     let query_config = ctx.take_query_config().unwrap_or_default();
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
-    let node = require(ctx.take_node(), "node")?;
+    let node = ctx.take_node().unwrap_or(Node::Query(Box::default()));
     let input = require(ctx.input().clone(), "input")?;
     let plan = require(ctx.relational().as_ref(), "relational")?;
     let base = codegen::render(plan, ctx.data_model(), result_context, query_config);

@@ -229,7 +229,10 @@ mod tests {
             },
         )
         .unwrap();
-        crate::passes::lower::emit(&plan, &input, None).unwrap().ast
+        let crate::passes::plan::QueryPlan::Hydration(plan) = &plan else {
+            panic!("expected a hydration plan");
+        };
+        super::emit(plan).unwrap().ast
     }
 
     #[test]
