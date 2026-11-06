@@ -20,6 +20,77 @@ struct SetupAssets;
 #[exclude = "*.d.ts"]
 struct AgentPluginAssets;
 
+#[derive(Embed)]
+#[folder = "$CARGO_MANIFEST_DIR/../../packages/agent-plugins-nightly"]
+#[exclude = "tests/*"]
+#[exclude = "node_modules/*"]
+#[exclude = "package.json"]
+#[exclude = "README.md"]
+struct NightlyAssets;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Feature {
+    nightly: bool,
+    stable: bool,
+    claude: Option<ClaudeFeature>,
+    pi: Option<FeatureFiles>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeatureFiles {
+    files: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClaudeFeature {
+    hooks: String,
+    files: Vec<String>,
+}
+
+pub(super) type Features = BTreeMap<String, Feature>;
+
+fn parse_features(yaml: &[u8]) -> Result<Features, String> {
+    let features: Features = orbit_utils::yaml::from_slice(yaml).map_err(|e| e.to_string())?;
+    match features
+        .iter()
+        .find(|(_, feature)| feature.stable && !feature.nightly)
+    {
+        Some((name, _)) => Err(format!(
+            "feature {name}: `stable: true` needs `nightly: true`, because nightly installs everything stable does; set both to false to turn it off"
+        )),
+        None => Ok(features),
+    }
+}
+
+static FEATURES: LazyLock<Features> = LazyLock::new(|| {
+    let file = NightlyAssets::get("features.yaml").expect("features.yaml is embedded");
+    parse_features(&file.data)
+        .unwrap_or_else(|e| panic!("packages/agent-plugins-nightly/features.yaml is invalid: {e}"))
+});
+
+fn feature_on(features: &Features, name: &str, nightly: bool) -> bool {
+    let feature = features
+        .get(name)
+        .unwrap_or_else(|| panic!("feature {name} is not in features.yaml"));
+    if nightly {
+        feature.nightly
+    } else {
+        feature.stable
+    }
+}
+
+pub(super) fn nightly_enabled() -> bool {
+    std::env::var("ORBIT_NIGHTLY").is_ok_and(|value| {
+        !matches!(
+            value.trim().to_lowercase().as_str(),
+            "" | "0" | "false" | "off" | "no"
+        )
+    })
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SetupTexts {
@@ -53,7 +124,10 @@ pub(crate) fn launcher() -> &'static str {
 }
 
 fn substitute_launcher(text: &str, launcher: &str) -> String {
-    text.replace("{{orbit}}", launcher)
+    text.replace("{{orbit}}", launcher).replace(
+        "{{gitlab_kinds}}",
+        &crate::commands::grep::gitlab_prefixes(),
+    )
 }
 
 fn render_instructions(launcher: &str, remote: bool) -> String {
@@ -110,6 +184,7 @@ pub(super) struct AgentSpec {
     #[serde(default)]
     pub(super) retired: Retired,
     pub(super) skills: Option<SkillDirs>,
+    pub(super) feature_dir: Option<ScopedPath>,
     pub(super) plugin: Option<PluginSpec>,
 }
 
@@ -122,6 +197,8 @@ pub(super) struct PluginSpec {
     pub(super) name: String,
     pub(super) min_version: String,
     pub(super) version_command: Vec<String>,
+    #[serde(default)]
+    pub(super) features: bool,
 }
 
 impl PluginSpec {
@@ -142,7 +219,16 @@ impl PluginSpec {
         format!("{}@{marketplace}", self.name)
     }
 
-    pub(super) fn files(&self, marketplace: &str) -> Vec<(String, Vec<u8>)> {
+    pub(super) fn files(&self, marketplace: &str, nightly: bool) -> Vec<(String, Vec<u8>)> {
+        self.files_with(&FEATURES, marketplace, nightly)
+    }
+
+    fn files_with(
+        &self,
+        features: &Features,
+        marketplace: &str,
+        nightly: bool,
+    ) -> Vec<(String, Vec<u8>)> {
         let marketplace = serde_json::json!({
             "name": marketplace,
             "owner": { "name": "GitLab" },
@@ -159,14 +245,62 @@ impl PluginSpec {
             }
             (format!("{}/{path}", self.name), data)
         });
-        [(".gitignore".to_string(), b"*\n".to_vec())]
+        let mut files: Vec<_> = [(".gitignore".to_string(), b"*\n".to_vec())]
             .into_iter()
             .chain(std::iter::once((
                 ".claude-plugin/marketplace.json".to_string(),
                 serde_json::to_vec_pretty(&marketplace).unwrap(),
             )))
             .chain(plugin)
-            .collect()
+            .collect();
+        if self.features {
+            self.add_features(&mut files, features, nightly);
+        }
+        files
+    }
+
+    fn add_features(&self, files: &mut Vec<(String, Vec<u8>)>, features: &Features, nightly: bool) {
+        let hooks_path = format!("{}/hooks/hooks.json", self.name);
+        let mut merged = serde_json::Map::new();
+        for (name, claude) in features
+            .iter()
+            .filter(|(name, _)| feature_on(features, name, nightly))
+            .filter_map(|(name, feature)| Some((name, feature.claude.as_ref()?)))
+        {
+            let hooks = NightlyAssets::get(&claude.hooks)
+                .unwrap_or_else(|| panic!("{} is not embedded", claude.hooks));
+            let hooks: serde_json::Map<String, Value> = serde_json::from_slice(&hooks.data)
+                .unwrap_or_else(|e| panic!("{} is invalid: {e}", claude.hooks));
+            for (event, entries) in hooks {
+                let Value::Array(entries) = entries else {
+                    panic!("{name}: hooks for {event} must be an array");
+                };
+                let slot = merged
+                    .entry(event)
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                slot.as_array_mut()
+                    .expect("merged hooks are arrays")
+                    .extend(entries);
+            }
+            for path in &claude.files {
+                let file =
+                    NightlyAssets::get(path).unwrap_or_else(|| panic!("{path} is not embedded"));
+                files.push((
+                    format!("{}/features/{path}", self.name),
+                    file.data.into_owned(),
+                ));
+            }
+        }
+        if merged.is_empty() {
+            return;
+        }
+        let (_, stable) = files
+            .iter_mut()
+            .find(|(path, _)| *path == hooks_path)
+            .expect("the stable plugin ships hooks/hooks.json");
+        let mut manifest: Value = serde_json::from_slice(stable).expect("hooks.json is JSON");
+        manifest["hooks"] = Value::Object(merged);
+        *stable = serde_json::to_vec_pretty(&manifest).unwrap();
     }
 }
 
@@ -226,6 +360,7 @@ pub(super) struct TemplateFile {
     pub(super) template: String,
     #[serde(default)]
     pub(super) ui: bool,
+    pub(super) feature: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -259,6 +394,31 @@ pub(super) struct RetiredFile {
     pub(super) ui: bool,
 }
 
+fn feature_template_files(spec: &AgentSpec, features: &Features) -> Vec<TemplateFile> {
+    let Some(dir) = &spec.feature_dir else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    for (name, feature) in features {
+        let section = match spec.name.as_str() {
+            "pi" => feature.pi.as_ref(),
+            _ => None,
+        };
+        for (destination, source) in section.iter().flat_map(|section| &section.files) {
+            files.push(TemplateFile {
+                path: ScopedPath {
+                    project: format!("{}/orbit-{name}/{destination}", dir.project),
+                    global: format!("{}/orbit-{name}/{destination}", dir.global),
+                },
+                template: source.clone(),
+                ui: true,
+                feature: Some(name.clone()),
+            });
+        }
+    }
+    files
+}
+
 static AGENT_SPECS: LazyLock<Vec<AgentSpec>> = LazyLock::new(|| {
     let mut specs: Vec<AgentSpec> = SetupAssets::iter()
         .filter_map(|path| {
@@ -271,6 +431,11 @@ static AGENT_SPECS: LazyLock<Vec<AgentSpec>> = LazyLock::new(|| {
                 "config/setup/{path}: name must match the file stem"
             );
             Some(spec)
+        })
+        .map(|mut spec| {
+            spec.template_files
+                .extend(feature_template_files(&spec, &FEATURES));
+            spec
         })
         .collect();
     specs.sort_by(|a, b| a.name.cmp(&b.name));
@@ -291,10 +456,22 @@ impl std::ops::Deref for Agent {
 
 impl Agent {
     pub(super) fn ui_files(self, ui: bool) -> impl Iterator<Item = &'static TemplateFile> {
-        self.0
-            .template_files
-            .iter()
-            .filter(move |file| file.ui == ui)
+        self.ui_files_with(&FEATURES, ui, nightly_enabled())
+    }
+
+    fn ui_files_with(
+        self,
+        features: &'static Features,
+        ui: bool,
+        nightly: bool,
+    ) -> impl Iterator<Item = &'static TemplateFile> {
+        self.0.template_files.iter().filter(move |file| {
+            file.ui == ui
+                && file
+                    .feature
+                    .as_deref()
+                    .is_none_or(|name| feature_on(features, name, nightly))
+        })
     }
 
     pub(super) fn ui_registrations(self, ui: bool) -> impl Iterator<Item = &'static Registration> {
@@ -311,6 +488,40 @@ impl Agent {
             .iter()
             .filter(move |file| file.ui == ui)
             .map(|file| &file.path)
+    }
+
+    pub(super) fn switched_off_files(
+        self,
+        ui: bool,
+    ) -> impl Iterator<Item = &'static TemplateFile> {
+        self.switched_off_files_with(&FEATURES, ui, nightly_enabled())
+    }
+
+    fn switched_off_files_with(
+        self,
+        features: &'static Features,
+        ui: bool,
+        nightly: bool,
+    ) -> impl Iterator<Item = &'static TemplateFile> {
+        self.feature_files(ui).filter(move |file| {
+            file.feature
+                .as_deref()
+                .is_some_and(|name| !feature_on(features, name, nightly))
+        })
+    }
+
+    pub(super) fn all_ui_files(self, ui: bool) -> impl Iterator<Item = &'static TemplateFile> {
+        self.0
+            .template_files
+            .iter()
+            .filter(move |file| file.ui == ui)
+    }
+
+    pub(super) fn feature_files(self, ui: bool) -> impl Iterator<Item = &'static TemplateFile> {
+        self.0
+            .template_files
+            .iter()
+            .filter(move |file| file.ui == ui && file.feature.is_some())
     }
 
     pub(super) fn retired_registrations(
@@ -345,7 +556,7 @@ const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
 
 impl TemplateFile {
     pub(super) fn render(&self) -> String {
-        let mut body = read_embedded_text(&self.template);
+        let mut body = read_embedded_text(&self.template, self.feature.is_some());
         for (name, value) in &TEXTS.template_vars {
             body = body.replace(&format!("{{{{{name}}}}}"), value);
         }
@@ -360,11 +571,14 @@ impl TemplateFile {
     }
 }
 
-fn read_embedded_text(name: &str) -> String {
-    let file =
-        SetupAssets::get(name).unwrap_or_else(|| panic!("config/setup/{name} is not embedded"));
-    String::from_utf8(file.data.into_owned())
-        .unwrap_or_else(|e| panic!("config/setup/{name} is not UTF-8: {e}"))
+fn read_embedded_text(name: &str, nightly: bool) -> String {
+    let file = if nightly {
+        NightlyAssets::get(name)
+    } else {
+        SetupAssets::get(name)
+    }
+    .unwrap_or_else(|| panic!("{name} is not embedded"));
+    String::from_utf8(file.data.into_owned()).unwrap_or_else(|e| panic!("{name} is not UTF-8: {e}"))
 }
 
 #[cfg(test)]
@@ -426,6 +640,7 @@ mod tests {
                     "{launcher}"
                 );
                 assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
+                assert_eq!(rendered.contains("`branch:`"), remote, "{launcher}");
                 let budget = if remote { 250 } else { 75 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
@@ -437,6 +652,7 @@ mod tests {
             "{local}"
         );
         assert!(search_nudge_text().contains("MANDATORY"));
+        assert!(gitlab_nudge_text().contains("`milestone:`"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }
@@ -538,9 +754,10 @@ mod tests {
         let claude = agent_named("claude").unwrap();
         let plugin = claude.plugin.as_ref().unwrap();
         let mut files: Vec<String> = plugin
-            .files(&plugin.marketplace)
+            .files(&plugin.marketplace, false)
             .into_iter()
             .map(|(path, _)| path)
+            .filter(|path| !path.contains("/features/"))
             .collect();
         files.sort();
         let shipped = [
@@ -567,7 +784,7 @@ mod tests {
         expected.extend(shipped.iter().map(|path| format!("gitlab-orbit/{path}")));
         assert_eq!(files, expected);
         let manifest = plugin
-            .files(&plugin.marketplace)
+            .files(&plugin.marketplace, false)
             .into_iter()
             .find(|(path, _)| path.ends_with("plugin.json"))
             .unwrap()
@@ -576,7 +793,7 @@ mod tests {
         assert_eq!(manifest["version"], crate::version::get());
         let marketplace: Value = serde_json::from_slice(
             &plugin
-                .files(&plugin.marketplace)
+                .files(&plugin.marketplace, false)
                 .into_iter()
                 .find(|(path, _)| path == ".claude-plugin/marketplace.json")
                 .unwrap()
@@ -593,9 +810,159 @@ mod tests {
         );
     }
 
+    fn registry(nightly: bool, stable: bool) -> &'static Features {
+        let file = NightlyAssets::get("features.yaml").unwrap();
+        let mut features = parse_features(&file.data).unwrap();
+        for feature in features.values_mut() {
+            feature.nightly = nightly;
+            feature.stable = stable;
+        }
+        Box::leak(Box::new(features))
+    }
+
+    fn claude_feature_paths(features: &Features, nightly: bool) -> Vec<String> {
+        let claude = agent_named("claude").unwrap();
+        let plugin = claude.plugin.as_ref().unwrap();
+        plugin
+            .files_with(features, &plugin.marketplace, nightly)
+            .into_iter()
+            .map(|(path, _)| path)
+            .filter(|path| path.contains("/features/"))
+            .collect()
+    }
+
+    fn claude_hooks(features: &Features, nightly: bool) -> Value {
+        let claude = agent_named("claude").unwrap();
+        let plugin = claude.plugin.as_ref().unwrap();
+        let files = plugin.files_with(features, &plugin.marketplace, nightly);
+        let (_, data) = files
+            .iter()
+            .find(|(path, _)| path == "gitlab-orbit/hooks/hooks.json")
+            .unwrap();
+        serde_json::from_slice(data).unwrap()
+    }
+
+    #[test]
+    fn the_registry_decides_which_channel_gets_the_claude_files_and_hooks() {
+        let (off, nightly_only, both) = (
+            registry(false, false),
+            registry(true, false),
+            registry(true, true),
+        );
+        assert!(claude_feature_paths(off, false).is_empty());
+        assert!(claude_feature_paths(off, true).is_empty());
+        assert!(claude_feature_paths(nightly_only, false).is_empty());
+        let nightly_paths = claude_feature_paths(nightly_only, true);
+        assert!(!nightly_paths.is_empty());
+        assert_eq!(claude_feature_paths(both, false), nightly_paths);
+
+        let stable = claude_hooks(off, false);
+        assert!(stable.get("hooks").is_none());
+        let nightly = claude_hooks(nightly_only, true);
+        assert_eq!(nightly["modules"], stable["modules"]);
+        assert!(nightly["hooks"].is_object());
+        assert_eq!(claude_hooks(both, false), nightly);
+        assert_eq!(claude_hooks(nightly_only, false), stable);
+    }
+
+    #[test]
+    fn the_registry_decides_which_channel_gets_the_pi_extensions() {
+        let pi = agent_named("pi").unwrap();
+        let installed = |features: &'static Features, nightly: bool| -> Vec<String> {
+            pi.ui_files_with(features, true, nightly)
+                .filter(|file| file.feature.is_some())
+                .map(|file| file.path.project.clone())
+                .collect()
+        };
+        let switched_off = |features: &'static Features, nightly: bool| {
+            pi.switched_off_files_with(features, true, nightly).count()
+        };
+        let (off, nightly_only, both) = (
+            registry(false, false),
+            registry(true, false),
+            registry(true, true),
+        );
+        let every_file = pi.feature_files(true).count();
+        assert!(every_file > 0);
+        assert!(installed(off, false).is_empty() && installed(off, true).is_empty());
+        assert!(installed(nightly_only, false).is_empty());
+        assert_eq!(installed(nightly_only, true).len(), every_file);
+        assert_eq!(installed(both, false), installed(nightly_only, true));
+        assert_eq!(switched_off(off, false), every_file);
+        assert_eq!(switched_off(nightly_only, false), every_file);
+        assert_eq!(switched_off(nightly_only, true), 0);
+        assert_eq!(switched_off(both, false), 0);
+        for file in pi.ui_files_with(nightly_only, true, true) {
+            let rendered = file.render();
+            assert!(rendered.starts_with(TEMPLATE_CHECKSUM_PREFIX));
+            assert!(TemplateFile::is_unmodified(&rendered));
+        }
+    }
+
+    #[test]
+    fn a_stable_feature_must_also_be_on_for_nightly() {
+        let error = parse_features(b"a:\n  nightly: false\n  stable: true\n").unwrap_err();
+        assert!(error.contains("feature a") && error.contains("needs `nightly: true`"));
+        assert!(
+            parse_features(
+                b"a:\n  nightly: true\n  stable: true\nb:\n  nightly: false\n  stable: false\n"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn the_shipped_registry_is_consistent() {
+        let mut destinations = std::collections::BTreeSet::new();
+        for spec in agents() {
+            for file in &spec.template_files {
+                if let Some(name) = &file.feature {
+                    assert!(
+                        FEATURES.contains_key(name),
+                        "{name} is not in features.yaml"
+                    );
+                }
+                assert!(
+                    destinations.insert((spec.name.clone(), file.path.project.clone())),
+                    "{}: {} is installed twice",
+                    spec.name,
+                    file.path.project
+                );
+            }
+        }
+        for (name, feature) in FEATURES.iter() {
+            let sources = feature
+                .claude
+                .iter()
+                .flat_map(|claude| claude.files.iter().chain([&claude.hooks]))
+                .chain(feature.pi.iter().flat_map(|pi| pi.files.values()));
+            for source in sources {
+                assert!(
+                    NightlyAssets::get(source).is_some(),
+                    "{name}: {source} is not embedded"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_feature_installs_as_its_own_pi_extension() {
+        let pi = agent_named("pi").unwrap();
+        for file in pi.feature_files(true) {
+            let name = file.feature.as_deref().unwrap();
+            assert!(
+                file.path
+                    .project
+                    .starts_with(&format!(".pi/extensions/orbit-{name}/")),
+                "{}",
+                file.path.project
+            );
+        }
+    }
+
     #[test]
     fn opencode_plugins_are_shell_safe() {
-        let template = read_embedded_text("opencode_plugin.js");
+        let template = read_embedded_text("opencode_plugin.js", false);
         assert_eq!(
             template.matches("{{").count(),
             1,
@@ -624,7 +991,7 @@ mod tests {
             "agents/opencode_ui/index.js",
             "agents/opencode_ui/tui.tsx",
         ] {
-            let text = read_embedded_text(template);
+            let text = read_embedded_text(template, false);
             assert!(
                 text.contains("export default") || text.contains(" as default"),
                 "{template}"

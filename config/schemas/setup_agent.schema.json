@@ -36,6 +36,10 @@
       "items": { "$ref": "#/definitions/jsonMerge" },
       "description": "Marker-owned merges into JSON arrays in the assistant's config, e.g. PreToolUse hooks."
     },
+    "feature_dir": {
+      "$ref": "#/definitions/scopedPath",
+      "description": "Directory that holds one orbit-<feature> extension for each feature that is on for the channel (packages/agent-plugins-nightly/features.yaml)."
+    },
     "template_files": {
       "type": "array",
       "minItems": 1,
@@ -142,6 +146,10 @@
           "minItems": 1,
           "items": { "type": "string", "minLength": 1 },
           "description": "Command whose output starts with the assistant's version, such as `claude --version`."
+        },
+        "features": {
+          "type": "boolean",
+          "description": "Add the Claude Code files and hooks of the features enabled for the channel (packages/agent-plugins-nightly/features.yaml) to the plugin."
         }
       }
     },
@@ -188,11 +196,12 @@
       "additionalProperties": false,
       "properties": {
         "ui": { "type": "boolean", "description": "Installed with the agent-plugins component instead of hooks." },
+        "feature": { "type": "string", "minLength": 1, "description": "Installed only while this feature in packages/agent-plugins-nightly/features.yaml is on for the channel (ORBIT_NIGHTLY=1 is nightly); a setup for the other channel removes it while it is unedited." },
         "path": { "$ref": "#/definitions/scopedPath" },
         "template": {
           "type": "string",
           "minLength": 1,
-          "description": "Template location under config/setup/, e.g. opencode_plugin.js."
+          "description": "Template location under config/setup/ (or packages/agent-plugins-nightly/ when `feature` is set), e.g. opencode_plugin.js."
         }
       }
     },

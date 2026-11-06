@@ -7,3 +7,6 @@ detect: ["~/.pi/agent"]
 instruction_file:
   project: AGENTS.md
   global: "~/.pi/agent/AGENTS.md"
+feature_dir:
+  project: .pi/extensions
+  global: "~/.pi/agent/extensions"

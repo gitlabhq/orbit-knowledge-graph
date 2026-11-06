@@ -105,13 +105,7 @@ pub(crate) async fn install(
     if interactive
         && options.ask_agent_plugins
         && !ui_agents.is_empty()
-        && !tui::confirm(
-            &format!(
-                "Install the agent plugins for {}? They show each Orbit call.",
-                ui_agents.join(" and ")
-            ),
-            true,
-        )?
+        && !ask_install_agent_plugins(&ui_agents)?
     {
         selection.components.remove(&Component::AgentPlugins);
     }
@@ -240,6 +234,36 @@ fn ask_which_agents(
     selection.with_agents_named(&chosen)
 }
 
+const INSTALL_AGENT_PLUGINS: &str = "install";
+const SKIP_AGENT_PLUGINS: &str = "skip";
+
+/// Asks whether to install the agent plugins, starting on the recommended install.
+fn ask_install_agent_plugins(ui_agents: &[&str]) -> Result<bool> {
+    let choices = [
+        tui::Choice {
+            key: INSTALL_AGENT_PLUGINS.to_string(),
+            label: "Install the agent plugins".to_string(),
+            hint: "recommended".to_string(),
+            section: None,
+        },
+        tui::Choice {
+            key: SKIP_AGENT_PLUGINS.to_string(),
+            label: "Skip the agent plugins".to_string(),
+            hint: String::new(),
+            section: None,
+        },
+    ];
+    let chosen = tui::select(
+        &format!(
+            "Agent plugins for {} show each Orbit call. Install them?",
+            ui_agents.join(" and ")
+        ),
+        &choices,
+        INSTALL_AGENT_PLUGINS,
+    )?;
+    Ok(chosen == INSTALL_AGENT_PLUGINS)
+}
+
 fn apply_and_report(
     options: &Options,
     apply: impl FnOnce(&mut Report) -> Result<()>,
@@ -250,7 +274,9 @@ fn apply_and_report(
         show_outcomes_per_component(&report)?;
     } else {
         for outcome in &report.outcomes {
-            if outcome.action == components::KEPT_RETIRED {
+            if [components::KEPT_RETIRED, components::KEPT_FEATURE]
+                .contains(&outcome.action.as_str())
+            {
                 tui::warning(format!("{}: {}", outcome.label, outcome.action));
             }
         }
@@ -1514,6 +1540,36 @@ mod tests {
         install_default(&["opencode"], dir.path());
 
         assert_eq!(tree(dir.path()), upgraded);
+    }
+
+    #[test]
+    fn feature_pi_files_count_as_installed_and_are_removed_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = project(dir.path());
+        let pi = spec::agent_named("pi").unwrap();
+        let installer = components::installer_for(Component::AgentPlugins);
+        assert!(!installer.is_installed(pi, &target));
+
+        let mut paths = Vec::new();
+        for file in pi.feature_files(true) {
+            let (path, _) = target.resolve(&file.path).unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, file.render()).unwrap();
+            paths.push(path);
+        }
+        assert!(installer.is_installed(pi, &target));
+
+        std::fs::write(&paths[0], "// my own edit\n").unwrap();
+        installer
+            .remove(&[pi], &target, &mut Report::default())
+            .unwrap();
+        assert!(paths.iter().all(|path| path.is_file()));
+
+        std::fs::write(&paths[0], pi.feature_files(true).next().unwrap().render()).unwrap();
+        installer
+            .remove(&[pi], &target, &mut Report::default())
+            .unwrap();
+        assert!(paths.iter().all(|path| !path.exists()));
     }
 
     #[test]

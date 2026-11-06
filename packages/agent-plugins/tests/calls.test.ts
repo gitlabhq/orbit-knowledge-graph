@@ -61,6 +61,12 @@ test('a grep pattern given with -e is the detail', () => {
   expect(describeOrbitCall('Bash', { command: 'glab orbit grep -e foo src/' })?.detail).toBe('foo')
 })
 
+test('a long grep flag does not take its value for the pattern', () => {
+  for (const flag of ['--context', '--after-context', '--before-context', '--max-count']) {
+    expect(describeOrbitCall('Bash', { command: `orbit grep ${flag} 3 parse_token` })?.detail).toBe('parse_token')
+  }
+})
+
 test('calls that are not Orbit calls are left alone', () => {
   expect(describeOrbitCall('Bash', { command: 'ls -la' })).toBe(null)
   expect(describeOrbitCall('Read', { file_path: 'README.md' })).toBe(null)
