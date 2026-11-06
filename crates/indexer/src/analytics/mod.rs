@@ -8,7 +8,9 @@ mod observer;
 use std::sync::Arc;
 
 use gitlab_client::GitlabClient;
-use orbit_analytics::{ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker};
+use orbit_analytics::{
+    AnalyticsTracker, ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker,
+};
 use orbit_log_fields::warn;
 use orbit_server_config::{
     AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind,
@@ -20,6 +22,7 @@ pub use observer::SnowplowIndexingObserver;
 #[derive(Clone)]
 pub struct IndexingAnalytics {
     tracker: Option<SnowplowAnalyticsTracker>,
+    local: Option<SnowplowAnalyticsTracker>,
     config: Arc<AnalyticsConfig>,
     instance: GitlabInstanceWatch,
 }
@@ -28,6 +31,7 @@ impl IndexingAnalytics {
     pub fn from_config(config: &AnalyticsConfig) -> Result<Self, labkit_events::Error> {
         Ok(Self {
             tracker: build_tracker(config)?,
+            local: SnowplowAnalyticsTracker::local_from_config(config)?,
             config: Arc::new(config.clone()),
             instance: GitlabInstanceWatch::default(),
         })
@@ -36,9 +40,11 @@ impl IndexingAnalytics {
     pub fn disabled() -> Self {
         Self {
             tracker: None,
+            local: None,
             config: Arc::new(AnalyticsConfig {
                 enabled: Some(false),
                 collector_url: String::new(),
+                local_collector_url: String::new(),
                 deployment: DeploymentConfig {
                     kind: DeploymentKind::SelfManaged,
                     environment: DeploymentEnvironment::Development,
@@ -49,12 +55,20 @@ impl IndexingAnalytics {
     }
 
     pub fn is_enabled(&self) -> bool {
-        self.tracker.is_some()
+        self.tracker.is_some() || self.local.is_some()
     }
 
     pub fn observer(&self) -> Option<Box<dyn IndexingObserver>> {
+        if !self.is_enabled() {
+            return None;
+        }
         let tracker = ConsentGate::new(
-            Arc::new(self.tracker.clone()?),
+            self.tracker
+                .clone()
+                .map(|t| Arc::new(t) as Arc<dyn AnalyticsTracker>),
+            self.local
+                .clone()
+                .map(|t| Arc::new(t) as Arc<dyn AnalyticsTracker>),
             &self.config,
             &self.instance,
         );
@@ -75,6 +89,9 @@ impl IndexingAnalytics {
         if let Some(tracker) = &self.tracker {
             tracker.shutdown().await;
         }
+        if let Some(tracker) = &self.local {
+            tracker.shutdown().await;
+        }
     }
 }
 
@@ -93,4 +110,29 @@ fn build_tracker(
         return Ok(None);
     }
     SnowplowAnalyticsTracker::from_config(config).map(Some)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(kind: DeploymentKind) -> AnalyticsConfig {
+        AnalyticsConfig {
+            enabled: Some(false),
+            collector_url: String::new(),
+            local_collector_url: "http://dip.example".into(),
+            deployment: DeploymentConfig {
+                kind,
+                environment: DeploymentEnvironment::Production,
+            },
+        }
+    }
+
+    #[test]
+    fn local_collector_is_ignored_off_self_managed() {
+        for kind in [DeploymentKind::Com, DeploymentKind::Dedicated] {
+            let analytics = IndexingAnalytics::from_config(&config(kind)).unwrap();
+            assert!(!analytics.is_enabled(), "{kind:?}");
+        }
+    }
 }

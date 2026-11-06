@@ -26,7 +26,31 @@ impl SnowplowAnalyticsTracker {
     }
 
     pub fn from_config(config: &AnalyticsConfig) -> Result<Self, labkit_events::Error> {
-        let tracker = Self::new(&config.collector_url, APP_ID)?;
+        Self::start(&config.collector_url)
+    }
+
+    /// The tracker for `analytics.local_collector_url`, if one applies.
+    pub fn local_from_config(
+        config: &AnalyticsConfig,
+    ) -> Result<Option<Self>, labkit_events::Error> {
+        let Some(url) = config.local_collector() else {
+            if !config.local_collector_url.trim().is_empty() {
+                orbit_log_fields::warn!(
+                    safe(DEPLOYMENT_TYPE) = <&str>::from(config.deployment.kind),
+                    "analytics.local_collector_url is for self-managed only, ignoring it"
+                );
+            }
+            return Ok(None);
+        };
+        orbit_log_fields::info!(
+            expanded(URL) = %url,
+            "initializing local analytics event tracker"
+        );
+        Self::start(url).map(Some)
+    }
+
+    fn start(collector_url: &str) -> Result<Self, labkit_events::Error> {
+        let tracker = Self::new(collector_url, APP_ID)?;
         tracker.spawn_periodic_flush();
         Ok(tracker)
     }

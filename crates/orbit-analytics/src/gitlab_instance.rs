@@ -68,20 +68,25 @@ impl GitlabInstanceWatch {
     }
 }
 
+/// Sends every event to the local collector, and to the GitLab collector only
+/// when `enabled` (or, when unset, the product usage data setting) allows it.
 pub struct ConsentGate {
-    tracker: Arc<dyn AnalyticsTracker>,
+    tracker: Option<Arc<dyn AnalyticsTracker>>,
+    local: Option<Arc<dyn AnalyticsTracker>>,
     enabled: Option<bool>,
     instance: GitlabInstanceWatch,
 }
 
 impl ConsentGate {
     pub fn new(
-        tracker: Arc<dyn AnalyticsTracker>,
+        tracker: Option<Arc<dyn AnalyticsTracker>>,
+        local: Option<Arc<dyn AnalyticsTracker>>,
         config: &AnalyticsConfig,
         instance: &GitlabInstanceWatch,
     ) -> Self {
         Self {
             tracker,
+            local,
             enabled: config.enabled,
             instance: instance.clone(),
         }
@@ -90,11 +95,92 @@ impl ConsentGate {
 
 impl AnalyticsTracker for ConsentGate {
     fn track(&self, event: StructuredEvent) {
-        let allowed = self
-            .enabled
-            .unwrap_or_else(|| self.instance.product_usage_data_enabled());
-        if allowed {
-            self.tracker.track(event);
+        let tracker = self.tracker.as_ref().filter(|_| {
+            self.enabled
+                .unwrap_or_else(|| self.instance.product_usage_data_enabled())
+        });
+        match (tracker, &self.local) {
+            (Some(tracker), Some(local)) => {
+                local.track(event.clone());
+                tracker.track(event);
+            }
+            (Some(tracker), None) => tracker.track(event),
+            (None, Some(local)) => local.track(event),
+            (None, None) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use labkit_events::StructuredEvent;
+    use orbit_server_config::{
+        AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind,
+    };
+    use parking_lot::Mutex;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct Recorder(Mutex<usize>);
+
+    impl AnalyticsTracker for Recorder {
+        fn track(&self, _event: StructuredEvent) {
+            *self.0.lock() += 1;
+        }
+    }
+
+    impl Recorder {
+        fn count(&self) -> usize {
+            *self.0.lock()
+        }
+    }
+
+    fn config(enabled: Option<bool>) -> AnalyticsConfig {
+        AnalyticsConfig {
+            enabled,
+            collector_url: "https://collector.example".into(),
+            local_collector_url: "http://dip.example".into(),
+            deployment: DeploymentConfig {
+                kind: DeploymentKind::SelfManaged,
+                environment: DeploymentEnvironment::Production,
+            },
+        }
+    }
+
+    fn send(enabled: Option<bool>, with_gitlab: bool, with_local: bool) -> (usize, usize) {
+        let gitlab = Arc::new(Recorder::default());
+        let local = Arc::new(Recorder::default());
+        // The default watch has no instance yet, so product usage data reads as off.
+        let gate = ConsentGate::new(
+            with_gitlab.then(|| gitlab.clone() as Arc<dyn AnalyticsTracker>),
+            with_local.then(|| local.clone() as Arc<dyn AnalyticsTracker>),
+            &config(enabled),
+            &GitlabInstanceWatch::default(),
+        );
+        gate.track(
+            StructuredEvent::builder("gkg", "gkg_query_executed")
+                .build()
+                .unwrap(),
+        );
+        (gitlab.count(), local.count())
+    }
+
+    #[test]
+    fn local_gets_every_event_whatever_enabled_says() {
+        assert_eq!(send(None, true, true), (0, 1));
+        assert_eq!(send(Some(false), true, true), (0, 1));
+        assert_eq!(send(Some(true), true, true), (1, 1));
+    }
+
+    #[test]
+    fn gitlab_collector_keeps_todays_rules_without_a_local_one() {
+        assert_eq!(send(None, true, false), (0, 0));
+        assert_eq!(send(Some(true), true, false), (1, 0));
+    }
+
+    #[test]
+    fn local_only() {
+        assert_eq!(send(Some(false), false, true), (0, 1));
     }
 }

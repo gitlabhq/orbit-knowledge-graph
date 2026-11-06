@@ -12,7 +12,9 @@ use orbit_billing::{QuotaService, SnowplowBillingTracker};
 use orbit_log_fields::{info, warn};
 use orbit_migrations::version::SCHEMA_VERSION;
 use orbit_server::active_schema::ActiveSchema;
-use orbit_server::analytics::{ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker};
+use orbit_server::analytics::{
+    AnalyticsTracker, ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker,
+};
 use orbit_server::auth::JwtValidator;
 use orbit_server::cli::{Args, Mode};
 use orbit_server::cluster_health::ClusterHealthChecker;
@@ -286,16 +288,25 @@ async fn run_webserver(
         );
         let tracker = SnowplowAnalyticsTracker::from_config(&config.analytics)
             .map_err(|e| anyhow::anyhow!("analytics tracker initialization failed: {e}"))?;
+        analytics_tracker = Some(tracker);
+    }
+    let local_analytics_tracker = SnowplowAnalyticsTracker::local_from_config(&config.analytics)
+        .map_err(|e| anyhow::anyhow!("local analytics tracker initialization failed: {e}"))?;
+    if analytics_tracker.is_some() || local_analytics_tracker.is_some() {
         let instance = GitlabInstanceWatch::default();
-        if config.analytics.follows_gitlab_setting() {
+        if analytics_tracker.is_some() && config.analytics.follows_gitlab_setting() {
             instance.spawn_refresh(gitlab_client.clone());
         }
         grpc_server = grpc_server.with_analytics(Arc::new(ConsentGate::new(
-            Arc::new(tracker.clone()),
+            analytics_tracker
+                .clone()
+                .map(|t| Arc::new(t) as Arc<dyn AnalyticsTracker>),
+            local_analytics_tracker
+                .clone()
+                .map(|t| Arc::new(t) as Arc<dyn AnalyticsTracker>),
             &config.analytics,
             &instance,
         )));
-        analytics_tracker = Some(tracker);
     }
 
     info!(
@@ -313,6 +324,11 @@ async fn run_webserver(
     tokio::join!(
         async {
             if let Some(tracker) = analytics_tracker {
+                tracker.shutdown().await;
+            }
+        },
+        async {
+            if let Some(tracker) = local_analytics_tracker {
                 tracker.shutdown().await;
             }
         },
