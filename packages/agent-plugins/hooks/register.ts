@@ -86,7 +86,25 @@ function resetConversation(): void {
   narration.clear()
 }
 
+const INSTRUCTIONS_BLOCK = 'orbit'
+
+async function orbitInstructions(run: (argv: readonly string[]) => Promise<{ exitCode: number; stdout: string }>): Promise<string> {
+  for (const launcher of [['orbit'], ['glab', 'orbit']]) {
+    const answer = await run([...launcher, 'hook-guard', 'instructions']).catch(() => null)
+    if (answer) return answer.exitCode === 0 ? answer.stdout.trim() : ''
+  }
+  return ''
+}
+
 export const register: Register = (on) => {
+  on('prompt.context', async ($, e, next) => {
+    const answer = await next(e)
+    const text = await orbitInstructions((argv) => $.process.run(argv, { timeoutMs: 9000 }))
+    if (!text) return answer
+    const blocks = answer.blocks.filter((block) => block.name !== INSTRUCTIONS_BLOCK)
+    return { ...answer, blocks: [...blocks, { name: INSTRUCTIONS_BLOCK, text }] }
+  }).catch((_$, e, next) => next(e))
+
   on('session.end', ($, e, next) => {
     resetConversation()
     $.ui.invalidate('ui.render')

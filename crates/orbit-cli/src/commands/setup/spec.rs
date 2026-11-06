@@ -103,7 +103,7 @@ pub(super) struct AgentSpec {
     pub(super) name: String,
     pub(super) title: String,
     pub(super) detect: Vec<String>,
-    pub(super) instruction_file: ScopedPath,
+    pub(super) instruction_file: Option<ScopedPath>,
     #[serde(default)]
     pub(super) json_merges: Vec<JsonMerge>,
     #[serde(default)]
@@ -252,6 +252,8 @@ pub(super) struct Retired {
     pub(super) registrations: Vec<Registration>,
     #[serde(default)]
     pub(super) mcp: Option<McpEntry>,
+    #[serde(default)]
+    pub(super) instruction_file: Option<ScopedPath>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -679,13 +681,23 @@ mod tests {
     #[test]
     fn instruction_files_are_known_names_and_globals_expand_under_home_or_an_absolute_config_dir() {
         for spec in agents() {
-            assert!(
-                ["AGENTS.md", "CLAUDE.md"].contains(&spec.instruction_file.project.as_str()),
-                "{}: unexpected instruction file {}",
-                spec.name,
-                spec.instruction_file.project
-            );
-            for global in std::iter::once(&spec.instruction_file.global)
+            for file in spec
+                .instruction_file
+                .iter()
+                .chain(&spec.retired.instruction_file)
+            {
+                assert!(
+                    ["AGENTS.md", "CLAUDE.md"].contains(&file.project.as_str()),
+                    "{}: unexpected instruction file {}",
+                    spec.name,
+                    file.project
+                );
+            }
+            for global in spec
+                .instruction_file
+                .iter()
+                .chain(&spec.retired.instruction_file)
+                .map(|file| &file.global)
                 .chain(spec.json_merges.iter().map(|m| &m.file.global))
                 .chain(spec.template_files.iter().map(|t| &t.path.global))
                 .chain(

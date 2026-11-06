@@ -29,7 +29,8 @@ fn setup_outside_a_repository_succeeds_and_suggests_indexing_by_path() {
 
     let printed = all_output(&output);
     assert!(output.status.success(), "{printed}");
-    assert!(folder.path().join(".claude/CLAUDE.md").is_file());
+    assert!(folder.path().join(".claude/settings.json").is_file());
+    assert!(!folder.path().join(".claude/CLAUDE.md").exists());
     assert!(printed.contains("not a git repository"), "{printed}");
     assert!(!printed.contains("orbit workspace index ."), "{printed}");
 }
@@ -213,7 +214,7 @@ fn setup_says_when_the_agent_plugin_is_skipped_and_leaves_it_off_the_configured_
     );
     assert!(printed.contains("you have 2.1.286"), "{printed}");
     let card = configured_card(&printed);
-    assert!(card.contains("instructions, hooks, skill"), "{printed}");
+    assert!(card.contains("Claude Code   hooks, skill  "), "{printed}");
     assert!(!card.contains("agent plugins"), "{printed}");
     assert!(!home.path().join(".claude/orbit").exists());
 }

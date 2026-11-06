@@ -4,7 +4,7 @@
   "title": "Orbit setup assistant spec",
   "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: detection paths, a managed instruction-file block, marker-owned JSON merges, templated files, string registrations, and skill directories. Each file's name field must match its file stem. Applied by crates/orbit-cli/src/commands/setup.",
   "type": "object",
-  "required": ["name", "title", "detect", "instruction_file"],
+  "required": ["name", "title", "detect"],
   "additionalProperties": false,
   "properties": {
     "name": {
@@ -28,7 +28,7 @@
     },
     "instruction_file": {
       "$ref": "#/definitions/scopedPath",
-      "description": "Instruction file receiving the managed guidance block."
+      "description": "Instruction file receiving the managed guidance block. Leave it out when the agent loads the instructions another way, such as a plugin hook."
     },
     "json_merges": {
       "type": "array",
@@ -53,6 +53,10 @@
       "additionalProperties": false,
       "description": "Files and registrations an earlier release installed and this one no longer does. Install and uninstall remove them: a file only while its setup checksum shows it is unedited, and a registration by its value.",
       "properties": {
+        "instruction_file": {
+          "$ref": "#/definitions/scopedPath",
+          "description": "Instruction file an earlier release wrote the managed guidance block into. Setup and uninstall remove the block."
+        },
         "template_files": {
           "type": "array",
           "minItems": 1,

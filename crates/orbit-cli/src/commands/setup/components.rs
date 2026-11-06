@@ -407,8 +407,12 @@ mod tests {
     fn install_refuses_a_symlinked_backup_path_and_writes_nothing_through_it() {
         let dir = tempfile::tempdir().unwrap();
         let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
-        let agent = spec::agents().next().unwrap();
-        let (file, _) = target.resolve(&agent.instruction_file).unwrap();
+        let agent = spec::agents()
+            .find(|agent| agent.instruction_file.is_some())
+            .unwrap();
+        let (file, _) = target
+            .resolve(agent.instruction_file.as_ref().unwrap())
+            .unwrap();
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(&file, "existing notes\n").unwrap();
         let outside = dir.path().join("outside");

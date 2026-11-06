@@ -7,7 +7,7 @@ use super::{
     remove_file_and_empty_parents, write_unless_unchanged,
 };
 use crate::commands::setup::Target;
-use crate::commands::setup::spec::{self, Agent};
+use crate::commands::setup::spec::{self, Agent, ScopedPath};
 
 const BLOCK_BEGIN: &str = "<!-- orbit:setup:begin -->";
 const BLOCK_END: &str = "<!-- orbit:setup:end -->";
@@ -16,37 +16,80 @@ pub(super) struct Instructions;
 
 impl Installer for Instructions {
     fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>> {
-        let mut files = vec![target.resolve(&agent.instruction_file)?.1];
+        let mut files: Vec<String> = agent
+            .instruction_file
+            .iter()
+            .map(|file| target.resolve(file).map(|(_, label)| label))
+            .collect::<Result<_>>()?;
+        files.extend(retired_with_block(agent, target)?);
         files.extend(mcp::retired_label(agent, target)?);
         Ok(files)
     }
 
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
-        for (path, label) in instruction_files(agents, target)? {
-            upsert_block_in_file(&path, &label, report)?;
+        let active = instruction_files(agents, target, |agent| agent.instruction_file.as_ref())?;
+        for (path, label) in &active {
+            upsert_block_in_file(path, label, report)?;
+        }
+        for (path, label) in instruction_files(agents, target, |agent| {
+            agent.retired.instruction_file.as_ref()
+        })? {
+            if !active.iter().any(|(kept, _)| same_file(kept, &path)) {
+                strip_block_from_file(&path, target, &label, report)?;
+            }
         }
         mcp::remove_retired(agents, target, report)
     }
 
     fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
-        for (path, label) in instruction_files(agents, target)? {
-            strip_block_from_file(&path, target, &label, report)?;
+        let active = instruction_files(agents, target, |agent| agent.instruction_file.as_ref())?;
+        let retired = instruction_files(agents, target, |agent| {
+            agent.retired.instruction_file.as_ref()
+        })?;
+        for (path, label) in &active {
+            strip_block_from_file(path, target, label, report)?;
+        }
+        for (path, label) in retired {
+            if !active.iter().any(|(done, _)| same_file(done, &path)) {
+                strip_block_from_file(&path, target, &label, report)?;
+            }
         }
         mcp::remove_retired(agents, target, report)
     }
 
     fn is_installed(&self, agent: Agent, target: &Target) -> bool {
-        target
-            .resolve(&agent.instruction_file)
-            .is_ok_and(|(path, _)| file_mentions(&path, BLOCK_BEGIN))
+        agent.instruction_file.iter().any(|file| {
+            target
+                .resolve(file)
+                .is_ok_and(|(path, _)| file_mentions(&path, BLOCK_BEGIN))
+        }) || retired_with_block(agent, target).is_ok_and(|label| label.is_some())
             || mcp::retired_label(agent, target).is_ok_and(|label| label.is_some())
     }
 }
 
-fn instruction_files(agents: &[Agent], target: &Target) -> Result<Vec<(PathBuf, String)>> {
+/// An instruction file an earlier release wrote the block into, while it still holds the block.
+fn retired_with_block(agent: Agent, target: &Target) -> Result<Option<String>> {
+    let Some(file) = &agent.retired.instruction_file else {
+        return Ok(None);
+    };
+    let (path, label) = target.resolve(file)?;
+    Ok(file_mentions(&path, BLOCK_BEGIN).then_some(label))
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    canonical(a) == canonical(b)
+}
+
+fn instruction_files(
+    agents: &[Agent],
+    target: &Target,
+    file: impl Fn(&Agent) -> Option<&ScopedPath>,
+) -> Result<Vec<(PathBuf, String)>> {
     let mut resolved: Vec<(PathBuf, String)> = agents
         .iter()
-        .map(|agent| target.resolve(&agent.instruction_file))
+        .filter_map(|agent| file(agent))
+        .map(|file| target.resolve(file))
         .collect::<Result<_>>()?;
     resolved.sort_by(|a, b| a.0.cmp(&b.0));
     resolved.dedup_by(|a, b| a.0 == b.0);

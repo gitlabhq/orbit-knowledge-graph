@@ -304,3 +304,45 @@ test('the status line starts over when the session ends, and counts only what fo
   expect(await ui.find({ type: 'Text', text: /\//})).toBeUndefined()
   expect(runs.length).toBe(2)
 })
+
+test('the conversation context carries the Orbit instructions the installed CLI prints', async ($, on) => {
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    runs.push(e.argv)
+    const stdout = e.argv[0] === 'orbit' ? '## Orbit\n\n- MANDATORY: `orbit grep`\n' : ''
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
+  const answer = await $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'mine' }] })
+
+  expect(runs).toEqual([['orbit', 'hook-guard', 'instructions']])
+  expect(answer.blocks).toEqual([
+    { name: 'claudeMd', text: 'mine' },
+    { name: 'orbit', text: '## Orbit\n\n- MANDATORY: `orbit grep`' },
+  ])
+})
+
+test('the context falls back to glab orbit when orbit cannot start', async ($, on) => {
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    runs.push(e.argv)
+    if (e.argv[0] === 'orbit') throw new Error('ENOENT')
+    return { value: { exitCode: 0, stdout: '## Orbit\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
+  const answer = await $.prompt.context({ blocks: [] })
+
+  expect(runs).toEqual([
+    ['orbit', 'hook-guard', 'instructions'],
+    ['glab', 'orbit', 'hook-guard', 'instructions'],
+  ])
+  expect(answer.blocks).toEqual([{ name: 'orbit', text: '## Orbit' }])
+})
+
+test('the context adds nothing when the CLI fails', async ($, on) => {
+  on('process.run', () => ({ value: { exitCode: 1, stdout: 'partial', stderr: 'x', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
+  const answer = await $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'mine' }] })
+
+  expect(answer.blocks).toEqual([{ name: 'claudeMd', text: 'mine' }])
+})

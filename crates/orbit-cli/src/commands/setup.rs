@@ -535,7 +535,7 @@ mod tests {
         assert_eq!(run.selected_agents, ["claude", "codex"]);
         assert_eq!(run.outcome, Outcome::Applied);
         assert!(!run.global);
-        assert!(dir.path().join("CLAUDE.md").is_file());
+        assert!(!dir.path().join("CLAUDE.md").exists());
         assert!(dir.path().join("AGENTS.md").is_file());
         assert!(dir.path().join(".claude/settings.json").is_file());
         assert!(!dir.path().join(".opencode").exists());
@@ -573,7 +573,7 @@ mod tests {
         .unwrap();
         install(only_instructions, project(dir.path()), &bare_machine()).unwrap();
 
-        assert!(dir.path().join("CLAUDE.md").is_file());
+        assert!(!dir.path().join("CLAUDE.md").exists());
         assert!(dir.path().join("AGENTS.md").is_file());
         assert!(!dir.path().join(".claude").exists());
         assert!(!dir.path().join(".opencode").exists());
@@ -633,6 +633,29 @@ mod tests {
         assert!(!dir.path().join("opencode.json").exists());
         assert!(!dir.path().join(".codex").exists());
         assert!(!dir.path().join(".agents").exists());
+    }
+
+    #[test]
+    fn claude_setup_removes_the_claude_md_block_and_keeps_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_md = dir.path().join("CLAUDE.md");
+        std::fs::write(
+            &claude_md,
+            "# Mine\n\n<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n",
+        )
+        .unwrap();
+
+        install_default(&["claude"], dir.path());
+
+        assert_eq!(std::fs::read_to_string(&claude_md).unwrap(), "# Mine\n");
+
+        std::fs::write(
+            &claude_md,
+            "<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n",
+        )
+        .unwrap();
+        install_default(&["claude"], dir.path());
+        assert!(!claude_md.exists());
     }
 
     #[cfg(unix)]
@@ -1748,7 +1771,7 @@ mod tests {
 
         install(options(), target(), &machine).unwrap();
 
-        assert!(config.path().join("CLAUDE.md").is_file());
+        assert!(!config.path().join("CLAUDE.md").exists());
         assert!(!config.path().join(".claude.json").exists());
         assert!(config.path().join("skills/orbit").exists());
         let settings = read_json(&config.path().join("settings.json"));
@@ -1811,7 +1834,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(home.path().join(".claude/CLAUDE.md").is_file());
+        assert!(!home.path().join(".claude/CLAUDE.md").exists());
         assert!(home.path().join(".claude/settings.json").is_file());
         assert!(!home.path().join(".claude.json").exists());
     }
