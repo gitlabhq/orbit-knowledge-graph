@@ -996,7 +996,7 @@ mod tests {
         let extension = pi.template_files[0].render();
         assert!(extension.contains("before_agent_start"));
         assert!(extension.contains(r#""hook-guard", "instructions""#));
-        let opencode = read_embedded_text("opencode_plugin.js");
+        let opencode = read_embedded_text("opencode_plugin.js", false);
         assert!(opencode.contains("experimental.chat.system.transform"));
         assert!(opencode.contains(r#""hook-guard", "instructions""#));
         for name in ["codex", "duo"] {
