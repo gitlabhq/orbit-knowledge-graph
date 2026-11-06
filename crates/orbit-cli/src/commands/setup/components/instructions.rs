@@ -51,8 +51,8 @@ fn holding_block(agents: &[Agent], target: &Target) -> Result<Vec<(PathBuf, Stri
         if canonicals.contains(&canonical) || !file_mentions(&path, BLOCK_BEGIN) {
             continue;
         }
-        canonicals.push(canonical);
-        files.push((path, label));
+        canonicals.push(canonical.clone());
+        files.push((canonical, label));
     }
     Ok(files)
 }
@@ -84,6 +84,14 @@ fn strip_block_from_file(
 }
 
 fn strip_block(existing: &str) -> Option<String> {
+    let mut text = strip_one_block(existing)?;
+    while let Some(fewer) = strip_one_block(&text) {
+        text = fewer;
+    }
+    Some(text)
+}
+
+fn strip_one_block(existing: &str) -> Option<String> {
     let (start, end) = block_span(existing)?;
     let before = existing[..start].trim_end();
     let after = existing[end..].trim_start();

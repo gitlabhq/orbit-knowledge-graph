@@ -739,6 +739,41 @@ mod tests {
         assert!(claude.is_symlink());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_claude_md_to_an_orbit_only_agents_md_keeps_the_link_and_loses_the_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let block = "<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n";
+        std::fs::write(
+            dir.path().join("AGENTS.md"),
+            format!("{block}# rules\n{block}"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink("AGENTS.md", dir.path().join("CLAUDE.md")).unwrap();
+
+        install_default(&["claude", "codex"], dir.path());
+
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
+            "# rules\n"
+        );
+        assert!(
+            std::fs::symlink_metadata(dir.path().join("CLAUDE.md"))
+                .unwrap()
+                .is_symlink()
+        );
+
+        std::fs::write(dir.path().join("AGENTS.md"), block).unwrap();
+        install_default(&["claude", "codex"], dir.path());
+
+        assert!(!dir.path().join("AGENTS.md").exists());
+        assert!(
+            std::fs::symlink_metadata(dir.path().join("CLAUDE.md"))
+                .unwrap()
+                .is_symlink()
+        );
+    }
+
     #[test]
     fn setup_removes_retired_mcp_entries_and_keeps_foreign_servers() {
         let dir = tempfile::tempdir().unwrap();
