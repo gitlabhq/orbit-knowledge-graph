@@ -123,18 +123,8 @@ fn conditions(query: Query<'_>) -> Result<HashMap<Ref, Vec<Condition>>> {
     let mut found: HashMap<Ref, Vec<Condition>> = HashMap::new();
     for leaf in query.conjuncts().into_iter().filter_map(type_leaf) {
         let names = names(leaf).ok_or_else(|| {
-            QueryError::Validation(
-                "type(r) supports =, <>, or IN with relationship type names, such as type(r) = 'CLOSES' or type(r) IN ['CLOSES', 'MENTIONS']".into(),
-            )
+            QueryError::PipelineInvariant("the builder admits only named type() conditions".into())
         })?;
-        if names
-            .iter()
-            .any(|name| query.model.relationship(name).is_err())
-        {
-            return Err(QueryError::Validation(
-                "type() names a relationship type that the schema does not have; relationship type names are uppercase and case-sensitive, and CALL db.schema() lists them".into(),
-            ));
-        }
         let negated = leaf.negated != (leaf.comparison() == Some(Comparison::Ne));
         found
             .entry(leaf.binding())

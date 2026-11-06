@@ -194,7 +194,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
 fn parse<C: CompilerCtx>(ctx: &mut C, frontend: Frontend, admin: bool) -> Result<()> {
     if let Some(raw) = ctx.take_raw() {
-        let catalog = surface::catalog(ctx.data_model().catalog().model(), admin);
+        let catalog = surface::catalog(ctx.data_model().catalog(), admin);
         ctx.set_statement(surface::parse(&raw, frontend, catalog)?);
     }
     Ok(())

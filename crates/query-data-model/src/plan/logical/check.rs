@@ -5,7 +5,7 @@ use ontology::DataType;
 use super::{EdgeField, Expr, Logical, LogicalOperation, LogicalType, Measure, PlanError};
 use crate::catalog::PropertyAccess;
 use crate::plan::tracking::{Construction, Ref};
-use crate::{AttributeId, Model, Property, RelationshipId};
+use crate::{AttributeId, Model, Property, RelationshipId, RelationshipVariantId};
 
 pub(super) struct Typed<'m> {
     pub(super) data_type: DataType,
@@ -48,6 +48,30 @@ pub(super) fn edge_relationships(
         }
     };
     Ok(relationships.into_iter().collect())
+}
+
+pub(super) fn edge_variants(
+    model: &Model,
+    construction: &Construction<Logical>,
+    edge: Ref,
+) -> Result<Vec<RelationshipVariantId>, PlanError> {
+    Ok(match construction.producer(edge)? {
+        LogicalOperation::Follow { hops, .. } => hops.iter().map(|hop| hop.variant).collect(),
+        LogicalOperation::Neighbors {
+            relationships,
+            direction,
+            from,
+        } => match construction.value(*from)? {
+            (_, LogicalType::Entity(entity)) => model
+                .graph()
+                .hops(*entity, *direction)
+                .filter(|hop| relationships.is_empty() || relationships.contains(&hop.relationship))
+                .map(|hop| hop.variant)
+                .collect(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    })
 }
 
 pub(super) fn edge_attribute(
@@ -132,7 +156,10 @@ pub(super) fn scalar<'m>(
                     }
                 },
                 property: None,
-                access: PropertyAccess::OPEN,
+                access: PropertyAccess {
+                    like: false,
+                    ..PropertyAccess::OPEN
+                },
                 name: format!("{field:?}"),
             }),
             (name, found) => Err(mismatch(name.unwrap_or("edge"), "a relationship", *found)),
@@ -144,7 +171,10 @@ pub(super) fn scalar<'m>(
             Ok(Typed {
                 data_type: declared.data_type,
                 property: None,
-                access: resolved.access,
+                access: PropertyAccess {
+                    like: false,
+                    ..resolved.access
+                },
                 name: resolved.name,
             })
         }

@@ -1,3 +1,4 @@
+mod checks;
 mod filters;
 mod pattern;
 mod request;
@@ -43,9 +44,11 @@ pub fn parse(json: &str, catalog: LogicalCatalog<'_>) -> Result<Statement, Surfa
 }
 
 fn build<'m>(q: &mut LogicalBuilder<'m>, request: &Request) -> Built<'m> {
+    checks::request(q, request)?;
     let rows = match request.query_type {
         QueryType::Aggregation => {
             let rows = pattern::pattern(q, request)?;
+            checks::unused(&rows, request)?;
             results::aggregate(q, rows, request)?
         }
         QueryType::Traversal => {
@@ -55,10 +58,12 @@ fn build<'m>(q: &mut LogicalBuilder<'m>, request: &Request) -> Built<'m> {
         }
         QueryType::Neighbors => {
             let rows = neighbors(q, request)?;
+            checks::unused(&rows, request)?;
             project(q, rows, request, Some("neighbor"))?
         }
         QueryType::PathFinding => {
             let rows = path(q, request)?;
+            checks::unused(&rows, request)?;
             project(q, rows, request, Some("path"))?
         }
     };

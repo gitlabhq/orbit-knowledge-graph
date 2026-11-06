@@ -1,6 +1,7 @@
 mod builder;
 mod catalog;
 mod check;
+mod conditions;
 mod detach;
 mod error;
 mod expr;
@@ -24,7 +25,7 @@ pub use error::{ErrorClass, PlanError};
 pub use expr::{EdgeField, Expr, Literal, Operand, TimeUnit};
 pub use handle::{Binding, Rows};
 pub use measure::{Columns, Measure, Order, Projection, count};
-pub use predicate::{Comparison, Matching, Predicate};
+pub use predicate::{Comparison, Conjunct, Matching, Predicate};
 pub use step::{Hops, Step};
 
 use crate::plan::tracking::{Body, Language, Plan, Ref};

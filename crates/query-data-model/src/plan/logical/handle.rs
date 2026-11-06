@@ -1,6 +1,6 @@
 use super::{EdgeField, Expr, Logical, LogicalCatalog, LogicalType, PlanError, TimeUnit};
 use crate::plan::tracking::{self, Construction, Ref};
-use crate::{EntityId, PropertyId, RelationshipId};
+use crate::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Binding<'m> {
@@ -23,6 +23,10 @@ impl<'m> Binding<'m> {
 
     pub fn output(self) -> Ref {
         self.output
+    }
+
+    pub fn catalog(self) -> LogicalCatalog<'m> {
+        self.catalog
     }
 
     pub fn node(self) -> Expr {
@@ -70,6 +74,12 @@ impl<'m> Binding<'m> {
         if access.admin_only && !self.catalog.admin() {
             return Err(PlanError::AdminOnly(qualified()));
         }
+        if !self.catalog.realized(entity, property.id) {
+            return Err(PlanError::Unavailable {
+                owner: model.graph().entity(entity).name.clone(),
+                name: name.to_string(),
+            });
+        }
         Ok(property.id)
     }
 }
@@ -78,7 +88,7 @@ impl<'m> Binding<'m> {
 pub struct Rows<'m> {
     rows: tracking::Rows,
     bindings: Vec<(Option<String>, Binding<'m>)>,
-    edges: Vec<(Ref, Vec<RelationshipId>)>,
+    edges: Vec<(Ref, Vec<RelationshipId>, Vec<RelationshipVariantId>)>,
     columns: Vec<(String, Ref)>,
 }
 
@@ -100,6 +110,7 @@ impl<'m> Rows<'m> {
                     edges.push((
                         output,
                         super::check::edge_relationships(model, construction, output)?,
+                        super::check::edge_variants(model, construction, output)?,
                     ));
                     bindings.push((
                         name.map(str::to_string),
@@ -176,7 +187,10 @@ impl<'m> Rows<'m> {
         if let Ok(field) = name.parse() {
             return edge.field(field);
         }
-        let Some((_, relationships)) = self.edges.iter().find(|(output, _)| *output == edge.output)
+        let Some((_, relationships, variants)) = self
+            .edges
+            .iter()
+            .find(|(output, ..)| *output == edge.output)
         else {
             return Err(super::check::mismatch(name, "a relationship", edge.kind));
         };
@@ -186,6 +200,13 @@ impl<'m> Rows<'m> {
         }
         if attribute.access.admin_only && !edge.catalog.admin() {
             return Err(PlanError::AdminOnly(attribute.name));
+        }
+        if !edge.catalog.attribute_realized(variants, attribute.id) {
+            let (owner, name) = attribute.name.split_once('.').unwrap_or(("", name));
+            return Err(PlanError::Unavailable {
+                owner: owner.to_string(),
+                name: name.to_string(),
+            });
         }
         Ok(Expr::Attribute {
             binding: edge.output,

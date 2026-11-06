@@ -21,6 +21,8 @@ pub enum PlanError {
     Rejected(#[from] Rejected),
     #[error("{0} is hidden")]
     Hidden(String),
+    #[error("field \"{name}\" on {owner} is not available in this data model")]
+    Unavailable { owner: String, name: String },
     #[error("{0} is available to administrators only")]
     AdminOnly(String),
     #[error("{0} cannot be filtered")]
@@ -74,7 +76,7 @@ impl PlanError {
             Self::Unresolved(Unresolved::NotConnected { .. }) | Self::Ambiguous { .. } => {
                 ErrorClass::Connectivity
             }
-            Self::Unresolved(_) => ErrorClass::Name,
+            Self::Unresolved(_) | Self::Unavailable { .. } => ErrorClass::Name,
             Self::Rejected(_) => ErrorClass::Construction,
             Self::Hidden(_)
             | Self::AdminOnly(_)

@@ -33,9 +33,16 @@ pub(super) fn in_values(model: &Model, predicate: &Predicate) -> Result<(), Plan
         } if model.graph().property(*property).name == DEFAULT_PRIMARY_KEY => {
             at_most("pinned ids", values.len(), MAX_PINS)
         }
-        Predicate::In { values, .. } => at_most("an IN list", values.len(), MAX_IN_VALUES),
         Predicate::And(all) => all.iter().try_for_each(|inner| in_values(model, inner)),
-        Predicate::Not(inner) => in_values(model, inner),
+        nested => in_lists(nested),
+    }
+}
+
+fn in_lists(predicate: &Predicate) -> Result<(), PlanError> {
+    match predicate {
+        Predicate::In { values, .. } => at_most("an IN list", values.len(), MAX_IN_VALUES),
+        Predicate::And(all) => all.iter().try_for_each(in_lists),
+        Predicate::Not(inner) => in_lists(inner),
         _ => Ok(()),
     }
 }

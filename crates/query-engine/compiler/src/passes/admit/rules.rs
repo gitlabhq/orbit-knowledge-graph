@@ -1,7 +1,7 @@
 use query_data_model::OrbitQueryModel;
 
 use crate::error::{QueryError, Result};
-use crate::input::{FilterOp, Input, PredicateTarget, QueryType};
+use crate::input::{Input, PredicateTarget, QueryType};
 
 pub(super) fn aggregation_text(input: &Input, model: &impl OrbitQueryModel) -> Result<()> {
     if input.query_type != QueryType::Aggregation {
@@ -103,30 +103,4 @@ pub(super) fn order(input: &Input, model: &impl OrbitQueryModel) -> Result<()> {
         )));
     }
     Ok(())
-}
-
-pub(super) fn constant_conditions(input: &Input) -> Result<()> {
-    let constant = input.conditions().any(|condition| {
-        let PredicateTarget::Node(alias) = &condition.target else {
-            return false;
-        };
-        let filter = &condition.filter;
-        let same = filter
-            .rhs_column
-            .as_ref()
-            .is_some_and(|(other, property)| other == alias && *property == condition.property);
-        let empty = filter.op == Some(FilterOp::In)
-            && filter
-                .value
-                .as_ref()
-                .and_then(serde_json::Value::as_array)
-                .is_none_or(Vec::is_empty);
-        same || empty
-    });
-    match constant {
-        true => Err(QueryError::Validation(
-            "every condition must compare a property of a matched node or relationship with a value or another property".into(),
-        )),
-        false => Ok(()),
-    }
 }

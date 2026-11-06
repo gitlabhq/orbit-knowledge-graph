@@ -169,16 +169,6 @@ impl Condition {
             && self.property == Self::RELATIONSHIP_TYPE
     }
 
-    pub fn relationship_type_names(&self) -> Option<Vec<&str>> {
-        match (self.filter.op, self.filter.value.as_ref()?) {
-            (Some(FilterOp::Eq | FilterOp::Ne), Value::String(name)) => Some(vec![name]),
-            (Some(FilterOp::In), Value::Array(names)) if !names.is_empty() => {
-                names.iter().map(Value::as_str).collect()
-            }
-            _ => None,
-        }
-    }
-
     pub fn compares_aliases(&self) -> bool {
         match (&self.target, &self.filter.rhs_column) {
             (PredicateTarget::Node(alias), Some((rhs, _))) => alias != rhs,
@@ -208,20 +198,6 @@ impl Condition {
 }
 
 impl BooleanExpression<Condition> {
-    pub fn relationship_type(&self) -> Option<(&Condition, bool)> {
-        let (expression, negated) = match self {
-            Self::Not(child) => (child.as_ref(), true),
-            expression => (expression, false),
-        };
-        match expression {
-            Self::Leaf(condition) if condition.is_relationship_type() => Some((
-                condition,
-                negated != (condition.filter.op == Some(FilterOp::Ne)),
-            )),
-            _ => None,
-        }
-    }
-
     pub fn local_node(&self) -> Option<&str> {
         let mut aliases = self.leaves().map(|condition| match &condition.target {
             PredicateTarget::Node(alias) if !condition.compares_aliases() => Some(alias.as_str()),

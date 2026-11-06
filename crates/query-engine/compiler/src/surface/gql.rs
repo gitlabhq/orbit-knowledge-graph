@@ -50,7 +50,7 @@ pub fn route(
     admin: bool,
     scope: IntrospectionScope,
 ) -> Result<RoutedStatement> {
-    let catalog = super::catalog(data_model.catalog().model(), admin);
+    let catalog = super::catalog(data_model.catalog(), admin);
     match gql::route(raw, catalog)
         .map_err(QueryError::from)
         .count_err()?

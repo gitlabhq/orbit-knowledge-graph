@@ -1,11 +1,13 @@
 use super::{LogicalBuilder, LogicalPlan, PlanError, Rows};
+use crate::catalog::Store;
 use crate::plan::tracking::{self, Declared};
-use crate::{EntityId, Model, RelationshipId};
+use crate::{AttributeId, EntityId, Model, PropertyId, RelationshipId, RelationshipVariantId};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LogicalCatalog<'m> {
     model: &'m Model,
     admin: bool,
+    connection: Option<&'m str>,
 }
 
 impl Model {
@@ -13,6 +15,7 @@ impl Model {
         LogicalCatalog {
             model: self,
             admin: false,
+            connection: None,
         }
     }
 }
@@ -32,6 +35,45 @@ impl<'m> LogicalCatalog<'m> {
 
     pub fn admin(self) -> bool {
         self.admin
+    }
+
+    #[must_use]
+    pub fn on(self, connection: &'m str) -> Self {
+        Self {
+            connection: Some(connection),
+            ..self
+        }
+    }
+
+    fn stores(self) -> impl Iterator<Item = &'m Store> {
+        let connection = self.connection;
+        self.model
+            .stores()
+            .iter()
+            .filter(move |store| Some(store.connection.as_str()) == connection)
+    }
+
+    pub(super) fn realized(self, entity: EntityId, property: PropertyId) -> bool {
+        if self.connection.is_none() {
+            return true;
+        }
+        let Some(home) = self.stores().find(|store| store.source(entity).is_some()) else {
+            return true;
+        };
+        !home.excludes(property)
+            && (self.model.lookup(property).is_some() || home.column(property).is_some())
+    }
+
+    pub(super) fn attribute_realized(
+        self,
+        variants: &[RelationshipVariantId],
+        attribute: AttributeId,
+    ) -> bool {
+        self.connection.is_none()
+            || variants.iter().all(|variant| {
+                self.stores()
+                    .any(|store| store.attribute_column(*variant, attribute).is_some())
+            })
     }
 
     pub fn entity(self, name: &str) -> Result<Declared<EntityId>, PlanError> {

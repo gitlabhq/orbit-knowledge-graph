@@ -1,8 +1,8 @@
 pub mod gql;
 
-use query_data_model::Model;
 use query_data_model::plan::logical::LogicalCatalog;
 use query_data_model::surface::{Statement, json};
+use query_data_model::{Catalog, StorageBackend};
 
 use crate::Result;
 
@@ -16,10 +16,11 @@ pub enum Frontend {
     Gql,
 }
 
-pub fn catalog(model: &Model, admin: bool) -> LogicalCatalog<'_> {
+pub fn catalog<B: StorageBackend>(catalog: &Catalog<B>, admin: bool) -> LogicalCatalog<'_> {
+    let logical = catalog.model().logical().on(catalog.connection());
     match admin {
-        true => model.logical().as_admin(),
-        false => model.logical(),
+        true => logical.as_admin(),
+        false => logical,
     }
 }
 

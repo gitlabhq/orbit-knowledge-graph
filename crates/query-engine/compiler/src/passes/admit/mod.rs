@@ -4,27 +4,17 @@
 
 mod conditions;
 mod limits;
-mod relationships;
 mod rules;
 mod selectivity;
 
 use query_data_model::OrbitQueryModel;
 
 use crate::error::{QueryError, Result};
-use crate::input::{
-    ColumnSelection, FilterOp, Input, InputFilter, InputNode, PredicateTarget, QueryType,
-    property_groups,
-};
+use crate::input::{FilterOp, Input, InputFilter, InputNode, PredicateTarget, QueryType};
 
 pub fn admit(input: &Input, model: &impl OrbitQueryModel, selectivity: bool) -> Result<()> {
-    limits::aliases(input)?;
     limits::predicates(input)?;
     limits::filters(input)?;
-    realized(input, model)?;
-    relationships::types(input, model)?;
-    relationships::columns(input, model)?;
-    relationships::endpoint_kinds(input, model)?;
-    rules::constant_conditions(input)?;
     conditions::conditions(input, model)?;
     filters(input, model)?;
     rules::epoch(input, model)?;
@@ -33,43 +23,6 @@ pub fn admit(input: &Input, model: &impl OrbitQueryModel, selectivity: bool) -> 
     buckets(input)?;
     if selectivity {
         selectivity::selectivity(input)?;
-    }
-    Ok(())
-}
-
-fn realized(input: &Input, model: &impl OrbitQueryModel) -> Result<()> {
-    let listed = input.nodes.iter().flat_map(|node| {
-        let columns = match &node.columns {
-            Some(ColumnSelection::List(columns)) => columns.as_slice(),
-            _ => &[],
-        };
-        let filtered = node.filters.keys();
-        columns
-            .iter()
-            .chain(filtered)
-            .map(move |property| (node.id.as_str(), property.as_str()))
-    });
-    let conditions = input
-        .conditions()
-        .flat_map(|condition| condition.node_properties());
-    let ordered = input
-        .order_by
-        .iter()
-        .map(|order| (order.node.as_str(), order.property.as_str()));
-    let grouped = property_groups(&input.aggregation.group_by);
-    for (alias, name) in listed.chain(conditions).chain(ordered).chain(grouped) {
-        let Some(entity) = input.entity_of(alias) else {
-            continue;
-        };
-        let Some(property) = model.property(entity, name) else {
-            continue;
-        };
-        if model.property_realization(property.id).is_none() && model.entity_table(entity).is_some()
-        {
-            return Err(QueryError::AllowlistRejected(format!(
-                "field \"{name}\" on {entity} is not available in this data model"
-            )));
-        }
     }
     Ok(())
 }

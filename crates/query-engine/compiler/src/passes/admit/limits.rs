@@ -74,20 +74,3 @@ pub(super) fn filters(input: &Input) -> Result<()> {
     }
     Ok(())
 }
-
-pub(super) fn aliases(input: &Input) -> Result<()> {
-    for (index, node) in input.nodes.iter().enumerate() {
-        for other in &input.nodes[index + 1..] {
-            let (short, long) = match node.id.len() < other.id.len() {
-                true => (&node.id, &other.id),
-                false => (&other.id, &node.id),
-            };
-            if long.starts_with(&format!("{short}_")) {
-                return Err(QueryError::Validation(format!(
-                    "node ids \"{short}\" and \"{long}\" overlap; rename one so neither starts with the other followed by \"_\""
-                )));
-            }
-        }
-    }
-    Ok(())
-}

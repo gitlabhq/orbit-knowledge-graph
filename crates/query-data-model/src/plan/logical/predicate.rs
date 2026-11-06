@@ -138,3 +138,70 @@ impl std::ops::Not for Predicate {
         Self::Not(Box::new(self))
     }
 }
+#[derive(Debug, Clone, Copy)]
+pub enum Conjunct<'p> {
+    Leaf {
+        predicate: &'p Predicate,
+        negated: bool,
+    },
+    Negated(&'p Predicate),
+}
+
+impl<'p> Conjunct<'p> {
+    pub fn attached(self) -> Option<&'p Predicate> {
+        match self {
+            Self::Leaf { predicate, negated } if !negated || predicate.complementable() => {
+                Some(predicate)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn negated_leaves(self) -> Vec<&'p Predicate> {
+        match self {
+            Self::Leaf { predicate, negated } if negated && !predicate.complementable() => {
+                vec![predicate]
+            }
+            Self::Leaf { .. } => Vec::new(),
+            Self::Negated(group) => group.leaf_predicates(),
+        }
+    }
+}
+
+impl Predicate {
+    pub fn conjuncts(&self) -> Vec<Conjunct<'_>> {
+        fn walk<'p>(predicate: &'p Predicate, negated: bool, into: &mut Vec<Conjunct<'p>>) {
+            match predicate {
+                Predicate::Not(inner) => walk(inner, !negated, into),
+                Predicate::And(all) if all.len() == 1 => walk(&all[0], negated, into),
+                Predicate::And(_) if negated => into.push(Conjunct::Negated(predicate)),
+                Predicate::And(all) => all.iter().for_each(|inner| walk(inner, false, into)),
+                leaf => into.push(Conjunct::Leaf {
+                    predicate: leaf,
+                    negated,
+                }),
+            }
+        }
+        let mut conjuncts = Vec::new();
+        walk(self, false, &mut conjuncts);
+        conjuncts
+    }
+
+    pub fn complementable(&self) -> bool {
+        matches!(
+            self,
+            Self::Compare {
+                comparison: Comparison::Eq | Comparison::Ne,
+                ..
+            } | Self::Null { .. }
+        )
+    }
+
+    pub fn leaf_predicates(&self) -> Vec<&Predicate> {
+        match self {
+            Self::And(all) => all.iter().flat_map(Self::leaf_predicates).collect(),
+            Self::Not(inner) => inner.leaf_predicates(),
+            leaf => vec![leaf],
+        }
+    }
+}
