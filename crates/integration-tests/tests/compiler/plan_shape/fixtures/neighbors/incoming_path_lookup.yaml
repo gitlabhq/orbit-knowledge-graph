@@ -7,7 +7,12 @@ query:
     MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(neighbor) RETURN g, neighbor
 
 logical:
-  expect: ["(Input neighbors (...))"]
+  gql:
+    expect:
+      - (Limit 30 (Select g, neighbor (Neighbors MEMBER_OF g<-neighbor (Filter g.id = 100 (Entities Group AS g)))))
+  json:
+    expect:
+      - (Limit 30 (Select g, neighbor (Neighbors MEMBER_OF g<-neighbor (Filter g.id IN [100] (Entities Group AS g)))))
 
 physical:
   clickhouse:

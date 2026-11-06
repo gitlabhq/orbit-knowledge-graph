@@ -7,7 +7,12 @@ query:
     MATCH (u:User {id: 1})--(neighbor) RETURN u, neighbor
 
 logical:
-  expect: ["(Input neighbors (...))"]
+  gql:
+    expect:
+      - (Limit 30 (Select u, neighbor (Neighbors APPROVED|ASSIGNED|AUTHORED|CLOSED|CONFIRMED_BY|CONTAINS|CREATOR|DEPLOYED_BY|DISMISSED_BY|LAST_EDITED_BY|MEMBER_OF|MERGED|OWNER|REOPENED|RESOLVED_BY|REVIEWER|TRIGGERED|UPDATED_BY u--neighbor (Filter u.id = 1 (Entities User AS u)))))
+  json:
+    expect:
+      - (Limit 30 (Select u, neighbor (Neighbors APPROVED|ASSIGNED|AUTHORED|CLOSED|CONFIRMED_BY|CONTAINS|CREATOR|DEPLOYED_BY|DISMISSED_BY|LAST_EDITED_BY|MEMBER_OF|MERGED|OWNER|REOPENED|RESOLVED_BY|REVIEWER|TRIGGERED|UPDATED_BY u--neighbor (Filter u.id IN [1] (Entities User AS u)))))
 
 physical:
   clickhouse:

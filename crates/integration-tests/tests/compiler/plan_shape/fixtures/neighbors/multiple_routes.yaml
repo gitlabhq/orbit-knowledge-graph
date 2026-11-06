@@ -7,7 +7,12 @@ query:
     MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT|HAS_HEAD_PIPELINE]-(neighbor) RETURN mr, neighbor
 
 logical:
-  expect: ["(Input neighbors (...))"]
+  gql:
+    expect:
+      - (Limit 30 (Select mr, neighbor (Neighbors IN_PROJECT|HAS_HEAD_PIPELINE mr--neighbor (Filter mr.id = 1 (Entities MergeRequest AS mr)))))
+  json:
+    expect:
+      - (Limit 30 (Select mr, neighbor (Neighbors IN_PROJECT|HAS_HEAD_PIPELINE mr--neighbor (Filter mr.id IN [1] (Entities MergeRequest AS mr)))))
 
 physical:
   clickhouse:

@@ -7,8 +7,12 @@ query:
     MATCH (d:Definition {id: 1, name: 'caller'})-[:CALLS]-(neighbor) RETURN d, neighbor
 
 logical:
-  expect:
-    - (Input neighbors (...))
+  gql:
+    expect:
+      - (Limit 30 (Select d, neighbor (Neighbors CALLS d--neighbor (Filter d.id = 1, d.name = 'caller' (Entities Definition AS d)))))
+  json:
+    expect:
+      - (Limit 30 (Select d, neighbor (Neighbors CALLS d--neighbor (Filter d.id IN [1], d.name = 'caller' (Entities Definition AS d)))))
 
 physical:
   clickhouse:

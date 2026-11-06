@@ -8,8 +8,12 @@ query:
     RETURN neighbor
 
 logical:
-  expect:
-    - (Filter mr.id IN [99000], mr.state = 'opened' (NodeScan MergeRequest AS mr))
+  gql:
+    expect:
+      - (Limit 30 (Select neighbor (Neighbors APPROVED mr<-neighbor (Filter mr.id = 99000, mr.state = 'opened' (Entities MergeRequest AS mr)))))
+  json:
+    expect:
+      - (Limit 30 (Select mr, neighbor (Neighbors APPROVED mr<-neighbor (Filter mr.id IN [99000], mr.state = 'opened' (Entities MergeRequest AS mr)))))
 
 physical:
   clickhouse:

@@ -7,7 +7,8 @@ query:
     MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT|AUTHORED]-(neighbor) RETURN mr, neighbor
 
 logical:
-  expect: ["(Input neighbors (...))"]
+  expect:
+    - (Limit 30 (Select mr, neighbor (Neighbors IN_PROJECT|AUTHORED mr--neighbor (Filter mr.state = 'merged' (Entities MergeRequest AS mr)))))
 
 physical:
   clickhouse:

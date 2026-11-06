@@ -11,9 +11,12 @@ query:
     MATCH (d:Definition {id: 1})-[:CALLS]-(neighbor) RETURN d, neighbor
 
 logical:
-  expect:
-    - (Input neighbors (...))
-    - (Filter d.id IN [1] (NodeScan Definition AS d))
+  gql:
+    expect:
+      - (Limit 30 (Select d, neighbor (Neighbors CALLS d--neighbor (Filter d.id = 1 (Entities Definition AS d)))))
+  json:
+    expect:
+      - (Limit 30 (Select d, neighbor (Neighbors CALLS d--neighbor (Filter d.id IN [1] (Entities Definition AS d)))))
 
 physical:
   clickhouse:

@@ -7,8 +7,12 @@ query:
     MATCH (p:Project {id: 1000})-[:IN_PROJECT]-(neighbor) RETURN p, neighbor
 
 logical:
-  expect:
-    - (Input neighbors (...))
+  gql:
+    expect:
+      - (Limit 30 (Select p, neighbor (Neighbors IN_PROJECT p--neighbor (Filter p.id = 1000 (Entities Project AS p)))))
+  json:
+    expect:
+      - (Limit 30 (Select p, neighbor (Neighbors IN_PROJECT p--neighbor (Filter p.id IN [1000] (Entities Project AS p)))))
 
 physical:
   clickhouse:
