@@ -2,7 +2,7 @@ use orbit_utils::query_types::SqlType;
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::relational::plan::{
     AggregateFunction, BinaryOp, Expr, JoinKind, Measure, Operation, Order, ReadMode,
-    RelationalError, RelationalPlan, UnaryOp,
+    RelationalError, RelationalPlan, Selection, UnaryOp,
 };
 use query_data_model::plan::tracking::{Declare, Rejected};
 use query_data_model::{Catalog, ClickHouseDataModel, DuckDbDataModel};
@@ -276,6 +276,58 @@ fn relational_rewrites_reconnect_changed_outputs() {
         catalog.render(&alias(true).unwrap()).sql,
         "SELECT u.id, u.username AS handle FROM gl_user AS u FINAL \
          WHERE (u.username = {p0:String}) ORDER BY handle ASC"
+    );
+}
+
+#[test]
+fn relational_rewrites_expose_outputs_their_result_selects() {
+    let model = clickhouse();
+    let catalog = model.catalog();
+    let users = catalog.table("gl_user").unwrap();
+    let build = || {
+        catalog
+            .build(|q| {
+                let rows = q.scan(users, ReadMode::Current, "u")?;
+                let id = rows.qualified("u", "id")?;
+                let rows = q.limit(rows, Some(5), None)?;
+                q.select(rows, vec![id])
+            })
+            .unwrap()
+    };
+    let label = |expose: bool| {
+        let mut added = None;
+        catalog.rewrite(build(), move |q, rows| match q.operation(&rows)? {
+            Operation::Limit { .. } => {
+                let mut detached = q.detach(rows)?;
+                let source = detached.inputs.remove(0);
+                let (source, computed) =
+                    q.compute(source, vec![Declare::named("label", text("user"))])?;
+                detached.inputs.insert(0, source);
+                let rows = q.reattach(detached)?;
+                if expose {
+                    q.expose(computed[0])?;
+                }
+                added = Some(computed[0]);
+                Ok(rows)
+            }
+            Operation::Select(_) => {
+                let mut detached = q.detach(rows)?;
+                if let Operation::Select(Selection::Columns(columns)) = &mut detached.operation {
+                    columns.extend(added.map(|column| column.output()));
+                }
+                q.reattach(detached)
+            }
+            _ => Ok(rows),
+        })
+    };
+
+    assert_eq!(
+        label(false).unwrap_err(),
+        RelationalError::Rejected(Rejected::ChangedOutputs("label".into()))
+    );
+    assert_eq!(
+        catalog.render(&label(true).unwrap()).sql,
+        "SELECT u.id, {p0:String} AS label FROM gl_user AS u FINAL LIMIT 5"
     );
 }
 
