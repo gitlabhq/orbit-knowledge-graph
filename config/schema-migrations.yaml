@@ -16,6 +16,11 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 119
+  scope: none
+  note: >-
+    Declares relationship attributes over existing edge columns; DDL and indexed
+    output unchanged
 - version: 118
   scope: "*"
   note: >-
