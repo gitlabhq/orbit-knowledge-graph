@@ -84,7 +84,7 @@ pub(super) fn route(
     let searchable = searchable(query, kinds, options);
     let remote_only = searchable.is_some() && !kinds.is_empty() && every_kind_hosted(kinds);
     let explicit = !targets.is_empty();
-    if targets.is_empty() && local_paths.is_empty() {
+    if targets.is_empty() && local_paths.is_empty() && !searched_kinds(kinds).is_empty() {
         targets.push(Target::Origin(
             repo.map_or_else(|| PathBuf::from("."), Path::to_path_buf),
         ));
