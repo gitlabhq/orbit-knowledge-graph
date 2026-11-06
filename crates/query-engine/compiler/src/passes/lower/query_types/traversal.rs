@@ -1,13 +1,12 @@
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{Order, Relation, RelationalBuilder};
 
-use crate::ast::{Expr, OrderExpr};
 use crate::constants::EDGE_KIND_SUFFIX;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, OrderDirection};
 use crate::passes::lower::build::predicates::Lowering;
 use crate::passes::lower::build::{Built, computed};
-use crate::passes::lower::{NodeBinding, graph, predicates};
+use crate::passes::lower::{NodeBinding, Term, graph};
 use crate::passes::plan::predicates::OutputValue;
 use crate::passes::plan::{EdgeRelation, Plan, Traversal, property_value};
 use crate::tp_bounds::TpBounds;
@@ -89,16 +88,16 @@ pub(crate) fn stable_order(
     plan: &Plan<Traversal>,
     input: &Input,
     nodes: &std::collections::HashMap<String, NodeBinding>,
-) -> Vec<OrderExpr> {
+) -> Vec<Term> {
     let identities = input
         .nodes
         .iter()
         .filter_map(|node| nodes.get(&node.id))
         .map(|binding| binding.identity().clone());
     if input.relationships.is_empty() {
-        return identities.map(OrderExpr::asc).collect();
+        return identities.collect();
     }
-    let mut order: Vec<Expr> = Vec::new();
+    let mut order: Vec<Term> = Vec::new();
     for identity in identities {
         if !order.contains(&identity) {
             order.push(identity);
@@ -113,12 +112,8 @@ pub(crate) fn stable_order(
                     || crate::passes::normalize::is_wildcard(&hop.rel_types))
         })
         .filter_map(|hop| edge_type(plan, hop))
-        .map(predicates::output_value);
-    order
-        .into_iter()
-        .chain(edge_types)
-        .map(OrderExpr::asc)
-        .collect()
+        .map(|value| Term::Value(value.clone()));
+    order.into_iter().chain(edge_types).collect()
 }
 
 fn edge_type<'p>(plan: &'p Plan<Traversal>, relation: &EdgeRelation) -> Option<&'p OutputValue> {

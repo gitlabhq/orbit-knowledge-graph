@@ -3,11 +3,10 @@ use query_data_model::implementations::relational::plan::{
     AggregateFunction, Expr, Measure, Order, Relation, RelationalBuilder, TimeUnit,
 };
 
-use crate::ast::{self, OrderExpr};
 use crate::input::{AggFunction, Input, OrderDirection, TruncateUnit};
 use crate::passes::lower::build::predicates::Lowering;
 use crate::passes::lower::build::{Built, computed, conjoin, named};
-use crate::passes::lower::{columns, graph, predicates};
+use crate::passes::lower::{Term, columns, graph};
 use crate::passes::plan::predicates::OutputValue;
 use crate::passes::plan::query_types::aggregation::Group;
 use crate::passes::plan::{Aggregation, Plan};
@@ -126,22 +125,9 @@ fn group<B: RelationalBackend>(lowering: &Lowering<'_>, value: &Group) -> Built<
     })
 }
 
-pub(crate) fn stable_order(plan: &Plan<Aggregation>) -> Vec<OrderExpr> {
-    plan.operation
-        .result
-        .groups
-        .iter()
-        .map(|value| {
-            let column = predicates::output_value(&value.value);
-            let key = match value.truncate {
-                Some(unit) => ast::Expr::TimeBucket {
-                    unit,
-                    value: Box::new(column),
-                },
-                None => column,
-            };
-            OrderExpr::asc(key)
-        })
+pub(crate) fn stable_order(plan: &Plan<Aggregation>) -> Vec<Term> {
+    (0..plan.operation.result.groups.len())
+        .map(Term::Group)
         .collect()
 }
 

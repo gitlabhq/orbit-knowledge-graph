@@ -10,9 +10,9 @@ use query_data_model::implementations::relational::plan::{
     Subquery,
 };
 
-use crate::ast::{self, OrderExpr};
 use crate::constants::*;
 use crate::input::*;
+use crate::passes::lower::Term;
 use crate::passes::lower::build::expr::{id_range, ids, relationship_kinds};
 use crate::passes::lower::build::predicates::{Lowering, Shared};
 use crate::passes::lower::build::sources::{
@@ -22,18 +22,16 @@ use crate::passes::lower::build::{
     Built, and, binary, call, col, computed, conjoin, disjoin, eq, filtered, int, scan, stored,
     string,
 };
-use crate::passes::plan::predicates::Column;
+use crate::passes::plan::predicates::{Column, OutputValue};
 use crate::passes::plan::{Neighbors, Plan, property_value};
 
-pub(crate) fn stable_order(plan: &Plan<Neighbors>) -> Vec<OrderExpr> {
+pub(crate) fn stable_order(plan: &Plan<Neighbors>) -> Vec<Term> {
     match plan.operation.direction {
         Direction::Both => vec![
-            OrderExpr::asc(ast::Expr::ident(redaction_id_column(
-                &plan.operation.center,
-            ))),
-            OrderExpr::asc(ast::Expr::ident(neighbor_id_column())),
-            OrderExpr::asc(ast::Expr::ident(relationship_type_column())),
-            OrderExpr::asc(ast::Expr::ident(neighbor_is_outgoing_column())),
+            Term::Output(redaction_id_column(&plan.operation.center)),
+            Term::Output(neighbor_id_column().to_string()),
+            Term::Output(relationship_type_column().to_string()),
+            Term::Output(neighbor_is_outgoing_column().to_string()),
         ],
         _ => [
             TRAVERSAL_PATH_COLUMN,
@@ -44,7 +42,12 @@ pub(crate) fn stable_order(plan: &Plan<Neighbors>) -> Vec<OrderExpr> {
             TARGET_KIND_COLUMN,
         ]
         .into_iter()
-        .map(|column| OrderExpr::asc(ast::Expr::col(neighbor_edge_alias(), column)))
+        .map(|column| {
+            Term::Value(OutputValue::Column(Column::new(
+                neighbor_edge_alias(),
+                column,
+            )))
+        })
         .collect(),
     }
 }

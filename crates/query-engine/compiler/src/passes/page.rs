@@ -11,8 +11,9 @@ use query_data_model::implementations::relational::plan::{
 
 use crate::error::Result;
 use crate::input::Input;
-use crate::passes::codegen::{PlanOf, RelationalModel, rejected, resolve};
-use crate::passes::lower::LoweredMetadata;
+use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
+use crate::passes::lower::build::term;
+use crate::passes::lower::{LoweredMetadata, Term};
 
 pub fn apply<M: RelationalModel>(
     plan: PlanOf<M>,
@@ -30,39 +31,30 @@ pub fn apply<M: RelationalModel>(
         Some(_) => metadata.stable_order.as_slice(),
         None => &[],
     };
-    let aggregate = block.aggregate.map(|node| {
-        let Operation::Aggregate { groups, .. } = plan.plan.operation(node) else {
-            unreachable!("blocks name aggregates by their operation")
-        };
-        let outputs = plan.plan.outputs(node).map(Expr::Column);
-        (
-            plan.plan.inputs(node)[0],
-            groups.clone(),
-            outputs.collect::<Vec<_>>(),
-        )
-    });
-    let mut ties: Vec<Option<Expr>> = vec![None; keys.len()];
+    let groups: Vec<Expr> = match block
+        .aggregate
+        .map(|node| (node, plan.plan.operation(node)))
+    {
+        Some((node, Operation::Aggregate { groups, .. })) => plan
+            .plan
+            .outputs(node)
+            .take(groups.len())
+            .map(Expr::Column)
+            .collect(),
+        _ => Vec::new(),
+    };
+    let ties = Ties {
+        keys,
+        groups: &groups,
+    };
     model
         .catalog()
         .rewrite(plan, |q, rows| {
             let node = q.original();
-            if let Some((source, groups, outputs)) = &aggregate
-                && node == Some(*source)
-            {
-                for (key, tie) in keys.iter().zip(&mut ties) {
-                    let value = resolve(q, M::DIALECT, &key.expr, &rows)?;
-                    *tie = groups
-                        .iter()
-                        .position(|group| *group == value)
-                        .map(|index| outputs[index].clone());
-                }
-                return Ok(rows);
-            }
             let mut rows = rows;
             if node.is_some() && node == block.order && !keys.is_empty() {
                 let mut detached = q.detach(rows)?;
-                let source = &detached.inputs[0];
-                let missing = resolved(q, M::DIALECT, keys, &ties, source)?;
+                let missing = ties.orders::<M::Backend>(&detached.inputs[0])?;
                 if let Operation::Order(orders) = &mut detached.operation {
                     extend(orders, missing);
                 }
@@ -72,9 +64,7 @@ pub fn apply<M: RelationalModel>(
                 let mut detached = q.detach(rows)?;
                 if block.order.is_none() && !keys.is_empty() {
                     let source = detached.inputs.remove(0);
-                    detached
-                        .inputs
-                        .insert(0, ordered(q, M::DIALECT, keys, &ties, source)?);
+                    detached.inputs.insert(0, ties.ordered(q, source)?);
                 }
                 detached.operation = Operation::Limit { count, offset };
                 return q.reattach(detached);
@@ -86,14 +76,14 @@ pub fn apply<M: RelationalModel>(
                 let mut detached = q.detach(rows)?;
                 let mut source = detached.inputs.remove(0);
                 if block.order.is_none() && !keys.is_empty() {
-                    source = ordered(q, M::DIALECT, keys, &ties, source)?;
+                    source = ties.ordered(q, source)?;
                 }
                 detached.inputs.insert(0, q.limit(source, count, offset)?);
                 return q.reattach(detached);
             }
             if block.select.is_none() && node == Some(root) {
                 if block.order.is_none() && !keys.is_empty() {
-                    rows = ordered(q, M::DIALECT, keys, &ties, rows)?;
+                    rows = ties.ordered(q, rows)?;
                 }
                 return q.limit(rows, count, offset);
             }
@@ -102,38 +92,36 @@ pub fn apply<M: RelationalModel>(
         .map_err(rejected)
 }
 
-fn resolved<B: RelationalBackend>(
-    q: &mut RelationalBuilder<'_, B>,
-    dialect: crate::passes::codegen::SqlDialect,
-    keys: &[crate::ast::OrderExpr],
-    ties: &[Option<Expr>],
-    rows: &Relation,
-) -> std::result::Result<Vec<Order>, RelationalError> {
-    keys.iter()
-        .zip(ties)
-        .map(|(key, tie)| {
-            let value = match tie {
-                Some(value) => value.clone(),
-                None => resolve(q, dialect, &key.expr, rows)?,
-            };
-            Ok(Order {
-                value,
-                descending: key.desc,
-            })
-        })
-        .collect()
+struct Ties<'a> {
+    keys: &'a [Term],
+    groups: &'a [Expr],
 }
 
-fn ordered<B: RelationalBackend>(
-    q: &mut RelationalBuilder<'_, B>,
-    dialect: crate::passes::codegen::SqlDialect,
-    keys: &[crate::ast::OrderExpr],
-    ties: &[Option<Expr>],
-    rows: Relation,
-) -> std::result::Result<Relation, RelationalError> {
-    let mut orders = Vec::new();
-    extend(&mut orders, resolved(q, dialect, keys, ties, &rows)?);
-    q.order(rows, orders)
+impl Ties<'_> {
+    fn orders<B: RelationalBackend>(
+        &self,
+        rows: &Relation,
+    ) -> std::result::Result<Vec<Order>, RelationalError> {
+        self.keys
+            .iter()
+            .map(|key| {
+                Ok(Order {
+                    value: term::<B>(&[rows], key, self.groups)?,
+                    descending: false,
+                })
+            })
+            .collect()
+    }
+
+    fn ordered<B: RelationalBackend>(
+        &self,
+        q: &mut RelationalBuilder<'_, B>,
+        rows: Relation,
+    ) -> std::result::Result<Relation, RelationalError> {
+        let mut orders = Vec::new();
+        extend(&mut orders, self.orders::<B>(&rows)?);
+        q.order(rows, orders)
+    }
 }
 
 fn extend(orders: &mut Vec<Order>, ties: Vec<Order>) {

@@ -8,14 +8,16 @@ use query_data_model::implementations::relational::plan::{
 };
 use query_data_model::plan::tracking::{Declare, Ref};
 
-use crate::ast::Expr as AstExpr;
 use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
-use crate::passes::codegen::{PlanOf, RelationalModel, SqlDialect, rejected, resolve};
+use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
+use crate::passes::lower::Term;
+use crate::passes::lower::build::term;
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
+use crate::passes::plan::predicates::{Column as Named, OutputValue};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactionNode {
@@ -188,8 +190,8 @@ pub fn apply<M: RelationalModel>(
 }
 
 struct Contract {
-    outputs: Vec<(String, AstExpr)>,
-    groups: Vec<AstExpr>,
+    outputs: Vec<(String, Term)>,
+    groups: Vec<Term>,
 }
 
 fn return_columns(
@@ -241,7 +243,10 @@ fn return_columns(
                     node.id
                 ))
             })?;
-            AstExpr::col(table_alias, redaction_column)
+            Term::Value(OutputValue::Column(Named::new(
+                table_alias,
+                redaction_column,
+            )))
         } else {
             identity.clone()
         };
@@ -251,19 +256,21 @@ fn return_columns(
         }
         contract.set(redaction_id_column(&node.id), authorization_id.clone());
         contract.group(authorization_id);
-        contract.set(redaction_type_column(&node.id), AstExpr::string(entity));
+        let kind = Term::Value(OutputValue::Text(entity.clone()));
+        contract.set(redaction_type_column(&node.id), kind);
         if input.query_type != QueryType::Aggregation
             && model.entity_has_traversal_path(entity)
             && let Some(path) = traversal_path
         {
-            contract.set(traversal_path_column(&node.id), path.clone());
+            let path = Term::Value(OutputValue::Column(path.clone()));
+            contract.set(traversal_path_column(&node.id), path);
         }
     }
     Ok(contract)
 }
 
 impl Contract {
-    fn set(&mut self, name: String, value: AstExpr) {
+    fn set(&mut self, name: String, value: Term) {
         match self
             .outputs
             .iter_mut()
@@ -274,7 +281,7 @@ impl Contract {
         }
     }
 
-    fn group(&mut self, value: AstExpr) {
+    fn group(&mut self, value: Term) {
         if !self.groups.contains(&value) {
             self.groups.push(value);
         }
@@ -333,7 +340,7 @@ fn enforce<M: RelationalModel>(
             if let Some((aggregate, width, outputs)) = &aggregate
                 && node == Some(*aggregate)
             {
-                let (groups, rows) = regroup(q, M::DIALECT, &contract, *width, outputs, rows)?;
+                let (groups, rows) = regroup(q, &contract, *width, outputs, rows)?;
                 bound = groups;
                 return Ok(rows);
             }
@@ -346,7 +353,6 @@ fn enforce<M: RelationalModel>(
                 let scope = Scope {
                     contract: &contract,
                     bound: &bound,
-                    dialect: M::DIALECT,
                 };
                 let (rows, columns) = scope.extend(q, &mut names, values, source)?;
                 for (old, new) in computed.iter().zip(&columns) {
@@ -369,7 +375,6 @@ fn enforce<M: RelationalModel>(
                 let scope = Scope {
                     contract: &contract,
                     bound: &bound,
-                    dialect: M::DIALECT,
                 };
                 let (rows, columns) = scope.extend(q, &mut names, Vec::new(), source)?;
                 detached.inputs.insert(0, rows);
@@ -399,7 +404,6 @@ fn first(inputs: Vec<Relation>) -> std::result::Result<Relation, RelationalError
 
 fn regroup<B: RelationalBackend>(
     q: &mut RelationalBuilder<'_, B>,
-    dialect: SqlDialect,
     contract: &Contract,
     width: usize,
     outputs: &[Ref],
@@ -415,7 +419,7 @@ fn regroup<B: RelationalBackend>(
     };
     let source = first(detached.inputs)?;
     for group in &contract.groups {
-        let group = resolve(q, dialect, group, &source)?;
+        let group = term::<B>(&[&source], group, &[])?;
         if !groups.contains(&group) {
             groups.push(group);
         }
@@ -441,7 +445,6 @@ fn regroup<B: RelationalBackend>(
 struct Scope<'a> {
     contract: &'a Contract,
     bound: &'a [(Expr, Ref)],
-    dialect: SqlDialect,
 }
 
 impl Scope<'_> {
@@ -453,7 +456,7 @@ impl Scope<'_> {
         source: Relation,
     ) -> std::result::Result<(Relation, Vec<Column>), RelationalError> {
         for (name, value) in &self.contract.outputs {
-            let value = resolve(q, self.dialect, value, &source)?;
+            let value = term::<B>(&[&source], value, &[])?;
             let value = match self.bound.iter().find(|(group, _)| *group == value) {
                 Some((_, output)) => Expr::Column(*output),
                 None => value,

@@ -4,8 +4,6 @@
 pub mod ddl;
 mod import;
 
-pub(crate) use import::resolve;
-
 use orbit_server_config::QueryConfig;
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::duckdb::DuckDb;

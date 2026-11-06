@@ -11,6 +11,7 @@ use query_data_model::implementations::relational::{CurrentRows, RelationalBacke
 use query_data_model::plan::tracking::Declare;
 use serde_json::Value;
 
+use crate::passes::lower::Term;
 use crate::passes::plan::predicates::Column as Named;
 
 pub(crate) type Built<T> = std::result::Result<T, RelationalError>;
@@ -169,6 +170,30 @@ pub(crate) fn filtered<B: RelationalBackend>(
         Some(predicate) => q.filter(rows, predicate),
         None => Ok(rows),
     }
+}
+
+pub(crate) fn term<B: RelationalBackend>(
+    scope: &[&Relation],
+    term: &Term,
+    groups: &[Expr],
+) -> Built<Expr> {
+    Ok(match term {
+        Term::Value(value) => {
+            let shared = predicates::Shared::default();
+            let lowering = predicates::Lowering {
+                scope,
+                shared: &shared,
+            };
+            lowering.output::<B>(value)?
+        }
+        Term::Id(id) => literal((*id).into()),
+        Term::Output(name) => named(scope, name)?,
+        Term::Text(value) => call(Function::ToString, vec![column(scope, value)?]),
+        Term::Group(index) => groups
+            .get(*index)
+            .cloned()
+            .ok_or(RelationalError::Incomplete("a group key"))?,
+    })
 }
 
 pub(crate) fn membership<B: RelationalBackend>(

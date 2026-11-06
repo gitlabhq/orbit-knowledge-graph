@@ -3,11 +3,8 @@
 pub(crate) mod build;
 mod columns;
 pub(crate) mod graph;
-mod predicates;
 pub mod query_types;
-pub(crate) mod sql;
 
-use crate::ast::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
@@ -15,23 +12,32 @@ use crate::tp_bounds::TpBounds;
 use std::collections::HashMap;
 
 use super::plan::graph::ExecutionPlan;
-use super::plan::predicates::Column;
+use super::plan::predicates::{Column, OutputValue};
 use super::plan::{Plan, QueryPlan};
 
 #[derive(Clone, Default)]
 pub struct LoweredMetadata {
     pub nodes: HashMap<String, NodeBinding>,
     pub edges: Vec<LoweredEdge>,
-    pub stable_order: Vec<OrderExpr>,
+    pub stable_order: Vec<Term>,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum Term {
+    Value(OutputValue),
+    Id(i64),
+    Output(String),
+    Text(Column),
+    Group(usize),
 }
 
 #[derive(Clone)]
 pub enum NodeBinding {
     Filtered,
     Values {
-        identity: Expr,
+        identity: Term,
         table_alias: Option<String>,
-        traversal_path: Option<Expr>,
+        traversal_path: Option<Column>,
     },
     Projected,
 }
@@ -41,16 +47,16 @@ impl NodeBinding {
         alias: &str,
         column: &str,
         table_alias: Option<String>,
-        traversal_path: Option<Expr>,
+        traversal_path: Option<Column>,
     ) -> Self {
         Self::Values {
-            identity: Expr::col(alias, column),
+            identity: Term::Value(OutputValue::Column(Column::new(alias, column))),
             table_alias,
             traversal_path,
         }
     }
 
-    fn identity(&self) -> &Expr {
+    fn identity(&self) -> &Term {
         let Self::Values { identity, .. } = self else {
             unreachable!("projected bindings supply their own ordering")
         };
@@ -96,7 +102,7 @@ fn bindings<T>(
                 _,
             ) => NodeBinding::source(alias, &source.1, None, None),
             (_, [id]) => NodeBinding::Values {
-                identity: Expr::lit(*id),
+                identity: Term::Id(*id),
                 table_alias: None,
                 traversal_path: None,
             },

@@ -12,9 +12,9 @@ use query_data_model::implementations::relational::plan::{
 };
 use serde_json::Value;
 
-use crate::ast::{self, OrderExpr};
 use crate::constants::*;
 use crate::input::*;
+use crate::passes::lower::Term;
 use crate::passes::lower::build::expr::{id_range, ids, in_list, relationship_kinds};
 use crate::passes::lower::build::sources::{
     Scope, bound_filter, columns, dedup, denorm_tags, final_edge_scan, select,
@@ -22,15 +22,11 @@ use crate::passes::lower::build::sources::{
 use crate::passes::lower::build::{
     Built, and, binary, call, col, computed, conjoin, eq, filtered, int, membership, stored, string,
 };
+use crate::passes::plan::predicates::Column;
 use crate::passes::plan::{NodePlan, PathFinding, Plan};
 
-pub(crate) fn stable_order() -> Vec<OrderExpr> {
-    let text = |column: &str| {
-        OrderExpr::asc(ast::Expr::func(
-            ast::Function::ToString,
-            vec![ast::Expr::col(paths_alias(), column)],
-        ))
-    };
+pub(crate) fn stable_order() -> Vec<Term> {
+    let text = |column: &str| Term::Text(Column::new(paths_alias(), column));
     vec![text(path_column()), text(edge_kinds_column())]
 }
 

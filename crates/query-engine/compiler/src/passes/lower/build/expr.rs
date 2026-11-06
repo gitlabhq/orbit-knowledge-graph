@@ -1,5 +1,5 @@
 use ontology::constants::{DELETED_COLUMN, RELATIONSHIP_KIND_COLUMN};
-use orbit_utils::query_types::SqlType;
+use orbit_utils::query_types::{SqlType, TimeZone};
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, Function, Relation, TextMatch, UnaryOp,
@@ -8,7 +8,6 @@ use serde_json::Value;
 
 use super::{Built, and, binary, call, col, conjoin, eq, param};
 use crate::input::{FilterOp, InputFilter};
-use crate::passes::lower::sql::parameter_type;
 use crate::passes::plan::filters::NullAsEpoch;
 use crate::passes::plan::predicates::Column;
 
@@ -20,6 +19,23 @@ pub(crate) struct Filter<'a> {
     pub text_indexed: bool,
     pub null_as_epoch: NullAsEpoch,
     pub negated: bool,
+}
+
+pub(crate) fn parameter_type(data_type: Option<&ontology::DataType>) -> SqlType {
+    match data_type {
+        Some(ontology::DataType::String | ontology::DataType::Enum | ontology::DataType::Uuid) => {
+            SqlType::String
+        }
+        Some(ontology::DataType::Int) => SqlType::Int64,
+        Some(ontology::DataType::Float) => SqlType::Float64,
+        Some(ontology::DataType::Bool) => SqlType::Bool,
+        Some(ontology::DataType::Date) => SqlType::Date,
+        Some(ontology::DataType::DateTime) => SqlType::Timestamp {
+            precision: 6,
+            timezone: Some(TimeZone::Utc),
+        },
+        None => SqlType::String,
+    }
 }
 
 fn epoch<B: RelationalBackend>(data_type: ontology::DataType) -> Expr {

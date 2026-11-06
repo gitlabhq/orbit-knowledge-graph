@@ -89,13 +89,11 @@ pub(super) fn bindings(plan: &ExecutionPlan) -> HashMap<String, NodeBinding> {
     plan.bindings
         .iter()
         .map(|binding| {
-            let path = binding.traversal_path.as_ref();
-            let path = path.map(|path| crate::ast::Expr::col(&path.source, &path.name));
             let source = NodeBinding::source(
                 &binding.alias,
                 &binding.column,
                 binding.property_source.clone(),
-                path,
+                binding.traversal_path.clone(),
             );
             (binding.node.clone(), source)
         })
