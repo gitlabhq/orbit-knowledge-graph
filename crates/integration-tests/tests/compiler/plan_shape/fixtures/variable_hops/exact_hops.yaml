@@ -14,8 +14,12 @@ query:
     MATCH (a:Definition {id: 1})-[:CALLS*2]->(b:Definition) RETURN a.id, b.id
 
 logical:
-  expect:
-    - (EdgeScan CALLS a->b AS e0 HOPS 2..2)
+  gql:
+    expect:
+      - (Limit 30 (Select a{id}, b{id} (Follow CALLS a->b AS e0 HOPS 2..2 (Filter a.id = 1 (Entities Definition AS a)))))
+  json:
+    expect:
+      - (Limit 30 (Select a{id}, b{id} (Follow CALLS a->b AS e0 HOPS 2..2 (Filter a.id IN [1] (Entities Definition AS a)))))
 
 physical:
   clickhouse:
