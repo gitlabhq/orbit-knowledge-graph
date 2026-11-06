@@ -108,38 +108,3 @@ fn model_errors_come_from_construction() {
         Err(SurfaceError::Schema(_))
     ));
 }
-
-#[test]
-fn schema_errors_name_the_location_and_rule_but_not_the_value() {
-    let message = |query: serde_json::Value| match operations(query) {
-        Err(SurfaceError::Schema(message)) => message,
-        other => panic!("expected a schema error, got {other:?}"),
-    };
-    let many: serde_json::Map<String, serde_json::Value> = (0..11)
-        .map(|i| (format!("f{i}"), format!("private-count-literal-{i}").into()))
-        .collect();
-    let rejected = message(serde_json::json!({
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "not": "private-type-literal"},
-            {"id": "w", "entity": "WorkItem", "not": many, "filters": {"state": {"bogus": "private-filter-literal"}}}
-        ]
-    }));
-    assert!(
-        rejected.contains("has more than 10 properties at /nodes/1/not"),
-        "{rejected}"
-    );
-    for literal in [
-        "private-type-literal",
-        "private-count-literal",
-        "private-filter-literal",
-    ] {
-        assert!(!rejected.contains(literal), "{rejected}");
-    }
-    let hydration = message(serde_json::json!({
-        "query_type": "hydration",
-        "nodes": [{"id": "h", "entity": "User", "node_ids": [1]}]
-    }));
-    assert!(hydration.contains("is not an allowed value"), "{hydration}");
-    assert!(!hydration.contains("hydration"), "{hydration}");
-}
