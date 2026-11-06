@@ -7,7 +7,7 @@ cases:
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 4 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
+      expect: ["(Offset 4 (Limit 2 (Select u{username} (Filter u.id >= 1, u.id <= 10000 (Entities User AS u)))))"]
     physical:
       clickhouse:
         emitted:
@@ -18,7 +18,7 @@ cases:
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username OFFSET 4 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
+      expect: ["(Offset 4 (Limit 2 (Select u{username} (Filter u.id >= 1, u.id <= 10000 (Entities User AS u)))))"]
     physical:
       clickhouse:
         emitted:
@@ -29,7 +29,7 @@ cases:
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 0 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 0 (Input traversal (...))))"]
+      expect: ["(Offset 0 (Limit 2 (Select u{username} (Filter u.id >= 1, u.id <= 10000 (Entities User AS u)))))"]
     physical:
       clickhouse:
         emitted:
@@ -41,7 +41,7 @@ cases:
       gql: |
         MATCH (u:User) RETURN u.username SKIP 4
     logical:
-      expect: ["(Limit 30 (Offset 4 (Input traversal (...))))"]
+      expect: ["(Offset 4 (Limit 30 (Select u{username} (Entities User AS u))))"]
     physical:
       clickhouse:
         emitted:
@@ -52,7 +52,7 @@ cases:
       gql: |
         MATCH (u:User) RETURN u.username ORDER BY u.username DESC SKIP 4 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 4 (Sort u.username DESC (_))))"]
+      expect: ["(Offset 4 (Limit 2 (Select u{username} (Sort u.username DESC (Entities User AS u)))))"]
     physical:
       clickhouse:
         emitted:
@@ -63,7 +63,7 @@ cases:
       gql: |
         MATCH (u:User) RETURN u.username ORDER BY u.id DESC SKIP 4 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 4 (Sort u.id DESC (_))))"]
+      expect: ["(Offset 4 (Limit 2 (Select u{username} (Sort u.id DESC (Entities User AS u)))))"]
     physical:
       clickhouse:
         emitted:
@@ -74,7 +74,7 @@ cases:
       gql: |
         MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr SKIP 4 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
+      expect: ["(Offset 4 (Limit 2 (Select u, mr (Follow AUTHORED u->mr AS e0 (Entities User AS u)))))"]
     physical:
       clickhouse:
         emitted:
@@ -85,7 +85,7 @@ cases:
       gql: |
         MATCH (u:User)-[:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN u, mr SKIP 4 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
+      expect: ["(Offset 4 (Limit 2 (Select u, mr (Follow AUTHORED|APPROVED u->mr AS e0 (Entities User AS u)))))"]
     physical:
       clickhouse:
         emitted:
@@ -97,7 +97,7 @@ cases:
       gql: |
         MATCH (a:Definition)-[:CALLS]->(b:Definition) RETURN a, b SKIP 4 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
+      expect: ["(Offset 4 (Limit 2 (Select a, b (Follow CALLS a->b AS e0 (Entities Definition AS a)))))"]
     physical:
       clickhouse:
         emitted:
@@ -111,7 +111,7 @@ cases:
       gql: |
         MATCH (f:File) RETURN f.path ORDER BY f.path SKIP 4 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 4 (Sort f.path (_))))"]
+      expect: ["(Offset 4 (Limit 2 (Select f{path} (Sort f.path (Entities File AS f)))))"]
     physical:
       clickhouse:
         emitted:
@@ -126,7 +126,8 @@ cases:
         MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000
         RETURN u{.id, .username}, count(mr) AS mr_count SKIP 2 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 2 (Aggregate group u AS u, COUNT(mr) AS mr_count (_))))"]
+      expect:
+        - (Offset 2 (Limit 2 (Select u{id, username}, mr_count (Aggregate group u AS u, COUNT(mr) AS mr_count (Filter u.id >= 1, u.id <= 10000 (Follow AUTHORED u->mr AS e0 (Entities User AS u)))))))
     physical:
       clickhouse:
         emitted:
@@ -137,7 +138,8 @@ cases:
       gql: |
         MATCH (mr:MergeRequest)--(n) WHERE mr.id IN [1, 2, 3] RETURN mr, n SKIP 20 LIMIT 20
     logical:
-      expect: ["(Limit 20 (Offset 20 (Input neighbors (...))))"]
+      expect:
+        - (Offset 20 (Limit 20 (Select mr, n (Neighbors APPROVED|ASSIGNED|AUTHORED|CLOSED|CLOSES|CREATED_FOR_MR|CREATED_MR|DEPLOYED_TO|FIXES|HAS_DIFF|HAS_HEAD_PIPELINE|HAS_LABEL|HAS_LATEST_DIFF|HAS_NOTE|IN_MILESTONE|IN_PROJECT|LAST_EDITED_BY|MENTIONS|MERGED|MERGED_AT_COMMIT|REOPENED|REVIEWER|SOURCE_PROJECT|TRIGGERED|UPDATED_BY mr--n (Filter mr.id IN [1, 2, 3] (Entities MergeRequest AS mr))))))
     physical:
       clickhouse:
         emitted:
@@ -151,7 +153,8 @@ cases:
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project)
         WHERE `end`.id IN [1000, 1002, 1004] RETURN p SKIP 2 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 2 (Input path_finding (...))))"]
+      expect:
+        - (Offset 2 (Limit 2 (Select p (Shortest MEMBER_OF|CONTAINS start->end DEPTH 3 (Filter start.id = 1 (Entities User AS start)) (Filter end.id IN [1000, 1002, 1004] (Entities Project AS end))))))
     physical:
       clickhouse:
         emitted:
@@ -164,7 +167,8 @@ cases:
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project)
         WHERE `end`.id IN [1000, 1002, 1004] RETURN p LIMIT 2
     logical:
-      expect: ["(Limit 2 (Input path_finding (...)))"]
+      expect:
+        - (Limit 2 (Select p (Shortest MEMBER_OF|CONTAINS start->end DEPTH 3 (Filter start.id = 1 (Entities User AS start)) (Filter end.id IN [1000, 1002, 1004] (Entities Project AS end)))))
       reject: ["(Offset ... (_))"]
     physical:
       clickhouse:
@@ -177,7 +181,7 @@ cases:
       gql: |
         MATCH (n:Note {id: 3002}) RETURN n.note SKIP 10000 LIMIT 1
     logical:
-      expect: ["(Limit 1 (Offset 10000 (Input traversal (...))))"]
+      expect: ["(Offset 10000 (Limit 1 (Select n{note} (Filter n.id = 3002 (Entities Note AS n)))))"]
     physical:
       clickhouse:
         emitted:
@@ -189,7 +193,7 @@ cases:
       gql: |
         MATCH (n:Note {id: 3002}) RETURN n.note SKIP 0 LIMIT 1
     logical:
-      expect: ["(Limit 1 (Offset 0 (Input traversal (...))))"]
+      expect: ["(Offset 0 (Limit 1 (Select n{note} (Filter n.id = 3002 (Entities Note AS n)))))"]
     physical:
       clickhouse:
         emitted:
@@ -201,7 +205,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1})-[:MEMBER_OF]->(n) RETURN u, n SKIP 2 LIMIT 2
     logical:
-      expect: ["(Limit 2 (Offset 2 (Input neighbors (...))))"]
+      expect: ["(Offset 2 (Limit 2 (Select u, n (Neighbors MEMBER_OF u->n (Filter u.id = 1 (Entities User AS u))))))"]
     physical:
       clickhouse:
         emitted:

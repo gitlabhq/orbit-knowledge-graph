@@ -7,7 +7,7 @@ query:
     MATCH (f:File) RETURN f.path LIMIT 2
 
 logical:
-  expect: ["(Limit 2 (Input traversal (...)))"]
+  expect: ["(Limit 2 (Select f{path} (Entities File AS f)))"]
   reject: ["(Offset ... (_))"]
 
 physical:
