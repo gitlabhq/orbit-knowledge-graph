@@ -95,8 +95,8 @@ fn aggregation_nodes(value: &Value, group_key: &str) -> Vec<Value> {
 //   User 4 (diana)   →MEMBER_OF→ Group 102 (Internal)
 //   User 5 (unicode) →MEMBER_OF→ Group 100 (Public)
 //
-//   Group 100 →MEMBER_OF→ Group 200 (Depth2)           -- group hierarchy for multi-hop
-//   Group 200 →MEMBER_OF→ Group 300 (Depth3)           -- 3-hop chain: User→100→200→300
+//   Group 100 →CONTAINS→ Group 200 (Depth2)            -- group hierarchy for multi-hop
+//   Group 200 →CONTAINS→ Group 300 (Depth3)            -- 3-hop chain: User→100→200→300
 //
 //   User 1 →AUTHORED→ MR 2000   →HAS_NOTE→ Note 3000, 3002, 3003
 //   User 2 →AUTHORED→ MR 2001   →HAS_NOTE→ Note 3001 (giant string)
@@ -162,8 +162,8 @@ async fn seed(ctx: &TestContext) {
          ('1/102/', 3, 'User', 'MEMBER_OF', 102, 'Group', ['state:active', 'user_type:human'], ['visibility_level:internal']),
          ('1/102/', 4, 'User', 'MEMBER_OF', 102, 'Group', ['state:blocked', 'user_type:project_bot'], ['visibility_level:internal']),
          ('1/100/', 5, 'User', 'MEMBER_OF', 100, 'Group', ['state:active', 'user_type:human'], ['visibility_level:public']),
-         ('1/200/', 100, 'Group', 'MEMBER_OF', 200, 'Group', ['visibility_level:public'], ['visibility_level:public']),
-         ('1/300/', 200, 'Group', 'MEMBER_OF', 300, 'Group', ['visibility_level:public'], ['visibility_level:public']),
+         ('1/200/', 100, 'Group', 'CONTAINS', 200, 'Group', ['visibility_level:public'], ['visibility_level:public']),
+         ('1/300/', 200, 'Group', 'CONTAINS', 300, 'Group', ['visibility_level:public'], ['visibility_level:public']),
          ('1/100/', 100, 'Group', 'CONTAINS', 1000, 'Project', [], []),
          ('1/101/', 101, 'Group', 'CONTAINS', 1001, 'Project', [], []),
          ('1/102/', 102, 'Group', 'CONTAINS', 1002, 'Project', [], []),
@@ -779,7 +779,7 @@ async fn path_finding_max_depth(ctx: &TestContext) {
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Note", "node_ids": [3000]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["AUTHORED", "HAS_NOTE"]}
         }"#,
         &allow_all(),
     )
@@ -1081,7 +1081,7 @@ async fn giant_string_survives_pipeline(ctx: &TestContext) {
                 {"id": "start", "entity": "User", "node_ids": [2]},
                 {"id": "end", "entity": "Note", "node_ids": [3001]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["AUTHORED", "HAS_NOTE"]}
         }"#,
         &allow_all(),
     )
@@ -1106,7 +1106,7 @@ async fn sql_injection_string_preserved(ctx: &TestContext) {
                 {"id": "start", "entity": "MergeRequest", "node_ids": [2000]},
                 {"id": "end", "entity": "Note", "node_ids": [3002]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["AUTHORED", "HAS_NOTE"]}
         }"#,
         &allow_all(),
     )
@@ -1488,7 +1488,7 @@ async fn traversal_both_direction(ctx: &TestContext) {
                 {"id": "g1", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "g2", "entity": "Group", "columns": ["name"]}
             ],
-            "relationships": [{"type": "MEMBER_OF", "from": "g1", "to": "g2", "direction": "both"}],
+            "relationships": [{"type": "CONTAINS", "from": "g1", "to": "g2", "direction": "both"}],
             "limit": 50
         }"#,
         &allow_all(),
@@ -1497,7 +1497,7 @@ async fn traversal_both_direction(ctx: &TestContext) {
 
     let edges = value["edges"].as_array().unwrap();
     assert!(!edges.is_empty());
-    assert!(edges.iter().all(|e| e["type"] == "MEMBER_OF"));
+    assert!(edges.iter().all(|e| e["type"] == "CONTAINS"));
 
     let nodes = value["nodes"].as_array().unwrap();
     assert!(
@@ -1516,7 +1516,7 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
 
     ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1000/', 1000, 'Project', 'CONTAINS', 3000, 'Note')",
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 3000, 'Note')",
         t("gl_edge")
     ))
     .await;
@@ -1528,11 +1528,11 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
             "nodes": [
                 {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "n", "entity": "Note", "columns": ["note"]},
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
+                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]}
             ],
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "n"},
-                {"type": "CONTAINS", "from": "p", "to": "n"}
+                {"type": "HAS_NOTE", "from": "mr", "to": "n"}
             ],
             "limit": 50
         }"#,
@@ -1545,13 +1545,10 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
     let nodes = value["nodes"].as_array().unwrap();
     let user_ids = node_ids(nodes, "User");
     let note_ids = node_ids(nodes, "Note");
-    let project_ids = node_ids(nodes, "Project");
+    let mr_ids = node_ids(nodes, "MergeRequest");
     assert!(user_ids.contains(&1), "User 1 should be present");
     assert!(note_ids.contains(&3000), "Note 3000 should be present");
-    assert!(
-        project_ids.contains(&1000),
-        "Project 1000 should be present"
-    );
+    assert!(mr_ids.contains(&2000), "MR 2000 should be present");
 
     let edges = value["edges"].as_array().unwrap();
     assert!(
@@ -1559,8 +1556,8 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
         "AUTHORED edge should exist"
     );
     assert!(
-        edges.iter().any(|e| e["type"] == "CONTAINS"),
-        "CONTAINS edge should exist"
+        edges.iter().any(|e| e["type"] == "HAS_NOTE"),
+        "HAS_NOTE edge should exist"
     );
 }
 
