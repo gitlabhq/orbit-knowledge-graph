@@ -10,3 +10,6 @@ template_files:
       project: .pi/extensions/orbit.ts
       global: "~/.pi/agent/extensions/orbit.ts"
     template: pi_extension.ts
+feature_dir:
+  project: .pi/extensions
+  global: "~/.pi/agent/extensions"
