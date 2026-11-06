@@ -2,18 +2,6 @@ use super::{Dialect, Renderer};
 use crate::implementations::relational::plan::{Operation, Sharing};
 use crate::plan::tracking::{BodyId, NodeId};
 
-#[derive(Default)]
-pub(super) struct Block {
-    select: Option<NodeId>,
-    compute: Option<NodeId>,
-    wheres: Vec<NodeId>,
-    aggregate: Option<NodeId>,
-    havings: Vec<NodeId>,
-    pub(super) order: Option<NodeId>,
-    pub(super) limit_by: Option<NodeId>,
-    pub(super) limit: Option<NodeId>,
-}
-
 impl<D: Dialect> Renderer<'_, D> {
     pub(super) fn statement(&mut self, with: &[BodyId], root: NodeId) -> String {
         if with.is_empty() {
@@ -42,7 +30,8 @@ impl<D: Dialect> Renderer<'_, D> {
     }
 
     fn query(&mut self, top: NodeId) -> String {
-        let (block, base) = self.block(top);
+        let block = self.plan.block(top);
+        let base = block.base;
         let mut parts = Vec::new();
         match block.select {
             Some(select) => {
@@ -72,52 +61,5 @@ impl<D: Dialect> Renderer<'_, D> {
         }
         self.tail(&block, &mut parts);
         parts.join(" ")
-    }
-
-    fn block(&self, top: NodeId) -> (Block, NodeId) {
-        let mut node = top;
-        let select = self.peel(&mut node, |op| matches!(op, Operation::Select(_)));
-        let limit = self.peel(&mut node, |op| matches!(op, Operation::Limit { .. }));
-        let limit_by = self.peel(&mut node, |op| {
-            matches!(op, Operation::LimitBy { .. } | Operation::Latest { .. })
-        });
-        let order = self.peel(&mut node, |op| matches!(op, Operation::Order(_)));
-        let mut block = Block {
-            select,
-            limit,
-            limit_by,
-            order,
-            ..Block::default()
-        };
-        if select.is_none() {
-            return (block, node);
-        }
-        block.compute = self.peel(&mut node, |op| matches!(op, Operation::Compute(_)));
-        let filtered = self.filters(&mut node);
-        match self.peel(&mut node, |op| matches!(op, Operation::Aggregate { .. })) {
-            Some(aggregate) => {
-                block.aggregate = Some(aggregate);
-                block.havings = filtered;
-                block.wheres = self.filters(&mut node);
-            }
-            None => block.wheres = filtered,
-        }
-        (block, node)
-    }
-
-    fn peel(&self, node: &mut NodeId, test: fn(&Operation) -> bool) -> Option<NodeId> {
-        let current = *node;
-        test(self.plan.plan.operation(current)).then(|| {
-            *node = self.plan.plan.inputs(current)[0];
-            current
-        })
-    }
-
-    fn filters(&self, node: &mut NodeId) -> Vec<NodeId> {
-        let mut filters = Vec::new();
-        while let Some(filter) = self.peel(node, |op| matches!(op, Operation::Filter(_))) {
-            filters.insert(0, filter);
-        }
-        filters
     }
 }

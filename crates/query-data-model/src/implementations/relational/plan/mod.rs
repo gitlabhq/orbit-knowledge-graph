@@ -1,3 +1,4 @@
+mod block;
 mod builder;
 mod error;
 mod expr;
@@ -9,6 +10,7 @@ use std::marker::PhantomData;
 
 use ontology::DataType;
 
+pub use block::Block;
 pub use builder::{Aggregated, Detached, RelationalBuilder, Subquery};
 pub use error::RelationalError;
 pub use expr::{BinaryOp, Expr, Function, TextMatch, TimeUnit, UnaryOp};
