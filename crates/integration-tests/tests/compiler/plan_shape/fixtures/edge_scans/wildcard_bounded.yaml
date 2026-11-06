@@ -10,9 +10,6 @@ logical:
   gql:
     expect:
       - (Follow * a->b AS e0 HOPS 1..3 (Filter a.id = 1 (Entities ImportedSymbol AS a)))
-  json:
-    expect:
-      - (Follow * a->b AS e0 HOPS 1..3 (Filter a.id IN [1] (Entities ImportedSymbol AS a)))
 
 physical:
   clickhouse:

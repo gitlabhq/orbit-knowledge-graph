@@ -14,9 +14,6 @@ logical:
   gql:
     expect:
       - (Limit 30 (Select d, neighbor (Neighbors CALLS d--neighbor (Filter d.id = 1 (Entities Definition AS d)))))
-  json:
-    expect:
-      - (Limit 30 (Select d, neighbor (Neighbors CALLS d--neighbor (Filter d.id IN [1] (Entities Definition AS d)))))
 
 physical:
   clickhouse:

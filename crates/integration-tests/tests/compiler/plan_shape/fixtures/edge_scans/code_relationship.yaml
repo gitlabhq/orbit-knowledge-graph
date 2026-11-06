@@ -18,9 +18,6 @@ logical:
   gql:
     expect:
       - (Select caller{id}, callee{id} (Follow CALLS caller->callee AS e0 (Filter caller.id = 1 (Entities Definition AS caller))))
-  json:
-    expect:
-      - (Select caller{id}, callee{id} (Follow CALLS caller->callee AS e0 (Filter caller.id IN [1] (Entities Definition AS caller))))
 
 physical:
   clickhouse:

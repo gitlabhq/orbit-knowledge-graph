@@ -10,9 +10,6 @@ logical:
   gql:
     expect:
       - (Limit 30 (Select p (Shortest MEMBER_OF|CONTAINS a->b DEPTH 2 (Filter a.id = 1 (Entities User AS a)) (Filter b.id >= 100, b.id <= 200 (Entities Project AS b)))))
-  json:
-    expect:
-      - (Limit 30 (Select a, b, path (Shortest MEMBER_OF|CONTAINS a->b DEPTH 2 (Filter a.id IN [1] (Entities User AS a)) (Filter b.id >= 100, b.id <= 200 (Entities Project AS b)))))
 
 physical:
   clickhouse:

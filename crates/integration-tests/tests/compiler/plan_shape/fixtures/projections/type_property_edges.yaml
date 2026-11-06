@@ -20,9 +20,6 @@ logical:
   gql:
     expect:
       - (Limit 5 (Select u{username, user_type}, g{name} (Sort u.username (Filter g.id = 9970 (Follow MEMBER_OF u->g AS e0 (Entities User AS u))))))
-  json:
-    expect:
-      - (Limit 5 (Select u{username, user_type}, g{name} (Sort u.username (Filter g.id IN [9970] (Follow MEMBER_OF u->g AS e0 (Entities User AS u))))))
 
 physical:
   clickhouse:

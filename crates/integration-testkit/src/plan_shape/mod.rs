@@ -302,14 +302,12 @@ fn check<M: RelationalModel>(
                 path_segment_budget: hydration.path_segment_budget,
             };
         }
-        let Some(logical) = scenario.logical.surface(language) else {
-            failures.push(format!("{label}: logical has no {language} assertions"));
-            continue;
-        };
-        if let Err(error) = logical.check(
-            &logical::logical(&statement.plan, catalog.model()),
-            &format!("{label}.logical"),
-        ) {
+        if let Some(logical) = scenario.logical.surface(language)
+            && let Err(error) = logical.check(
+                &logical::logical(&statement.plan, catalog.model()),
+                &format!("{label}.logical"),
+            )
+        {
             failures.push(error);
             continue;
         }

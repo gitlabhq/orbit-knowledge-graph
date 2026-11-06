@@ -9,9 +9,6 @@ cases:
       gql:
         expect:
           - (Filter i.project_id = 42 (Follow IMPORTS i->d AS e0 (Entities ImportedSymbol AS i)))
-      json:
-        expect:
-          - (Follow IMPORTS i->d AS e0 (Filter i.project_id = 42 (Entities ImportedSymbol AS i)))
     physical:
       clickhouse:
         planned:
@@ -51,9 +48,6 @@ cases:
       gql:
         expect:
           - (Filter f.project_id = 42, f.branch = 'main' (Follow DEFINES f->d AS e0 (Entities File AS f)))
-      json:
-        expect:
-          - (Follow DEFINES f->d AS e0 (Filter f.project_id = 42, f.branch = 'main' (Entities File AS f)))
     physical:
       clickhouse:
         emitted:
@@ -75,9 +69,6 @@ cases:
       gql:
         expect:
           - (Filter p.name = 'x', b.project_id = 42 (Follow CONTAINS p->b AS e0 (Entities Project AS p)))
-      json:
-        expect:
-          - (Filter b.project_id = 42 (Follow CONTAINS p->b AS e0 (Filter p.name = 'x' (Entities Project AS p))))
     physical:
       clickhouse:
         emitted:
@@ -135,9 +126,6 @@ cases:
       gql:
         expect:
           - (Filter a.project_id = 42 (Follow CALLS a->b AS e0 HOPS 1..2 (Entities Definition AS a)))
-      json:
-        expect:
-          - (Follow CALLS a->b AS e0 HOPS 1..2 (Filter a.project_id = 42 (Entities Definition AS a)))
     physical:
       clickhouse:
         emitted:

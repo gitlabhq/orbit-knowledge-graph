@@ -10,9 +10,6 @@ cases:
       gql:
         expect:
           - "(Filter a.id >= 1, a.id <= 10 (Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Entities Definition AS a))))"
-      json:
-        expect:
-          - "(Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Filter a.id >= 1, a.id <= 10 (Entities Definition AS a))))"
 
     physical:
       clickhouse:

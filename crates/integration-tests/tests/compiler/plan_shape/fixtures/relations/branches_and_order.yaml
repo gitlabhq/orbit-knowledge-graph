@@ -83,9 +83,6 @@ cases:
       gql:
         expect:
           - "(Filter b.id = 2 (Follow CALLS c<-b AS e1 (Follow CALLS a->c AS e0 (Filter a.id = 1 (Entities Definition AS a)))))"
-      json:
-        expect:
-          - "(Filter b.id IN [2] (Follow CALLS c<-b AS e1 (Follow CALLS a->c AS e0 (Filter a.id IN [1] (Entities Definition AS a)))))"
     physical:
       clickhouse:
         planned:

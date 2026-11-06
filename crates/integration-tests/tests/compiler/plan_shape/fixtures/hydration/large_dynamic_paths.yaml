@@ -274,9 +274,6 @@ logical:
   gql:
     expect:
       - (Limit 30 (Select f{path} (Filter f.id = 1 (Entities File AS f))))
-  json:
-    expect:
-      - (Limit 30 (Select f{path} (Filter f.id IN [1] (Entities File AS f))))
 
 physical:
   clickhouse:

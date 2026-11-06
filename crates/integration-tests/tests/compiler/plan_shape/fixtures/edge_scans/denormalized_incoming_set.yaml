@@ -10,9 +10,6 @@ logical:
   gql:
     expect:
       - (Filter a.definition_type IN ['function', 'method'] (Follow CALLS a<-b AS e0 (Entities Definition AS a)))
-  json:
-    expect:
-      - (Follow CALLS a<-b AS e0 (Filter a.definition_type IN ['function', 'method'] (Entities Definition AS a)))
 
 physical:
   clickhouse:

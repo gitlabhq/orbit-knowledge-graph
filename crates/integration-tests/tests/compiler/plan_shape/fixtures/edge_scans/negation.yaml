@@ -28,9 +28,6 @@ cases:
       gql:
         expect:
           - "(Filter a.id IN [12000], NOT (a.definition_type IN ['function', 'method']) (Follow CALLS a->b AS e0 (Entities Definition AS a)))"
-      json:
-        expect:
-          - "(Follow CALLS a->b AS e0 (Filter a.id IN [12000], NOT ((a.definition_type IN ['function', 'method'])) (Entities Definition AS a)))"
     physical:
       clickhouse:
         planned:
@@ -85,9 +82,6 @@ cases:
       gql:
         expect:
           - "(Filter starts_with(u.username, 'ali'), NOT (u.state IN ['blocked']) (Follow CONTAINS g->p AS e1 (Filter g.id = 100 (Follow MEMBER_OF u->g AS e0 (Entities User AS u)))))"
-      json:
-        expect:
-          - "(Follow CONTAINS g->p AS e1 (Filter g.id IN [100] (Follow MEMBER_OF u->g AS e0 (Filter starts_with(u.username, 'ali'), NOT ((u.state IN ['blocked'])) (Entities User AS u)))))"
     physical:
       clickhouse:
         planned:

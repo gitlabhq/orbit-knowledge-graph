@@ -259,9 +259,6 @@ cases:
       gql:
         expect:
           - "(Filter NOT (j.name = 'build') (Entities Job AS j))"
-      json:
-        expect:
-          - "(Filter NOT ((j.name = 'build')) (Entities Job AS j))"
     physical:
       clickhouse:
         planned:

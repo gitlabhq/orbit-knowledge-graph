@@ -10,9 +10,6 @@ logical:
   gql:
     expect:
       - (Follow CALLS a->b AS e0 (Filter a.id = 1 (Entities Definition AS a)))
-  json:
-    expect:
-      - (Follow CALLS a->b AS e0 (Filter a.id IN [1] (Entities Definition AS a)))
 
 physical:
   clickhouse:

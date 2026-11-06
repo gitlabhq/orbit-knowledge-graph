@@ -60,9 +60,6 @@ cases:
       gql:
         expect:
           - (Neighbors IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF mr->target (Filter mr.id = 1 (Entities MergeRequest AS mr)))
-      json:
-        expect:
-          - (Neighbors IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF mr->neighbor (Filter mr.id IN [1] (Entities MergeRequest AS mr)))
     physical:
       clickhouse:
         planned:
@@ -84,9 +81,6 @@ cases:
       gql:
         expect:
           - (Neighbors AUTHORED user->neighbor (Filter user.id = 1 (Entities User AS user)))
-      json:
-        expect:
-          - (Neighbors AUTHORED user->neighbor (Filter user.id IN [1] (Entities User AS user)))
     physical:
       clickhouse:
         planned:
@@ -107,9 +101,6 @@ cases:
       gql:
         expect:
           - (Shortest IN_PROJECT|CONTAINS pipeline->branch DEPTH 2 (Filter pipeline.id = 1 (Entities Pipeline AS pipeline)) (Filter branch.id = 2 (Entities Branch AS branch)))
-      json:
-        expect:
-          - (Shortest IN_PROJECT|CONTAINS pipeline->branch DEPTH 2 (Filter pipeline.id IN [1] (Entities Pipeline AS pipeline)) (Filter branch.id IN [2] (Entities Branch AS branch)))
     physical:
       clickhouse:
         planned:

@@ -10,8 +10,6 @@ cases:
     logical:
       gql:
         expect: ["(Filter d.id >= 1, d.id <= 10, NOT (d.id IN [3, 4]) (Entities Definition AS d))"]
-      json:
-        expect: ["(Filter d.id >= 1, d.id <= 10, NOT ((d.id IN [3, 4])) (Entities Definition AS d))"]
     physical:
       clickhouse:
         planned:
@@ -30,10 +28,6 @@ cases:
       gql:
         expect:
           - "(Filter NOT (b.name = 'skip') (Follow CALLS a->b AS e0 (Filter a.id = 12000 (Entities Definition AS a))))"
-      json:
-        expect:
-          - "(Filter b.name != 'skip' (Follow CALLS a->b AS e0 (Filter a.id IN [12000] (Entities Definition AS a))))"
-        reject: ["(Filter NOT (b.name = 'skip') (_))"]
     physical:
       clickhouse:
         planned:

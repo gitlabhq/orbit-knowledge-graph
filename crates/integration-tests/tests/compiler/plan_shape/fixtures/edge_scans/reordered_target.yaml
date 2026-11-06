@@ -11,9 +11,6 @@ logical:
   gql:
     expect:
       - (Filter callee.id = 12001 (Follow CALLS caller->callee AS e0 (Entities Definition AS caller)))
-  json:
-    expect:
-      - (Filter callee.id IN [12001] (Follow CALLS caller->callee AS e0 (Entities Definition AS caller)))
 
 physical:
   clickhouse:

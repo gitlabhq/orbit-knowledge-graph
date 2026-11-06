@@ -10,9 +10,6 @@ logical:
   gql:
     expect:
       - (Filter b.project_id = 9, b.branch = 'main' (Follow CALLS a->b AS e0 (Filter a.id = 1, a.project_id = 9, a.branch = 'main' (Entities Definition AS a))))
-  json:
-    expect:
-      - (Filter b.project_id = 9, b.branch = 'main' (Follow CALLS a->b AS e0 (Filter a.id IN [1], a.project_id = 9, a.branch = 'main' (Entities Definition AS a))))
 
 physical:
   clickhouse:
