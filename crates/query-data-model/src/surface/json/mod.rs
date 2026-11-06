@@ -1,4 +1,5 @@
 mod checks;
+mod errors;
 mod filters;
 mod pattern;
 mod request;
@@ -16,20 +17,23 @@ pub const SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.
 
 type Built<'m> = Result<Rows<'m>, SurfaceError>;
 
-fn validator() -> &'static jsonschema::Validator {
-    static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
-    VALIDATOR.get_or_init(|| {
+fn schema() -> &'static (Value, jsonschema::Validator) {
+    static SCHEMA_VALIDATOR: OnceLock<(Value, jsonschema::Validator)> = OnceLock::new();
+    SCHEMA_VALIDATOR.get_or_init(|| {
         let schema: Value = serde_json::from_str(SCHEMA).expect("the query schema is JSON");
-        jsonschema::validator_for(&schema).expect("the query schema is a JSON Schema")
+        let validator =
+            jsonschema::validator_for(&schema).expect("the query schema is a JSON Schema");
+        (schema, validator)
     })
 }
 
 pub fn parse(json: &str, catalog: LogicalCatalog<'_>) -> Result<Statement, SurfaceError> {
     let value: Value =
         serde_json::from_str(json).map_err(|error| SurfaceError::Syntax(error.to_string()))?;
-    let errors: Vec<String> = validator()
+    let (schema, validator) = schema();
+    let errors: Vec<String> = validator
         .iter_errors(&value)
-        .map(|error| format!("{error} at {}", error.instance_path()))
+        .map(|error| errors::describe(&error, schema))
         .collect();
     if !errors.is_empty() {
         return Err(SurfaceError::Schema(errors.join("; ")));
