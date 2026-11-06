@@ -7,7 +7,12 @@ query:
     MATCH p = ANY SHORTEST (a:User {username: 'alice'})-[:MEMBER_OF*1..1]->(b:Group {id: 100}) RETURN p
 
 logical:
-  expect: ["(Filter a.username = 'alice' (_))"]
+  gql:
+    expect:
+      - (Limit 30 (Select p (Shortest MEMBER_OF a->b DEPTH 1 (Filter a.username = 'alice' (Entities User AS a)) (Filter b.id = 100 (Entities Group AS b)))))
+  json:
+    expect:
+      - (Limit 30 (Select a, b, path (Shortest MEMBER_OF a->b DEPTH 1 (Filter a.username = 'alice' (Entities User AS a)) (Filter b.id IN [100] (Entities Group AS b)))))
 
 physical:
   clickhouse:

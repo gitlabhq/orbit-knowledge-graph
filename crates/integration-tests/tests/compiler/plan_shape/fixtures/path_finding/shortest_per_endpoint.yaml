@@ -8,8 +8,12 @@ query:
     RETURN path
 
 logical:
-  expect:
-    - (Input path_finding (...))
+  gql:
+    expect:
+      - (Limit 30 (Select path (Shortest MEMBER_OF|CONTAINS u->p DEPTH 2 (Filter u.id = 1 (Entities User AS u)) (Filter p.id = 100 (Entities Project AS p)))))
+  json:
+    expect:
+      - (Limit 30 (Select u, p, path (Shortest MEMBER_OF|CONTAINS u->p DEPTH 2 (Filter u.id IN [1] (Entities User AS u)) (Filter p.id IN [100] (Entities Project AS p)))))
 
 physical:
   clickhouse:

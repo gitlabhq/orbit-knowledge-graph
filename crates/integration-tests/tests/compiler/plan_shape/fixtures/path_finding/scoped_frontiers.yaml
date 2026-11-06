@@ -14,10 +14,12 @@ query:
     MATCH p = ANY SHORTEST (a:Definition {id: 1})-[:CALLS*1..2]->(b:Definition {id: 2}) RETURN p
 
 logical:
-  expect:
-    - (Input path_finding (...))
-    - (Filter a.id IN [1] (NodeScan Definition AS a))
-    - (Filter b.id IN [2] (NodeScan Definition AS b))
+  gql:
+    expect:
+      - (Limit 30 (Select p (Shortest CALLS a->b DEPTH 2 (Filter a.id = 1 (Entities Definition AS a)) (Filter b.id = 2 (Entities Definition AS b)))))
+  json:
+    expect:
+      - (Limit 30 (Select a, b, path (Shortest CALLS a->b DEPTH 2 (Filter a.id IN [1] (Entities Definition AS a)) (Filter b.id IN [2] (Entities Definition AS b)))))
 
 physical:
   clickhouse:

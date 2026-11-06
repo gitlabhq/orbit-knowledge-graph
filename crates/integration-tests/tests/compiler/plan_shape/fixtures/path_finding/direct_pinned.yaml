@@ -7,7 +7,12 @@ query:
     MATCH p = ANY SHORTEST (a:User {id: 1})-[:MEMBER_OF*1..1]->(b:Group {id: 2}) RETURN p
 
 logical:
-  expect: ["(Input path_finding (...))"]
+  gql:
+    expect:
+      - (Limit 30 (Select p (Shortest MEMBER_OF a->b DEPTH 1 (Filter a.id = 1 (Entities User AS a)) (Filter b.id = 2 (Entities Group AS b)))))
+  json:
+    expect:
+      - (Limit 30 (Select a, b, path (Shortest MEMBER_OF a->b DEPTH 1 (Filter a.id IN [1] (Entities User AS a)) (Filter b.id IN [2] (Entities Group AS b)))))
 
 physical:
   clickhouse:
