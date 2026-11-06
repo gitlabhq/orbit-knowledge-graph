@@ -6,13 +6,18 @@ use serde::{Deserialize, Serialize};
 pub struct ObservabilityConfig {
     pub provisioner_url: Option<String>,
     pub provisioner_api_key: Option<String>,
+    #[schemars(range(min = 1))]
     pub host_map_refresh_seconds: u64,
     /// Minimum wait before retrying the provisioner after a failed refresh, so
     /// a provisioner outage does not add the request timeout to every query.
+    #[schemars(range(min = 1))]
     pub host_map_retry_after_seconds: u64,
+    #[schemars(range(min = 1))]
     pub request_timeout_seconds: u64,
     /// Server-side bound on a tenant ClickHouse query, sent as max_execution_time.
+    #[schemars(range(min = 1))]
     pub query_timeout_seconds: u64,
+    #[schemars(range(min = 1))]
     pub max_result_rows: u64,
 }
 
@@ -39,28 +44,75 @@ fn transport_is_protected(raw: &str) -> bool {
     }
 }
 
-impl ObservabilityConfig {
-    pub fn resolver_settings(&self) -> Option<ObservabilityResolverSettings> {
-        let provisioner_url = non_empty(self.provisioner_url.as_deref())?;
-        if !transport_is_protected(&provisioner_url) {
-            return None;
-        }
+/// Distinguishes an unconfigured block from a misconfigured one, so the
+/// resolver can say why it stayed off rather than leaving null columns as the
+/// only clue.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ObservabilityConfigError {
+    MissingProvisionerApiKey,
+    UnprotectedProvisionerUrl,
+    NonPositive(&'static str),
+}
 
-        Some(ObservabilityResolverSettings {
+impl std::fmt::Display for ObservabilityConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingProvisionerApiKey => {
+                write!(f, "observability.provisioner_api_key is not set")
+            }
+            Self::UnprotectedProvisionerUrl => write!(
+                f,
+                "observability.provisioner_url must be https, or http on loopback"
+            ),
+            Self::NonPositive(field) => {
+                write!(f, "observability.{field} must be greater than zero")
+            }
+        }
+    }
+}
+
+impl ObservabilityConfig {
+    /// `Ok(None)` when the block is simply unconfigured.
+    pub fn resolver_settings(
+        &self,
+    ) -> Result<Option<ObservabilityResolverSettings>, ObservabilityConfigError> {
+        let url = non_empty(self.provisioner_url.as_deref());
+        let key = non_empty(self.provisioner_api_key.as_deref());
+
+        let (Some(provisioner_url), key) = (url, key) else {
+            return Ok(None);
+        };
+        if !transport_is_protected(&provisioner_url) {
+            return Err(ObservabilityConfigError::UnprotectedProvisionerUrl);
+        }
+        let provisioner_api_key = key.ok_or(ObservabilityConfigError::MissingProvisionerApiKey)?;
+
+        Ok(Some(ObservabilityResolverSettings {
             provisioner_url,
-            provisioner_api_key: non_empty(self.provisioner_api_key.as_deref())?,
-            host_map_refresh_seconds: positive(self.host_map_refresh_seconds)?,
-            host_map_retry_after_seconds: positive(self.host_map_retry_after_seconds)?,
-            request_timeout_seconds: positive(self.request_timeout_seconds)?,
-            query_timeout_seconds: positive(self.query_timeout_seconds)?,
-            max_result_rows: positive(self.max_result_rows)?,
-        })
+            provisioner_api_key,
+            host_map_refresh_seconds: positive(
+                self.host_map_refresh_seconds,
+                "host_map_refresh_seconds",
+            )?,
+            host_map_retry_after_seconds: positive(
+                self.host_map_retry_after_seconds,
+                "host_map_retry_after_seconds",
+            )?,
+            request_timeout_seconds: positive(
+                self.request_timeout_seconds,
+                "request_timeout_seconds",
+            )?,
+            query_timeout_seconds: positive(self.query_timeout_seconds, "query_timeout_seconds")?,
+            max_result_rows: positive(self.max_result_rows, "max_result_rows")?,
+        }))
     }
 }
 
 /// Zero means unlimited to ClickHouse, so a zeroed bound is a missing bound.
-fn positive(value: u64) -> Option<u64> {
-    (value > 0).then_some(value)
+fn positive(value: u64, field: &'static str) -> Result<u64, ObservabilityConfigError> {
+    (value > 0)
+        .then_some(value)
+        .ok_or(ObservabilityConfigError::NonPositive(field))
 }
 
 fn non_empty(value: Option<&str>) -> Option<String> {
@@ -68,7 +120,7 @@ fn non_empty(value: Option<&str>) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObservabilityResolverSettings {
     pub provisioner_url: String,
     pub provisioner_api_key: String,
@@ -97,61 +149,40 @@ mod tests {
 
     #[test]
     fn complete_configuration_yields_settings() {
-        let settings = complete().resolver_settings().expect("settings");
+        let settings = complete().resolver_settings().unwrap().expect("settings");
 
         assert_eq!(settings.provisioner_url, "https://provisioner.internal");
         assert_eq!(settings.query_timeout_seconds, 15);
     }
 
     #[test]
-    fn an_unconfigured_provisioner_yields_no_settings() {
+    fn an_unconfigured_provisioner_is_not_an_error() {
         let mut config = complete();
         config.provisioner_url = None;
         config.provisioner_api_key = None;
 
-        assert!(config.resolver_settings().is_none());
+        assert_eq!(config.resolver_settings(), Ok(None));
     }
 
     #[test]
-    fn a_zeroed_bound_disables_resolution() {
-        for zero in [
-            (|c: &mut ObservabilityConfig| c.host_map_refresh_seconds = 0)
-                as fn(&mut ObservabilityConfig),
-            |c: &mut ObservabilityConfig| c.host_map_retry_after_seconds = 0,
-            |c: &mut ObservabilityConfig| c.request_timeout_seconds = 0,
-            |c: &mut ObservabilityConfig| c.query_timeout_seconds = 0,
-            |c: &mut ObservabilityConfig| c.max_result_rows = 0,
-        ] {
-            let mut config = complete();
-            zero(&mut config);
-            assert!(
-                config.resolver_settings().is_none(),
-                "zero means unlimited to ClickHouse"
-            );
-        }
+    fn a_url_without_a_key_names_the_missing_field() {
+        let mut config = complete();
+        config.provisioner_api_key = None;
+
+        assert_eq!(
+            config.resolver_settings(),
+            Err(ObservabilityConfigError::MissingProvisionerApiKey)
+        );
     }
 
     #[test]
-    fn each_missing_field_disables_resolution() {
-        for mutate in [
-            (|c: &mut ObservabilityConfig| c.provisioner_url = None)
-                as fn(&mut ObservabilityConfig),
-            |c: &mut ObservabilityConfig| c.provisioner_api_key = None,
-        ] {
-            let mut config = complete();
-            mutate(&mut config);
-            assert!(config.resolver_settings().is_none());
-        }
-    }
-
-    #[test]
-    fn a_plaintext_provisioner_url_disables_resolution() {
+    fn a_plaintext_provisioner_url_is_an_error_rather_than_silence() {
         let mut config = complete();
         config.provisioner_url = Some("http://provisioner.internal".to_string());
 
-        assert!(
-            config.resolver_settings().is_none(),
-            "the host map carries tenant ClickHouse passwords"
+        assert_eq!(
+            config.resolver_settings(),
+            Err(ObservabilityConfigError::UnprotectedProvisionerUrl)
         );
     }
 
@@ -167,7 +198,7 @@ mod tests {
         ] {
             let mut config = complete();
             config.provisioner_url = Some(url.to_string());
-            assert!(config.resolver_settings().is_some(), "{url}");
+            assert!(config.resolver_settings().unwrap().is_some(), "{url}");
         }
     }
 
@@ -181,9 +212,10 @@ mod tests {
         ] {
             let mut config = complete();
             config.provisioner_url = Some(url.to_string());
-            assert!(
-                config.resolver_settings().is_none(),
-                "userinfo makes the real host something else: {url}"
+            assert_eq!(
+                config.resolver_settings(),
+                Err(ObservabilityConfigError::UnprotectedProvisionerUrl),
+                "{url}"
             );
         }
     }
@@ -193,7 +225,7 @@ mod tests {
         for url in ["ftp://provisioner.internal", "file:///etc/passwd"] {
             let mut config = complete();
             config.provisioner_url = Some(url.to_string());
-            assert!(config.resolver_settings().is_none(), "{url}");
+            assert!(config.resolver_settings().is_err(), "{url}");
         }
     }
 
@@ -207,7 +239,41 @@ mod tests {
         ] {
             let mut config = complete();
             config.provisioner_url = Some(url.to_string());
-            assert!(config.resolver_settings().is_none(), "{url}");
+            assert!(config.resolver_settings().is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_zeroed_bound_names_the_field() {
+        for (zero, field) in [
+            (
+                (|c: &mut ObservabilityConfig| c.host_map_refresh_seconds = 0)
+                    as fn(&mut ObservabilityConfig),
+                "host_map_refresh_seconds",
+            ),
+            (
+                |c: &mut ObservabilityConfig| c.host_map_retry_after_seconds = 0,
+                "host_map_retry_after_seconds",
+            ),
+            (
+                |c: &mut ObservabilityConfig| c.request_timeout_seconds = 0,
+                "request_timeout_seconds",
+            ),
+            (
+                |c: &mut ObservabilityConfig| c.query_timeout_seconds = 0,
+                "query_timeout_seconds",
+            ),
+            (
+                |c: &mut ObservabilityConfig| c.max_result_rows = 0,
+                "max_result_rows",
+            ),
+        ] {
+            let mut config = complete();
+            zero(&mut config);
+            assert_eq!(
+                config.resolver_settings(),
+                Err(ObservabilityConfigError::NonPositive(field))
+            );
         }
     }
 
@@ -216,7 +282,10 @@ mod tests {
         let mut config = complete();
         config.provisioner_api_key = Some("   ".to_string());
 
-        assert!(config.resolver_settings().is_none());
+        assert_eq!(
+            config.resolver_settings(),
+            Err(ObservabilityConfigError::MissingProvisionerApiKey)
+        );
     }
 
     #[test]
@@ -224,7 +293,7 @@ mod tests {
         let mut config = complete();
         config.provisioner_url = Some("  https://provisioner.internal  ".to_string());
 
-        let settings = config.resolver_settings().expect("settings");
+        let settings = config.resolver_settings().unwrap().expect("settings");
 
         assert_eq!(settings.provisioner_url, "https://provisioner.internal");
     }

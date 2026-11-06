@@ -1785,29 +1785,29 @@
         "host_map_refresh_seconds": {
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         },
         "host_map_retry_after_seconds": {
           "description": "Minimum wait before retrying the provisioner after a failed refresh, so\na provisioner outage does not add the request timeout to every query.",
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         },
         "request_timeout_seconds": {
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         },
         "query_timeout_seconds": {
           "description": "Server-side bound on a tenant ClickHouse query, sent as max_execution_time.",
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         },
         "max_result_rows": {
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         }
       },
       "additionalProperties": false,
