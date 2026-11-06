@@ -1217,11 +1217,6 @@ impl Ontology {
         result
     }
 
-    #[must_use]
-    pub fn internal_column_prefix(&self) -> &str {
-        &self.internal_column_prefix
-    }
-
     /// Physical tables of `global` nodes — non-namespaced hubs (User, Runner).
     /// These are excluded from traversal-path security filters because they
     /// carry no `traversal_path` to scope on.

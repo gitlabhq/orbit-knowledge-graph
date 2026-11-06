@@ -11,6 +11,7 @@ mod measure;
 mod pattern;
 mod predicate;
 mod results;
+mod shape;
 mod step;
 mod time;
 

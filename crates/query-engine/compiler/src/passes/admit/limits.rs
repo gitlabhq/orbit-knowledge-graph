@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, PredicateTarget};
 
@@ -77,14 +76,7 @@ pub(super) fn filters(input: &Input) -> Result<()> {
 }
 
 pub(super) fn aliases(input: &Input) -> Result<()> {
-    let prefix = internal_column_prefix();
     for (index, node) in input.nodes.iter().enumerate() {
-        if format!("{}_", node.id).starts_with(prefix) {
-            return Err(QueryError::Validation(format!(
-                "identifier {:?} conflicts with reserved prefix {prefix:?}",
-                node.id
-            )));
-        }
         for other in &input.nodes[index + 1..] {
             let (short, long) = match node.id.len() < other.id.len() {
                 true => (&node.id, &other.id),

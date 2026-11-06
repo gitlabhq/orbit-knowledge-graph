@@ -34,7 +34,9 @@ impl<'m> LogicalBuilder<'m> {
         self,
         root: Result<tracking::Rows, PlanError>,
     ) -> Result<LogicalPlan, PlanError> {
-        Ok(self.construction.finish(root?)?)
+        let plan = self.construction.finish(root?)?;
+        super::shape::plan(&plan)?;
+        Ok(plan)
     }
 
     pub(super) fn connect(

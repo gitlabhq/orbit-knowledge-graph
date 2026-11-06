@@ -34,18 +34,10 @@ const fn ends_with_word(name: &[u8], word: &[u8]) -> bool {
     true
 }
 
-/// Loaded once at startup from the embedded ontology YAML.
 /// Every name the compiler invents (column, table alias, CTE) starts with this prefix,
-/// and validation rejects user identifiers that use it, so the two never collide.
+/// and the logical builder rejects user identifiers that use it, so the two never collide.
 pub fn internal_column_prefix() -> &'static str {
-    use std::sync::OnceLock;
-    static PREFIX: OnceLock<String> = OnceLock::new();
-    PREFIX.get_or_init(|| {
-        ontology::Ontology::load_embedded()
-            .expect("embedded ontology must load")
-            .internal_column_prefix()
-            .to_string()
-    })
+    query_data_model::plan::logical::limits::RESERVED_PREFIX
 }
 
 macro_rules! internal_name {

@@ -3,6 +3,7 @@ use ontology::constants::DEFAULT_PRIMARY_KEY;
 use super::{Expr, PlanError, Predicate};
 use crate::Model;
 
+pub const RESERVED_PREFIX: &str = "_orbit_";
 pub const MAX_HOPS: u32 = 3;
 pub const MAX_PATH_DEPTH: u32 = 3;
 pub const MAX_RELATIONSHIP_TYPES: usize = 10;

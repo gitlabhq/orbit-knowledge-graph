@@ -2,6 +2,7 @@ mod dialects;
 mod ontology;
 mod plan_shape;
 mod predicate_limits;
+mod reserved_names;
 mod setup;
 #[allow(dead_code)]
 mod utils;
