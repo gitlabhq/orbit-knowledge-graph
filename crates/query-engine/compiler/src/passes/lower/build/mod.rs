@@ -1,5 +1,6 @@
 pub(crate) mod expr;
 pub(crate) mod predicates;
+pub(crate) mod sources;
 
 use orbit_utils::query_types::SqlType;
 use query_data_model::implementations::relational::plan::{

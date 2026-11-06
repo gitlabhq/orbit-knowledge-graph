@@ -33,9 +33,7 @@ pub enum NodeBinding {
         table_alias: Option<String>,
         traversal_path: Option<Expr>,
     },
-    Projected {
-        role_identity: Option<Expr>,
-    },
+    Projected,
 }
 
 impl NodeBinding {
@@ -156,7 +154,14 @@ pub fn emit<M: RelationalModel>(
             let stable_order = query_types::aggregation::stable_order(plan);
             (Lowered::Plan(built), nodes, stable_order)
         }
-        QueryPlan::Neighbors(plan) => ast(query_types::neighbors::emit(plan, input)?),
+        QueryPlan::Neighbors(plan) => {
+            let built = catalog
+                .build(|q| query_types::neighbors::emit(q, plan, input))
+                .map_err(rejected)?;
+            let center = (plan.operation.center.clone(), NodeBinding::Projected);
+            let stable_order = query_types::neighbors::stable_order(plan);
+            (Lowered::Plan(built), HashMap::from([center]), stable_order)
+        }
         QueryPlan::PathFinding(plan) => ast(query_types::pathfinding::emit(plan, input)?),
         QueryPlan::Hydration(plan) => {
             query_types::hydration::check(plan)?;

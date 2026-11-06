@@ -8,19 +8,6 @@ use crate::passes::plan::BoundFilter;
 use crate::passes::plan::filters::{NullAsEpoch, denorm_tag_values};
 use crate::passes::plan::predicates::Column;
 
-pub(crate) fn latest_row_dedup(
-    alias: &str,
-    sort_key: &[String],
-) -> (Vec<OrderExpr>, Option<(u32, Vec<Expr>)>) {
-    let keys: Vec<_> = sort_key
-        .iter()
-        .map(|column| Expr::col(alias, column))
-        .collect();
-    let mut order: Vec<_> = keys.iter().cloned().map(OrderExpr::asc).collect();
-    order.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
-    (order, Some((1, keys)))
-}
-
 pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
     filter_expression(
         &Column::new(alias, prop),
@@ -316,34 +303,6 @@ pub fn final_edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     TableRef::union_all(queries, alias)
 }
 
-/// Like `edge_table_scan` but pushes per-arm predicates into each UNION arm; returns predicates the caller must apply on the enclosing query (single-table case).
-pub fn edge_table_scan_filtered(
-    tables: &[String],
-    alias: &str,
-    arm_where: impl Fn(&str) -> Vec<Expr>,
-) -> (TableRef, Vec<Expr>) {
-    if tables.len() == 1 {
-        (TableRef::scan(&tables[0], alias), arm_where(alias))
-    } else {
-        let inner_alias = union_arm_alias(alias);
-        let mut common_cols: Vec<SelectExpr> = ontology::constants::EDGE_RESERVED_COLUMNS
-            .iter()
-            .map(|col| SelectExpr::col(&inner_alias, *col))
-            .collect();
-        common_cols.push(SelectExpr::col(&inner_alias, DELETED_COLUMN));
-        let arms: Vec<Query> = tables
-            .iter()
-            .map(|table| Query {
-                select: common_cols.clone(),
-                from: TableRef::scan(table, &inner_alias),
-                where_clause: Expr::conjoin(arm_where(&inner_alias)),
-                ..Default::default()
-            })
-            .collect();
-        (TableRef::union_all(arms, alias), Vec::new())
-    }
-}
-
 /// `FINAL` applies the table engine's merge semantics at read time, so filters
 /// are evaluated against the latest row rather than historical matching
 /// versions.
@@ -359,21 +318,4 @@ pub fn dedup_query(
         where_clause: Expr::conjoin(scan_where),
         ..Default::default()
     }
-}
-
-/// Latest-row scan wrapped as a subquery TableRef + outer `_deleted=false` filter.
-pub fn dedup_subquery(
-    alias: &str,
-    table: &str,
-    select: Vec<SelectExpr>,
-    scan_where: Vec<Expr>,
-) -> (TableRef, Expr) {
-    let query = dedup_query(alias, table, select, scan_where);
-    (
-        TableRef::Subquery {
-            query: Box::new(query),
-            alias: alias.to_string(),
-        },
-        deleted_false(alias),
-    )
 }
