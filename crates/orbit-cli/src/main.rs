@@ -691,7 +691,7 @@ enum Commands {
         #[arg(long, hide = true)]
         gitlab: bool,
     },
-    /// Sends one command event; `hook-guard` runs it detached so hooks never wait on telemetry.
+    /// Sends one command event; every command runs it detached so none waits on telemetry.
     #[command(hide = true)]
     SendEvent {
         #[arg(value_name = "COMMAND")]
@@ -699,6 +699,9 @@ enum Commands {
 
         #[arg(long, value_name = "MS")]
         duration_ms: u64,
+
+        #[arg(long, value_name = "CODE", default_value_t = 0)]
+        exit_code: i32,
     },
     /// Refreshes edited files into the incremental graph; `grep` and `context` run it detached.
     #[command(hide = true)]
@@ -792,16 +795,18 @@ async fn main() -> Result<()> {
         Commands::HookGuard { kind, gitlab, .. } => {
             let started = Instant::now();
             if commands::hook_guard::run(*kind, *gitlab) {
-                telemetry::spawn_detached_event(&subcommand_path(&matches), started.elapsed());
+                telemetry::spawn_detached_event(&subcommand_path(&matches), 0, started.elapsed());
             }
             return Ok(());
         }
         Commands::SendEvent {
             command,
             duration_ms,
+            exit_code,
         } => {
-            send_event(command, Duration::from_millis(*duration_ms)).await;
-            return Ok(());
+            send_event(command, *exit_code, Duration::from_millis(*duration_ms)).await;
+            // Skips the runtime's wait on blocking DNS lookups past the flush timeout.
+            std::process::exit(0);
         }
         Commands::Refresh { repo, db, files } => {
             return commands::index::incremental::refresh_now(
@@ -817,7 +822,12 @@ async fn main() -> Result<()> {
 
     // labkit-events ships no TLS provider; the tracker below builds an HTTPS client.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    let tracker = telemetry::resolve_from_env().build_tracker();
+    let tracker = match cli.command {
+        Commands::Setup { .. } | Commands::Uninstall { .. } => {
+            telemetry::resolve_from_env().build_tracker()
+        }
+        _ => None,
+    };
 
     let started = Instant::now();
     let result = dispatch(cli.command, tracker.clone(), coding_agent.clone())
@@ -828,15 +838,7 @@ async fn main() -> Result<()> {
         });
     let exit_code = result.as_ref().map_or_else(exit_code_for, |()| 0);
 
-    if let Some(tracker) = &tracker {
-        telemetry::emit_command_event(
-            tracker,
-            &subcommand_path(&matches),
-            exit_code,
-            started.elapsed(),
-            coding_agent.as_deref(),
-        );
-    }
+    telemetry::spawn_detached_event(&subcommand_path(&matches), exit_code, started.elapsed());
     flush_telemetry(tracker.as_ref()).await;
 
     let Err(err) = &result else {
@@ -887,13 +889,19 @@ fn subcommand_path(matches: &clap::ArgMatches) -> String {
     path.replace('-', "_")
 }
 
-async fn send_event(command: &str, duration: Duration) {
+async fn send_event(command: &str, exit_code: i32, duration: Duration) {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let Some(tracker) = telemetry::resolve_from_env().build_tracker() else {
         return;
     };
     let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
-    telemetry::emit_command_event(&tracker, command, 0, duration, coding_agent.as_deref());
+    telemetry::emit_command_event(
+        &tracker,
+        command,
+        exit_code,
+        duration,
+        coding_agent.as_deref(),
+    );
     let _ = tokio::time::timeout(DETACHED_FLUSH_TIMEOUT, tracker.shutdown()).await;
 }
 
@@ -1326,6 +1334,23 @@ mod tests {
             Cli::try_parse_from(["orbit", "status", "--full-path", "a/b", "--project-id", "1"])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn send_event_carries_the_parent_exit_code() {
+        let Commands::SendEvent { exit_code, .. } = Cli::parse_from([
+            "orbit",
+            "send-event",
+            "grep",
+            "--duration-ms",
+            "5",
+            "--exit-code=130",
+        ])
+        .command
+        else {
+            panic!("expected send-event");
+        };
+        assert_eq!(exit_code, 130);
     }
 
     #[test]
