@@ -318,7 +318,16 @@ impl Returned {
             SortKey::Property(key) => (key.node.value, key.property.value),
             SortKey::RelationshipType(name) => match scope.edge(&name.value) {
                 Some((_, edge)) if edge.hops.max == 1 => return kind(&name),
-                _ => {
+                Some(_) => {
+                    let (span, name) = (name.span, &name.value);
+                    return Err(invalid(
+                        span,
+                        &format!(
+                            "{name} has a variable length and binds a list; type({name}) and RETURN {name} need a one-hop relationship, so list the types in the pattern instead, such as -[{name}:CLOSES|MENTIONS*1..3]->"
+                        ),
+                    ));
+                }
+                None => {
                     return Err(invalid(
                         name.span,
                         &format!("undefined variable {}", name.value),

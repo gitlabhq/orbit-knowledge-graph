@@ -5,4 +5,4 @@ query:
     MATCH (f:File {id: 13004}) RETURN min(f.content) AS text
 
 expect:
-  compile_error: "virtual"
+  compile_error: "looked up from a service and cannot be aggregated"

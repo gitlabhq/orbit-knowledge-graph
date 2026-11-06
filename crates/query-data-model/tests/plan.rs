@@ -334,11 +334,11 @@ fn property_policy_and_types_are_checked_at_construction() {
     );
     assert_eq!(
         attempt(requests, "state", |value| value.eq("draft")),
-        "MergeRequest.state has no value draft; allowed: opened, closed, merged, locked"
+        "MergeRequest.state has no value draft. Valid values: 1 (opened), 2 (closed), 3 (merged), 4 (locked)"
     );
     assert_eq!(
         attempt(requests, "title", |value| value.gt(3)),
-        "MergeRequest.title is Int(3), not String"
+        "MergeRequest.title: the value is an integer, not a string"
     );
 
     let model = load(&["gitlab"]);
@@ -373,7 +373,7 @@ fn a_failed_step_closes_the_construction_session() {
         let rows = q.entities(requests)?;
         let title = rows.property("title")?;
         let failed = q.filter(rows, title.eq(true));
-        assert!(matches!(failed, Err(PlanError::Type { .. })));
+        assert!(matches!(failed, Err(PlanError::Invalid { .. })));
         let retry = q.entities(requests);
         assert_eq!(retry.unwrap_err(), PlanError::Rejected(Rejected::Failed));
         Err(PlanError::NoEntity)

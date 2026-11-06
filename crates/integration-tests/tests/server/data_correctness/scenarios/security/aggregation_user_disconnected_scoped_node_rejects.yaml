@@ -18,7 +18,7 @@ query:
 expect:
   compile_error: true
   compile_error_contains:
-    json: [globally-scoped, relationships]
+    json: [available to administrators only]
     gql: [one connected pattern]
   compile_error_not_contains:
     json: ["target@example.com"]

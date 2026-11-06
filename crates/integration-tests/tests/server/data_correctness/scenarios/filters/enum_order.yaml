@@ -7,7 +7,7 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state > 'opened' RETURN mr
     expect:
-      compile_error: enum values have no order
+      compile_error: enum values compare only with = or <>
 
   - name: greater_or_equal_rejected
     description: An enum has no order, so >= is rejected
@@ -17,7 +17,7 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state >= 3 RETURN mr
     expect:
-      compile_error: enum values have no order
+      compile_error: enum values compare only with = or <>
 
   - name: less_than_rejected
     description: An enum has no order, so < is rejected
@@ -27,7 +27,7 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state < 'opened' RETURN mr
     expect:
-      compile_error: enum values have no order
+      compile_error: enum values compare only with = or <>
 
   - name: less_or_equal_rejected
     description: An enum has no order, so <= is rejected
@@ -37,7 +37,7 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state <= 'merged' RETURN mr
     expect:
-      compile_error: enum values have no order
+      compile_error: enum values compare only with = or <>
 
   - name: negated_ordering_rejected
     description: NOT does not make an enum ordering comparison valid
@@ -45,7 +45,7 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) WHERE NOT mr.state > 'opened' RETURN mr
     expect:
-      compile_error: enum values have no order
+      compile_error: enum values compare only with = or <>
 
   - name: string_backed_enum_ordering_rejected
     description: A string-backed enum has no order either
@@ -55,7 +55,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1}) WHERE u.state > 'active' RETURN u
     expect:
-      compile_error: enum values have no order
+      compile_error: enum values compare only with = or <>
 
   - name: min_rejected
     description: MIN does not apply to an enum
@@ -83,7 +83,7 @@ cases:
       gql: |
         MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE g.visibility_level < p.visibility_level RETURN p
     expect:
-      compile_error: not <, >, <=, or >=
+      compile_error: enum values compare only with = or <>
 
   - name: comparison_across_enum_domains_rejected
     description: Two enum fields with different values cannot be compared

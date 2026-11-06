@@ -13,5 +13,5 @@ query:
 expect:
   compile_error:
     json: "Valid values: id, "
-    gql: "Valid fields: id, "
+    gql: "candidates: id, "
   compile_error_not_contains: ["traversal_path"]

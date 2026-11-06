@@ -50,7 +50,7 @@ cases:
         MATCH (u:User {id: 1}) WHERE NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND
         NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1
         AND NOT u.id = 1 RETURN u
-    expect: { compile_error: filter on "id" needs between 1 and 10 predicates }
+    expect: { compile_error: on property "id" for node "u" must not exceed 10 }
 
   - name: negation_depth_rejected
     description: NOT nesting is bounded before recursive lowering
@@ -217,7 +217,7 @@ cases:
     query:
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT (u.username = 'alice' AND u.missing = 'value') RETURN u.id
-    expect: { compile_error: does not exist }
+    expect: { compile_error: unknown property User.missing }
 
   - name: variable_edge_rejected
     description: A variable-length relationship list cannot be used as a scalar predicate

@@ -51,7 +51,7 @@ cases:
       gql: |
         MATCH (w:WorkItem)-[:HAS_LABEL]->(l:Label) WHERE w.title > l.title RETURN count(w) AS n
     expect:
-      compile_error: text matching and ordering require grouping by "w"
+      compile_error: cross-node property comparisons are only supported in traversal queries
 
   - name: cross_node_text_ordering_rhs_rejected
     description: A text ordering comparison between nodes requires grouping by the right node
@@ -59,7 +59,7 @@ cases:
       gql: |
         MATCH (w:WorkItem)-[:HAS_LABEL]->(l:Label) WHERE w.title > l.title RETURN w, count(l) AS n
     expect:
-      compile_error: text matching and ordering require grouping by "l"
+      compile_error: cross-node property comparisons are only supported in traversal queries
 
   - name: text_equality_on_ungrouped_node_compiles
     description: Equality on a text property works on any node

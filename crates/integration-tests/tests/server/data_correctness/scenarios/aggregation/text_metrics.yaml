@@ -12,7 +12,7 @@ cases:
       gql: |
         MATCH (w:WorkItem {id: 9001}) RETURN min(w.description) AS v
     expect:
-      compile_error: aggregates are restricted to scalars
+      compile_error: not an ordered scalar
 
   - name: grouped_max_text_rejected
     description: A node-grouped MAX rejects a text property
@@ -22,7 +22,7 @@ cases:
       gql: |
         MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000}) RETURN p, max(w.title) AS v
     expect:
-      compile_error: aggregates are restricted to scalars
+      compile_error: not an ordered scalar
 
   - name: max_uuid_rejected
     description: MAX rejects a UUID
@@ -35,7 +35,7 @@ cases:
       gql: |
         MATCH (o:VulnerabilityOccurrence {id: 1}) RETURN max(o.uuid) AS v
     expect:
-      compile_error: aggregates are restricted to scalars
+      compile_error: not an ordered scalar
 
   - name: scalar_metrics_compile
     description: MIN and MAX still accept timestamps, integers, and booleans

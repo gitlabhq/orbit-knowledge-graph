@@ -262,6 +262,10 @@ pub(super) fn measure(
             Measure::Min(_) | Measure::Max(_),
             DataType::Int | DataType::Float | DataType::Bool | DataType::Date | DataType::DateTime,
         ) => Ok(typed.data_type),
+        (Measure::Min(_) | Measure::Max(_), DataType::Enum) => Err(PlanError::Invalid {
+            expr: typed.name,
+            reason: "min and max do not apply to an enum, because enum values have no order; group by it instead".to_string(),
+        }),
         (Measure::Min(_) | Measure::Max(_), found) => Err(PlanError::Type {
             expr: typed.name,
             expected: "an ordered scalar".to_string(),

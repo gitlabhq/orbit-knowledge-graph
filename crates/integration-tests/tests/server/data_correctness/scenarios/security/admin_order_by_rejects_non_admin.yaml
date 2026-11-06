@@ -13,4 +13,4 @@ query:
 
 expect:
   compile_error: true
-  compile_error_contains: [is_admin, order_by, administrator]
+  compile_error_contains: [is_admin, administrator]

@@ -14,4 +14,4 @@ query:
     RETURN mr.title LIMIT 10
 
 expect:
-  compile_error: "token_match value must be one word"
+  compile_error: "takes one word of letters and digits; use all_tokens for several words"

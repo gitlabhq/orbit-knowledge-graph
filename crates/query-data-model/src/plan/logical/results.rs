@@ -101,7 +101,11 @@ impl<'m> LogicalBuilder<'m> {
         let operation = LogicalOperation::Limit { rows: count, skip };
         self.connect(operation, vec![rows], |_, _, _| {
             limits::within("limit", count, 1, MAX_ROWS)?;
-            limits::within("skip", skip.unwrap_or_default(), 0, MAX_SKIP)?;
+            if skip.unwrap_or_default() > MAX_SKIP {
+                return Err(PlanError::shape(format!(
+                    "skip must be at most {MAX_SKIP}; to page deeper, ORDER BY a unique key such as id and filter past the last value from the previous page"
+                )));
+            }
             Ok(Outputs::preserve())
         })
     }

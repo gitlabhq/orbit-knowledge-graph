@@ -31,7 +31,7 @@ fn empty_in_list_is_rejected() {
         "MATCH (mr:MergeRequest) WHERE mr.state IN [] RETURN mr",
         "MATCH (mr:MergeRequest) WHERE mr.id IN [] RETURN mr",
     ] {
-        assert_rejected(query, Frontend::Gql, CONSTANT);
+        assert_rejected(query, Frontend::Gql, "IN requires 1-100 values");
     }
 }
 
@@ -113,5 +113,53 @@ fn virtual_properties_are_rejected_under_not() {
         let message = rejected(query, Frontend::Gql);
         assert!(message.contains("virtual column"), "{query}: {message}");
         assert!(!message.contains("secret"), "{query}: {message}");
+    }
+}
+
+#[test]
+fn rejections_keep_their_hints() {
+    for (query, hint) in [
+        (
+            "MATCH (n:Note {id: 3000}) WHERE n.created_at >= '2024-02-30' RETURN n",
+            "is not a valid date; use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS",
+        ),
+        (
+            "MATCH (n:Note {id: 3000}) WHERE n.note = date('2024-01-15') RETURN n",
+            "datetime() and date() compare only with date fields",
+        ),
+        (
+            "MATCH (wi:WorkItem {id: 4000}) WHERE NOT wi.id IN ['bad'] RETURN wi.id",
+            "not an integer",
+        ),
+        (
+            "MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN p, min(mr.state) AS s",
+            "because enum values have no order; group by it instead",
+        ),
+        (
+            "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) WHERE u.user_type = p.visibility_level RETURN p",
+            "enums with different values",
+        ),
+        (
+            "MATCH (u:User {id: 1}) WHERE u.user_type = 999 RETURN u LIMIT 10",
+            "has no value 999. Valid values: 0 (human)",
+        ),
+        (
+            "MATCH (u:User {id: 1}) WHERE u.user_type STARTS WITH 'bot' RETURN u LIMIT 10",
+            "no enum value starts with \"bot\"",
+        ),
+        (
+            "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 10001 LIMIT 2",
+            "ORDER BY a unique key such as id and filter past the last value",
+        ),
+        (
+            "MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE type(r) <> 'CONTAINS' RETURN p LIMIT 10",
+            "Valid values: CONTAINS",
+        ),
+        (
+            "MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN u, g ORDER BY type(r) LIMIT 10",
+            "r has a variable length and binds a list",
+        ),
+    ] {
+        assert_rejected(query, Frontend::Gql, hint);
     }
 }

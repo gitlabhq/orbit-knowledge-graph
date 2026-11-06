@@ -109,11 +109,12 @@ fn apply(
                 false => names.clone(),
             };
         }
+        let allowed = types.join(", ");
         types.retain(|kind| names.contains(kind) != *negated);
         if types.is_empty() {
-            return Err(QueryError::Validation(
-                "type(r) excludes every relationship type the pattern allows".into(),
-            ));
+            return Err(QueryError::Validation(format!(
+                "type(r) excludes every relationship type the pattern allows. Valid values: {allowed}"
+            )));
         }
     }
     Ok(types)

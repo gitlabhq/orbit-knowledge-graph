@@ -18,4 +18,4 @@ query:
 
 expect:
   compile_error: true
-  compile_error_contains: [is_auditor, aggregation]
+  compile_error_contains: [is_auditor, administrator]

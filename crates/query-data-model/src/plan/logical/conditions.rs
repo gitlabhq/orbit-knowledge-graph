@@ -1,3 +1,4 @@
+use super::limits::MAX_IN_VALUES;
 use super::{
     Comparison, Conjunct, EdgeField, Expr, Literal, Logical, LogicalOperation, LogicalType,
     Operand, PlanError, Predicate,
@@ -12,10 +13,10 @@ pub(super) fn conditions(
     construction: &Construction<Logical>,
     predicate: &Predicate,
 ) -> Result<(), PlanError> {
-    kinds(model, predicate)?;
     for leaf in predicate.leaf_predicates() {
         constant(leaf)?;
     }
+    kinds(model, predicate)?;
     for conjunct in predicate.conjuncts() {
         let leaves = match conjunct {
             Conjunct::Leaf { predicate, negated } => vec![(predicate, negated)],
@@ -34,7 +35,11 @@ pub(super) fn conditions(
 
 fn constant(leaf: &Predicate) -> Result<(), PlanError> {
     let constant = match leaf {
-        Predicate::In { values, .. } => values.is_empty(),
+        Predicate::In { values, .. } if values.is_empty() => {
+            return Err(PlanError::shape(format!(
+                "IN requires 1-{MAX_IN_VALUES} values"
+            )));
+        }
         Predicate::Compare {
             left,
             right: Operand::Expr(right),

@@ -35,12 +35,14 @@ pub enum PlanError {
         expected: String,
         found: String,
     },
-    #[error("{property} has no value {value}; allowed: {}", .allowed.join(", "))]
+    #[error("{property} has no value {value}. Valid values: {}", .allowed.join(", "))]
     Value {
         property: String,
         value: String,
         allowed: Vec<String>,
     },
+    #[error("{expr}: {reason}")]
+    Invalid { expr: String, reason: String },
     #[error("{relationship} reaches several entities; pick one of: {}", .endpoints.join(", "))]
     Ambiguous {
         relationship: String,
@@ -82,7 +84,9 @@ impl PlanError {
             | Self::AdminOnly(_)
             | Self::NotFilterable(_)
             | Self::NoSubstring(_) => ErrorClass::Policy,
-            Self::Type { .. } | Self::Value { .. } | Self::NoEntity => ErrorClass::Type,
+            Self::Type { .. } | Self::Value { .. } | Self::Invalid { .. } | Self::NoEntity => {
+                ErrorClass::Type
+            }
             Self::UnknownColumn { .. } | Self::UnknownBinding { .. } | Self::Duplicate(_) => {
                 ErrorClass::Reference
             }

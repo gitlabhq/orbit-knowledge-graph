@@ -65,7 +65,7 @@ fn negated(model: &Model, predicate: &Predicate) -> Result<(), PlanError> {
             && model.lookup(property).is_some()
         {
             return Err(PlanError::shape(format!(
-                "{} is a virtual column and cannot be used under NOT",
+                "{}: virtual columns cannot be used under NOT",
                 model.graph().property(property).name
             )));
         }
@@ -138,7 +138,7 @@ fn text(typed: &Typed<'_>, matching: Matching, needle: &str) -> Result<(), PlanE
             .any(|c| c.is_ascii() && !c.is_ascii_alphanumeric())
     {
         return Err(PlanError::shape(format!(
-            "a token match on {} takes one word of letters and digits",
+            "a token match on {} takes one word of letters and digits; use all_tokens for several words",
             typed.name
         )));
     }
@@ -156,10 +156,17 @@ fn text(typed: &Typed<'_>, matching: Matching, needle: &str) -> Result<(), PlanE
                     _ => label.ends_with(&needle),
                 }
             });
-            found.then_some(()).ok_or_else(|| PlanError::Value {
-                property: typed.name.clone(),
-                value: needle,
-                allowed: labels.values().cloned().collect(),
+            let verb = match matching {
+                Matching::Contains => "contains",
+                Matching::StartsWith => "starts with",
+                _ => "ends with",
+            };
+            found.then_some(()).ok_or_else(|| PlanError::Invalid {
+                expr: typed.name.clone(),
+                reason: format!(
+                    "no enum value {verb} \"{needle}\". Valid values: {}",
+                    allowed(typed).join(", ")
+                ),
             })
         }
         _ => Ok(()),
@@ -183,7 +190,13 @@ fn comparable(model: &Model, left: &Typed<'_>, right: &Typed<'_>) -> Result<(), 
     let enums = left.data_type == DataType::Enum
         && left.property.map(|p| (p.enum_type, &p.enum_values))
             != right.property.map(|p| (p.enum_type, &p.enum_values));
-    if !same || enums {
+    if same && enums {
+        return Err(PlanError::Invalid {
+            expr: format!("{} and {}", left.name, right.name),
+            reason: "they are enums with different values and cannot be compared".to_string(),
+        });
+    }
+    if !same {
         return Err(PlanError::Type {
             expr: right.name.clone(),
             expected: format!("{:?} like {}", left.data_type, left.name),
@@ -194,26 +207,50 @@ fn comparable(model: &Model, left: &Typed<'_>, right: &Typed<'_>) -> Result<(), 
 }
 
 pub(super) fn literal(typed: &Typed<'_>, literal: &Literal) -> Result<(), PlanError> {
-    let mismatch = || PlanError::Type {
+    let invalid = |reason: String| PlanError::Invalid {
         expr: typed.name.clone(),
-        expected: format!("{:?}", typed.data_type),
-        found: format!("{literal:?}"),
+        reason,
+    };
+    let date = |valid: bool, formats: &str| {
+        valid
+            .then_some(())
+            .ok_or_else(|| invalid(format!("the value is not a valid date; use {formats}")))
     };
     match (typed.data_type, literal) {
         (DataType::Enum, Literal::String(_) | Literal::Int(_)) => enum_value(typed, literal),
         (DataType::Date, Literal::String(text) | Literal::Temporal(text)) => {
-            super::time::date(text).then_some(()).ok_or_else(mismatch)
+            date(super::time::date(text), "YYYY-MM-DD")
         }
-        (DataType::DateTime, Literal::String(text) | Literal::Temporal(text)) => {
-            super::time::date_time(text)
-                .then_some(())
-                .ok_or_else(mismatch)
-        }
+        (DataType::DateTime, Literal::String(text) | Literal::Temporal(text)) => date(
+            super::time::date_time(text),
+            "YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS[.ffffff][Z]",
+        ),
+        (found, Literal::Temporal(_)) => Err(invalid(format!(
+            "datetime() and date() compare only with date fields, but this field is {found:?}"
+        ))),
         (DataType::String | DataType::Uuid, Literal::String(_))
         | (DataType::Int, Literal::Int(_))
         | (DataType::Float, Literal::Float(_) | Literal::Int(_))
         | (DataType::Bool, Literal::Bool(_)) => Ok(()),
-        _ => Err(mismatch()),
+        (expected, found) => {
+            let noun = |data_type| match data_type {
+                DataType::Int => "an integer",
+                DataType::Float => "a number",
+                DataType::Bool => "a boolean",
+                _ => "a string",
+            };
+            let found = match found {
+                Literal::String(_) => "a string",
+                Literal::Int(_) => "an integer",
+                Literal::Float(_) => "a float",
+                Literal::Bool(_) => "a boolean",
+                Literal::Temporal(_) => "a date",
+            };
+            Err(invalid(format!(
+                "the value is {found}, not {}",
+                noun(expected)
+            )))
+        }
     }
 }
 
@@ -234,8 +271,24 @@ fn enum_value(typed: &Typed<'_>, literal: &Literal) -> Result<(), PlanError> {
         property: typed.name.clone(),
         value: match literal {
             Literal::String(text) => text.clone(),
+            Literal::Int(key) => key.to_string(),
             other => format!("{other:?}"),
         },
-        allowed: labels.map(|(_, label)| label.clone()).collect(),
+        allowed: allowed(typed),
     })
+}
+
+fn allowed(typed: &Typed<'_>) -> Vec<String> {
+    let Some(property) = typed.property else {
+        return Vec::new();
+    };
+    property
+        .enum_values
+        .iter()
+        .flatten()
+        .map(|(key, label)| match property.enum_type {
+            ontology::EnumType::Int => format!("{key} ({label})"),
+            _ => label.clone(),
+        })
+        .collect()
 }
