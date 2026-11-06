@@ -29,6 +29,13 @@ impl Catalog<ClickHouse> {
         }
         rendered
     }
+
+    pub fn render_shared(
+        &self,
+        plan: &RelationalPlan<ClickHouse>,
+    ) -> Vec<(String, ParameterizedSql)> {
+        Renderer::shared(self, plan, ClickHouseSql::default)
+    }
 }
 
 impl Dialect for ClickHouseSql {

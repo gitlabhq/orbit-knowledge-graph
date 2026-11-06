@@ -17,7 +17,7 @@ use query_data_model::{
     Catalog, ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, QueryModel,
 };
 
-use crate::ast::{Node, Query, SqlType};
+use crate::ast::{Node, SqlType};
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::hydrate::HydrationPlan;
@@ -143,28 +143,11 @@ pub fn duckdb_codegen(
 /// A CTE's name, its body as a statement of its own with the CTEs before it attached, and its parameters.
 pub type CteStatement = (String, String, HashMap<String, ParamValue>);
 
-/// Each CTE body as a statement tests can EXPLAIN.
-pub fn cte_statements(ast: &Node, catalog: &Catalog<ClickHouse>) -> Result<Vec<CteStatement>> {
-    let Node::Query(query) = ast else {
-        return Ok(Vec::new());
-    };
-    query
-        .ctes
-        .iter()
-        .map(|cte| {
-            let statement = Node::Query(Box::new(Query {
-                ctes: query
-                    .ctes
-                    .iter()
-                    .take_while(|other| other.name != cte.name)
-                    .cloned()
-                    .collect(),
-                ..(*cte.query).clone()
-            }));
-            let plan = build(&statement, catalog, SqlDialect::ClickHouse)?;
-            let rendered = catalog.render(&plan);
-            Ok((cte.name.clone(), rendered.sql, rendered.parameters))
-        })
+pub fn cte_statements(plan: &ClickHousePlan, catalog: &Catalog<ClickHouse>) -> Vec<CteStatement> {
+    catalog
+        .render_shared(plan)
+        .into_iter()
+        .map(|(name, rendered)| (name, rendered.sql, rendered.parameters))
         .collect()
 }
 

@@ -94,6 +94,35 @@ fn finish<C: config::CompilerCtx>(
         .count_err()
 }
 
+/// Each CTE body of the compiled ClickHouse plan as a statement tests can EXPLAIN.
+pub fn cte_statements(
+    raw: &str,
+    fe: Frontend,
+    data_model: &Arc<ClickHouseDataModel>,
+    ctx: &SecurityContext,
+) -> Result<Vec<passes::codegen::CteStatement>> {
+    let shared = |plan: &Option<passes::codegen::ClickHousePlan>| {
+        let plan = plan.as_ref().ok_or_else(|| {
+            error::QueryError::PipelineInvariant("pipeline did not produce a plan".into())
+        })?;
+        Ok(passes::codegen::cte_statements(plan, data_model.catalog()))
+    };
+    match fe {
+        Frontend::JsonDsl => {
+            let mut ctx = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
+            ctx.set_raw(raw.to_string());
+            config::run_clickhouse_json_dsl(&mut ctx)?;
+            shared(ctx.relational())
+        }
+        Frontend::Gql => {
+            let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
+            ctx.set_raw(raw.to_string());
+            config::run_clickhouse_gql(&mut ctx)?;
+            shared(ctx.relational())
+        }
+    }
+}
+
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
     raw: &str,

@@ -2151,16 +2151,13 @@ fn gql_prepares_queries_and_scoped_schema() {
 
 #[test]
 fn cte_statements_carry_the_ctes_they_read() {
-    let compiled = compile(
+    let statements = compiler::cte_statements(
         "MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) WHERE g.full_path = 'g701' RETURN p, count(f) AS c LIMIT 10",
         Frontend::Gql,
         &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
-    let statements =
-        compiler::passes::codegen::cte_statements(&compiled.ast, embedded_model().catalog())
-            .unwrap();
     assert!(
         statements
             .iter()

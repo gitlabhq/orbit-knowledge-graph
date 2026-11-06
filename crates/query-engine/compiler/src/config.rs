@@ -378,8 +378,8 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
     let node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
-    let plan = require(ctx.take_relational(), "relational")?;
-    let base = codegen::render(&plan, ctx.data_model(), result_context, query_config);
+    let plan = require(ctx.relational().as_ref(), "relational")?;
+    let base = codegen::render(plan, ctx.data_model(), result_context, query_config);
     let query_type = input.query_type;
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
