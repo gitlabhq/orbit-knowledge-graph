@@ -35,17 +35,20 @@ const DETACHED_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
     after_help = descriptions::summary("cli")
 )]
 struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Args, Debug, PartialEq)]
+struct RetryArgs {
     /// Retries for rate-limited or unreachable requests; 0 disables them.
     #[arg(
         long,
-        global = true,
         env = "ORBIT_RETRIES",
         value_name = "N",
         default_value_t = remote::retry::DEFAULT_RETRIES
     )]
     retries: u32,
-    #[command(subcommand)]
-    command: Commands,
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -107,6 +110,9 @@ impl IndexArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("grep"), long_about = descriptions::long("grep"))]
 struct GrepArgs {
+    #[command(flatten)]
+    retry: RetryArgs,
+
     #[arg(
         value_name = "QUERY",
         required_unless_present = "regexp",
@@ -389,6 +395,9 @@ fn sql_long_about() -> String {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("context"), long_about = descriptions::long("context"))]
 struct ContextArgs {
+    #[command(flatten)]
+    retry: RetryArgs,
+
     #[arg(value_name = "TARGET", help = context_target_help())]
     target: Vec<String>,
 
@@ -492,6 +501,9 @@ struct ResetArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(group(clap::ArgGroup::new("graph_status_scope").args(["full_path", "namespace_id", "project_id"])))]
 struct GraphStatusArgs {
+    #[command(flatten)]
+    retry: RetryArgs,
+
     /// Full path of a project or group, such as `gitlab-org/gitlab`.
     #[arg(long)]
     full_path: Option<String>,
@@ -624,6 +636,18 @@ impl SetupFlags {
     }
 }
 
+impl Commands {
+    fn retries(&self) -> u32 {
+        match self {
+            Commands::Grep(args) => args.retry.retries,
+            Commands::Context(args) => args.retry.retries,
+            Commands::Status(args) | Commands::GraphStatus(args) => args.retry.retries,
+            Commands::Query { retry, .. } | Commands::Schema { retry, .. } => retry.retries,
+            _ => remote::retry::DEFAULT_RETRIES,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Print the version string and exit.
@@ -735,6 +759,9 @@ enum Commands {
     /// POST a query to the remote Orbit API and stream the response.
     #[command(group(clap::ArgGroup::new("input").required(true).args(["query", "file"])))]
     Query {
+        #[command(flatten)]
+        retry: RetryArgs,
+
         #[arg(value_name = "QUERY", help = "Query text")]
         query: Option<String>,
 
@@ -758,6 +785,9 @@ enum Commands {
     /// Show the remote Orbit schema: node types, properties, and edges.
     #[command(alias = "ontology")]
     Schema {
+        #[command(flatten)]
+        retry: RetryArgs,
+
         /// Node names to expand with their properties. Quote '*' to expand all.
         #[arg(value_name = "NODE")]
         nodes: Vec<String>,
@@ -811,7 +841,7 @@ async fn main() -> Result<()> {
         anyhow::bail!("run `glab orbit update` to update Orbit");
     }
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
-    remote::retry::configure(cli.retries);
+    remote::retry::configure(cli.command.retries());
     match &cli.command {
         Commands::HookGuard {
             kind,
@@ -1057,6 +1087,7 @@ async fn dispatch(
             query,
             file,
             response_format,
+            ..
         } => {
             let input = match (query, file) {
                 (Some(query), None) => remote::QueryInput::Text(query),
@@ -1071,7 +1102,7 @@ async fn dispatch(
             ..
         }) => anyhow::bail!("--response-format needs --full-path, --namespace-id, or --project-id"),
         Commands::Status(_) => Ok(remote::run_status().await?),
-        Commands::Schema { nodes, db, raw }
+        Commands::Schema { nodes, db, raw, .. }
             if db.is_some() || raw || nodes.iter().any(|name| is_local_table_name(name)) =>
         {
             warn_moved("schema <table>", "workspace schema <table>");
@@ -1430,7 +1461,7 @@ mod tests {
             }
         );
 
-        let Commands::Schema { nodes, db, raw } =
+        let Commands::Schema { nodes, db, raw, .. } =
             Cli::parse_from(["orbit", "schema", "gl_edge", "--raw"]).command
         else {
             panic!("expected schema");
@@ -1467,6 +1498,7 @@ mod tests {
             query,
             file,
             response_format,
+            ..
         } = Cli::parse_from(["orbit", "query", "--response-format", "raw", "--file", "-"]).command
         else {
             panic!("expected query");
