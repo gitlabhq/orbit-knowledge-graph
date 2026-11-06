@@ -92,7 +92,7 @@ pub(crate) fn session_start(dir: &Path) -> Session {
         ..Session::default()
     };
     let client = match OrbitClient::from_env_in_if_signed_in(dir) {
-        Ok(Some(client)) => client,
+        Ok(Some(client)) => client.without_retries(),
         Ok(None) => return Session::default(),
         Err(_) => return signed_in,
     };
