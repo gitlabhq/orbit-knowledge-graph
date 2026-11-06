@@ -1,13 +1,21 @@
-use crate::ast::{Expr, Node, Query, SelectExpr};
+use std::collections::{HashMap, HashSet};
+
+use ontology::constants::DEFAULT_PRIMARY_KEY;
+use query_data_model::EntityAuthConfig;
+use query_data_model::implementations::relational::RelationalBackend;
+use query_data_model::implementations::relational::plan::{
+    Column, Expr, Operation, Relation, RelationalBuilder, RelationalError, Selection,
+};
+use query_data_model::plan::tracking::{Declare, Ref};
+
+use crate::ast::Expr as AstExpr;
 use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
+use crate::passes::codegen::{PlanOf, RelationalModel, SqlDialect, rejected, resolve};
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
-use ontology::constants::DEFAULT_PRIMARY_KEY;
-use query_data_model::EntityAuthConfig;
-use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactionNode {
@@ -113,12 +121,12 @@ impl ResultContext {
     }
 }
 
-pub fn apply(
-    node: &mut Node,
+pub fn apply<M: RelationalModel>(
+    plan: PlanOf<M>,
     input: &Input,
     metadata: &LoweredMetadata,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Result<ResultContext> {
+    model: &M,
+) -> Result<(PlanOf<M>, ResultContext)> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth.clone_from(model.entity_auth());
     if input.query_type == QueryType::Neighbors
@@ -132,23 +140,6 @@ pub fn apply(
             .map(|entity| (entity.name.clone(), entity.label.clone()))
             .collect();
     }
-    apply_with(node, input, metadata, model, &mut ctx, |entity| {
-        model
-            .redaction_id_column(entity)
-            .unwrap_or(DEFAULT_PRIMARY_KEY)
-            .to_string()
-    })?;
-    Ok(ctx)
-}
-
-fn apply_with(
-    node: &mut Node,
-    input: &Input,
-    metadata: &LoweredMetadata,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-    ctx: &mut ResultContext,
-    redaction_column: impl Fn(query_data_model::EntityId) -> String,
-) -> Result<()> {
     let selectable_nodes: HashSet<&str> = match input.query_type {
         QueryType::Aggregation => input.aggregation_row_nodes(model),
         QueryType::Traversal | QueryType::Neighbors => {
@@ -156,27 +147,14 @@ fn apply_with(
         }
         QueryType::PathFinding | QueryType::Hydration => HashSet::new(),
     };
-    match node {
-        Node::Query(q) => {
-            for node in &input.nodes {
-                if selectable_nodes.contains(node.id.as_str())
-                    && let Some(entity) = &node.entity
-                {
-                    ctx.add_node(&node.id, entity);
-                }
-            }
-            enforce_return_columns(
-                q,
-                input,
-                &selectable_nodes,
-                &metadata.nodes,
-                model,
-                redaction_column,
-            )?
+    for node in &input.nodes {
+        if selectable_nodes.contains(node.id.as_str())
+            && let Some(entity) = &node.entity
+        {
+            ctx.add_node(&node.id, entity);
         }
-        Node::Insert(_) => return Ok(()),
     }
-
+    let contract = return_columns(input, &selectable_nodes, &metadata.nodes, model)?;
     if matches!(
         input.query_type,
         QueryType::Traversal | QueryType::Aggregation
@@ -202,38 +180,28 @@ fn apply_with(
             });
         }
     }
-    Ok(())
+    let plan = match contract.outputs.is_empty() {
+        true => plan,
+        false => enforce(plan, model, contract, input.query_type)?,
+    };
+    Ok((plan, ctx))
 }
 
-fn ensure_in_group_by(q: &mut Query, query_type: QueryType, expr: Expr) {
-    if query_type == QueryType::Aggregation && !q.group_by.is_empty() && !q.group_by.contains(&expr)
-    {
-        q.group_by.push(expr);
-    }
+struct Contract {
+    outputs: Vec<(String, AstExpr)>,
+    groups: Vec<AstExpr>,
 }
 
-fn set_output(q: &mut Query, output: SelectExpr) {
-    for arm in &mut q.union_all {
-        set_output(arm, output.clone());
-    }
-    match q
-        .select
-        .iter_mut()
-        .find(|select| select.alias == output.alias)
-    {
-        Some(existing) => *existing = output,
-        None => q.select.push(output),
-    }
-}
-
-fn enforce_return_columns(
-    q: &mut Query,
+fn return_columns(
     input: &Input,
     selectable_nodes: &HashSet<&str>,
     bindings: &HashMap<String, NodeBinding>,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-    redaction_column: impl Fn(query_data_model::EntityId) -> String,
-) -> Result<()> {
+    model: &impl query_data_model::OrbitQueryModel,
+) -> Result<Contract> {
+    let mut contract = Contract {
+        outputs: Vec::new(),
+        groups: Vec::new(),
+    };
     for node in &input.nodes {
         let Some(entity) = &node.entity else {
             continue;
@@ -245,7 +213,6 @@ fn enforce_return_columns(
             .entity(entity)
             .map(|entity| entity.id)
             .ok_or_else(|| QueryError::PipelineInvariant(format!("unknown entity '{entity}'")))?;
-        let id_col = redaction_id_column(&node.id);
         let binding = bindings.get(&node.id).ok_or_else(|| {
             QueryError::PipelineInvariant(format!("node '{}' has no lowered binding", node.id))
         })?;
@@ -263,7 +230,9 @@ fn enforce_return_columns(
         else {
             continue;
         };
-        let redaction_column = redaction_column(entity_id);
+        let redaction_column = model
+            .redaction_id_column(entity_id)
+            .unwrap_or(DEFAULT_PRIMARY_KEY);
         let needs_separate_pk = redaction_column != DEFAULT_PRIMARY_KEY;
         let authorization_id = if needs_separate_pk {
             let table_alias = table_alias.as_deref().ok_or_else(|| {
@@ -272,27 +241,240 @@ fn enforce_return_columns(
                     node.id
                 ))
             })?;
-            Expr::col(table_alias, redaction_column)
+            AstExpr::col(table_alias, redaction_column)
         } else {
             identity.clone()
         };
-
         if needs_separate_pk {
-            let name = primary_key_column(&node.id);
-            set_output(q, SelectExpr::new(identity.clone(), name));
-            ensure_in_group_by(q, input.query_type, identity.clone());
+            contract.set(primary_key_column(&node.id), identity.clone());
+            contract.group(identity.clone());
         }
-        set_output(q, SelectExpr::new(authorization_id.clone(), id_col.clone()));
-        ensure_in_group_by(q, input.query_type, authorization_id);
-        let type_col = redaction_type_column(&node.id);
-        set_output(q, SelectExpr::new(Expr::string(entity), type_col));
+        contract.set(redaction_id_column(&node.id), authorization_id.clone());
+        contract.group(authorization_id);
+        contract.set(redaction_type_column(&node.id), AstExpr::string(entity));
         if input.query_type != QueryType::Aggregation
             && model.entity_has_traversal_path(entity)
             && let Some(path) = traversal_path
         {
-            let name = traversal_path_column(&node.id);
-            set_output(q, SelectExpr::new(path.clone(), name));
+            contract.set(traversal_path_column(&node.id), path.clone());
         }
     }
-    Ok(())
+    Ok(contract)
+}
+
+impl Contract {
+    fn set(&mut self, name: String, value: AstExpr) {
+        match self
+            .outputs
+            .iter_mut()
+            .find(|(current, _)| *current == name)
+        {
+            Some(output) => output.1 = value,
+            None => self.outputs.push((name, value)),
+        }
+    }
+
+    fn group(&mut self, value: AstExpr) {
+        if !self.groups.contains(&value) {
+            self.groups.push(value);
+        }
+    }
+}
+
+fn enforce<M: RelationalModel>(
+    plan: PlanOf<M>,
+    model: &M,
+    contract: Contract,
+    query_type: QueryType,
+) -> Result<PlanOf<M>> {
+    let root = plan.plan.root();
+    let block = plan.block(root);
+    let Some(select) = block.select else {
+        return Err(QueryError::PipelineInvariant(
+            "result columns cannot extend a union".into(),
+        ));
+    };
+    let consumer = block
+        .order
+        .or(block.limit_by)
+        .or(block.limit)
+        .unwrap_or(select);
+    let computed: Vec<Ref> = match block.compute.map(|node| plan.plan.operation(node)) {
+        Some(Operation::Compute(values)) => {
+            let outputs: Vec<Ref> = plan.plan.outputs(block.compute.unwrap_or(root)).collect();
+            outputs[outputs.len() - values.len()..].to_vec()
+        }
+        _ => Vec::new(),
+    };
+    let mut names: Vec<Option<String>> = computed
+        .iter()
+        .map(|output| plan.plan.name(*output).map(str::to_string))
+        .collect();
+    let mut bound: Vec<(Expr, Ref)> = Vec::new();
+    let mut aggregate = None;
+    if let Some(node) = block.aggregate
+        && let Operation::Aggregate { groups, .. } = plan.plan.operation(node)
+    {
+        let outputs: Vec<Ref> = plan.plan.outputs(node).collect();
+        bound = groups
+            .iter()
+            .cloned()
+            .zip(outputs.iter().copied())
+            .collect();
+        if query_type == QueryType::Aggregation && !groups.is_empty() {
+            aggregate = Some((node, groups.len(), outputs));
+        }
+    }
+    let mut added: Vec<Ref> = Vec::new();
+    model
+        .catalog()
+        .rewrite(plan, |q, rows| {
+            let node = q.original();
+            if let Some((aggregate, width, outputs)) = &aggregate
+                && node == Some(*aggregate)
+            {
+                let (groups, rows) = regroup(q, M::DIALECT, &contract, *width, outputs, rows)?;
+                bound = groups;
+                return Ok(rows);
+            }
+            if block.compute.is_some() && node == block.compute {
+                let detached = q.detach(rows)?;
+                let Operation::Compute(values) = detached.operation else {
+                    return Err(RelationalError::Incomplete("a compute"));
+                };
+                let source = first(detached.inputs)?;
+                let scope = Scope {
+                    contract: &contract,
+                    bound: &bound,
+                    dialect: M::DIALECT,
+                };
+                let (rows, columns) = scope.extend(q, &mut names, values, source)?;
+                for (old, new) in computed.iter().zip(&columns) {
+                    if *old != new.output() {
+                        q.reconnect(*old, new.output())?;
+                    }
+                }
+                for column in &columns[computed.len()..] {
+                    q.expose(*column)?;
+                    added.push(column.output());
+                }
+                return Ok(rows);
+            }
+            if node != Some(consumer) && node != Some(select) {
+                return Ok(rows);
+            }
+            let mut detached = q.detach(rows)?;
+            if block.compute.is_none() && node == Some(consumer) {
+                let source = detached.inputs.remove(0);
+                let scope = Scope {
+                    contract: &contract,
+                    bound: &bound,
+                    dialect: M::DIALECT,
+                };
+                let (rows, columns) = scope.extend(q, &mut names, Vec::new(), source)?;
+                detached.inputs.insert(0, rows);
+                added = columns.iter().map(|column| column.output()).collect();
+                if node != Some(select) {
+                    let rows = q.reattach(detached)?;
+                    for column in columns {
+                        q.expose(column)?;
+                    }
+                    return Ok(rows);
+                }
+            }
+            if let Operation::Select(Selection::Columns(columns)) = &mut detached.operation {
+                columns.extend(added.iter().copied());
+            }
+            q.reattach(detached)
+        })
+        .map_err(rejected)
+}
+
+fn first(inputs: Vec<Relation>) -> std::result::Result<Relation, RelationalError> {
+    inputs
+        .into_iter()
+        .next()
+        .ok_or(RelationalError::Incomplete("an input"))
+}
+
+fn regroup<B: RelationalBackend>(
+    q: &mut RelationalBuilder<'_, B>,
+    dialect: SqlDialect,
+    contract: &Contract,
+    width: usize,
+    outputs: &[Ref],
+    rows: Relation,
+) -> std::result::Result<(Vec<(Expr, Ref)>, Relation), RelationalError> {
+    let detached = q.detach(rows)?;
+    let Operation::Aggregate {
+        mut groups,
+        measures,
+    } = detached.operation
+    else {
+        return Err(RelationalError::Incomplete("an aggregate"));
+    };
+    let source = first(detached.inputs)?;
+    for group in &contract.groups {
+        let group = resolve(q, dialect, group, &source)?;
+        if !groups.contains(&group) {
+            groups.push(group);
+        }
+    }
+    let aggregated = q.aggregate(source, groups.clone(), measures)?;
+    let fresh = aggregated
+        .groups
+        .iter()
+        .take(width)
+        .chain(&aggregated.measures);
+    for (old, new) in outputs.iter().zip(fresh) {
+        if *old != new.output() {
+            q.reconnect(*old, new.output())?;
+        }
+    }
+    for group in &aggregated.groups[width..] {
+        q.expose(*group)?;
+    }
+    let outputs = aggregated.groups.iter().map(|group| group.output());
+    Ok((groups.into_iter().zip(outputs).collect(), aggregated.rows))
+}
+
+struct Scope<'a> {
+    contract: &'a Contract,
+    bound: &'a [(Expr, Ref)],
+    dialect: SqlDialect,
+}
+
+impl Scope<'_> {
+    fn extend<B: RelationalBackend>(
+        &self,
+        q: &mut RelationalBuilder<'_, B>,
+        names: &mut Vec<Option<String>>,
+        mut values: Vec<Expr>,
+        source: Relation,
+    ) -> std::result::Result<(Relation, Vec<Column>), RelationalError> {
+        for (name, value) in &self.contract.outputs {
+            let value = resolve(q, self.dialect, value, &source)?;
+            let value = match self.bound.iter().find(|(group, _)| *group == value) {
+                Some((_, output)) => Expr::Column(*output),
+                None => value,
+            };
+            match names
+                .iter()
+                .position(|current| current.as_deref() == Some(name))
+            {
+                Some(index) => values[index] = value,
+                None => {
+                    names.push(Some(name.clone()));
+                    values.push(value);
+                }
+            }
+        }
+        let items = names
+            .iter()
+            .cloned()
+            .zip(values)
+            .map(|(name, value)| Declare { name, value })
+            .collect();
+        q.compute(source, items)
+    }
 }

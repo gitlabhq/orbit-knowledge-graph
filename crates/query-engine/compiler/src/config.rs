@@ -107,8 +107,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         result_contract {
             reads_env: [data_model]
-            reads_state: [input]
-            mutates: [node, lowered_metadata, result_ctx]
+            reads_state: [input, lowered_metadata]
+            mutates: [relational, result_ctx]
         }
         hydrate_plan {
             reads_env: [security_ctx, data_model]
@@ -145,31 +145,31 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, result_contract, build_plan, response_policy, paginate, hydrate_plan, settings, security, security_check, codegen]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, build_plan, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, result_contract, build_plan, response_policy, paginate, hydrate_plan, settings, security, security_check, codegen]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, build_plan, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, result_contract, build_plan, response_policy, settings, security, security_check, codegen]
+            phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, build_plan, response_policy, result_contract, settings, security, security_check, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
             env: []
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, result_contract, build_plan, paginate, codegen]
+            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, build_plan, result_contract, paginate, codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, result_contract, build_plan, paginate, codegen]
+            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, build_plan, result_contract, paginate, codegen]
         }
         validate_normalize_gql {
             model: query_data_model::ClickHouseDataModel
@@ -300,17 +300,12 @@ fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn result_contract<C>(ctx: &mut C) -> Result<()>
-where
-    C: CompilerCtx,
-    C::Model: query_data_model::OrbitQueryModel,
-{
-    let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
-    let mut node = require(ctx.take_node(), "node")?;
-    let input = require(ctx.input().clone(), "input")?;
-    let result_context = result_contract::apply(&mut node, &input, &metadata, ctx.data_model())?;
-    ctx.set_node(node);
-    ctx.set_lowered_metadata(metadata);
+fn result_contract(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let plan = require(ctx.take_relational(), "relational")?;
+    let input = require(ctx.input().as_ref(), "input")?;
+    let metadata = require(ctx.lowered_metadata().as_ref(), "lowered_metadata")?;
+    let (plan, result_context) = result_contract::apply(plan, input, metadata, ctx.data_model())?;
+    ctx.set_relational(plan);
     ctx.set_result_ctx(result_context);
     Ok(())
 }
