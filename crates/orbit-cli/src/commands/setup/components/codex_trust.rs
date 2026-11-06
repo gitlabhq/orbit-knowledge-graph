@@ -19,13 +19,19 @@ pub(super) fn trust_hooks(
     if !on_path("codex") {
         return Ok(None);
     }
+    let folder = cwd.to_str().ok_or_else(|| {
+        format!(
+            "Codex can't read the folder {}, which is not UTF-8",
+            cwd.display()
+        )
+    })?;
     let mut server = AppServer::start(cwd)?;
     server.request(
         "initialize",
         json!({ "clientInfo": { "name": "orbit-setup", "version": crate::version::get() } }),
     )?;
     server.notify("initialized")?;
-    let listed = server.request("hooks/list", json!({ "cwds": [cwd] }))?;
+    let listed = server.request("hooks/list", json!({ "cwds": [folder] }))?;
     let hooks = ours(&listed, hooks_file, commands);
     if hooks.is_empty() {
         return Err("trust this folder in Codex, then run setup again".to_string());

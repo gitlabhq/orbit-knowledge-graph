@@ -138,3 +138,54 @@ fn a_hook_codex_does_not_list_warns_and_writes_nothing() {
         "{printed}"
     );
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_folder_that_is_not_utf8_warns_instead_of_panicking() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("bin");
+    std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+    std::fs::create_dir_all(&bin).unwrap();
+    fake_codex(&bin, home.path(), |_| json!([]));
+    let project = home.path().join(std::ffi::OsStr::from_bytes(b"repo-\xff"));
+    std::fs::create_dir_all(&project).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_orbit"))
+        .args([
+            "setup",
+            "codex",
+            "--yes",
+            "--no-index",
+            "--project",
+            "--dir",
+        ])
+        .arg(&project)
+        .current_dir(home.path())
+        .env("HOME", home.path())
+        .env("PATH", path)
+        .env("GIT_CEILING_DIRECTORIES", home.path().parent().unwrap())
+        .env_remove("CODEX_HOME")
+        .env_remove("GITLAB_ORBIT_DISTRIBUTION")
+        .output()
+        .unwrap();
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(output.status.success(), "{printed}");
+    assert!(!printed.contains("panicked"), "{printed}");
+    assert!(
+        printed.contains("Codex skips the Orbit hook; Codex can't read the folder"),
+        "{printed}"
+    );
+    assert!(!bin.join("writes.jsonl").exists());
+}
