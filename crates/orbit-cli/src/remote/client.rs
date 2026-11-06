@@ -36,6 +36,7 @@ pub(crate) struct SkillHttpResponse {
 pub(crate) struct OrbitClient {
     endpoint: ResolvedEndpoint,
     http: reqwest::Client,
+    retries_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -83,7 +84,16 @@ impl OrbitClient {
             .map_err(|e| {
                 RemoteError::new(EXIT_GENERIC, format!("failed to build HTTP client: {e}"))
             })?;
-        Ok(Self { endpoint, http })
+        Ok(Self {
+            endpoint,
+            http,
+            retries_enabled: true,
+        })
+    }
+
+    pub(crate) fn without_retries(mut self) -> Self {
+        self.retries_enabled = false;
+        self
     }
 
     pub(crate) fn origin(&self) -> Result<String, RemoteError> {
@@ -237,7 +247,11 @@ impl OrbitClient {
         request: reqwest::RequestBuilder,
         policy: Policy,
     ) -> Result<reqwest::Response, RemoteError> {
-        let max_retries = retry::max_retries();
+        let max_retries = if self.retries_enabled {
+            retry::max_retries()
+        } else {
+            0
+        };
         let mut retries = 0_u32;
         let mut waited = Duration::ZERO;
         let mut pending = Some(request);
@@ -429,7 +443,7 @@ impl std::fmt::Display for MissingCredential {
 impl std::error::Error for MissingCredential {}
 
 pub(crate) fn gitlab_usable(dir: &Path) -> bool {
-    let Ok(client) = OrbitClient::from_env_in(dir) else {
+    let Ok(client) = OrbitClient::from_env_in(dir).map(OrbitClient::without_retries) else {
         return false;
     };
     let Ok(host) = client.get_host() else {
@@ -449,7 +463,8 @@ pub(crate) fn gitlab_usable(dir: &Path) -> bool {
 
 impl OrbitClient {
     pub(crate) async fn schema_overview(&self, request: Vec<u8>) -> Option<String> {
-        let body = tokio::time::timeout(SHORT_REQUEST_TIMEOUT, self.query_raw(request))
+        let client = self.clone().without_retries();
+        let body = tokio::time::timeout(SHORT_REQUEST_TIMEOUT, client.query_raw(request))
             .await
             .ok()?
             .ok()?;
@@ -561,6 +576,38 @@ mod tests {
 
     use super::*;
     use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn a_client_without_retries_sends_a_rate_limited_request_once() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let served = tokio::spawn(async move {
+            let mut count = 0_u32;
+            while let Ok(Ok((mut stream, _))) =
+                tokio::time::timeout(Duration::from_secs(2), listener.accept()).await
+            {
+                count += 1;
+                let _ = stream.read(&mut [0; 4096]).await;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 429 X\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+            }
+            count
+        });
+        let client = OrbitClient::new(ResolvedEndpoint {
+            base_url,
+            header_name: "Private-Token".into(),
+            header_value: "t".into(),
+        })
+        .unwrap()
+        .without_retries();
+
+        assert!(client.query_raw(b"{}".to_vec()).await.is_err());
+        assert_eq!(served.await.unwrap(), 1);
+    }
 
     #[tokio::test]
     async fn unresponsive_host_reports_timeout() {
