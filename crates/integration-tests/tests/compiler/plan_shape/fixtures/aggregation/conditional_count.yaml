@@ -16,7 +16,7 @@ query:
 
 logical:
   expect:
-    - (Aggregate COUNT(b) AS n (_))
+    - (Aggregate COUNT(b) AS n (Follow CALLS a->b AS e0 (_)))
 
 physical:
   clickhouse:

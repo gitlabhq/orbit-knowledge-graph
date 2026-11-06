@@ -14,7 +14,7 @@ query:
 
 logical:
   expect:
-    - (Filter n.id >= 1, n.id <= 100 (NodeScan Note AS n))
+    - (Aggregate group date_trunc(month, n.created_at) AS n_created_at_month, COUNT(n) AS n (Filter n.id >= 1, n.id <= 100 (Entities Note AS n)))
 
 physical:
   clickhouse:

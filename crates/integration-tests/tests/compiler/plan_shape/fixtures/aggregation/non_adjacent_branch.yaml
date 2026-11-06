@@ -24,7 +24,7 @@ query:
 
 logical:
   expect:
-    - (Aggregate COUNT(d) AS matches (_))
+    - (Aggregate COUNT(d) AS matches (Follow CALLS a->d AS e2 (Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (_)))))
 
 physical:
   clickhouse:

@@ -9,7 +9,7 @@ query:
 
 logical:
   expect:
-    - (Aggregate COUNT(mr.merged_at) AS n (_))
+    - (Aggregate COUNT(mr.merged_at) AS n (Follow APPROVED u->mr AS e0 (_)))
 
 physical:
   clickhouse:

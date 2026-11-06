@@ -7,7 +7,12 @@ query:
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN b.name, count(a) AS n
 
 logical:
-  expect: ["(Aggregate ... (_))"]
+  gql:
+    expect:
+      - (Aggregate group b.name AS b_name, COUNT(a) AS n (Follow CALLS a->b AS e0 (Filter a.id = 1 (Entities Definition AS a))))
+  json:
+    expect:
+      - (Aggregate group b.name AS b_name, COUNT(a) AS n (Follow CALLS a->b AS e0 (Filter a.id IN [1] (Entities Definition AS a))))
 
 physical:
   clickhouse:

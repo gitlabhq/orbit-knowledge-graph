@@ -15,8 +15,7 @@ query:
 
 logical:
   expect:
-    - (Filter d.id IN [1, 2] (NodeScan Definition AS d))
-    - (Aggregate group d.name AS d_name, COUNT(d) AS n (_))
+    - (Aggregate group d.name AS d_name, COUNT(d) AS n (Filter d.id IN [1, 2] (Entities Definition AS d)))
 
 physical:
   clickhouse:
