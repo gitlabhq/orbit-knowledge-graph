@@ -17,13 +17,7 @@ fn generated_transforms_are_selects_over_the_block_with_allowed_functions() {
     let parser = DuckDbClient::open(OpenMode::InMemory).unwrap();
 
     for transform in transforms {
-        let batches = parser
-            .query_arrow_json(
-                "SELECT json_serialize_sql(?) AS tree",
-                &[transform.sql.clone().into()],
-            )
-            .unwrap();
-        let tree: Value = serde_json::from_str(&string_column(&batches, "tree")[0]).unwrap();
+        let tree = parse(&parser, &transform);
         let table = &transform.destination_table;
         assert_eq!(tree["error"], false, "{table} is not one SELECT: {tree}");
         assert_eq!(
@@ -86,16 +80,19 @@ async fn every_node_transform_runs_on_its_input_columns() {
     );
 }
 
-fn input_columns(parser: &DuckDbClient, transform: &Transformation) -> BTreeSet<String> {
+fn parse(parser: &DuckDbClient, transform: &Transformation) -> Value {
     let batches = parser
         .query_arrow_json(
             "SELECT json_serialize_sql(?) AS tree",
             &[transform.sql.clone().into()],
         )
         .unwrap();
-    let tree: Value = serde_json::from_str(&string_column(&batches, "tree")[0]).unwrap();
+    serde_json::from_str(&string_column(&batches, "tree")[0]).unwrap()
+}
+
+fn input_columns(parser: &DuckDbClient, transform: &Transformation) -> BTreeSet<String> {
     let mut found = Tree::default();
-    found.collect(&tree);
+    found.collect(&parse(parser, transform));
     found.columns
 }
 
