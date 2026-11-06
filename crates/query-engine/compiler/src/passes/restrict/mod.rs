@@ -46,17 +46,9 @@ pub fn restrict(
 
 fn entities(query: Query<'_>) -> Vec<(Ref, EntityId)> {
     query
-        .operations()
-        .filter(|(_, operation)| {
-            matches!(
-                operation,
-                LogicalOperation::Entities(_) | LogicalOperation::Follow { .. }
-            )
-        })
-        .filter_map(|(node, _)| {
-            let output = query.plan.outputs(node).last()?;
-            Some((output, query.entity(output)?))
-        })
+        .bindings()
+        .into_iter()
+        .map(|binding| (binding.output, binding.entity))
         .collect()
 }
 

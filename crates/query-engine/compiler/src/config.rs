@@ -98,7 +98,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         tp_bounds {
             reads_env: [data_model]
-            reads_state: [input]
+            reads_state: [statement]
             mutates: [tp_bounds]
         }
         lower {
@@ -163,7 +163,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [restrict_hydration, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, security_check, codegen]
+            phases: [restrict_hydration, plan_clickhouse, lower, response_policy, result_contract, settings, security, security_check, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
@@ -292,8 +292,10 @@ where
 }
 
 fn tp_bounds(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().as_ref(), "input")?;
-    ctx.set_tp_bounds(crate::tp_bounds::TpBounds::derive(input, ctx.data_model()));
+    let statement = require(ctx.statement().as_ref(), "statement")?;
+    let model = ctx.data_model();
+    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+    ctx.set_tp_bounds(crate::tp_bounds::TpBounds::derive(query, model));
     Ok(())
 }
 

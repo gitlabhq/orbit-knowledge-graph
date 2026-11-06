@@ -619,29 +619,6 @@ impl AggExpr {
     }
 }
 
-#[cfg(test)]
-impl AggExpr {
-    pub(crate) fn from_parts(function: AggFunction, node: &str, property: Option<&str>) -> Self {
-        let prop_ref = |property: &str| PropertyRef {
-            node: node.to_owned(),
-            property: property.to_owned(),
-        };
-        match function {
-            AggFunction::Count => Self::Count(TargetRef {
-                node: node.to_owned(),
-                property: property.map(str::to_owned),
-            }),
-            AggFunction::Sum => Self::Sum(prop_ref(property.expect("sum needs a property"))),
-            AggFunction::Avg => Self::Avg(prop_ref(property.expect("avg needs a property"))),
-            AggFunction::Min => Self::Min(prop_ref(property.expect("min needs a property"))),
-            AggFunction::Max => Self::Max(prop_ref(property.expect("max needs a property"))),
-            AggFunction::Collect => {
-                Self::Collect(prop_ref(property.expect("collect needs a property")))
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetRef {
     pub node: String,

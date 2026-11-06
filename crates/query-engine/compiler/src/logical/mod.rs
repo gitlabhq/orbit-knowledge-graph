@@ -79,16 +79,31 @@ impl<'p> Query<'p> {
     }
 
     pub fn bindings(self) -> Vec<Binding<'p>> {
-        self.plan
-            .declaration_order()
-            .filter_map(|output| {
+        let declared: Vec<Ref> = self.plan.declaration_order().collect();
+        let mut bindings: Vec<Binding<'p>> = self
+            .operations()
+            .filter(|(_, operation)| {
+                matches!(
+                    operation,
+                    LogicalOperation::Entities(_) | LogicalOperation::Follow { .. }
+                )
+            })
+            .filter_map(|(node, _)| {
+                let output = self.plan.outputs(node).last()?;
                 Some(Binding {
                     output,
                     entity: self.entity(output)?,
                     name: self.name(output),
                 })
             })
-            .collect()
+            .collect();
+        bindings.sort_by_key(|binding| {
+            declared
+                .iter()
+                .position(|output| *output == binding.output)
+                .unwrap_or(declared.len())
+        });
+        bindings
     }
 
     pub fn binding(self, name: &str) -> Option<Binding<'p>> {

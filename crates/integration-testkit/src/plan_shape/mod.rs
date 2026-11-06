@@ -252,13 +252,14 @@ fn check<M: RelationalModel>(
             }
         };
         let catalog = model.catalog().model().logical().as_admin();
-        let input = compiler::surface::parse(raw, frontend, catalog).and_then(|statement| {
+        let parsed = compiler::surface::parse(raw, frontend, catalog).and_then(|statement| {
             let plan = normalize::normalize(statement.plan, catalog.model(), model)?;
             let statement = query_data_model::surface::Statement { plan, ..statement };
-            compiler::bridge::input(&statement, catalog.model(), model)
+            let input = compiler::bridge::input(&statement, catalog.model(), model)?;
+            Ok((statement, input))
         });
-        let mut input = match input {
-            Ok(input) => input,
+        let (statement, mut input) = match parsed {
+            Ok(parsed) => parsed,
             Err(error) => {
                 failures.push(format!("{label}: {error}"));
                 continue;
@@ -298,8 +299,10 @@ fn check<M: RelationalModel>(
                 continue;
             }
         };
-        let tp_bounds =
-            (backend == "clickhouse").then(|| compiler::tp_bounds::TpBounds::derive(&input, model));
+        let tp_bounds = (backend == "clickhouse" && scenario.hydration.is_none()).then(|| {
+            let query = compiler::logical::Query::new(&statement.plan, catalog.model());
+            compiler::tp_bounds::TpBounds::derive(query, model)
+        });
         let planned = explain::physical(&plan);
         let relational = lower::emit(&plan, &input, tp_bounds.as_ref(), model)
             .and_then(|lowered| {
