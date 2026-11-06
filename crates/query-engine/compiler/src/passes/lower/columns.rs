@@ -107,7 +107,7 @@ pub(super) fn referenced(predicate: &Predicate, out: &mut Vec<Column>) {
         Predicate::Live { alias } => out.push(Column::new(alias, DELETED_COLUMN)),
         Predicate::ColumnEq { left, right } => out.extend([left.clone(), right.clone()]),
         Predicate::RelationshipKinds { alias, kinds } => {
-            if !crate::passes::normalize::is_wildcard(kinds) {
+            if !crate::input::is_wildcard(kinds) {
                 out.push(Column::new(alias, RELATIONSHIP_KIND_COLUMN));
             }
         }

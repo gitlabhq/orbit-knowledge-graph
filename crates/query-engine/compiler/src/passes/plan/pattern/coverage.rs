@@ -6,7 +6,7 @@ use ontology::constants::*;
 use query_data_model::{DenormalizedDirection, DenormalizedProperty, OrbitQueryModel};
 
 use super::{EdgeRelation, NodePlan, Pattern};
-use crate::passes::normalize::is_wildcard;
+use crate::input::is_wildcard;
 use crate::passes::plan::filters::{BoundFilter, FilterOwner, bind_filter, lowerable_denorm};
 use crate::passes::plan::predicates::{Predicate, property_filter, tag_filter};
 

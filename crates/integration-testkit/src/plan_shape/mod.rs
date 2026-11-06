@@ -252,9 +252,12 @@ fn check<M: RelationalModel>(
             }
         };
         let catalog = model.catalog().model().logical().as_admin();
-        let input = compiler::surface::parse(raw, frontend, catalog)
-            .and_then(|statement| compiler::bridge::input(&statement, catalog.model()));
-        let mut input = match input.and_then(|input| normalize::normalize(input, model)) {
+        let input = compiler::surface::parse(raw, frontend, catalog).and_then(|statement| {
+            let plan = normalize::normalize(statement.plan, catalog.model(), model)?;
+            let statement = query_data_model::surface::Statement { plan, ..statement };
+            compiler::bridge::input(&statement, catalog.model(), model)
+        });
+        let mut input = match input {
             Ok(input) => input,
             Err(error) => {
                 failures.push(format!("{label}: {error}"));

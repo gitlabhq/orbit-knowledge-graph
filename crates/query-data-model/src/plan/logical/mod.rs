@@ -1,6 +1,7 @@
 mod builder;
 mod catalog;
 mod check;
+mod detach;
 mod error;
 mod expr;
 mod filter;
@@ -17,6 +18,7 @@ use ontology::DataType;
 
 pub use builder::LogicalBuilder;
 pub use catalog::LogicalCatalog;
+pub use detach::Detached;
 pub use error::{ErrorClass, PlanError};
 pub use expr::{EdgeField, Expr, Literal, Operand, TimeUnit};
 pub use handle::{Binding, Rows};

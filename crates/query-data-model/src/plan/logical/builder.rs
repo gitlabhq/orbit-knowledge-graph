@@ -22,6 +22,10 @@ impl<'m> LogicalBuilder<'m> {
         &mut self.construction
     }
 
+    pub(super) fn construction_ref(&self) -> &Construction<Logical> {
+        &self.construction
+    }
+
     pub(super) fn view(&self, rows: tracking::Rows) -> Result<Rows<'m>, PlanError> {
         Rows::view(self.catalog, &self.construction, rows)
     }

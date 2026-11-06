@@ -108,8 +108,7 @@ pub(crate) fn stable_order(
         .iter()
         .filter(|hop| {
             hop.max_hops == 1
-                && (hop.rel_types.len() > 1
-                    || crate::passes::normalize::is_wildcard(&hop.rel_types))
+                && (hop.rel_types.len() > 1 || crate::input::is_wildcard(&hop.rel_types))
         })
         .filter_map(|hop| edge_type(plan, hop))
         .map(|value| Term::Value(Box::new(value.clone())));

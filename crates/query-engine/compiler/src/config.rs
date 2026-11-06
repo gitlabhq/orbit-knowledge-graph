@@ -76,7 +76,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         normalize {
             reads_env: [data_model]
-            mutates: [input]
+            mutates: [statement]
         }
         restrict {
             reads_env: [data_model, security_ctx]
@@ -147,13 +147,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, statement, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, bridge, admit, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
+            phases: [json_dsl_parse, normalize, bridge, admit, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, statement, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse, bridge, admit, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
+            phases: [gql_parse, normalize, bridge, admit, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
@@ -165,25 +165,25 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::DuckDbDataModel
             env: []
             state: [raw, statement, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse_trusted, bridge, admit_local, normalize, plan_duckdb, lower, result_contract, paginate, codegen]
+            phases: [json_dsl_parse_trusted, normalize, bridge, admit_local, plan_duckdb, lower, result_contract, paginate, codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
             state: [raw, statement, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse_trusted, bridge, admit_local, normalize, plan_duckdb, lower, result_contract, paginate, codegen]
+            phases: [gql_parse_trusted, normalize, bridge, admit_local, plan_duckdb, lower, result_contract, paginate, codegen]
         }
         check_gql {
             model: query_data_model::ClickHouseDataModel
             env: []
             state: [raw, statement, input]
-            phases: [gql_parse_trusted, bridge, admit, normalize]
+            phases: [gql_parse_trusted, normalize, bridge, admit]
         }
         check_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: []
             state: [raw, statement, input]
-            phases: [json_dsl_parse_trusted, bridge, admit, normalize]
+            phases: [json_dsl_parse_trusted, normalize, bridge, admit]
         }
     }
 }
@@ -216,7 +216,8 @@ fn gql_parse_trusted(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn bridge(ctx: &mut impl CompilerCtx) -> Result<()> {
     let statement = require(ctx.statement().as_ref(), "statement")?;
-    let input = crate::bridge::input(statement, ctx.data_model().catalog().model())?;
+    let model = ctx.data_model();
+    let input = crate::bridge::input(statement, model.catalog().model(), model)?;
     ctx.set_input(input);
     Ok(())
 }
@@ -232,9 +233,10 @@ fn admit_local(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.take_input(), "input")?;
-    let input = normalize::normalize(input, ctx.data_model())?;
-    ctx.set_input(input);
+    let statement = require(ctx.take_statement(), "statement")?;
+    let model = ctx.data_model();
+    let plan = normalize::normalize(statement.plan, model.catalog().model(), model)?;
+    ctx.set_statement(Statement { plan, ..statement });
     Ok(())
 }
 

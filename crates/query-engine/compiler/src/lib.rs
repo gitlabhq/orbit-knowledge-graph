@@ -42,6 +42,7 @@ pub mod tp_bounds;
 pub mod types;
 
 pub mod config;
+pub(crate) mod logical;
 pub mod passes;
 pub mod surface;
 

@@ -14,7 +14,7 @@ fn gql_input(query: &str) -> compiler::Result<compiler::Input> {
     let model = embedded_model();
     let catalog = model.catalog().model().logical().as_admin();
     let statement = compiler::surface::parse(query, Frontend::Gql, catalog)?;
-    compiler::bridge::input(&statement, catalog.model())
+    compiler::bridge::input(&statement, catalog.model(), model.as_ref())
 }
 
 #[ignore = "fixture ontology fails the data model load checks"]

@@ -1,3 +1,4 @@
+mod columns;
 mod predicates;
 mod results;
 
@@ -6,7 +7,7 @@ use std::collections::HashMap;
 use query_data_model::plan::logical::{LogicalOperation, LogicalPlan};
 use query_data_model::plan::tracking::{NodeId, Ref};
 use query_data_model::surface::Statement;
-use query_data_model::{Model, RelationshipId};
+use query_data_model::{Model, OrbitQueryModel, RelationshipId};
 
 use crate::input::{
     BooleanExpression, Condition, Direction, HopRange, InputNeighbors, InputNode, InputPath,
@@ -14,7 +15,7 @@ use crate::input::{
 };
 use crate::{Input, QueryError, Result};
 
-pub fn input(statement: &Statement, model: &Model) -> Result<Input> {
+pub fn input(statement: &Statement, model: &Model, data: &impl OrbitQueryModel) -> Result<Input> {
     let mut bridge = Bridge {
         plan: &statement.plan,
         model,
@@ -33,6 +34,7 @@ pub fn input(statement: &Statement, model: &Model) -> Result<Input> {
     }
     bridge.input.promote_id_filters()?;
     bridge.input.options.include_debug_sql = statement.debug;
+    columns::fill(&mut bridge.input, data);
     Ok(bridge.input)
 }
 

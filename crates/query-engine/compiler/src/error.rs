@@ -106,6 +106,12 @@ impl From<SurfaceError> for QueryError {
     }
 }
 
+impl From<PlanError> for QueryError {
+    fn from(error: PlanError) -> Self {
+        SurfaceError::Plan(error).into()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, strum::IntoStaticStr, strum::EnumIter)]
 #[strum(serialize_all = "snake_case")]
 pub enum RejectionReason {
