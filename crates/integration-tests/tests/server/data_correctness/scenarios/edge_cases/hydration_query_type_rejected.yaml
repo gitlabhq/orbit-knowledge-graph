@@ -9,4 +9,4 @@ query:
     }
 
 expect:
-  compile_error: "is not an allowed value. Valid values: traversal, aggregation, path_finding, neighbors at /query_type"
+  compile_error: '"hydration" is not one of "traversal", "aggregation" or 2 other candidates at /query_type'
