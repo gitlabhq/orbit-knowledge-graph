@@ -11,6 +11,7 @@ fn main() {
             .display()
     );
     println!("cargo:rerun-if-changed=../../packages/agent-plugins");
+    println!("cargo:rerun-if-changed=../../packages/agent-plugins-nightly");
 
     // Release jobs run on `vX.Y.Z` tags (.gitlab/ci/release-local.yml), so
     // CI_COMMIT_TAG is the authoritative release version. `git describe` is a
