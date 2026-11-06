@@ -1,11 +1,10 @@
-use compiler::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
+use compiler::input::{FilterOp, InputFilter, OrderDirection};
 use compiler::passes::plan::QueryPlan;
 use compiler::passes::plan::graph::{
     ExecutionPlan, RelationGraph, RelationId, RelationNode, RelationRef,
 };
 use compiler::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
 use query_engine::compiler;
-use std::collections::HashMap;
 
 use super::operator::Operator;
 use super::pattern::Expression as Tree;
@@ -25,170 +24,6 @@ pub(super) fn filter(predicates: Vec<String>, input: Tree) -> Tree {
     } else {
         Tree::node(Operator::Filter, predicates.join(", "), vec![input])
     }
-}
-
-pub fn logical(input: &Input) -> Tree {
-    let mut children: Vec<_> = input
-        .nodes
-        .iter()
-        .map(|node| {
-            let mut predicates = input_filters(&node.id, &node.filters);
-            if !node.node_ids.is_empty() {
-                predicates.push(format!("{}.id IN {:?}", node.id, node.node_ids));
-            }
-            if let Some(range) = &node.id_range {
-                predicates.extend([
-                    format!("{}.id >= {}", node.id, range.start),
-                    format!("{}.id <= {}", node.id, range.end),
-                ]);
-            }
-            let scan = filter(
-                predicates,
-                leaf(
-                    Operator::NodeScan,
-                    format!(
-                        "{} AS {}",
-                        node.entity.as_deref().unwrap_or("Unresolved"),
-                        node.id
-                    ),
-                ),
-            );
-            match &node.columns {
-                Some(ColumnSelection::List(columns)) => Tree::node(
-                    Operator::Project,
-                    columns
-                        .iter()
-                        .map(|column| format!("{}.{column}", node.id))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    vec![scan],
-                ),
-                Some(ColumnSelection::All) => {
-                    Tree::node(Operator::Project, format!("{}.*", node.id), vec![scan])
-                }
-                None => scan,
-            }
-        })
-        .collect();
-    children.extend(input.relationships.iter().enumerate().map(|(index, edge)| {
-        let (source, target, arrow) = match edge.direction {
-            compiler::input::Direction::Incoming => (&edge.to, &edge.from, "->"),
-            compiler::input::Direction::Outgoing => (&edge.from, &edge.to, "->"),
-            compiler::input::Direction::Both => (&edge.from, &edge.to, "--"),
-        };
-        let alias = format!("e{index}");
-        let depth = if edge.hops.min == 1 && edge.hops.max == 1 {
-            String::new()
-        } else {
-            format!(" HOPS {}..{}", edge.hops.min, edge.hops.max)
-        };
-        filter(
-            input_filters(&alias, &edge.filters),
-            leaf(
-                Operator::EdgeScan,
-                format!(
-                    "{} {source}{arrow}{target} AS {alias}{depth}",
-                    edge.types.join("|")
-                ),
-            ),
-        )
-    }));
-    let mut tree = Tree::node(Operator::Input, input.query_type.to_string(), children);
-    tree = filter(
-        input
-            .predicates
-            .iter()
-            .map(|expression| {
-                boolean_text(expression, &|leaf: &compiler::input::Condition| {
-                    let alias = match &leaf.target {
-                        compiler::input::PredicateTarget::Node(alias) => alias.clone(),
-                        compiler::input::PredicateTarget::Relationship(index) => {
-                            format!("e{index}")
-                        }
-                    };
-                    property_filter(&alias, &leaf.property, &leaf.filter)
-                })
-            })
-            .collect(),
-        tree,
-    );
-    if !input.aggregation.metrics.is_empty() || !input.aggregation.group_by.is_empty() {
-        let groups = input.aggregation.group_by.iter().map(|group| {
-            let value = group.property().map_or_else(
-                || group.node().into(),
-                |property| format!("{}.{property}", group.node()),
-            );
-            let value = group.truncate().map_or_else(
-                || value.clone(),
-                |unit| format!("date_trunc({}, {value})", unit.name()),
-            );
-            format!("group {value} AS {}", group.output_name())
-        });
-        let metrics = input.aggregation.metrics.iter().map(|metric| {
-            let argument = metric.expr.property().map_or_else(
-                || metric.expr.node().into(),
-                |property| format!("{}.{property}", metric.expr.node()),
-            );
-            format!(
-                "{}({argument}) AS {}",
-                metric.expr.function().to_string().to_uppercase(),
-                metric.output_name()
-            )
-        });
-        tree = Tree::node(
-            Operator::Aggregate,
-            groups.chain(metrics).collect::<Vec<_>>().join(", "),
-            vec![tree],
-        );
-    }
-    if let Some(order) = &input.order_by {
-        tree = Tree::node(
-            Operator::Sort,
-            format!(
-                "{}.{}{}",
-                order.node,
-                order.property,
-                if order.direction == OrderDirection::Desc {
-                    " DESC"
-                } else {
-                    ""
-                }
-            ),
-            vec![tree],
-        );
-    }
-    if let Some(order) = &input.aggregation.sort {
-        tree = Tree::node(
-            Operator::Sort,
-            format!(
-                "{}{}",
-                order.column,
-                if order.direction == OrderDirection::Desc {
-                    " DESC"
-                } else {
-                    ""
-                }
-            ),
-            vec![tree],
-        );
-    }
-    if let Some(skip) = input.skip {
-        tree = Tree::node(Operator::Offset, skip.to_string(), vec![tree]);
-    }
-    Tree::node(Operator::Limit, input.limit.to_string(), vec![tree])
-}
-
-fn input_filters(alias: &str, filters: &HashMap<String, Vec<InputFilter>>) -> Vec<String> {
-    let mut ordered: Vec<_> = filters.iter().collect();
-    ordered.sort_by_key(|(property, _)| *property);
-    ordered
-        .into_iter()
-        .flat_map(|(property, filters)| {
-            filters
-                .iter()
-                .map(move |filter| property_filter(alias, property, filter))
-        })
-        .collect()
 }
 
 fn property_filter(alias: &str, property: &str, filter: &InputFilter) -> String {
@@ -723,7 +558,7 @@ pub(super) fn scan(table: &str, alias: &str, final_: bool) -> Tree {
     }
 }
 
-fn text_literal(value: &str) -> String {
+pub(super) fn text_literal(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 

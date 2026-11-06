@@ -1,5 +1,6 @@
 mod emitted;
 mod explain;
+mod logical;
 mod operator;
 mod pattern;
 mod terms;
@@ -23,7 +24,7 @@ struct Scenario {
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
-    logical: Assertions,
+    logical: Logical,
     physical: BTreeMap<String, PhysicalAssertions>,
     hydration: Option<HydrationSetup>,
 }
@@ -50,6 +51,22 @@ impl Scenario {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Logical {
+    Shared(Assertions),
+    Surfaces(BTreeMap<String, Assertions>),
+}
+
+impl Logical {
+    fn surface(&self, language: &str) -> Option<&Assertions> {
+        match self {
+            Self::Shared(assertions) => Some(assertions),
+            Self::Surfaces(surfaces) => surfaces.get(language),
+        }
     }
 }
 
@@ -285,10 +302,14 @@ fn check<M: RelationalModel>(
                 path_segment_budget: hydration.path_segment_budget,
             };
         }
-        if let Err(error) = scenario
-            .logical
-            .check(&explain::logical(&input), &format!("{label}.logical"))
-        {
+        let Some(logical) = scenario.logical.surface(language) else {
+            failures.push(format!("{label}: logical has no {language} assertions"));
+            continue;
+        };
+        if let Err(error) = logical.check(
+            &logical::logical(&statement.plan, catalog.model()),
+            &format!("{label}.logical"),
+        ) {
             failures.push(error);
             continue;
         }
@@ -481,7 +502,7 @@ cases:
       json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}]}'
       gql: 'MATCH (u:User {id: 1}) RETURN u'
     logical:
-      expect: ['(Input neighbors (...))']
+      expect: ['(Neighbors (...))']
     physical:
       clickhouse:
         planned:
@@ -491,7 +512,7 @@ cases:
       json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]}]}'
       gql: 'MATCH (p:Project {id: 1}) RETURN p'
     logical:
-      expect: ['(Input neighbors (...))']
+      expect: ['(Neighbors (...))']
     physical:
       clickhouse:
         planned:

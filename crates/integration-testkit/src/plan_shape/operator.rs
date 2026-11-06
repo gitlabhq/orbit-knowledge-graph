@@ -28,7 +28,10 @@ macro_rules! operators {
 operators! {
     Hole => "_",
     Sequence => "...",
-    Input => "Input",
+    Entities => "Entities",
+    Follow => "Follow",
+    Shortest => "Shortest",
+    Select => "Select",
     NodeScan => "NodeScan",
     EdgeScan => "EdgeScan",
     Filter => "Filter",
