@@ -243,10 +243,7 @@ fn return_columns(
                     node.id
                 ))
             })?;
-            Term::Value(OutputValue::Column(Named::new(
-                table_alias,
-                redaction_column,
-            )))
+            Term::Column(Named::new(table_alias, redaction_column))
         } else {
             identity.clone()
         };
@@ -256,13 +253,13 @@ fn return_columns(
         }
         contract.set(redaction_id_column(&node.id), authorization_id.clone());
         contract.group(authorization_id);
-        let kind = Term::Value(OutputValue::Text(entity.clone()));
+        let kind = Term::Value(Box::new(OutputValue::Text(entity.clone())));
         contract.set(redaction_type_column(&node.id), kind);
         if input.query_type != QueryType::Aggregation
             && model.entity_has_traversal_path(entity)
             && let Some(path) = traversal_path
         {
-            let path = Term::Value(OutputValue::Column(path.clone()));
+            let path = Term::Column(path.clone());
             contract.set(traversal_path_column(&node.id), path);
         }
     }

@@ -112,7 +112,7 @@ pub(crate) fn stable_order(
                     || crate::passes::normalize::is_wildcard(&hop.rel_types))
         })
         .filter_map(|hop| edge_type(plan, hop))
-        .map(|value| Term::Value(value.clone()));
+        .map(|value| Term::Value(Box::new(value.clone())));
     order.into_iter().chain(edge_types).collect()
 }
 

@@ -178,6 +178,7 @@ pub(crate) fn term<B: RelationalBackend>(
     groups: &[Expr],
 ) -> Built<Expr> {
     Ok(match term {
+        Term::Column(value) => column(scope, value)?,
         Term::Value(value) => {
             let shared = predicates::Shared::default();
             let lowering = predicates::Lowering {

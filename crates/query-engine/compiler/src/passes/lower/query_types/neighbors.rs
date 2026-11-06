@@ -22,7 +22,7 @@ use crate::passes::lower::build::{
     Built, and, binary, call, col, computed, conjoin, disjoin, eq, filtered, int, scan, stored,
     string,
 };
-use crate::passes::plan::predicates::{Column, OutputValue};
+use crate::passes::plan::predicates::Column;
 use crate::passes::plan::{Neighbors, Plan, property_value};
 
 pub(crate) fn stable_order(plan: &Plan<Neighbors>) -> Vec<Term> {
@@ -42,12 +42,7 @@ pub(crate) fn stable_order(plan: &Plan<Neighbors>) -> Vec<Term> {
             TARGET_KIND_COLUMN,
         ]
         .into_iter()
-        .map(|column| {
-            Term::Value(OutputValue::Column(Column::new(
-                neighbor_edge_alias(),
-                column,
-            )))
-        })
+        .map(|column| Term::Column(Column::new(neighbor_edge_alias(), column)))
         .collect(),
     }
 }

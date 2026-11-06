@@ -24,7 +24,8 @@ pub struct LoweredMetadata {
 
 #[derive(Clone, PartialEq)]
 pub enum Term {
-    Value(OutputValue),
+    Column(Column),
+    Value(Box<OutputValue>),
     Id(i64),
     Output(String),
     Text(Column),
@@ -50,7 +51,7 @@ impl NodeBinding {
         traversal_path: Option<Column>,
     ) -> Self {
         Self::Values {
-            identity: Term::Value(OutputValue::Column(Column::new(alias, column))),
+            identity: Term::Column(Column::new(alias, column)),
             table_alias,
             traversal_path,
         }
