@@ -103,7 +103,7 @@ pub(super) struct AgentSpec {
     pub(super) name: String,
     pub(super) title: String,
     pub(super) detect: Vec<String>,
-    pub(super) instruction_file: Option<ScopedPath>,
+    pub(super) instruction_file: ScopedPath,
     #[serde(default)]
     pub(super) json_merges: Vec<JsonMerge>,
     #[serde(default)]
@@ -220,6 +220,16 @@ pub(super) struct JsonMerge {
     pub(super) path: Vec<String>,
     pub(super) marker: String,
     pub(super) entries: Vec<Value>,
+    #[serde(default)]
+    pub(super) trust: Option<HookTrust>,
+}
+
+/// How the assistant records that the person accepted a hook, so setup can do it for the hooks
+/// it writes: `codex` asks `codex app-server` to trust them.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum HookTrust {
+    Codex,
 }
 
 #[derive(Debug, Deserialize)]
@@ -252,8 +262,6 @@ pub(super) struct Retired {
     pub(super) registrations: Vec<Registration>,
     #[serde(default)]
     pub(super) mcp: Option<McpEntry>,
-    #[serde(default)]
-    pub(super) instruction_file: Option<ScopedPath>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -619,6 +627,32 @@ mod tests {
     }
 
     #[test]
+    fn every_agent_loads_the_instructions_from_the_cli() {
+        let pi = agent_named("pi").unwrap();
+        let extension = pi.template_files[0].render();
+        assert!(extension.contains("before_agent_start"));
+        assert!(extension.contains(r#""hook-guard", "instructions""#));
+        let opencode = read_embedded_text("opencode_plugin.js");
+        assert!(opencode.contains("experimental.chat.system.transform"));
+        assert!(opencode.contains(r#""hook-guard", "instructions""#));
+        for name in ["codex", "duo"] {
+            let agent = agent_named(name).unwrap();
+            let session = agent
+                .json_merges
+                .iter()
+                .find(|merge| merge.path == ["hooks", "SessionStart"])
+                .unwrap_or_else(|| panic!("{name} has no SessionStart hook"));
+            assert!(
+                session.entries[0]["hooks"][0]["command"]
+                    .as_str()
+                    .is_some_and(|command| command.ends_with("hook-guard instructions")),
+                "{name}"
+            );
+        }
+        assert!(agent_named("claude").unwrap().plugin.is_some());
+    }
+
+    #[test]
     fn opencode_plugins_use_the_opencode_2_shape() {
         let opencode = agent_named("opencode").unwrap();
         for file in &opencode.template_files {
@@ -681,23 +715,13 @@ mod tests {
     #[test]
     fn instruction_files_are_known_names_and_globals_expand_under_home_or_an_absolute_config_dir() {
         for spec in agents() {
-            for file in spec
-                .instruction_file
-                .iter()
-                .chain(&spec.retired.instruction_file)
-            {
-                assert!(
-                    ["AGENTS.md", "CLAUDE.md"].contains(&file.project.as_str()),
-                    "{}: unexpected instruction file {}",
-                    spec.name,
-                    file.project
-                );
-            }
-            for global in spec
-                .instruction_file
-                .iter()
-                .chain(&spec.retired.instruction_file)
-                .map(|file| &file.global)
+            assert!(
+                ["AGENTS.md", "CLAUDE.md"].contains(&spec.instruction_file.project.as_str()),
+                "{}: unexpected instruction file {}",
+                spec.name,
+                spec.instruction_file.project
+            );
+            for global in std::iter::once(&spec.instruction_file.global)
                 .chain(spec.json_merges.iter().map(|m| &m.file.global))
                 .chain(spec.template_files.iter().map(|t| &t.path.global))
                 .chain(

@@ -5,6 +5,17 @@ detect: ["~/.gitlab/duo"]
 instruction_file:
   project: AGENTS.md
   global: "~/.gitlab/duo/AGENTS.md"
+json_merges:
+  - file:
+      project: .gitlab/duo/hooks.json
+      global: "~/.gitlab/duo/hooks.json"
+    path: [hooks, SessionStart]
+    marker: hook-guard
+    entries:
+      - hooks:
+          - type: command
+            command: "{{orbit}} hook-guard instructions"
+            timeout: 10
 skills:
   dir:
     project: .agents/skills

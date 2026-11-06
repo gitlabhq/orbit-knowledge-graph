@@ -209,10 +209,10 @@ fn setup_says_when_the_agent_plugin_is_skipped_and_leaves_it_off_the_configured_
     let (home, printed) = setup_with_claude_version("2.1.286", &[]);
 
     assert!(
-        printed.contains("Orbit UI skipped: needs Claude Code"),
+        printed.contains("WARNING: Orbit plugin requires Claude Code"),
         "{printed}"
     );
-    assert!(printed.contains("you have 2.1.286"), "{printed}");
+    assert!(printed.contains("2.1.287+ (you have 2.1.286)"), "{printed}");
     let card = configured_card(&printed);
     assert!(card.contains("Claude Code   hooks, skill  "), "{printed}");
     assert!(!card.contains("agent plugins"), "{printed}");
@@ -224,7 +224,10 @@ fn setup_says_when_the_agent_plugin_is_skipped_and_leaves_it_off_the_configured_
 fn setup_lists_agent_plugins_when_the_plugin_is_installed() {
     let (home, printed) = setup_with_claude_version("99.0.0", &[]);
 
-    assert!(!printed.contains("Orbit UI skipped"), "{printed}");
+    assert!(
+        !printed.contains("WARNING: Orbit plugin requires"),
+        "{printed}"
+    );
     assert!(
         configured_card(&printed).contains("skill, agent plugins"),
         "{printed}"
@@ -238,7 +241,7 @@ fn dry_run_does_not_plan_the_agent_plugin_when_it_would_be_skipped() {
     let (_home, printed) = setup_with_claude_version("2.1.286", &["--dry-run"]);
 
     assert!(
-        printed.contains("Orbit UI skipped: needs Claude Code"),
+        printed.contains("WARNING: Orbit plugin requires Claude Code"),
         "{printed}"
     );
     let plan = &printed[printed.find("Plan").expect("Plan card")..];
@@ -251,7 +254,10 @@ fn dry_run_does_not_plan_the_agent_plugin_when_it_would_be_skipped() {
 fn dry_run_plans_the_agent_plugin_when_claude_is_new_enough() {
     let (_home, printed) = setup_with_claude_version("99.0.0", &["--dry-run"]);
 
-    assert!(!printed.contains("Orbit UI skipped"), "{printed}");
+    assert!(
+        !printed.contains("WARNING: Orbit plugin requires"),
+        "{printed}"
+    );
     let plan = &printed[printed.find("Plan").expect("Plan card")..];
     assert!(plan.contains("claude_plugin"), "{printed}");
 }
@@ -262,5 +268,8 @@ fn dry_run_reports_no_plugin_skip_when_agent_plugins_are_not_selected() {
     let (_home, printed) =
         setup_with_claude_version("2.1.286", &["--dry-run", "--skip", "agent-plugins"]);
 
-    assert!(!printed.contains("Orbit UI skipped"), "{printed}");
+    assert!(
+        !printed.contains("WARNING: Orbit plugin requires"),
+        "{printed}"
+    );
 }

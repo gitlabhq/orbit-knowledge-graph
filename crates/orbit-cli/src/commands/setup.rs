@@ -276,6 +276,8 @@ fn apply_and_report(
         for outcome in &report.outcomes {
             if outcome.action == components::KEPT_RETIRED {
                 tui::warning(format!("{}: {}", outcome.label, outcome.action));
+            } else if let Some(warning) = outcome.action.strip_prefix("WARNING: ") {
+                tui::warning(format!("{}: {warning}", outcome.label));
             }
         }
         show_outcomes_per_component(&report.only_plugin_skips())?;
@@ -536,8 +538,9 @@ mod tests {
         assert_eq!(run.outcome, Outcome::Applied);
         assert!(!run.global);
         assert!(!dir.path().join("CLAUDE.md").exists());
-        assert!(dir.path().join("AGENTS.md").is_file());
+        assert!(!dir.path().join("AGENTS.md").exists());
         assert!(dir.path().join(".claude/settings.json").is_file());
+        assert!(dir.path().join(".codex/hooks.json").is_file());
         assert!(!dir.path().join(".opencode").exists());
     }
 
@@ -565,6 +568,8 @@ mod tests {
     #[test]
     fn skipped_components_are_left_alone() {
         let dir = tempfile::tempdir().unwrap();
+        let old = "# Mine\n\n<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n";
+        std::fs::write(dir.path().join("AGENTS.md"), old).unwrap();
         let mut only_instructions = options_for(&["claude", "opencode"]);
         only_instructions.components = Component::from_flags(
             &[],
@@ -574,7 +579,10 @@ mod tests {
         install(only_instructions, project(dir.path()), &bare_machine()).unwrap();
 
         assert!(!dir.path().join("CLAUDE.md").exists());
-        assert!(dir.path().join("AGENTS.md").is_file());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
+            "# Mine\n"
+        );
         assert!(!dir.path().join(".claude").exists());
         assert!(!dir.path().join(".opencode").exists());
         assert!(!dir.path().join(".agents").exists());
@@ -607,10 +615,12 @@ mod tests {
 
         install_default(&["codex", "opencode"], dir.path());
 
-        let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
-        assert!(agents.contains("<!-- orbit:setup:begin -->"));
-        assert!(agents.contains("# My rules"));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
+            "# My rules\n"
+        );
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
+        assert!(dir.path().join(".codex/hooks.json").is_file());
         for part in ["index.js", "rpc.ts", "tui.tsx"] {
             let path = dir.path().join(".opencode/plugins/orbit-ui").join(part);
             assert!(path.is_file(), "{}", path.display());
@@ -636,7 +646,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_setup_removes_the_claude_md_block_and_keeps_the_rest() {
+    fn setup_removes_an_earlier_instruction_block_and_keeps_the_rest() {
         let dir = tempfile::tempdir().unwrap();
         let claude_md = dir.path().join("CLAUDE.md");
         std::fs::write(
@@ -656,19 +666,34 @@ mod tests {
         .unwrap();
         install_default(&["claude"], dir.path());
         assert!(!claude_md.exists());
+
+        let agents_md = dir.path().join("AGENTS.md");
+        std::fs::write(
+            &agents_md,
+            "# Rules\n\n<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n",
+        )
+        .unwrap();
+        install_default(&["codex", "duo", "opencode", "pi"], dir.path());
+        assert_eq!(std::fs::read_to_string(&agents_md).unwrap(), "# Rules\n");
     }
 
     #[cfg(unix)]
     #[test]
-    fn symlinked_claude_md_gets_one_orbit_block() {
+    fn a_symlinked_claude_md_loses_the_block_once_and_stays_a_link() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("AGENTS.md"), "# rules\n").unwrap();
+        std::fs::write(
+            dir.path().join("AGENTS.md"),
+            "# rules\n\n<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n",
+        )
+        .unwrap();
         std::os::unix::fs::symlink("AGENTS.md", dir.path().join("CLAUDE.md")).unwrap();
 
         install_default(&["claude", "codex"], dir.path());
 
-        let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
-        assert_eq!(agents.matches("<!-- orbit:setup:begin -->").count(), 1);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
+            "# rules\n"
+        );
         let claude = std::fs::symlink_metadata(dir.path().join("CLAUDE.md")).unwrap();
         assert!(claude.is_symlink());
     }
@@ -1638,12 +1663,11 @@ mod tests {
         install_default(&["claude", "codex", "opencode"], dir.path());
         install_default(&["claude", "codex", "opencode"], dir.path());
 
-        let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
-        assert_eq!(agents.matches("<!-- orbit:setup:begin -->").count(), 1);
         assert_eq!(
-            std::fs::read_to_string(dir.path().join("AGENTS.md.orbit-backup")).unwrap(),
+            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
             "# Mine\n"
         );
+        assert!(!dir.path().join("AGENTS.md.orbit-backup").exists());
         assert_eq!(
             std::fs::read_to_string(dir.path().join(".claude/settings.json.orbit-backup")).unwrap(),
             "{\"permissions\": {}}"

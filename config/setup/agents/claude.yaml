@@ -5,6 +5,9 @@
 name: claude
 title: Claude Code
 detect: ["$CLAUDE_CONFIG_DIR", "~/.claude", "~/.claude.json"]
+instruction_file:
+  project: CLAUDE.md
+  global: "${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md"
 json_merges:
   - file:
       project: .claude/settings.json
@@ -17,9 +20,6 @@ json_merges:
           - type: command
             command: "{{orbit}} hook-guard search{{hook_gitlab}}"
 retired:
-  instruction_file:
-    project: CLAUDE.md
-    global: "${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md"
   mcp:
     file:
       project: .mcp.json

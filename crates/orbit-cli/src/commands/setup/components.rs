@@ -1,4 +1,5 @@
 pub(super) mod agent_plugins;
+mod codex_trust;
 mod hooks;
 mod instructions;
 pub(super) mod json;
@@ -400,29 +401,5 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), "data");
         assert_eq!(mode_of(&backup), 0o777);
         assert_eq!(report.outcomes.len(), 1);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn install_refuses_a_symlinked_backup_path_and_writes_nothing_through_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
-        let agent = spec::agents()
-            .find(|agent| agent.instruction_file.is_some())
-            .unwrap();
-        let (file, _) = target
-            .resolve(agent.instruction_file.as_ref().unwrap())
-            .unwrap();
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(&file, "existing notes\n").unwrap();
-        let outside = dir.path().join("outside");
-        std::os::unix::fs::symlink(&outside, backup_path(&file)).unwrap();
-        let mut report = Report::default();
-
-        let result = installer_for(Component::Instructions).install(&[agent], &target, &mut report);
-
-        assert!(result.is_err());
-        assert!(!outside.exists());
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "existing notes\n");
     }
 }

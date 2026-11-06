@@ -1,3 +1,4 @@
+import { execFile } from "child_process";
 import { existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -11,6 +12,25 @@ const SHELL_TOOLS = ["bash", "shell"];
 function hasGraph() {
   const root = process.env.ORBIT_DATA_DIR || join(homedir(), ".gitlab", "orbit");
   return existsSync(join(root, "local", "manifest.duckdb"));
+}
+
+const LAUNCHERS = [["orbit", []], ["glab", ["orbit"]]];
+
+function run(command, args) {
+  return new Promise((resolve) => {
+    execFile(command, args, { timeout: 9000 }, (error, stdout) => {
+      if (error && error.code === "ENOENT") return resolve(null);
+      resolve(error ? "" : String(stdout).trim());
+    });
+  });
+}
+
+async function instructions() {
+  for (const [command, prefix] of LAUNCHERS) {
+    const text = await run(command, [...prefix, "hook-guard", "instructions"]);
+    if (text !== null) return text;
+  }
+  return "";
 }
 
 function withReminder(result) {
@@ -36,6 +56,10 @@ export default {
   async server() {
     let reminded = false;
     return {
+      "experimental.chat.system.transform": async (_input, output) => {
+        const text = await instructions();
+        if (text && !output.system.includes(text)) output.system.push(text);
+      },
       "tool.execute.after": async (input, output) => {
         if (reminded || !SHELL_TOOLS.includes(input.tool) || !hasGraph()) return;
         output.output = output.output + "\n\n" + REMINDER;
