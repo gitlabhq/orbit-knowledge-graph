@@ -102,7 +102,7 @@ Commands that use only the local graph need no GitLab account and no network.
 | `status` | GitLab Orbit API | Show the health of the service, or the indexing progress of a group or project. |
 | `schema` | GitLab Orbit API | Show the node types, properties, and relationships. |
 | `skills get` | GitLab Orbit API when a GitLab credential is available, otherwise the built-in copy of `orbit` | Print the agent skill files, such as `orbit` and `orbit-start`. Only `orbit` has a built-in copy. |
-| `grep` | Local graph and GitLab Orbit API | Search every line of code, tests, configuration, and documentation, with the enclosing definitions, and the merge requests, issues, and comments of your GitLab group. |
+| `grep` | Local graph and GitLab Orbit API | Search every line of code, tests, configuration, and documentation, with the enclosing definitions. With `mr:`, `issue:`, or `comment:`, search the merge requests, issues, and comments of your GitLab group. |
 | `context` | Local graph and GitLab Orbit API | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
 | `workspace index` | Local graph | Index a repository, or a directory of repositories. |
 | `workspace list` | Local graph | List the indexed repositories. |
@@ -277,9 +277,9 @@ src/main.py
 - `grep` and `context` index files that you edited after the last index.
   If indexing an edited file takes longer than two seconds or fails, `grep` marks the file `(edited since index)`
   and does not show its definitions. For more information, see [troubleshooting](troubleshooting.md#files-marked-edited-since-index).
-- In a clone of a GitLab project, a search without paths also searches the merge requests, issues, and comments
-  of the group of the `origin` remote, and prints them after the local results.
-  To search only GitLab, start the query with `mr:`, `issue:`, `commit:`, or `comment:`.
+- A search without paths searches only local code.
+  To search the merge requests, issues, and comments of the group of the `origin` remote,
+  start the query with `mr:`, `issue:`, `commit:`, or `comment:`.
 
 To read the source of a definition and its callers, pass its name to `context`:
 
