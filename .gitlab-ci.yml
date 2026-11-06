@@ -22,7 +22,7 @@ workflow:
         on_new_commit: interruptible
       variables:
         DEV_PREFIX: "sec"
-    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       variables:
@@ -38,7 +38,7 @@ workflow:
       variables:
         RUNNER_LARGE: saas-linux-medium-amd64
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       variables:
@@ -58,7 +58,7 @@ workflow:
         on_new_commit: interruptible
       variables:
         DOCS_ONLY: "true"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     # Security-template jobs can't reference .skip-on-solo-schedule, so solo
     # schedules mute them through their documented kill-switch variables.
