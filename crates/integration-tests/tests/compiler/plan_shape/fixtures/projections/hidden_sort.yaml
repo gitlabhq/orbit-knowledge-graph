@@ -14,8 +14,7 @@ query:
 
 logical:
   expect:
-    - (Project f.path (Filter f.id IN [1, 2] (NodeScan File AS f)))
-    - (Limit 5 (Sort f.id DESC (_)))
+    - (Limit 5 (Select f{path} (Sort f.id DESC (Filter f.id IN [1, 2] (Entities File AS f)))))
 
 physical:
   clickhouse:

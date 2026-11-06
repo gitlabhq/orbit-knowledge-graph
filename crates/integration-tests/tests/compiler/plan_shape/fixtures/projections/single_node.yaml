@@ -12,7 +12,7 @@ query:
 
 logical:
   expect:
-    - (Project f.id, f.path (Filter f.language = 'rust' (NodeScan File AS f)))
+    - (Limit 10 (Select f{id, path} (Filter f.language = 'rust' (Entities File AS f))))
 
 physical:
   clickhouse:
