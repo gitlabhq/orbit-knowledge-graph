@@ -20,7 +20,7 @@ const VALUE_FLAGS = new Set([
   '--db', '--file', '--response-format', '--full-path', '--namespace-id', '--project-id', '--repo', '--budget', '--timeout',
 ])
 const VALUE_FLAGS_BY_KEY: Readonly<Record<string, ReadonlySet<string>>> = {
-  grep: new Set(['-A', '-B', '-C', '-m', '-g', '--glob', '--include', '--exclude', '--exclude-dir', '-t', '--type', '-T', '--type-not', '-M', '--max-columns']),
+  grep: new Set(['-A', '--after-context', '-B', '--before-context', '-C', '--context', '-m', '--max-count', '-g', '--glob', '--include', '--exclude', '--exclude-dir', '-t', '--type', '-T', '--type-not', '-M', '--max-columns']),
   'workspace sql': new Set(['-f', '-F', '--format']),
 }
 const SHOWS_ARGUMENT = new Set(['grep', 'context', 'workspace sql', 'sql', 'schema', 'ontology', 'graph-status', 'skills', 'skill'])

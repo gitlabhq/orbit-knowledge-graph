@@ -784,7 +784,7 @@ var VALUE_FLAGS = new Set([
   "--timeout"
 ]);
 var VALUE_FLAGS_BY_KEY = {
-  grep: new Set(["-A", "-B", "-C", "-m", "-g", "--glob", "--include", "--exclude", "--exclude-dir", "-t", "--type", "-T", "--type-not", "-M", "--max-columns"]),
+  grep: new Set(["-A", "--after-context", "-B", "--before-context", "-C", "--context", "-m", "--max-count", "-g", "--glob", "--include", "--exclude", "--exclude-dir", "-t", "--type", "-T", "--type-not", "-M", "--max-columns"]),
   "workspace sql": new Set(["-f", "-F", "--format"])
 };
 var SHOWS_ARGUMENT = new Set(["grep", "context", "workspace sql", "sql", "schema", "ontology", "graph-status", "skills", "skill"]);
