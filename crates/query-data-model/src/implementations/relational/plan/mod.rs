@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 
 use ontology::DataType;
 
-pub use builder::{Aggregated, RelationalBuilder, Subquery};
+pub use builder::{Aggregated, Detached, RelationalBuilder, Subquery};
 pub use error::RelationalError;
 pub use expr::{BinaryOp, Expr, Function, TextMatch, TimeUnit, UnaryOp};
 pub use operation::{
@@ -82,5 +82,13 @@ impl<B: RelationalBackend> Catalog<B> {
         let mut builder = RelationalBuilder::new(self);
         let root = construct(&mut builder);
         builder.finish(root)
+    }
+
+    pub fn rewrite<'c>(
+        &'c self,
+        plan: RelationalPlan<B>,
+        visit: impl FnMut(&mut RelationalBuilder<'c, B>, Relation) -> Result<Relation, RelationalError>,
+    ) -> Result<RelationalPlan<B>, RelationalError> {
+        RelationalBuilder::rewriting(self, plan)?.rewrite(visit)
     }
 }

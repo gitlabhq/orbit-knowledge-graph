@@ -36,6 +36,12 @@ pub struct Rows {
     pub(super) node: NodeId,
 }
 
+impl Rows {
+    pub fn node(&self) -> NodeId {
+        self.node
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Ref {
     pub(super) plan: PlanId,

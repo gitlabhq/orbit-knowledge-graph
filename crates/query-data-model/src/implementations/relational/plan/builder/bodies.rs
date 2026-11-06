@@ -62,6 +62,7 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
         let width = self.construction.outputs(&root.rows)?.len();
         let body = self.construction.close(opening, root.rows)?;
         self.bodies.push(BodyUse { sharing, with });
+        self.names.push(name.to_string());
         self.widths.push(width);
         if sharing != Sharing::Inline
             && let Some(frame) = self.frames.last_mut()

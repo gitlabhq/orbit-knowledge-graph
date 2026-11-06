@@ -1,28 +1,35 @@
 mod bodies;
 mod check;
 mod clauses;
+mod detach;
+mod rewrite;
 mod sources;
 mod tail;
+
+use std::collections::HashMap;
 
 use ontology::DataType;
 
 pub use bodies::Subquery;
 pub use clauses::Aggregated;
+pub use detach::Detached;
 
 use super::relation::Visible;
 use super::stage::Stage;
 use super::{BodyUse, Column, Operation, Relation, Relational, RelationalError, RelationalPlan};
 use crate::catalog::Catalog;
 use crate::implementations::relational::RelationalBackend;
-use crate::plan::tracking::{BodyId, Construction, Outputs, Ref};
+use crate::plan::tracking::{self, BodyId, Construction, NodeId, Outputs, Ref};
 
 pub struct RelationalBuilder<'c, B: RelationalBackend> {
     catalog: &'c Catalog<B>,
     construction: Construction<Relational<B>>,
     bodies: Vec<BodyUse>,
+    names: Vec<String>,
     widths: Vec<usize>,
     frames: Vec<Vec<BodyId>>,
     settings: Vec<(String, String)>,
+    views: HashMap<NodeId, rewrite::View>,
 }
 
 impl<'c, B: RelationalBackend> RelationalBuilder<'c, B> {
@@ -31,10 +38,54 @@ impl<'c, B: RelationalBackend> RelationalBuilder<'c, B> {
             catalog,
             construction: Construction::new(catalog.model().id()),
             bodies: Vec::new(),
+            names: Vec::new(),
             widths: Vec::new(),
             frames: vec![Vec::new()],
             settings: Vec::new(),
+            views: HashMap::new(),
         }
+    }
+
+    pub(in super::super) fn rewriting(
+        catalog: &'c Catalog<B>,
+        plan: RelationalPlan<B>,
+    ) -> Result<Self, RelationalError> {
+        let mut names = Vec::new();
+        let mut widths = Vec::new();
+        for body in plan.plan.bodies() {
+            let (name, root) = plan.plan.body(body);
+            names.push(name.to_string());
+            widths.push(plan.plan.outputs(root).count());
+        }
+        let construction = Construction::rewrite(plan.plan, catalog.model().id())?;
+        Ok(Self {
+            catalog,
+            construction,
+            bodies: plan.bodies,
+            names,
+            widths,
+            frames: vec![plan.with],
+            settings: plan.settings,
+            views: HashMap::new(),
+        })
+    }
+
+    pub(in super::super) fn rewrite(
+        mut self,
+        mut visit: impl FnMut(&mut Self, Relation) -> Result<Relation, RelationalError>,
+    ) -> Result<RelationalPlan<B>, RelationalError> {
+        let root = tracking::rewrite(
+            &mut self,
+            |q| &mut q.construction,
+            |q, rows| {
+                let relation = q.view(rows)?;
+                let relation = visit(q, relation)?;
+                q.remember(&relation);
+                Ok(relation.rows)
+            },
+        );
+        let root = root.and_then(|rows| self.view(rows));
+        self.finish(root)
     }
 
     pub(in super::super) fn finish(

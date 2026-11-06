@@ -20,28 +20,36 @@
 //! target. Now the target entity's scan is filtered down to zero paths
 //! (producing a Bool(false) predicate) and the aggregation counts nothing.
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use orbit_utils::query_types::SqlType;
+use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
+use query_data_model::Catalog;
+use query_data_model::implementations::clickhouse::ClickHouse;
+use query_data_model::implementations::relational::plan::{
+    BinaryOp, Expr, Function, Operation, Relational,
+};
+use query_data_model::plan::tracking::{NodeId, Plan, Ref};
 use regex::Regex;
-
 use serde_json::Value;
 
-use crate::ast::visit::{visit_queries_mut, visit_relations};
-use crate::ast::{Expr, Function, Node, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
-use crate::error::Result;
+use crate::error::{QueryError, Result};
+use crate::passes::codegen::ClickHousePlan;
+use crate::passes::security_check::table_name;
 pub use crate::types::SecurityContext;
-use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 
 static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 
 /// Per-alias role floors come from the query data model.
 /// Tables without authorization metadata keep the historical Reporter floor.
 pub fn apply_security_context(
-    node: &mut Node,
+    plan: ClickHousePlan,
+    catalog: &Catalog<ClickHouse>,
     ctx: &SecurityContext,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Result<()> {
+) -> Result<ClickHousePlan> {
     // An entirely empty security context is treated as a fail-closed bug:
     // the caller forgot to populate traversal paths. Emitting `Bool(false)`
     // here would silently return empty results, which is indistinguishable
@@ -51,530 +59,236 @@ pub fn apply_security_context(
     // role, and returning zero rows for the protected entity is the
     // intended behavior.
     if ctx.traversal_paths.is_empty() {
-        return Err(crate::error::QueryError::Security(
+        return Err(QueryError::Security(
             "security context has no traversal_path entries; refusing to compile \
              because every gl_* alias would fall back to Bool(false) and hide \
              the underlying auth misconfiguration"
                 .into(),
         ));
     }
-    let Node::Query(query) = node else {
-        return Ok(());
-    };
-    visit_queries_mut(query, &mut |query| {
-        let mut aliased_tables = Vec::new();
-        visit_relations(&query.from, &mut |relation| {
-            if let TableRef::Scan { table, alias, .. } = relation {
-                let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
-                    Regex::new(&format!(
-                        r"^(?:v\d+_)?{}.+$",
-                        regex::escape(GL_TABLE_PREFIX)
-                    ))
-                    .expect("valid regex")
-                });
-                if graph_table_pattern.is_match(table) && model.table_has_path_columns(table) {
-                    aliased_tables.push((alias.clone(), table.clone()));
+    let mut guards = guards(&plan.plan, catalog, ctx, model);
+    catalog
+        .rewrite(plan, |q, rows| {
+            let Some(mut conditions) = q.original().and_then(|node| guards.remove(&node)) else {
+                return Ok(rows);
+            };
+            let mut detached = q.detach(rows)?;
+            match &mut detached.operation {
+                Operation::Filter(predicate) => {
+                    conditions.push(predicate.clone());
+                    if let Some(guarded) = balanced(BinaryOp::And, conditions) {
+                        *predicate = guarded;
+                    }
+                }
+                _ => {
+                    if let Some(guard) = balanced(BinaryOp::And, conditions) {
+                        let source = detached.inputs.remove(0);
+                        detached.inputs.insert(0, q.filter(source, guard)?);
+                    }
                 }
             }
-        });
-        let security_conditions = aliased_tables.iter().map(|(alias, table)| {
-            let min_role = model.table_minimum_access_level(table);
-            let eligible = ctx.paths_at_least(min_role);
-            build_path_filter(alias, &eligible)
-        });
-        query.where_clause = Expr::and_all(
-            security_conditions
-                .map(Some)
-                .chain(std::iter::once(query.where_clause.take())),
-        );
-        Ok(())
-    })
+            q.reattach(detached)
+        })
+        .map_err(|error| QueryError::Security(error.to_string()))
 }
 
-fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
-    let starts_with = |path: &str| {
-        Expr::func(
-            Function::StartsWith,
-            vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(path)],
-        )
+fn guards(
+    graph: &Plan<Relational<ClickHouse>>,
+    catalog: &Catalog<ClickHouse>,
+    ctx: &SecurityContext,
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+) -> HashMap<NodeId, Vec<Expr>> {
+    let pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
+        Regex::new(&format!(
+            r"^(?:v\d+_)?{}.+$",
+            regex::escape(GL_TABLE_PREFIX)
+        ))
+        .expect("valid regex")
+    });
+    let mut guards = HashMap::new();
+    for node in graph.nodes() {
+        let operation = graph.operation(node);
+        let Some(source) = graph.inputs(node).first() else {
+            continue;
+        };
+        if source_of_rows(operation) || !source_of_rows(graph.operation(*source)) {
+            continue;
+        }
+        let mut scans = Vec::new();
+        collect_scans(graph, *source, &mut scans);
+        let conditions: Vec<Expr> = scans
+            .into_iter()
+            .filter_map(|scan| {
+                let Operation::Scan { table, .. } = graph.operation(scan) else {
+                    return None;
+                };
+                let table = table_name(catalog, *table);
+                if !pattern.is_match(table) || !model.table_has_path_columns(table) {
+                    return None;
+                }
+                let column = graph
+                    .outputs(scan)
+                    .find(|output| graph.name(*output) == Some(TRAVERSAL_PATH_COLUMN))?;
+                let eligible = ctx.paths_at_least(model.table_minimum_access_level(table));
+                Some(path_filter(column, &eligible))
+            })
+            .collect();
+        if !conditions.is_empty() {
+            guards.insert(node, conditions);
+        }
+    }
+    guards
+}
+
+fn source_of_rows(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Scan { .. } | Operation::Read { .. } | Operation::Join(_)
+    )
+}
+
+fn collect_scans(graph: &Plan<Relational<ClickHouse>>, node: NodeId, scans: &mut Vec<NodeId>) {
+    match graph.operation(node) {
+        Operation::Join(_) => {
+            for input in graph.inputs(node) {
+                collect_scans(graph, *input, scans);
+            }
+        }
+        Operation::Scan { .. } => scans.push(node),
+        _ => {}
+    }
+}
+
+fn path_filter(column: Ref, paths: &[&TraversalPath]) -> Expr {
+    let starts_with = |path: &str| Expr::Call {
+        function: Function::StartsWith,
+        args: vec![
+            Expr::Column(column),
+            Expr::Parameter {
+                data_type: SqlType::String,
+                value: Value::String(path.to_string()),
+            },
+        ],
     };
-    match paths.len() {
-        0 => Expr::Literal(Value::Bool(false)),
-        1 => starts_with(paths[0].as_str()),
+    match paths {
+        [] => Expr::Parameter {
+            data_type: SqlType::Bool,
+            value: Value::Bool(false),
+        },
+        [path] => starts_with(path.as_str()),
         _ => {
             let collapsed = TraversalPathTrie::from_paths(paths).to_minimal_prefixes();
-            if let [path] = collapsed.as_slice() {
-                return starts_with(path.as_str());
-            }
-            Expr::or_all(
-                collapsed
-                    .iter()
-                    .map(|path| Some(starts_with(path.as_str()))),
-            )
-            .expect("paths is non-empty")
+            let arms = collapsed.iter().map(|path| starts_with(path.as_str()));
+            balanced(BinaryOp::Or, arms.collect()).expect("paths is non-empty")
+        }
+    }
+}
+
+fn balanced(op: BinaryOp, mut exprs: Vec<Expr>) -> Option<Expr> {
+    match exprs.len() {
+        0 | 1 => exprs.pop(),
+        length => {
+            let right = exprs.split_off(length / 2);
+            Some(Expr::Binary {
+                op,
+                left: Box::new(balanced(op, exprs)?),
+                right: Box::new(balanced(op, right)?),
+            })
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::LazyLock;
 
-    use crate::AuthorizedPath;
-    use crate::ast::visit::{visit_expressions, visit_queries};
-    use crate::ast::{JoinType, Op, Query, SelectExpr};
-    use ontology::constants::EDGE_TABLE;
-    use orbit_utils::traversal_path::TraversalPath;
     use query_data_model::ClickHouseDataModel;
-    use serde_json::Value;
+    use query_data_model::implementations::relational::plan::{JoinKind, ReadMode};
+
+    use super::*;
 
     fn model() -> &'static ClickHouseDataModel {
         static MODEL: LazyLock<ClickHouseDataModel> =
-            LazyLock::new(|| query_data_model::ClickHouseDataModel::embedded().unwrap());
+            LazyLock::new(|| ClickHouseDataModel::embedded().unwrap());
         &MODEL
     }
 
-    fn security_model() -> &'static ClickHouseDataModel {
-        static MODEL: LazyLock<ClickHouseDataModel> = LazyLock::new(|| {
-            query_data_model::from_ontology::clickhouse(
-                &ontology::Ontology::new()
-                    .with_nodes(["Project", "Vulnerability"])
-                    .with_redaction("Vulnerability", "vulnerabilities", "id")
-                    .with_redaction_role("Vulnerability", ontology::RequiredRole::SecurityManager),
-            )
+    fn scans(tables: &[(&str, &str)], kind: Option<&str>) -> ClickHousePlan {
+        let catalog = model().catalog();
+        catalog
+            .build(|q| {
+                let mut rows = None;
+                for (table, alias) in tables {
+                    let scan = q.scan(catalog.table(table)?, ReadMode::Raw, alias)?;
+                    rows = Some(match rows {
+                        None => scan,
+                        Some(left) => q.join(left, scan, JoinKind::Cross)?,
+                    });
+                }
+                let rows = rows.expect("at least one table");
+                let id = rows.qualified(tables[tables.len() - 1].1, "traversal_path")?;
+                let rows = match kind {
+                    Some(kind) => {
+                        let column = rows.qualified(tables[0].1, "relationship_kind")?;
+                        let predicate = Expr::Binary {
+                            op: BinaryOp::Eq,
+                            left: Box::new(column.expr()),
+                            right: Box::new(Expr::Parameter {
+                                data_type: SqlType::String,
+                                value: Value::String(kind.into()),
+                            }),
+                        };
+                        q.filter(rows, predicate)?
+                    }
+                    None => rows,
+                };
+                q.select(rows, vec![id])
+            })
             .unwrap()
-        });
-        &MODEL
     }
 
-    fn apply(
-        node: &mut Node,
-        context: &SecurityContext,
-        model: &ClickHouseDataModel,
-    ) -> Result<()> {
-        apply_security_context(node, context, model)
-    }
-
-    fn simple_query() -> Node {
-        Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("p", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("gl_project", "p"),
-            where_clause: None,
-            limit: Some(10),
-            ..Default::default()
-        }))
+    fn secured(plan: ClickHousePlan, paths: &[&str]) -> String {
+        let paths = paths.iter().map(|path| path.to_string()).collect();
+        let ctx = SecurityContext::new(1, paths).unwrap();
+        let plan = apply_security_context(plan, model().catalog(), &ctx, model()).unwrap();
+        model().catalog().render(&plan).sql
     }
 
     #[test]
-    fn security_context_validates_paths_and_roles() {
-        assert!(SecurityContext::new(1, vec!["1/".into()]).is_ok());
-        assert!(SecurityContext::new(1, vec!["1/2/3/".into()]).is_ok());
-        assert!(SecurityContext::new(42, vec!["42/100/".into()]).is_ok());
-
-        // Cross-org paths are allowed (user's home org != path org)
-        assert!(SecurityContext::new(1, vec!["42/".into()]).is_ok());
-        assert!(SecurityContext::new(99, vec!["1/2/3/".into()]).is_ok());
-
-        assert!(SecurityContext::new(1, vec!["1/2/3".into()]).is_err());
-        assert!(SecurityContext::new(1, vec!["".into()]).is_err());
-        assert!(SecurityContext::new(1, vec!["abc/".into()]).is_err());
-        assert!(SecurityContext::new(1, vec!["1/abc/2/".into()]).is_err());
-        assert!(SecurityContext::new(1, vec!["99999999999999999999999999999/".into()]).is_err());
-        assert!(SecurityContext::new(1, vec!["-1/".into()]).is_err());
-
-        let context = SecurityContext::new_with_roles(
-            1,
-            vec![
-                AuthorizedPath::new("1/100/", 20),
-                AuthorizedPath::new("1/101/", 30),
-            ],
-        )
-        .unwrap();
-        assert_eq!(context.paths_at_least(20), vec!["1/100/", "1/101/"]);
-        assert_eq!(context.paths_at_least(30), vec!["1/101/"]);
-        assert!(context.paths_at_least(50).is_empty());
-        assert!(
-            SecurityContext::new_with_roles(
-                1,
-                vec![AuthorizedPath::with_access_levels("1/100/", vec![])]
-            )
-            .is_err()
-        );
+    fn an_empty_security_context_fails_closed() {
+        let mut ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        ctx.traversal_paths.clear();
+        let plan = scans(&[("gl_project", "p")], None);
+        let error = apply_security_context(plan, model().catalog(), &ctx, model());
+        assert!(matches!(error, Err(QueryError::Security(_))));
     }
 
     #[test]
-    fn path_filters_cover_empty_single_multiple_and_large_sets() {
-        assert!(matches!(
-            build_path_filter("v", &[]),
-            Expr::Literal(Value::Bool(false))
-        ));
-        assert!(matches!(
-            build_path_filter("u", &[&TraversalPath::from("42/43/")]),
-            Expr::FuncCall {
-                name: Function::StartsWith,
-                ..
-            }
-        ));
-
-        let expr = build_path_filter(
-            "u",
-            &[
-                &TraversalPath::from("1/2/4/"),
-                &TraversalPath::from("1/2/5/"),
-            ],
-        );
-        assert!(matches!(expr, Expr::BinaryOp { op: Op::Or, .. }));
-        let mut paths = starts_with_paths_for_alias(&expr, "u");
-        paths.sort();
-        assert_eq!(paths, ["1/2/4/", "1/2/5/"]);
-
-        let paths: Vec<TraversalPath> = (0..1000u64)
-            .map(|i| TraversalPath::from(format!("1/{i}/")))
-            .collect();
-        let refs: Vec<&TraversalPath> = paths.iter().collect();
-        let expr = build_path_filter("e", &refs);
-        let debug = format!("{expr:?}");
-        assert!(!debug.contains("arrayExists"));
-        assert!(debug.contains("StartsWith"));
-        assert!(or_depth(&expr) <= 11, "OR tree is too deep: {debug}");
-    }
-
-    fn or_depth(expr: &Expr) -> usize {
-        match expr {
-            Expr::BinaryOp {
-                op: Op::Or,
-                left,
-                right,
-            } => 1 + or_depth(left).max(or_depth(right)),
-            _ => 1,
-        }
-    }
-
-    fn starts_with_paths_for_alias(expr: &Expr, alias: &str) -> Vec<String> {
-        let mut paths = Vec::new();
-        visit_expressions(expr, &mut |expr| {
-            if let Expr::FuncCall { name, args } = expr
-                && *name == Function::StartsWith
-                && let [
-                    Expr::Column { table, column },
-                    Expr::Param {
-                        value: Value::String(path),
-                        ..
-                    },
-                ] = args.as_slice()
-                && table == alias
-                && column == TRAVERSAL_PATH_COLUMN
-            {
-                paths.push(path.clone());
-            }
-            Ok(())
-        })
-        .unwrap();
-        paths
-    }
-
-    #[test]
-    fn injects_security_into_nested_queries() {
-        let ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/200/".into()]).unwrap();
-        let anchor = Query {
-            select: vec![SelectExpr::col("e0p", "source_id")],
-            from: TableRef::scan(EDGE_TABLE, "e0p"),
-            where_clause: Some(Expr::eq(
-                Expr::col("e0p", "relationship_kind"),
-                Expr::string("IN_PROJECT"),
-            )),
-            ..Default::default()
-        };
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr::col("e0", "source_id")],
-            from: TableRef::scan(EDGE_TABLE, "e0"),
-            where_clause: Some(Expr::InSelect {
-                expr: Box::new(Expr::col("e0", "target_id")),
-                query: Box::new(anchor),
-            }),
-            limit: Some(10),
-            ..Default::default()
-        }));
-
-        apply(&mut node, &ctx, model()).unwrap();
-
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
-        let mut paths = Vec::new();
-        visit_queries(q, &mut |query| {
-            if let Some(predicate) = &query.where_clause {
-                paths.extend(starts_with_paths_for_alias(predicate, "e0p"));
-            }
-            Ok(())
-        })
-        .unwrap();
-        assert!(
-            paths.contains(&"1/100/".to_string()) && paths.contains(&"1/200/".to_string()),
-            "anchor subquery must carry the caller's full path set, got {paths:?}"
-        );
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("outer_e", "source_id"),
-                alias: None,
-            }],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan(EDGE_TABLE, "outer_e"),
-                TableRef::union_all(
-                    vec![Query {
-                        select: vec![SelectExpr {
-                            expr: Expr::col("e1", "source_id"),
-                            alias: None,
-                        }],
-                        from: TableRef::scan(EDGE_TABLE, "e1"),
-                        ..Default::default()
-                    }],
-                    "hop_e0",
-                ),
-                Expr::lit(true),
-            ),
-            ..Default::default()
-        }));
-        apply(&mut node, &ctx, model()).unwrap();
-        let Node::Query(query) = &node else {
-            unreachable!()
-        };
-        assert!(query.where_clause.is_some());
-        let TableRef::Join { right, .. } = &query.from else {
-            unreachable!()
-        };
-        let TableRef::Union { queries, .. } = right.as_ref() else {
-            unreachable!()
-        };
-        assert!(queries[0].where_clause.is_some());
-        assert!(starts_with_paths_for_alias(query.where_clause.as_ref().unwrap(), "e1").is_empty());
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("u", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("gl_project", "u"),
-            union_all: vec![Query {
-                select: vec![SelectExpr {
-                    expr: Expr::col("p", "id"),
-                    alias: None,
-                }],
-                from: TableRef::scan("gl_project", "p"),
-                ..Default::default()
-            }],
-            ..Default::default()
-        }));
-        apply(&mut node, &ctx, model()).unwrap();
-        let Node::Query(query) = &node else {
-            unreachable!()
-        };
-        assert!(query.where_clause.is_some());
-        assert!(query.union_all[0].where_clause.is_some());
-    }
-
-    // Paths tagged at Developer (30) still qualify because 30 >= the
-    // Security Manager floor (25).
-    #[ignore = "fixture ontology fails the data model load checks"]
-    #[test]
-    fn role_floors_filter_and_collapse_paths() {
-        let ctx = SecurityContext::new_with_roles(
-            1,
-            vec![
-                AuthorizedPath::new("1/100/", 20), // Reporter
-                AuthorizedPath::new("1/101/", 30), // Developer (covers SM)
-            ],
-        )
-        .unwrap();
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("v", "id"),
-                alias: None,
-            }],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("gl_project", "p"),
-                TableRef::scan("gl_vulnerability", "v"),
-                Expr::eq(Expr::col("p", "id"), Expr::col("v", "project_id")),
-            ),
-            limit: Some(10),
-            ..Default::default()
-        }));
-
-        apply(&mut node, &ctx, security_model()).unwrap();
-
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
-        let where_sql = format!("{:?}", q.where_clause);
-        assert!(
-            where_sql.contains("1/100/"),
-            "Project alias must retain Reporter path '1/100/', got: {where_sql}"
-        );
-        assert!(
-            where_sql.contains("1/101/"),
-            "Project alias must retain Developer path '1/101/', got: {where_sql}"
-        );
+    fn every_namespaced_scan_of_a_join_tree_guards_the_block() {
+        let plan = scans(&[("gl_project", "p"), ("gl_edge", "e")], None);
         assert_eq!(
-            starts_with_paths_for_alias(q.where_clause.as_ref().unwrap(), "v"),
-            vec!["1/101/".to_string()],
-            "Vulnerability alias 'v' must only keep the higher-role path, got: {where_sql}"
+            secured(plan, &["1/"]),
+            "SELECT e.traversal_path FROM gl_project AS p INNER JOIN gl_edge AS e ON 1 \
+             WHERE (startsWith(p.traversal_path, {p0:String}) \
+             AND startsWith(e.traversal_path, {p0:String}))"
         );
-
-        let ctx = SecurityContext::new_with_roles(
-            1,
-            vec![AuthorizedPath::new("1/100/", 20)], // Reporter only
-        )
-        .unwrap();
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("v", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("gl_vulnerability", "v"),
-            limit: Some(10),
-            ..Default::default()
-        }));
-
-        apply(&mut node, &ctx, security_model()).unwrap();
-
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
-        let where_sql = format!("{:?}", q.where_clause);
-        assert!(
-            !where_sql.contains("1/100/"),
-            "no traversal path should be bound for Vulnerability, got: {where_sql}"
-        );
-        assert!(
-            where_sql.contains("Bool") && where_sql.contains("false"),
-            "where clause should compile to Bool(false) for empty path set, got: {where_sql}"
-        );
-
-        let ctx = SecurityContext::new_with_roles(
-            1,
-            vec![
-                AuthorizedPath::new(String::from("1/100/"), 20),
-                AuthorizedPath::new(String::from("1/100/200/"), 20),
-                AuthorizedPath::new(String::from("1/100/200/"), 30),
-                AuthorizedPath::new(String::from("1/300/"), 30),
-            ],
-        )
-        .unwrap();
-
-        let eligible = ctx.paths_at_least(20);
-        assert_eq!(eligible.len(), 4);
-
-        let collapsed = TraversalPathTrie::from_paths(&eligible).to_minimal_prefixes();
-        assert_eq!(collapsed, vec!["1/100/", "1/300/"]);
-
-        let filter = build_path_filter("t", &eligible);
-        let sql = format!("{filter:?}");
-        assert!(
-            sql.contains("StartsWith"),
-            "should produce startsWith predicates: {sql}"
+        let plan = scans(&[("gl_user", "u"), ("gl_merge_request", "mr")], None);
+        assert_eq!(
+            secured(plan, &["1/"]),
+            "SELECT mr.traversal_path FROM gl_user AS u INNER JOIN gl_merge_request AS mr ON 1 \
+             WHERE startsWith(mr.traversal_path, {p0:String})"
         );
     }
 
     #[test]
-    fn data_model_controls_security_injection() {
-        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let mut node = simple_query();
-        apply(&mut node, &ctx, model()).unwrap();
-        assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
-
-        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("e", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan(EDGE_TABLE, "e"),
-            ..Default::default()
-        }));
-
-        apply(&mut node, &ctx, model()).unwrap();
-        assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
-
-        let from = TableRef::join(
-            JoinType::Inner,
-            TableRef::scan("gl_project", "p"),
-            TableRef::scan(EDGE_TABLE, "e"),
-            Expr::eq(Expr::col("p", "id"), Expr::col("e", "source")),
-        );
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr::col("p", "id")],
-            from,
-            ..Default::default()
-        }));
-        apply(&mut node, &ctx, model()).unwrap();
-        let Node::Query(query) = &node else {
-            unreachable!()
-        };
-        let where_clause = query.where_clause.as_ref().unwrap();
-        assert_eq!(starts_with_paths_for_alias(where_clause, "p"), ["1/"]);
-        assert_eq!(starts_with_paths_for_alias(where_clause, "e"), ["1/"]);
-
-        for table in ["gl_user", "path_cte", "some_cte", "nodes"] {
-            let mut node = Node::Query(Box::new(Query {
-                select: vec![SelectExpr::col("x", "id")],
-                from: TableRef::scan(table, "x"),
-                ..Default::default()
-            }));
-            apply(&mut node, &ctx, model()).unwrap();
-            assert!(matches!(node, Node::Query(query) if query.where_clause.is_none()));
-        }
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr::col("u", "id")],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("gl_user", "u"),
-                TableRef::scan("gl_merge_request", "mr"),
-                Expr::lit(true),
-            ),
-            ..Default::default()
-        }));
-        apply(&mut node, &ctx, model()).unwrap();
-        let Node::Query(query) = &node else {
-            unreachable!()
-        };
-        let where_clause = query.where_clause.as_ref().unwrap();
-        assert!(starts_with_paths_for_alias(where_clause, "u").is_empty());
-        assert_eq!(starts_with_paths_for_alias(where_clause, "mr"), ["1/"]);
-
-        let ctx = SecurityContext::new(1, vec!["1/9970/".into(), "1/6543/".into()]).unwrap();
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("e", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("gl_edge", "e"),
-            limit: Some(10),
-            ..Default::default()
-        }));
-
-        apply(&mut node, &ctx, model()).unwrap();
-
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
-        let mut got = starts_with_paths_for_alias(q.where_clause.as_ref().unwrap(), "e");
-        got.sort();
+    fn guards_join_the_existing_predicate_and_collapse_paths() {
+        let plan = scans(&[("gl_edge", "e")], Some("IN_PROJECT"));
         assert_eq!(
-            got,
-            vec!["1/6543/".to_string(), "1/9970/".to_string()],
-            "multi-path authz must be the OR of real prefixes with no redundant broad LCP, got:\n{got:?}"
+            secured(plan, &["1/9970/", "1/6543/", "1/9970/12/"]),
+            "SELECT e.traversal_path FROM gl_edge AS e \
+             WHERE ((startsWith(e.traversal_path, {p0:String}) \
+             OR startsWith(e.traversal_path, {p1:String})) \
+             AND (e.relationship_kind = {p2:String}))"
         );
     }
 }

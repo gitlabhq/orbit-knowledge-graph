@@ -65,6 +65,11 @@ impl<L: Language> Construction<L> {
             .map(|node| &self.arena.nodes[node.0].operation)
     }
 
+    pub fn inputs(&self, rows: &Rows) -> Result<&[NodeId], Rejected> {
+        self.node(rows)
+            .map(|node| self.arena.nodes[node.0].inputs.as_slice())
+    }
+
     pub fn outputs(&self, rows: &Rows) -> Result<Vec<Ref>, Rejected> {
         let node = self.node(rows)?;
         let plan = self.arena.plan;

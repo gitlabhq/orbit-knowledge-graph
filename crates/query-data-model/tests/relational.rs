@@ -1,9 +1,11 @@
 use orbit_utils::query_types::SqlType;
+use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::relational::plan::{
-    AggregateFunction, BinaryOp, Expr, JoinKind, Measure, Order, ReadMode, RelationalError,
+    AggregateFunction, BinaryOp, Expr, JoinKind, Measure, Operation, Order, ReadMode,
+    RelationalError, RelationalPlan, UnaryOp,
 };
-use query_data_model::plan::tracking::Declare;
-use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
+use query_data_model::plan::tracking::{Declare, Rejected};
+use query_data_model::{Catalog, ClickHouseDataModel, DuckDbDataModel};
 use serde_json::json;
 
 fn clickhouse() -> ClickHouseDataModel {
@@ -177,4 +179,154 @@ fn backend_capabilities_and_declarations_are_checked_at_construction() {
         unknown.unwrap_err(),
         RelationalError::UnknownColumn { name, .. } if name == "f.nope"
     ));
+}
+
+fn handles(catalog: &Catalog<ClickHouse>) -> RelationalPlan<ClickHouse> {
+    let users = catalog.table("gl_user").unwrap();
+    catalog
+        .build(|q| {
+            let keys = q.subquery("keys", |q| {
+                let rows = q.scan(users, ReadMode::Raw, "k")?;
+                let id = rows.qualified("k", "id")?;
+                q.select(rows, vec![id])
+            })?;
+            let rows = q.scan(users, ReadMode::Current, "u")?;
+            let id = rows.qualified("u", "id")?;
+            let name = rows.qualified("u", "username")?;
+            let rows = q.filter(rows, keys.contains(id.expr()))?;
+            let (rows, computed) = q.compute(rows, vec![Declare::named("handle", name.expr())])?;
+            q.select(rows, vec![id, computed[0]])
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_relational_rewrite_keeps_unchanged_plans_and_guards_every_scan() {
+    let model = clickhouse();
+    let catalog = model.catalog();
+    let original = catalog.render(&handles(catalog)).sql;
+    let same = catalog
+        .rewrite(handles(catalog), |_, rows| Ok(rows))
+        .unwrap();
+    assert_eq!(catalog.render(&same).sql, original);
+
+    let mut visits = 0;
+    let guarded = catalog
+        .rewrite(handles(catalog), |q, rows| {
+            visits += 1;
+            if !matches!(q.operation(&rows)?, Operation::Scan { .. }) {
+                return Ok(rows);
+            }
+            let deleted = rows.column("_deleted")?;
+            let live = Expr::Unary {
+                op: UnaryOp::Not,
+                value: Box::new(deleted.expr()),
+            };
+            q.filter(rows, live)
+        })
+        .unwrap();
+    assert_eq!(visits, 6);
+    assert_eq!(
+        catalog.render(&guarded).sql,
+        "SELECT u.id, u.username AS handle FROM gl_user AS u FINAL \
+         WHERE ((NOT u._deleted) AND u.id IN (SELECT k.id FROM gl_user AS k WHERE (NOT k._deleted)))"
+    );
+}
+
+#[test]
+fn relational_rewrites_reconnect_changed_outputs() {
+    let model = clickhouse();
+    let catalog = model.catalog();
+    let users = catalog.table("gl_user").unwrap();
+    let build = || {
+        catalog
+            .build(|q| {
+                let rows = q.scan(users, ReadMode::Current, "u")?;
+                let id = rows.qualified("u", "id")?;
+                let name = rows.qualified("u", "username")?;
+                let rows = q.filter(rows, eq(name.expr(), text("root")))?;
+                let order = Order {
+                    value: name.expr(),
+                    descending: false,
+                };
+                let rows = q.order(rows, vec![order])?;
+                q.select(rows, vec![id, name])
+            })
+            .unwrap()
+    };
+    let alias = |reconnect: bool| {
+        catalog.rewrite(build(), move |q, rows| {
+            if !matches!(q.operation(&rows)?, Operation::Filter(_)) {
+                return Ok(rows);
+            }
+            let name = rows.qualified("u", "username")?;
+            let (rows, computed) = q.compute(rows, vec![Declare::named("handle", name.expr())])?;
+            if reconnect {
+                q.reconnect(name.output(), computed[0].output())?;
+            }
+            Ok(rows)
+        })
+    };
+
+    assert_eq!(
+        alias(false).unwrap_err(),
+        RelationalError::Rejected(Rejected::ChangedOutputs("handle".into()))
+    );
+    assert_eq!(
+        catalog.render(&alias(true).unwrap()).sql,
+        "SELECT u.id, u.username AS handle FROM gl_user AS u FINAL \
+         WHERE (u.username = {p0:String}) ORDER BY handle ASC"
+    );
+}
+
+#[test]
+fn a_detached_operation_reattaches_onto_rewritten_inputs() {
+    let model = clickhouse();
+    let catalog = model.catalog();
+    let users = catalog.table("gl_user").unwrap();
+    let build = || {
+        catalog
+            .build(|q| {
+                let rows = q.scan(users, ReadMode::Current, "u")?;
+                let id = rows.qualified("u", "id")?;
+                let name = rows.qualified("u", "username")?;
+                let (rows, computed) =
+                    q.compute(rows, vec![Declare::named("handle", name.expr())])?;
+                q.select(rows, vec![id, computed[0]])
+            })
+            .unwrap()
+    };
+    let guarded = catalog
+        .rewrite(build(), |q, rows| {
+            if !matches!(q.operation(&rows)?, Operation::Compute(_)) {
+                return Ok(rows);
+            }
+            let mut detached = q.detach(rows)?;
+            let input = detached.inputs.remove(0);
+            let deleted = input.qualified("u", "_deleted")?;
+            let live = Expr::Unary {
+                op: UnaryOp::Not,
+                value: Box::new(deleted.expr()),
+            };
+            detached.inputs.push(q.filter(input, live)?);
+            q.reattach(detached)
+        })
+        .unwrap();
+    assert_eq!(
+        catalog.render(&guarded).sql,
+        "SELECT u.id, u.username AS handle FROM gl_user AS u FINAL WHERE (NOT u._deleted)"
+    );
+
+    let stray = catalog.rewrite(build(), |q, rows| {
+        if !matches!(q.operation(&rows)?, Operation::Select(_)) {
+            return Ok(rows);
+        }
+        let other = q.scan(users, ReadMode::Current, "v")?;
+        q.detach(other)?;
+        Ok(rows)
+    });
+    assert_eq!(
+        stray.unwrap_err(),
+        RelationalError::Rejected(Rejected::NotDetachable)
+    );
 }

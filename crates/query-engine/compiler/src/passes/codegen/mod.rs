@@ -22,15 +22,28 @@ use std::sync::LazyLock;
 
 pub type ClickHousePlan = RelationalPlan<ClickHouse>;
 
-pub fn build(
-    ast: &Node,
+pub fn build(ast: &Node, catalog: &Catalog<ClickHouse>) -> Result<ClickHousePlan> {
+    import::clickhouse(ast, catalog).map_err(rejected)
+}
+
+pub fn configure(
+    plan: ClickHousePlan,
     catalog: &Catalog<ClickHouse>,
     query_config: &QueryConfig,
 ) -> Result<ClickHousePlan> {
-    let settings = query_config
-        .to_clickhouse_settings()
-        .map_err(QueryError::Codegen)?;
-    import::clickhouse(ast, catalog, settings).map_err(rejected)
+    let mut settings = Some(
+        query_config
+            .to_clickhouse_settings()
+            .map_err(QueryError::Codegen)?,
+    );
+    catalog
+        .rewrite(plan, |q, rows| {
+            if let Some(settings) = settings.take() {
+                q.settings(settings)?;
+            }
+            Ok(rows)
+        })
+        .map_err(rejected)
 }
 
 pub fn render(
@@ -55,7 +68,7 @@ pub fn codegen(
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
-    let plan = build(ast, catalog, &query_config)?;
+    let plan = configure(build(ast, catalog)?, catalog, &query_config)?;
     Ok(render(&plan, catalog, result_context, query_config))
 }
 
@@ -95,7 +108,7 @@ pub fn cte_statements(ast: &Node, catalog: &Catalog<ClickHouse>) -> Result<Vec<C
                     .collect(),
                 ..(*cte.query).clone()
             }));
-            let plan = import::clickhouse(&statement, catalog, Vec::new()).map_err(rejected)?;
+            let plan = import::clickhouse(&statement, catalog).map_err(rejected)?;
             let rendered = catalog.render(&plan);
             Ok((cte.name.clone(), rendered.sql, rendered.parameters))
         })
