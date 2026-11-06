@@ -11,8 +11,6 @@ struct MockServer {
     requests: Arc<AtomicUsize>,
 }
 
-/// Answers each connection with the next `(status, retry_after)` reply, then keeps answering with
-/// the last one. Runs on a detached thread that ends with the test process.
 fn unreachable_url() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     format!("http://{}", listener.local_addr().expect("addr"))

@@ -1,6 +1,3 @@
-//! Retry policy for remote requests: exponential backoff with full jitter, and only for failures
-//! where re-sending cannot run or bill a query twice.
-
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
@@ -11,27 +8,21 @@ const BASE_DELAY: Duration = Duration::from_secs(1);
 const MAX_DELAY: Duration = Duration::from_secs(30);
 const DEFAULT_WAIT_BUDGET: Duration = Duration::from_secs(300);
 
-/// What a call may retry and for how long it may wait between attempts.
 #[derive(Clone, Copy)]
 pub(crate) struct Policy {
-    /// Whether a 503 is retried. Only safe where the endpoint runs no billed query.
     pub(crate) retry_unavailable: bool,
-    /// Total time the call may spend waiting between attempts.
     pub(crate) wait_budget: Duration,
 }
 
 impl Policy {
-    /// Endpoints that can run and bill a graph query: a 503 may follow a billed run.
     pub(crate) const QUERY: Self = Self {
         retry_unavailable: false,
         wait_budget: DEFAULT_WAIT_BUDGET,
     };
-    /// Read-only endpoints that run no billed query.
     pub(crate) const READ_ONLY: Self = Self {
         retry_unavailable: true,
         wait_budget: DEFAULT_WAIT_BUDGET,
     };
-    /// Best-effort, interactive lookups: give up rather than wait out a long `Retry-After`.
     pub(crate) const BEST_EFFORT: Self = Self {
         retry_unavailable: true,
         wait_budget: Duration::from_secs(10),
@@ -40,7 +31,6 @@ impl Policy {
 
 static CONFIGURED_RETRIES: OnceLock<u32> = OnceLock::new();
 
-/// Sets the retry count for the process. The first call wins.
 pub(crate) fn configure(retries: u32) {
     let _ = CONFIGURED_RETRIES.set(retries);
 }
@@ -49,14 +39,10 @@ pub(crate) fn max_retries() -> u32 {
     CONFIGURED_RETRIES.get().copied().unwrap_or(DEFAULT_RETRIES)
 }
 
-/// The rate limit is checked before a query runs, so a 429 is always safe to retry. A 503 is
-/// retried only where the endpoint allows it, because a 503 on a query can follow a billed run.
 pub(crate) fn is_retryable_status(status: u16, retry_unavailable: bool) -> bool {
     status == 429 || (status == 503 && retry_unavailable)
 }
 
-/// How long to wait before retry number `retry` (1-based), or `None` when the wait would not fit
-/// in what is left of the budget. `Retry-After` is a lower bound and is never capped.
 pub(crate) fn next_delay(
     retry: u32,
     retry_after: Option<Duration>,
@@ -73,7 +59,6 @@ pub(crate) fn next_delay(
     (waited.saturating_add(delay) <= wait_budget).then_some(delay)
 }
 
-/// Parses a `Retry-After` value: delay-seconds or an HTTP-date.
 pub(crate) fn parse_retry_after(value: &str, now: SystemTime) -> Option<Duration> {
     let value = value.trim();
     if let Ok(seconds) = value.parse::<u64>() {
@@ -83,7 +68,6 @@ pub(crate) fn parse_retry_after(value: &str, now: SystemTime) -> Option<Duration
     Some(date.duration_since(now).unwrap_or_default())
 }
 
-/// Extra lines for the 429 error: how many retries ran and how long the server asked to wait.
 pub(crate) fn rate_limit_note(retries: u32, retry_after: Option<Duration>) -> String {
     let mut note = String::new();
     if retries > 0 {
