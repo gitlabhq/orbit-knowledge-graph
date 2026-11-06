@@ -7,27 +7,19 @@ mod sources;
 mod tail;
 
 use query_data_model::Catalog;
-use query_data_model::implementations::clickhouse::ClickHouse;
-use query_data_model::implementations::duckdb::DuckDb;
+use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{RelationalError, RelationalPlan};
 
 use crate::ast::Node;
 use crate::passes::codegen::SqlDialect;
 
-pub fn clickhouse(
+pub fn build<B: RelationalBackend>(
     ast: &Node,
-    catalog: &Catalog<ClickHouse>,
-) -> Result<RelationalPlan<ClickHouse>, RelationalError> {
+    catalog: &Catalog<B>,
+    dialect: SqlDialect,
+) -> Result<RelationalPlan<B>, RelationalError> {
     let root = query(ast)?;
-    catalog.build(|q| query::Importer::new(SqlDialect::ClickHouse).statement(q, root))
-}
-
-pub fn duckdb(
-    ast: &Node,
-    catalog: &Catalog<DuckDb>,
-) -> Result<RelationalPlan<DuckDb>, RelationalError> {
-    let root = query(ast)?;
-    catalog.build(|q| query::Importer::new(SqlDialect::DuckDb).statement(q, root))
+    catalog.build(|q| query::Importer::new(dialect).statement(q, root))
 }
 
 fn query(ast: &Node) -> Result<&crate::ast::Query, RelationalError> {

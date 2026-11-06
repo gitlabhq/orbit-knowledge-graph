@@ -162,7 +162,11 @@ mod tests {
         context: &SecurityContext,
         model: &ClickHouseDataModel,
     ) -> Result<ClickHousePlan> {
-        let plan = crate::passes::codegen::build(node, model.catalog())?;
+        let plan = crate::passes::codegen::build(
+            node,
+            model.catalog(),
+            crate::passes::codegen::SqlDialect::ClickHouse,
+        )?;
         let plan =
             crate::passes::security::apply_security_context(plan, model.catalog(), context, model)?;
         verify(&plan, model.catalog(), context, model)?;
@@ -170,7 +174,11 @@ mod tests {
     }
 
     fn check(node: &Node, context: &SecurityContext, model: &ClickHouseDataModel) -> Result<()> {
-        let plan = crate::passes::codegen::build(node, model.catalog())?;
+        let plan = crate::passes::codegen::build(
+            node,
+            model.catalog(),
+            crate::passes::codegen::SqlDialect::ClickHouse,
+        )?;
         verify(&plan, model.catalog(), context, model)
     }
 

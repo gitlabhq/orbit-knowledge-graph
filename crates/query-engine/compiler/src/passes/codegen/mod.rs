@@ -5,11 +5,15 @@ pub mod ddl;
 mod import;
 
 use orbit_server_config::QueryConfig;
-use query_data_model::Catalog;
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::duckdb::DuckDb;
 use query_data_model::implementations::duckdb::render::type_name;
+use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{RelationalError, RelationalPlan};
+use query_data_model::implementations::relational::render::ParameterizedSql;
+use query_data_model::{
+    Catalog, ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, QueryModel,
+};
 
 use crate::ast::{Node, Query, SqlType};
 use crate::error::{QueryError, Result};
@@ -21,9 +25,48 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 pub type ClickHousePlan = RelationalPlan<ClickHouse>;
+pub type PlanOf<M> = RelationalPlan<<M as RelationalModel>::Backend>;
 
-pub fn build(ast: &Node, catalog: &Catalog<ClickHouse>) -> Result<ClickHousePlan> {
-    import::clickhouse(ast, catalog).map_err(rejected)
+pub trait RelationalModel: OrbitQueryModel {
+    type Backend: RelationalBackend;
+    const DIALECT: SqlDialect;
+
+    fn catalog(&self) -> &Catalog<Self::Backend>;
+    fn render(&self, plan: &PlanOf<Self>) -> ParameterizedSql;
+}
+
+impl RelationalModel for ClickHouseDataModel {
+    type Backend = ClickHouse;
+    const DIALECT: SqlDialect = SqlDialect::ClickHouse;
+
+    fn catalog(&self) -> &Catalog<ClickHouse> {
+        QueryModel::catalog(self)
+    }
+
+    fn render(&self, plan: &ClickHousePlan) -> ParameterizedSql {
+        QueryModel::catalog(self).render(plan)
+    }
+}
+
+impl RelationalModel for DuckDbDataModel {
+    type Backend = DuckDb;
+    const DIALECT: SqlDialect = SqlDialect::DuckDb;
+
+    fn catalog(&self) -> &Catalog<DuckDb> {
+        QueryModel::catalog(self)
+    }
+
+    fn render(&self, plan: &RelationalPlan<DuckDb>) -> ParameterizedSql {
+        QueryModel::catalog(self).render(plan)
+    }
+}
+
+pub fn build<B: RelationalBackend>(
+    ast: &Node,
+    catalog: &Catalog<B>,
+    dialect: SqlDialect,
+) -> Result<RelationalPlan<B>> {
+    import::build(ast, catalog, dialect).map_err(rejected)
 }
 
 pub fn configure(
@@ -46,19 +89,19 @@ pub fn configure(
         .map_err(rejected)
 }
 
-pub fn render(
-    plan: &ClickHousePlan,
-    catalog: &Catalog<ClickHouse>,
+pub fn render<M: RelationalModel>(
+    plan: &PlanOf<M>,
+    model: &M,
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> ParameterizedQuery {
-    let rendered = catalog.render(plan);
+    let rendered = model.render(plan);
     ParameterizedQuery {
         sql: rendered.sql,
         params: rendered.parameters,
         result_context,
         query_config,
-        dialect: SqlDialect::ClickHouse,
+        dialect: M::DIALECT,
     }
 }
 
@@ -68,8 +111,16 @@ pub fn codegen(
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
-    let plan = configure(build(ast, catalog)?, catalog, &query_config)?;
-    Ok(render(&plan, catalog, result_context, query_config))
+    let plan = build(ast, catalog, SqlDialect::ClickHouse)?;
+    let plan = configure(plan, catalog, &query_config)?;
+    let rendered = catalog.render(&plan);
+    Ok(ParameterizedQuery {
+        sql: rendered.sql,
+        params: rendered.parameters,
+        result_context,
+        query_config,
+        dialect: SqlDialect::ClickHouse,
+    })
 }
 
 pub fn duckdb_codegen(
@@ -77,7 +128,7 @@ pub fn duckdb_codegen(
     catalog: &Catalog<DuckDb>,
     result_context: ResultContext,
 ) -> Result<ParameterizedQuery> {
-    let rendered = catalog.render(&import::duckdb(ast, catalog).map_err(rejected)?);
+    let rendered = catalog.render(&build(ast, catalog, SqlDialect::DuckDb)?);
     Ok(ParameterizedQuery {
         sql: rendered.sql,
         params: rendered.parameters,
@@ -108,7 +159,7 @@ pub fn cte_statements(ast: &Node, catalog: &Catalog<ClickHouse>) -> Result<Vec<C
                     .collect(),
                 ..(*cte.query).clone()
             }));
-            let plan = import::clickhouse(&statement, catalog).map_err(rejected)?;
+            let plan = build(&statement, catalog, SqlDialect::ClickHouse)?;
             let rendered = catalog.render(&plan);
             Ok((cte.name.clone(), rendered.sql, rendered.parameters))
         })
