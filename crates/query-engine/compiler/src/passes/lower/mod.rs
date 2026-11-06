@@ -158,7 +158,13 @@ pub fn emit<M: RelationalModel>(
         }
         QueryPlan::Neighbors(plan) => ast(query_types::neighbors::emit(plan, input)?),
         QueryPlan::PathFinding(plan) => ast(query_types::pathfinding::emit(plan, input)?),
-        QueryPlan::Hydration(plan) => ast(query_types::hydration::emit(plan)?),
+        QueryPlan::Hydration(plan) => {
+            query_types::hydration::check(plan)?;
+            let built = catalog
+                .build(|q| query_types::hydration::emit(q, plan))
+                .map_err(rejected)?;
+            (Lowered::Plan(built), HashMap::new(), Vec::new())
+        }
     };
     let edges = plan
         .relations()

@@ -9,186 +9,189 @@
 //! granules via the primary key (sort key starts with `traversal_path`).
 
 use ontology::constants::*;
+use orbit_utils::query_types::SqlType;
+use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::implementations::relational::RelationalBackend;
+use query_data_model::implementations::relational::plan::{
+    Expr, Function, Order, Relation, RelationalBuilder,
+};
+use serde_json::Value;
 
-use crate::ast::*;
 use crate::error::{QueryError, Result};
-
-use super::Emitted;
-use crate::passes::lower::predicates::output_value;
-use crate::passes::lower::sql::{deleted_false, latest_row_dedup};
+use crate::passes::lower::build::expr::{in_list, live};
+use crate::passes::lower::build::predicates::{Lowering, Shared};
+use crate::passes::lower::build::{
+    Built, call, col, computed, disjoin, filtered, scan, stored, string, versioning,
+};
 use crate::passes::plan::predicates::{Column, OutputValue};
 use crate::passes::plan::query_types::hydration::HydrationPathFilter;
 use crate::passes::plan::{Hydration, HydrationNodePlan, Plan};
 
-use orbit_utils::traversal_path::TraversalPath;
-
-pub(crate) fn emit(plan: &Plan<Hydration>) -> Result<Emitted> {
-    Ok(Emitted::new(emit_hydration(&plan.operation.nodes)?))
+pub(crate) fn check(plan: &Plan<Hydration>) -> Result<()> {
+    match plan.operation.nodes.is_empty() {
+        true => Err(QueryError::Lowering(
+            "hydration requires at least one node".into(),
+        )),
+        false => Ok(()),
+    }
 }
 
-pub fn emit_hydration(nodes: &[HydrationNodePlan]) -> Result<Node> {
-    let mut arms = nodes.iter().map(emit_arm);
-    let mut first = arms
-        .next()
-        .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))?;
-    for arm in arms {
-        first.union_all.push(arm);
-    }
-    Ok(Node::Query(Box::new(first)))
-}
-
-fn emit_arm(node: &HydrationNodePlan) -> Query {
-    let alias = &node.alias;
-    let pk = &node.id_property;
-
-    let json_expr = if node.columns.is_empty() {
-        Expr::string("{}")
-    } else {
-        let map_args: Vec<Expr> = node
-            .columns
-            .iter()
-            .flat_map(|col| {
-                let value = OutputValue::property(&node.null_as_epoch, Column::new(alias, col));
-                [
-                    Expr::string(col),
-                    Expr::func(Function::ToString, vec![output_value(&value)]),
-                ]
-            })
-            .collect();
-        Expr::func(
-            Function::ToJson,
-            vec![Expr::func(Function::Object, map_args)],
-        )
-    };
-
-    let mut scan_where = Vec::new();
-
-    let path_filter = match &node.path_filter {
-        Some(HydrationPathFilter::PrefixUnion(paths)) => or_starts_with(alias, paths),
-        Some(HydrationPathFilter::PrefixSet(paths)) => Some(array_exists_starts_with(alias, paths)),
-        None => None,
-    };
-    if let Some(tp_filter) = path_filter {
-        scan_where.push(tp_filter);
-    }
-
-    if let Some(id_filter) = Expr::col_in(
-        alias,
-        pk,
-        SqlType::Int64,
-        node.node_ids
-            .iter()
-            .map(|id| serde_json::Value::Number((*id).into()))
-            .collect(),
-    ) {
-        scan_where.push(id_filter);
-    }
-
-    let mut inner_select = vec![
-        SelectExpr::col(alias, pk),
-        SelectExpr::col(alias, DELETED_COLUMN),
-    ];
-    for col in &node.columns {
-        if col != pk && col != DELETED_COLUMN {
-            inner_select.push(SelectExpr::col(alias, col));
+pub(crate) fn emit<B: RelationalBackend>(
+    q: &mut RelationalBuilder<'_, B>,
+    plan: &Plan<Hydration>,
+) -> Built<Relation> {
+    match plan.operation.nodes.as_slice() {
+        [node] => arm(q, node),
+        nodes => {
+            let mut arms = Vec::new();
+            for node in nodes {
+                arms.push(arm(q, node)?);
+            }
+            q.union(arms)
         }
     }
-    let (order_by, limit_by) = latest_row_dedup(alias, &node.sort_key);
-    let keys = Query {
-        select: inner_select,
-        from: TableRef::scan(&node.table, alias),
-        where_clause: Expr::conjoin(scan_where),
-        order_by,
-        limit_by,
-        ..Default::default()
+}
+
+fn arm<B: RelationalBackend>(
+    q: &mut RelationalBuilder<'_, B>,
+    node: &HydrationNodePlan,
+) -> Built<Relation> {
+    let alias = &node.alias;
+    let pk = &node.id_property;
+    let keys = q.subquery(alias, |q| {
+        let rows = scan(q, &node.table, alias, false)?;
+        let scope = [&rows];
+        let mut predicates = Vec::new();
+        let path_filter = match &node.path_filter {
+            Some(HydrationPathFilter::PrefixUnion(paths)) => {
+                let mut matches = Vec::new();
+                for path in paths {
+                    matches.push(starts_with(&scope, alias, path)?);
+                }
+                disjoin(matches)
+            }
+            Some(HydrationPathFilter::PrefixSet(paths)) => {
+                Some(array_exists(&scope, alias, paths)?)
+            }
+            None => None,
+        };
+        predicates.extend(path_filter.map(Some));
+        let ids = node.node_ids.iter().map(|id| Value::from(*id)).collect();
+        let id = col(&scope, alias, pk)?;
+        predicates.extend(in_list::<B>(id, SqlType::Int64, ids).map(Some));
+        let rows = filtered(q, rows, predicates)?;
+        let mut names = vec![pk.as_str(), DELETED_COLUMN];
+        names.extend(
+            node.columns
+                .iter()
+                .map(String::as_str)
+                .filter(|column| column != pk && *column != DELETED_COLUMN),
+        );
+        let mut items = Vec::new();
+        for name in names
+            .into_iter()
+            .filter(|name| !stored::<B>() || !versioning(name))
+        {
+            items.push((name.to_string(), col(&[&rows], alias, name)?));
+        }
+        let (rows, columns) = computed(q, rows, items)?;
+        let keys = node
+            .sort_key
+            .iter()
+            .map(|key| rows.qualified(alias, key))
+            .collect::<Built<Vec<_>>>()?;
+        let rows = match stored::<B>() {
+            true => {
+                let orders = keys.into_iter().map(|key| Order {
+                    value: key.expr(),
+                    descending: false,
+                });
+                q.order(rows, orders.collect())?
+            }
+            false => {
+                let version = rows.qualified(alias, VERSION_COLUMN)?;
+                q.latest(rows, keys, version)?
+            }
+        };
+        q.select(rows, columns)
+    })?;
+    let rows = q.read(&keys, Some(alias))?;
+    let deleted = match stored::<B>() {
+        true => None,
+        false => Some(live::<B>(&[&rows], alias)?),
     };
-    Query {
-        select: vec![
-            SelectExpr::new(Expr::col(alias, pk), format!("{alias}_{pk}")),
-            SelectExpr::new(Expr::string(&node.entity), format!("{alias}_entity_type")),
-            SelectExpr::new(json_expr, format!("{alias}_props")),
-        ],
-        from: TableRef::subquery(keys, alias),
-        where_clause: Some(deleted_false(alias)),
-        ..Default::default()
-    }
+    let rows = filtered(q, rows, vec![deleted])?;
+    let shared = Shared::default();
+    let lowering = Lowering {
+        scope: &[&rows],
+        shared: &shared,
+    };
+    let props = match node.columns.is_empty() {
+        true => string("{}"),
+        false => {
+            let mut args = Vec::new();
+            for column in &node.columns {
+                let value = OutputValue::property(&node.null_as_epoch, Column::new(alias, column));
+                args.push(string(column));
+                args.push(call(
+                    Function::ToString,
+                    vec![lowering.output::<B>(&value)?],
+                ));
+            }
+            call(Function::ToJson, vec![call(Function::Object, args)])
+        }
+    };
+    let items = vec![
+        (format!("{alias}_{pk}"), col(&[&rows], alias, pk)?),
+        (format!("{alias}_entity_type"), string(&node.entity)),
+        (format!("{alias}_props"), props),
+    ];
+    let (rows, columns) = computed(q, rows, items)?;
+    q.select(rows, columns)
 }
 
-fn or_starts_with(alias: &str, paths: &[TraversalPath]) -> Option<Expr> {
-    Expr::or_all(paths.iter().map(|tp| Some(starts_with_path(alias, tp))))
-}
-
-fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
-    Expr::func(
+fn starts_with(scope: &[&Relation], alias: &str, path: &TraversalPath) -> Built<Expr> {
+    let column = col(scope, alias, TRAVERSAL_PATH_COLUMN)?;
+    Ok(call(
         Function::StartsWith,
-        vec![
-            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-            Expr::string(tp.as_str()),
-        ],
-    )
+        vec![column, string(path.as_str())],
+    ))
 }
 
-fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
-    let lambda_param = "_orbit_path";
-    Expr::func(
-        Function::ArrayExists,
-        vec![
-            Expr::lambda(
-                lambda_param,
-                Expr::func(
-                    Function::StartsWith,
-                    vec![
-                        Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                        Expr::ident(lambda_param),
-                    ],
-                ),
-            ),
-            Expr::param(
-                SqlType::String.to_array(),
-                serde_json::Value::Array(
-                    paths
-                        .iter()
-                        .map(|p| serde_json::Value::String(p.as_str().to_string()))
-                        .collect(),
-                ),
-            ),
-        ],
-    )
+fn array_exists(scope: &[&Relation], alias: &str, paths: &[TraversalPath]) -> Built<Expr> {
+    let variable = "_orbit_path";
+    let column = col(scope, alias, TRAVERSAL_PATH_COLUMN)?;
+    let body = call(
+        Function::StartsWith,
+        vec![column, Expr::Variable(variable.to_string())],
+    );
+    let lambda = Expr::Lambda {
+        param: variable.to_string(),
+        body: Box::new(body),
+    };
+    let paths = paths
+        .iter()
+        .map(|path| Value::String(path.as_str().to_string()))
+        .collect();
+    let paths = Expr::Parameter {
+        data_type: SqlType::String.to_array(),
+        value: Value::Array(paths),
+    };
+    Ok(call(Function::ArrayExists, vec![lambda, paths]))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::input::{ColumnSelection, Input, InputNode, QueryType};
-    use crate::passes::codegen::codegen;
+    use crate::passes::codegen::ParamValue;
     use crate::passes::plan::{HydrationCompileOptions, plan_clickhouse};
-    use crate::passes::result_contract::ResultContext;
-    use orbit_server_config::QueryConfig;
     use query_data_model::ClickHouseDataModel;
+    use std::collections::HashMap;
     use std::sync::LazyLock;
 
     static MODEL: LazyLock<ClickHouseDataModel> =
         LazyLock::new(|| ClickHouseDataModel::embedded().unwrap());
-
-    fn render(node: &Node) -> String {
-        render_with_params(node).0
-    }
-
-    fn render_with_params(
-        node: &Node,
-    ) -> (
-        String,
-        std::collections::HashMap<String, crate::passes::codegen::ParamValue>,
-    ) {
-        let q = codegen(
-            node,
-            MODEL.catalog(),
-            ResultContext::new(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        (q.sql, q.params)
-    }
 
     fn plan(columns: Vec<&str>, node_ids: Vec<i64>, traversal_paths: Vec<&str>) -> InputNode {
         InputNode {
@@ -206,33 +209,24 @@ mod tests {
         }
     }
 
-    fn emit_dynamic(plans: &[InputNode]) -> Node {
-        emit(plans, true)
-    }
-
-    fn emit_static(plans: &[InputNode]) -> Node {
-        emit(plans, false)
-    }
-
-    fn emit(nodes: &[InputNode], dynamic: bool) -> Node {
+    fn render(nodes: &[InputNode], dynamic: bool) -> (String, HashMap<String, ParamValue>) {
         let input = Input {
             query_type: QueryType::Hydration,
             nodes: nodes.to_vec(),
             ..Default::default()
         };
-        let plan = plan_clickhouse(
-            &input,
-            &MODEL,
-            HydrationCompileOptions {
-                dynamic,
-                path_segment_budget: None,
-            },
-        )
-        .unwrap();
+        let options = HydrationCompileOptions {
+            dynamic,
+            path_segment_budget: None,
+        };
+        let plan = plan_clickhouse(&input, &MODEL, options).unwrap();
         let crate::passes::plan::QueryPlan::Hydration(plan) = &plan else {
             panic!("expected a hydration plan");
         };
-        super::emit(plan).unwrap().ast
+        let catalog = MODEL.catalog();
+        let built = catalog.build(|q| super::emit(q, plan)).unwrap();
+        let rendered = catalog.render(&built);
+        (rendered.sql, rendered.parameters)
     }
 
     #[test]
@@ -240,13 +234,12 @@ mod tests {
         let paths: Vec<TraversalPath> = (0..=256)
             .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
             .collect();
-        let plan = InputNode {
+        let node = InputNode {
             traversal_paths: paths.clone(),
             ..plan(vec!["title"], vec![1], vec![])
         };
 
-        let node = emit_dynamic(&[plan]);
-        let (sql, params) = render_with_params(&node);
+        let (sql, params) = render(&[node], true);
 
         assert!(
             sql.contains("arrayExists"),
@@ -260,7 +253,7 @@ mod tests {
         let array_params: Vec<_> = params
             .values()
             .filter_map(|p| match &p.value {
-                serde_json::Value::Array(items) => Some(items),
+                Value::Array(items) => Some(items),
                 _ => None,
             })
             .collect();
@@ -277,13 +270,12 @@ mod tests {
         let paths: Vec<TraversalPath> = (0..=256)
             .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
             .collect();
-        let plan = InputNode {
+        let node = InputNode {
             traversal_paths: paths,
             ..plan(vec!["title"], vec![1], vec![])
         };
 
-        let node = emit_static(&[plan]);
-        let sql = render(&node);
+        let (sql, _) = render(&[node], false);
 
         assert!(
             !sql.contains("arrayExists"),
@@ -293,26 +285,15 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_tp_filter_precedes_id_filter() {
-        let node = emit_dynamic(&[plan(vec!["title"], vec![1], vec!["1/9970/"])]);
-        let sql = render(&node);
-        let tp_pos = sql.find("startsWith").unwrap();
-        let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();
-        assert!(
-            tp_pos < in_pos,
-            "TP filter should precede ID filter for primary key pruning: {sql}"
-        );
-    }
-
-    #[test]
-    fn static_tp_filter_precedes_id_filter() {
-        let node = emit_static(&[plan(vec!["title"], vec![1], vec!["1/9970/"])]);
-        let sql = render(&node);
-        let tp_pos = sql.find("startsWith").unwrap();
-        let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();
-        assert!(
-            tp_pos < in_pos,
-            "TP filter should precede ID filter for primary key pruning: {sql}"
-        );
+    fn tp_filter_precedes_id_filter() {
+        for dynamic in [true, false] {
+            let (sql, _) = render(&[plan(vec!["title"], vec![1], vec!["1/9970/"])], dynamic);
+            let tp_pos = sql.find("startsWith").unwrap();
+            let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();
+            assert!(
+                tp_pos < in_pos,
+                "TP filter should precede ID filter for primary key pruning: {sql}"
+            );
+        }
     }
 }

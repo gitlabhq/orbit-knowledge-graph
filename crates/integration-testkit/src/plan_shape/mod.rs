@@ -826,17 +826,10 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         };
         assert_eq!((actual_set, paths.len()), (set, expected_paths));
         let lowered = lower::emit(&plan, &input, None, &model).unwrap();
-        let lower::Lowered::Ast(ast) = lowered.lowered else {
-            panic!("hydration lowers to an AST");
+        let lower::Lowered::Plan(relational) = lowered.lowered else {
+            panic!("hydration lowers to a relational plan");
         };
-        let sql = compiler::codegen(
-            &ast,
-            model.catalog(),
-            Default::default(),
-            Default::default(),
-        )
-        .unwrap()
-        .sql;
+        let sql = model.catalog().render(&relational).sql;
         assert_eq!(sql.contains("arrayExists"), set);
         assert_eq!(
             sql.matches("startsWith").count(),
