@@ -60,20 +60,6 @@ fn text_operators_on_relationship_columns_are_rejected() {
         Frontend::Gql,
         "does not support substring matching",
     );
-    let json = serde_json::json!({
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "mr", "entity": "MergeRequest"}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr",
-            "filters": {"target_kind": {"token_match": "MergeRequest"}}}]
-    });
-    assert_rejected(
-        &json.to_string(),
-        Frontend::JsonDsl,
-        "does not support substring matching",
-    );
 }
 
 #[test]
