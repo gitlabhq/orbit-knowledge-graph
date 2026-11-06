@@ -3,7 +3,7 @@
 
 mod conditions;
 
-pub use conditions::{Leaf, Literals};
+pub use conditions::{Leaf, Literals, binding};
 
 use query_data_model::plan::logical::{
     Expr, Hops, LogicalOperation, LogicalPlan, LogicalType, Measure, Predicate, Projection,

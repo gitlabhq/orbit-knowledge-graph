@@ -1,75 +1,51 @@
+use std::collections::HashSet;
+
 use query_data_model::OrbitQueryModel;
+use query_data_model::plan::logical::{Comparison, Expr, Literal, Predicate};
+use query_data_model::plan::tracking::Ref;
 
+use super::facts::Fact;
+use super::node_property;
 use crate::error::{QueryError, Result};
-use crate::input::{Input, PredicateTarget, QueryType};
+use crate::logical::Query;
 
-pub(super) fn aggregation_text(input: &Input, model: &impl OrbitQueryModel) -> Result<()> {
-    if input.query_type != QueryType::Aggregation {
-        return Ok(());
-    }
-    let rows = input.aggregation_row_nodes(model);
-    let attached = input.nodes.iter().flat_map(|node| {
-        node.filters.iter().flat_map(move |(property, filters)| {
-            filters
-                .iter()
-                .map(move |filter| (node.id.as_str(), property.as_str(), filter.op))
-        })
-    });
-    let conditions = input.conditions().flat_map(|condition| {
-        condition
-            .node_properties()
-            .map(move |(alias, property)| (alias, property, condition.filter.op))
-    });
-    for (alias, property, op) in attached.chain(conditions) {
-        if !op.is_some_and(|op| op.is_like() || op.is_token() || op.is_ordering()) {
-            continue;
+fn sides(fact: &Fact<'_>) -> impl Iterator<Item = Expr> {
+    std::iter::once(fact.left).chain(fact.right())
+}
+
+pub(super) fn negated(
+    query: Query<'_>,
+    facts: &[Fact<'_>],
+    model: &impl OrbitQueryModel,
+) -> Result<()> {
+    let negated = facts.iter().filter(|fact| fact.negated).flat_map(sides);
+    for (_, entity, property) in negated.filter_map(|expr| node_property(query, expr)) {
+        if model.virtual_source(entity, property).is_some() {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{property}\" for {entity}: virtual columns cannot be used under NOT"
+            )));
         }
-        let Some(entity) = input.entity_of(alias) else {
-            continue;
-        };
-        if rows.contains(alias)
-            || model.entity_authorized_by_namespace(entity)
-            || !model.property_is_free_text(entity, property)
-        {
-            continue;
-        }
-        return Err(QueryError::Validation(format!(
-            "aggregation filter on {entity}.{property}: text matching and ordering require grouping by \"{alias}\""
-        )));
     }
     Ok(())
 }
 
-pub(super) fn epoch(input: &Input, model: &impl OrbitQueryModel) -> Result<()> {
-    let attached = input.nodes.iter().flat_map(|node| {
-        node.filters
-            .iter()
-            .flat_map(move |(property, filters)| filters.iter().map(move |f| (node, property, f)))
-    });
-    let conditions = input
-        .conditions()
-        .filter_map(|condition| match &condition.target {
-            PredicateTarget::Node(alias) => {
-                Some((input.node(alias)?, &condition.property, &condition.filter))
-            }
-            PredicateTarget::Relationship(_) => None,
-        });
-    for (node, property, filter) in attached.chain(conditions) {
-        let (Some(entity), Some(value)) = (node.entity.as_deref(), filter.value.as_ref()) else {
+pub(super) fn epoch(
+    query: Query<'_>,
+    facts: &[Fact<'_>],
+    model: &impl OrbitQueryModel,
+) -> Result<()> {
+    for fact in facts {
+        let Some((_, entity, property)) = node_property(query, fact.left) else {
             continue;
         };
-        let values = value
-            .as_array()
-            .map_or(std::slice::from_ref(value), Vec::as_slice);
         let epoch_null = model
             .property(entity, property)
             .is_some_and(|property| model.null_as_epoch(property.id));
-        if epoch_null
-            && values
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .any(at_or_before_epoch)
-        {
+        let early = fact.literals().iter().any(|literal| match literal {
+            Literal::String(text) | Literal::Temporal(text) => at_or_before_epoch(text),
+            _ => false,
+        });
+        if epoch_null && early {
             return Err(QueryError::Validation(format!(
                 "filter on \"{property}\" for {entity}: \
                  values on or before 1970-01-01 stand for null; use is_null or is_not_null"
@@ -89,18 +65,69 @@ fn at_or_before_epoch(value: &str) -> bool {
     date.is_some_and(|date| date <= "1970-01-01")
 }
 
-pub(super) fn order(input: &Input, model: &impl OrbitQueryModel) -> Result<()> {
-    let Some(order) = &input.order_by else {
+pub(super) fn aggregation_text(
+    query: Query<'_>,
+    facts: &[Fact<'_>],
+    model: &impl OrbitQueryModel,
+) -> Result<()> {
+    let Some((groups, _)) = query.aggregate() else {
         return Ok(());
     };
-    let Some(entity) = input.entity_of(&order.node) else {
-        return Ok(());
-    };
-    if model.virtual_source(entity, &order.property).is_some() {
-        return Err(QueryError::Validation(format!(
-            "order_by property {}.{} is virtual and cannot be read in SQL",
-            order.node, order.property
-        )));
+    let rows: HashSet<Ref> = groups
+        .iter()
+        .filter_map(|group| match group {
+            Expr::Node(binding) => Some(*binding),
+            Expr::Property { binding, property } => {
+                let entity = query.entity_name(*binding)?;
+                model
+                    .property_is_free_text(entity, query.property_name(*property))
+                    .then_some(*binding)
+            }
+            _ => None,
+        })
+        .collect();
+    for fact in facts {
+        let matching = match fact.leaf {
+            Predicate::Text { .. } => true,
+            Predicate::Compare { .. } => !matches!(
+                fact.comparison,
+                Some(Comparison::Eq | Comparison::Ne) | None
+            ),
+            _ => false,
+        };
+        if !matching {
+            continue;
+        }
+        for expr in sides(fact) {
+            let (Expr::Property { binding, .. }, Some((alias, entity, property))) =
+                (expr, node_property(query, expr))
+            else {
+                continue;
+            };
+            if rows.contains(&binding)
+                || model.entity_authorized_by_namespace(entity)
+                || !model.property_is_free_text(entity, property)
+            {
+                continue;
+            }
+            return Err(QueryError::Validation(format!(
+                "aggregation filter on {entity}.{property}: text matching and ordering require grouping by \"{alias}\""
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn order(query: Query<'_>, model: &impl OrbitQueryModel) -> Result<()> {
+    for key in query.ordered() {
+        let Some((alias, entity, property)) = node_property(query, key) else {
+            continue;
+        };
+        if model.virtual_source(entity, property).is_some() {
+            return Err(QueryError::Validation(format!(
+                "order_by property {alias}.{property} is virtual and cannot be read in SQL"
+            )));
+        }
     }
     Ok(())
 }

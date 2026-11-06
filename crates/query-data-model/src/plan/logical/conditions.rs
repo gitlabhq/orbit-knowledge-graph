@@ -145,31 +145,31 @@ fn endpoint(
     let Some(allowed) = endpoint_kinds(model, construction, *binding, source)? else {
         return Ok(());
     };
-    let name = if source { "source_kind" } else { "target_kind" };
-    fn named(literal: &Literal) -> Option<&str> {
-        match literal {
-            Literal::String(text) => Some(text),
+    let Some(kinds) = values
+        .iter()
+        .map(|value| match value {
+            Literal::String(text) => Some(text.as_str()),
             _ => None,
-        }
-    }
+        })
+        .collect::<Option<Vec<&str>>>()
+    else {
+        return Ok(());
+    };
+    let name = if source { "source_kind" } else { "target_kind" };
     if comparison == Some(Comparison::Ne)
-        && let [only] = allowed.as_slice()
-        && named(&values[0]) == Some(only.as_str())
+        && let ([only], [kind]) = (allowed.as_slice(), kinds.as_slice())
+        && only == kind
     {
         return Err(PlanError::shape(format!(
             "filter on \"{name}\": <> {only:?} excludes the only value this pattern allows; remove the filter"
         )));
     }
-    let invalid = values
-        .iter()
-        .find(|value| !named(value).is_some_and(|kind| allowed.iter().any(|a| a == kind)));
-    match invalid {
-        Some(value) => Err(PlanError::shape(format!(
-            "filter on \"{name}\": {} cannot match this pattern{}",
-            match named(value) {
-                Some(text) => format!("{text:?}"),
-                None => format!("{value:?}"),
-            },
+    match kinds
+        .into_iter()
+        .find(|kind| !allowed.iter().any(|allowed| allowed == kind))
+    {
+        Some(kind) => Err(PlanError::shape(format!(
+            "filter on \"{name}\": {kind:?} cannot match this pattern{}",
             ontology::errors::format_candidate_list("values", &allowed)
         ))),
         None => Ok(()),

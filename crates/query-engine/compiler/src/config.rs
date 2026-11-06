@@ -68,11 +68,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         admit {
             reads_env: [data_model]
-            reads_state: [input]
+            reads_state: [statement]
         }
         admit_local {
             reads_env: [data_model]
-            reads_state: [input]
+            reads_state: [statement]
         }
         normalize {
             reads_env: [data_model]
@@ -180,14 +180,14 @@ compiler_pipeline_macros::define_compiler_ctx! {
         check_gql {
             model: query_data_model::ClickHouseDataModel
             env: []
-            state: [raw, statement, input]
-            phases: [gql_parse_trusted, normalize, bridge, admit]
+            state: [raw, statement]
+            phases: [gql_parse_trusted, normalize, admit]
         }
         check_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: []
-            state: [raw, statement, input]
-            phases: [json_dsl_parse_trusted, normalize, bridge, admit]
+            state: [raw, statement]
+            phases: [json_dsl_parse_trusted, normalize, admit]
         }
     }
 }
@@ -226,14 +226,19 @@ fn bridge(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
+fn admit_with(ctx: &mut impl CompilerCtx, selectivity: bool) -> Result<()> {
+    let statement = require(ctx.statement().as_ref(), "statement")?;
+    let model = ctx.data_model();
+    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+    admit::admit(query, model, selectivity)
+}
+
 fn admit(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().as_ref(), "input")?;
-    admit::admit(input, ctx.data_model(), true)
+    admit_with(ctx, true)
 }
 
 fn admit_local(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().as_ref(), "input")?;
-    admit::admit(input, ctx.data_model(), false)
+    admit_with(ctx, false)
 }
 
 fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {

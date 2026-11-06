@@ -1,119 +1,123 @@
-//! Rejects queries the engine will not run: shapes the planner does not
-//! support, properties the backend does not store, conditions past the
-//! engine limits, and scans with no selective node.
+//! Rejects queries past the engine limits: predicate and filter caps,
+//! virtual-column and text-index rules, and scans with no selective node.
 
-mod conditions;
+mod facts;
 mod limits;
 mod rules;
 mod selectivity;
 
 use query_data_model::OrbitQueryModel;
+use query_data_model::plan::logical::{Expr, Predicate, TimeUnit};
 
 use crate::error::{QueryError, Result};
-use crate::input::{FilterOp, Input, InputFilter, InputNode, PredicateTarget, QueryType};
+use crate::input::QueryType;
+use crate::logical::Query;
+use facts::{Anchor, Fact};
 
-pub fn admit(input: &Input, model: &impl OrbitQueryModel, selectivity: bool) -> Result<()> {
-    limits::predicates(input)?;
-    limits::filters(input)?;
-    conditions::conditions(input, model)?;
-    filters(input, model)?;
-    rules::epoch(input, model)?;
-    rules::aggregation_text(input, model)?;
-    rules::order(input, model)?;
-    buckets(input)?;
+pub fn admit(query: Query<'_>, model: &impl OrbitQueryModel, selectivity: bool) -> Result<()> {
+    let facts = facts::facts(query);
+    let anchors = facts::anchors(query, &facts);
+    limits::predicates(&facts)?;
+    limits::filters(query, &facts, &anchors)?;
+    rules::negated(query, &facts, model)?;
+    filters(query, &facts, &anchors, model)?;
+    rules::epoch(query, &facts, model)?;
+    rules::aggregation_text(query, &facts, model)?;
+    rules::order(query, model)?;
+    buckets(query, &anchors)?;
     if selectivity {
-        selectivity::selectivity(input)?;
+        selectivity::selectivity(query, &facts, &anchors)?;
     }
     Ok(())
 }
 
-fn filters(input: &Input, model: &impl OrbitQueryModel) -> Result<()> {
-    let conditions = input
-        .conditions()
-        .filter_map(|condition| match &condition.target {
-            PredicateTarget::Node(alias) => Some((
-                input.node(alias)?,
-                condition.property.as_str(),
-                std::slice::from_ref(&condition.filter),
-            )),
-            PredicateTarget::Relationship(_) => None,
-        });
-    let attached = input.nodes.iter().flat_map(|node| {
-        node.filters
-            .iter()
-            .map(move |(property, filters)| (node, property.as_str(), filters.as_slice()))
-    });
-    for (node, property, filters) in attached.chain(conditions) {
-        let Some(entity) = node.entity.as_deref() else {
-            continue;
-        };
-        filter(input, model, node, entity, property, filters)?;
-    }
-    Ok(())
+fn node_property<'p>(query: Query<'p>, expr: Expr) -> Option<(&'p str, &'p str, &'p str)> {
+    let Expr::Property { binding, property } = expr else {
+        return None;
+    };
+    Some((
+        query.name(binding),
+        query.entity_name(binding)?,
+        query.property_name(property),
+    ))
 }
 
-fn filter(
-    input: &Input,
+fn filters(
+    query: Query<'_>,
+    facts: &[Fact<'_>],
+    anchors: &[Anchor<'_>],
     model: &impl OrbitQueryModel,
-    node: &InputNode,
-    entity: &str,
-    property: &str,
-    filters: &[InputFilter],
 ) -> Result<()> {
-    if model.virtual_source(entity, property).is_some() {
-        if matches!(
-            input.query_type,
-            QueryType::Aggregation | QueryType::Neighbors | QueryType::PathFinding
-        ) {
-            let query_type: &str = input.query_type.into();
+    let kind = query.kind();
+    for fact in facts {
+        let Some((alias, entity, property)) = node_property(query, fact.left) else {
+            continue;
+        };
+        if model.virtual_source(entity, property).is_some() {
+            if matches!(
+                kind,
+                QueryType::Aggregation | QueryType::Neighbors | QueryType::PathFinding
+            ) {
+                let kind: &str = kind.into();
+                return Err(QueryError::Validation(format!(
+                    "filter on \"{property}\" for {entity}: virtual columns cannot be \
+                     filtered in {kind} queries"
+                )));
+            }
+            let pinned = anchors
+                .iter()
+                .any(|anchor| anchor.binding.name == alias && anchor.pinned);
+            if !pinned {
+                return Err(QueryError::Validation(format!(
+                    "filter on \"{property}\" for {entity}: virtual columns can only be \
+                     filtered on nodes with explicit node_ids; searching by virtual \
+                     column content is not yet supported"
+                )));
+            }
+        }
+        let tokens = matches!(fact.leaf, Predicate::Text { matching, .. } if matching.tokens());
+        let indexed = model
+            .property(entity, property)
+            .is_some_and(|property| model.has_text_index(property.id));
+        if tokens && !indexed {
             return Err(QueryError::Validation(format!(
-                "filter on \"{property}\" for {entity}: virtual columns cannot be \
-                 filtered in {query_type} queries"
+                "filter on \"{property}\" for {entity}: \
+                 token operators (token_match/all_tokens/any_tokens) require a text index on the field"
             )));
         }
-        if node.node_ids.is_empty() {
-            return Err(QueryError::Validation(format!(
-                "filter on \"{property}\" for {entity}: virtual columns can only be \
-                 filtered on nodes with explicit node_ids; searching by virtual \
-                 column content is not yet supported"
-            )));
-        }
-    }
-    let tokens = filters.iter().any(|filter| {
-        matches!(
-            filter.op,
-            Some(FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens)
-        )
-    });
-    let indexed = model
-        .property(entity, property)
-        .is_some_and(|property| model.has_text_index(property.id));
-    if tokens && !indexed {
-        return Err(QueryError::Validation(format!(
-            "filter on \"{property}\" for {entity}: \
-             token operators (token_match/all_tokens/any_tokens) require a text index on the field"
-        )));
     }
     Ok(())
 }
 
-fn buckets(input: &Input) -> Result<()> {
-    for (index, group) in input.aggregation.group_by.iter().enumerate() {
-        let (Some(unit), Some(property)) = (group.truncate(), group.property()) else {
+fn buckets(query: Query<'_>, anchors: &[Anchor<'_>]) -> Result<()> {
+    let Some((groups, _)) = query.aggregate() else {
+        return Ok(());
+    };
+    for (index, group) in groups.iter().enumerate() {
+        let Expr::Truncate {
+            binding,
+            property,
+            unit: unit @ (TimeUnit::Minute | TimeUnit::Hour),
+        } = group
+        else {
             continue;
         };
-        let Some(node) = input.node(group.node()) else {
+        let Some(anchor) = anchors
+            .iter()
+            .find(|anchor| anchor.binding.output == *binding)
+        else {
             continue;
         };
-        if unit.requires_selectivity_guard()
-            && node.node_ids.is_empty()
-            && !node.filters.contains_key(property)
-        {
+        let filtered = anchor.filters.iter().any(|fact| {
+            matches!(fact.left, Expr::Property { property: filtered, .. } if filtered == *property)
+        });
+        if !anchor.pinned && !filtered {
+            let property = query.property_name(*property);
+            let unit: &str = unit.into();
             return Err(QueryError::Validation(format!(
-                "group_by[{index}]: truncate \"{}\" on \"{property}\" requires either node_ids on \"{}\" \
+                "group_by[{index}]: truncate \"{unit}\" on \"{property}\" requires either node_ids on \"{}\" \
                  or at least one filter on \"{property}\" to bound bucket cardinality",
-                unit.name(),
-                node.id,
+                anchor.binding.name,
             )));
         }
     }
