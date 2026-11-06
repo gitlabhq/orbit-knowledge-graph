@@ -1,5 +1,5 @@
 [package]
-name = "indexer-datafusion"
+name = "indexer-duckdb"
 version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
@@ -7,9 +7,10 @@ license = "LicenseRef-EE"
 [dependencies]
 arrow = { workspace = true }
 async-trait = { workspace = true }
-datafusion = { workspace = true }
+duckdb-client = { path = "../../duckdb-client" }
 indexer = { path = ".." }
 orbit-arrow = { path = "../../utils/arrow" }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

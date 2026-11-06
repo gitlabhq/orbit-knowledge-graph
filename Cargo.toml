@@ -10,7 +10,7 @@ members = [
   "crates/code-graph-incremental",
   "crates/clickhouse-client",
   "crates/indexer",
-  "crates/indexer/datafusion",
+  "crates/indexer/duckdb",
   "crates/query-engine",
   "crates/query-engine/compiler",
   "crates/query-engine/types",
@@ -65,7 +65,6 @@ cargo-util-schemas = "0.14.0"
 cargo_metadata = "0.23.1"
 enum-as-inner = "0.7.0"
 either = "1.15.0"
-datafusion = { version = "55.2.0", default-features = false, features = ["sql", "nested_expressions"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 cliclack = "0.5"
 comrak = { version = "0.53.0", default-features = false }
