@@ -16,7 +16,7 @@ metadata:
 
 Use these rules and recipes with the `orbit` skill, which covers query syntax,
 schema discovery, and the iteration budget. Run each recipe with
-`glab orbit query '<query>'`.
+`glab orbit query "<query>"`, because the recipes contain single-quoted strings.
 
 ## Rules
 
@@ -63,8 +63,8 @@ Count them with one aggregate query rather than a sample.
 
 ```gql orbit-query
 MATCH (p:Package)-[:DECLARES_DEPENDENCY]->(d:Dependency {name: 'lodash'}), (p)-[:IN_PROJECT]->(pr:Project)
-WHERE pr.full_path STARTS WITH 'gitlab-org/'
-RETURN pr.full_path, count(p) AS dependents
+WHERE pr.full_path STARTS WITH 'gitlab-org/' AND p.status IN ['default', 'error', 'deprecated']
+RETURN pr.full_path, count(DISTINCT p) AS dependents
 ORDER BY dependents DESC
 LIMIT 10
 ```
