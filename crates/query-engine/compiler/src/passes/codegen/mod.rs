@@ -1,5 +1,5 @@
-//! Imports the lowered AST into the relational plan and renders it through
-//! the backend catalog.
+//! Renders the finished relational plan to SQL and parameters through the
+//! backend catalog.
 
 pub mod ddl;
 

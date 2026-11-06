@@ -1,6 +1,6 @@
 //! Security filter injection for multi-tenant isolation.
 //!
-//! Injects traversal_path filters on all node table scans.
+//! Injects path filters on every scan whose guard names a path column.
 //! The org_id is encoded as the first segment of each path, validated at construction.
 //!
 //! Path filtering strategy:
@@ -9,10 +9,9 @@
 //!
 //! # Per-entity role scoping
 //!
-//! Each entity's ontology can declare a `required_role`. Before injecting
-//! the `startsWith` predicate for an alias we look up the entity attached
-//! to that alias's physical table and drop any traversal path where the
-//! user's access level is below the entity's `required_access_level`.
+//! Each guard carries the entity's role floor. Before injecting the
+//! `startsWith` predicate for a scan we drop any traversal path where the
+//! user's access level is below that floor.
 //!
 //! This closes the aggregation-query oracle where a Reporter-only user
 //! could count or binary-search properties on a higher-privilege entity
@@ -21,7 +20,6 @@
 //! (producing a Bool(false) predicate) and the aggregation counts nothing.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use orbit_utils::query_types::SqlType;
 use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
@@ -31,23 +29,18 @@ use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, Function, Operation, Relational,
 };
 use query_data_model::plan::tracking::{NodeId, Plan, Ref};
-use regex::Regex;
 use serde_json::Value;
 
-use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::{QueryError, Result};
 use crate::passes::codegen::ClickHousePlan;
 pub use crate::types::SecurityContext;
 
-static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
-
-/// Per-alias role floors come from the query data model.
-/// Tables without authorization metadata keep the historical Reporter floor.
+/// Per-scan path columns and role floors come from the loader's guards.
+/// Tables without authorization metadata keep the Reporter floor.
 pub fn apply_security_context(
     plan: ClickHousePlan,
     catalog: &Catalog<ClickHouse>,
     ctx: &SecurityContext,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ClickHousePlan> {
     // An entirely empty security context is treated as a fail-closed bug:
     // the caller forgot to populate traversal paths. Emitting `Bool(false)`
@@ -65,7 +58,7 @@ pub fn apply_security_context(
                 .into(),
         ));
     }
-    let mut guards = guards(&plan.plan, catalog, ctx, model);
+    let mut guards = guards(&plan.plan, catalog, ctx);
     catalog
         .rewrite(plan, |q, rows| {
             let Some(mut conditions) = q.original().and_then(|node| guards.remove(&node)) else {
@@ -95,15 +88,7 @@ fn guards(
     graph: &Plan<Relational<ClickHouse>>,
     catalog: &Catalog<ClickHouse>,
     ctx: &SecurityContext,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> HashMap<NodeId, Vec<Expr>> {
-    let pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
-        Regex::new(&format!(
-            r"^(?:v\d+_)?{}.+$",
-            regex::escape(GL_TABLE_PREFIX)
-        ))
-        .expect("valid regex")
-    });
     let mut guards = HashMap::new();
     for node in graph.nodes() {
         let operation = graph.operation(node);
@@ -121,16 +106,18 @@ fn guards(
                 let Operation::Scan { table, .. } = graph.operation(scan) else {
                     return None;
                 };
-                let table = catalog.table_name(*table);
-                if !pattern.is_match(table) || !model.table_has_path_columns(table) {
-                    return None;
-                }
-                let column = graph
-                    .outputs(scan)
-                    .find(|output| graph.name(*output) == Some(TRAVERSAL_PATH_COLUMN))?;
-                let eligible = ctx.paths_at_least(model.table_minimum_access_level(table));
-                Some(path_filter(column, &eligible))
+                Some(
+                    super::guards::scan(catalog, *table)?
+                        .into_iter()
+                        .filter_map(move |guard| {
+                            let column = graph.outputs(scan).find(|output| {
+                                graph.name(*output) == Some(guard.column.as_str())
+                            })?;
+                            Some(path_filter(column, &ctx.paths_at_least(guard.min_role)))
+                        }),
+                )
             })
+            .flatten()
             .collect();
         if !conditions.is_empty() {
             guards.insert(node, conditions);
@@ -249,7 +236,7 @@ mod tests {
     fn secured(plan: ClickHousePlan, paths: &[&str]) -> String {
         let paths = paths.iter().map(|path| path.to_string()).collect();
         let ctx = SecurityContext::new(1, paths).unwrap();
-        let plan = apply_security_context(plan, model().catalog(), &ctx, model()).unwrap();
+        let plan = apply_security_context(plan, model().catalog(), &ctx).unwrap();
         model().catalog().render(&plan).sql
     }
 
@@ -258,7 +245,7 @@ mod tests {
         let mut ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         ctx.traversal_paths.clear();
         let plan = scans(&[("gl_project", "p")], None);
-        let error = apply_security_context(plan, model().catalog(), &ctx, model());
+        let error = apply_security_context(plan, model().catalog(), &ctx);
         assert!(matches!(error, Err(QueryError::Security(_))));
     }
 

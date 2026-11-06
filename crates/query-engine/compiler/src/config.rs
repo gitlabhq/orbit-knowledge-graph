@@ -337,7 +337,7 @@ fn security(
 ) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
     let model = ctx.data_model();
-    let plan = security::apply_security_context(plan, model.catalog(), ctx.security_ctx(), model)?;
+    let plan = security::apply_security_context(plan, model.catalog(), ctx.security_ctx())?;
     ctx.set_relational(plan);
     Ok(())
 }
@@ -356,7 +356,7 @@ fn security_check(
 ) -> Result<()> {
     let plan = require(ctx.relational().as_ref(), "relational")?;
     let model = ctx.data_model();
-    security_check::verify(plan, model.catalog(), ctx.security_ctx(), model)
+    security_check::verify(plan, model.catalog(), ctx.security_ctx())
 }
 
 fn hydrate_plan(

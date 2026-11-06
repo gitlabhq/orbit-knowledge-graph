@@ -3,6 +3,7 @@
 
 pub mod admit;
 pub mod codegen;
+pub mod guards;
 pub mod hydrate;
 pub mod lower;
 pub mod normalize;

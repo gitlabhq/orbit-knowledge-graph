@@ -23,7 +23,6 @@ pub fn verify(
     plan: &ClickHousePlan,
     catalog: &Catalog<ClickHouse>,
     ctx: &SecurityContext,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     let graph = &plan.plan;
     let consumers: HashMap<NodeId, NodeId> = graph
@@ -34,22 +33,18 @@ pub fn verify(
         let Operation::Scan { table, alias, .. } = graph.operation(node) else {
             continue;
         };
-        let table = catalog.table_name(*table);
-        let Some(columns) = model.table_path_columns(table) else {
+        let Some(guards) = super::guards::scan(catalog, *table) else {
             return Err(QueryError::Security(format!(
-                "post-check failed: unresolved table '{table}'"
+                "post-check failed: unresolved table '{}'",
+                catalog.table_name(*table)
             )));
         };
         let filters = join_filters(graph, &consumers, node);
-        for column in columns {
-            let access_level = column
-                .entity
-                .and_then(|entity| model.required_access_level(entity))
-                .unwrap_or(ontology::RequiredRole::Reporter.as_access_level());
-            let eligible = ctx.paths_at_least(access_level);
+        for guard in guards {
+            let eligible = ctx.paths_at_least(guard.min_role);
             let output = graph
                 .outputs(node)
-                .find(|output| graph.name(*output) == Some(column.name.as_str()));
+                .find(|output| graph.name(*output) == Some(guard.column.as_str()));
             let guarded = output.is_some_and(|output| {
                 filters
                     .iter()
@@ -57,8 +52,8 @@ pub fn verify(
             });
             if !guarded {
                 return Err(QueryError::Security(format!(
-                    "post-check failed: column '{alias}.{}' missing valid traversal_path filter at access level {access_level}",
-                    column.name
+                    "post-check failed: column '{alias}.{}' missing valid traversal_path filter at access level {}",
+                    guard.column, guard.min_role
                 )));
             }
         }
@@ -171,9 +166,8 @@ mod tests {
         context: &SecurityContext,
         model: &ClickHouseDataModel,
     ) -> Result<ClickHousePlan> {
-        let plan =
-            crate::passes::security::apply_security_context(plan, model.catalog(), context, model)?;
-        verify(&plan, model.catalog(), context, model)?;
+        let plan = crate::passes::security::apply_security_context(plan, model.catalog(), context)?;
+        verify(&plan, model.catalog(), context)?;
         Ok(plan)
     }
 
@@ -182,7 +176,7 @@ mod tests {
         context: &SecurityContext,
         model: &ClickHouseDataModel,
     ) -> Result<()> {
-        verify(plan, model.catalog(), context, model)
+        verify(plan, model.catalog(), context)
     }
 
     fn scan(q: Builder<'_, '_>, table: &str, alias: &str) -> Built<Relation> {
