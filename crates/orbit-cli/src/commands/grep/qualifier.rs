@@ -22,10 +22,27 @@ pub(super) struct Parsed {
     pub(super) targets: Vec<String>,
 }
 
-static ALIASES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
+static DECLARED: LazyLock<BTreeMap<String, Vec<String>>> = LazyLock::new(|| {
     let file = GrepAssets::get("qualifiers.yaml").expect("config/grep/qualifiers.yaml is embedded");
-    let declared: BTreeMap<String, Vec<String>> =
-        orbit_utils::yaml::from_slice(&file.data).expect("config/grep/qualifiers.yaml is valid");
+    orbit_utils::yaml::from_slice(&file.data).expect("config/grep/qualifiers.yaml is valid")
+});
+
+pub(crate) fn gitlab_prefixes() -> String {
+    crate::remote::grep::searched_kinds()
+        .iter()
+        .map(|kind| {
+            let name = DECLARED
+                .get(*kind)
+                .and_then(|names| names.first().cloned())
+                .unwrap_or_else(|| snake(kind));
+            format!("`{name}:`")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+static ALIASES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
+    let declared = DECLARED.clone();
     let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must load");
     let mut aliases = BTreeMap::new();
     let searchable = |node: &str| {
@@ -218,6 +235,21 @@ pub(super) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_gitlab_prefix_parses_to_its_kind() {
+        let prefixes = gitlab_prefixes();
+        let names: Vec<&str> = prefixes.split(' ').collect();
+        assert_eq!(names.len(), crate::remote::grep::searched_kinds().len());
+        for (name, kind) in names.iter().zip(crate::remote::grep::searched_kinds()) {
+            let name = name.trim_matches('`').strip_suffix(':').unwrap();
+            assert_eq!(kind_for(name).as_deref(), Some(*kind), "{name}");
+        }
+        assert!(
+            prefixes.starts_with("`issue:` `mr:` `commit:` `comment:`"),
+            "{prefixes}"
+        );
+    }
 
     fn strings(list: &[&str]) -> Vec<String> {
         list.iter().map(|item| item.to_string()).collect()

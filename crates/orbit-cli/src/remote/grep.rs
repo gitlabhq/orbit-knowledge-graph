@@ -24,6 +24,10 @@ const MAX_SEARCHES: usize = 5;
 /// GitLab rejects a search with no term this long as an abusive tiny search.
 const MIN_SEARCH_CHARS: usize = 2;
 
+pub(crate) fn searched_kinds() -> &'static [&'static str] {
+    SEARCHED_KINDS
+}
+
 /// The node kind GitLab grep searches for `kind`, a node name in any case or snake case.
 pub(crate) fn searched_kind(kind: &str) -> Option<&'static str> {
     let flat = kind.replace('_', "");
