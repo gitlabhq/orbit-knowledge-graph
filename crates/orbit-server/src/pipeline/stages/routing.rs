@@ -1,4 +1,9 @@
+use std::sync::Arc;
+
 use ontology::introspection::SchemaResponse;
+use query_data_model::ClickHouseDataModel;
+
+use crate::auth::Claims;
 use query_engine::compiler::{Frontend, gql::RoutedStatement};
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -12,6 +17,25 @@ pub enum RoutingOutput {
 #[derive(Clone)]
 pub struct RoutingStage;
 
+impl RoutingStage {
+    fn route(ctx: &QueryPipelineContext) -> Result<RoutedStatement, PipelineError> {
+        let data_model = ctx
+            .server_extensions
+            .get::<Arc<ClickHouseDataModel>>()
+            .ok_or_else(|| PipelineError::custom("query data model missing"))?;
+        let claims = ctx.server_extensions.get::<Claims>().ok_or_else(|| {
+            PipelineError::Security("Claims not found in server_extensions".into())
+        })?;
+        Ok(query_engine::compiler::gql::route(
+            &ctx.query_json,
+            &ctx.ontology,
+            data_model,
+            claims.admin,
+            ontology::introspection::IntrospectionScope::All,
+        )?)
+    }
+}
+
 impl PipelineStage for RoutingStage {
     type Input = ();
     type Output = RoutingOutput;
@@ -23,13 +47,9 @@ impl PipelineStage for RoutingStage {
     ) -> Result<Self::Output, PipelineError> {
         match ctx.frontend {
             Frontend::JsonDsl => Ok(RoutingOutput::Query),
-            Frontend::Gql => match query_engine::compiler::gql::route(
-                &ctx.query_json,
-                &ctx.ontology,
-                ontology::introspection::IntrospectionScope::All,
-            )
-            .map_err(PipelineError::from)
-            .inspect_err(|error| obs.record_error(error))?
+            Frontend::Gql => match Self::route(ctx)
+                .map_err(PipelineError::from)
+                .inspect_err(|error| obs.record_error(error))?
             {
                 RoutedStatement::Query(query) => {
                     ctx.phases.insert(*query);

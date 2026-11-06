@@ -46,11 +46,10 @@ impl QueryParser {
     }
 
     fn SchemaCall(input: Node) -> Result<Statement> {
-        match_nodes!(input.into_children();
-            [] => (),
-            [literal] => drop(string(&literal)?),
-        );
-        Ok(Statement::SchemaCall)
+        Ok(Statement::SchemaCall(match_nodes!(input.into_children();
+            [] => None,
+            [literal] => Some(string(&literal)?),
+        )))
     }
 
     fn Matches(input: Node) -> Result<(Pattern, Vec<BooleanExpression<Predicate>>)> {

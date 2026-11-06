@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use compiler::input::Input;
 use compiler::passes::codegen::RelationalModel;
-use compiler::passes::{frontend, lower, normalize, page, plan, response_policy};
+use compiler::passes::{lower, normalize, page, plan, response_policy};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, Model};
 use serde::Deserialize;
 
@@ -243,14 +243,17 @@ fn check<M: RelationalModel>(
             path.display(),
             scenario.name
         );
-        let input = match language.as_str() {
-            "json" => frontend::json_dsl::parse(raw, model),
-            "gql" => frontend::gql::parse(raw),
+        let frontend = match language.as_str() {
+            "json" => compiler::Frontend::JsonDsl,
+            "gql" => compiler::Frontend::Gql,
             _ => {
                 failures.push(format!("{label}: unknown frontend"));
                 continue;
             }
         };
+        let catalog = model.catalog().model().logical().as_admin();
+        let input = compiler::surface::parse(raw, frontend, catalog)
+            .and_then(|statement| compiler::bridge::input(&statement, catalog.model()));
         let mut input = match input.and_then(|input| normalize::normalize(input, model)) {
             Ok(input) => input,
             Err(error) => {

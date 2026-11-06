@@ -16,6 +16,7 @@ impl PipelineStage for CompilationStage {
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
         let t = Instant::now();
+        let parsed = ctx.phases.remove::<compiler::gql::ParsedQuery>();
         let security_context = ctx
             .security_context()
             .inspect_err(|e| obs.record_error(e))?;
@@ -26,19 +27,12 @@ impl PipelineStage for CompilationStage {
             .ok_or_else(|| {
                 compiler::QueryError::PipelineInvariant("no data model in the pipeline".into())
             })
-            .and_then(
-                |data_model| match ctx.phases.get::<compiler::gql::ParsedQuery>() {
-                    Some(query) => {
-                        compiler::gql::compile_query(query.clone(), data_model, security_context)
-                    }
-                    None => compiler::compile(
-                        &ctx.query_json,
-                        ctx.frontend,
-                        data_model,
-                        security_context,
-                    ),
-                },
-            )
+            .and_then(|data_model| match parsed {
+                Some(query) => compiler::gql::compile_query(query, data_model, security_context),
+                None => {
+                    compiler::compile(&ctx.query_json, ctx.frontend, data_model, security_context)
+                }
+            })
             .map_err(PipelineError::from)
             .inspect_err(|e| obs.record_error(e))?;
 

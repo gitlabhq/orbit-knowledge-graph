@@ -88,6 +88,7 @@ fn aggregation_with_content_produces_hydration_plan() {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "content"]}],
+            "group_by": ["f"],
             "aggregations": [{"count": "f", "as": "total"}],
             "limit": 5
         }"#,

@@ -47,7 +47,7 @@ pub(super) enum OrderDirection {
 
 pub(super) enum Statement<'i> {
     Query(Box<Query<'i>>),
-    SchemaCall,
+    SchemaCall(Option<String>),
 }
 
 pub(super) struct Query<'i> {

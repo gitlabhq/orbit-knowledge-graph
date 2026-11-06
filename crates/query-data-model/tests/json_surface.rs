@@ -94,7 +94,7 @@ fn model_errors_come_from_construction() {
     );
     assert_eq!(
         class(node(serde_json::json!({"traversal_path": "1/"}))),
-        Some(ErrorClass::Policy)
+        Some(ErrorClass::Name)
     );
     let disconnected = serde_json::json!({
         "query_type": "traversal",

@@ -10,7 +10,7 @@ use crate::surface::SurfaceError;
 struct Group {
     named: Named<Expr>,
     key: Option<(String, String)>,
-    node: Option<(String, Option<Vec<String>>, bool)>,
+    node: Option<(String, Columns)>,
 }
 
 pub(super) fn project<'m>(
@@ -142,12 +142,7 @@ pub(super) fn project<'m>(
         .into_iter()
         .map(|(name, node)| {
             Ok(match node {
-                Some((alias, listed, all)) => {
-                    let columns = match (listed, all) {
-                        (Some(listed), _) => Columns::Listed(property_ids(&rows, &alias, &listed)?),
-                        (None, true) => Columns::All,
-                        (None, false) => Columns::Default,
-                    };
+                Some((_, columns)) => {
                     let binding = rows.binding(&name)?.output();
                     Projection::Graph { binding, columns }.named(name)
                 }
@@ -180,8 +175,13 @@ fn node(
     all: bool,
     name: Option<String>,
 ) -> Result<(), SurfaceError> {
+    let columns = match (columns, all) {
+        (Some(listed), _) => Columns::Listed(property_ids(rows, &alias, &listed)?),
+        (None, true) => Columns::All,
+        (None, false) => Columns::Default,
+    };
     if groups.iter().any(|group| {
-        matches!(&group.node, Some((other, previous, every)) if *other == alias && (*previous != columns || *every != all))
+        matches!(&group.node, Some((other, previous)) if *other == alias && !same(previous, &columns))
     }) {
         return Err(invalid(span, "duplicate or overlapping node projection"));
     }
@@ -190,9 +190,23 @@ fn node(
     groups.push(Group {
         named,
         key: None,
-        node: Some((alias, columns, all)),
+        node: Some((alias, columns)),
     });
     Ok(())
+}
+
+fn same(left: &Columns, right: &Columns) -> bool {
+    match (left, right) {
+        (Columns::Listed(left), Columns::Listed(right)) => {
+            let set = |ids: &[crate::PropertyId]| {
+                ids.iter()
+                    .copied()
+                    .collect::<std::collections::BTreeSet<_>>()
+            };
+            set(left) == set(right)
+        }
+        _ => left == right,
+    }
 }
 
 fn measure(

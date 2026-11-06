@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use compiler::passes::frontend::gql;
+use compiler::gql;
 use pest_meta::ast::{Expr, Rule, RuleType};
 use pest_meta::parser::{self, Rule as MetaRule};
 
@@ -203,7 +203,7 @@ impl Grammar {
     fn parsed_pairs(&self, text: &str) -> Option<Vec<usize>> {
         let mut pairs = Vec::new();
         let mut skip_below = None;
-        for (depth, name) in gql::pair_outline(text)? {
+        for (depth, name) in gql::outline(text)? {
             if skip_below.is_some_and(|d| depth > d) {
                 continue;
             }

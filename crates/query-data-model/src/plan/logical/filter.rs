@@ -110,11 +110,10 @@ fn text(typed: &Typed<'_>, matching: Matching, needle: &str) -> Result<(), PlanE
     }
     let length = needle.chars().count();
     if length < MIN_PATTERN {
-        return Err(PlanError::limit(
-            format!("the search pattern on {}", typed.name),
-            length,
-            MIN_PATTERN,
-        ));
+        return Err(PlanError::shape(format!(
+            "the search pattern on {} must be at least {MIN_PATTERN} characters",
+            typed.name
+        )));
     }
     if matching == Matching::Token
         && needle

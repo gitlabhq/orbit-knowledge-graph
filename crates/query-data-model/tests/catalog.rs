@@ -450,7 +450,7 @@ fn frontend_errors_name_the_alternatives() {
     let error = model.entity("Linear").unwrap_err();
     assert_eq!(
         error.to_string(),
-        "unknown entity Linear; similar: LinearIssue"
+        "unknown entity Linear; candidates: LinearIssue"
     );
 }
 

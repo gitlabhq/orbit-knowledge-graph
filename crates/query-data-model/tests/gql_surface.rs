@@ -31,7 +31,9 @@ fn plan(query: &str) -> Result<Vec<String>, SurfaceError> {
                     .join(",")
             ),
             LogicalOperation::Order(_) => "order".to_string(),
-            LogicalOperation::Limit { rows, skip } => format!("limit {rows} {skip}"),
+            LogicalOperation::Limit { rows, skip } => {
+                format!("limit {rows} {}", skip.unwrap_or_default())
+            }
             LogicalOperation::Union | LogicalOperation::Read(_) => "other".to_string(),
         })
         .collect())

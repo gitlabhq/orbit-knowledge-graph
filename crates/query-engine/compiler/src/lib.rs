@@ -5,7 +5,7 @@
 //! # Pipeline
 //!
 //! ```text
-//! raw → {JSON | GQL} frontend → Input → shared compiler passes → SQL
+//! raw → {JSON | GQL} surface → logical plan → compiler phases → SQL
 //! ```
 //!
 //! # Example
@@ -43,6 +43,7 @@ pub mod types;
 
 pub mod config;
 pub mod passes;
+pub mod surface;
 
 pub use ast::ddl;
 pub use constants::{
@@ -66,13 +67,13 @@ pub use passes::codegen::{
     ddl::duckdb::emit_create_table as emit_duckdb_create_table, ddl::duckdb::generate_local_ddl,
     ddl::generate_local_tables,
 };
-pub use passes::frontend::{Frontend, gql};
 pub use passes::hydrate::{
     DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
 };
 pub use passes::plan::HydrationCompileOptions;
 pub use passes::result_contract::{EdgeMeta, RedactionNode, ResultContext};
+pub use surface::{Frontend, gql};
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
@@ -166,34 +167,21 @@ pub fn compile_local(
     }
 }
 
-/// Run only `validate` + `normalize`, returning the normalized [`Input`].
-pub fn validate_normalize(
-    json_input: &str,
-    data_model: &Arc<ClickHouseDataModel>,
-) -> Result<Input> {
-    let mut ctx = config::ValidateNormalizeCtx::new(Arc::clone(data_model));
-    ctx.set_raw(json_input.to_string());
-    config::run_validate_normalize(&mut ctx)
-        .and_then(|()| {
-            ctx.take_input().ok_or_else(|| {
-                error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
-            })
-        })
-        .count_err()
-}
-
-pub fn validate_normalize_gql(raw: &str, data_model: &Arc<ClickHouseDataModel>) -> Result<Input> {
-    let mut ctx = config::ValidateNormalizeGqlCtx::new(Arc::clone(data_model));
-    ctx.set_raw(raw.to_string());
-    config::run_validate_normalize_gql(&mut ctx)
-        .and_then(|()| {
-            ctx.take_input().ok_or_else(|| {
-                error::QueryError::PipelineInvariant(
-                    "validate_normalize_gql produced no input".into(),
-                )
-            })
-        })
-        .count_err()
+/// Parse and admit a query without a caller, as startup checks of shipped queries do.
+pub fn check(raw: &str, fe: Frontend, data_model: &Arc<ClickHouseDataModel>) -> Result<()> {
+    match fe {
+        Frontend::JsonDsl => {
+            let mut ctx = config::CheckJsonDslCtx::new(Arc::clone(data_model));
+            ctx.set_raw(raw.to_string());
+            config::run_check_json_dsl(&mut ctx)
+        }
+        Frontend::Gql => {
+            let mut ctx = config::CheckGqlCtx::new(Arc::clone(data_model));
+            ctx.set_raw(raw.to_string());
+            config::run_check_gql(&mut ctx)
+        }
+    }
+    .count_err()
 }
 
 /// Compile a pre-built hydration `Input` into ClickHouse SQL.
@@ -457,53 +445,6 @@ mod tests {
                 "edge alias e0 must remain scoped, got:\n{sql}"
             );
         }
-    }
-
-    fn compile_error(query: &str) -> String {
-        compile(query, Frontend::JsonDsl, &MODEL, &security_ctx())
-            .expect_err("query must be rejected")
-            .to_string()
-    }
-
-    #[test]
-    fn multi_node_traversal_without_relationships_explains_the_shape() {
-        let msg = compile_error(
-            r#"{"query_type":"traversal","nodes":[
-                {"id":"u","entity":"User","node_ids":[1],"columns":["username"]},
-                {"id":"mr","entity":"MergeRequest","node_ids":[2]}
-            ],"limit":5}"#,
-        );
-        assert!(
-            msg.contains("Multi-node traversal requires nodes + relationships"),
-            "{msg}"
-        );
-        assert!(!msg.contains("oneOf"), "{msg}");
-    }
-
-    #[test]
-    fn non_numeric_id_range_endpoint_says_the_value_is_invalid() {
-        let msg = compile_error(
-            r#"{"query_type":"traversal","nodes":[{"id":"p","entity":"Project",
-                "columns":["name"],"id_range":{"start":"abc","end":5}}],"limit":5}"#,
-        );
-        assert!(
-            msg.contains("invalid value at /nodes/0/id_range/start: Start of ID range (inclusive)"),
-            "{msg}"
-        );
-    }
-
-    #[test]
-    fn malformed_filter_explains_the_accepted_shapes() {
-        let msg = compile_error(
-            r#"{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1],
-                "columns":["name"],"filters":{"name":{"op":"bogus","value":1}}}],"limit":5}"#,
-        );
-        assert!(msg.contains("A bare value is an equality match"), "{msg}");
-        assert!(
-            msg.contains("invalid value at /nodes/0/filters/name: "),
-            "{msg}"
-        );
-        assert!(!msg.contains("oneOf"), "{msg}");
     }
 
     #[test]

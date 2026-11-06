@@ -1842,7 +1842,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "compiler-pipeline-macros",
- "jsonschema",
  "named-queries",
  "ontology",
  "opentelemetry",
@@ -1850,9 +1849,6 @@ dependencies = [
  "orbit-server-config",
  "orbit-utils",
  "orbit-versions",
- "pest",
- "pest_consume",
- "pest_derive",
  "query-data-model",
  "regex",
  "serde",

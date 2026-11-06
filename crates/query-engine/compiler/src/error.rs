@@ -5,12 +5,14 @@
 //! [`crate::metrics::failure_reason`] to wire it to the right instrument.
 
 use ontology::OntologyError;
+use query_data_model::plan::logical::{ErrorClass, PlanError};
+use query_data_model::surface::SurfaceError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum QueryError {
     #[error("parse error: {0}")]
-    Parse(#[from] serde_json::Error),
+    Parse(String),
 
     #[error("schema violation: {0}")]
     Validation(String),
@@ -85,6 +87,25 @@ impl QueryError {
     }
 }
 
+impl From<SurfaceError> for QueryError {
+    fn from(error: SurfaceError) -> Self {
+        let message = error.to_string();
+        match error {
+            SurfaceError::Syntax(message) => Self::Parse(message),
+            SurfaceError::Schema(message) => Self::Validation(message),
+            SurfaceError::Limit(message) => Self::LimitExceeded(message),
+            SurfaceError::Plan(PlanError::AdminOnly(_)) => Self::Restrict(message),
+            SurfaceError::Plan(PlanError::Hidden(_)) => Self::AllowlistRejected(message),
+            SurfaceError::Plan(error) => match error.class() {
+                ErrorClass::Name => Self::AllowlistRejected(message),
+                ErrorClass::Reference => Self::ReferenceError(message),
+                ErrorClass::Construction => Self::PipelineInvariant(message),
+                _ => Self::Validation(message),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, strum::IntoStaticStr, strum::EnumIter)]
 #[strum(serialize_all = "snake_case")]
 pub enum RejectionReason {
@@ -115,10 +136,7 @@ mod tests {
     #[test]
     fn is_client_safe_covers_all_variants() {
         let cases: Vec<(QueryError, bool)> = vec![
-            (
-                QueryError::Parse(serde_json::from_str::<()>("!").unwrap_err()),
-                true,
-            ),
+            (QueryError::Parse("bad".into()), true),
             (QueryError::Validation("bad".into()), true),
             (QueryError::ReferenceError("bad".into()), true),
             (QueryError::DepthExceeded("bad".into()), true),

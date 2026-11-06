@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use strum::VariantNames;
 
 mod predicates;
+mod schema;
 pub use predicates::{BooleanExpression, Condition, PredicateTarget};
 
 /// Controls which columns are fetched for dynamically-discovered entities
@@ -649,13 +650,11 @@ impl<'de> Deserialize<'de> for TargetRef {
         D: Deserializer<'de>,
     {
         let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::node_ref_regex()
-            .captures(&spec)
-            .ok_or_else(|| {
-                serde::de::Error::custom(format!(
-                    "aggregation target {spec:?} must be \"node\" or \"node.property\""
-                ))
-            })?;
+        let caps = schema::node_ref_regex().captures(&spec).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "aggregation target {spec:?} must be \"node\" or \"node.property\""
+            ))
+        })?;
         Ok(TargetRef {
             node: caps["node"].to_owned(),
             property: caps.name("property").map(|p| p.as_str().to_owned()),
@@ -675,7 +674,7 @@ impl<'de> Deserialize<'de> for PropertyRef {
         D: Deserializer<'de>,
     {
         let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::node_ref_regex()
+        let caps = schema::node_ref_regex()
             .captures(&spec)
             .filter(|caps| caps.name("property").is_some())
             .ok_or_else(|| {
@@ -726,7 +725,7 @@ fn parse_group_by_spec(
     truncate: Option<TruncateUnit>,
     alias: Option<String>,
 ) -> Result<InputGroupByKey, String> {
-    let caps = crate::passes::validate::node_ref_regex()
+    let caps = schema::node_ref_regex()
         .captures(spec)
         .ok_or_else(|| match truncate {
             Some(unit) => format!(
@@ -939,13 +938,11 @@ impl<'de> Deserialize<'de> for InputOrderBy {
         D: Deserializer<'de>,
     {
         let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::order_by_regex()
-            .captures(&spec)
-            .ok_or_else(|| {
-                serde::de::Error::custom(format!(
-                    "order_by {spec:?} must be \"[-]node.property\" (leading \"-\" = descending)"
-                ))
-            })?;
+        let caps = schema::order_by_regex().captures(&spec).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "order_by {spec:?} must be \"[-]node.property\" (leading \"-\" = descending)"
+            ))
+        })?;
         let direction = if caps.name("descending").is_some() {
             OrderDirection::Desc
         } else {
@@ -979,7 +976,7 @@ impl<'de> Deserialize<'de> for InputAggSort {
         D: Deserializer<'de>,
     {
         let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::aggregation_sort_regex()
+        let caps = schema::aggregation_sort_regex()
             .captures(&spec)
             .ok_or_else(|| {
                 let hint = if spec.contains('.') {

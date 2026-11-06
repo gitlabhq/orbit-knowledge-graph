@@ -6,18 +6,19 @@ use orbit_server_config::QueryConfig;
 
 use crate::error::{QueryError, Result};
 use crate::input::Input;
-use crate::passes::codegen::CompiledQueryContext;
-use crate::passes::frontend;
+use crate::passes::codegen::{CompiledQueryContext, RelationalModel as _};
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::lower::LoweredMetadata;
 use crate::passes::plan::HydrationCompileOptions;
 use crate::passes::plan::QueryPlan;
 use crate::passes::result_contract::ResultContext;
 use crate::passes::{
-    codegen, hydrate, lower, normalize, page, plan, relationships, response_policy, restrict,
-    result_contract, security, security_check, settings, validate,
+    admit, codegen, hydrate, lower, normalize, page, plan, response_policy, restrict,
+    result_contract, security, security_check, settings,
 };
+use crate::surface::{self, Frontend};
 use crate::types::SecurityContext;
+use query_data_model::surface::Statement;
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
     opt.ok_or_else(|| QueryError::PipelineInvariant(format!("{field} not yet populated")))
@@ -30,6 +31,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
     state {
         pub raw: String,
+        pub statement: Statement,
         pub input: Input,
         pub tp_bounds: crate::tp_bounds::TpBounds,
         pub hydration_options: HydrationCompileOptions,
@@ -44,27 +46,33 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
     phases {
         json_dsl_parse {
-            reads_env: [data_model]
-            mutates: [raw, input]
+            reads_env: [security_ctx, data_model]
+            mutates: [raw, statement]
         }
         gql_parse {
-            mutates: [raw, input]
+            reads_env: [security_ctx, data_model]
+            mutates: [raw, statement]
         }
-        validate_relationships {
+        json_dsl_parse_trusted {
+            reads_env: [data_model]
+            mutates: [raw, statement]
+        }
+        gql_parse_trusted {
+            reads_env: [data_model]
+            mutates: [raw, statement]
+        }
+        bridge {
+            reads_env: [data_model]
+            reads_state: [statement]
+            mutates: [input]
+        }
+        admit {
             reads_env: [data_model]
             reads_state: [input]
         }
-        validate_conditions {
+        admit_local {
             reads_env: [data_model]
             reads_state: [input]
-        }
-        validate {
-            reads_env: [data_model]
-            mutates: [input]
-        }
-        validate_local {
-            reads_env: [data_model]
-            mutates: [input]
         }
         normalize {
             reads_env: [data_model]
@@ -138,89 +146,89 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
+            state: [raw, statement, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [json_dsl_parse, bridge, admit, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
+            state: [raw, statement, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [gql_parse, bridge, admit, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, security_check, codegen]
+            phases: [restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, security_check, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, result_contract, paginate, codegen]
+            state: [raw, statement, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [json_dsl_parse_trusted, bridge, admit_local, normalize, plan_duckdb, lower, result_contract, paginate, codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, result_contract, paginate, codegen]
+            state: [raw, statement, input, tp_bounds, hydration_options, query_plan, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [gql_parse_trusted, bridge, admit_local, normalize, plan_duckdb, lower, result_contract, paginate, codegen]
         }
-        validate_normalize_gql {
+        check_gql {
             model: query_data_model::ClickHouseDataModel
             env: []
-            state: [raw, input]
-            phases: [gql_parse, validate, validate_relationships, normalize]
+            state: [raw, statement, input]
+            phases: [gql_parse_trusted, bridge, admit, normalize]
         }
-        validate_normalize {
+        check_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: []
-            state: [raw, input]
-            phases: [json_dsl_parse, validate, normalize]
+            state: [raw, statement, input]
+            phases: [json_dsl_parse_trusted, bridge, admit, normalize]
         }
     }
+}
+
+fn parse<C: CompilerCtx>(ctx: &mut C, frontend: Frontend, admin: bool) -> Result<()> {
+    if let Some(raw) = ctx.take_raw() {
+        let catalog = surface::catalog(ctx.data_model().catalog().model(), admin);
+        ctx.set_statement(surface::parse(&raw, frontend, catalog)?);
+    }
+    Ok(())
 }
 
 fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let raw = require(ctx.take_raw(), "raw")?;
-    let input = frontend::json_dsl::parse(&raw, ctx.data_model())?;
-    ctx.set_input(input);
-    Ok(())
+    let admin = ctx.security_ctx().admin;
+    parse(ctx, Frontend::JsonDsl, admin)
 }
 
 fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
-    if let Some(raw) = ctx.take_raw() {
-        frontend::gql::parse_query(&raw)?.load(ctx);
-    }
-    Ok(())
+    let admin = ctx.security_ctx().admin;
+    parse(ctx, Frontend::Gql, admin)
 }
 
-fn validate_conditions(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().as_ref(), "input")?;
-    validate::Validator::new(ctx.data_model()).check_filter_types(input)
+fn json_dsl_parse_trusted(ctx: &mut impl CompilerCtx) -> Result<()> {
+    parse(ctx, Frontend::JsonDsl, true)
 }
 
-fn validate_relationships(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().as_ref(), "input")?;
-    relationships::validate_relationships(input, ctx.data_model())
+fn gql_parse_trusted(ctx: &mut impl CompilerCtx) -> Result<()> {
+    parse(ctx, Frontend::Gql, true)
 }
 
-fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.take_input(), "input")?;
-    let v = validate::Validator::new(ctx.data_model());
-    v.check_shape(&input)?;
-    v.check_references(&input)?;
+fn bridge(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let statement = require(ctx.statement().as_ref(), "statement")?;
+    let input = crate::bridge::input(statement, ctx.data_model().catalog().model())?;
     ctx.set_input(input);
     Ok(())
 }
 
-fn validate_local(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.take_input(), "input")?;
-    let v =
-        validate::Validator::new(ctx.data_model()).with_skip(validate::Skip { selectivity: true });
-    v.check_shape(&input)?;
-    v.check_references(&input)?;
-    ctx.set_input(input);
-    Ok(())
+fn admit(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let input = require(ctx.input().as_ref(), "input")?;
+    admit::admit(input, ctx.data_model(), true)
+}
+
+fn admit_local(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let input = require(ctx.input().as_ref(), "input")?;
+    admit::admit(input, ctx.data_model(), false)
 }
 
 fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {

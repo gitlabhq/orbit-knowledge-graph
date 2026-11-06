@@ -10,7 +10,7 @@ pub use access::{
 };
 pub use backend::{Catalog, RouteInput, SourceInput, StorageBackend, StoreInput};
 pub use diagnostics::{Diagnostics, SpecError};
-pub use frontend::Unresolved;
+pub use frontend::{Reversed, Unresolved};
 pub use lookups::{Lookup, Lookups};
 pub use store::{DeclaredRoute, Source, Store};
 

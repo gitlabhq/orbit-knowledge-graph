@@ -89,7 +89,7 @@ fn cycles_are_rejected() {
     let local = embedded_local_model();
     let cycle_query = serde_json::json!({"query_type":"traversal", "nodes":[{"id":"a","entity":"Definition","node_ids":[1],"columns":["id"]},{"id":"b","entity":"Definition","columns":["id"]},{"id":"c","entity":"Definition","columns":["id"]}], "relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"},{"type":"CALLS","from":"c","to":"a"}]});
     let error = compile_local(&cycle_query.to_string(), Frontend::JsonDsl, &local).unwrap_err();
-    assert!(error.to_string().contains("exactly n-1 relationships"));
+    assert!(error.to_string().contains("cycle"), "{error}");
     let error = compile_local("MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(a) RETURN a.id, b.id, c.id", Frontend::Gql, &local).unwrap_err();
     assert!(error.to_string().contains("cycles are unsupported"));
 }

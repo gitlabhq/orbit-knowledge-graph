@@ -47,7 +47,7 @@ fn a_pattern_binds_aliases_hops_and_edges() {
                     .named("mr"),
                 ],
             )?;
-            q.slice(rows, 20, 40)
+            q.slice(rows, 20, Some(40))
         })
         .unwrap();
     let operations: Vec<_> = plan.nodes().map(|node| plan.operation(node)).collect();
@@ -62,7 +62,10 @@ fn a_pattern_binds_aliases_hops_and_edges() {
             LogicalOperation::Filter(_),
             LogicalOperation::Order(_),
             LogicalOperation::Select(_),
-            LogicalOperation::Limit { rows: 20, skip: 40 },
+            LogicalOperation::Limit {
+                rows: 20,
+                skip: Some(40)
+            },
         ]
     ));
 }

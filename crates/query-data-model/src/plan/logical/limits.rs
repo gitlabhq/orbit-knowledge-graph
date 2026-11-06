@@ -1,4 +1,7 @@
-use super::{PlanError, Predicate};
+use ontology::constants::DEFAULT_PRIMARY_KEY;
+
+use super::{Expr, PlanError, Predicate};
+use crate::Model;
 
 pub const MAX_HOPS: u32 = 3;
 pub const MAX_PATH_DEPTH: u32 = 3;
@@ -21,11 +24,17 @@ pub(super) fn at_most(what: &str, found: usize, max: usize) -> Result<(), PlanEr
     Ok(())
 }
 
-pub(super) fn in_values(predicate: &Predicate) -> Result<(), PlanError> {
+pub(super) fn in_values(model: &Model, predicate: &Predicate) -> Result<(), PlanError> {
     match predicate {
+        Predicate::In {
+            left: Expr::Property { property, .. },
+            values,
+        } if model.graph().property(*property).name == DEFAULT_PRIMARY_KEY => {
+            at_most("pinned ids", values.len(), MAX_PINS)
+        }
         Predicate::In { values, .. } => at_most("an IN list", values.len(), MAX_IN_VALUES),
-        Predicate::And(all) => all.iter().try_for_each(in_values),
-        Predicate::Not(inner) => in_values(inner),
+        Predicate::And(all) => all.iter().try_for_each(|inner| in_values(model, inner)),
+        Predicate::Not(inner) => in_values(model, inner),
         _ => Ok(()),
     }
 }

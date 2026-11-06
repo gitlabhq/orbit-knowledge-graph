@@ -65,7 +65,7 @@ impl<'m> Binding<'m> {
         let access = model.access().property(property.id);
         let qualified = || format!("{}.{name}", model.graph().entity(entity).name);
         if access.hidden {
-            return Err(PlanError::Hidden(qualified()));
+            return Err(model.unknown_property(entity, name).into());
         }
         if access.admin_only && !self.catalog.admin() {
             return Err(PlanError::AdminOnly(qualified()));

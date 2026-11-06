@@ -5,23 +5,49 @@ use crate::{Direction, EntityId, Hop, Property, RelationshipId};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Unresolved {
-    #[error("unknown entity {name}; similar: {}", .similar.join(", "))]
+    #[error("unknown entity {name}; candidates: {}", .similar.join(", "))]
     Entity { name: String, similar: Vec<String> },
-    #[error("unknown property {entity}.{name}; similar: {}", .similar.join(", "))]
+    #[error("unknown property {entity}.{name}; candidates: {}", .similar.join(", "))]
     Property {
         entity: String,
         name: String,
         similar: Vec<String>,
     },
-    #[error("unknown relationship {name}; similar: {}", .similar.join(", "))]
+    #[error("unknown relationship {name}; candidates: {}", .similar.join(", "))]
     Relationship { name: String, similar: Vec<String> },
-    #[error("no {relationships} relationship connects {from} to {to}; these do: {}", .connecting.join(", "))]
+    #[error("no {}relationship connects {from} to {to}; {}", named(.relationships), hint(.from, .to, .connecting, .reversed))]
     NotConnected {
         from: String,
         to: String,
         relationships: String,
         connecting: Vec<String>,
+        reversed: Option<Reversed>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reversed {
+    pub relationships: String,
+    pub source: String,
+    pub target: String,
+}
+
+fn named(relationships: &str) -> String {
+    match relationships {
+        "" | "*" => String::new(),
+        named => format!("{named} "),
+    }
+}
+
+fn hint(from: &str, to: &str, connecting: &[String], reversed: &Option<Reversed>) -> String {
+    match (connecting, reversed) {
+        (_, Some(reversed)) => format!(
+            "{} goes from {} to {}; reverse the arrow",
+            reversed.relationships, reversed.source, reversed.target
+        ),
+        ([_, ..], None) => format!("these do: {}", connecting.join(", ")),
+        ([], None) => format!("nothing connects {from} and {to} in this direction"),
+    }
 }
 
 impl Model {
@@ -39,20 +65,23 @@ impl Model {
 
     pub fn property(&self, entity: EntityId, name: &str) -> Result<&Property, Unresolved> {
         let found = self.graph.property_id(entity, name);
-        found.map(|id| self.graph.property(id)).ok_or_else(|| {
-            let entity = self.graph.entity(entity);
-            Unresolved::Property {
-                entity: entity.name.clone(),
-                name: name.to_string(),
-                similar: similar(
-                    name,
-                    entity
-                        .properties
-                        .iter()
-                        .map(|id| self.graph.property(*id).name.as_str()),
-                ),
-            }
-        })
+        found
+            .map(|id| self.graph.property(id))
+            .ok_or_else(|| self.unknown_property(entity, name))
+    }
+
+    pub(crate) fn unknown_property(&self, entity: EntityId, name: &str) -> Unresolved {
+        let entity = self.graph.entity(entity);
+        let visible = entity
+            .properties
+            .iter()
+            .filter(|id| !self.access().property(**id).hidden)
+            .map(|id| self.graph.property(*id).name.as_str());
+        Unresolved::Property {
+            entity: entity.name.clone(),
+            name: name.to_string(),
+            similar: similar(name, visible),
+        }
     }
 
     pub fn relationship(&self, name: &str) -> Result<RelationshipId, Unresolved> {
@@ -94,6 +123,7 @@ impl Model {
             .filter(reaches)
             .map(|hop| self.graph.relationship(hop.relationship).name.as_str())
             .collect();
+        let reversed = to.and_then(|to| self.reversed(from, relationships, to, direction));
         Err(Unresolved::NotConnected {
             from: self.graph.entity(from).name.clone(),
             to: to.map_or_else(
@@ -106,17 +136,51 @@ impl Model {
                 .collect::<Vec<_>>()
                 .join("|"),
             connecting: connecting.into_iter().map(str::to_string).collect(),
+            reversed,
+        })
+    }
+
+    fn reversed(
+        &self,
+        from: EntityId,
+        relationships: &[RelationshipId],
+        to: EntityId,
+        direction: Direction,
+    ) -> Option<Reversed> {
+        let names: BTreeSet<&str> = self
+            .graph
+            .hops(to, direction)
+            .filter(|hop| hop.to == from)
+            .filter(|hop| relationships.is_empty() || relationships.contains(&hop.relationship))
+            .map(|hop| self.graph.relationship(hop.relationship).name.as_str())
+            .collect();
+        let (from, to) = (self.graph.entity(from), self.graph.entity(to));
+        let (source, target) = match direction {
+            Direction::Outgoing => (to, from),
+            Direction::Incoming => (from, to),
+            Direction::Both => return None,
+        };
+        (!names.is_empty()).then(|| Reversed {
+            relationships: names.into_iter().collect::<Vec<_>>().join("|"),
+            source: source.name.clone(),
+            target: target.name.clone(),
         })
     }
 }
 
 fn similar<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let candidates: Vec<&str> = candidates.collect();
     let wanted = name.to_lowercase();
-    candidates
+    let close: Vec<String> = candidates
+        .iter()
         .filter(|candidate| {
             let candidate = candidate.to_lowercase();
             candidate.contains(&wanted) || wanted.contains(&candidate)
         })
-        .map(str::to_string)
-        .collect()
+        .map(|candidate| candidate.to_string())
+        .collect();
+    match close.is_empty() {
+        true => candidates.into_iter().map(str::to_string).collect(),
+        false => close,
+    }
 }

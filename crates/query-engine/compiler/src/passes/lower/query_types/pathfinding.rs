@@ -139,7 +139,7 @@ fn anchor<B: RelationalBackend>(
             descending: false,
         };
         let rows = q.order(rows, vec![order])?;
-        let limit = crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32;
+        let limit = crate::query_limits::MAX_PATH_ANCHOR_LIMIT as u32;
         let rows = q.limit(rows, Some(limit), None)?;
         q.select(rows, outputs)
     })?;

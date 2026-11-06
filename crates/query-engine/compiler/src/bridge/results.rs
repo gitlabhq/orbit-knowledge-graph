@@ -56,7 +56,10 @@ impl Bridge<'_> {
                     let truncate = match group {
                         Expr::Truncate { unit, .. } => {
                             let unit: &str = unit.into();
-                            Some(serde_json::from_value(serde_json::Value::from(unit))?)
+                            Some(
+                                serde_json::from_value(serde_json::Value::from(unit))
+                                    .map_err(|e| QueryError::PipelineInvariant(e.to_string()))?,
+                            )
                         }
                         _ => None,
                     };
@@ -189,7 +192,9 @@ impl Bridge<'_> {
                             .input
                             .node_mut(&alias)
                             .ok_or_else(|| invariant("this node"))?;
-                        node.columns = selection;
+                        if !order.contains(&alias) {
+                            node.columns = selection;
+                        }
                         order.push(alias);
                     }
                     LogicalType::Node | LogicalType::Path => {

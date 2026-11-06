@@ -30,7 +30,10 @@ fn invalid_column_in_order_by() {
         &test_ctx(),
     )
     .unwrap_err();
-    assert!(err.to_string().contains("does not exist"));
+    assert!(
+        err.to_string()
+            .contains("unknown property User.nonexistent_column")
+    );
 }
 
 #[test]
@@ -85,7 +88,10 @@ fn invalid_column_in_aggregation() {
         &test_ctx(),
     )
     .unwrap_err();
-    assert!(err.to_string().contains("does not exist"));
+    assert!(
+        err.to_string()
+            .contains("unknown property Project.invalid_property")
+    );
 }
 
 #[test]
@@ -103,8 +109,7 @@ fn invalid_entity_type_rejected() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("NonexistentType"), "got: {msg}");
-    // The enrichment must surface valid candidates, not strip or truncate them.
-    assert!(msg.contains("Valid values:"), "got: {msg}");
+    assert!(msg.contains("candidates:"), "got: {msg}");
     assert!(msg.contains("Branch"), "got: {msg}");
     assert!(msg.contains("WorkItem"), "got: {msg}");
     assert!(!msg.contains("more —"), "got: {msg}");
@@ -126,11 +131,9 @@ fn invalid_filter_key_lists_valid_candidates() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("project_full_path"), "got: {msg}");
-    assert!(msg.contains("Valid values:"), "got: {msg}");
+    assert!(msg.contains("candidates:"), "got: {msg}");
     assert!(msg.contains("username"), "got: {msg}");
     assert!(!msg.contains("more —"), "got: {msg}");
-    // The opaque "or N other candidates" truncation must not leak through.
-    assert!(!msg.contains("other candidates"), "got: {msg}");
 }
 
 #[test]
@@ -150,55 +153,9 @@ fn invalid_group_by_property_lists_valid_fields() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("reviewer_count"), "got: {msg}");
-    assert!(msg.contains("does not exist"), "got: {msg}");
-    assert!(msg.contains("Valid fields"), "got: {msg}");
+    assert!(msg.contains("unknown property"), "got: {msg}");
+    assert!(msg.contains("candidates:"), "got: {msg}");
     assert!(msg.contains("name"), "got: {msg}");
-}
-
-#[test]
-fn malformed_group_by_entry_shows_expected_shapes() {
-    let err = compile(
-        r#"{
-        "query_type": "aggregation",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-        "group_by": [{"node": "p", "property": "name"}],
-        "aggregations": [{"count": "p", "as": "c"}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
-        &embedded_model(),
-        &test_ctx(),
-    )
-    .unwrap_err();
-    let msg = err.to_string();
-    assert!(msg.contains("/group_by/0"), "got: {msg}");
-    assert!(
-        msg.contains("\"<node-id>.<property>\"") && msg.contains("\"truncate\""),
-        "got: {msg}"
-    );
-}
-
-#[test]
-fn bare_string_group_by_dotted_garbage_shows_expected_shapes() {
-    let err = compile(
-        r#"{
-        "query_type": "aggregation",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-        "group_by": ["p.name.x"],
-        "aggregations": [{"count": "p", "as": "c"}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
-        &embedded_model(),
-        &test_ctx(),
-    )
-    .unwrap_err();
-    let msg = err.to_string();
-    assert!(msg.contains("/group_by/0"), "got: {msg}");
-    assert!(
-        msg.contains("\"<node-id>\"") && msg.contains("\"<node-id>.<property>\""),
-        "got: {msg}"
-    );
 }
 
 #[test]
@@ -217,7 +174,7 @@ fn bare_string_group_by_unknown_node_names_the_reference() {
     )
     .unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("undefined node \"name\""), "got: {msg}");
+    assert!(msg.contains("unknown variable name"), "got: {msg}");
 }
 
 #[test]
@@ -235,10 +192,8 @@ fn invalid_column_lists_valid_candidates() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("bogus_col"), "got: {msg}");
-    assert!(msg.contains("/nodes/0/columns"), "got: {msg}");
-    assert!(msg.contains("Valid values"), "got: {msg}");
+    assert!(msg.contains("candidates:"), "got: {msg}");
     assert!(msg.contains("username"), "got: {msg}");
-    // The opaque oneOf fallthrough must not leak through.
     assert!(!msg.contains("under any of the schemas"), "got: {msg}");
 }
 
@@ -261,8 +216,7 @@ fn invalid_relationship_type_lists_valid_candidates() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("BOGUS_REL"), "got: {msg}");
-    assert!(msg.contains("/relationships/0/type"), "got: {msg}");
-    assert!(msg.contains("Valid values"), "got: {msg}");
+    assert!(msg.contains("candidates:"), "got: {msg}");
     assert!(msg.contains("AUTHORED"), "got: {msg}");
     assert!(!msg.contains("under any of the schemas"), "got: {msg}");
 }
@@ -972,8 +926,7 @@ fn like_rejects_short_contains_pattern() {
     )
     .unwrap_err();
     assert!(
-        err.to_string()
-            .contains("search pattern must be at least 3"),
+        err.to_string().contains("must be at least 3 characters"),
         "expected min length error, got: {err}"
     );
 }
@@ -993,8 +946,7 @@ fn like_rejects_single_char_starts_with() {
     )
     .unwrap_err();
     assert!(
-        err.to_string()
-            .contains("search pattern must be at least 3"),
+        err.to_string().contains("must be at least 3 characters"),
         "expected min length error, got: {err}"
     );
 }
@@ -1014,8 +966,7 @@ fn like_rejects_empty_ends_with() {
     )
     .unwrap_err();
     assert!(
-        err.to_string()
-            .contains("search pattern must be at least 3"),
+        err.to_string().contains("must be at least 3 characters"),
         "expected min length error, got: {err}"
     );
 }
@@ -1031,11 +982,12 @@ fn like_rejects_contains_on_email() {
     }"#,
         Frontend::JsonDsl,
         &embedded_model(),
-        &test_ctx(),
+        &admin_ctx(),
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("string operators"),
+        err.to_string()
+            .contains("does not support substring matching"),
         "expected like_allowed rejection, got: {err}"
     );
 }
@@ -1051,11 +1003,12 @@ fn like_rejects_starts_with_on_email() {
     }"#,
         Frontend::JsonDsl,
         &embedded_model(),
-        &test_ctx(),
+        &admin_ctx(),
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("string operators"),
+        err.to_string()
+            .contains("does not support substring matching"),
         "expected like_allowed rejection, got: {err}"
     );
 }

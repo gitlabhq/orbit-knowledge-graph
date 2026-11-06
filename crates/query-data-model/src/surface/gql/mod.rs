@@ -18,13 +18,42 @@ pub const GRAMMAR: &str = include_str!("query.pest");
 
 const MAX_QUERY_BYTES: usize = 32 * 1024;
 
-pub fn parse(raw: &str, catalog: LogicalCatalog<'_>) -> Result<Statement, SurfaceError> {
+#[derive(Debug)]
+pub enum Routed {
+    Query(Statement),
+    Schema(Option<String>),
+}
+
+pub fn route(raw: &str, catalog: LogicalCatalog<'_>) -> Result<Routed, SurfaceError> {
     match statement(raw)? {
-        ast::Statement::Query(query) => lower::lower(*query, catalog),
-        ast::Statement::SchemaCall => {
-            Err(SurfaceError::schema("schema calls are not graph queries"))
+        ast::Statement::Query(query) => lower::lower(*query, catalog).map(Routed::Query),
+        ast::Statement::SchemaCall(node) => Ok(Routed::Schema(node)),
+    }
+}
+
+pub fn parse(raw: &str, catalog: LogicalCatalog<'_>) -> Result<Statement, SurfaceError> {
+    match route(raw, catalog)? {
+        Routed::Query(statement) => Ok(statement),
+        Routed::Schema(_) => Err(SurfaceError::schema("schema calls are not graph queries")),
+    }
+}
+
+pub fn outline(query: &str) -> Option<Vec<(usize, String)>> {
+    fn visit(
+        pairs: pest::iterators::Pairs<'_, Rule>,
+        depth: usize,
+        out: &mut Vec<(usize, String)>,
+    ) {
+        for pair in pairs {
+            out.push((depth, format!("{:?}", pair.as_rule())));
+            visit(pair.into_inner(), depth + 1, out);
         }
     }
+    bounds(query).ok()?;
+    let pairs = <QueryParser as pest::Parser<Rule>>::parse(Rule::Query, query).ok()?;
+    let mut outline = Vec::new();
+    visit(pairs, 0, &mut outline);
+    Some(outline)
 }
 
 fn statement(raw: &str) -> Result<ast::Statement<'_>, SurfaceError> {

@@ -41,7 +41,7 @@ pub(super) fn lower(
         q.declare_order(declared.collect::<Result<Vec<_>, _>>()?)?;
         let rows = returns::project(q, rows, &scope, projections, order)?;
         let limit = limit.unwrap_or(DEFAULT_LIMIT);
-        Ok(q.slice(rows, limit.into(), skip.unwrap_or(0).into())?)
+        Ok(q.slice(rows, limit.into(), skip.map(u64::from))?)
     })?;
     Ok(Statement { plan, debug })
 }

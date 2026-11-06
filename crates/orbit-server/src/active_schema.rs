@@ -16,7 +16,7 @@ use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
 use orbit_server_config::AppConfig;
 use query_data_model::ClickHouseDataModel;
-use query_engine::compiler::{validate_normalize, validate_normalize_gql};
+use query_engine::compiler::{Frontend, check};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
@@ -263,11 +263,11 @@ fn fits_data_model(
     let json = query
         .render_example_language(Language::Json)
         .map_err(|error| error.to_string())?;
-    validate_normalize(&json, data_model).map_err(|error| error.to_string())?;
+    check(&json, Frontend::JsonDsl, data_model).map_err(|error| error.to_string())?;
     let gql = query
         .render_example_language(Language::Gql)
         .map_err(|error| error.to_string())?;
-    validate_normalize_gql(&gql, data_model).map_err(|error| error.to_string())?;
+    check(&gql, Frontend::Gql, data_model).map_err(|error| error.to_string())?;
     Ok(())
 }
 

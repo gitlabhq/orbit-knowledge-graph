@@ -326,7 +326,7 @@ fn property_policy_and_types_are_checked_at_construction() {
 
     assert_eq!(
         attempt(requests, "traversal_path", |value| value.eq("1/")),
-        "MergeRequest.traversal_path is hidden"
+        "unknown property MergeRequest.traversal_path; candidates: id, iid, title, state, project_id, author_id, diff"
     );
     assert_eq!(
         attempt(users, "email", |value| value.eq("a@b.c")),

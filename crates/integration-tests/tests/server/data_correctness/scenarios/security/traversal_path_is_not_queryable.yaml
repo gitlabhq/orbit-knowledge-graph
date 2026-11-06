@@ -94,7 +94,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1})-[:MEMBER_OF {traversal_path: '1/100/'}]->(g:Group) RETURN u, g LIMIT 10
     expect:
-      compile_error: private edge column "traversal_path"
+      compile_error: unknown column traversal_path
 
   - name: negated_relationship_filter_rejected
     description: NOT cannot wrap a relationship traversal_path condition
@@ -104,7 +104,7 @@ cases:
       gql: |
         MATCH (g:Group {id: 100})-[c:CONTAINS]->(p:Project) WHERE NOT c.traversal_path = '1/100/1000/' RETURN p.id
     expect:
-      compile_error: private edge column "traversal_path"
+      compile_error: unknown column traversal_path
       compile_error_not_contains: [1/100/]
 
   - name: projection_rejected
@@ -229,7 +229,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1})-[r:MEMBER_OF]->(g:Group) WHERE r.traversal_path = '1/100/' RETURN g LIMIT 10
     expect:
-      compile_error: private edge column "traversal_path"
+      compile_error: unknown column traversal_path
       compile_error_not_contains: [1/100/]
 
   - name: path_endpoint_filter_rejected

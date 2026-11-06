@@ -83,7 +83,7 @@ impl Predicate {
             Self::Property { selective, .. } => *selective,
             Self::Ids { .. } | Self::Membership { .. } => true,
             Self::IdRange { start, end, .. } => {
-                end.saturating_sub(*start) <= crate::passes::validate::MAX_ID_RANGE_SPAN
+                end.saturating_sub(*start) <= crate::query_limits::MAX_ID_RANGE_SPAN
             }
             _ => false,
         }

@@ -1,5 +1,3 @@
-#[cfg(test)]
-mod parity;
 mod predicates;
 mod results;
 
@@ -129,15 +127,20 @@ impl Bridge<'_> {
                 let (edge, target) = (self.declared(node, 2), self.declared(node, 1));
                 self.bind(target, self.entity_name(target));
                 self.edges.insert(edge, self.input.relationships.len());
+                let (near, far) = (self.alias(*from)?, self.alias(target)?);
+                let (from, to, direction) = match direction(*way) {
+                    Direction::Incoming => (far, near, Direction::Outgoing),
+                    direction => (near, far, direction),
+                };
                 self.input.relationships.push(InputRelationship {
                     types: self.names(relationships),
-                    from: self.alias(*from)?,
-                    to: self.alias(target)?,
+                    from,
+                    to,
                     hops: HopRange {
                         min: range.min,
                         max: range.max,
                     },
-                    direction: direction(*way),
+                    direction,
                     filters: HashMap::new(),
                 });
             }
@@ -182,7 +185,7 @@ impl Bridge<'_> {
             LogicalOperation::Select(items) => self.select(node, items)?,
             LogicalOperation::Limit { rows, skip } => {
                 self.input.limit = u32::try_from(*rows).unwrap_or(u32::MAX);
-                self.input.skip = (*skip > 0).then(|| u32::try_from(*skip).unwrap_or(u32::MAX));
+                self.input.skip = skip.map(|skip| u32::try_from(skip).unwrap_or(u32::MAX));
             }
             LogicalOperation::Union | LogicalOperation::Read(_) => {
                 return Err(QueryError::PipelineInvariant(

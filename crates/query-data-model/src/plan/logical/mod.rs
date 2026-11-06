@@ -71,7 +71,7 @@ pub enum LogicalOperation {
     Order(Vec<(Expr, Order)>),
     Limit {
         rows: u64,
-        skip: u64,
+        skip: Option<u64>,
     },
     Union,
     Read(Body),

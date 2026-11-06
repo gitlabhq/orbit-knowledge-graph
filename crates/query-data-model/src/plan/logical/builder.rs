@@ -97,7 +97,7 @@ impl<'m> LogicalBuilder<'m> {
             LogicalOperation::Filter(predicate),
             vec![rows],
             |catalog, construction, _| {
-                super::limits::in_values(&checked)?;
+                super::limits::in_values(catalog.model(), &checked)?;
                 filter::predicate(catalog.model(), construction, &checked)?;
                 Ok(Outputs::preserve())
             },

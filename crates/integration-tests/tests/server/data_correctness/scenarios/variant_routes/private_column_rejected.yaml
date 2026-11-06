@@ -10,4 +10,4 @@ query:
     MATCH (file:File {id: 11000})-[call:CALLS]->(callee:Definition) WHERE call._deleted = false RETURN file, callee
 
 expect:
-  compile_error: private edge column
+  compile_error: unknown column _deleted

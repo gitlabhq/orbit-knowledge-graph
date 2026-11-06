@@ -89,14 +89,19 @@ impl<'m> LogicalBuilder<'m> {
     }
 
     pub fn limit(&mut self, rows: Rows<'m>, count: u64) -> Result<Rows<'m>, PlanError> {
-        self.slice(rows, count, 0)
+        self.slice(rows, count, None)
     }
 
-    pub fn slice(&mut self, rows: Rows<'m>, count: u64, skip: u64) -> Result<Rows<'m>, PlanError> {
+    pub fn slice(
+        &mut self,
+        rows: Rows<'m>,
+        count: u64,
+        skip: Option<u64>,
+    ) -> Result<Rows<'m>, PlanError> {
         let operation = LogicalOperation::Limit { rows: count, skip };
         self.connect(operation, vec![rows], |_, _, _| {
             limits::within("limit", count, 1, MAX_ROWS)?;
-            limits::within("skip", skip, 0, MAX_SKIP)?;
+            limits::within("skip", skip.unwrap_or_default(), 0, MAX_SKIP)?;
             Ok(Outputs::preserve())
         })
     }

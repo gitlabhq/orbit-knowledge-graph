@@ -227,6 +227,7 @@ fn reach(
         to: graph.entity(target).name.clone(),
         relationships: names(model, relationships),
         connecting: Vec::new(),
+        reversed: None,
     }
     .into())
 }

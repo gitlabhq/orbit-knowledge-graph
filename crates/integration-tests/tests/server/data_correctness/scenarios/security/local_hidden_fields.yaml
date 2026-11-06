@@ -62,7 +62,7 @@ cases:
       gql: |
         MATCH (f:File {id: 13000})-[r:DEFINES]->(d:Definition) WHERE r.traversal_path = '1/100/1000/' RETURN d
     expect:
-      compile_error: private edge column "traversal_path"
+      compile_error: unknown column traversal_path
       compile_error_not_contains: [1/100/]
 
   - name: property_comparison_rejected
