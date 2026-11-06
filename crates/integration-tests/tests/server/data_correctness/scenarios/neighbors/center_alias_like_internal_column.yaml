@@ -1,5 +1,8 @@
 description: A center aliased like a generated neighbor column keeps its neighbors
 
+config:
+  skip: { json: JSON DSL deprecated }
+
 query:
   json: |
     {
