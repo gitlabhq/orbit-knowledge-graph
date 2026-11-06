@@ -6,7 +6,8 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {source_branch: 'feature-x'}) RETURN mr.id, mr.title LIMIT 10
     logical:
-      expect: ["(Filter mr.source_branch = 'feature-x' (_))"]
+      expect:
+        - "(Filter mr.source_branch = 'feature-x' (Entities MergeRequest AS mr))"
     physical:
       clickhouse:
         planned:
@@ -25,7 +26,8 @@ cases:
       gql: |
         MATCH (j:Job {name: 'build'}) RETURN j.id, j.name LIMIT 10
     logical:
-      expect: ["(Filter j.name = 'build' (_))"]
+      expect:
+        - "(Filter j.name = 'build' (Entities Job AS j))"
     physical:
       clickhouse:
         planned:
@@ -42,7 +44,8 @@ cases:
       gql: |
         MATCH (j:Job {status: 'failed'}) RETURN j.id, j.status LIMIT 10
     logical:
-      expect: ["(Filter j.status = 'failed' (_))"]
+      expect:
+        - "(Filter j.status = 'failed' (Entities Job AS j))"
     physical:
       clickhouse:
         planned:
@@ -56,7 +59,8 @@ cases:
       gql: |
         MATCH (j:Job) WHERE j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
     logical:
-      expect: ["(Filter j.finished_at >= '2026-10-10' (_))"]
+      expect:
+        - "(Filter j.finished_at >= '2026-10-10' (Entities Job AS j))"
     physical:
       clickhouse:
         planned:
@@ -75,7 +79,8 @@ cases:
       gql: |
         MATCH (j:Job {pipeline_id: 7}) WHERE j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
     logical:
-      expect: ["(Filter j.finished_at >= '2026-10-10', j.pipeline_id = 7 (_))"]
+      expect:
+        - "(Filter j.finished_at >= '2026-10-10', j.pipeline_id = 7 (Entities Job AS j))"
     physical:
       clickhouse:
         planned:
@@ -91,7 +96,8 @@ cases:
       gql: |
         MATCH (j:Job) WHERE j.id IN [7, 8] AND j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
     logical:
-      expect: ["(Filter j.finished_at >= '2026-10-10', j.id IN [7, 8] (_))"]
+      expect:
+        - "(Filter j.finished_at >= '2026-10-10', j.id IN [7, 8] (Entities Job AS j))"
     physical:
       clickhouse:
         planned:
@@ -107,7 +113,8 @@ cases:
       gql: |
         MATCH (pl:Pipeline {id: 1000})-[:HAS_JOB]->(j:Job) WHERE j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
     logical:
-      expect: ["(Filter j.finished_at >= '2026-10-10' (_))"]
+      expect:
+        - "(Filter j.finished_at >= '2026-10-10' (Follow HAS_JOB pl->j AS e0 (Filter ... (Entities Pipeline AS pl))))"
     physical:
       clickhouse:
         planned:
@@ -123,7 +130,8 @@ cases:
       gql: |
         MATCH (n:Note) WHERE n.noteable_id = 5 AND n.note CONTAINS 'abc' RETURN n.id, n.note LIMIT 10
     logical:
-      expect: ["(Filter contains(n.note, 'abc'), n.noteable_id = 5 (_))"]
+      expect:
+        - "(Filter contains(n.note, 'abc'), n.noteable_id = 5 (Entities Note AS n))"
     physical:
       clickhouse:
         planned:
@@ -139,7 +147,8 @@ cases:
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.id IN [2000, 2001] AND mr.source_branch = 'feature-x' RETURN mr.id, mr.title LIMIT 10
     logical:
-      expect: ["(Filter mr.source_branch = 'feature-x', mr.id IN [2000, 2001] (_))"]
+      expect:
+        - "(Filter mr.source_branch = 'feature-x', mr.id IN [2000, 2001] (Entities MergeRequest AS mr))"
     physical:
       clickhouse:
         planned:
@@ -159,7 +168,8 @@ cases:
       gql: |
         MATCH (j:Job) WHERE j.created_at >= '2026-10-10' RETURN j.id, j.created_at LIMIT 10
     logical:
-      expect: ["(Filter j.created_at >= '2026-10-10' (_))"]
+      expect:
+        - "(Filter j.created_at >= '2026-10-10' (Entities Job AS j))"
     physical:
       clickhouse:
         planned:
@@ -176,7 +186,8 @@ cases:
       gql: |
         MATCH (j:Job {project_id: 1000}) RETURN count(j) AS n
     logical:
-      expect: ["(Filter j.project_id = 1000 (_))"]
+      expect:
+        - "(Aggregate COUNT(j) AS n (Filter j.project_id = 1000 (Entities Job AS j)))"
     physical:
       clickhouse:
         planned:
@@ -192,7 +203,8 @@ cases:
         WHERE mr.title CONTAINS 'migration'
         RETURN mr.title LIMIT 10
     logical:
-      expect: ["(Filter contains(mr.title, 'migration'), mr.project_id = 1000 (_))"]
+      expect:
+        - "(Filter contains(mr.title, 'migration'), mr.project_id = 1000 (Entities MergeRequest AS mr))"
     physical:
       clickhouse:
         planned:
@@ -207,7 +219,8 @@ cases:
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH 'ALI' RETURN u.username LIMIT 10
     logical:
-      expect: ["(Filter u.id >= 1, u.id <= 10000, starts_with(u.username, 'ALI') (_))"]
+      expect:
+        - "(Filter u.id >= 1, u.id <= 10000, starts_with(u.username, 'ALI') (Entities User AS u))"
     physical:
       clickhouse:
         planned:
@@ -225,7 +238,8 @@ cases:
         WHERE f.new_path CONTAINS 'app/services'
         RETURN f.new_path LIMIT 10
     logical:
-      expect: ["(Filter contains(f.new_path, 'app/services'), f.project_id = 1000 (_))"]
+      expect:
+        - "(Filter contains(f.new_path, 'app/services'), f.project_id = 1000 (Entities MergeRequestDiffFile AS f))"
     physical:
       clickhouse:
         planned:
@@ -242,7 +256,12 @@ cases:
       gql: |
         MATCH (j:Job) WHERE NOT j.name = 'build' RETURN j.id, j.name LIMIT 10
     logical:
-      expect: ["(Filter j.name != 'build' (_))"]
+      gql:
+        expect:
+          - "(Filter NOT (j.name = 'build') (Entities Job AS j))"
+      json:
+        expect:
+          - "(Filter NOT ((j.name = 'build')) (Entities Job AS j))"
     physical:
       clickhouse:
         planned:
@@ -256,7 +275,8 @@ cases:
       gql: |
         MATCH (j:Job) WHERE j.id >= 1 AND j.id <= 100002 RETURN j.id LIMIT 10
     logical:
-      expect: ["(Filter j.id >= 1, j.id <= 100002 (_))"]
+      expect:
+        - "(Filter j.id >= 1, j.id <= 100002 (Entities Job AS j))"
     physical:
       clickhouse:
         planned:

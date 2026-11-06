@@ -8,7 +8,8 @@ cases:
         WHERE mr.title STARTS WITH 'Fix'
         RETURN count(mr) AS n
     logical:
-      expect: ["(Aggregate COUNT(mr) AS n (_))"]
+      expect:
+        - "(Aggregate COUNT(mr) AS n (Filter starts_with(mr.title, 'Fix') (Follow APPROVED u->mr AS e0 (Filter ... (Entities User AS u)))))"
     physical:
       clickhouse:
         planned:
@@ -26,7 +27,8 @@ cases:
         WHERE p.id IN [1000, 1001] AND p.id >= 1000 AND p.id <= 1001
         RETURN mr.title, p.name
     logical:
-      expect: ["(Filter p.id IN [1000, 1001], p.id >= 1000, p.id <= 1001 (_))"]
+      expect:
+        - "(Filter p.id IN [1000, 1001], p.id >= 1000, p.id <= 1001 (Follow IN_PROJECT mr->p AS e0 (Entities MergeRequest AS mr)))"
     physical:
       clickhouse:
         planned:
@@ -42,7 +44,8 @@ cases:
         MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)
         RETURN count(mr.merged_at) AS n
     logical:
-      expect: ["(Aggregate COUNT(mr.merged_at) AS n (_))"]
+      expect:
+        - "(Aggregate COUNT(mr.merged_at) AS n (Follow APPROVED u->mr AS e0 (Filter ... (Entities User AS u))))"
     physical:
       clickhouse:
         planned:

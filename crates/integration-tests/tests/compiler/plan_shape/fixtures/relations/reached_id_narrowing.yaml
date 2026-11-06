@@ -7,7 +7,12 @@ cases:
         MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) WHERE a.id >= 1 AND a.id <= 10 RETURN a, b, c
 
     logical:
-      expect: ["(Filter ... (NodeScan Definition AS a))"]
+      gql:
+        expect:
+          - "(Filter a.id >= 1, a.id <= 10 (Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Entities Definition AS a))))"
+      json:
+        expect:
+          - "(Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Filter a.id >= 1, a.id <= 10 (Entities Definition AS a))))"
 
     physical:
       clickhouse:
@@ -29,7 +34,8 @@ cases:
         MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) RETURN u, g, p
 
     logical:
-      expect: ["(EdgeScan CONTAINS g->p AS e1)"]
+      expect:
+        - "(Follow CONTAINS g->p AS e1 (Follow MEMBER_OF u->g AS e0 (Filter ... (Entities User AS u))))"
 
     physical:
       clickhouse:
@@ -51,7 +57,8 @@ cases:
         MATCH (a:Definition {name: 'compile'})-[:CALLS]->(c:Definition)<-[:CALLS]-(b:Definition) RETURN c.name, count(a) AS n
 
     logical:
-      expect: ["(EdgeScan CALLS b->c AS e1)"]
+      expect:
+        - "(Aggregate group c.name AS c_name, COUNT(a) AS n (Follow CALLS c<-b AS e1 (Follow CALLS a->c AS e0 (Filter a.name = 'compile' (Entities Definition AS a)))))"
 
     physical:
       clickhouse:

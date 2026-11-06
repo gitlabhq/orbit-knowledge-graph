@@ -6,7 +6,8 @@ cases:
       json: |
         {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"},{"id":"d","entity":"Definition"},{"id":"e","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"},{"type":"CALLS","from":"c","to":"d"},{"type":"CALLS","from":"d","to":"e"}]}
     logical:
-      expect: ["(EdgeScan CALLS a->b AS e0)"]
+      expect:
+        - "(Follow CALLS d->e AS e3 (Follow CALLS c->d AS e2 (Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Filter a.id IN [1] (Entities Definition AS a))))))"
     physical:
       clickhouse:
         planned:
@@ -25,7 +26,8 @@ cases:
           (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
         RETURN u.id, mr.id, p.id, pipe.id
     logical:
-      expect: ["(EdgeScan APPROVED u->mr AS e0)"]
+      expect:
+        - "(Follow HAS_HEAD_PIPELINE mr->pipe AS e2 (Follow IN_PROJECT mr->p AS e1 (Follow APPROVED u->mr AS e0 (Filter ... (Entities User AS u)))))"
     physical:
       clickhouse:
         planned:
@@ -45,7 +47,8 @@ cases:
         MATCH (u:User {username: 'alice'})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
         RETURN p.id, count(p) AS n
     logical:
-      expect: ["(Aggregate group p.id AS p_id, COUNT(p) AS n (_))"]
+      expect:
+        - "(Aggregate group p.id AS p_id, COUNT(p) AS n (Follow CONTAINS g->p AS e1 (Follow MEMBER_OF u->g AS e0 (Filter u.username = 'alice' (Entities User AS u)))))"
     physical:
       clickhouse:
         planned:
@@ -66,7 +69,8 @@ cases:
           (a)-[:CALLS]->(c:Definition)
         RETURN a.id, b.id, c.id
     logical:
-      expect: ["(Filter a.definition_type = 'function' (_))"]
+      expect:
+        - "(Follow CALLS a->c AS e1 (Follow CALLS a->b AS e0 (Filter a.definition_type = 'function' (Entities Definition AS a))))"
     physical:
       clickhouse:
         planned:

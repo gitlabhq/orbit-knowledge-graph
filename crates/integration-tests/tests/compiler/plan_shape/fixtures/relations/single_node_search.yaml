@@ -6,7 +6,8 @@ cases:
       gql: |
         MATCH (u:User {username: 'admin'}) RETURN u.username LIMIT 10
     logical:
-      expect: ["(Filter u.username = 'admin' (NodeScan User AS u))"]
+      expect:
+        - "(Limit 10 (Select u{username} (Filter u.username = 'admin' (Entities User AS u))))"
     physical:
       clickhouse:
         planned:
@@ -28,7 +29,8 @@ cases:
         WHERE u.username STARTS WITH 'admin' AND u.state IN ['active', 'blocked'] AND u.created_at >= '2024-01-01'
         RETURN u.username, u.state, u.created_at ORDER BY u.created_at DESC LIMIT 50
     logical:
-      expect: ["(NodeScan User AS u)"]
+      expect:
+        - "(Limit 50 (Select u{username, state, created_at} (Sort u.created_at DESC (Filter starts_with(u.username, 'admin'), u.state IN ['active', 'blocked'], u.created_at >= '2024-01-01' (Entities User AS u)))))"
     physical:
       clickhouse:
         planned:

@@ -7,7 +7,12 @@ cases:
         MATCH (a:Pipeline {id: 99000})-[r:CHILD_OF|AUTO_CANCELED_BY]->(b:Pipeline)
         RETURN a, b, type(r)
     logical:
-      expect: ["(EdgeScan CHILD_OF|AUTO_CANCELED_BY a->b AS e0)"]
+      gql:
+        expect:
+          - "(Select a, b, type(e0) AS type(r) (Follow CHILD_OF|AUTO_CANCELED_BY a->b AS e0 (Filter a.id = 99000 (Entities Pipeline AS a))))"
+      json:
+        expect:
+          - "(Follow CHILD_OF|AUTO_CANCELED_BY a->b AS e0 (Filter a.id IN [99000] (Entities Pipeline AS a)))"
     physical:
       clickhouse:
         planned:

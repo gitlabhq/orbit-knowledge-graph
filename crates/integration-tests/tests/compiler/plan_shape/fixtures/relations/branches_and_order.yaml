@@ -8,7 +8,8 @@ cases:
           (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)
         RETURN mr.title, p.name, pipe.status, j.name
     logical:
-      expect: ["(EdgeScan IN_PROJECT mr->p AS e0)"]
+      expect:
+        - "(Follow HAS_JOB pipe->j AS e2 (Follow HAS_HEAD_PIPELINE mr->pipe AS e1 (Follow IN_PROJECT mr->p AS e0 (Filter ... (Entities MergeRequest AS mr)))))"
     physical:
       clickhouse:
         planned:
@@ -26,7 +27,8 @@ cases:
           (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
         RETURN mr.title, p.id, pipe.id
     logical:
-      expect: ["(EdgeScan IN_PROJECT mr->p AS e0)", "(EdgeScan HAS_HEAD_PIPELINE mr->pipe AS e1)"]
+      expect:
+        - "(Follow HAS_HEAD_PIPELINE mr->pipe AS e1 (Follow IN_PROJECT mr->p AS e0 (Filter ... (Entities MergeRequest AS mr))))"
     physical:
       clickhouse:
         planned:
@@ -45,7 +47,8 @@ cases:
           (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
         RETURN u.username, mr.title, p.name, pipe.status
     logical:
-      expect: ["(EdgeScan APPROVED u->mr AS e0)"]
+      expect:
+        - "(Follow HAS_HEAD_PIPELINE mr->pipe AS e2 (Follow IN_PROJECT mr->p AS e1 (Follow APPROVED u->mr AS e0 (Filter ... (Entities User AS u)))))"
     physical:
       clickhouse:
         planned:
@@ -61,7 +64,8 @@ cases:
       json: |
         {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"},{"id":"d","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"c","to":"d"},{"type":"CALLS","from":"b","to":"c"}]}
     logical:
-      expect: ["(EdgeScan CALLS a->b AS e0)", "(EdgeScan CALLS b->c AS e1)", "(EdgeScan CALLS c->d AS e2)"]
+      expect:
+        - "(Follow CALLS c->d AS e2 (Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Filter a.id IN [1] (Entities Definition AS a)))))"
     physical:
       clickhouse:
         planned:
@@ -76,7 +80,12 @@ cases:
         MATCH (a:Definition {id: 1})-[:CALLS]->(c:Definition)<-[:CALLS]-(b:Definition {id: 2})
         RETURN a.id, b.id, c.id
     logical:
-      expect: ["(EdgeScan CALLS a->c AS e0)", "(EdgeScan CALLS b->c AS e1)"]
+      gql:
+        expect:
+          - "(Filter b.id = 2 (Follow CALLS c<-b AS e1 (Follow CALLS a->c AS e0 (Filter a.id = 1 (Entities Definition AS a)))))"
+      json:
+        expect:
+          - "(Filter b.id IN [2] (Follow CALLS c<-b AS e1 (Follow CALLS a->c AS e0 (Filter a.id IN [1] (Entities Definition AS a)))))"
     physical:
       clickhouse:
         planned:
@@ -97,7 +106,8 @@ cases:
       json: |
         {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"},{"id":"d","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","direction":"incoming"},{"type":"CALLS","from":"b","to":"c","direction":"incoming"},{"type":"CALLS","from":"a","to":"d","direction":"incoming"}]}
     logical:
-      expect: ["(EdgeScan CALLS b->a AS e0)", "(EdgeScan CALLS c->b AS e1)", "(EdgeScan CALLS d->a AS e2)"]
+      expect:
+        - "(Follow CALLS a<-d AS e2 (Follow CALLS b<-c AS e1 (Follow CALLS a<-b AS e0 (Filter a.id IN [1] (Entities Definition AS a)))))"
     physical:
       clickhouse:
         planned:

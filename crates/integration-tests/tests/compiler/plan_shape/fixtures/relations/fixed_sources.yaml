@@ -7,7 +7,8 @@ cases:
         MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project)
         RETURN mr.title, p.name
     logical:
-      expect: ["(EdgeScan IN_PROJECT mr->p AS e0)"]
+      expect:
+        - "(Follow IN_PROJECT mr->p AS e0 (Filter ... (Entities MergeRequest AS mr)))"
     physical:
       clickhouse:
         planned:
@@ -28,7 +29,8 @@ cases:
           -[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
         RETURN u.id, mr.id, pipe.id, j.id
     logical:
-      expect: ["(EdgeScan AUTHORED u->mr AS e0)"]
+      expect:
+        - "(Filter j.status = 'failed' (Follow HAS_JOB pipe->j AS e2 (Follow HAS_HEAD_PIPELINE mr->pipe AS e1 (Follow AUTHORED u->mr AS e0 (Filter u.username = 'alice' (Entities User AS u))))))"
     physical:
       clickhouse:
         planned:
@@ -48,7 +50,8 @@ cases:
         MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
         RETURN u.username, mr.title, p.name
     logical:
-      expect: ["(EdgeScan APPROVED u->mr AS e0)", "(EdgeScan IN_PROJECT mr->p AS e1)"]
+      expect:
+        - "(Follow IN_PROJECT mr->p AS e1 (Follow APPROVED u->mr AS e0 (Filter ... (Entities User AS u))))"
     physical:
       clickhouse:
         planned:
@@ -68,7 +71,8 @@ cases:
         MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE {target_id: 1}]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)
         RETURN mr.id, pipe.id, j.id
     logical:
-      expect: ["(Filter e0.target_id = 1 (_))"]
+      expect:
+        - "(Follow HAS_JOB pipe->j AS e1 (Filter e0.target_id = 1 (Follow HAS_HEAD_PIPELINE mr->pipe AS e0 (Entities MergeRequest AS mr))))"
     physical:
       clickhouse:
         planned:
@@ -84,7 +88,8 @@ cases:
         MATCH (pl:Pipeline {id: 1000})-[:HAS_JOB]->(j:Job)
         RETURN j.status, count(j) AS n
     logical:
-      expect: ["(Aggregate group j.status AS j_status, COUNT(j) AS n (_))"]
+      expect:
+        - "(Aggregate group j.status AS j_status, COUNT(j) AS n (Follow HAS_JOB pl->j AS e0 (Filter ... (Entities Pipeline AS pl))))"
     physical:
       clickhouse:
         planned:

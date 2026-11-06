@@ -7,7 +7,8 @@ query:
     MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) RETURN a, b, c
 
 logical:
-  expect: ["(EdgeScan CALLS b->c AS e1)"]
+  expect:
+    - "(Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Entities Definition AS a)))"
 
 physical:
   clickhouse:
