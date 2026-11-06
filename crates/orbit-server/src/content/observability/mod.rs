@@ -4,6 +4,7 @@ pub mod rows;
 pub mod traces;
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,6 +33,19 @@ fn enabled_for_path(traversal_path: &TraversalPath) -> bool {
         orbit_server_config::Feature::ObservabilityColumns,
         gated_namespace(traversal_path),
     )
+}
+
+/// A tenant whose ClickHouse accepts the connection and never answers would
+/// otherwise hold the whole batch open.
+async fn bounded<T, E>(
+    timeout: Duration,
+    fetch: impl Future<Output = Result<T, E>>,
+) -> Result<Option<T>, E> {
+    match tokio::time::timeout(timeout, fetch).await {
+        Ok(Ok(value)) => Ok(Some(value)),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Ok(None),
+    }
 }
 
 pub struct ObservabilityService {
@@ -131,9 +145,9 @@ impl ColumnResolver for ObservabilityService {
         let futures = batches.iter().map(|(database, (route, keys))| async move {
             let fetch = traces::fetch(&self.pool, route, trace_lookup, keys);
 
-            let values = match tokio::time::timeout(self.query_timeout, fetch).await {
-                Ok(Ok(values)) => values,
-                Ok(Err(e)) => {
+            let values = match bounded(self.query_timeout, fetch).await {
+                Ok(Some(values)) => values,
+                Err(e) => {
                     warn!(
                         safe(ERROR_TYPE) = "observability_lookup",
                         safe(QUERY_NAME) = lookup,
@@ -142,7 +156,7 @@ impl ColumnResolver for ObservabilityService {
                     );
                     HashMap::new()
                 }
-                Err(_) => {
+                Ok(None) => {
                     warn!(
                         safe(ERROR_TYPE) = "observability_timeout",
                         safe(QUERY_NAME) = lookup,
@@ -189,6 +203,7 @@ pub fn build(settings: &ObservabilityResolverSettings) -> Option<Arc<Observabili
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn path(raw: &str) -> TraversalPath {
         TraversalPath::new_unchecked(raw)
@@ -215,18 +230,35 @@ mod tests {
         assert!(!enabled_for_path(&path("1/9970/")));
     }
 
-    /// A tenant whose server never answers must not hold the batch open for
-    /// longer than the configured query timeout.
     #[tokio::test(start_paused = true)]
-    async fn a_stalled_tenant_is_cut_off_at_the_query_timeout() {
-        let query_timeout = Duration::from_secs(15);
+    async fn a_stalled_tenant_resolves_to_nothing_rather_than_holding_the_batch() {
         let never_answers = async {
             tokio::time::sleep(Duration::from_secs(600)).await;
-            Ok::<(), ()>(())
+            Ok::<&str, ()>("a trace id")
         };
 
-        let outcome = tokio::time::timeout(query_timeout, never_answers).await;
+        let resolved = bounded(Duration::from_secs(15), never_answers).await;
 
-        assert!(outcome.is_err(), "the batch would stall on this tenant");
+        assert_eq!(resolved, Ok(None));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_tenant_that_answers_in_time_resolves_normally() {
+        let answers = async { Ok::<&str, ()>("a trace id") };
+
+        assert_eq!(
+            bounded(Duration::from_secs(15), answers).await,
+            Ok(Some("a trace id"))
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_tenant_error_is_not_swallowed_by_the_bound() {
+        let fails = async { Err::<&str, &str>("connection refused") };
+
+        assert_eq!(
+            bounded(Duration::from_secs(15), fails).await,
+            Err("connection refused")
+        );
     }
 }
