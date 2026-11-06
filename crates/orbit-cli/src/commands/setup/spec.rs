@@ -53,7 +53,10 @@ pub(crate) fn launcher() -> &'static str {
 }
 
 fn substitute_launcher(text: &str, launcher: &str) -> String {
-    text.replace("{{orbit}}", launcher)
+    text.replace("{{orbit}}", launcher).replace(
+        "{{gitlab_kinds}}",
+        &crate::commands::grep::gitlab_prefixes(),
+    )
 }
 
 fn render_instructions(launcher: &str, remote: bool) -> String {
@@ -426,6 +429,7 @@ mod tests {
                     "{launcher}"
                 );
                 assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
+                assert_eq!(rendered.contains("`branch:`"), remote, "{launcher}");
                 let budget = if remote { 250 } else { 75 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
@@ -437,6 +441,7 @@ mod tests {
             "{local}"
         );
         assert!(search_nudge_text().contains("MANDATORY"));
+        assert!(gitlab_nudge_text().contains("`milestone:`"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }
