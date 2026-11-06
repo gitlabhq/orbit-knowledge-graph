@@ -73,3 +73,33 @@ fn measure_inputs_must_be_stored() {
         "{error}"
     );
 }
+
+#[test]
+fn relationship_variables_and_type_conditions_compile() {
+    for query in [
+        "MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, r, mr.title LIMIT 50",
+        "MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(r) IN ['AUTHORED', 'APPROVED'] RETURN mr, r AS rel, type(r) ORDER BY type(r) LIMIT 10",
+        "MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE NOT NOT type(r) = 'APPROVED' RETURN u, mr.title LIMIT 50",
+        "MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE NOT type(r) = 'APPROVED' AND NOT (mr.state = 'opened' AND mr.title = 'Fix bug B') RETURN u, mr.title, type(r) LIMIT 50",
+        "MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF*1]->(`end`:Group {id: 100}) RETURN p, type(r)",
+        "MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE type(r) = 'MEMBER_OF' RETURN p",
+        "MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 102}) WHERE type(r) IN ['MEMBER_OF', 'CONTAINS'] RETURN p",
+    ] {
+        compile(query, Frontend::Gql, &embedded_model(), &test_ctx())
+            .unwrap_or_else(|error| panic!("{query}: {error}"));
+    }
+}
+
+#[test]
+fn shortest_path_type_conditions_keep_their_rejections() {
+    assert_rejected(
+        "MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE NOT type(r) = 'MEMBER_OF' RETURN p",
+        Frontend::Gql,
+        "shortest paths require named relationship types",
+    );
+    assert_rejected(
+        "MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF*1]->(`end`:Group {id: 100}) WHERE type(r) <> 'MEMBER_OF' RETURN p",
+        Frontend::Gql,
+        "type(r) excludes every relationship type the pattern allows",
+    );
+}

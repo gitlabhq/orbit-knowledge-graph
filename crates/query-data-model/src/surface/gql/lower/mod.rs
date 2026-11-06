@@ -178,16 +178,12 @@ fn path<'m>(
     name: &str,
 ) -> Built<'m> {
     let edge = &scope.edges[0];
-    if edge.types.is_empty() {
+    let (split, typed) = local(predicates, &[&edge.from, &edge.to])?;
+    let types = conditions::narrow(edge.types.clone(), typed, edge.variable.as_deref())?;
+    if types.is_empty() {
         return Err(SurfaceError::schema(
             "shortest paths require named relationship types, such as -[:CONTAINS*1..3]->; a wildcard expands over every edge type",
         ));
-    }
-    let (split, typed) = local(predicates, &[&edge.from, &edge.to])?;
-    if !typed.is_empty() {
-        return Err(
-            PlanError::shape("type() conditions on a shortest path are unsupported").into(),
-        );
     }
     let mut split = split.into_iter();
     let mut endpoint = |q: &mut LogicalBuilder<'m>, alias: &str| {
@@ -199,7 +195,7 @@ fn path<'m>(
     };
     let start = endpoint(q, &edge.from)?;
     let end = endpoint(q, &edge.to)?;
-    let via = relationships(q, &edge.types)?;
+    let via = relationships(q, &types)?;
     Ok(q.shortest(start, end, &via, edge.hops.max, name)?)
 }
 

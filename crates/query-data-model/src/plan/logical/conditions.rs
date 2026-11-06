@@ -59,24 +59,16 @@ fn is_kind(expr: &Expr) -> bool {
 }
 
 fn kinds(model: &Model, predicate: &Predicate) -> Result<(), PlanError> {
-    let conjuncts = match predicate {
-        Predicate::And(all) => all.iter().collect(),
-        other => vec![other],
-    };
-    for conjunct in conjuncts {
+    for conjunct in predicate.conjuncts() {
         let leaf = match conjunct {
-            Predicate::Not(inner) => inner.as_ref(),
-            other => other,
+            Conjunct::Leaf { predicate, .. } => predicate,
+            Conjunct::Negated(group) if group.exprs().iter().any(is_kind) => {
+                return Err(PlanError::shape(
+                    "type(r) cannot be used inside a NOT group; write it as its own condition joined with AND, such as NOT type(r) = 'CLOSES'",
+                ));
+            }
+            Conjunct::Negated(_) => continue,
         };
-        let grouped = matches!(leaf, Predicate::And(_) | Predicate::Not(_));
-        if !conjunct.exprs().iter().any(is_kind) {
-            continue;
-        }
-        if grouped {
-            return Err(PlanError::shape(
-                "type(r) cannot be used inside a NOT group; write it as its own condition joined with AND, such as NOT type(r) = 'CLOSES'",
-            ));
-        }
         if !leaf.exprs().first().is_some_and(is_kind) {
             continue;
         }

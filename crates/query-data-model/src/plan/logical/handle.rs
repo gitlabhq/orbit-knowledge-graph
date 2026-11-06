@@ -1,4 +1,6 @@
-use super::{EdgeField, Expr, Logical, LogicalCatalog, LogicalType, PlanError, TimeUnit};
+use super::{
+    EdgeField, Expr, Logical, LogicalCatalog, LogicalOperation, LogicalType, PlanError, TimeUnit,
+};
 use crate::plan::tracking::{self, Construction, Ref};
 use crate::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
@@ -107,11 +109,16 @@ impl<'m> Rows<'m> {
                 (_, LogicalType::Scalar(_)) => {}
                 (name, LogicalType::Edge) => {
                     let model = catalog.model();
-                    edges.push((
-                        output,
-                        super::check::edge_relationships(model, construction, output)?,
-                        super::check::edge_variants(model, construction, output)?,
-                    ));
+                    if matches!(
+                        construction.producer(output)?,
+                        LogicalOperation::Follow { .. } | LogicalOperation::Neighbors { .. }
+                    ) {
+                        edges.push((
+                            output,
+                            super::check::edge_relationships(model, construction, output)?,
+                            super::check::edge_variants(model, construction, output)?,
+                        ));
+                    }
                     bindings.push((
                         name.map(str::to_string),
                         Binding {

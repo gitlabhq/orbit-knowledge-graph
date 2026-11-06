@@ -184,8 +184,9 @@ impl Returned {
             }
             Expression::RelationshipType { span, variable } => {
                 let name = alias.clone().unwrap_or_else(|| span.as_str().to_owned());
-                self.relationship(scope, span, &variable, alias)?;
-                self.items.push(Item::Type(name, variable.value));
+                if self.relationship(scope, span, &variable, alias)? {
+                    self.items.push(Item::Type(name, variable.value));
+                }
                 Ok(())
             }
         }

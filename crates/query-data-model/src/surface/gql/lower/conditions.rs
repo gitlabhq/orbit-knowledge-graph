@@ -240,3 +240,59 @@ fn literal(value: &Value, temporal: bool) -> Result<Literal, SurfaceError> {
         ))),
     }
 }
+
+pub(super) fn narrow(
+    mut types: Vec<String>,
+    typed: Vec<BooleanExpression<Leaf<'_>>>,
+    variable: Option<&str>,
+) -> Result<Vec<String>, SurfaceError> {
+    for conjunct in typed {
+        let (mut tree, mut negated) = (conjunct, false);
+        while let BooleanExpression::Not(inner) = tree {
+            (tree, negated) = (*inner, !negated);
+        }
+        let BooleanExpression::Leaf(Leaf::RelationshipType {
+            span,
+            variable: name,
+            op,
+            value,
+        }) = tree
+        else {
+            return Err(SurfaceError::schema(
+                "type() conditions on a shortest path must each stand alone, joined with AND",
+            ));
+        };
+        if variable != Some(name.value.as_str()) {
+            return Err(invalid(span, &format!("undefined variable {}", name.value)));
+        }
+        let names: Option<Vec<String>> = match (op, value) {
+            (FilterOp::Eq | FilterOp::Ne, Some(Value::String(name))) => Some(vec![name]),
+            (FilterOp::In, Some(Value::Array(names))) if !names.is_empty() => names
+                .into_iter()
+                .map(|name| name.as_str().map(str::to_string))
+                .collect(),
+            _ => None,
+        };
+        let names = names.ok_or_else(|| {
+            invalid(
+                span,
+                "type(r) supports =, <>, or IN with relationship type names, such as type(r) = 'CLOSES' or type(r) IN ['CLOSES', 'MENTIONS']",
+            )
+        })?;
+        let excluded = negated != (op == FilterOp::Ne);
+        if types.is_empty() {
+            if !excluded {
+                types = names;
+            }
+            continue;
+        }
+        types.retain(|kind| names.contains(kind) != excluded);
+        if types.is_empty() {
+            return Err(invalid(
+                span,
+                "type(r) excludes every relationship type the pattern allows",
+            ));
+        }
+    }
+    Ok(types)
+}

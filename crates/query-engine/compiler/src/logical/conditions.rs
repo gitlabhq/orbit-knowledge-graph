@@ -22,10 +22,10 @@ pub enum Literals<'p> {
 
 impl<'p> Leaf<'p> {
     pub fn of(predicate: &'p Predicate) -> Option<Self> {
-        let (inner, negated) = match predicate {
-            Predicate::Not(inner) => (inner.as_ref(), true),
-            other => (other, false),
-        };
+        let (mut inner, mut negated) = (predicate, false);
+        while let Predicate::Not(nested) = inner {
+            (inner, negated) = (nested.as_ref(), !negated);
+        }
         let left = match inner {
             Predicate::Compare { left, .. }
             | Predicate::In { left, .. }

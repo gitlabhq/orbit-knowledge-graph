@@ -153,14 +153,15 @@ fn names(leaf: Leaf<'_>) -> Option<Vec<String>> {
 }
 
 pub(super) fn without_types(predicate: &Predicate) -> Option<Predicate> {
-    let conjuncts = match predicate {
-        Predicate::And(all) => all.clone(),
-        other => vec![other.clone()],
-    };
-    let mut kept: Vec<Predicate> = conjuncts
-        .into_iter()
-        .filter(|conjunct| type_leaf(conjunct).is_none())
-        .collect();
+    fn keep(predicate: &Predicate, into: &mut Vec<Predicate>) {
+        match predicate {
+            Predicate::And(all) => all.iter().for_each(|inner| keep(inner, into)),
+            conjunct if type_leaf(conjunct).is_some() => {}
+            conjunct => into.push(conjunct.clone()),
+        }
+    }
+    let mut kept = Vec::new();
+    keep(predicate, &mut kept);
     match kept.len() {
         0 | 1 => kept.pop(),
         _ => Some(Predicate::And(kept)),
