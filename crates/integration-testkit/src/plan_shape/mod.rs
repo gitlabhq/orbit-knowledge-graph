@@ -294,18 +294,19 @@ fn check<M: RelationalModel>(
         };
         let tp_bounds =
             (backend == "clickhouse").then(|| compiler::tp_bounds::TpBounds::derive(&input, model));
-        let mut lowered = match lower::emit(&plan, &input, tp_bounds.as_ref()) {
+        let lowered = match lower::emit(&plan, &input, tp_bounds.as_ref()) {
             Ok(lowered) => lowered,
             Err(error) => {
                 failures.push(format!("{label}: {error}"));
                 continue;
             }
         };
-        if backend == "clickhouse" {
-            response_policy::apply_text_excerpts(&mut lowered.ast, &input, model);
-        }
         let planned = explain::physical(&plan);
         let relational = codegen::build(&lowered.ast, model.catalog(), M::DIALECT)
+            .and_then(|relational| match backend {
+                "clickhouse" => response_policy::apply_text_excerpts(relational, model, &input),
+                _ => Ok(relational),
+            })
             .and_then(|relational| match scenario.hydration {
                 Some(_) => Ok(relational),
                 None => page::apply(relational, model, &input, &lowered.metadata),

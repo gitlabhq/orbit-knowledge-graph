@@ -103,7 +103,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         response_policy {
             reads_env: [data_model]
             reads_state: [input]
-            mutates: [node]
+            mutates: [relational]
         }
         result_contract {
             reads_env: [data_model]
@@ -145,19 +145,19 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, build_plan, paginate, hydrate_plan, settings, security, security_check, codegen]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, result_contract, build_plan, response_policy, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, build_plan, paginate, hydrate_plan, settings, security, security_check, codegen]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, result_contract, build_plan, response_policy, paginate, hydrate_plan, settings, security, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, build_plan, settings, security, security_check, codegen]
+            phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, result_contract, build_plan, response_policy, settings, security, security_check, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
@@ -293,10 +293,10 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().clone(), "input")?;
-    let mut node = require(ctx.take_node(), "node")?;
-    response_policy::apply_text_excerpts(&mut node, &input, ctx.data_model());
-    ctx.set_node(node);
+    let plan = require(ctx.take_relational(), "relational")?;
+    let input = require(ctx.input().as_ref(), "input")?;
+    let plan = response_policy::apply_text_excerpts(plan, ctx.data_model(), input)?;
+    ctx.set_relational(plan);
     Ok(())
 }
 

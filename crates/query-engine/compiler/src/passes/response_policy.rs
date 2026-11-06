@@ -1,19 +1,22 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{Expr, Function, Node, Op, SelectExpr};
-use crate::input::{ColumnSelection, Input};
 use ontology::DataType;
+use orbit_utils::query_types::SqlType;
+use query_data_model::implementations::relational::plan::{BinaryOp, Expr, Function, Operation};
+
+use crate::error::Result;
+use crate::input::{ColumnSelection, Input};
+use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
 
 const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_UTF8_BYTES_PER_CHAR: u64 = 4;
 const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
 
-pub fn apply_text_excerpts(
-    node: &mut Node,
+pub fn apply_text_excerpts<M: RelationalModel>(
+    plan: PlanOf<M>,
+    model: &M,
     input: &Input,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) {
-    let Node::Query(query) = node else { return };
+) -> Result<PlanOf<M>> {
     let max_chars = (WORKHORSE_GRPC_MESSAGE_CAP_BYTES
         / MAX_UTF8_BYTES_PER_CHAR
         / u64::from(input.sorted_rows().max(1))) as u32;
@@ -51,50 +54,62 @@ pub fn apply_text_excerpts(
         })
         .collect();
 
-    for select in &mut query.select {
-        rewrite_select(select, &columns, max_chars);
-    }
-}
-
-fn rewrite_select(
-    select: &mut SelectExpr,
-    columns: &HashMap<String, HashSet<String>>,
-    max_chars: u32,
-) {
-    let Expr::Column { table, column } = &select.expr else {
-        return;
+    let root = plan.plan.root();
+    let top = match plan.block(root).select {
+        Some(_) => root,
+        None => plan.plan.inputs(plan.block(root).base)[0],
     };
-    if columns
-        .get(table)
-        .is_some_and(|values| values.contains(column))
-    {
-        select.expr = excerpt(table, column, max_chars);
-    }
+    let Some(compute) = plan.block(top).compute else {
+        return Ok(plan);
+    };
+    model
+        .catalog()
+        .rewrite(plan, |q, rows| {
+            if q.original() != Some(compute) {
+                return Ok(rows);
+            }
+            let mut detached = q.detach(rows)?;
+            let source = &detached.inputs[0];
+            let excerpted: Vec<_> = columns
+                .iter()
+                .flat_map(|(alias, names)| names.iter().map(move |name| (alias, name)))
+                .filter_map(|(alias, name)| source.qualified(alias, name).ok())
+                .map(|column| column.output())
+                .collect();
+            if let Operation::Compute(values) = &mut detached.operation {
+                for value in values {
+                    if matches!(value, Expr::Column(output) if excerpted.contains(output)) {
+                        *value = excerpt(value.clone(), max_chars);
+                    }
+                }
+            }
+            q.reattach(detached)
+        })
+        .map_err(rejected)
 }
 
-fn excerpt(alias: &str, column: &str, max_chars: u32) -> Expr {
-    let value = Expr::col(alias, column);
-    let excerpt = Expr::func(
+fn excerpt(value: Expr, max_chars: u32) -> Expr {
+    let call = |function, args| Expr::Call { function, args };
+    let literal = |value: serde_json::Value| Expr::Parameter {
+        data_type: SqlType::from_value(&value),
+        value,
+    };
+    let excerpt = call(
         Function::Substring,
-        vec![value.clone(), Expr::lit(1), Expr::lit(max_chars)],
+        vec![value.clone(), literal(1.into()), literal(max_chars.into())],
     );
-    let shortened = Expr::binary(
-        Op::Gt,
-        Expr::func(Function::ByteLength, vec![value]),
-        Expr::func(Function::ByteLength, vec![excerpt.clone()]),
-    );
-    Expr::func(
-        Function::Concat,
+    let shortened = Expr::Binary {
+        op: BinaryOp::Gt,
+        left: Box::new(call(Function::ByteLength, vec![value])),
+        right: Box::new(call(Function::ByteLength, vec![excerpt.clone()])),
+    };
+    let suffix = call(
+        Function::If,
         vec![
-            excerpt,
-            Expr::func(
-                Function::If,
-                vec![
-                    shortened,
-                    Expr::string(TEXT_TRUNCATION_SUFFIX),
-                    Expr::string(""),
-                ],
-            ),
+            shortened,
+            literal(TEXT_TRUNCATION_SUFFIX.into()),
+            literal("".into()),
         ],
-    )
+    );
+    call(Function::Concat, vec![excerpt, suffix])
 }
