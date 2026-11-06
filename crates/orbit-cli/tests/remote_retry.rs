@@ -13,6 +13,11 @@ struct MockServer {
 
 /// Answers each connection with the next `(status, retry_after)` reply, then keeps answering with
 /// the last one. Runs on a detached thread that ends with the test process.
+fn unreachable_url() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    format!("http://{}", listener.local_addr().expect("addr"))
+}
+
 fn serve(replies: &'static [(u16, Option<&'static str>)]) -> MockServer {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let base_url = format!("http://{}", listener.local_addr().expect("mock addr"));
@@ -54,11 +59,22 @@ fn serve(replies: &'static [(u16, Option<&'static str>)]) -> MockServer {
 }
 
 fn run_query(server: &MockServer, extra_args: &[&str]) -> Output {
+    run_query_at(&server.base_url, extra_args)
+}
+
+fn run_query_at(base_url: &str, extra_args: &[&str]) -> Output {
+    run_orbit(
+        base_url,
+        &[&["query", "--response-format", "raw"], extra_args].concat(),
+        &[r#"{"query":{"query_type":"traversal"}}"#],
+    )
+}
+
+fn run_orbit(base_url: &str, args: &[&str], trailing: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_orbit"))
-        .args(["query", "--response-format", "raw"])
-        .args(extra_args)
-        .arg(r#"{"query":{"query_type":"traversal"}}"#)
-        .env("ORBIT_API_BASE_URL", &server.base_url)
+        .args(args)
+        .args(trailing)
+        .env("ORBIT_API_BASE_URL", base_url)
         .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
         .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
         .env_remove("GITLAB_TOKEN")
@@ -127,4 +143,88 @@ fn server_errors_on_a_query_are_not_retried() {
         assert_eq!(output.status.code(), Some(1), "status {status}");
         assert_eq!(server.requests.load(Ordering::SeqCst), 1, "status {status}");
     }
+}
+
+#[test]
+fn a_failed_connection_is_retried_with_backoff() {
+    let output = run_query_at(&unreachable_url(), &["--retries", "1"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("connection failed; retrying"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("retry 1/1"), "stderr: {stderr}");
+}
+
+#[test]
+fn zero_retries_also_disables_connect_retries() {
+    let output = run_query_at(&unreachable_url(), &["--retries", "0"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("retrying"));
+}
+
+#[test]
+fn retry_after_may_be_an_http_date() {
+    let reply_at = httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_secs(3));
+    let replies: &'static [(u16, Option<&'static str>)] =
+        Box::leak(Box::new([(429, Some(&*reply_at.leak())), (200, None)]));
+    let server = serve(replies);
+    let started = Instant::now();
+    let output = run_query(&server, &[]);
+
+    assert!(output.status.success());
+    assert!(started.elapsed() >= Duration::from_secs(2));
+}
+
+#[test]
+fn the_rate_limit_error_reports_the_wait_the_server_asked_for() {
+    let server = serve(&[(429, Some("3600"))]);
+    let output = run_query(&server, &[]);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(5));
+    assert!(
+        stderr.contains("asked to wait 3600 seconds"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn schema_retries_a_503() {
+    let server = serve(&[(503, None), (200, None)]);
+    let output = run_orbit(&server.base_url, &["schema"], &[]);
+
+    assert_eq!(server.requests.load(Ordering::SeqCst), 2);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("HTTP 503; retrying"));
+}
+
+fn run_remote_grep(server: &MockServer) -> Output {
+    run_orbit(
+        &server.base_url,
+        &["grep", "mr:runner", "my-group/my-project"],
+        &[],
+    )
+}
+
+#[test]
+fn remote_grep_retries_a_503() {
+    let server = serve(&[(503, None), (200, None)]);
+    let output = run_remote_grep(&server);
+
+    assert_eq!(server.requests.load(Ordering::SeqCst), 2);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("HTTP 503; retrying"));
+}
+
+#[test]
+fn remote_grep_gives_up_instead_of_waiting_out_a_long_retry_after() {
+    let server = serve(&[(429, Some("60")), (200, None)]);
+    let started = Instant::now();
+    let output = run_remote_grep(&server);
+
+    assert_eq!(server.requests.load(Ordering::SeqCst), 1);
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(output.status.code(), Some(1));
 }
