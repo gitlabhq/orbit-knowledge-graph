@@ -9,7 +9,7 @@ query:
 
 logical:
   expect:
-    - (NodeScan Pipeline AS a)
+    - (Follow CHILD_OF|AUTO_CANCELED_BY a->b AS e0 (Filter ... (Entities Pipeline AS a)))
 
 physical:
   clickhouse:

@@ -10,7 +10,7 @@ query:
 
 logical:
   expect:
-    - (EdgeScan CALLS e0->b AS e0)
+    - (Select e0{name}, b{name} (Follow CALLS e0->b AS e0 (Filter e0.id = 12000 (Entities Definition AS e0))))
 
 physical:
   clickhouse:

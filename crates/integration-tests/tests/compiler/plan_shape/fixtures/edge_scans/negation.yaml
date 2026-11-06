@@ -8,7 +8,7 @@ cases:
     missing_frontends: { json: JSON filters cannot express grouped negation. }
     logical:
       expect:
-        - "(Filter NOT ((mr.state = 'merged') AND (wi.state = 'closed')) (_))"
+        - "(Aggregate COUNT(mr) AS n (Filter NOT ((mr.state = 'merged') AND (wi.state = 'closed')) (Follow CLOSES mr->wi AS e0 (Filter mr.project_id = 1000 (Entities MergeRequest AS mr)))))"
     physical:
       clickhouse:
         planned:
@@ -25,8 +25,12 @@ cases:
         WHERE a.id IN [12000] AND NOT a.definition_type IN ['function', 'method']
         RETURN a, b
     logical:
-      expect:
-        - "(Filter NOT (a.definition_type IN ['function', 'method']) (_))"
+      gql:
+        expect:
+          - "(Filter a.id IN [12000], NOT (a.definition_type IN ['function', 'method']) (Follow CALLS a->b AS e0 (Entities Definition AS a)))"
+      json:
+        expect:
+          - "(Follow CALLS a->b AS e0 (Filter a.id IN [12000], NOT ((a.definition_type IN ['function', 'method'])) (Entities Definition AS a)))"
     physical:
       clickhouse:
         planned:
@@ -42,7 +46,7 @@ cases:
     missing_frontends: { json: JSON filters cannot express grouped negation. }
     logical:
       expect:
-        - "(Filter NOT ((e0.source_id < 50) AND (u.state = 'active')) (_))"
+        - "(Aggregate COUNT(u) AS n (Filter g.id = 100, NOT ((e0.source_id < 50) AND (u.state = 'active')) (Follow MEMBER_OF u->g AS e0 (Entities User AS u))))"
     physical:
       clickhouse:
         planned:
@@ -59,7 +63,7 @@ cases:
     missing_frontends: { json: JSON filters cannot express grouped negation. }
     logical:
       expect:
-        - (Filter NOT ((n.confidential = true) AND (n.internal = true)) (_))
+        - (Aggregate COUNT(n) AS c (Filter NOT ((n.confidential = true) AND (n.internal = true)) (Follow HAS_NOTE wi->n AS e0 (Filter wi.id = 100 (Entities WorkItem AS wi)))))
     physical:
       clickhouse:
         planned:
@@ -78,8 +82,12 @@ cases:
         WHERE u.username STARTS WITH 'ali' AND NOT u.state IN ['blocked']
         RETURN p.name
     logical:
-      expect:
-        - "(Filter NOT (u.state IN ['blocked']) (_))"
+      gql:
+        expect:
+          - "(Filter starts_with(u.username, 'ali'), NOT (u.state IN ['blocked']) (Follow CONTAINS g->p AS e1 (Filter g.id = 100 (Follow MEMBER_OF u->g AS e0 (Entities User AS u)))))"
+      json:
+        expect:
+          - "(Follow CONTAINS g->p AS e1 (Filter g.id IN [100] (Follow MEMBER_OF u->g AS e0 (Filter starts_with(u.username, 'ali'), NOT ((u.state IN ['blocked'])) (Entities User AS u)))))"
     physical:
       clickhouse:
         planned:

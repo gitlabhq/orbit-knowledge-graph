@@ -9,7 +9,8 @@ query:
     RETURN u, mr
 
 logical:
-  expect: ["(Filter mr.state IN ['merged'], mr.draft = true (_))"]
+  expect:
+    - (Filter mr.state IN ['merged'], mr.draft = true (Follow REVIEWER u->mr AS e0 (Filter ... (Entities User AS u))))
 
 physical:
   clickhouse:

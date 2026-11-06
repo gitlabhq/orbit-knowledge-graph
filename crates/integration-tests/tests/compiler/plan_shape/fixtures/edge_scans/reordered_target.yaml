@@ -8,7 +8,12 @@ query:
     MATCH (caller:Definition)-[:CALLS]->(callee:Definition {id: 12001}) RETURN caller.id, callee.id
 
 logical:
-  expect: ["(EdgeScan CALLS caller->callee AS e0)"]
+  gql:
+    expect:
+      - (Filter callee.id = 12001 (Follow CALLS caller->callee AS e0 (Entities Definition AS caller)))
+  json:
+    expect:
+      - (Filter callee.id IN [12001] (Follow CALLS caller->callee AS e0 (Entities Definition AS caller)))
 
 physical:
   clickhouse:

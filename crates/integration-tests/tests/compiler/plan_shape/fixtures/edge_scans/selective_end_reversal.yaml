@@ -7,7 +7,12 @@ query:
     MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition {id: 7}) RETURN a, b, c
 
 logical:
-  expect: ["(EdgeScan CALLS a->b AS e0)"]
+  gql:
+    expect:
+      - (Filter c.id = 7 (Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Entities Definition AS a))))
+  json:
+    expect:
+      - (Filter c.id IN [7] (Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Entities Definition AS a))))
 
 physical:
   clickhouse:

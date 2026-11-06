@@ -16,7 +16,7 @@ query:
 
 logical:
   expect:
-    - (Filter e0.target_id = 2 (EdgeScan CALLS caller->callee AS e0))
+    - (Filter e0.target_id = 2 (Follow CALLS caller->callee AS e0 (Filter ... (Entities Definition AS caller))))
 
 physical:
   clickhouse:

@@ -15,9 +15,12 @@ query:
     RETURN caller.id, callee.id
 
 logical:
-  expect:
-    - (Filter caller.id IN [1] (NodeScan Definition AS caller))
-    - (EdgeScan CALLS caller->callee AS e0)
+  gql:
+    expect:
+      - (Select caller{id}, callee{id} (Follow CALLS caller->callee AS e0 (Filter caller.id = 1 (Entities Definition AS caller))))
+  json:
+    expect:
+      - (Select caller{id}, callee{id} (Follow CALLS caller->callee AS e0 (Filter caller.id IN [1] (Entities Definition AS caller))))
 
 physical:
   clickhouse:

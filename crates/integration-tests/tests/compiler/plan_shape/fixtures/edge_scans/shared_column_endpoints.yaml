@@ -6,7 +6,12 @@ cases:
       gql: |
         MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) WHERE i.project_id = 42 RETURN i, d
     logical:
-      expect: ["(Filter i.project_id = 42 (_))"]
+      gql:
+        expect:
+          - (Filter i.project_id = 42 (Follow IMPORTS i->d AS e0 (Entities ImportedSymbol AS i)))
+      json:
+        expect:
+          - (Follow IMPORTS i->d AS e0 (Filter i.project_id = 42 (Entities ImportedSymbol AS i)))
     physical:
       clickhouse:
         planned:
@@ -26,7 +31,8 @@ cases:
       gql: |
         MATCH (a:Definition)-[:CALLS]->(b:Definition) WHERE b.project_id = 42 RETURN a, b
     logical:
-      expect: ["(Filter b.project_id = 42 (_))"]
+      expect:
+        - (Filter b.project_id = 42 (Follow CALLS a->b AS e0 (Entities Definition AS a)))
     physical:
       clickhouse:
         emitted:
@@ -42,7 +48,12 @@ cases:
       gql: |
         MATCH (f:File)-[:DEFINES]->(d:Definition) WHERE f.project_id = 42 AND f.branch = 'main' RETURN f, d
     logical:
-      expect: ["(Filter f.project_id = 42, f.branch = 'main' (_))"]
+      gql:
+        expect:
+          - (Filter f.project_id = 42, f.branch = 'main' (Follow DEFINES f->d AS e0 (Entities File AS f)))
+      json:
+        expect:
+          - (Follow DEFINES f->d AS e0 (Filter f.project_id = 42, f.branch = 'main' (Entities File AS f)))
     physical:
       clickhouse:
         emitted:
@@ -61,7 +72,12 @@ cases:
       gql: |
         MATCH (p:Project)-[:CONTAINS]->(b:Branch) WHERE p.name = 'x' AND b.project_id = 42 RETURN p, b
     logical:
-      expect: ["(Filter b.project_id = 42 (_))"]
+      gql:
+        expect:
+          - (Filter p.name = 'x', b.project_id = 42 (Follow CONTAINS p->b AS e0 (Entities Project AS p)))
+      json:
+        expect:
+          - (Filter b.project_id = 42 (Follow CONTAINS p->b AS e0 (Filter p.name = 'x' (Entities Project AS p))))
     physical:
       clickhouse:
         emitted:
@@ -79,7 +95,8 @@ cases:
       gql: |
         MATCH (i:ImportedSymbol {id: 7})-[:IMPORTS]->(d:Definition) WHERE i.project_id = i.start_line RETURN i, d
     logical:
-      expect: ["(Filter i.project_id = i.start_line, ... (_))"]
+      expect:
+        - (Filter i.project_id = i.start_line (Follow IMPORTS i->d AS e0 (Filter i.id = 7 (Entities ImportedSymbol AS i))))
     physical:
       clickhouse:
         emitted:
@@ -96,7 +113,8 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {project_id: 1})-[:CLOSES]->(wi:WorkItem) RETURN mr, wi
     logical:
-      expect: ["(Filter mr.project_id = 1 (_))"]
+      expect:
+        - (Follow CLOSES mr->wi AS e0 (Filter mr.project_id = 1 (Entities MergeRequest AS mr)))
     physical:
       clickhouse:
         emitted:
@@ -114,7 +132,12 @@ cases:
       gql: |
         MATCH (a:Definition)-[:CALLS*1..2]->(b:Definition) WHERE a.project_id = 42 RETURN a, b
     logical:
-      expect: ["(Filter a.project_id = 42 (_))"]
+      gql:
+        expect:
+          - (Filter a.project_id = 42 (Follow CALLS a->b AS e0 HOPS 1..2 (Entities Definition AS a)))
+      json:
+        expect:
+          - (Follow CALLS a->b AS e0 HOPS 1..2 (Filter a.project_id = 42 (Entities Definition AS a)))
     physical:
       clickhouse:
         emitted:
@@ -130,7 +153,8 @@ cases:
       gql: |
         MATCH (a:Definition {project_id: 42})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) RETURN a, b, c
     logical:
-      expect: ["(Filter a.project_id = 42 (_))"]
+      expect:
+        - (Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Filter a.project_id = 42 (Entities Definition AS a))))
     physical:
       clickhouse:
         emitted:

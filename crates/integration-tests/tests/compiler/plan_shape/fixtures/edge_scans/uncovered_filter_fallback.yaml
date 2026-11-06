@@ -7,7 +7,8 @@ query:
     MATCH (a:Definition {definition_type: 'function', name: 'compile'})-[:CALLS]->(b:Definition) RETURN a, b
 
 logical:
-  expect: ["(Filter a.definition_type = 'function', a.name = 'compile' (_))"]
+  expect:
+    - (Follow CALLS a->b AS e0 (Filter a.definition_type = 'function', a.name = 'compile' (Entities Definition AS a)))
 
 physical:
   clickhouse:

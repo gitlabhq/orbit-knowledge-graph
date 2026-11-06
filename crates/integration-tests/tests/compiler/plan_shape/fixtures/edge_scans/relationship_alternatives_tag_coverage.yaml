@@ -9,7 +9,7 @@ query:
 
 logical:
   expect:
-    - (Aggregate COUNT(mr) AS n (_))
+    - (Aggregate COUNT(mr) AS n (Filter mr.state = 'opened' (Follow AUTHORED|APPROVED u->mr AS e0 (Filter ... (Entities User AS u)))))
 
 physical:
   clickhouse:

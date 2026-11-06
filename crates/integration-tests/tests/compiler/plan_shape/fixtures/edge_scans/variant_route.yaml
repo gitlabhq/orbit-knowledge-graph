@@ -8,7 +8,12 @@ query:
     MATCH (file:File {id: 11000})-[:CALLS]->(callee:Definition) RETURN file.id, callee.id
 
 logical:
-  expect: ["(EdgeScan CALLS file->callee AS e0)"]
+  gql:
+    expect:
+      - (Follow CALLS file->callee AS e0 (Filter file.id = 11000 (Entities File AS file)))
+  json:
+    expect:
+      - (Follow CALLS file->callee AS e0 (Filter file.id IN [11000] (Entities File AS file)))
 
 physical:
   clickhouse:

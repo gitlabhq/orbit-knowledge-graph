@@ -7,7 +7,12 @@ query:
     MATCH (a:Definition {id: 1, project_id: 9, branch: 'main'})-[:CALLS]->(b:Definition {project_id: 9, branch: 'main'}) RETURN a, b
 
 logical:
-  expect: ["(Filter a.project_id = 9, a.branch = 'main', ... (_))"]
+  gql:
+    expect:
+      - (Filter b.project_id = 9, b.branch = 'main' (Follow CALLS a->b AS e0 (Filter a.id = 1, a.project_id = 9, a.branch = 'main' (Entities Definition AS a))))
+  json:
+    expect:
+      - (Filter b.project_id = 9, b.branch = 'main' (Follow CALLS a->b AS e0 (Filter a.id IN [1], a.project_id = 9, a.branch = 'main' (Entities Definition AS a))))
 
 physical:
   clickhouse:

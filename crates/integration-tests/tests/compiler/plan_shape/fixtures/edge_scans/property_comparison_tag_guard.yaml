@@ -11,7 +11,7 @@ query:
 
 logical:
   expect:
-    - (Aggregate COUNT(b) AS n (_))
+    - (Aggregate COUNT(b) AS n (Filter a.definition_type = a.name (Follow CALLS a->b AS e0 (Filter a.id = 99000 (Entities Definition AS a)))))
 
 physical:
   clickhouse:

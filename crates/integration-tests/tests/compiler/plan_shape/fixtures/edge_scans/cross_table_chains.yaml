@@ -7,10 +7,7 @@ cases:
         MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
     logical:
       expect:
-        - (EdgeScan AUTHORED user->mr AS e0)
-        - (EdgeScan HAS_HEAD_PIPELINE mr->pipeline AS e1)
-        - (EdgeScan IN_PROJECT pipeline->project AS e2)
-        - (EdgeScan CONTAINS project->branch AS e3)
+        - (Follow CONTAINS project->branch AS e3 (Follow IN_PROJECT pipeline->project AS e2 (Follow HAS_HEAD_PIPELINE mr->pipeline AS e1 (Follow AUTHORED user->mr AS e0 (Filter ... (Entities User AS user))))))
     physical:
       clickhouse:
         planned:
@@ -27,10 +24,7 @@ cases:
         MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, diff, project, branch
     logical:
       expect:
-        - (EdgeScan AUTHORED user->mr AS e0)
-        - (EdgeScan HAS_DIFF mr->diff AS e1)
-        - (EdgeScan IN_PROJECT diff->project AS e2)
-        - (EdgeScan CONTAINS project->branch AS e3)
+        - (Follow CONTAINS project->branch AS e3 (Follow IN_PROJECT diff->project AS e2 (Follow HAS_DIFF mr->diff AS e1 (Follow AUTHORED user->mr AS e0 (Filter ... (Entities User AS user))))))
     physical:
       clickhouse:
         planned:
@@ -47,9 +41,7 @@ cases:
         MATCH (scan:SecurityScan {id: 1})-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch)-[:CONTAINS]->(directory:Directory) RETURN scan, project, branch, directory
     logical:
       expect:
-        - (EdgeScan IN_PROJECT scan->project AS e0)
-        - (EdgeScan CONTAINS project->branch AS e1)
-        - (EdgeScan CONTAINS branch->directory AS e2)
+        - (Follow CONTAINS branch->directory AS e2 (Follow CONTAINS project->branch AS e1 (Follow IN_PROJECT scan->project AS e0 (Filter ... (Entities SecurityScan AS scan)))))
     physical:
       clickhouse:
         planned:
@@ -65,7 +57,12 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF]->(target) RETURN mr, target
     logical:
-      expect: ["(Input neighbors (...))"]
+      gql:
+        expect:
+          - (Neighbors IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF mr->target (Filter mr.id = 1 (Entities MergeRequest AS mr)))
+      json:
+        expect:
+          - (Neighbors IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF mr->neighbor (Filter mr.id IN [1] (Entities MergeRequest AS mr)))
     physical:
       clickhouse:
         planned:
@@ -84,7 +81,12 @@ cases:
       gql: |
         MATCH (user:User {id: 1})-[:AUTHORED]->(neighbor) RETURN user, neighbor
     logical:
-      expect: ["(Input neighbors (...))"]
+      gql:
+        expect:
+          - (Neighbors AUTHORED user->neighbor (Filter user.id = 1 (Entities User AS user)))
+      json:
+        expect:
+          - (Neighbors AUTHORED user->neighbor (Filter user.id IN [1] (Entities User AS user)))
     physical:
       clickhouse:
         planned:
@@ -102,7 +104,12 @@ cases:
       gql: |
         MATCH path = ANY SHORTEST (pipeline:Pipeline {id: 1})-[:IN_PROJECT|CONTAINS*1..2]->(branch:Branch {id: 2}) RETURN path
     logical:
-      expect: ["(Input path_finding (...))"]
+      gql:
+        expect:
+          - (Shortest IN_PROJECT|CONTAINS pipeline->branch DEPTH 2 (Filter pipeline.id = 1 (Entities Pipeline AS pipeline)) (Filter branch.id = 2 (Entities Branch AS branch)))
+      json:
+        expect:
+          - (Shortest IN_PROJECT|CONTAINS pipeline->branch DEPTH 2 (Filter pipeline.id IN [1] (Entities Pipeline AS pipeline)) (Filter branch.id IN [2] (Entities Branch AS branch)))
     physical:
       clickhouse:
         planned:
