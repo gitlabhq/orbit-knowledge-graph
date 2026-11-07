@@ -88,10 +88,10 @@ impl<D: Dialect> Renderer<'_, D> {
                     format!("{} AS {alias}", plan.plan.body(*body).0)
                 }
                 (Sharing::Shared { .. }, None) => plan.plan.body(*body).0.to_string(),
-                (Sharing::Inline | Sharing::Pending, Some(alias)) => {
+                (Sharing::Inline | Sharing::Pending { .. }, Some(alias)) => {
                     format!("({}) AS {alias}", self.subquery(*body))
                 }
-                (Sharing::Inline | Sharing::Pending, None) => {
+                (Sharing::Inline | Sharing::Pending { .. }, None) => {
                     format!("({})", self.subquery(*body))
                 }
             },

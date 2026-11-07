@@ -20,7 +20,7 @@ pub fn tree<B: RelationalBackend>(plan: &RelationalPlan<B>, catalog: &Catalog<B>
         }
     }
     let mut readers = vec![0; plan.bodies.len()];
-    for node in plan.plan.nodes() {
+    for node in plan.reachable() {
         if let Operation::Read { body, .. } = plan.plan.operation(node) {
             readers[body.index()] += 1;
         }
@@ -28,7 +28,7 @@ pub fn tree<B: RelationalBackend>(plan: &RelationalPlan<B>, catalog: &Catalog<B>
     let shares = plan
         .plan
         .bodies()
-        .filter(|body| plan.body(*body).sharing == Sharing::Pending)
+        .filter(|body| matches!(plan.body(*body).sharing, Sharing::Pending { .. }))
         .enumerate()
         .map(|(position, body)| (body, format!("shared_{position}")))
         .collect();
@@ -77,7 +77,8 @@ impl<B: RelationalBackend> Emitted<'_, B> {
 
     /// A planned share that several reads use, shown as the CTE materialization makes of it.
     fn reused(&self, body: BodyId) -> bool {
-        self.shares.contains_key(&body) && self.readers[body.index()] > 1
+        self.plan.body(body).sharing == Sharing::Pending { lookup: false }
+            && self.readers[body.index()] > 1
     }
 
     fn name(&self, body: BodyId) -> &str {
@@ -182,21 +183,21 @@ impl<B: RelationalBackend> Emitted<'_, B> {
                 let range = alias.as_deref().unwrap_or(name);
                 match (self.plan.body(*body).sharing, self.operation(root)) {
                     (Sharing::Shared { .. }, _) => scan(name, range, false),
-                    (Sharing::Pending, _) if self.reused(*body) => {
+                    (Sharing::Pending { .. }, _) if self.reused(*body) => {
                         leaf(Operator::Scan, format!("Share({name}) AS {range}"))
                     }
-                    (Sharing::Pending, Operation::Select(Selection::All))
+                    (Sharing::Pending { .. }, Operation::Select(Selection::All))
                         if self.filters_in_place(root, alias.as_deref()) =>
                     {
                         let mut tree = self.query(root);
                         tree.children.pop().unwrap_or(tree)
                     }
-                    (Sharing::Inline | Sharing::Pending, Operation::Union) => {
+                    (Sharing::Inline | Sharing::Pending { .. }, Operation::Union) => {
                         let arms = self.plan.plan.inputs(root).iter();
                         let arms = arms.map(|arm| self.query(*arm)).collect();
                         Tree::node(Operator::Union, format!("ALL AS {range}"), arms)
                     }
-                    (Sharing::Inline | Sharing::Pending, _) => {
+                    (Sharing::Inline | Sharing::Pending { .. }, _) => {
                         Tree::node(Operator::Bind, range, vec![self.body(*body)])
                     }
                 }
@@ -269,7 +270,7 @@ impl<B: RelationalBackend> Emitted<'_, B> {
     /// Membership keys read from rows that are not a CTE, each listed beside the CTEs under its name.
     fn inline_memberships(&self) -> Vec<Tree> {
         let mut seen: Vec<(&str, BodyId)> = Vec::new();
-        for node in self.plan.plan.nodes() {
+        for node in self.plan.reachable() {
             for body in self.operation(node).memberships() {
                 if let Some((name, source, false)) = self.membership_source(body)
                     && !seen.iter().any(|(_, known)| *known == source)

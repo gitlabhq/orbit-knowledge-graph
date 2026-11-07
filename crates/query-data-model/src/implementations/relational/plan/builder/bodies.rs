@@ -44,11 +44,20 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
 
     /// Rows that every read of the returned handle sees; `Catalog::materialize` decides how each is shared.
     pub fn share(&mut self, rows: Relation) -> Result<Subquery, RelationalError> {
+        self.shared(rows, false)
+    }
+
+    /// Shared rows found by a point lookup, which a share policy may recompute at each read.
+    pub fn share_lookup(&mut self, rows: Relation) -> Result<Subquery, RelationalError> {
+        self.shared(rows, true)
+    }
+
+    fn shared(&mut self, rows: Relation, lookup: bool) -> Result<Subquery, RelationalError> {
         let rows = self.guard(complete(rows, "a shared relation"))?;
         let width = self.construction.outputs(&rows.rows)?.len();
         let body = self.construction.share(SHARED, rows.rows)?;
         self.bodies.push(BodyUse {
-            sharing: Sharing::Pending,
+            sharing: Sharing::Pending { lookup },
             with: Vec::new(),
         });
         self.names.push(SHARED.to_string());

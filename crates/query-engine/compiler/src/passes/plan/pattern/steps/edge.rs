@@ -136,7 +136,7 @@ where
             let rows = self.reads.q.read(&latest, Some(alias))?;
             let rows = self.reads.filter(rows, &predicates)?;
             self.condition = predicates;
-            return self.reads.share(rows, Some(alias));
+            return self.reads.share(rows, Some(alias), false);
         }
         if relation.single_edge_table().is_some()
             || pattern.model.supports_selective_latest_rows()

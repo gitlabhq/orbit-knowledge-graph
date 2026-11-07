@@ -6,7 +6,7 @@ use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{Order, Relation, RelationalBuilder};
 
 use super::predicates::{Column, Predicate, Projection};
-use super::rows::{ReadScope, Reads, Rel};
+use super::rows::{ReadScope, Reads, Rel, point_lookup};
 use crate::error::Result;
 use crate::passes::lower::build::{scan, stored};
 use crate::tp_bounds::TpBound;
@@ -37,7 +37,7 @@ impl<B: RelationalBackend> Reads<'_, '_, B> {
         };
         let rows = self.bound(rows, bound, alias)?;
         let rows = self.filter(rows, predicates)?;
-        self.share(rows, Some(alias))
+        self.share(rows, Some(alias), point_lookup(predicates).unwrap_or(false))
     }
 
     /// A FINAL read in its own block with only sort-key predicates, so no other predicate moves before the merge.
@@ -101,7 +101,8 @@ impl<B: RelationalBackend> Reads<'_, '_, B> {
             let rows = self.final_rows(table, alias, &keyed)?;
             let rows = self.bound(rows, bound, alias)?;
             let rows = self.filter(rows, &rest)?;
-            return self.share(rows, Some(alias));
+            let lookup = point_lookup(&rest).or_else(|| point_lookup(&keyed));
+            return self.share(rows, Some(alias), lookup.unwrap_or(false));
         }
         let (mut identity, rest): (Vec<_>, Vec<_>) = predicates
             .iter()
@@ -131,7 +132,7 @@ impl<B: RelationalBackend> Reads<'_, '_, B> {
         })?;
         let rows = self.q.read(&latest, Some(alias))?;
         let rows = self.filter(rows, &rest)?;
-        self.share(rows, Some(alias))
+        self.share(rows, Some(alias), point_lookup(&rest).unwrap_or(false))
     }
 }
 

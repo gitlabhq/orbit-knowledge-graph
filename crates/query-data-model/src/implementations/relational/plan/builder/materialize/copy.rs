@@ -161,7 +161,7 @@ impl<B: RelationalBackend> Copier<'_, B> {
         let plan = &old.plan;
         let (name, root) = plan.body(body);
         let sharing = old.body(body).sharing;
-        if sharing == Sharing::Pending && !self.shared(body) {
+        if matches!(sharing, Sharing::Pending { .. }) && !self.shared(body) {
             if let Some(source) = self.splice(q, root, alias.as_deref(), joined)? {
                 let fed: Vec<_> = plan
                     .outputs(node)

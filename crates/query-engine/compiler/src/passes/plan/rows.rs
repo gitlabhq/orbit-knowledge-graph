@@ -18,6 +18,15 @@ use crate::tp_bounds::{TpBound, TpBounds};
 pub struct Rel {
     pub rows: Subquery,
     pub alias: Option<String>,
+    pub lookup: bool,
+}
+
+/// Rows pinned by unique keys: every selective predicate is a point lookup, which costs less to
+/// repeat at each read than to materialize. `None` when no predicate is selective.
+pub(super) fn point_lookup(predicates: &[Predicate]) -> Option<bool> {
+    let mut selective = predicates.iter().filter(|p| p.is_selective()).peekable();
+    selective.peek()?;
+    Some(selective.all(Predicate::is_point_lookup))
 }
 
 #[derive(Clone)]
@@ -167,11 +176,20 @@ impl<'q, 'c, B: RelationalBackend> Reads<'q, 'c, B> {
         Ok(self.q.filter(rows, lowered)?)
     }
 
-    pub fn share(&mut self, rows: Relation, alias: Option<&str>) -> Result<Rel> {
+    pub fn share(&mut self, rows: Relation, alias: Option<&str>, lookup: bool) -> Result<Rel> {
         let rows = self.q.select_all(rows)?;
+        self.shared(rows, alias, lookup)
+    }
+
+    pub fn shared(&mut self, rows: Relation, alias: Option<&str>, lookup: bool) -> Result<Rel> {
+        let rows = match lookup {
+            true => self.q.share_lookup(rows)?,
+            false => self.q.share(rows)?,
+        };
         Ok(Rel {
-            rows: self.q.share(rows)?,
+            rows,
             alias: alias.map(str::to_string),
+            lookup,
         })
     }
 
@@ -181,7 +199,8 @@ impl<'q, 'c, B: RelationalBackend> Reads<'q, 'c, B> {
         }
         let rows = self.read(rel, None)?;
         let rows = self.filter(rows, predicates)?;
-        self.share(rows, rel.alias.as_deref())
+        let lookup = point_lookup(predicates).unwrap_or(rel.lookup);
+        self.share(rows, rel.alias.as_deref(), lookup)
     }
 
     pub fn select(&mut self, rows: Relation, outputs: &[Projection]) -> Result<Relation> {
@@ -198,10 +217,7 @@ impl<'q, 'c, B: RelationalBackend> Reads<'q, 'c, B> {
     ) -> Result<Rel> {
         let rows = self.read(rel, alias)?;
         let rows = self.select(rows, outputs)?;
-        Ok(Rel {
-            rows: self.q.share(rows)?,
-            alias: None,
-        })
+        self.shared(rows, None, false)
     }
 
     pub fn join(
@@ -232,6 +248,6 @@ impl<'q, 'c, B: RelationalBackend> Reads<'q, 'c, B> {
             Ok(reads.q.union(arms)?)
         })?;
         let rows = self.q.read(&united, Some(alias))?;
-        self.share(rows, Some(alias))
+        self.share(rows, Some(alias), false)
     }
 }

@@ -98,9 +98,8 @@ pub enum Operation {
 }
 
 impl Operation {
-    /// The bodies this operation's expressions test membership in.
-    pub fn memberships(&self) -> Vec<BodyId> {
-        let exprs: Vec<&Expr> = match self {
+    fn expressions(&self) -> Vec<&Expr> {
+        match self {
             Self::Join(JoinKind::Inner(on) | JoinKind::Left(on)) | Self::Filter(on) => vec![on],
             Self::Aggregate { groups, measures } => groups
                 .iter()
@@ -113,10 +112,23 @@ impl Operation {
             Self::Compute(values) | Self::LimitBy { by: values, .. } => values.iter().collect(),
             Self::Order(orders) => orders.iter().map(|order| &order.value).collect(),
             _ => Vec::new(),
-        };
+        }
+    }
+
+    /// The bodies this operation's expressions test membership in.
+    pub fn memberships(&self) -> Vec<BodyId> {
         let mut bodies = Vec::new();
-        for expr in exprs {
+        for expr in self.expressions() {
             expr.memberships(&mut bodies);
+        }
+        bodies
+    }
+
+    /// Every body this operation's expressions read, as a membership or a scalar.
+    pub(super) fn subqueries(&self) -> Vec<BodyId> {
+        let mut bodies = Vec::new();
+        for expr in self.expressions() {
+            expr.clone().bodies(&mut |body| bodies.push(*body));
         }
         bodies
     }

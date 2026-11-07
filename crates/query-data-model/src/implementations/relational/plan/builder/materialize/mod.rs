@@ -14,6 +14,7 @@ mod copy;
 #[derive(Debug, Clone)]
 pub struct SharePolicy {
     pub materialized: bool,
+    pub inline_lookups: bool,
     pub prefix: String,
 }
 
@@ -21,6 +22,7 @@ impl SharePolicy {
     pub fn of<B: RelationalBackend>(prefix: impl Into<String>) -> Self {
         Self {
             materialized: B::CAPABILITIES.materialized_bodies,
+            inline_lookups: true,
             prefix: prefix.into(),
         }
     }
@@ -28,7 +30,8 @@ impl SharePolicy {
 
 impl<B: RelationalBackend> Catalog<B> {
     /// Shares read more than once become bodies with only the columns their readers use; a share read
-    /// once is inlined into its reader, its filters joining the reader's WHERE.
+    /// once, or a point lookup the policy recomputes, is inlined into each reader, its filters joining
+    /// the reader's WHERE.
     pub fn materialize(
         &self,
         plan: RelationalPlan<B>,
@@ -37,7 +40,7 @@ impl<B: RelationalBackend> Catalog<B> {
         if !plan
             .bodies
             .iter()
-            .any(|body| body.sharing == Sharing::Pending)
+            .any(|body| matches!(body.sharing, Sharing::Pending { .. }))
         {
             return Ok(plan);
         }
@@ -71,20 +74,21 @@ impl<'p, B: RelationalBackend> Copier<'p, B> {
     fn new(old: &'p RelationalPlan<B>, policy: &'p SharePolicy) -> Self {
         let plan = &old.plan;
         let mut readers = vec![0; old.bodies.len()];
+        for node in old.reachable() {
+            if let Operation::Read { body, .. } = plan.operation(node) {
+                readers[body.index()] += 1;
+            }
+        }
         let mut live: HashSet<Ref> = plan.outputs(plan.root()).collect();
         for node in plan.nodes() {
             let mut operation = plan.operation(node).clone();
             operation.visit(&mut |output| {
                 live.insert(*output);
             });
-            match plan.operation(node) {
-                Operation::Read { body, .. } => readers[body.index()] += 1,
-                Operation::Union => {
-                    for arm in plan.inputs(node) {
-                        live.extend(plan.outputs(*arm));
-                    }
+            if *plan.operation(node) == Operation::Union {
+                for arm in plan.inputs(node) {
+                    live.extend(plan.outputs(*arm));
                 }
-                _ => {}
             }
         }
         let mut wanted: HashSet<(BodyId, usize)> = HashSet::new();
@@ -128,7 +132,12 @@ impl<'p, B: RelationalBackend> Copier<'p, B> {
     }
 
     fn shared(&self, body: BodyId) -> bool {
-        self.old.body(body).sharing == Sharing::Pending && self.readers[body.index()] > 1
+        match self.old.body(body).sharing {
+            Sharing::Pending { lookup } => {
+                self.readers[body.index()] > 1 && !(lookup && self.policy.inline_lookups)
+            }
+            _ => false,
+        }
     }
 
     fn name(&mut self) -> String {
@@ -170,15 +179,13 @@ impl<'p, B: RelationalBackend> Copier<'p, B> {
         let mut expr = expr.clone();
         let mut bodies = Vec::new();
         expr.bodies(&mut |body| bodies.push(*body));
+        let mut copies = HashMap::new();
         for body in bodies {
-            if !self.bodies.contains_key(&body) {
-                let (name, _) = self.old.plan.body(body);
-                let name = name.to_string();
-                let built = q.subquery(&name, |q| self.statement(q, body))?;
-                self.bodies.insert(body, built);
-            }
+            let (name, _) = self.old.plan.body(body);
+            let name = name.to_string();
+            copies.insert(body, q.subquery(&name, |q| self.statement(q, body))?.id());
         }
-        expr.bodies(&mut |body| *body = self.bodies[body].id());
+        expr.bodies(&mut |body| *body = copies[body]);
         let mut missing = false;
         expr.visit(&mut |output| match self.refs.get(output) {
             Some(mapped) => *output = *mapped,

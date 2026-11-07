@@ -100,3 +100,33 @@ fn a_share_read_once_without_an_alias_inlines_as_a_named_subquery() {
          FROM (SELECT u.id FROM gl_user AS u FINAL) AS _orbit_relation_0)"
     );
 }
+
+#[test]
+fn a_point_lookup_read_twice_is_recomputed_at_each_read() {
+    let model = ClickHouseDataModel::embedded().unwrap();
+    let catalog = model.catalog();
+    let users = catalog.table("gl_user").unwrap();
+    let plan = catalog
+        .build(|q| {
+            let rows = q.scan(users, ReadMode::Current, "u")?;
+            let name = rows.qualified("u", "username")?;
+            let rows = q.filter(rows, eq(name.expr(), text("root")))?;
+            let rows = q.select_all(rows)?;
+            let found = q.share_lookup(rows)?;
+            let left = q.read(&found, Some("u"))?;
+            let right = q.read(&found, Some("v"))?;
+            let on = eq(
+                left.qualified("u", "id")?.expr(),
+                right.qualified("v", "id")?.expr(),
+            );
+            let rows = q.join(left, right, JoinKind::Inner(on))?;
+            let id = rows.qualified("u", "id")?;
+            q.select(rows, vec![id])
+        })
+        .unwrap();
+    let sql = catalog
+        .render(&catalog.materialize(plan, &policy()).unwrap())
+        .sql;
+    assert!(!sql.starts_with("WITH "), "{sql}");
+    assert_eq!(sql.matches("FROM gl_user AS u FINAL").count(), 2, "{sql}");
+}

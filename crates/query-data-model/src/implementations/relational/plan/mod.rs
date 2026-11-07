@@ -6,6 +6,7 @@ mod operation;
 mod relation;
 mod stage;
 
+use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use ontology::DataType;
@@ -21,7 +22,7 @@ pub use relation::{Column, Relation};
 
 use super::{RelationalBackend, RelationalFacts};
 use crate::catalog::Catalog;
-use crate::plan::tracking::{BodyId, Declared, Language, Plan, Ref};
+use crate::plan::tracking::{BodyId, Declared, Language, NodeId, Plan, Ref};
 
 #[derive(Debug)]
 pub struct Relational<B>(PhantomData<B>);
@@ -38,7 +39,7 @@ impl<B> Language for Relational<B> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sharing {
     Inline,
-    Pending,
+    Pending { lookup: bool },
     Shared { materialized: bool },
 }
 
@@ -59,6 +60,33 @@ pub struct RelationalPlan<B> {
 impl<B> RelationalPlan<B> {
     pub fn body(&self, body: BodyId) -> &BodyUse {
         &self.bodies[body.index()]
+    }
+
+    /// The nodes the root reads, through the bodies its reads and expressions reach.
+    pub fn reachable(&self) -> Vec<NodeId> {
+        let plan = &self.plan;
+        let mut seen = HashSet::new();
+        let mut entered = HashSet::new();
+        let mut stack = vec![plan.root()];
+        let mut nodes = Vec::new();
+        while let Some(node) = stack.pop() {
+            if !seen.insert(node) {
+                continue;
+            }
+            nodes.push(node);
+            stack.extend(plan.inputs(node));
+            let operation = plan.operation(node);
+            let mut bodies = operation.subqueries();
+            if let Operation::Read { body, .. } = operation {
+                bodies.push(*body);
+            }
+            for body in bodies {
+                if entered.insert(body) {
+                    stack.push(plan.body(body).1);
+                }
+            }
+        }
+        nodes
     }
 }
 

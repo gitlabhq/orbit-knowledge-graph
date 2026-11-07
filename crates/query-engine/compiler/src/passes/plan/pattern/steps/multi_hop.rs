@@ -226,10 +226,7 @@ impl<M: OrbitQueryModel + ?Sized, B: RelationalBackend> Walk<'_, '_, '_, '_, M, 
                 .map(|column| Projection::col(meta, column)),
         );
         let rows = self.reads.select(input, &outputs)?;
-        Ok(Rel {
-            rows: self.reads.q.share(rows)?,
-            alias: None,
-        })
+        self.reads.shared(rows, None, false)
     }
 }
 
