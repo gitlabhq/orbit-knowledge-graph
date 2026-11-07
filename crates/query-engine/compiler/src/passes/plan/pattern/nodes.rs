@@ -257,8 +257,8 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
     let ordered = query
         .ordered()
         .into_iter()
-        .filter(|key| matches!(key, Expr::Property { .. }))
-        .last()
+        .rev()
+        .find(|key| matches!(key, Expr::Property { .. }))
         .is_some_and(|key| on_node(&key));
     let local_predicate = condition_nodes.contains(&node.alias) && !pattern.holds_fk(&node.alias);
     let uncovered_filter = pattern.has_uncovered_filter(node);

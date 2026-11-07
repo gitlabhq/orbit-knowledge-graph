@@ -21,27 +21,21 @@ pub(crate) struct Shape {
 pub(crate) fn shape(plan: &Plan<Traversal>, query: Query<'_>, limit: u32) -> Result<Shape> {
     let execution = &plan.operation.execution;
     let keys = query.sort_keys();
-    let property = keys
-        .iter()
-        .filter_map(|(key, order)| match key {
-            Expr::Property { binding, property } => Some((
-                query.name(*binding),
-                query.property_name(*property),
-                *order == Sort::Descending,
-            )),
-            _ => None,
-        })
-        .last();
-    let kind = keys
-        .iter()
-        .filter_map(|(key, order)| match key {
-            Expr::Edge {
-                binding,
-                field: EdgeField::Kind,
-            } => Some((*binding, *order == Sort::Descending)),
-            _ => None,
-        })
-        .last();
+    let property = keys.iter().rev().find_map(|(key, order)| match key {
+        Expr::Property { binding, property } => Some((
+            query.name(*binding),
+            query.property_name(*property),
+            *order == Sort::Descending,
+        )),
+        _ => None,
+    });
+    let kind = keys.iter().rev().find_map(|(key, order)| match key {
+        Expr::Edge {
+            binding,
+            field: EdgeField::Kind,
+        } => Some((*binding, *order == Sort::Descending)),
+        _ => None,
+    });
     let sorted = property.map(|(node, property, _)| execution.property(node, property));
     let order = match (property, kind) {
         (Some((node, property, descending)), _) => Some((

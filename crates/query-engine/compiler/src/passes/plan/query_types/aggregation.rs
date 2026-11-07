@@ -68,13 +68,13 @@ fn aggregation_plan(
         order: query
             .sort_keys()
             .into_iter()
-            .filter_map(|(key, order)| match key {
+            .rev()
+            .find_map(|(key, order)| match key {
                 Expr::Output(output) => {
                     Some((query.name(output).to_string(), order == Order::Descending))
                 }
                 _ => None,
-            })
-            .last(),
+            }),
     };
     let Some((groups, measures, outputs)) = aggregate(query) else {
         return plan;
