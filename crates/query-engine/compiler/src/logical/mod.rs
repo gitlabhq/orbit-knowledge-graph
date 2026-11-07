@@ -2,6 +2,7 @@
 //! conjuncts, and the result operations, all by declaration id.
 
 mod conditions;
+pub mod facts;
 
 pub use conditions::{Leaf, Literals, binding};
 
@@ -176,6 +177,14 @@ impl<'p> Query<'p> {
             })
             .flatten()
             .collect()
+    }
+
+    pub fn limit(self) -> Option<(u64, Option<u64>)> {
+        self.operations()
+            .find_map(|(_, operation)| match operation {
+                LogicalOperation::Limit { rows, skip } => Some((*rows, *skip)),
+                _ => None,
+            })
     }
 
     pub fn aggregate(self) -> Option<(&'p [Expr], &'p [Measure])> {

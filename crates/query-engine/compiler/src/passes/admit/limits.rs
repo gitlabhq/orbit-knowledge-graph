@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use query_data_model::plan::logical::Expr;
 
-use super::facts::{Anchor, Fact};
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
+use crate::logical::facts::{Anchor, Fact};
 
 pub(super) const MAX_PREDICATES: usize = 16;
 pub(super) const MAX_FILTERS_PER_NODE: usize = 10;

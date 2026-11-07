@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use compiler::input::Input;
 use compiler::passes::codegen::RelationalModel;
-use compiler::passes::{lower, normalize, page, plan, response_policy};
+use compiler::passes::{normalize, page, plan, response_policy};
+use query_data_model::implementations::relational::plan::RelationalPlan;
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, Model};
 use serde::Deserialize;
 
@@ -251,7 +252,6 @@ fn check<M: RelationalModel>(
     model: &M,
     backend: &str,
     path: &Path,
-    build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
 ) -> Result<(), Vec<String>> {
     let mut failures = Vec::new();
     for (language, raw) in &scenario.query {
@@ -311,30 +311,16 @@ fn check<M: RelationalModel>(
             failures.push(error);
             continue;
         }
-        let plan = match build(&input, options) {
-            Ok(plan) => plan,
-            Err(error) => {
-                failures.push(format!("{label}: {error}"));
-                continue;
-            }
-        };
-        let tp_bounds = (backend == "clickhouse" && scenario.hydration.is_none()).then(|| {
-            let query = compiler::logical::Query::new(&statement.plan, catalog.model());
-            compiler::tp_bounds::TpBounds::derive(query, model)
-        });
-        let planned = explain::physical(&plan);
-        let relational = lower::emit(&plan, &input, tp_bounds.as_ref(), model)
-            .and_then(|lowered| {
-                let relational = match backend {
-                    "clickhouse" => {
-                        response_policy::apply_text_excerpts(lowered.plan, model, &input)?
-                    }
-                    _ => lowered.plan,
+        let query = compiler::logical::Query::new(&statement.plan, catalog.model());
+        let tp_bounds = (backend == "clickhouse" && scenario.hydration.is_none())
+            .then(|| compiler::tp_bounds::TpBounds::derive(query, model));
+        let relational = plan::plan(Some(query), &input, tp_bounds.as_ref(), model, options)
+            .and_then(|planned| {
+                let tree = match &planned.legacy {
+                    Some(legacy) => explain::physical(legacy),
+                    None => emitted::tree(&planned.plan, model.catalog()),
                 };
-                match scenario.hydration {
-                    Some(_) => Ok(relational),
-                    None => page::apply(relational, model, &input, &lowered.metadata),
-                }
+                Ok((tree, passes(planned, scenario, backend, model, &input)?))
             })
             .map_err(|error| error.to_string());
         let assertions = &scenario.physical[backend];
@@ -350,7 +336,7 @@ fn check<M: RelationalModel>(
             failures.push(format!("{label}: missing assertion targets"));
             continue;
         }
-        let relational = match relational {
+        let (planned_tree, relational) = match relational {
             Ok(relational) => relational,
             Err(error) => {
                 failures.push(format!("{label}: {error}"));
@@ -359,7 +345,7 @@ fn check<M: RelationalModel>(
         };
         let emitted = emitted::tree(&relational, model.catalog());
         for (phase, assertions, actual) in [
-            ("planned", &assertions.planned, planned),
+            ("planned", &assertions.planned, planned_tree),
             ("emitted", &assertions.emitted, emitted),
         ] {
             if let Some(assertions) = assertions
@@ -374,6 +360,23 @@ fn check<M: RelationalModel>(
         Ok(())
     } else {
         Err(failures)
+    }
+}
+
+fn passes<M: RelationalModel>(
+    planned: plan::Planned<RelationalPlan<M::Backend>>,
+    scenario: &Scenario,
+    backend: &str,
+    model: &M,
+    input: &Input,
+) -> compiler::Result<RelationalPlan<M::Backend>> {
+    let relational = match backend {
+        "clickhouse" => response_policy::apply_text_excerpts(planned.plan, model, input)?,
+        _ => planned.plan,
+    };
+    match scenario.hydration {
+        Some(_) => Ok(relational),
+        None => page::apply(relational, model, input, &planned.metadata),
     }
 }
 
@@ -428,15 +431,12 @@ fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
         for backend in scenario.physical.keys() {
             match backend.as_str() {
                 "clickhouse" => {
-                    let build =
-                        |input: &Input, options| plan::plan_clickhouse(input, remote, options);
-                    if let Err(errors) = check(&scenario, remote, backend, path, build) {
+                    if let Err(errors) = check(&scenario, remote, backend, path) {
                         failures.extend(errors);
                     }
                 }
                 "duckdb" => {
-                    let build = |input: &Input, options| plan::plan_duckdb(input, local, options);
-                    if let Err(errors) = check(&scenario, local, backend, path, build) {
+                    if let Err(errors) = check(&scenario, local, backend, path) {
                         failures.extend(errors);
                     }
                 }
@@ -832,15 +832,12 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             }],
             ..Default::default()
         };
-        let plan = plan::plan_clickhouse(
-            &input,
-            &model,
-            plan::HydrationCompileOptions {
-                dynamic,
-                path_segment_budget: budget,
-            },
-        )
-        .unwrap();
+        let options = plan::HydrationCompileOptions {
+            dynamic,
+            path_segment_budget: budget,
+        };
+        let planned = plan::plan(None, &input, None, &model, options).unwrap();
+        let plan = planned.legacy.unwrap();
         let plan::QueryPlan::Hydration(hydration) = &plan else {
             panic!("expected hydration");
         };
@@ -849,8 +846,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             HydrationPathFilter::PrefixSet(paths) => (true, paths),
         };
         assert_eq!((actual_set, paths.len()), (set, expected_paths));
-        let lowered = lower::emit(&plan, &input, None, &model).unwrap();
-        let sql = model.catalog().render(&lowered.plan).sql;
+        let sql = model.catalog().render(&planned.plan).sql;
         assert_eq!(sql.contains("arrayExists"), set);
         assert_eq!(
             sql.matches("startsWith").count(),

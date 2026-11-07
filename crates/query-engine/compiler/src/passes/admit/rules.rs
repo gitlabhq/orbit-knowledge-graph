@@ -4,10 +4,10 @@ use query_data_model::OrbitQueryModel;
 use query_data_model::plan::logical::{Comparison, Expr, Literal, Predicate};
 use query_data_model::plan::tracking::Ref;
 
-use super::facts::Fact;
 use super::node_property;
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
+use crate::logical::facts::Fact;
 
 fn sides(fact: &Fact<'_>) -> impl Iterator<Item = Expr> {
     std::iter::once(fact.left).chain(fact.right())

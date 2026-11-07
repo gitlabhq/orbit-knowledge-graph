@@ -12,7 +12,11 @@ const PATHFINDING_MEMORY_CEILING_BYTES: u64 = 15 * 1024 * 1024 * 1024;
 
 const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 1_000_000;
 
-pub fn resolve(input: &Input, relational: &ClickHousePlan, plan: &QueryPlan) -> QueryConfig {
+pub fn resolve(
+    input: &Input,
+    relational: &ClickHousePlan,
+    plan: Option<&QueryPlan>,
+) -> QueryConfig {
     let query_type: &str = input.query_type.into();
     let mut config = orbit_server_config::query::for_query_type(query_type);
 
@@ -39,10 +43,10 @@ pub fn resolve(input: &Input, relational: &ClickHousePlan, plan: &QueryPlan) -> 
         derived.use_index_for_in_with_subqueries_max_values = Some(IN_SUBQUERY_INDEX_MAX_VALUES);
     }
 
-    if plan.relations().len() >= 3 {
+    if plan.is_some_and(|plan| plan.relations().len() >= 3) {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
     }
-    if plan.is_point_lookup() && config.use_query_cache == Some(true) {
+    if plan.is_some_and(QueryPlan::is_point_lookup) && config.use_query_cache == Some(true) {
         config.use_query_cache = Some(false);
     }
     if input.query_type == QueryType::PathFinding {

@@ -164,13 +164,6 @@ pub fn emit<M: RelationalModel>(
             let stable_order = query_types::neighbors::stable_order(plan);
             (built, HashMap::from([center]), stable_order)
         }
-        QueryPlan::PathFinding(plan) => {
-            let built = catalog
-                .build(|q| query_types::pathfinding::emit(q, plan, input))
-                .map_err(rejected)?;
-            let stable_order = query_types::pathfinding::stable_order();
-            (built, HashMap::new(), stable_order)
-        }
         QueryPlan::Hydration(plan) => {
             query_types::hydration::check(plan)?;
             let built = catalog

@@ -87,6 +87,10 @@ impl<B: StorageBackend> Catalog<B> {
         self.stores()
             .find(|(store, _)| store.source(entity).is_some())
     }
+
+    pub fn source(&self, entity: EntityId) -> Option<(&Store, &Source)> {
+        self.sources(entity).next()
+    }
 }
 
 impl Model {

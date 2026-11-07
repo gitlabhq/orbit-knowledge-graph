@@ -776,6 +776,10 @@ where
         self.bindings.edge_tables(&relationships)
     }
 
+    fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String> {
+        self.bindings.edge_tables(relationships)
+    }
+
     fn relationship_tables_between(
         &self,
         relationships: &[String],

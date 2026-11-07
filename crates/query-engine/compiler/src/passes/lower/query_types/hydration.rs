@@ -185,7 +185,7 @@ mod tests {
     use super::*;
     use crate::input::{ColumnSelection, Input, InputNode, QueryType};
     use crate::passes::codegen::ParamValue;
-    use crate::passes::plan::{HydrationCompileOptions, plan_clickhouse};
+    use crate::passes::plan::{HydrationCompileOptions, plan};
     use query_data_model::ClickHouseDataModel;
     use std::collections::HashMap;
     use std::sync::LazyLock;
@@ -193,7 +193,7 @@ mod tests {
     static MODEL: LazyLock<ClickHouseDataModel> =
         LazyLock::new(|| ClickHouseDataModel::embedded().unwrap());
 
-    fn plan(columns: Vec<&str>, node_ids: Vec<i64>, traversal_paths: Vec<&str>) -> InputNode {
+    fn node(columns: Vec<&str>, node_ids: Vec<i64>, traversal_paths: Vec<&str>) -> InputNode {
         InputNode {
             id: "hydrate".into(),
             entity: Some("MergeRequest".into()),
@@ -219,13 +219,8 @@ mod tests {
             dynamic,
             path_segment_budget: None,
         };
-        let plan = plan_clickhouse(&input, &MODEL, options).unwrap();
-        let crate::passes::plan::QueryPlan::Hydration(plan) = &plan else {
-            panic!("expected a hydration plan");
-        };
-        let catalog = MODEL.catalog();
-        let built = catalog.build(|q| super::emit(q, plan)).unwrap();
-        let rendered = catalog.render(&built);
+        let planned = plan(None, &input, None, &*MODEL, options).unwrap();
+        let rendered = MODEL.catalog().render(&planned.plan);
         (rendered.sql, rendered.parameters)
     }
 
@@ -236,7 +231,7 @@ mod tests {
             .collect();
         let node = InputNode {
             traversal_paths: paths.clone(),
-            ..plan(vec!["title"], vec![1], vec![])
+            ..node(vec!["title"], vec![1], vec![])
         };
 
         let (sql, params) = render(&[node], true);
@@ -272,7 +267,7 @@ mod tests {
             .collect();
         let node = InputNode {
             traversal_paths: paths,
-            ..plan(vec!["title"], vec![1], vec![])
+            ..node(vec!["title"], vec![1], vec![])
         };
 
         let (sql, _) = render(&[node], false);
@@ -287,7 +282,7 @@ mod tests {
     #[test]
     fn tp_filter_precedes_id_filter() {
         for dynamic in [true, false] {
-            let (sql, _) = render(&[plan(vec!["title"], vec![1], vec!["1/9970/"])], dynamic);
+            let (sql, _) = render(&[node(vec!["title"], vec![1], vec!["1/9970/"])], dynamic);
             let tp_pos = sql.find("startsWith").unwrap();
             let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();
             assert!(

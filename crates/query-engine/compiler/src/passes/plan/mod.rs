@@ -1,13 +1,16 @@
-//! Planning turns a validated query into a `QueryPlan`: the backend-neutral reads, joins, and
-//! outputs that lowering renders as SQL.
+//! Planning turns a validated query into a relational plan. Path finding reads the logical plan and
+//! builds through the catalog in one step.
 //!
+//! The other query types still plan from `Input` into a `QueryPlan` that `lower` renders.
 //! `query_types/` picks the planner for the query type. Traversal and aggregation build a `pattern`
 //! (nodes, relations, conditions) whose steps assemble a `graph::RelationGraph`; `reuse` decides which
 //! relations lowering materializes; `filters` and `predicates` are the shared condition vocabulary.
-//! Neighbors, path finding, and hydration keep their own hand-written shapes.
+//! Neighbors and hydration keep their own hand-written shapes.
 
 pub(crate) mod filters;
 pub mod graph;
+mod node;
+mod path_finding;
 mod pattern;
 pub mod predicates;
 pub mod query_types;
@@ -20,13 +23,17 @@ pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedP
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::logical::Query;
+use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
+use crate::passes::lower::{self, LoweredMetadata};
+use crate::tp_bounds::TpBounds;
 
 pub use filters::BoundFilter;
 pub use pattern::{EdgeRelation, NodePlan};
 pub use query_types::{
     EdgeTableConfig, aggregation::Aggregation, hydration::Hydration,
     hydration::HydrationCompileOptions, hydration::HydrationNodePlan, neighbors::Neighbors,
-    pathfinding::PathFinding, traversal::Traversal,
+    traversal::Traversal,
 };
 
 pub struct Plan<T> {
@@ -53,7 +60,6 @@ pub enum QueryPlan {
     Traversal(Plan<Traversal>),
     Aggregation(Plan<Aggregation>),
     Neighbors(Plan<Neighbors>),
-    PathFinding(Plan<PathFinding>),
     Hydration(Plan<Hydration>),
 }
 
@@ -107,23 +113,47 @@ pub(crate) fn sort_key<'m>(
         })
 }
 
-pub fn plan_clickhouse(
-    input: &Input,
-    model: &query_data_model::ClickHouseDataModel,
-    hydration_options: HydrationCompileOptions,
-) -> Result<QueryPlan> {
-    plan(input, model, hydration_options)
+pub struct Planned<P> {
+    pub plan: P,
+    pub metadata: LoweredMetadata,
+    pub legacy: Option<QueryPlan>,
 }
 
-pub fn plan_duckdb(
+pub fn plan<M: RelationalModel>(
+    query: Option<Query<'_>>,
     input: &Input,
-    model: &query_data_model::DuckDbDataModel,
+    tp_bounds: Option<&TpBounds>,
+    model: &M,
     hydration_options: HydrationCompileOptions,
-) -> Result<QueryPlan> {
-    plan(input, model, hydration_options)
+) -> Result<Planned<PlanOf<M>>> {
+    if let Some(query) = query
+        && query.kind() == QueryType::PathFinding
+    {
+        let path = path_finding::PathFinding::new(query, model)?;
+        let plan = model
+            .catalog()
+            .build(|q| path_finding::emit(q, &path))
+            .map_err(rejected)?;
+        let metadata = LoweredMetadata {
+            stable_order: path_finding::stable_order(),
+            ..LoweredMetadata::default()
+        };
+        return Ok(Planned {
+            plan,
+            metadata,
+            legacy: None,
+        });
+    }
+    let legacy = legacy(input, model, hydration_options)?;
+    let lowered = lower::emit(&legacy, input, tp_bounds, model)?;
+    Ok(Planned {
+        plan: lowered.plan,
+        metadata: lowered.metadata,
+        legacy: Some(legacy),
+    })
 }
 
-fn plan<M>(
+fn legacy<M>(
     input: &Input,
     model: &M,
     hydration_options: HydrationCompileOptions,
@@ -138,7 +168,9 @@ where
         }
         QueryType::Neighbors => QueryPlan::Neighbors(query_types::neighbors::plan(input, model)?),
         QueryType::PathFinding => {
-            QueryPlan::PathFinding(query_types::pathfinding::plan(input, model)?)
+            return Err(QueryError::PipelineInvariant(
+                "path finding plans from the logical plan".into(),
+            ));
         }
         QueryType::Hydration => QueryPlan::Hydration(query_types::hydration::plan(
             input,

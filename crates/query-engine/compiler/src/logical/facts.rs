@@ -3,14 +3,15 @@ use query_data_model::plan::logical::{
 };
 use query_data_model::plan::tracking::Ref;
 
-use crate::logical::{Binding, Query, binding};
+use super::{Binding, Query, binding};
 
 #[derive(Clone, Copy)]
-pub(super) struct Fact<'p> {
+pub struct Fact<'p> {
     pub leaf: &'p Predicate,
     pub left: Expr,
     pub attached: bool,
     pub negated: bool,
+    pub complemented: bool,
     pub comparison: Option<Comparison>,
 }
 
@@ -48,7 +49,7 @@ impl<'p> Fact<'p> {
     }
 }
 
-pub(super) fn facts<'p>(query: Query<'p>) -> Vec<Fact<'p>> {
+pub fn facts<'p>(query: Query<'p>) -> Vec<Fact<'p>> {
     let mut facts = Vec::new();
     for (_, operation) in query.operations() {
         let LogicalOperation::Filter(predicate) = operation else {
@@ -88,20 +89,21 @@ fn fact(leaf: &Predicate, negated: bool, top: bool) -> Option<Fact<'_>> {
         left,
         attached: top && (!negated || leaf.complementable()),
         negated: negated && !complemented,
+        complemented,
         comparison,
     };
     fact.attached &= !fact.compares_bindings();
     Some(fact)
 }
 
-pub(super) struct Anchor<'p> {
+pub struct Anchor<'p> {
     pub binding: Binding<'p>,
-    pub pinned: bool,
+    pub pinned: Vec<i64>,
     pub range: Option<(i64, i64)>,
     pub filters: Vec<Fact<'p>>,
 }
 
-pub(super) fn anchors<'p>(query: Query<'p>, facts: &[Fact<'p>]) -> Vec<Anchor<'p>> {
+pub fn anchors<'p>(query: Query<'p>, facts: &[Fact<'p>]) -> Vec<Anchor<'p>> {
     query
         .bindings()
         .into_iter()
@@ -117,10 +119,7 @@ fn anchor<'p>(query: Query<'p>, binding: Binding<'p>, facts: &[Fact<'p>]) -> Anc
         .collect();
     let is_id = |fact: &Fact<'_>| matches!(fact.left, Expr::Property { property, .. } if query.property_name(property) == "id");
     let pin = filters.iter().position(|fact| is_id(fact) && pins(*fact));
-    let pinned = pin.is_some();
-    if let Some(index) = pin {
-        filters.remove(index);
-    }
+    let pinned = pin.map_or_else(Vec::new, |index| pinned_ids(filters.remove(index)));
     let ids: Vec<usize> = (0..filters.len()).filter(|i| is_id(&filters[*i])).collect();
     let mut range = None;
     if let [a, b] = ids[..] {
@@ -154,6 +153,16 @@ fn anchor<'p>(query: Query<'p>, binding: Binding<'p>, facts: &[Fact<'p>]) -> Anc
         range,
         filters,
     }
+}
+
+fn pinned_ids(fact: Fact<'_>) -> Vec<i64> {
+    fact.literals()
+        .iter()
+        .filter_map(|literal| match literal {
+            Literal::Int(id) => Some(*id),
+            _ => None,
+        })
+        .collect()
 }
 
 fn pins(fact: Fact<'_>) -> bool {

@@ -6,7 +6,7 @@ use crate::implementations::duckdb::DuckDb;
 use crate::{
     DataModelError, DenormalizedCatalog, Entity, EntityAuthConfig, EntityId, ForeignKey,
     GraphCatalog, MaterializedJoin, Model, Packages, PathColumn, Property, PropertyId, QueryModel,
-    RelationshipVariant,
+    RelationshipId, RelationshipVariant,
 };
 
 pub type ClickHouseDataModel = QueryModel<ClickHouse>;
@@ -136,6 +136,7 @@ pub trait OrbitQueryModel {
     fn default_edge_table(&self) -> &str;
     fn denormalized(&self) -> &DenormalizedCatalog;
     fn relationship_tables(&self, relationships: &[String]) -> Vec<String>;
+    fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String>;
     fn relationship_tables_between(
         &self,
         relationships: &[String],

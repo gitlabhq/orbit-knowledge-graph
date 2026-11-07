@@ -38,7 +38,7 @@ pub(crate) fn parameter_type(data_type: Option<&ontology::DataType>) -> SqlType 
     }
 }
 
-fn epoch<B: RelationalBackend>(data_type: ontology::DataType) -> Expr {
+pub(crate) fn epoch<B: RelationalBackend>(data_type: ontology::DataType) -> Expr {
     let value = match data_type {
         ontology::DataType::Date => "1970-01-01",
         _ => "1970-01-01 00:00:00",

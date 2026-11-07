@@ -50,7 +50,6 @@ operators! {
     Offset => "Offset",
     Distinct => "Distinct",
     Neighbors => "Neighbors",
-    PathFinding => "PathFinding",
     Hydration => "Hydration",
     Insert => "Insert",
 }

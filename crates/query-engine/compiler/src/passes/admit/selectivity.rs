@@ -1,10 +1,10 @@
 use query_data_model::plan::logical::LogicalOperation;
 use query_data_model::plan::tracking::Ref;
 
-use super::facts::{Anchor, Fact};
 use crate::error::{QueryError, Result};
 use crate::input::QueryType;
 use crate::logical::Query;
+use crate::logical::facts::{Anchor, Fact};
 use crate::query_limits::{MAX_ID_RANGE_SPAN, MAX_PATH_ANCHOR_RANGE};
 
 pub(super) fn selectivity(
@@ -69,13 +69,13 @@ fn span(anchor: &Anchor<'_>) -> Option<i64> {
 }
 
 fn anchored(anchor: &Anchor<'_>) -> bool {
-    anchor.pinned
+    !anchor.pinned.is_empty()
         || !anchor.filters.is_empty()
         || span(anchor).is_some_and(|span| span <= MAX_PATH_ANCHOR_RANGE)
 }
 
 fn selective(anchor: &Anchor<'_>) -> bool {
-    anchor.pinned
+    !anchor.pinned.is_empty()
         || anchor.filters.iter().any(|fact| fact.right().is_none())
         || span(anchor).is_some_and(|span| span <= MAX_ID_RANGE_SPAN)
 }

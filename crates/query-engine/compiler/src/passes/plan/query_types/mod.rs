@@ -1,10 +1,9 @@
-//! One planner per query type. Traversal and aggregation share the pattern planner; neighbors, path
-//! finding, and hydration have their own shapes. `EdgeTableConfig` is the edge routing the last two share.
+//! One planner per query type. Traversal and aggregation share the pattern planner; neighbors and
+//! hydration have their own shapes. `EdgeTableConfig` is the edge routing of neighbors.
 
 pub mod aggregation;
 pub mod hydration;
 pub mod neighbors;
-pub mod pathfinding;
 pub mod traversal;
 
 use std::collections::BTreeSet;

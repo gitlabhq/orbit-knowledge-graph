@@ -3,7 +3,6 @@
 
 #[cfg(test)]
 mod contract;
-mod facts;
 mod limits;
 mod rules;
 mod selectivity;
@@ -14,7 +13,7 @@ use query_data_model::plan::logical::{Expr, Predicate, TimeUnit};
 use crate::error::{QueryError, Result};
 use crate::input::QueryType;
 use crate::logical::Query;
-use facts::{Anchor, Fact};
+use crate::logical::facts::{self, Anchor, Fact};
 
 pub fn admit(query: Query<'_>, model: &impl OrbitQueryModel, selectivity: bool) -> Result<()> {
     let facts = facts::facts(query);
@@ -68,7 +67,7 @@ fn filters(
             }
             let pinned = anchors
                 .iter()
-                .any(|anchor| anchor.binding.name == alias && anchor.pinned);
+                .any(|anchor| anchor.binding.name == alias && !anchor.pinned.is_empty());
             if !pinned {
                 return Err(QueryError::Validation(format!(
                     "filter on \"{property}\" for {entity}: virtual columns can only be \
@@ -113,7 +112,7 @@ fn buckets(query: Query<'_>, anchors: &[Anchor<'_>]) -> Result<()> {
         let filtered = anchor.filters.iter().any(|fact| {
             matches!(fact.left, Expr::Property { property: filtered, .. } if filtered == *property)
         });
-        if !anchor.pinned && !filtered {
+        if anchor.pinned.is_empty() && !filtered {
             let property = query.property_name(*property);
             let unit: &str = unit.into();
             return Err(QueryError::Validation(format!(

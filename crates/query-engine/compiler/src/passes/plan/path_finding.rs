@@ -1,8 +1,6 @@
-//! Generates forward + backward frontier CTEs (UNION ALL of depth arms),
-//! then combines via direct (depth-1) + intersection (forward meets backward).
-//! Dedup is baked into anchor CTEs.
-
-use std::collections::HashMap;
+//! Path finding: forward and backward frontier CTEs (a UNION ALL of depth arms), combined as the
+//! direct depth-1 paths plus the paths where the two frontiers meet. Anchor CTEs bound and dedup
+//! the filtered endpoints.
 
 use ontology::constants::*;
 use orbit_utils::query_types::SqlType;
@@ -10,20 +8,80 @@ use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, Function, JoinKind, Order, Relation, RelationalBuilder, Subquery,
 };
+use query_data_model::plan::logical::LogicalOperation;
 use serde_json::Value;
 
+use super::node::Node;
 use crate::constants::*;
-use crate::input::*;
+use crate::error::{QueryError, Result};
+use crate::logical::Query;
+use crate::logical::facts::{anchors, facts};
+use crate::passes::codegen::RelationalModel;
 use crate::passes::lower::Term;
 use crate::passes::lower::build::expr::{id_range, ids, in_list, relationship_kinds};
-use crate::passes::lower::build::sources::{
-    Scope, bound_filter, columns, dedup, denorm_tags, final_edge_scan, select,
-};
+use crate::passes::lower::build::sources::{Scope, columns, dedup, final_edge_scan, select};
 use crate::passes::lower::build::{
     Built, and, binary, call, col, computed, conjoin, eq, filtered, int, membership, stored, string,
 };
 use crate::passes::plan::predicates::Column;
-use crate::passes::plan::{NodePlan, PathFinding, Plan};
+
+pub(crate) struct PathFinding<'p> {
+    start: Node<'p>,
+    end: Node<'p>,
+    max_depth: u32,
+    tables: Vec<String>,
+    kinds: Vec<String>,
+    scoped: bool,
+    limit: u32,
+}
+
+impl<'p> PathFinding<'p> {
+    pub fn new<M: RelationalModel>(query: Query<'p>, model: &'p M) -> Result<Self> {
+        let (from, to, relationships, max_depth) = query
+            .operations()
+            .find_map(|(_, operation)| match operation {
+                LogicalOperation::Shortest {
+                    from,
+                    to,
+                    relationships,
+                    max_depth,
+                } => Some((*from, *to, relationships, *max_depth)),
+                _ => None,
+            })
+            .ok_or_else(|| QueryError::Lowering("path config missing".into()))?;
+        let facts = facts(query);
+        let mut anchors = anchors(query, &facts);
+        let mut node = |output| {
+            let index = anchors
+                .iter()
+                .position(|anchor| anchor.binding.output == output)
+                .ok_or_else(|| QueryError::Lowering("path endpoint is not a binding".into()))?;
+            Ok::<_, QueryError>(Node::new(query, anchors.swap_remove(index), model))
+        };
+        let (start, end) = (node(from)?, node(to)?);
+        let graph = query.model.graph();
+        let kinds = relationships
+            .iter()
+            .map(|relationship| graph.relationship(*relationship).name.clone())
+            .collect();
+        let (rows, _) = query
+            .limit()
+            .ok_or_else(|| QueryError::PipelineInvariant("the surfaces always limit".into()))?;
+        Ok(Self {
+            scoped: start.has_traversal_path && end.has_traversal_path,
+            start,
+            end,
+            max_depth,
+            tables: model.edge_tables(relationships),
+            kinds,
+            limit: u32::try_from(rows).unwrap_or(u32::MAX),
+        })
+    }
+
+    fn backward_depth(&self) -> u32 {
+        self.max_depth / 2
+    }
+}
 
 pub(crate) fn stable_order() -> Vec<Term> {
     let text = |column: &str| Term::Text(Column::new(paths_alias(), column));
@@ -88,19 +146,18 @@ fn anchor_filter<B: RelationalBackend>(
 fn anchor<B: RelationalBackend>(
     q: &mut RelationalBuilder<'_, B>,
     bodies: &mut Bodies,
-    node: &NodePlan,
+    node: &Node<'_>,
     force_cte: bool,
 ) -> Built<Anchor> {
-    let alias = &node.alias;
-    let table = node.table.as_deref().unwrap_or("");
+    let (alias, table) = (node.alias, node.table);
     if !force_cte && node.is_id_pinned_only() {
         return Ok(Anchor {
-            filter: (!node.node_ids.is_empty()).then(|| AnchorFilter::Ids(node.node_ids.clone())),
+            filter: Some(AnchorFilter::Ids(node.pinned.clone())),
             shared: None,
             has_tp: false,
         });
     }
-    if node.node_ids.is_empty() && node.filters.is_empty() && node.id_range.is_none() {
+    if node.pinned.is_empty() && node.filters.is_empty() && node.range.is_none() {
         return Ok(Anchor {
             filter: None,
             shared: None,
@@ -118,16 +175,16 @@ fn anchor<B: RelationalBackend>(
         inner.push(DELETED_COLUMN);
         let (rows, live) = dedup(q, alias, table, &inner, |scope| {
             let mut parts = Vec::new();
-            for (property, filter) in &node.filters {
-                parts.push(bound_filter::<B>(scope, alias, property, filter)?);
+            for filter in &node.filters {
+                parts.push(filter.lower::<B>(scope, alias)?);
             }
-            if !node.node_ids.is_empty() {
+            if !node.pinned.is_empty() {
                 let id = col(scope, alias, DEFAULT_PRIMARY_KEY)?;
-                parts.push(ids::<B>(id, &node.node_ids));
+                parts.push(ids::<B>(id, &node.pinned));
             }
-            if let Some(range) = &node.id_range {
+            if let Some((start, end)) = node.range {
                 let id = col(scope, alias, DEFAULT_PRIMARY_KEY)?;
-                parts.push(id_range(id, range.start, range.end));
+                parts.push(id_range(id, start, end));
             }
             Ok(parts)
         })?;
@@ -192,16 +249,12 @@ enum Way {
 }
 
 struct Frontier<'a> {
-    rel_type_filter: &'a Option<Vec<String>>,
+    kinds: &'a [String],
     anchor_entity: &'a str,
     edge_tables: &'a [String],
     scope: Option<&'a str>,
     include_tp: bool,
     anchor: &'a Anchor,
-    tags: &'a [(String, crate::passes::plan::BoundFilter)],
-    tag_direction: query_data_model::DenormalizedDirection,
-    denormalized:
-        &'a HashMap<query_data_model::DenormalizedKey, query_data_model::DenormalizedProperty>,
 }
 
 fn frontier<B: RelationalBackend>(
@@ -242,7 +295,7 @@ fn frontier_arm<B: RelationalBackend>(
             TARGET_KIND_COLUMN,
         ),
     };
-    let kinds = options.rel_type_filter.as_deref().unwrap_or(&[]);
+    let kinds = options.kinds;
     let first = hop_alias(1);
     let last = hop_alias(depth);
     let mut rows = final_edge_scan(q, options.edge_tables, &first)?;
@@ -294,7 +347,6 @@ fn frontier_arm<B: RelationalBackend>(
         let path = col(&scope, &first, TRAVERSAL_PATH_COLUMN)?;
         predicates.push(bodies.member(q, path, shared, TRAVERSAL_PATH_COLUMN)?);
     }
-    predicates.extend(tags(&scope, &first, options)?);
     let range = match way {
         Way::Forward => 1..=depth,
         Way::Backward => 1..=depth.saturating_sub(1),
@@ -341,70 +393,43 @@ fn frontier_arm<B: RelationalBackend>(
     select(q, rows, items)
 }
 
-fn tags(scope: &Scope<'_>, alias: &str, options: &Frontier<'_>) -> Built<Vec<Expr>> {
-    let mut found = Vec::new();
-    for (_, filter) in options.tags {
-        let Some(property) = filter.property else {
-            continue;
-        };
-        let key = query_data_model::DenormalizedKey {
-            property,
-            direction: options.tag_direction,
-        };
-        if let Some(facts) = options.denormalized.get(&key)
-            && let Some(tags) = denorm_tags(
-                scope,
-                alias,
-                &facts.edge_column,
-                &facts.tag_key,
-                &filter.filter,
-            )?
-        {
-            found.push(tags);
-        }
-    }
-    Ok(found)
-}
-
 pub(crate) fn emit<B: RelationalBackend>(
     q: &mut RelationalBuilder<'_, B>,
-    plan: &Plan<PathFinding>,
-    input: &Input,
+    path: &PathFinding<'_>,
 ) -> Built<Relation> {
-    let pf = &plan.operation;
-    let start = &plan.nodes[&pf.start];
-    let end = &plan.nodes[&pf.end];
+    let (start, end) = (&path.start, &path.end);
     let mut bodies = Bodies::default();
-    let start_anchor = anchor(q, &mut bodies, start, pf.scoped_by_tp)?;
-    let end_anchor = anchor(q, &mut bodies, end, pf.scoped_by_tp)?;
+    let start_anchor = anchor(q, &mut bodies, start, path.scoped)?;
+    let end_anchor = anchor(q, &mut bodies, end, path.scoped)?;
     let scope = scope_cte(q, &mut bodies, &start_anchor, &end_anchor)?;
-    let start_entity = start.entity.as_deref().unwrap_or("");
-    let end_entity = end.entity.as_deref().unwrap_or("");
+    let (start_entity, end_entity) = (start.entity, end.entity);
     let options = Frontier {
-        rel_type_filter: &pf.edge.rel_type_filter,
+        kinds: &path.kinds,
         anchor_entity: start_entity,
-        edge_tables: &pf.edge.tables,
+        edge_tables: &path.tables,
         scope: scope.as_deref(),
-        include_tp: pf.scoped_by_tp,
+        include_tp: path.scoped,
         anchor: &start_anchor,
-        tags: &start.filters,
-        tag_direction: query_data_model::DenormalizedDirection::Source,
-        denormalized: &plan.denormalized,
     };
+    let backward_depth = path.backward_depth();
     let forward = q.cte(forward_cte(), false, |q| {
-        frontier(q, &bodies, pf.forward_depth, Way::Forward, &options)
+        frontier(
+            q,
+            &bodies,
+            path.max_depth - backward_depth,
+            Way::Forward,
+            &options,
+        )
     })?;
-    let backward = match pf.backward_depth > 0 {
+    let backward = match backward_depth > 0 {
         true => {
             let options = Frontier {
                 anchor_entity: end_entity,
                 anchor: &end_anchor,
-                tags: &end.filters,
-                tag_direction: query_data_model::DenormalizedDirection::Target,
                 ..options
             };
             Some(q.cte(backward_cte(), false, |q| {
-                frontier(q, &bodies, pf.backward_depth, Way::Backward, &options)
+                frontier(q, &bodies, backward_depth, Way::Backward, &options)
             })?)
         }
         false => None,
@@ -429,10 +454,10 @@ pub(crate) fn emit<B: RelationalBackend>(
         ];
         let reached = col(&scope, forward_cte(), end_node_column())?;
         if end.is_id_pinned_only() {
-            let values = end.node_ids.iter().map(|id| Value::from(*id)).collect();
+            let values = end.pinned.iter().map(|id| Value::from(*id)).collect();
             predicates.extend(in_list::<B>(reached, SqlType::Int64, values));
-        } else if !end.filters.is_empty() || end.id_range.is_some() {
-            let name = node_filter_cte(&end.alias);
+        } else if !end.filters.is_empty() || end.range.is_some() {
+            let name = node_filter_cte(end.alias);
             predicates.push(bodies.member(q, reached, &name, DEFAULT_PRIMARY_KEY)?);
         }
         let items = vec![
@@ -468,7 +493,7 @@ pub(crate) fn emit<B: RelationalBackend>(
         let Some(backward) = &backward else {
             return Ok(direct);
         };
-        let intersection = intersection(q, plan, &forward, backward, start_entity, end_entity)?;
+        let intersection = intersection(q, path, &forward, backward)?;
         q.union(vec![direct, intersection])
     })?;
     let rows = q.read(&paths, Some(paths_alias()))?;
@@ -491,18 +516,17 @@ pub(crate) fn emit<B: RelationalBackend>(
             q.limit_by(rows, 1, by)?
         }
     };
-    let rows = q.limit(rows, Some(input.limit), None)?;
+    let rows = q.limit(rows, Some(path.limit), None)?;
     q.select(rows, outputs)
 }
 
 fn intersection<B: RelationalBackend>(
     q: &mut RelationalBuilder<'_, B>,
-    plan: &Plan<PathFinding>,
+    path: &PathFinding<'_>,
     forward: &Subquery,
     backward: &Subquery,
-    start_entity: &str,
-    end_entity: &str,
 ) -> Built<Relation> {
+    let (start_entity, end_entity) = (path.start.entity, path.end.entity);
     let (f, b) = (forward_cte(), backward_cte());
     let left = q.read(forward, Some(f))?;
     let right = q.read(backward, Some(b))?;
@@ -517,7 +541,7 @@ fn intersection<B: RelationalBackend>(
             col(&scope, b, end_kind_column())?,
         ),
     );
-    if plan.operation.scoped_by_tp {
+    if path.scoped {
         on = and(
             on,
             eq(
@@ -575,7 +599,7 @@ fn intersection<B: RelationalBackend>(
             ),
         ),
     ];
-    let bound = binary(BinaryOp::Le, depth()?, int(plan.operation.max_depth as i64));
+    let bound = binary(BinaryOp::Le, depth()?, int(i64::from(path.max_depth)));
     let rows = filtered(q, rows, vec![Some(bound)])?;
     select(q, rows, items)
 }

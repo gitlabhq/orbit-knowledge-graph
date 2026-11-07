@@ -151,32 +151,6 @@ pub fn physical(plan: &QueryPlan) -> Tree {
                 vec![planned_node(&plan.nodes[&operation.center])],
             )
         }
-        QueryPlan::PathFinding(plan) => {
-            let operation = &plan.operation;
-            Tree::node(
-                Operator::PathFinding,
-                format!(
-                    "{}->{} depth={} forward={} backward={} scoped={} tables=[{}] relationships=[{}]",
-                    operation.start,
-                    operation.end,
-                    operation.max_depth,
-                    operation.forward_depth,
-                    operation.backward_depth,
-                    operation.scoped_by_tp,
-                    operation.edge.tables.join(", "),
-                    operation
-                        .edge
-                        .rel_type_filter
-                        .as_deref()
-                        .unwrap_or_default()
-                        .join(", ")
-                ),
-                vec![
-                    planned_node(&plan.nodes[&operation.start]),
-                    planned_node(&plan.nodes[&operation.end]),
-                ],
-            )
-        }
         QueryPlan::Hydration(plan) => Tree::node(
             Operator::Hydration,
             "",
