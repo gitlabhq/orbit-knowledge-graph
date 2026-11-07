@@ -14,7 +14,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter NOT (d.id IN [3, 4]), d._deleted = false (Deduplicate LimitBy ... (Filter d.id >= 1, d.id <= 10 (_))))
+            - (Filter NOT(d.id IN [3, 4]), d._deleted = false (Bind d (Deduplicate LimitBy ... (Sort d.traversal_path, d.project_id, d.branch, d.id, d._version DESC (Project * (Filter d.id >= 1, d.id <= 10 (_)))))))
 
   - name: A complemented NOT becomes an ordinary node filter
     query:

@@ -18,9 +18,10 @@ physical:
   clickhouse:
     planned:
       exact: |
-        (Project f.id AS f_id, f.path AS f_path
-          (Filter f.language = 'rust', f._deleted = false
-            (Deduplicate Final (Scan Table(gl_file) AS f))))
+        (Limit 10
+          (Project f.id AS f_id, f.path AS f_path
+            (Filter f.language = 'rust', f._deleted = false
+              (Bind f (Project * (Deduplicate Final (Scan Table(gl_file) AS f)))))))
     emitted:
       exact: |
         (Limit 11
@@ -30,6 +31,7 @@ physical:
   duckdb:
     planned:
       exact: |
-        (Project f.id AS f_id, f.path AS f_path
-          (Filter f.language = 'rust', f._deleted = false
-            (Deduplicate Final (Scan Table(gl_file) AS f))))
+        (Limit 10
+          (Project f.id AS f_id, f.path AS f_path
+            (Filter f.language = 'rust'
+              (Bind f (Project * (Scan Table(gl_file) AS f))))))

@@ -12,9 +12,9 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter mr.source_branch = 'feature-x', mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
+            - (Filter mr.source_branch = 'feature-x', Lower(mr.source_branch) = Lower('feature-x'), mr._deleted = false (Bind mr (Project * (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
           reject:
-            - (Filter (mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))
+            - (Filter Tuple(mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate LimitBy ... (_))
           ctes:
             absent: true
@@ -32,9 +32,9 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter j._deleted = false (Deduplicate LimitBy j.traversal_path, j.id (Filter j.name = 'build' (Scan Table(gl_job) AS j))))
+            - (Filter j._deleted = false (Bind j (Deduplicate LimitBy 1 BY j.traversal_path, j.id (Sort j.traversal_path, j.id, j._version DESC (Project * (Filter j.name = 'build', Lower(j.name) = Lower('build') (Scan Table(gl_job) AS j)))))))
           reject:
-            - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
+            - (Filter Tuple(j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate Final (Scan Table(gl_job) AS j))
 
   - name: Low-selectivity node filters keep FINAL
@@ -49,7 +49,7 @@ cases:
     physical:
       clickhouse:
         planned:
-          expect: ["(Filter j.status = 'failed', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
+          expect: ["(Filter j.status = 'failed', j._deleted = false (Bind j (Project * (Deduplicate Final (Scan Table(gl_job) AS j)))))"]
           reject: ["(Deduplicate LimitBy ... (_))"]
 
   - name: An unpinned range on a high fan out child reads once with FINAL
@@ -65,9 +65,9 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter j.finished_at >= '2026-10-10', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))
+            - (Filter j.finished_at >= '2026-10-10', j.finished_at != '1970-01-01 00:00:00', j._deleted = false (Bind j (Project * (Deduplicate Final (Scan Table(gl_job) AS j)))))
           reject:
-            - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
+            - (Filter Tuple(j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate LimitBy ... (_))
           ctes:
             absent: true
@@ -86,7 +86,7 @@ cases:
         planned:
           expect:
             - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.finished_at >= '2026-10-10', j.pipeline_id = 7, ... (Scan Table(gl_job) AS j)))
-            - (Deduplicate LimitBy j.traversal_path, j.id (Filter j.pipeline_id = 7, (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
+            - (Deduplicate LimitBy 1 BY j.traversal_path, j.id (Sort j.traversal_path, j.id, j._version DESC (Project * (Filter j.pipeline_id = 7, Tuple(j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))))
           reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
 
   - name: A changing-column filter on a high fan out child pinned by id keeps find then check
@@ -103,7 +103,7 @@ cases:
         planned:
           expect:
             - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.finished_at >= '2026-10-10', ... (Scan Table(gl_job) AS j)))
-            - (Deduplicate LimitBy j.traversal_path, j.id (Filter ..., (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
+            - (Deduplicate LimitBy 1 BY j.traversal_path, j.id (Sort j.traversal_path, j.id, j._version DESC (Project * (Filter ..., Tuple(j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))))
           reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
 
   - name: A changing-column filter on a high fan out child reached through its parent keeps find then check
@@ -120,7 +120,7 @@ cases:
         planned:
           expect:
             - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.finished_at >= '2026-10-10', ... (Scan Table(gl_job) AS j)))
-            - (Deduplicate LimitBy j.traversal_path, j.id (Filter ..., (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
+            - (Deduplicate LimitBy 1 BY j.traversal_path, j.id (Sort j.traversal_path, j.id, j._version DESC (Project * (Filter ..., Tuple(j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))))
           reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
 
   - name: A text match on a high fan out child pinned by its polymorphic parent keeps find then check
@@ -136,8 +136,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Project n.traversal_path AS traversal_path, n.id AS id (Filter contains(n.note, 'abc'), n.noteable_id = 5, ... (Scan Table(gl_note) AS n)))
-            - (Deduplicate LimitBy n.traversal_path, n.id (Filter n.noteable_id = 5, (n.traversal_path, n.id) IN ?.(traversal_path, id) (Scan Table(gl_note) AS n)))
+            - (Project n.traversal_path AS traversal_path, n.id AS id (Filter Contains(Lower(n.note), Lower('abc')), n.noteable_id = 5, ... (Scan Table(gl_note) AS n)))
+            - (Deduplicate LimitBy 1 BY n.traversal_path, n.id (Sort n.traversal_path, n.id, n._version DESC (Project * (Filter n.noteable_id = 5, Tuple(n.traversal_path, n.id) IN ?.(traversal_path, id) (Scan Table(gl_note) AS n)))))
           reject: ["(Deduplicate Final (Scan Table(gl_note) AS n))"]
 
   - name: A changing-column filter on a pinned read of an ordinary table reads once with FINAL
@@ -153,10 +153,10 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter mr.source_branch = 'feature-x', mr._deleted = false (_))
+            - (Filter mr.source_branch = 'feature-x', Lower(mr.source_branch) = Lower('feature-x'), mr._deleted = false (_))
             - (Deduplicate Final (Scan Table(gl_merge_request) AS mr))
           reject:
-            - (Filter (mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))
+            - (Filter Tuple(mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate LimitBy ... (_))
           ctes:
             absent: true
@@ -174,9 +174,9 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter j._deleted = false (Deduplicate LimitBy j.traversal_path, j.id (Filter j.created_at >= '2026-10-10' (Scan Table(gl_job) AS j))))
+            - (Filter j._deleted = false (Bind j (Deduplicate LimitBy 1 BY j.traversal_path, j.id (Sort j.traversal_path, j.id, j._version DESC (Project * (Filter j.created_at >= '2026-10-10', j.created_at != '1970-01-01 00:00:00' (Scan Table(gl_job) AS j)))))))
           reject:
-            - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
+            - (Filter Tuple(j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate Final (Scan Table(gl_job) AS j))
 
   - name: Namespace anchors keep FINAL by themselves
@@ -191,7 +191,7 @@ cases:
     physical:
       clickhouse:
         planned:
-          expect: ["(Filter j.project_id = 1000, j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
+          expect: ["(Filter StartsWith(j.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 1000)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 1000) = '0/'), j.project_id = 1000, j._deleted = false (Bind j (Project * (Deduplicate Final (Scan Table(gl_job) AS j)))))"]
           reject: ["(Deduplicate LimitBy ... (_))"]
 
   - name: A text match on a changing column keeps FINAL instead of a keyed re-read
@@ -209,8 +209,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter mr.project_id = 1000, contains(mr.title, 'migration'), ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
-          reject: ["(Filter (mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))"]
+            - (Filter mr.project_id = 1000, Contains(Lower(mr.title), Lower('migration')), ... (Bind mr (Project * (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
+          reject: ["(Filter Tuple(mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))"]
 
   - name: A text match beside a key range still finds then checks
     query:
@@ -225,8 +225,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Project u.id AS id (Filter u.id >= 1, u.id <= 10000, starts_with(u.username, 'ALI'), ... (Scan Table(gl_user) AS u)))
-            - (Deduplicate LimitBy u.id (Filter u.id >= 1, u.id <= 10000, u.id IN ?.id (Scan Table(gl_user) AS u)))
+            - (Project u.id AS id (Filter u.id >= 1, u.id <= 10000, StartsWith(Lower(u.username), Lower('ALI')), ... (Scan Table(gl_user) AS u)))
+            - (Deduplicate LimitBy 1 BY u.id (Sort u.id, u._version DESC (Project * (Filter u.id >= 1, u.id <= 10000, u.id IN ?.id (Scan Table(gl_user) AS u)))))
           reject: ["(Deduplicate Final (Scan Table(gl_user) AS u))"]
 
   - name: Text indexes on an unchanging column apply before the latest-row pick
@@ -244,9 +244,9 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.id (Filter contains(f.new_path, 'app/services'), f.project_id = 1000 (Scan Table(gl_merge_request_diff_file) AS f))))
+            - (Filter f._deleted = false (Bind f (Deduplicate LimitBy 1 BY f.traversal_path, f.id (Sort f.traversal_path, f.id, f._version DESC (Project * (Filter StartsWith(f.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 1000)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 1000) = '0/'), Contains(Lower(f.new_path), Lower('app/services')), f.project_id = 1000 (Scan Table(gl_merge_request_diff_file) AS f)))))))
           reject:
-            - (Filter (f.traversal_path, f.id) IN ?.(traversal_path, id) (_))
+            - (Filter Tuple(f.traversal_path, f.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate Final (Scan Table(gl_merge_request_diff_file) AS f))
 
   - name: Negated high-selectivity node filters keep FINAL
@@ -262,7 +262,7 @@ cases:
     physical:
       clickhouse:
         planned:
-          expect: ["(Filter j.name != 'build', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
+          expect: ["(Filter j.name != 'build', j._deleted = false (Bind j (Project * (Deduplicate Final (Scan Table(gl_job) AS j)))))"]
           reject: ["(Deduplicate LimitBy ... (_))"]
 
   - name: Wide ID ranges keep FINAL
@@ -277,5 +277,5 @@ cases:
     physical:
       clickhouse:
         planned:
-          expect: ["(Filter j._deleted = false (Bind j (Filter j.id >= 1, j.id <= 100002 (Deduplicate Final (Scan Table(gl_job) AS j)))))"]
+          expect: ["(Filter j._deleted = false (Bind j (Project * (Filter j.id >= 1, j.id <= 100002 (Deduplicate Final (Scan Table(gl_job) AS j))))))"]
           reject: ["(Deduplicate LimitBy ... (_))"]

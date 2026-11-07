@@ -12,9 +12,9 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $candidates (Project u.id AS id (Filter u.username = 'admin', ... (Scan Table(gl_user) AS u))))
+            - (Bind $candidates (Project u.id AS id (Filter u.username = 'admin', ... (Scan Table(gl_user) AS u))))
           expect:
-            - (Filter u.username = 'admin', u._deleted = false (Deduplicate LimitBy u.id (Filter u.id IN $candidates.id (Scan Table(gl_user) AS u))))
+            - (Filter u.username = 'admin', Lower(u.username) = Lower('admin'), u._deleted = false (Bind u (Deduplicate LimitBy 1 BY u.id (Sort u.id, u._version DESC (Project * (Filter u.id IN $candidates.id (Scan Table(gl_user) AS u)))))))
           reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
         emitted:
           expect: ["(Limit 11 (_))", "(Filter u.id IN ?.id (Scan Table(gl_user) AS u))"]
@@ -35,7 +35,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Deduplicate LimitBy u.id (Filter u.id IN ?.id, ... (Scan Table(gl_user) AS u)))
+            - (Deduplicate LimitBy 1 BY u.id (Sort u.id, u._version DESC (Project * (Filter u.id IN ?.id, ... (Scan Table(gl_user) AS u)))))
           reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
         emitted:
           expect: ["(Limit 51 (_))", "(Sort NullIf(u.created_at, '1970-01-01 00:00:00') DESC (_))"]

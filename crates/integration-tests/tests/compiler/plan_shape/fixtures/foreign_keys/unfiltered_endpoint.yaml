@@ -22,7 +22,7 @@ cases:
         planned:
           expect:
             - (Join ON u.id = mr.author_id (_) (_))
-            - (Project _orbit_id_source.author_id AS id (Bind _orbit_id_source (_)))
+            - (Project _orbit_id_source.author_id AS id (Scan Share(?) AS _orbit_id_source))
             - (Filter u.id IN ?.id (Scan Table(gl_user) AS u))
           reject:
             - (Deduplicate Final (Scan Table(gl_user) AS u))
@@ -47,7 +47,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Project _orbit_id_source.merge_user_id AS id (Bind _orbit_id_source (_)))
+            - (Project _orbit_id_source.merge_user_id AS id (Scan Share(?) AS _orbit_id_source))
             - (Filter u.id IN ?.id (Scan Table(gl_user) AS u))
             - (Filter mr.merge_user_id IN ?.id (_))
           reject:
@@ -77,6 +77,6 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter mr.state = 'merged', mr.project_id IN ?.id, mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
+            - (Filter StartsWith(mr.traversal_path, scalar(gl_group AS _orbit_scope WHERE _orbit_scope.id = 1)) OR (scalar(gl_group AS _orbit_scope WHERE _orbit_scope.id = 1) = '0/'), mr.state = 'merged', mr.project_id IN ?.id, mr._deleted = false (Bind mr (Project * (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
           reject:
             - (Deduplicate LimitBy ... (Scan Table(gl_merge_request) AS mr))

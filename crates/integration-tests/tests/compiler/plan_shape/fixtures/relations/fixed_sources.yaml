@@ -17,7 +17,7 @@ cases:
             - (Project mr.id AS _orbit_e0_src, mr.project_id AS _orbit_e0_dst, ... (_))
             - (Deduplicate LimitBy ... (_))
             - (Scan Table(gl_merge_request) AS mr)
-            - (Filter p._deleted = false (Deduplicate LimitBy ... (Filter p.id IN ?.id (_))))
+            - (Filter p._deleted = false (Bind p (Deduplicate LimitBy ... (Sort p.traversal_path, p.id, p._version DESC (Project * (Filter StartsWith(p.traversal_path, scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 2000)) OR (scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 2000) = '0/'), p.id IN ?.id (_)))))))
           reject: ["(Scan Table(gl_edge) ...)", "(Deduplicate Final (Scan Table(gl_project) AS p))"]
 
   - name: A fixed chain composes routed edge relations
@@ -56,7 +56,7 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $ids (Project _orbit_id_source.target_id AS id (_)))
+            - (Bind $ids (Project _orbit_id_source.target_id AS id (_)))
           expect:
             - (Join ON mr.id = _orbit_edge_0.target_id (_) (_))
             - (Scan Table(gl_edge) AS _orbit_edge_0)
@@ -77,7 +77,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.target_id = 1, ... (_))))
+            - (Filter _orbit_edge_0._deleted = false (Bind _orbit_edge_0 (Deduplicate LimitBy ... (Sort _orbit_edge_0.traversal_path, _orbit_edge_0.relationship_kind, _orbit_edge_0.source_id, _orbit_edge_0.target_id, _orbit_edge_0.source_kind, _orbit_edge_0.target_kind, _orbit_edge_0._version DESC (Project * (Filter _orbit_edge_0.target_id = 1, ... (_)))))))
             - (Scan Table(gl_job) AS j)
 
   - name: FK endpoints narrow current holder rows
@@ -95,5 +95,5 @@ cases:
         planned:
           expect:
             - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.pipeline_id = 1000, ... (Scan Table(gl_job) AS j)))
-            - (Deduplicate LimitBy j.traversal_path, j.id (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
+            - (Deduplicate LimitBy 1 BY j.traversal_path, j.id (Sort j.traversal_path, j.id, j._version DESC (Project * (Filter StartsWith(j.traversal_path, scalar(gl_pipeline AS _orbit_scope WHERE _orbit_scope.id = 1000)) OR (scalar(gl_pipeline AS _orbit_scope WHERE _orbit_scope.id = 1000) = '0/'), Tuple(j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))))
           reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]

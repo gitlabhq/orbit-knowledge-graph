@@ -34,7 +34,7 @@ physical:
       expect:
         - (Join ON mr.id = pl.merge_request_id (_) (_))
         - (Join ON f.merge_request_diff_id = mr.latest_merge_request_diff_id (_) (_))
-        - (Filter pl.source = 'merge_request_event', pl.status = 'failed', ... (Deduplicate Final (Scan Table(gl_pipeline) AS pl)))
+        - (Filter pl.source = 'merge_request_event', pl.status = 'failed', ... (Bind pl (Project * (Deduplicate Final (Scan Table(gl_pipeline) AS pl)))))
         - (Filter d.id IN ?.id (Scan Table(gl_merge_request_diff) AS d))
       reject:
         - (Scan Table(gl_edge) ...)

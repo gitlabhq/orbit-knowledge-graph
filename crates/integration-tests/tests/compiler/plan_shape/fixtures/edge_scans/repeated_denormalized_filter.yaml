@@ -17,4 +17,4 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:function'], _orbit_edge_0.source_tags HAS ANY ['definition_type:class'], ... (_))
+        - (Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:function'), ArrayContains(_orbit_edge_0.source_tags, 'definition_type:class'), ... (_))

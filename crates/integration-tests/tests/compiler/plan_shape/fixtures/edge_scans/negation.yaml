@@ -13,7 +13,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - "(Filter NOT (((mr.state = 'merged') AND (_orbit_edge_0.source_tags HAS ANY ['state:merged'])) AND (_orbit_edge_0.target_tags HAS ANY ['state:closed'])) (_))"
+            - "(Filter NOT((mr.state = 'merged') AND ArrayContains(_orbit_edge_0.source_tags, 'state:merged') AND ArrayContains(_orbit_edge_0.target_tags, 'state:closed')) (_))"
           reject: ["(Scan Table(gl_work_item) ...)"]
 
   - name: NOT over a non-nullable denormalized property reads the node row and its edge tag together
@@ -32,7 +32,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - "(Filter ..., NOT ((a.definition_type IN ['function', 'method']) AND (_orbit_edge_0.source_tags HAS ANY ['definition_type:function', 'definition_type:method'])) (_))"
+            - "(Filter NOT((a.definition_type IN ['function', 'method']) AND ArrayContainsAny(_orbit_edge_0.source_tags, Array('definition_type:function', 'definition_type:method'))) (_))"
 
   - name: A NOT group over edge columns and non-nullable denormalized properties reads no node table
     query:
@@ -48,7 +48,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - "(Filter NOT ((_orbit_edge_0.source_id < 50) AND (_orbit_edge_0.source_tags HAS ANY ['state:active'])) (_))"
+            - "(Filter _orbit_edge_0.relationship_kind = 'MEMBER_OF', _orbit_edge_0.source_kind = 'User', _orbit_edge_0.target_kind = 'Group', _orbit_edge_0._deleted = false, _orbit_edge_0.target_id = 100, NOT((_orbit_edge_0.source_id < 50) AND ArrayContains(_orbit_edge_0.source_tags, 'state:active')) (_))"
           reject: ["(Scan Table(gl_user) ...)"]
 
   - name: A NOT group over a nullable denormalized property reads the node table instead of edge tags
@@ -66,9 +66,9 @@ cases:
         planned:
           expect:
             - (Scan Table(gl_note) AS n)
-            - (Filter NOT ((n.confidential = true) AND (n.internal = true)), ... (_))
+            - (Filter NOT((n.confidential = true) AND (n.internal = true)), ... (_))
           reject:
-            - "(Filter ..., NOT ((_orbit_edge_0.target_tags HAS ANY ['confidential:true']) AND (_orbit_edge_0.target_tags HAS ANY ['internal:true'])) (_))"
+            - "(Filter ..., NOT(ArrayContains(_orbit_edge_0.target_tags, 'confidential:true') AND ArrayContains(_orbit_edge_0.target_tags, 'internal:true')) (_))"
 
   - name: A NOT leaf on a node that also has an untagged filter reads the node row and the edge tag
     query:
@@ -86,4 +86,4 @@ cases:
       clickhouse:
         planned:
           expect:
-            - "(Filter ..., NOT ((u.state IN ['blocked']) AND (_orbit_edge_0.source_tags HAS ANY ['state:blocked'])) (_))"
+            - "(Filter ..., NOT((u.state = 'blocked') AND ArrayContains(_orbit_edge_0.source_tags, 'state:blocked')) (_))"

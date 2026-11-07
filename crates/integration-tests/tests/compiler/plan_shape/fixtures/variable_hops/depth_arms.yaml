@@ -23,14 +23,14 @@ physical:
     planned:
       expect:
         - (Union ALL AS _orbit_edge_0 (_) (_) (_))
-        - (Project 1 AS _orbit_depth, ... (Filter _orbit_e1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e1.relationship_kind = 'CALLS', _orbit_e1.source_kind = 'Definition', _orbit_e1.source_id = 1 (_)))))
-        - (Filter _orbit_e2._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e2.relationship_kind = 'CALLS', _orbit_e2.source_id IN ?.target_id (_))))
-        - (Filter _orbit_e3._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e3.relationship_kind = 'CALLS', _orbit_e3.source_id IN ?.target_id (_))))
+        - (Project 1 AS _orbit_depth, ... (Filter _orbit_e1._deleted = false (Bind _orbit_e1 (Deduplicate LimitBy ... (Sort _orbit_e1.traversal_path, _orbit_e1.relationship_kind, _orbit_e1.project_id, _orbit_e1.branch, _orbit_e1.source_id, _orbit_e1.target_id, _orbit_e1.source_kind, _orbit_e1.target_kind, _orbit_e1._version DESC (Project * (Filter StartsWith(_orbit_e1.traversal_path, scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1)) OR (scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1) = '0/'), _orbit_e1.relationship_kind = 'CALLS', _orbit_e1.source_kind = 'Definition', _orbit_e1.source_id = 1 (_))))))))
+        - (Filter _orbit_e2._deleted = false (Bind _orbit_e2 (Deduplicate LimitBy ... (Sort _orbit_e2.traversal_path, _orbit_e2.relationship_kind, _orbit_e2.project_id, _orbit_e2.branch, _orbit_e2.source_id, _orbit_e2.target_id, _orbit_e2.source_kind, _orbit_e2.target_kind, _orbit_e2._version DESC (Project * (Filter StartsWith(_orbit_e2.traversal_path, scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1)) OR (scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1) = '0/'), _orbit_e2.relationship_kind = 'CALLS', _orbit_e2.source_id IN ?.target_id (_)))))))
+        - (Filter _orbit_e3._deleted = false (Bind _orbit_e3 (Deduplicate LimitBy ... (Sort _orbit_e3.traversal_path, _orbit_e3.relationship_kind, _orbit_e3.project_id, _orbit_e3.branch, _orbit_e3.source_id, _orbit_e3.target_id, _orbit_e3.source_kind, _orbit_e3.target_kind, _orbit_e3._version DESC (Project * (Filter StartsWith(_orbit_e3.traversal_path, scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1)) OR (scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1) = '0/'), _orbit_e3.relationship_kind = 'CALLS', _orbit_e3.source_id IN ?.target_id (_)))))))
         - (Project 1 AS _orbit_depth, ... (_))
         - (Project 2 AS _orbit_depth, ... (_))
         - (Project 3 AS _orbit_depth, ... (_))
         - (Project _orbit_depth_2.source_tags AS source_tags, _orbit_e3.target_tags AS target_tags, ... (_))
-        - (Project append(_orbit_depth_2._orbit_path_nodes, (_orbit_e3.target_id, _orbit_e3.target_kind)) AS _orbit_path_nodes, ... (_))
+        - (Project ArrayConcat(_orbit_depth_2._orbit_path_nodes, Array(Tuple(_orbit_e3.target_id, _orbit_e3.target_kind))) AS _orbit_path_nodes, ... (_))
       reject:
         - (CTE ? (Deduplicate Final (Scan Table(gl_code_edge) ...)))
     emitted:

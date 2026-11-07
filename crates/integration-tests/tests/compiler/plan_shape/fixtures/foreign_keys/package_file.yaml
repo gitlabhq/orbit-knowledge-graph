@@ -15,9 +15,9 @@ physical:
     planned:
       expect:
         - (Filter f.package_id = 8001, ... (_))
-        - (Project p.id AS id (Filter p._deleted = false (Deduplicate LimitBy ... (Filter p.id = 8001 (_)))))
+        - (Project p.id AS id (Filter p._deleted = false (Bind p (Deduplicate LimitBy ... (Sort p.traversal_path, p.id, p._version DESC (Project * (Filter StartsWith(p.traversal_path, scalar(gl_package AS _orbit_scope WHERE _orbit_scope.id = 8001)) OR (scalar(gl_package AS _orbit_scope WHERE _orbit_scope.id = 8001) = '0/'), p.id = 8001 (_))))))))
         - (Project f.package_id AS _orbit_e0_src, ... (_))
-        - (Filter f.package_id = 8001, ... (Deduplicate Final (Scan Table(gl_package_file) AS f)))
+        - (Filter f.package_id = 8001, ... (Bind f (Project * (Deduplicate Final (Scan Table(gl_package_file) AS f)))))
       reject:
         - (Deduplicate LimitBy ... (Scan Table(gl_package_file) AS f))
         - (Scan Table(gl_edge) ...)

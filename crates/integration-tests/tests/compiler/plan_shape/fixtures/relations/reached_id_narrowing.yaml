@@ -15,9 +15,9 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $first (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.source_id >= 1, _orbit_edge_0.source_id <= 10, ... (Scan Table(gl_code_edge) AS _orbit_edge_0)))))
+            - (CTE $first (Project * (Filter _orbit_edge_0._deleted = false (Bind _orbit_edge_0 (Deduplicate LimitBy ... (Sort _orbit_edge_0.traversal_path, _orbit_edge_0.relationship_kind, _orbit_edge_0.project_id, _orbit_edge_0.branch, _orbit_edge_0.source_id, _orbit_edge_0.target_id, _orbit_edge_0.source_kind, _orbit_edge_0.target_kind, _orbit_edge_0._version DESC (Project * (Filter _orbit_edge_0.source_id >= 1, _orbit_edge_0.source_id <= 10, ... (Scan Table(gl_code_edge) AS _orbit_edge_0)))))))))
           expect:
-            - (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.source_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))))
+            - (Filter _orbit_edge_1._deleted = false (Bind _orbit_edge_1 (Deduplicate LimitBy ... (Sort _orbit_edge_1.traversal_path, _orbit_edge_1.relationship_kind, _orbit_edge_1.project_id, _orbit_edge_1.branch, _orbit_edge_1.source_id, _orbit_edge_1.target_id, _orbit_edge_1.source_kind, _orbit_edge_1.target_kind, _orbit_edge_1._version DESC (Project * (Filter _orbit_edge_1.source_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_1)))))))
         emitted:
           expect:
             - (Filter _orbit_edge_0.source_id >= 1, _orbit_edge_0.source_id <= 10, ... (_))
@@ -38,7 +38,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Bind _orbit_edge_1 (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.source_id IN ?.id, ... (Scan Table(gl_edge) AS _orbit_edge_1)))))
+            - (Bind _orbit_edge_1 (Project * (Filter _orbit_edge_1._deleted = false (Bind _orbit_edge_1 (Deduplicate LimitBy ... (Sort _orbit_edge_1.traversal_path, _orbit_edge_1.relationship_kind, _orbit_edge_1.source_id, _orbit_edge_1.target_id, _orbit_edge_1.source_kind, _orbit_edge_1.target_kind, _orbit_edge_1._version DESC (Project * (Filter _orbit_edge_1.source_id IN ?.id, ... (Scan Table(gl_edge) AS _orbit_edge_1)))))))))
           reject:
             - (Filter _orbit_edge_1.source_id IN ?.id, ... (Filter _orbit_edge_1._deleted = false (_)))
             - (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_1))

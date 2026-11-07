@@ -12,8 +12,10 @@ cases:
     physical:
       clickhouse:
         planned:
+          bind:
+            - (CTE $p (Project * (Filter p.full_path = 'gitlab-org/orbit', p._deleted = false (Bind p (Project * (Deduplicate Final (Scan Table(gl_project) AS p)))))))
           expect:
-            - (Join ON p.id = mr.project_id (_) (Bind p (Filter p.full_path = 'gitlab-org/orbit', p._deleted = false (Deduplicate Final (Scan Table(gl_project) AS p)))))
+            - (Join ON p.id = mr.project_id (_) (Scan Share($p) AS p))
 
   - name: Filtered aggregation endpoints use exact reusable keys
     query:
@@ -29,7 +31,7 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $users (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
+            - (Bind $users (Project u.id AS id (Filter u.username = 'alice', ... (Bind u (Deduplicate LimitBy ... (_))))))
           expect:
             - (Filter mr.author_id IN $users.id, ... (_))
             - (Scan Table(gl_merge_request) AS mr)
@@ -48,8 +50,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter mr.state = 'merged', mr._deleted = false, ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
-            - (Project _orbit_id_source.project_id AS id (Bind _orbit_id_source (_)))
+            - (Filter mr.state = 'merged', mr._deleted = false, ... (Bind mr (Project * (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
+            - (Project _orbit_id_source.project_id AS id (Scan Share(?) AS _orbit_id_source))
             - (Filter p.id IN ?.id (_))
           reject:
             - (Scan Table(gl_edge) ...)
@@ -69,7 +71,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter p.star_count = 1, p._deleted = false (Deduplicate Final (Scan Table(gl_project) AS p)))
+            - (Filter p.star_count = 1, p._deleted = false (Bind p (Project * (Deduplicate Final (Scan Table(gl_project) AS p)))))
 
   - name: Low-cardinality endpoint filters do not create candidate relations
     query:
@@ -85,6 +87,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter _orbit_edge_0.target_tags HAS ANY ['definition_type:function'], ... (_))
+            - (Filter ArrayContains(_orbit_edge_0.target_tags, 'definition_type:function'), ... (_))
           reject:
             - (CTE ? (Project b.id AS id (_)))
+            - (Bind ? (Project b.id AS id (_)))

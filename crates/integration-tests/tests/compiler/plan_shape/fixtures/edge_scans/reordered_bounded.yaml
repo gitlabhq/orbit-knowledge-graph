@@ -17,8 +17,8 @@ physical:
     planned:
       expect:
         - (Scan Table(gl_code_edge_by_target) ...)
-        - (Filter _orbit_e1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e1.relationship_kind = 'CALLS', _orbit_e1.target_kind = 'Definition', _orbit_e1.target_id = 12001 (_))))
-        - (Project prepend((_orbit_e2.target_id, _orbit_e2.target_kind), _orbit_depth_1._orbit_path_nodes) AS _orbit_path_nodes, ... (_))
+        - (Filter _orbit_e1._deleted = false (Bind _orbit_e1 (Deduplicate LimitBy ... (Sort _orbit_e1.traversal_path, _orbit_e1.target_id, _orbit_e1.relationship_kind, _orbit_e1.project_id, _orbit_e1.branch, _orbit_e1.source_id, _orbit_e1.source_kind, _orbit_e1.target_kind, _orbit_e1._version DESC (Project * (Filter StartsWith(_orbit_e1.traversal_path, scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 12001)) OR (scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 12001) = '0/'), _orbit_e1.relationship_kind = 'CALLS', _orbit_e1.target_kind = 'Definition', _orbit_e1.target_id = 12001 (_)))))))
+        - (Project ArrayConcat(Array(Tuple(_orbit_e2.target_id, _orbit_e2.target_kind)), _orbit_depth_1._orbit_path_nodes) AS _orbit_path_nodes, ... (_))
       reject: ["(Scan Table(gl_code_edge) ...)"]
   duckdb:
     planned:

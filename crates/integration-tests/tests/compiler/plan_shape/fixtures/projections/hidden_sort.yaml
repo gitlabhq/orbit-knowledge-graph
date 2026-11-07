@@ -20,7 +20,7 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Project f.path AS f_path (Filter f._deleted = false (Deduplicate LimitBy ... (Filter f.id IN [1, 2] (_)))))
+        - (Project f.path AS f_path (Filter f._deleted = false (Bind f (Deduplicate LimitBy ... (Sort f.traversal_path, f.project_id, f.branch, f.id, f._version DESC (Project * (Filter f.id IN [1, 2] (_))))))))
       reject:
         - (Project f.id AS f_id, ... (_))
     emitted:
@@ -31,7 +31,7 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Project f.path AS f_path (Filter ... (Bind f (Filter ... (Deduplicate Final (Scan Table(gl_file) AS f))))))
+        - (Project f.path AS f_path (Bind f (Project * (Filter f.id IN [1, 2] (Scan Table(gl_file) AS f)))))
       reject:
         - (Project f.id AS f_id, ... (_))
     emitted:

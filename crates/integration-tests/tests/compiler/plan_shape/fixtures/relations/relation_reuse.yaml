@@ -32,7 +32,7 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $mr_ids (Project _orbit_id_source.target_id AS id (_)))
+            - (Bind $mr_ids (Project _orbit_id_source.target_id AS id (_)))
           expect:
             - (Filter mr.id IN $mr_ids.id, ... (_))
           occurrences:
@@ -53,11 +53,11 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $users (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
+            - (Bind $users (Project u.id AS id (Filter u.username = 'alice', ... (Bind u (Deduplicate LimitBy ... (_))))))
           expect:
             - (Filter _orbit_edge_0.source_id IN $users.id, ... (_))
           occurrences:
-            - pattern: (CTE ? (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
+            - pattern: (Bind ? (Project u.id AS id (Filter u.username = 'alice', ... (Bind u (Deduplicate LimitBy ... (_))))))
               count: 1
 
   - name: Repeated low-cardinality row filters stay inline
@@ -75,7 +75,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:function'], ... (_))
+            - (Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:function'), ... (_))
             - (Filter _orbit_edge_1.relationship_kind = 'CALLS', ... (_))
           reject:
-            - (CTE ? (Filter ?.source_tags HAS ANY ['definition_type:function'], ... (_)))
+            - (CTE ? (Project * (Filter ArrayContains(?.source_tags, 'definition_type:function'), ... (_))))

@@ -14,6 +14,6 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['definition_type:function', 'definition_type:method'], ... (_))"]
+      expect: ["(Filter ArrayContainsAny(_orbit_edge_0.target_tags, Array('definition_type:function', 'definition_type:method')), ... (_))"]
     emitted:
       expect: ["(Filter ArrayContainsAny(_orbit_edge_0.target_tags, Array('definition_type:function', 'definition_type:method')), ... (_))"]

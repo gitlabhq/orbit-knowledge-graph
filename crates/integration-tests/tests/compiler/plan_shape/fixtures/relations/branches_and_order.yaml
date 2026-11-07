@@ -88,8 +88,8 @@ cases:
         planned:
           expect:
             - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.target_id (_) (_))
-            - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.source_id = 1, ... (_))))
-            - (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.source_id = 2, ... (_))))
+            - (Filter _orbit_edge_0._deleted = false (Bind _orbit_edge_0 (Deduplicate LimitBy ... (Sort _orbit_edge_0.traversal_path, _orbit_edge_0.relationship_kind, _orbit_edge_0.project_id, _orbit_edge_0.branch, _orbit_edge_0.source_id, _orbit_edge_0.target_id, _orbit_edge_0.source_kind, _orbit_edge_0.target_kind, _orbit_edge_0._version DESC (Project * (Filter _orbit_edge_0.source_id = 1, ... (_)))))))
+            - (Filter _orbit_edge_1._deleted = false (Bind _orbit_edge_1 (Deduplicate LimitBy ... (Sort _orbit_edge_1.traversal_path, _orbit_edge_1.relationship_kind, _orbit_edge_1.project_id, _orbit_edge_1.branch, _orbit_edge_1.source_id, _orbit_edge_1.target_id, _orbit_edge_1.source_kind, _orbit_edge_1.target_kind, _orbit_edge_1._version DESC (Project * (Filter _orbit_edge_1.source_id = 2, ... (_)))))))
           reject:
             - (CTE ? (Deduplicate Final (Scan Table(gl_code_edge) ...)))
           occurrences:
@@ -110,5 +110,5 @@ cases:
         planned:
           expect:
             - (Join ON _orbit_edge_0.source_id = _orbit_edge_1.target_id (Join ON _orbit_edge_0.target_id = _orbit_edge_2.target_id (_) (_)) (_))
-            - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.target_id = 1, ... (_))))
+            - (Filter _orbit_edge_0._deleted = false (Bind _orbit_edge_0 (Deduplicate LimitBy ... (Sort _orbit_edge_0.traversal_path, _orbit_edge_0.relationship_kind, _orbit_edge_0.project_id, _orbit_edge_0.branch, _orbit_edge_0.source_id, _orbit_edge_0.target_id, _orbit_edge_0.source_kind, _orbit_edge_0.target_kind, _orbit_edge_0._version DESC (Project * (Filter _orbit_edge_0.target_id = 1, ... (_)))))))
             - (Filter _orbit_edge_1.target_id IN ?.id, ... (_))

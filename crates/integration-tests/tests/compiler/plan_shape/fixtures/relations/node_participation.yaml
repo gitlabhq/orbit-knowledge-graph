@@ -14,7 +14,7 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $mrs (Project mr.id AS id (Filter starts_with(mr.title, 'Fix'), ... (Deduplicate Final (_)))))
+            - (CTE $mrs (Project mr.id AS id (Filter StartsWith(Lower(mr.title), Lower('Fix')), ... (Bind mr (Project * (Deduplicate Final (_)))))))
           expect:
             - (Filter _orbit_edge_0.target_id IN $mrs.id, ... (_))
 
@@ -50,5 +50,5 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Join ON mr.id = _orbit_edge_0.target_id (_) (Bind mr (_)))
-            - (Aggregate COUNT(mr.merged_at) FILTER ? AS n (_))
+            - (Join ON mr.id = _orbit_edge_0.target_id (_) (Filter mr._deleted = false (Bind mr (_))))
+            - (Aggregate COUNT(NullIf(mr.merged_at, '1970-01-01 00:00:00')) FILTER ? AS n (_))

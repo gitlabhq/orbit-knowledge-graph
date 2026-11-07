@@ -22,9 +22,9 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Union ALL AS _orbit_edge_0 (Filter _orbit_edge_0.target_kind = 'Definition' (Bind _orbit_edge_0 (Project 2 AS _orbit_depth, ... (_)))))
+        - (Union ALL AS _orbit_edge_0 (Project * (Filter _orbit_edge_0.target_kind = 'Definition' (Bind _orbit_edge_0 (Project 2 AS _orbit_depth, ... (_))))))
         - (Join ON (_orbit_depth_1.target_id = _orbit_e2.source_id) AND (_orbit_depth_1.target_kind = _orbit_e2.source_kind) (_) (_))
-        - (Filter _orbit_e2._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e2.relationship_kind = 'CALLS', _orbit_e2.source_id IN ?.target_id (_))))
+        - (Filter _orbit_e2._deleted = false (Bind _orbit_e2 (Deduplicate LimitBy ... (Sort _orbit_e2.traversal_path, _orbit_e2.relationship_kind, _orbit_e2.project_id, _orbit_e2.branch, _orbit_e2.source_id, _orbit_e2.target_id, _orbit_e2.source_kind, _orbit_e2.target_kind, _orbit_e2._version DESC (Project * (Filter StartsWith(_orbit_e2.traversal_path, scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1)) OR (scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1) = '0/'), _orbit_e2.relationship_kind = 'CALLS', _orbit_e2.source_id IN ?.target_id (_)))))))
       reject:
         - (Project 3 AS _orbit_depth, ... (_))
       occurrences:
@@ -33,6 +33,6 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Union ALL AS _orbit_edge_0 (Filter _orbit_edge_0.target_kind = 'Definition' (Bind _orbit_edge_0 (Project 2 AS _orbit_depth, ... (_)))))
+        - (Union ALL AS _orbit_edge_0 (Project * (Filter _orbit_edge_0.target_kind = 'Definition' (Bind _orbit_edge_0 (Project 2 AS _orbit_depth, ... (_))))))
       reject:
         - (Project 3 AS _orbit_depth, ... (_))
