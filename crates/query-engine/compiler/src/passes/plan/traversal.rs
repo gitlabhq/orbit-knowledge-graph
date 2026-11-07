@@ -8,12 +8,12 @@ use query_data_model::plan::logical::{EdgeField, Expr, Order as Sort};
 use crate::constants::EDGE_KIND_SUFFIX;
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
-use crate::passes::lower::build::computed;
-use crate::passes::lower::build::predicates::Lowering;
-use crate::passes::lower::{NodeBinding, Term};
+use crate::passes::plan::build::computed;
+use crate::passes::plan::build::predicates::Lowering;
 use crate::passes::plan::pattern::Pattern;
 use crate::passes::plan::predicates::OutputValue;
 use crate::passes::plan::{EdgeRelation, Matched, property_value};
+use crate::passes::plan::{NodeBinding, Term};
 
 pub(crate) struct Shape {
     order: Option<(OutputValue, bool)>,

@@ -4,11 +4,11 @@ use query_data_model::implementations::relational::plan::{
 };
 
 use crate::error::Result;
-use crate::passes::lower::Term;
-use crate::passes::lower::build::predicates::Lowering;
-use crate::passes::lower::build::{Built, computed, conjoin, named};
 use crate::passes::plan::Matched;
-use crate::passes::plan::query_types::aggregation::{AggregationPlan, Group};
+use crate::passes::plan::Term;
+use crate::passes::plan::aggregation::{AggregationPlan, Group};
+use crate::passes::plan::build::predicates::Lowering;
+use crate::passes::plan::build::{Built, computed, conjoin, named};
 use query_data_model::plan::logical::TimeUnit as Unit;
 
 pub(crate) fn emit<B: RelationalBackend>(

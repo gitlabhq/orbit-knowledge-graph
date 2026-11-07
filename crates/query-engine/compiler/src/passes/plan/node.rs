@@ -10,9 +10,9 @@ use super::predicates::Column;
 use crate::logical::Query;
 use crate::logical::facts::Anchor;
 use crate::passes::codegen::RelationalModel;
-use crate::passes::lower::build::Built;
-use crate::passes::lower::build::expr::{self, Filter};
-use crate::passes::lower::build::sources::Scope;
+use crate::passes::plan::build::Built;
+use crate::passes::plan::build::expr::{self, Filter};
+use crate::passes::plan::build::sources::Scope;
 
 pub(crate) struct Node<'p> {
     pub alias: &'p str,

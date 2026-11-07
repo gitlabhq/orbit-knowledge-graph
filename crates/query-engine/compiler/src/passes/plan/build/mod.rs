@@ -11,7 +11,7 @@ use query_data_model::implementations::relational::{CurrentRows, RelationalBacke
 use query_data_model::plan::tracking::Declare;
 use serde_json::Value;
 
-use crate::passes::lower::Term;
+use crate::passes::plan::Term;
 use crate::passes::plan::predicates::Column as Named;
 
 pub(crate) type Built<T> = std::result::Result<T, RelationalError>;

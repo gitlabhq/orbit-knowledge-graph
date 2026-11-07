@@ -14,10 +14,10 @@ use crate::constants::{
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
-use crate::passes::lower::Term;
-use crate::passes::lower::build::term;
-use crate::passes::lower::{LoweredMetadata, NodeBinding};
+use crate::passes::plan::Term;
+use crate::passes::plan::build::term;
 use crate::passes::plan::predicates::{Column as Named, OutputValue};
+use crate::passes::plan::{NodeBinding, PlanMetadata};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactionNode {
@@ -126,7 +126,7 @@ impl ResultContext {
 pub fn apply<M: RelationalModel>(
     plan: PlanOf<M>,
     input: &Input,
-    metadata: &LoweredMetadata,
+    metadata: &PlanMetadata,
     model: &M,
 ) -> Result<(PlanOf<M>, ResultContext)> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);

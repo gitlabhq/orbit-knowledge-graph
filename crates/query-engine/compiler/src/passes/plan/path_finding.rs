@@ -17,10 +17,10 @@ use crate::error::{QueryError, Result};
 use crate::logical::Query;
 use crate::logical::facts::{anchors, facts};
 use crate::passes::codegen::RelationalModel;
-use crate::passes::lower::Term;
-use crate::passes::lower::build::expr::{id_range, ids, in_list, relationship_kinds};
-use crate::passes::lower::build::sources::{Scope, columns, dedup, final_edge_scan, select};
-use crate::passes::lower::build::{
+use crate::passes::plan::Term;
+use crate::passes::plan::build::expr::{id_range, ids, in_list, relationship_kinds};
+use crate::passes::plan::build::sources::{Scope, columns, dedup, final_edge_scan, select};
+use crate::passes::plan::build::{
     Built, and, binary, call, col, computed, conjoin, eq, filtered, int, membership, stored, string,
 };
 use crate::passes::plan::predicates::Column;

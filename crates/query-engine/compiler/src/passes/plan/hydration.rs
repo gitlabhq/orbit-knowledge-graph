@@ -21,9 +21,9 @@ use crate::hydration::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 use crate::logical::Query;
 use crate::logical::facts::{anchors, facts};
 use crate::passes::codegen::RelationalModel;
-use crate::passes::lower::build::expr::{in_list, live};
-use crate::passes::lower::build::predicates::Lowering;
-use crate::passes::lower::build::{
+use crate::passes::plan::build::expr::{in_list, live};
+use crate::passes::plan::build::predicates::Lowering;
+use crate::passes::plan::build::{
     Built, call, col, computed, disjoin, filtered, scan, stored, string, versioning,
 };
 use crate::passes::plan::predicates::{Column, OutputValue};

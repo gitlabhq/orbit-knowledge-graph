@@ -5,16 +5,19 @@
 //! joined rows through `rows`, sharing what later steps read again; `filters` and `predicates` are
 //! the shared condition vocabulary.
 
+pub mod aggregation;
+pub(crate) mod build;
 mod current;
 pub(crate) mod filters;
 mod hydration;
+mod metadata;
 mod neighbors;
 mod node;
 mod path_finding;
 pub(crate) mod pattern;
 pub mod predicates;
-pub mod query_types;
 pub mod rows;
+mod traversal;
 
 use std::collections::HashMap;
 
@@ -26,10 +29,10 @@ use crate::hydration::HydrationRequest;
 use crate::input::*;
 use crate::logical::Query;
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
-use crate::passes::lower::{self, LoweredMetadata, NodeBinding};
 use crate::tp_bounds::TpBounds;
 
 pub use filters::{BoundFilter, Test};
+pub use metadata::{NodeBinding, PlanMetadata, PlannedEdge, Term};
 pub use pattern::{EdgeRelation, Matched, NodePlan};
 
 pub(crate) fn property_value(
@@ -59,7 +62,7 @@ pub(crate) fn sort_key<'m>(
 
 pub struct Planned<P> {
     pub plan: P,
-    pub metadata: LoweredMetadata,
+    pub metadata: PlanMetadata,
 }
 
 pub enum Request<'a> {
@@ -82,7 +85,7 @@ pub fn plan<M: RelationalModel>(
                 .map_err(rejected)?;
             return Ok(Planned {
                 plan,
-                metadata: LoweredMetadata::default(),
+                metadata: PlanMetadata::default(),
             });
         }
     };
@@ -93,9 +96,9 @@ pub fn plan<M: RelationalModel>(
                 .catalog()
                 .build(|q| path_finding::emit(q, &path))
                 .map_err(rejected)?;
-            let metadata = LoweredMetadata {
+            let metadata = PlanMetadata {
                 stable_order: path_finding::stable_order(),
-                ..LoweredMetadata::default()
+                ..PlanMetadata::default()
             };
             Ok(Planned { plan, metadata })
         }
@@ -105,16 +108,76 @@ pub fn plan<M: RelationalModel>(
                 .catalog()
                 .build(|q| neighbors::emit(q, &neighbors))
                 .map_err(rejected)?;
-            let metadata = LoweredMetadata {
+            let metadata = PlanMetadata {
                 nodes: HashMap::from([(neighbors.center().to_string(), NodeBinding::Projected)]),
                 stable_order: neighbors::stable_order(&neighbors),
-                ..LoweredMetadata::default()
+                ..PlanMetadata::default()
             };
             Ok(Planned { plan, metadata })
         }
-        QueryType::Traversal | QueryType::Aggregation => lower::emit(query, tp_bounds, model),
+        QueryType::Traversal | QueryType::Aggregation => pattern(query, tp_bounds, model),
         QueryType::Hydration => Err(QueryError::PipelineInvariant(
             "hydration plans from a hydration request".into(),
         )),
     }
+}
+
+/// Traversal and aggregation: the matched pattern, then the result rows built on it.
+fn pattern<M: RelationalModel>(
+    query: Query<'_>,
+    tp_bounds: Option<&TpBounds>,
+    model: &M,
+) -> Result<Planned<PlanOf<M>>> {
+    let limit = query
+        .row_limit()
+        .ok_or_else(|| QueryError::PipelineInvariant("queries carry a row limit".into()))?;
+    let pattern = pattern::Pattern::new(query, model)?;
+    let mut planned = None;
+    let plan = rows::build(model.catalog(), |q| {
+        let matched = pattern.execution(q, tp_bounds)?;
+        let nodes = metadata::bindings(&pattern.nodes, query, &matched.bindings)?;
+        let (rows, stable_order) = match query.kind() {
+            QueryType::Aggregation => {
+                let result = aggregation::aggregation_plan(query, &pattern.nodes, &matched);
+                let stable_order = aggregation::emit::stable_order(&result);
+                let rows = aggregation::emit::emit(q, matched, &result, limit)?;
+                (rows, stable_order)
+            }
+            _ => {
+                let shape = traversal::shape(&pattern, &matched, query, limit)?;
+                let stable_order = traversal::stable_order(&pattern, &matched, query, &nodes);
+                let rows = traversal::emit(q, matched, &shape)?;
+                (rows, stable_order)
+            }
+        };
+        planned = Some((nodes, stable_order));
+        Ok(rows)
+    })?;
+    let (nodes, stable_order) =
+        planned.ok_or_else(|| QueryError::PipelineInvariant("a built plan has metadata".into()))?;
+    let edges = pattern
+        .relations
+        .iter()
+        .map(|hop| PlannedEdge {
+            path_column: (hop.max_hops > 1).then(|| hop.path_nodes_column()),
+            column_prefix: hop.column_prefix(),
+            rel_types: hop.rel_types.clone(),
+            relationship: hop.input_index,
+        })
+        .collect();
+    let point_lookup = !pattern.nodes.is_empty()
+        && pattern.nodes.values().all(NodePlan::is_id_pinned_only)
+        && pattern
+            .relations
+            .iter()
+            .all(|relation| relation.max_hops == 1);
+    Ok(Planned {
+        plan,
+        metadata: PlanMetadata {
+            nodes,
+            edges,
+            stable_order,
+            point_lookup,
+        },
+    })
 }

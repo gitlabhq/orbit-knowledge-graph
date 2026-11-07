@@ -1,5 +1,7 @@
 //! Aggregation: groups, measures, and the order of the result rows, read from the matched pattern.
 
+pub(super) mod emit;
+
 use std::collections::HashMap;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;

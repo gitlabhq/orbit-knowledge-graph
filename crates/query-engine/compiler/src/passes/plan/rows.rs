@@ -10,8 +10,8 @@ use query_data_model::implementations::relational::plan::{
 
 use super::predicates::{Column, Predicate, Projection};
 use crate::error::{QueryError, Result};
-use crate::passes::lower::build::predicates::Lowering;
-use crate::passes::lower::build::{and, column, computed, eq, stored};
+use crate::passes::plan::build::predicates::Lowering;
+use crate::passes::plan::build::{and, column, computed, eq, stored};
 use crate::tp_bounds::{TpBound, TpBounds};
 
 #[derive(Clone, PartialEq)]

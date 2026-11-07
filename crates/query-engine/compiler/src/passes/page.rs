@@ -12,14 +12,14 @@ use query_data_model::implementations::relational::plan::{
 use crate::error::Result;
 use crate::input::Input;
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
-use crate::passes::lower::build::term;
-use crate::passes::lower::{LoweredMetadata, Term};
+use crate::passes::plan::build::term;
+use crate::passes::plan::{PlanMetadata, Term};
 
 pub fn apply<M: RelationalModel>(
     plan: PlanOf<M>,
     model: &M,
     input: &Input,
-    metadata: &LoweredMetadata,
+    metadata: &PlanMetadata,
 ) -> Result<PlanOf<M>> {
     let root = plan.plan.root();
     let block = plan.block(root);

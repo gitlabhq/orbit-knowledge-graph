@@ -8,7 +8,7 @@ use query_data_model::implementations::relational::plan::{Order, Relation, Relat
 use super::predicates::{Column, Predicate, Projection};
 use super::rows::{ReadScope, Reads, Rel, point_lookup};
 use crate::error::Result;
-use crate::passes::lower::build::{scan, stored};
+use crate::passes::plan::build::{scan, stored};
 use crate::tp_bounds::TpBound;
 
 #[derive(PartialEq)]

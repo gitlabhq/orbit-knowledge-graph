@@ -31,7 +31,7 @@ impl TpBounds {
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
 use crate::constants::scope_lookup_alias;
-use crate::passes::lower::build::{self, Built};
+use crate::passes::plan::build::{self, Built};
 use orbit_utils::query_types::SqlType;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{self, Relation, RelationalBuilder};
