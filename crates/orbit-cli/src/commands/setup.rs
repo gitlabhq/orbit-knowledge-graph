@@ -246,7 +246,7 @@ fn missing_instructions(selection: &Selection, target: &Target, report: &Report)
                 || components::loads_instructions(*agent, target);
             (!installed).then(|| {
                 format!(
-                    "{} gets no Orbit instructions: they load from the {}, which this run skipped",
+                    "{} gets no Orbit instructions: setup removed the old instruction block, and the {} that load them now were skipped",
                     agent.title,
                     component.label()
                 )
