@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use compiler::input::Input;
 use compiler::logical::facts;
-use compiler::passes::codegen::RelationalModel;
+use compiler::passes::codegen::{self, RelationalModel};
 use compiler::passes::{normalize, page, plan, response_policy};
 use compiler::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 use orbit_utils::traversal_path::TraversalPath;
@@ -316,10 +316,7 @@ fn check<M: RelationalModel>(
         };
         let relational = plan::plan(request, tp_bounds.as_ref(), model)
             .and_then(|planned| {
-                let tree = match &planned.legacy {
-                    Some(legacy) => explain::physical(legacy),
-                    None => emitted::tree(&planned.plan, model.catalog()),
-                };
+                let tree = emitted::tree(&planned.plan, model.catalog());
                 Ok((tree, passes(planned, scenario, backend, model, &input)?))
             })
             .map_err(|error| error.to_string());
@@ -377,7 +374,8 @@ fn passes<M: RelationalModel>(
         "clickhouse" => response_policy::apply_text_excerpts(planned.plan, model, input)?,
         _ => planned.plan,
     };
-    page::apply(relational, model, input, &planned.metadata)
+    let relational = page::apply(relational, model, input, &planned.metadata)?;
+    codegen::materialize(relational, model)
 }
 
 fn hydration_request(

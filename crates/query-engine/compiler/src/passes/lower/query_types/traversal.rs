@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use query_data_model::OrbitQueryModel;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{Order, Relation, RelationalBuilder};
 use query_data_model::plan::logical::{EdgeField, Expr, Order as Sort};
@@ -5,21 +8,24 @@ use query_data_model::plan::logical::{EdgeField, Expr, Order as Sort};
 use crate::constants::EDGE_KIND_SUFFIX;
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
+use crate::passes::lower::build::computed;
 use crate::passes::lower::build::predicates::Lowering;
-use crate::passes::lower::build::{Built, computed};
-use crate::passes::lower::{NodeBinding, Term, graph};
-use crate::passes::plan::predicates::{Column, OutputValue};
-use crate::passes::plan::{EdgeRelation, Plan, Traversal, property_value};
-use crate::tp_bounds::TpBounds;
+use crate::passes::lower::{NodeBinding, Term};
+use crate::passes::plan::pattern::Pattern;
+use crate::passes::plan::predicates::OutputValue;
+use crate::passes::plan::{EdgeRelation, Matched, property_value};
 
 pub(crate) struct Shape {
     order: Option<(OutputValue, bool)>,
-    sorted: Option<Column>,
     limit: u32,
 }
 
-pub(crate) fn shape(plan: &Plan<Traversal>, query: Query<'_>, limit: u32) -> Result<Shape> {
-    let execution = &plan.operation.execution;
+pub(crate) fn shape<M: OrbitQueryModel + ?Sized>(
+    pattern: &Pattern<'_, M>,
+    matched: &Matched,
+    query: Query<'_>,
+    limit: u32,
+) -> Result<Shape> {
     let keys = query.sort_keys();
     let property = keys.iter().rev().find_map(|(key, order)| match key {
         Expr::Property { binding, property } => Some((
@@ -36,19 +42,18 @@ pub(crate) fn shape(plan: &Plan<Traversal>, query: Query<'_>, limit: u32) -> Res
         } => Some((*binding, *order == Sort::Descending)),
         _ => None,
     });
-    let sorted = property.map(|(node, property, _)| execution.property(node, property));
     let order = match (property, kind) {
         (Some((node, property, descending)), _) => Some((
-            property_value(&plan.nodes, node, execution.property(node, property)),
+            property_value(&pattern.nodes, node, matched.property(node, property)),
             descending,
         )),
         (None, Some((edge, descending))) => {
             let relationship = query.steps().iter().position(|step| step.edge == edge);
-            let edge_type = plan
+            let edge_type = pattern
                 .relations
                 .iter()
                 .find(|hop| Some(hop.input_index) == relationship)
-                .and_then(|hop| edge_type(plan, hop))
+                .and_then(|hop| edge_type(matched, hop))
                 .ok_or_else(|| {
                     QueryError::Lowering("sorted relationship has no edge type column".into())
                 })?;
@@ -56,37 +61,20 @@ pub(crate) fn shape(plan: &Plan<Traversal>, query: Query<'_>, limit: u32) -> Res
         }
         (None, None) => None,
     };
-    Ok(Shape {
-        order,
-        sorted,
-        limit,
-    })
+    Ok(Shape { order, limit })
 }
 
 pub(crate) fn emit<B: RelationalBackend>(
     q: &mut RelationalBuilder<'_, B>,
-    plan: &Plan<Traversal>,
+    matched: Matched,
     shape: &Shape,
-    tp_bounds: Option<&TpBounds>,
-) -> Built<Relation> {
-    let execution = &plan.operation.execution;
-    let mut read = super::super::redaction_columns(plan, execution);
-    read.extend(shape.sorted.iter().cloned());
-    let executed = graph::execute(q, execution, &read, tp_bounds)?;
-    let rows = executed.reads.filter(q, executed.source)?;
-    let lowering = Lowering {
-        scope: &[&rows],
-        shared: &executed.reads.shared,
-    };
-    let items = lowering.projections::<B>(&execution.outputs)?;
+) -> Result<Relation> {
+    let rows = matched.rows;
+    let items = Lowering { scope: &[&rows] }.projections::<B>(&matched.outputs)?;
     let (rows, columns) = computed(q, rows, items)?;
     let rows = match &shape.order {
         Some((value, descending)) => {
-            let lowering = Lowering {
-                scope: &[&rows],
-                shared: &executed.reads.shared,
-            };
-            let value = lowering.output::<B>(value)?;
+            let value = Lowering { scope: &[&rows] }.output::<B>(value)?;
             let order = Order {
                 value,
                 descending: *descending,
@@ -96,13 +84,14 @@ pub(crate) fn emit<B: RelationalBackend>(
         None => rows,
     };
     let rows = q.limit(rows, Some(shape.limit), None)?;
-    q.select(rows, columns)
+    Ok(q.select(rows, columns)?)
 }
 
-pub(crate) fn stable_order(
-    plan: &Plan<Traversal>,
+pub(crate) fn stable_order<M: OrbitQueryModel + ?Sized>(
+    pattern: &Pattern<'_, M>,
+    matched: &Matched,
     query: Query<'_>,
-    nodes: &std::collections::HashMap<String, NodeBinding>,
+    nodes: &HashMap<String, NodeBinding>,
 ) -> Vec<Term> {
     let identities = query
         .bindings()
@@ -118,22 +107,21 @@ pub(crate) fn stable_order(
             order.push(identity);
         }
     }
-    let edge_types = plan
+    let edge_types = pattern
         .relations
         .iter()
         .filter(|hop| {
             hop.max_hops == 1
                 && (hop.rel_types.len() > 1 || crate::input::is_wildcard(&hop.rel_types))
         })
-        .filter_map(|hop| edge_type(plan, hop))
+        .filter_map(|hop| edge_type(matched, hop))
         .map(|value| Term::Value(Box::new(value.clone())));
     order.into_iter().chain(edge_types).collect()
 }
 
-fn edge_type<'p>(plan: &'p Plan<Traversal>, relation: &EdgeRelation) -> Option<&'p OutputValue> {
+fn edge_type<'p>(matched: &'p Matched, relation: &EdgeRelation) -> Option<&'p OutputValue> {
     let name = format!("{}{}", relation.column_prefix(), EDGE_KIND_SUFFIX);
-    plan.operation
-        .execution
+    matched
         .outputs
         .iter()
         .find(|output| output.name == name)

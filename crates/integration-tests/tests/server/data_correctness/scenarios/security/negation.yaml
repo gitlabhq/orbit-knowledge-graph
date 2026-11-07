@@ -101,7 +101,7 @@ cases:
     expect:
       compile_only: true
       sql_contains:
-        - "gl_group AS g WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _orbit_relation_"
+        - "gl_group AS g WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT _orbit_relation_"
         - "LIMIT 1 BY g.traversal_path, g.id) AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')])) AND (g._deleted = false))"
 
   - name: negation_no_existence_oracle_hidden

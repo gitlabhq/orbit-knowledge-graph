@@ -1,5 +1,5 @@
-//! Assembles the relation graph: the shared chain state (root, bindings, id sets), node table reads,
-//! and the steps in `edge`, `fk`, and `multi_hop` that each add one relation to the chain.
+//! Builds the pattern's relations: the shared chain state (root, bindings, id sets), node table
+//! reads, and the steps in `edge`, `fk`, and `multi_hop` that each add one relation to the chain.
 
 mod edge;
 mod fk;
@@ -9,21 +9,43 @@ use std::collections::{HashMap, HashSet};
 
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
+use query_data_model::implementations::relational::RelationalBackend;
+use query_data_model::implementations::relational::plan::Relation;
 
 use super::{EdgeRelation, NodePlan, Pattern};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
-use crate::passes::plan::graph::{BindingSource, ExecutionPlan, RelationGraph, RelationId};
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection, membership};
+use crate::passes::plan::rows::{BindingSource, Reads, Rel};
 
-type IdSet = (RelationId, String);
+type IdSet = (Rel, String);
 
-pub(super) struct RelationBuilder<'a, M: OrbitQueryModel + ?Sized> {
+/// The pattern's joined rows and what the result reads from them.
+pub struct Matched {
+    pub rows: Relation,
+    pub outputs: Vec<Projection>,
+    pub bindings: Vec<BindingSource>,
+    pub condition: Vec<Predicate>,
+}
+
+impl Matched {
+    pub fn property(&self, node: &str, property: &str) -> Column {
+        self.bindings
+            .iter()
+            .find(|binding| binding.node == node)
+            .and_then(|binding| binding.column(property))
+            .unwrap_or_else(|| Column::new(node, property))
+    }
+}
+
+pub(super) struct RelationBuilder<'a, 'q, 'c, M: OrbitQueryModel + ?Sized, B: RelationalBackend> {
     pattern: &'a Pattern<'a, M>,
-    root: Option<RelationId>,
+    reads: Reads<'q, 'c, B>,
+    root: Option<Relation>,
+    filters: Vec<Predicate>,
+    condition: Vec<Predicate>,
     outputs: Vec<Projection>,
     nodes: HashMap<String, PlannedNode>,
-    graph: RelationGraph,
     tagged: HashSet<(String, String, usize)>,
 }
 
@@ -31,73 +53,85 @@ pub(super) struct RelationBuilder<'a, M: OrbitQueryModel + ?Sized> {
 struct PlannedNode {
     binding: Option<BindingSource>,
     ids: Option<IdSet>,
-    bounded_read: Option<RelationId>,
-    read: Option<RelationId>,
+    bounded_read: Option<Rel>,
+    read: Option<Rel>,
 }
 
-impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
-    pub fn new(pattern: &'a Pattern<'a, M>) -> Self {
+impl<'a, 'q, 'c, M, B> RelationBuilder<'a, 'q, 'c, M, B>
+where
+    M: OrbitQueryModel + ?Sized,
+    B: RelationalBackend,
+{
+    pub fn new(pattern: &'a Pattern<'a, M>, reads: Reads<'q, 'c, B>) -> Self {
         Self {
             pattern,
+            reads,
             root: None,
+            filters: Vec::new(),
+            condition: Vec::new(),
             outputs: Vec::new(),
             nodes: HashMap::new(),
-            graph: RelationGraph::new(pattern.model.supports_selective_latest_rows()),
             tagged: HashSet::new(),
         }
     }
 
-    pub fn build(mut self) -> Result<ExecutionPlan> {
+    /// The joined rows with the pattern's filters and the `conditions` bound to the result bindings.
+    pub fn build(
+        mut self,
+        conditions: impl FnOnce(&[BindingSource]) -> Result<Vec<Predicate>>,
+    ) -> Result<Matched> {
         let pattern = self.pattern;
-        if pattern.relations.is_empty() {
-            return self.single_node();
-        }
-        for (index, relation) in pattern.relations.iter().enumerate() {
-            match &relation.fk {
-                Some(key) => self.add_fk(relation, key)?,
-                None => self.add_edge(index, relation)?,
+        let bindings = if pattern.relations.is_empty() {
+            self.single_node()?
+        } else {
+            for (index, relation) in pattern.relations.iter().enumerate() {
+                match &relation.fk {
+                    Some(key) => self.add_fk(relation, key)?,
+                    None => self.add_edge(index, relation)?,
+                }
             }
-        }
-        let joined: Vec<&str> = pattern
-            .query
-            .bindings()
-            .into_iter()
-            .map(|binding| binding.name)
-            .filter(|alias| self.nodes.contains_key(*alias) && pattern.nodes[*alias].joined)
-            .collect();
-        for alias in joined {
-            self.ensure_node(alias)?;
-        }
-        let bindings = pattern
-            .query
-            .bindings()
-            .into_iter()
-            .filter_map(|binding| self.nodes.get(binding.name)?.binding.clone())
-            .collect();
-        Ok(ExecutionPlan {
-            root: self
-                .root
-                .ok_or_else(|| QueryError::Lowering("traversal has no physical source".into()))?,
-            graph: self.graph,
+            let joined: Vec<&str> = pattern
+                .query
+                .bindings()
+                .into_iter()
+                .map(|binding| binding.name)
+                .filter(|alias| self.nodes.contains_key(*alias) && pattern.nodes[*alias].joined)
+                .collect();
+            for alias in joined {
+                self.ensure_node(alias)?;
+            }
+            pattern
+                .query
+                .bindings()
+                .into_iter()
+                .filter_map(|binding| self.nodes.get(binding.name)?.binding.clone())
+                .collect()
+        };
+        let root = self
+            .root
+            .take()
+            .ok_or_else(|| QueryError::Lowering("traversal has no physical source".into()))?;
+        self.filters.extend(conditions(&bindings)?);
+        let rows = self.reads.filter(root, &self.filters)?;
+        Ok(Matched {
+            rows,
             outputs: self.outputs,
             bindings,
+            condition: self.condition,
         })
     }
 
-    fn single_node(mut self) -> Result<ExecutionPlan> {
+    fn single_node(&mut self) -> Result<Vec<BindingSource>> {
         let node = self
             .pattern
             .nodes
             .values()
             .next()
             .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
-        let root = self.pattern.node_read(&mut self.graph, node)?;
-        Ok(ExecutionPlan {
-            graph: self.graph,
-            root,
-            outputs: node.outputs(),
-            bindings: vec![BindingSource::table(&node.alias)],
-        })
+        let read = self.pattern.node_read(&mut self.reads, node)?;
+        self.root = Some(self.reads.read(&read, None)?);
+        self.outputs = node.outputs();
+        Ok(vec![BindingSource::table(&node.alias)])
     }
 
     fn binding(&self, node: &str) -> Option<&BindingSource> {
@@ -157,16 +191,17 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
 
     fn join_root(
         &mut self,
-        scan: RelationId,
+        scan: &Rel,
         alias: &str,
         on: impl FnOnce(&Self) -> Result<(Column, Column)>,
     ) -> Result<()> {
         let Some(root) = self.root.take() else {
-            self.root = Some(scan);
+            self.root = Some(self.reads.read(scan, None)?);
             return Ok(());
         };
         let on = on(self)?;
-        self.root = Some(self.graph.join(root, scan.alias(alias), on, vec![]));
+        let right = self.reads.read(scan, Some(alias))?;
+        self.root = Some(self.reads.join(root, right, on, &[])?);
         Ok(())
     }
 
@@ -199,7 +234,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         on: impl FnOnce(&Self) -> Result<(Column, Column)>,
     ) -> Result<()> {
         let scan = self.node_read(node)?;
-        self.join_root(scan, &node.alias, on)?;
+        self.join_root(&scan, &node.alias, on)?;
         self.outputs.extend(node.outputs());
         self.bind_table(node);
         Ok(())
@@ -225,17 +260,17 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         );
     }
 
-    fn node_read(&mut self, node: &NodePlan) -> Result<RelationId> {
-        let read = self.pattern.node_read(&mut self.graph, node)?;
-        let state = self.nodes.entry(node.alias.clone()).or_default();
-        state.read = Some(read);
-        if self
+    fn node_read(&mut self, node: &NodePlan) -> Result<Rel> {
+        let read = self.pattern.node_read(&mut self.reads, node)?;
+        let selective = self
             .pattern
             .node_conditions(node)
             .iter()
-            .any(Predicate::is_selective)
-        {
-            state.bounded_read = Some(read);
+            .any(Predicate::is_selective);
+        let state = self.nodes.entry(node.alias.clone()).or_default();
+        state.read = Some(read.clone());
+        if selective {
+            state.bounded_read = Some(read.clone());
         }
         Ok(read)
     }
@@ -253,20 +288,25 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             return Ok(ids.clone());
         }
         let source = self.node_read(node)?;
-        let id = self.graph.project(
-            source,
-            vec![Projection::new(
-                OutputValue::Column(Column::new(&node.alias, DEFAULT_PRIMARY_KEY)),
-                DEFAULT_PRIMARY_KEY,
-            )],
+        let id = Projection::new(
+            OutputValue::Column(Column::new(&node.alias, DEFAULT_PRIMARY_KEY)),
+            DEFAULT_PRIMARY_KEY,
         );
-        let ids = (id, DEFAULT_PRIMARY_KEY.to_string());
+        let ids = (
+            self.reads.project(&source, None, &[id])?,
+            DEFAULT_PRIMARY_KEY.to_string(),
+        );
         self.set_ids(&node.alias, ids.clone());
         Ok(ids)
     }
 
     /// Keeps the ids an edge read produces for an endpoint when a later step can narrow by them.
-    fn bind_relation_ids(&mut self, index: usize, relation: &EdgeRelation, source: RelationId) {
+    fn bind_relation_ids(
+        &mut self,
+        index: usize,
+        relation: &EdgeRelation,
+        source: &Rel,
+    ) -> Result<()> {
         let pattern = self.pattern;
         let (start, end) = relation.direction.edge_columns();
         let bounded = [&relation.from_node, &relation.to_node]
@@ -285,38 +325,44 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                     && pattern.nodes[node].joined
                     && (pattern.endpoint_is_selective(other) || self.ids(other).is_some());
             if used_later {
-                let ids = self.ids_reached_by(source, column);
+                let ids = self.ids_reached_by(source, column)?;
                 self.set_ids(node, ids);
             }
         }
+        Ok(())
     }
 
-    fn endpoint_ids(&mut self, node: &str) -> Option<IdSet> {
+    fn endpoint_ids(&mut self, node: &str) -> Result<Option<IdSet>> {
         if let Some(ids) = self.ids(node) {
-            return Some(ids.clone());
+            return Ok(Some(ids.clone()));
         }
-        let ids = self.ids_through_holder(node, DEFAULT_PRIMARY_KEY)?;
+        let Some(ids) = self.ids_through_holder(node, DEFAULT_PRIMARY_KEY)? else {
+            return Ok(None);
+        };
         self.set_ids(node, ids.clone());
-        Some(ids)
+        Ok(Some(ids))
     }
 
-    fn ids_through_holder(&mut self, holder: &str, column: &str) -> Option<IdSet> {
+    fn ids_through_holder(&mut self, holder: &str, column: &str) -> Result<Option<IdSet>> {
         if !self.pattern.model.supports_selective_latest_rows() {
-            return None;
+            return Ok(None);
         }
-        let read = self.nodes.get(holder)?.bounded_read?;
-        Some(self.ids_reached_by(read, column))
+        let Some(read) = self
+            .nodes
+            .get(holder)
+            .and_then(|state| state.bounded_read.clone())
+        else {
+            return Ok(None);
+        };
+        self.ids_reached_by(&read, column).map(Some)
     }
 
-    fn ids_reached_by(&mut self, source: RelationId, column: &str) -> IdSet {
-        let bound = self.graph.bind(source, id_source_alias());
-        let id = self.graph.project(
-            bound,
-            vec![Projection::new(
-                OutputValue::Column(Column::new(id_source_alias(), column)),
-                DEFAULT_PRIMARY_KEY,
-            )],
+    fn ids_reached_by(&mut self, source: &Rel, column: &str) -> Result<IdSet> {
+        let id = Projection::new(
+            OutputValue::Column(Column::new(id_source_alias(), column)),
+            DEFAULT_PRIMARY_KEY,
         );
-        (id, DEFAULT_PRIMARY_KEY.to_string())
+        let ids = self.reads.project(source, Some(id_source_alias()), &[id])?;
+        Ok((ids, DEFAULT_PRIMARY_KEY.to_string()))
     }
 }

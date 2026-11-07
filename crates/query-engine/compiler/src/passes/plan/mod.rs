@@ -1,21 +1,20 @@
 //! Planning turns a validated query into a relational plan. Path finding, neighbors, and hydration
 //! read logical plans and build through the catalog in one step.
 //!
-//! Traversal and aggregation still plan into a `QueryPlan` that `lower` renders.
-//! `query_types/` picks the planner for the query type. They build a `pattern` (nodes, relations,
-//! conditions) whose steps assemble a `graph::RelationGraph`; `reuse` decides which relations
-//! lowering materializes; `filters` and `predicates` are the shared condition vocabulary.
+//! Traversal and aggregation plan a `pattern` (nodes, relations, conditions) whose steps build the
+//! joined rows through `rows`, sharing what later steps read again; `filters` and `predicates` are
+//! the shared condition vocabulary.
 
+mod current;
 pub(crate) mod filters;
-pub mod graph;
 mod hydration;
 mod neighbors;
 mod node;
 mod path_finding;
-mod pattern;
+pub(crate) mod pattern;
 pub mod predicates;
 pub mod query_types;
-pub mod reuse;
+pub mod rows;
 
 use std::collections::HashMap;
 
@@ -31,43 +30,7 @@ use crate::passes::lower::{self, LoweredMetadata, NodeBinding};
 use crate::tp_bounds::TpBounds;
 
 pub use filters::{BoundFilter, Test};
-pub use pattern::{EdgeRelation, NodePlan};
-pub use query_types::{aggregation::Aggregation, traversal::Traversal};
-
-pub struct Plan<T> {
-    pub nodes: HashMap<String, NodePlan>,
-    pub relations: Vec<EdgeRelation>,
-    pub node_edge_mappings: HashMap<String, (String, String)>,
-    pub operation: T,
-}
-
-pub enum QueryPlan {
-    Traversal(Plan<Traversal>),
-    Aggregation(Plan<Aggregation>),
-}
-
-impl QueryPlan {
-    pub fn relations(&self) -> &[EdgeRelation] {
-        match self {
-            Self::Traversal(plan) => &plan.relations,
-            Self::Aggregation(plan) => &plan.relations,
-        }
-    }
-
-    pub fn is_point_lookup(&self) -> bool {
-        let (nodes, relations) = match self {
-            Self::Traversal(Plan {
-                nodes, relations, ..
-            })
-            | Self::Aggregation(Plan {
-                nodes, relations, ..
-            }) => (nodes, relations),
-        };
-        !nodes.is_empty()
-            && nodes.values().all(NodePlan::is_id_pinned_only)
-            && relations.iter().all(|relation| relation.max_hops == 1)
-    }
-}
+pub use pattern::{EdgeRelation, Matched, NodePlan};
 
 pub(crate) fn property_value(
     nodes: &HashMap<String, NodePlan>,
@@ -97,7 +60,6 @@ pub(crate) fn sort_key<'m>(
 pub struct Planned<P> {
     pub plan: P,
     pub metadata: LoweredMetadata,
-    pub legacy: Option<QueryPlan>,
 }
 
 pub enum Request<'a> {
@@ -121,7 +83,6 @@ pub fn plan<M: RelationalModel>(
             return Ok(Planned {
                 plan,
                 metadata: LoweredMetadata::default(),
-                legacy: None,
             });
         }
     };
@@ -136,11 +97,7 @@ pub fn plan<M: RelationalModel>(
                 stable_order: path_finding::stable_order(),
                 ..LoweredMetadata::default()
             };
-            Ok(Planned {
-                plan,
-                metadata,
-                legacy: None,
-            })
+            Ok(Planned { plan, metadata })
         }
         QueryType::Neighbors => {
             let neighbors = neighbors::Neighbors::new(query, model)?;
@@ -153,37 +110,11 @@ pub fn plan<M: RelationalModel>(
                 stable_order: neighbors::stable_order(&neighbors),
                 ..LoweredMetadata::default()
             };
-            Ok(Planned {
-                plan,
-                metadata,
-                legacy: None,
-            })
+            Ok(Planned { plan, metadata })
         }
-        _ => {
-            let legacy = legacy(query, model)?;
-            let lowered = lower::emit(&legacy, query, tp_bounds, model)?;
-            Ok(Planned {
-                plan: lowered.plan,
-                metadata: lowered.metadata,
-                legacy: Some(legacy),
-            })
-        }
+        QueryType::Traversal | QueryType::Aggregation => lower::emit(query, tp_bounds, model),
+        QueryType::Hydration => Err(QueryError::PipelineInvariant(
+            "hydration plans from a hydration request".into(),
+        )),
     }
-}
-
-fn legacy<M>(query: Query<'_>, model: &M) -> Result<QueryPlan>
-where
-    M: OrbitQueryModel + ?Sized,
-{
-    Ok(match query.kind() {
-        QueryType::Traversal => QueryPlan::Traversal(query_types::traversal::plan(query, model)?),
-        QueryType::Aggregation => {
-            QueryPlan::Aggregation(query_types::aggregation::plan(query, model)?)
-        }
-        QueryType::Neighbors | QueryType::PathFinding | QueryType::Hydration => {
-            return Err(QueryError::PipelineInvariant(
-                "neighbors, path finding, and hydration plan from logical plans".into(),
-            ));
-        }
-    })
 }

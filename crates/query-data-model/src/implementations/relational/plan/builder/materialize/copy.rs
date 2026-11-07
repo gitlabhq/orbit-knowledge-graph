@@ -35,7 +35,15 @@ impl<B: RelationalBackend> Copier<'_, B> {
             self.define(q, inner)?;
         }
         let (_, root) = self.old.plan.body(body);
-        self.complete(q, root)
+        let rows = self.complete(q, root)?;
+        self.root(q, body, &rows)?;
+        Ok(rows)
+    }
+
+    fn root(&mut self, q: &RelationalBuilder<'_, B>, body: BodyId, rows: &Relation) -> Built<()> {
+        let outputs = q.construction.outputs(&rows.rows)?;
+        self.roots.insert(body, outputs);
+        Ok(())
     }
 
     fn pruned(&mut self, q: &mut RelationalBuilder<'_, B>, body: BodyId) -> Built<Relation> {
@@ -47,8 +55,7 @@ impl<B: RelationalBackend> Copier<'_, B> {
         if *plan.operation(root) != Operation::Select(Selection::All)
             || (0..outputs.len()).all(|index| wanted(&index))
         {
-            self.kept.insert(body, (0..outputs.len()).collect());
-            return self.complete(q, root);
+            return self.statement(q, body);
         }
         let input = plan.inputs(root)[0];
         let source = self.source(q, input)?;
@@ -59,7 +66,7 @@ impl<B: RelationalBackend> Copier<'_, B> {
                     || rows
                         .computed
                         .iter()
-                        .any(|(computed, _)| self.refs[&outputs[*index]] == *computed)
+                        .any(|(computed, _)| self.refs.get(&outputs[*index]) == Some(computed))
             })
             .collect();
         kept.sort_by_key(|index| plan.name(outputs[*index]).unwrap_or_default());
@@ -67,8 +74,9 @@ impl<B: RelationalBackend> Copier<'_, B> {
             .iter()
             .map(|index| q.column(self.refs[&outputs[*index]]))
             .collect::<Built<Vec<_>>>()?;
-        self.kept.insert(body, kept);
-        q.select(rows, columns)
+        let rows = q.select(rows, columns)?;
+        self.root(q, body, &rows)?;
+        Ok(rows)
     }
 
     pub(super) fn complete(
@@ -93,7 +101,7 @@ impl<B: RelationalBackend> Copier<'_, B> {
         let operation = plan.operation(node).clone();
         let inputs = plan.inputs(node).to_vec();
         let rows = match operation {
-            Operation::Read { body, alias } => return self.read(q, node, body, alias),
+            Operation::Read { body, alias } => return self.read(q, node, body, alias, false),
             Operation::Filter(predicate) => {
                 let mut source = self.source(q, inputs[0])?;
                 source.pending.push(self.remap(q, &predicate)?);
@@ -101,7 +109,12 @@ impl<B: RelationalBackend> Copier<'_, B> {
             }
             Operation::Join(kind) => {
                 let left = self.source(q, inputs[0])?;
-                let right = self.source(q, inputs[1])?;
+                let right = match plan.operation(inputs[1]).clone() {
+                    Operation::Read { body, alias } => {
+                        self.read(q, inputs[1], body, alias, true)?
+                    }
+                    _ => self.source(q, inputs[1])?,
+                };
                 let kind = match kind {
                     JoinKind::Inner(on) => JoinKind::Inner(self.remap(q, &on)?),
                     JoinKind::Left(on) => JoinKind::Left(self.remap(q, &on)?),
@@ -142,24 +155,26 @@ impl<B: RelationalBackend> Copier<'_, B> {
         node: NodeId,
         body: BodyId,
         alias: Option<String>,
+        joined: bool,
     ) -> Built<Source> {
         let old = self.old;
         let plan = &old.plan;
         let (name, root) = plan.body(body);
         let sharing = old.body(body).sharing;
         if sharing == Sharing::Pending && !self.shared(body) {
-            if let Some(source) = self.splice(q, root, alias.as_deref())? {
+            if let Some(source) = self.splice(q, root, alias.as_deref(), joined)? {
                 let fed: Vec<_> = plan
-                    .outputs(root)
-                    .map(|output| self.refs[&output])
+                    .outputs(node)
+                    .zip(plan.outputs(root))
+                    .filter_map(|(read, fed)| Some((read, *self.refs.get(&fed)?)))
                     .collect();
-                self.refs.extend(plan.outputs(node).zip(fed));
+                self.refs.extend(fed);
                 return Ok(source);
             }
             let name = alias.clone().unwrap_or_else(|| self.name());
             let inline = q.subquery(&name, |q| self.statement(q, body))?;
             let rows = q.read(&inline, Some(&name))?;
-            self.bind(q, node, &rows)?;
+            self.through(q, node, body, &rows)?;
             return Ok(Source {
                 rows,
                 pending: Vec::new(),
@@ -173,26 +188,46 @@ impl<B: RelationalBackend> Copier<'_, B> {
             _ => self.bodies[&body].clone(),
         };
         let rows = q.read(&built, alias.as_deref())?;
-        let fresh = q.construction.outputs(&rows.rows)?;
-        let reads: Vec<_> = plan.outputs(node).collect();
-        match self.kept.get(&body) {
-            Some(kept) => self
-                .refs
-                .extend(kept.iter().map(|index| reads[*index]).zip(fresh)),
-            None => self.refs.extend(reads.into_iter().zip(fresh)),
-        }
+        self.through(q, node, body, &rows)?;
         Ok(Source {
             rows,
             pending: Vec::new(),
         })
     }
 
-    /// A body that only filters a source under the reader's alias reads that source in place.
+    /// Maps a read's outputs through its body's root, whose copy may keep fewer columns.
+    fn through(
+        &mut self,
+        q: &RelationalBuilder<'_, B>,
+        node: NodeId,
+        body: BodyId,
+        rows: &Relation,
+    ) -> Built<()> {
+        let plan = &self.old.plan;
+        let (_, root) = plan.body(body);
+        let fresh = q.construction.outputs(&rows.rows)?;
+        let copied = &self.roots[&body];
+        let mapped: Vec<_> = plan
+            .outputs(node)
+            .zip(plan.outputs(root))
+            .filter_map(|(read, fed)| {
+                let new = self.refs.get(&fed)?;
+                let position = copied.iter().position(|copy| copy == new)?;
+                Some((read, fresh[position]))
+            })
+            .collect();
+        self.refs.extend(mapped);
+        Ok(())
+    }
+
+    /// A body that only filters a source under the reader's alias reads that source in place, except
+    /// that a join input keeps a derived source and its filters in their own block.
     fn splice(
         &mut self,
         q: &mut RelationalBuilder<'_, B>,
         root: NodeId,
         alias: Option<&str>,
+        joined: bool,
     ) -> Built<Option<Source>> {
         let old = self.old;
         let plan = &old.plan;
@@ -207,7 +242,7 @@ impl<B: RelationalBackend> Copier<'_, B> {
         }
         let named = match plan.operation(base) {
             Operation::Scan { alias, .. } => Some(alias.as_str()),
-            Operation::Read { alias, .. } => alias.as_deref(),
+            Operation::Read { alias, .. } if !joined => alias.as_deref(),
             _ => None,
         };
         if alias.is_none() || named != alias {

@@ -97,17 +97,20 @@ fn finish<C: config::CompilerCtx>(
 }
 
 /// Each CTE body of the compiled ClickHouse plan as a statement tests can EXPLAIN.
-pub fn cte_statements(
+pub fn subquery_statements(
     raw: &str,
     fe: Frontend,
     data_model: &Arc<ClickHouseDataModel>,
     ctx: &SecurityContext,
-) -> Result<Vec<passes::codegen::CteStatement>> {
+) -> Result<Vec<passes::codegen::SubqueryStatement>> {
     let shared = |plan: &Option<passes::codegen::ClickHousePlan>| {
         let plan = plan.as_ref().ok_or_else(|| {
             error::QueryError::PipelineInvariant("pipeline did not produce a plan".into())
         })?;
-        Ok(passes::codegen::cte_statements(plan, data_model.catalog()))
+        Ok(passes::codegen::subquery_statements(
+            plan,
+            data_model.catalog(),
+        ))
     };
     match fe {
         Frontend::JsonDsl => {

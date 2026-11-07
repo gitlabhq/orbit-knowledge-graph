@@ -3,13 +3,18 @@
 
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
+use query_data_model::implementations::relational::RelationalBackend;
 
 use super::super::{EdgeRelation, Fk};
 use super::RelationBuilder;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::predicates::*;
 
-impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
+impl<M, B> RelationBuilder<'_, '_, '_, M, B>
+where
+    M: OrbitQueryModel + ?Sized,
+    B: RelationalBackend,
+{
     pub(super) fn add_fk(&mut self, relation: &EdgeRelation, key: &Fk) -> Result<()> {
         let pattern = self.pattern;
         let joined_through_endpoint = self.ensure_holder(relation, key)?;
@@ -30,13 +35,16 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             let mut reached = if selective {
                 None
             } else {
-                self.ids_through_holder(&key.node, &key.column)
+                self.ids_through_holder(&key.node, &key.column)?
             };
             if reached.is_none()
                 && unfiltered
-                && let Some(read) = self.nodes.get(&key.node).and_then(|state| state.read)
+                && let Some(read) = self
+                    .nodes
+                    .get(&key.node)
+                    .and_then(|state| state.read.clone())
             {
-                reached = Some(self.ids_reached_by(read, &key.column));
+                reached = Some(self.ids_reached_by(&read, &key.column)?);
             }
             let read_later = pattern.nodes[endpoint].joined || pattern.holds_fk(endpoint);
             match reached {
@@ -67,8 +75,8 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             Some(_) => {}
             None => self.set_binding(endpoint, alias, &key.column, None, None),
         }
-        if let Some(root) = self.root.take() {
-            self.root = Some(self.graph.filter(root, predicates));
+        if self.root.is_some() {
+            self.filters.extend(predicates);
         }
         self.push_fk_outputs(relation, key, alias);
         Ok(())
@@ -93,7 +101,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             far.columns = Vec::new();
             let ids = self.node_ids_from(&far)?;
             node.predicates.push(membership(key_column.clone(), ids));
-        } else if let Some(ids) = self.endpoint_ids(endpoint) {
+        } else if let Some(ids) = self.endpoint_ids(endpoint)? {
             node.predicates.push(membership(key_column.clone(), ids));
         }
         if let Some(ids) = self.reached_ids(&key.node) {

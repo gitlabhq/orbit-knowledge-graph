@@ -23,7 +23,7 @@ use crate::logical::facts::{anchors, facts};
 use crate::passes::codegen::RelationalModel;
 use crate::passes::lower::Term;
 use crate::passes::lower::build::expr::{id_range, ids, relationship_kinds, tags};
-use crate::passes::lower::build::predicates::{Lowering, Shared};
+use crate::passes::lower::build::predicates::Lowering;
 use crate::passes::lower::build::sources::{Scope, columns, dedup, deleted, edge_scan, select};
 use crate::passes::lower::build::{
     Built, and, binary, call, col, computed, conjoin, disjoin, eq, filtered, int, scan, stored,
@@ -407,11 +407,7 @@ pub(crate) fn emit<B: RelationalBackend>(
     let tail = |q: &mut RelationalBuilder<'_, B>, rows: Relation| -> Built<Relation> {
         let rows = match order {
             Some((value, descending)) => {
-                let shared = Shared::default();
-                let lowering = Lowering {
-                    scope: &[&rows],
-                    shared: &shared,
-                };
+                let lowering = Lowering { scope: &[&rows] };
                 let value = lowering.output::<B>(value)?;
                 let order = Order {
                     value,

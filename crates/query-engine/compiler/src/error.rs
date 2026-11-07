@@ -5,6 +5,7 @@
 //! [`crate::metrics::failure_reason`] to wire it to the right instrument.
 
 use ontology::OntologyError;
+use query_data_model::implementations::relational::plan::RelationalError;
 use query_data_model::plan::logical::{ErrorClass, PlanError};
 use query_data_model::surface::SurfaceError;
 use thiserror::Error;
@@ -103,6 +104,12 @@ impl From<SurfaceError> for QueryError {
                 _ => Self::Validation(message),
             },
         }
+    }
+}
+
+impl From<RelationalError> for QueryError {
+    fn from(error: RelationalError) -> Self {
+        Self::Codegen(error.to_string())
     }
 }
 

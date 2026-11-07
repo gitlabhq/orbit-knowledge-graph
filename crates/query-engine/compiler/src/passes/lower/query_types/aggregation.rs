@@ -3,46 +3,22 @@ use query_data_model::implementations::relational::plan::{
     Expr, Measure, Order, Relation, RelationalBuilder, TimeUnit,
 };
 
+use crate::error::Result;
+use crate::passes::lower::Term;
 use crate::passes::lower::build::predicates::Lowering;
 use crate::passes::lower::build::{Built, computed, conjoin, named};
-use crate::passes::lower::{Term, columns, graph};
-use crate::passes::plan::predicates::OutputValue;
-use crate::passes::plan::query_types::aggregation::Group;
-use crate::passes::plan::{Aggregation, Plan};
-use crate::tp_bounds::TpBounds;
+use crate::passes::plan::Matched;
+use crate::passes::plan::query_types::aggregation::{AggregationPlan, Group};
 use query_data_model::plan::logical::TimeUnit as Unit;
 
 pub(crate) fn emit<B: RelationalBackend>(
     q: &mut RelationalBuilder<'_, B>,
-    plan: &Plan<Aggregation>,
+    matched: Matched,
+    result: &AggregationPlan,
     limit: u32,
-    tp_bounds: Option<&TpBounds>,
-) -> Built<Relation> {
-    let result = &plan.operation.result;
-    let execution = &plan.operation.execution;
-    let mut read = super::super::redaction_columns(plan, execution);
-    for condition in &result.condition {
-        columns::referenced(condition, &mut read);
-    }
-    read.extend(
-        result
-            .groups
-            .iter()
-            .filter_map(|group| group.value.column().cloned()),
-    );
-    read.extend(result.measures.iter().filter_map(|measure| {
-        measure
-            .argument
-            .as_ref()
-            .and_then(OutputValue::column)
-            .cloned()
-    }));
-    let executed = graph::execute(q, execution, &read, tp_bounds)?;
-    let rows = executed.reads.filter(q, executed.source)?;
-    let lowering = Lowering {
-        scope: &[&rows],
-        shared: &executed.reads.shared,
-    };
+) -> Result<Relation> {
+    let rows = matched.rows;
+    let lowering = Lowering { scope: &[&rows] };
     let mut groups = Vec::new();
     for value in &result.groups {
         groups.push(group::<B>(&lowering, value)?);
@@ -78,7 +54,7 @@ pub(crate) fn emit<B: RelationalBackend>(
         measures.push(lowered);
         picks.push((measure.name.clone(), measures.len() - 1));
     }
-    let projections = lowering.projections::<B>(&execution.outputs)?;
+    let projections = lowering.projections::<B>(&matched.outputs)?;
     let aggregated = q.aggregate(rows, groups.clone(), measures)?;
     let bound = |value: Expr| match groups.iter().position(|group| *group == value) {
         Some(index) => aggregated.groups[index].expr(),
@@ -111,7 +87,7 @@ pub(crate) fn emit<B: RelationalBackend>(
         None => rows,
     };
     let rows = q.limit(rows, Some(limit), None)?;
-    q.select(rows, columns)
+    Ok(q.select(rows, columns)?)
 }
 
 fn group<B: RelationalBackend>(lowering: &Lowering<'_>, value: &Group) -> Built<Expr> {
@@ -125,10 +101,8 @@ fn group<B: RelationalBackend>(lowering: &Lowering<'_>, value: &Group) -> Built<
     })
 }
 
-pub(crate) fn stable_order(plan: &Plan<Aggregation>) -> Vec<Term> {
-    (0..plan.operation.result.groups.len())
-        .map(Term::Group)
-        .collect()
+pub(crate) fn stable_order(result: &AggregationPlan) -> Vec<Term> {
+    (0..result.groups.len()).map(Term::Group).collect()
 }
 
 fn time_unit(unit: Unit) -> TimeUnit {

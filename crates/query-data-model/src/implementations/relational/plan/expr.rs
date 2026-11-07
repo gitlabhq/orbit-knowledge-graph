@@ -197,6 +197,15 @@ impl Expr {
         }
     }
 
+    pub(super) fn memberships(&self, bodies: &mut Vec<BodyId>) {
+        if let Self::In { query, .. } = self {
+            bodies.push(*query);
+        }
+        for child in self.children() {
+            child.memberships(bodies);
+        }
+    }
+
     fn children_mut(&mut self) -> Vec<&mut Expr> {
         match self {
             Self::List(items) | Self::Call { args: items, .. } => items.iter_mut().collect(),

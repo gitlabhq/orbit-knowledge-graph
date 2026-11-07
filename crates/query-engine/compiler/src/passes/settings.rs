@@ -4,7 +4,6 @@ use query_data_model::implementations::relational::plan::{Operation, ReadMode, S
 
 use crate::input::QueryType;
 use crate::passes::codegen::ClickHousePlan;
-use crate::passes::plan::QueryPlan;
 
 // Deployment config can tighten these compiler-enforced ceilings but cannot raise them.
 const PATHFINDING_EXECUTION_TIME_CEILING_SECONDS: u64 = 15;
@@ -16,7 +15,8 @@ pub fn resolve(
     query_type: QueryType,
     negation: bool,
     relational: &ClickHousePlan,
-    plan: Option<&QueryPlan>,
+    relationships: usize,
+    point_lookup: bool,
 ) -> QueryConfig {
     let mut config = orbit_server_config::query::for_query_type(query_type.into());
 
@@ -35,18 +35,22 @@ pub fn resolve(
             }
         )
     });
-    if relational
+    let shared = relational
         .bodies
         .iter()
-        .any(|body| matches!(body.sharing, Sharing::Shared { .. }))
-    {
+        .any(|body| matches!(body.sharing, Sharing::Shared { .. }));
+    let membership = relational
+        .plan
+        .nodes()
+        .any(|node| !relational.plan.operation(node).memberships().is_empty());
+    if shared || membership {
         derived.use_index_for_in_with_subqueries_max_values = Some(IN_SUBQUERY_INDEX_MAX_VALUES);
     }
 
-    if plan.is_some_and(|plan| plan.relations().len() >= 3) {
+    if relationships >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
     }
-    if plan.is_some_and(QueryPlan::is_point_lookup) && config.use_query_cache == Some(true) {
+    if point_lookup && config.use_query_cache == Some(true) {
         config.use_query_cache = Some(false);
     }
     if query_type == QueryType::PathFinding {

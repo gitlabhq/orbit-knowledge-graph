@@ -8,7 +8,9 @@ use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::duckdb::DuckDb;
 use query_data_model::implementations::duckdb::render::type_name;
 use query_data_model::implementations::relational::RelationalBackend;
-use query_data_model::implementations::relational::plan::{RelationalError, RelationalPlan};
+use query_data_model::implementations::relational::plan::{
+    RelationalError, RelationalPlan, SharePolicy,
+};
 use query_data_model::implementations::relational::render::ParameterizedSql;
 use query_data_model::{
     Catalog, ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, QueryModel,
@@ -60,6 +62,13 @@ impl RelationalModel for DuckDbDataModel {
     }
 }
 
+/// Shares read more than once become `_orbit_relation_N` bodies; the rest inline into their reader.
+pub fn materialize<M: RelationalModel>(plan: PlanOf<M>, model: &M) -> Result<PlanOf<M>> {
+    let prefix = format!("{}relation_", crate::constants::internal_column_prefix());
+    let policy = SharePolicy::of::<M::Backend>(prefix);
+    model.catalog().materialize(plan, &policy).map_err(rejected)
+}
+
 pub fn configure(
     plan: ClickHousePlan,
     catalog: &Catalog<ClickHouse>,
@@ -96,19 +105,22 @@ pub fn render<M: RelationalModel>(
     }
 }
 
-/// A CTE's name, its body as a statement of its own with the CTEs before it attached, and its parameters.
-pub type CteStatement = (String, String, HashMap<String, ParamValue>);
+/// A CTE or IN subquery's name, its body as a statement of its own with the CTEs it can read, and its parameters.
+pub type SubqueryStatement = (String, String, HashMap<String, ParamValue>);
 
-pub fn cte_statements(plan: &ClickHousePlan, catalog: &Catalog<ClickHouse>) -> Vec<CteStatement> {
+pub fn subquery_statements(
+    plan: &ClickHousePlan,
+    catalog: &Catalog<ClickHouse>,
+) -> Vec<SubqueryStatement> {
     catalog
-        .render_shared(plan)
+        .render_subqueries(plan)
         .into_iter()
         .map(|(name, rendered)| (name, rendered.sql, rendered.parameters))
         .collect()
 }
 
 pub(crate) fn rejected(error: RelationalError) -> QueryError {
-    QueryError::Codegen(error.to_string())
+    error.into()
 }
 
 fn duckdb_literal(parameter: &ParamValue) -> String {

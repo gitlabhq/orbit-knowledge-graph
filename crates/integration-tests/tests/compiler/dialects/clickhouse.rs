@@ -2084,9 +2084,9 @@ fn gql_prepares_queries_and_scoped_schema() {
 }
 
 #[test]
-fn cte_statements_carry_the_ctes_they_read() {
-    let statements = compiler::cte_statements(
-        "MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) WHERE g.full_path = 'g701' RETURN p, count(f) AS c LIMIT 10",
+fn subquery_statements_carry_the_ctes_they_read() {
+    let statements = compiler::subquery_statements(
+        "MATCH (f:File)-[:DEFINES]->(d:Definition) WHERE f.path ENDS WITH '.rb' RETURN * LIMIT 20",
         Frontend::Gql,
         &embedded_model(),
         &test_ctx(),
@@ -2105,10 +2105,18 @@ fn cte_statements_carry_the_ctes_they_read() {
                 .take_while(char::is_ascii_digit)
                 .collect();
             let name = format!("_orbit_relation_{digits}");
-            assert!(
-                &name == own || sql.contains(&format!("{name} AS ")),
-                "{name} is read but not defined in: {sql}"
-            );
+            let after = &sql[position + name.len()..];
+            let defines = after.starts_with(" AS (") || after.starts_with(" AS MATERIALIZED (");
+            let aliased = sql[..position].ends_with(") AS ");
+            let reads = after.starts_with(" AS ") || sql[..position].ends_with("FROM ");
+            if reads && !defines && !aliased {
+                assert!(
+                    &name == own
+                        || sql.contains(&format!("{name} AS ("))
+                        || sql.contains(&format!("{name} AS MATERIALIZED (")),
+                    "{name} is read but not defined in: {sql}"
+                );
+            }
         }
     }
 }

@@ -179,14 +179,7 @@ pub(crate) fn term<B: RelationalBackend>(
 ) -> Built<Expr> {
     Ok(match term {
         Term::Column(value) => column(scope, value)?,
-        Term::Value(value) => {
-            let shared = predicates::Shared::default();
-            let lowering = predicates::Lowering {
-                scope,
-                shared: &shared,
-            };
-            lowering.output::<B>(value)?
-        }
+        Term::Value(value) => predicates::Lowering { scope }.output::<B>(value)?,
         Term::Id(id) => literal((*id).into()),
         Term::Output(name) => named(scope, name)?,
         Term::Text(value) => call(Function::ToString, vec![column(scope, value)?]),

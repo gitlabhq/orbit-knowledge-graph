@@ -54,12 +54,15 @@ impl<'p, D: Dialect> Renderer<'p, D> {
         Self::statement_of(catalog, plan, &plan.with, plan.plan.root(), dialect)
     }
 
-    pub fn shared(
+    /// Each CTE with the CTEs before it, then each IN subquery with every CTE: the bodies an EXPLAIN of
+    /// the whole statement does not show.
+    pub fn subqueries(
         catalog: &'p Catalog<D::Backend>,
         plan: &'p RelationalPlan<D::Backend>,
         dialect: impl Fn() -> D,
     ) -> Vec<(String, ParameterizedSql)> {
-        plan.with
+        let mut statements: Vec<_> = plan
+            .with
             .iter()
             .enumerate()
             .map(|(position, body)| {
@@ -68,7 +71,20 @@ impl<'p, D: Dialect> Renderer<'p, D> {
                     Self::statement_of(catalog, plan, &plan.with[..position], root, dialect());
                 (name.to_string(), sql)
             })
-            .collect()
+            .collect();
+        let mut seen = Vec::new();
+        for node in plan.plan.nodes() {
+            for body in plan.plan.operation(node).memberships() {
+                if seen.contains(&body) {
+                    continue;
+                }
+                seen.push(body);
+                let (name, root) = plan.plan.body(body);
+                let sql = Self::statement_of(catalog, plan, &plan.with, root, dialect());
+                statements.push((name.to_string(), sql));
+            }
+        }
+        statements
     }
 
     fn statement_of(

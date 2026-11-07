@@ -7,7 +7,7 @@ cases:
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     expect:
-      sql_contains: ["caller.id IN (SELECT id FROM _orbit_relation_", "WITH _orbit_relation_4 AS MATERIALIZED (SELECT _orbit_edge_0.relationship_kind"]
+      sql_contains: ["caller.id IN (SELECT _orbit_relation_", "WITH _orbit_relation_0 AS MATERIALIZED (SELECT _orbit_edge_0.relationship_kind"]
       node_count: 2
       nodes:
         Definition:
@@ -41,7 +41,7 @@ cases:
       gql: |
         MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
     expect:
-      sql_contains: ["callee.id IN (SELECT id FROM _orbit_relation_", "WITH _orbit_relation_4 AS MATERIALIZED (SELECT _orbit_edge_0.relationship_kind"]
+      sql_contains: ["callee.id IN (SELECT _orbit_relation_", "WITH _orbit_relation_0 AS MATERIALIZED (SELECT _orbit_edge_0.relationship_kind"]
       node_count: 2
       nodes:
         Definition:
@@ -76,7 +76,7 @@ cases:
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     expect:
-      sql_contains: ["caller.id IN (SELECT id FROM _orbit_relation_"]
+      sql_contains: ["caller.id IN (SELECT _orbit_relation_"]
       node_count: 2
       nodes:
         Definition:
@@ -126,7 +126,7 @@ cases:
       gql: |
         MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
     expect:
-      sql_contains: ["callee.id IN (SELECT id FROM _orbit_relation_"]
+      sql_contains: ["callee.id IN (SELECT _orbit_relation_"]
       node_count: 2
       nodes:
         Definition:

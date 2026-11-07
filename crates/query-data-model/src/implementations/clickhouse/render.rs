@@ -30,11 +30,11 @@ impl Catalog<ClickHouse> {
         rendered
     }
 
-    pub fn render_shared(
+    pub fn render_subqueries(
         &self,
         plan: &RelationalPlan<ClickHouse>,
     ) -> Vec<(String, ParameterizedSql)> {
-        Renderer::shared(self, plan, ClickHouseSql::default)
+        Renderer::subqueries(self, plan, ClickHouseSql::default)
     }
 }
 

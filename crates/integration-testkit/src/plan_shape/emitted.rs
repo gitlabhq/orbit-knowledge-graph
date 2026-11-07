@@ -8,7 +8,7 @@ use query_data_model::implementations::relational::plan::{
 use query_data_model::implementations::relational::{CurrentRows, RelationalBackend};
 use query_data_model::plan::tracking::{BodyId, NodeId, Ref};
 
-use super::explain::{filter, literal, membership_keys, scan, sort};
+use super::explain::{filter, leaf, literal, membership_keys, scan, sort};
 use super::operator::Operator;
 use super::pattern::Expression as Tree;
 
@@ -19,13 +19,46 @@ pub fn tree<B: RelationalBackend>(plan: &RelationalPlan<B>, catalog: &Catalog<B>
             owners.entry(output).or_insert((node, position));
         }
     }
+    let mut readers = vec![0; plan.bodies.len()];
+    for node in plan.plan.nodes() {
+        if let Operation::Read { body, .. } = plan.plan.operation(node) {
+            readers[body.index()] += 1;
+        }
+    }
+    let shares = plan
+        .plan
+        .bodies()
+        .filter(|body| plan.body(*body).sharing == Sharing::Pending)
+        .enumerate()
+        .map(|(position, body)| (body, format!("shared_{position}")))
+        .collect();
     let explain = Emitted {
         plan,
         catalog,
         owners,
         current_is_final: B::CAPABILITIES.current_rows == CurrentRows::Final,
+        readers,
+        shares,
     };
-    explain.statement(&plan.with, plan.plan.root())
+    let mut with: Vec<BodyId> = plan.with.clone();
+    with.extend(plan.plan.bodies().filter(|body| explain.reused(*body)));
+    with.sort();
+    let tree = explain.statement(&with, plan.plan.root());
+    let inline = explain.inline_memberships();
+    match (inline.is_empty(), tree.label) {
+        (true, _) => tree,
+        (false, Operator::With) => {
+            let mut children = tree.children;
+            let main = children.pop();
+            let children = children.into_iter().chain(inline).chain(main);
+            Tree::node(Operator::With, "", children.collect())
+        }
+        (false, _) => Tree::node(
+            Operator::With,
+            "",
+            inline.into_iter().chain([tree]).collect(),
+        ),
+    }
 }
 
 struct Emitted<'p, B: RelationalBackend> {
@@ -33,11 +66,24 @@ struct Emitted<'p, B: RelationalBackend> {
     catalog: &'p Catalog<B>,
     owners: HashMap<Ref, (NodeId, usize)>,
     current_is_final: bool,
+    readers: Vec<usize>,
+    shares: HashMap<BodyId, String>,
 }
 
 impl<B: RelationalBackend> Emitted<'_, B> {
     fn operation(&self, node: NodeId) -> &Operation {
         self.plan.plan.operation(node)
+    }
+
+    /// A planned share that several reads use, shown as the CTE materialization makes of it.
+    fn reused(&self, body: BodyId) -> bool {
+        self.shares.contains_key(&body) && self.readers[body.index()] > 1
+    }
+
+    fn name(&self, body: BodyId) -> &str {
+        self.shares
+            .get(&body)
+            .map_or_else(|| self.plan.plan.body(body).0, String::as_str)
     }
 
     fn statement(&self, with: &[BodyId], root: NodeId) -> Tree {
@@ -46,9 +92,9 @@ impl<B: RelationalBackend> Emitted<'_, B> {
             return tree;
         }
         let shared = with.iter().map(|body| {
-            let (name, root) = self.plan.plan.body(*body);
+            let (_, root) = self.plan.plan.body(*body);
             let inner = self.statement(&self.plan.body(*body).with, root);
-            Tree::node(Operator::Cte, name, vec![inner])
+            Tree::node(Operator::Cte, self.name(*body), vec![inner])
         });
         Tree::node(Operator::With, "", shared.chain([tree]).collect())
     }
@@ -131,10 +177,20 @@ impl<B: RelationalBackend> Emitted<'_, B> {
                 *read == ReadMode::Current && self.current_is_final,
             ),
             Operation::Read { body, alias } => {
-                let (name, root) = self.plan.plan.body(*body);
+                let (_, root) = self.plan.plan.body(*body);
+                let name = self.name(*body);
                 let range = alias.as_deref().unwrap_or(name);
                 match (self.plan.body(*body).sharing, self.operation(root)) {
                     (Sharing::Shared { .. }, _) => scan(name, range, false),
+                    (Sharing::Pending, _) if self.reused(*body) => {
+                        leaf(Operator::Scan, format!("Share({name}) AS {range}"))
+                    }
+                    (Sharing::Pending, Operation::Select(Selection::All))
+                        if self.filters_in_place(root, alias.as_deref()) =>
+                    {
+                        let mut tree = self.query(root);
+                        tree.children.pop().unwrap_or(tree)
+                    }
                     (Sharing::Inline | Sharing::Pending, Operation::Union) => {
                         let arms = self.plan.plan.inputs(root).iter();
                         let arms = arms.map(|arm| self.query(*arm)).collect();
@@ -180,6 +236,51 @@ impl<B: RelationalBackend> Emitted<'_, B> {
             ),
             _ => filter(vec![self.expression(predicate)], input),
         }
+    }
+
+    /// A share that only filters a source under its reader's alias, which materialization reads in place.
+    fn filters_in_place(&self, root: NodeId, alias: Option<&str>) -> bool {
+        let mut base = self.plan.plan.inputs(root)[0];
+        while let Operation::Filter(_) = self.operation(base) {
+            base = self.plan.plan.inputs(base)[0];
+        }
+        let named = match self.operation(base) {
+            Operation::Scan { alias, .. } => Some(alias.as_str()),
+            Operation::Read { alias, .. } => alias.as_deref(),
+            _ => None,
+        };
+        alias.is_some() && named == alias
+    }
+
+    /// The relation a membership body reads its keys from, and whether it is a CTE.
+    fn membership_source(&self, body: BodyId) -> Option<(&str, BodyId, bool)> {
+        let (_, root) = self.plan.plan.body(body);
+        match self.operation(self.plan.block(root).base) {
+            Operation::Read { body, alias } => {
+                let shared = matches!(self.plan.body(*body).sharing, Sharing::Shared { .. })
+                    || self.reused(*body);
+                let name = alias.as_deref().unwrap_or(self.name(*body));
+                Some((name, *body, shared))
+            }
+            _ => None,
+        }
+    }
+
+    /// Membership keys read from rows that are not a CTE, each listed beside the CTEs under its name.
+    fn inline_memberships(&self) -> Vec<Tree> {
+        let mut seen: Vec<(&str, BodyId)> = Vec::new();
+        for node in self.plan.plan.nodes() {
+            for body in self.operation(node).memberships() {
+                if let Some((name, source, false)) = self.membership_source(body)
+                    && !seen.iter().any(|(_, known)| *known == source)
+                {
+                    seen.push((name, source));
+                }
+            }
+        }
+        seen.into_iter()
+            .map(|(name, source)| Tree::node(Operator::Bind, name, vec![self.body(source)]))
+            .collect()
     }
 
     fn projection(&self, select: NodeId, compute: Option<NodeId>) -> String {
@@ -294,6 +395,9 @@ impl<B: RelationalBackend> Emitted<'_, B> {
                 if name == "subquery" {
                     return format!("{value} IN subquery");
                 }
+                let name = self
+                    .membership_source(*query)
+                    .map_or(name, |(source, ..)| source);
                 let keys: Vec<_> = self
                     .plan
                     .plan

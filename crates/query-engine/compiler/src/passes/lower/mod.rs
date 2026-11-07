@@ -1,25 +1,28 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
 pub(crate) mod build;
-mod columns;
-pub(crate) mod graph;
 pub mod query_types;
 
-use crate::error::{QueryError, Result};
-use crate::logical::Query;
-use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
-use crate::tp_bounds::TpBounds;
 use std::collections::HashMap;
 
-use super::plan::graph::ExecutionPlan;
+use crate::error::{QueryError, Result};
+use crate::input::QueryType;
+use crate::logical::Query;
+use crate::passes::codegen::{PlanOf, RelationalModel};
+use crate::tp_bounds::TpBounds;
+
+use super::plan::pattern::Pattern;
 use super::plan::predicates::{Column, OutputValue};
-use super::plan::{Plan, QueryPlan};
+use super::plan::query_types::aggregation::aggregation_plan;
+use super::plan::rows::{self, BindingSource};
+use super::plan::{NodePlan, Planned};
 
 #[derive(Clone, Default)]
 pub struct LoweredMetadata {
     pub nodes: HashMap<String, NodeBinding>,
     pub edges: Vec<LoweredEdge>,
     pub stable_order: Vec<Term>,
+    pub point_lookup: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -73,34 +76,44 @@ pub struct LoweredEdge {
     pub relationship: usize,
 }
 
-pub struct LoweredQuery<P> {
-    pub plan: P,
-    pub metadata: LoweredMetadata,
-}
-
-fn bindings<T>(
-    plan: &Plan<T>,
+fn bindings(
+    nodes: &HashMap<String, NodePlan>,
     query: Query<'_>,
-    mut nodes: HashMap<String, NodeBinding>,
+    matched: &[BindingSource],
 ) -> Result<HashMap<String, NodeBinding>> {
+    let mut bound: HashMap<String, NodeBinding> = matched
+        .iter()
+        .map(|binding| {
+            let source = NodeBinding::source(
+                &binding.alias,
+                &binding.column,
+                binding.property_source.clone(),
+                binding.traversal_path.clone(),
+            );
+            (binding.node.clone(), source)
+        })
+        .collect();
     for (alias, node) in query
         .bindings()
         .into_iter()
-        .filter_map(|binding| Some((binding.name, plan.nodes.get(binding.name)?)))
+        .filter_map(|binding| Some((binding.name, nodes.get(binding.name)?)))
     {
-        if nodes.contains_key(alias) {
+        if bound.contains_key(alias) {
             continue;
         }
         let missing = || QueryError::Lowering(format!("node '{alias}' has no emitted identity"));
-        let source = plan.node_edge_mappings.get(alias).ok_or_else(missing)?;
-        let binding = match (nodes.get(&source.0), node.node_ids.as_slice()) {
+        let source = matched
+            .iter()
+            .find(|binding| binding.node == alias)
+            .ok_or_else(missing)?;
+        let binding = match (bound.get(&source.alias), node.node_ids.as_slice()) {
             (
                 Some(NodeBinding::Values {
                     table_alias: Some(table),
                     ..
                 }),
                 _,
-            ) => NodeBinding::source(table, &source.1, None, None),
+            ) => NodeBinding::source(table, &source.column, None, None),
             (_, [id]) => NodeBinding::Values {
                 identity: Term::Id(*id),
                 table_alias: None,
@@ -108,54 +121,46 @@ fn bindings<T>(
             },
             _ => return Err(missing()),
         };
-        nodes.insert(alias.to_string(), binding);
+        bound.insert(alias.to_string(), binding);
     }
-    Ok(nodes)
-}
-
-fn redaction_columns<T>(plan: &Plan<T>, execution: &ExecutionPlan) -> Vec<Column> {
-    execution
-        .bindings
-        .iter()
-        .filter_map(|binding| {
-            let source = binding.property_source.as_deref()?;
-            let node = plan.nodes.get(&binding.node)?;
-            Some(Column::new(source, &node.redaction_id_column))
-        })
-        .collect()
+    Ok(bound)
 }
 
 pub fn emit<M: RelationalModel>(
-    plan: &QueryPlan,
     query: Query<'_>,
     tp_bounds: Option<&TpBounds>,
     model: &M,
-) -> Result<LoweredQuery<PlanOf<M>>> {
-    let catalog = model.catalog();
+) -> Result<Planned<PlanOf<M>>> {
     let limit = query
         .row_limit()
         .ok_or_else(|| QueryError::PipelineInvariant("queries carry a row limit".into()))?;
-    let (built, nodes, stable_order) = match plan {
-        QueryPlan::Traversal(plan) => {
-            let nodes = bindings(plan, query, graph::bindings(&plan.operation.execution))?;
-            let shape = query_types::traversal::shape(plan, query, limit)?;
-            let built = catalog
-                .build(|q| query_types::traversal::emit(q, plan, &shape, tp_bounds))
-                .map_err(rejected)?;
-            let stable_order = query_types::traversal::stable_order(plan, query, &nodes);
-            (built, nodes, stable_order)
-        }
-        QueryPlan::Aggregation(plan) => {
-            let nodes = bindings(plan, query, graph::bindings(&plan.operation.execution))?;
-            let built = catalog
-                .build(|q| query_types::aggregation::emit(q, plan, limit, tp_bounds))
-                .map_err(rejected)?;
-            let stable_order = query_types::aggregation::stable_order(plan);
-            (built, nodes, stable_order)
-        }
-    };
-    let edges = plan
-        .relations()
+    let pattern = Pattern::new(query, model)?;
+    let mut planned = None;
+    let plan = rows::build(model.catalog(), |q| {
+        let matched = pattern.execution(q, tp_bounds)?;
+        let nodes = bindings(&pattern.nodes, query, &matched.bindings)?;
+        let (rows, stable_order) = match query.kind() {
+            QueryType::Aggregation => {
+                let result = aggregation_plan(query, &pattern.nodes, &matched);
+                let stable_order = query_types::aggregation::stable_order(&result);
+                let rows = query_types::aggregation::emit(q, matched, &result, limit)?;
+                (rows, stable_order)
+            }
+            _ => {
+                let shape = query_types::traversal::shape(&pattern, &matched, query, limit)?;
+                let stable_order =
+                    query_types::traversal::stable_order(&pattern, &matched, query, &nodes);
+                let rows = query_types::traversal::emit(q, matched, &shape)?;
+                (rows, stable_order)
+            }
+        };
+        planned = Some((nodes, stable_order));
+        Ok(rows)
+    })?;
+    let (nodes, stable_order) =
+        planned.ok_or_else(|| QueryError::PipelineInvariant("a built plan has metadata".into()))?;
+    let edges = pattern
+        .relations
         .iter()
         .map(|hop| LoweredEdge {
             path_column: (hop.max_hops > 1).then(|| hop.path_nodes_column()),
@@ -164,12 +169,19 @@ pub fn emit<M: RelationalModel>(
             relationship: hop.input_index,
         })
         .collect();
-    Ok(LoweredQuery {
-        plan: built,
+    let point_lookup = !pattern.nodes.is_empty()
+        && pattern.nodes.values().all(NodePlan::is_id_pinned_only)
+        && pattern
+            .relations
+            .iter()
+            .all(|relation| relation.max_hops == 1);
+    Ok(Planned {
+        plan,
         metadata: LoweredMetadata {
             nodes,
             edges,
             stable_order,
+            point_lookup,
         },
     })
 }

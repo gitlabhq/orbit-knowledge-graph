@@ -1,34 +1,15 @@
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
-    Expr, Function, Relation, RelationalBuilder, RelationalError, Subquery, UnaryOp,
+    Expr, Function, Relation, RelationalBuilder, UnaryOp,
 };
 
 use super::expr::{self, Filter};
 use super::{Built, call, column, eq, int, string};
 use crate::input::BooleanExpression;
-use crate::passes::plan::graph::RelationId;
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
-
-#[derive(Default)]
-pub(crate) struct Shared(Vec<(RelationId, Subquery)>);
-
-impl Shared {
-    pub(crate) fn insert(&mut self, relation: RelationId, body: Subquery) {
-        self.0.push((relation, body));
-    }
-
-    pub(crate) fn get(&self, relation: RelationId) -> Built<&Subquery> {
-        self.0
-            .iter()
-            .find(|(id, _)| *id == relation)
-            .map(|(_, body)| body)
-            .ok_or(RelationalError::Incomplete("a shared relation"))
-    }
-}
 
 pub(crate) struct Lowering<'s> {
     pub scope: &'s [&'s Relation],
-    pub shared: &'s Shared,
 }
 
 impl Lowering<'_> {
@@ -119,10 +100,9 @@ impl Lowering<'_> {
                     1 => values.remove(0),
                     _ => call(Function::Tuple, values),
                 };
-                let body = self.shared.get(*relation)?.clone();
-                let name = crate::passes::lower::graph::relation_name(*relation);
                 let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
-                super::membership(q, value, &body, &name, &keys)?
+                let name = format!("{}keys", crate::constants::internal_column_prefix());
+                super::membership(q, value, &relation.rows, &name, &keys)?
             }
         })
     }

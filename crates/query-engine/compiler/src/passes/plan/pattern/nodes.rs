@@ -14,10 +14,10 @@ use super::{NodePlan, Pattern};
 use crate::logical::facts::Anchor;
 use crate::logical::{Query, binding};
 use crate::passes::plan::filters::{bind_facts, unindex_if_key_narrowed};
-use crate::passes::plan::graph::ReadScope;
 use crate::passes::plan::predicates::{
     Column, OutputValue, Predicate, Projection, live, property_filter,
 };
+use crate::passes::plan::rows::ReadScope;
 
 impl NodePlan {
     fn new<M>(query: Query<'_>, anchor: &Anchor<'_>, selection: Option<&Columns>, model: &M) -> Self

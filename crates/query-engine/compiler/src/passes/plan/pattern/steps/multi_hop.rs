@@ -3,6 +3,8 @@
 
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
+use query_data_model::implementations::relational::RelationalBackend;
+use query_data_model::implementations::relational::plan::Relation;
 
 use super::super::relations::select_edge_layouts;
 use super::super::{EdgeRelation, Pattern};
@@ -11,12 +13,16 @@ use super::{IdSet, RelationBuilder};
 use crate::constants::*;
 use crate::error::Result;
 use crate::input::Direction;
-use crate::passes::plan::graph::{RelationGraph, RelationId};
 use crate::passes::plan::predicates::*;
+use crate::passes::plan::rows::{Reads, Rel};
 
-impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
+impl<M, B> RelationBuilder<'_, '_, '_, M, B>
+where
+    M: OrbitQueryModel + ?Sized,
+    B: RelationalBackend,
+{
     /// Walks a variable-length relation from its pinned end, so the walk reverses when only the target is pinned.
-    pub(super) fn multi_hop_source(&mut self, relation: &EdgeRelation) -> Result<RelationId> {
+    pub(super) fn multi_hop_source(&mut self, relation: &EdgeRelation) -> Result<Rel> {
         let pattern = self.pattern;
         let mut expansion = relation.clone();
         let mut source_ids = self.ids(&relation.from_node).cloned();
@@ -33,181 +39,213 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             &mut expansion.edge_tables,
             &[expansion.direction.edge_columns().0],
         );
-        multi_hop(
-            &mut self.graph,
+        let mut walk = Walk {
+            reads: &mut self.reads,
             pattern,
-            &expansion,
-            &relation.alias,
-            [source_ids, target_ids],
+            relation: &expansion,
+            alias: &relation.alias,
             reverse,
-        )
-    }
-}
-
-fn multi_hop<M: OrbitQueryModel + ?Sized>(
-    graph: &mut RelationGraph,
-    pattern: &Pattern<'_, M>,
-    relation: &EdgeRelation,
-    alias: &str,
-    [source_ids, target_ids]: [Option<IdSet>; 2],
-    reverse_output: bool,
-) -> Result<RelationId> {
-    let covered = pattern.edge_column_filters(relation);
-    let required: Vec<String> = covered
-        .iter()
-        .map(|(property, _)| (*property).to_string())
-        .collect();
-    let (start_id, end_id) = relation.direction.edge_columns();
-    let path_id = if reverse_output { start_id } else { end_id };
-    let from = &pattern.nodes[&relation.from_node];
-    let tagged = relation.edge_tables.iter().all(|table| {
-        pattern
-            .model
-            .table_columns(table)
-            .is_none_or(|columns| columns.contains(SOURCE_TAGS_COLUMN))
-    });
-
-    let first_hop = hop_alias(1);
-    let mut first_predicates = vec![live(&first_hop)];
-    first_predicates.extend(pattern.entity_kind(&first_hop, &relation.from_node, start_id));
-    if let Some(ids) = source_ids {
-        first_predicates.push(membership(Column::new(&first_hop, start_id), ids));
-    }
-    first_predicates.extend(from.id_predicates(Column::new(&first_hop, start_id)));
-    first_predicates.extend(from.filters.iter().filter_map(|(_, filter)| {
-        pattern.denorm_tag(relation, &relation.from_node, filter, &first_hop)
-    }));
-    first_predicates.extend(
-        covered
-            .iter()
-            .map(|(property, filter)| property_filter(&first_hop, property, filter)),
-    );
-    let first = hop_rows(graph, pattern, relation, &first_hop, first_predicates)?;
-    let first_path = OutputValue::Path(vec![(
-        Column::new(&first_hop, path_id),
-        Column::new(&first_hop, kind_column(path_id)),
-    )]);
-    let mut previous = project_depth(
-        graph,
-        first,
-        1,
-        (&first_hop, &first_hop, &first_hop),
-        first_path,
-        (&required, tagged),
-    );
-    let mut depths = Vec::new();
-    if relation.min_hops <= 1 {
-        depths.push(
-            complete_depth(
-                graph,
-                pattern,
-                relation,
-                alias,
-                previous,
-                target_ids.as_ref(),
-            )
-            .into(),
-        );
-    }
-    for depth in 2..=relation.max_hops {
-        let previous_alias = reached_depth_alias(depth - 1);
-        let current_alias = hop_alias(depth);
-        let current = hop_rows(
-            graph,
-            pattern,
-            relation,
-            &current_alias,
-            vec![
-                live(&current_alias),
-                membership(
-                    Column::new(&current_alias, start_id),
-                    (previous, end_id.to_string()),
-                ),
-            ],
-        )?;
-        let joined = graph.join(
-            previous.alias(&previous_alias),
-            current.alias(&current_alias),
-            (
-                Column::new(&previous_alias, end_id),
-                Column::new(&current_alias, start_id),
-            ),
-            vec![column_eq(
-                Column::new(&previous_alias, kind_column(end_id)),
-                Column::new(&current_alias, kind_column(start_id)),
-            )],
-        );
-        let (source, target) = relation
-            .direction
-            .stored_order(&previous_alias, &current_alias);
-        let step = (
-            Column::new(&previous_alias, path_nodes_column()),
-            Column::new(&current_alias, path_id),
-            Column::new(&current_alias, kind_column(path_id)),
-        );
-        let path = if reverse_output {
-            OutputValue::PathPrepend {
-                path: step.0,
-                id: step.1,
-                kind: step.2,
-            }
-        } else {
-            OutputValue::PathAppend {
-                path: step.0,
-                id: step.1,
-                kind: step.2,
-            }
         };
-        previous = project_depth(
-            graph,
-            joined,
-            depth,
-            (&previous_alias, source, target),
-            path,
-            (&required, tagged),
-        );
-        if depth >= relation.min_hops.max(1) {
-            depths.push(
-                complete_depth(
-                    graph,
-                    pattern,
-                    relation,
-                    alias,
-                    previous,
-                    target_ids.as_ref(),
-                )
-                .into(),
-            );
-        }
+        walk.expand([source_ids, target_ids])
     }
-    Ok(graph.union_all(depths, alias))
 }
 
-fn hop_rows<M: OrbitQueryModel + ?Sized>(
-    graph: &mut RelationGraph,
-    pattern: &Pattern<'_, M>,
-    relation: &EdgeRelation,
-    alias: &str,
-    mut predicates: Vec<Predicate>,
-) -> Result<RelationId> {
-    predicates.extend(relationship_kinds(alias, &relation.rel_types));
-    predicates.extend(
-        relation
-            .filters
+struct Walk<'w, 'q, 'c, 'p, M: OrbitQueryModel + ?Sized, B: RelationalBackend> {
+    reads: &'w mut Reads<'q, 'c, B>,
+    pattern: &'w Pattern<'p, M>,
+    relation: &'w EdgeRelation,
+    alias: &'w str,
+    reverse: bool,
+}
+
+impl<M: OrbitQueryModel + ?Sized, B: RelationalBackend> Walk<'_, '_, '_, '_, M, B> {
+    fn expand(&mut self, [source_ids, target_ids]: [Option<IdSet>; 2]) -> Result<Rel> {
+        let (pattern, relation) = (self.pattern, self.relation);
+        let covered = pattern.edge_column_filters(relation);
+        let required: Vec<String> = covered
             .iter()
-            .map(|(property, filter)| property_filter(alias, property, filter)),
-    );
-    current_edge_rows(graph, pattern, relation, alias, predicates)
+            .map(|(property, _)| (*property).to_string())
+            .collect();
+        let (start_id, end_id) = relation.direction.edge_columns();
+        let path_id = if self.reverse { start_id } else { end_id };
+        let from = &pattern.nodes[&relation.from_node];
+        let tagged = relation.edge_tables.iter().all(|table| {
+            pattern
+                .model
+                .table_columns(table)
+                .is_none_or(|columns| columns.contains(SOURCE_TAGS_COLUMN))
+        });
+        let shape = Depth {
+            required: &required,
+            tagged,
+        };
+
+        let first_hop = hop_alias(1);
+        let mut first_predicates = vec![live(&first_hop)];
+        first_predicates.extend(pattern.entity_kind(&first_hop, &relation.from_node, start_id));
+        if let Some(ids) = source_ids {
+            first_predicates.push(membership(Column::new(&first_hop, start_id), ids));
+        }
+        first_predicates.extend(from.id_predicates(Column::new(&first_hop, start_id)));
+        first_predicates.extend(from.filters.iter().filter_map(|(_, filter)| {
+            pattern.denorm_tag(relation, &relation.from_node, filter, &first_hop)
+        }));
+        first_predicates.extend(
+            covered
+                .iter()
+                .map(|(property, filter)| property_filter(&first_hop, property, filter)),
+        );
+        let first = self.hop_rows(&first_hop, first_predicates)?;
+        let first_path = OutputValue::Path(vec![(
+            Column::new(&first_hop, path_id),
+            Column::new(&first_hop, kind_column(path_id)),
+        )]);
+        let rows = self.reads.read(&first, None)?;
+        let mut previous = self.project_depth(
+            rows,
+            1,
+            (&first_hop, &first_hop, &first_hop),
+            first_path,
+            &shape,
+        )?;
+        let mut depths = Vec::new();
+        if relation.min_hops <= 1 {
+            depths.push(previous.clone());
+        }
+        for depth in 2..=relation.max_hops {
+            let previous_alias = reached_depth_alias(depth - 1);
+            let current_alias = hop_alias(depth);
+            let current = self.hop_rows(
+                &current_alias,
+                vec![
+                    live(&current_alias),
+                    membership(
+                        Column::new(&current_alias, start_id),
+                        (previous.clone(), end_id.to_string()),
+                    ),
+                ],
+            )?;
+            let left = self.reads.read(&previous, Some(&previous_alias))?;
+            let right = self.reads.read(&current, Some(&current_alias))?;
+            let joined = self.reads.join(
+                left,
+                right,
+                (
+                    Column::new(&previous_alias, end_id),
+                    Column::new(&current_alias, start_id),
+                ),
+                &[column_eq(
+                    Column::new(&previous_alias, kind_column(end_id)),
+                    Column::new(&current_alias, kind_column(start_id)),
+                )],
+            )?;
+            let (source, target) = relation
+                .direction
+                .stored_order(&previous_alias, &current_alias);
+            let step = (
+                Column::new(&previous_alias, path_nodes_column()),
+                Column::new(&current_alias, path_id),
+                Column::new(&current_alias, kind_column(path_id)),
+            );
+            let path = if self.reverse {
+                OutputValue::PathPrepend {
+                    path: step.0,
+                    id: step.1,
+                    kind: step.2,
+                }
+            } else {
+                OutputValue::PathAppend {
+                    path: step.0,
+                    id: step.1,
+                    kind: step.2,
+                }
+            };
+            previous = self.project_depth(
+                joined,
+                depth,
+                (&previous_alias, source, target),
+                path,
+                &shape,
+            )?;
+            if depth >= relation.min_hops.max(1) {
+                depths.push(previous.clone());
+            }
+        }
+        let (pattern, alias) = (self.pattern, self.alias);
+        self.reads.union(alias, |reads| {
+            depths
+                .iter()
+                .map(|depth| {
+                    complete_depth(reads, pattern, relation, alias, depth, target_ids.as_ref())
+                })
+                .collect()
+        })
+    }
+
+    fn hop_rows(&mut self, alias: &str, mut predicates: Vec<Predicate>) -> Result<Rel> {
+        let relation = self.relation;
+        predicates.extend(relationship_kinds(alias, &relation.rel_types));
+        predicates.extend(
+            relation
+                .filters
+                .iter()
+                .map(|(property, filter)| property_filter(alias, property, filter)),
+        );
+        current_edge_rows(self.reads, self.pattern, relation, alias, predicates)
+    }
+
+    fn project_depth(
+        &mut self,
+        input: Relation,
+        depth: u32,
+        (meta, source, target): (&str, &str, &str),
+        path: OutputValue,
+        shape: &Depth<'_>,
+    ) -> Result<Rel> {
+        let tags = |alias, column| shape.tagged.then(|| Projection::col(alias, column));
+        let mut outputs: Vec<_> = [
+            Some(Projection::col(meta, RELATIONSHIP_KIND_COLUMN)),
+            Some(Projection::col(source, SOURCE_ID_COLUMN)),
+            Some(Projection::col(source, SOURCE_KIND_COLUMN)),
+            tags(source, SOURCE_TAGS_COLUMN),
+            Some(Projection::col(target, TARGET_ID_COLUMN)),
+            Some(Projection::col(target, TARGET_KIND_COLUMN)),
+            tags(target, TARGET_TAGS_COLUMN),
+            Some(Projection::new(path, path_nodes_column())),
+            Some(Projection::new(OutputValue::Depth(depth), depth_column())),
+            Some(Projection::col(meta, DELETED_COLUMN)),
+            Some(Projection::col(meta, TRAVERSAL_PATH_COLUMN)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        outputs.extend(
+            shape
+                .required
+                .iter()
+                .map(|column| Projection::col(meta, column)),
+        );
+        let rows = self.reads.select(input, &outputs)?;
+        Ok(Rel {
+            rows: self.reads.q.share(rows)?,
+            alias: None,
+        })
+    }
 }
 
-fn complete_depth<M: OrbitQueryModel + ?Sized>(
-    graph: &mut RelationGraph,
+struct Depth<'r> {
+    required: &'r [String],
+    tagged: bool,
+}
+
+fn complete_depth<M: OrbitQueryModel + ?Sized, B: RelationalBackend>(
+    reads: &mut Reads<'_, '_, B>,
     pattern: &Pattern<'_, M>,
     relation: &EdgeRelation,
     alias: &str,
-    depth: RelationId,
+    depth: &Rel,
     target_ids: Option<&IdSet>,
-) -> RelationId {
+) -> Result<Relation> {
     let end_id = relation.direction.edge_columns().1;
     let mut predicates: Vec<Predicate> = pattern
         .entity_kind(alias, &relation.to_node, end_id)
@@ -217,34 +255,7 @@ fn complete_depth<M: OrbitQueryModel + ?Sized>(
         predicates.push(membership(Column::new(alias, end_id), ids.clone()));
     }
     predicates.extend(pattern.nodes[&relation.to_node].id_predicates(Column::new(alias, end_id)));
-    graph.filter(depth.alias(alias), predicates)
-}
-
-fn project_depth(
-    graph: &mut RelationGraph,
-    input: RelationId,
-    depth: u32,
-    (meta, source, target): (&str, &str, &str),
-    path: OutputValue,
-    (required, tagged): (&[String], bool),
-) -> RelationId {
-    let tags = |alias, column| tagged.then(|| Projection::col(alias, column));
-    let mut outputs: Vec<_> = [
-        Some(Projection::col(meta, RELATIONSHIP_KIND_COLUMN)),
-        Some(Projection::col(source, SOURCE_ID_COLUMN)),
-        Some(Projection::col(source, SOURCE_KIND_COLUMN)),
-        tags(source, SOURCE_TAGS_COLUMN),
-        Some(Projection::col(target, TARGET_ID_COLUMN)),
-        Some(Projection::col(target, TARGET_KIND_COLUMN)),
-        tags(target, TARGET_TAGS_COLUMN),
-        Some(Projection::new(path, path_nodes_column())),
-        Some(Projection::new(OutputValue::Depth(depth), depth_column())),
-        Some(Projection::col(meta, DELETED_COLUMN)),
-        Some(Projection::col(meta, TRAVERSAL_PATH_COLUMN)),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    outputs.extend(required.iter().map(|column| Projection::col(meta, column)));
-    graph.project(input, outputs)
+    let rows = reads.read(depth, Some(alias))?;
+    let rows = reads.filter(rows, &predicates)?;
+    Ok(reads.q.select_all(rows)?)
 }

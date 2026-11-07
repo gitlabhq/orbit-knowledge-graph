@@ -1,22 +1,18 @@
-//! Aggregation: plan the pattern like a traversal, then derive groups, measures, and the deferred
-//! latest-row condition from the relation graph.
+//! Aggregation: groups, measures, and the order of the result rows, read from the matched pattern.
 
 use std::collections::HashMap;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
-use query_data_model::OrbitQueryModel;
 use query_data_model::implementations::relational::plan::AggregateFunction;
 use query_data_model::plan::logical::{
     Expr, LogicalOperation, Measure as Logical, Order, TimeUnit,
 };
 use query_data_model::plan::tracking::Ref;
 
-use crate::error::Result;
 use crate::logical::{Query, binding};
-use crate::passes::plan::graph::{ExecutionPlan, RelationNode};
-use crate::passes::plan::pattern::Pattern;
+use crate::passes::plan::pattern::Matched;
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate};
-use crate::passes::plan::{NodePlan, Plan, property_value};
+use crate::passes::plan::{NodePlan, property_value};
 
 #[derive(Clone, PartialEq)]
 pub struct Group {
@@ -31,11 +27,6 @@ pub struct Measure {
     pub name: String,
 }
 
-pub struct Aggregation {
-    pub execution: ExecutionPlan,
-    pub result: AggregationPlan,
-}
-
 pub struct AggregationPlan {
     pub groups: Vec<Group>,
     pub group_outputs: Vec<(Group, String)>,
@@ -45,26 +36,16 @@ pub struct AggregationPlan {
     pub order: Option<(String, bool)>,
 }
 
-pub(crate) fn plan<'a, M: OrbitQueryModel + ?Sized>(
-    query: Query<'a>,
-    model: &'a M,
-) -> Result<Plan<Aggregation>> {
-    let pattern = Pattern::new(query, model)?;
-    let execution = pattern.execution()?;
-    let result = aggregation_plan(query, &pattern.nodes, &execution);
-    Ok(pattern.into_plan(execution, |execution| Aggregation { execution, result }))
-}
-
-fn aggregation_plan(
+pub(crate) fn aggregation_plan(
     query: Query<'_>,
     nodes: &HashMap<String, NodePlan>,
-    execution: &ExecutionPlan,
+    execution: &Matched,
 ) -> AggregationPlan {
     let mut plan = AggregationPlan {
         groups: vec![],
         group_outputs: vec![],
         measures: vec![],
-        condition: latest_row_condition(execution),
+        condition: execution.condition.clone(),
         order: query
             .sort_keys()
             .into_iter()
@@ -189,21 +170,5 @@ fn aggregate<'p>(query: Query<'p>) -> Option<(&'p [Expr], &'p [Logical], Vec<Ref
 fn add_group(groups: &mut Vec<Group>, group: Group) {
     if !groups.contains(&group) {
         groups.push(group);
-    }
-}
-
-/// The condition a single edge relation defers past its latest-row pick, so the measures apply it instead of the scan.
-fn latest_row_condition(execution: &ExecutionPlan) -> Vec<Predicate> {
-    let mut source = execution.root;
-    loop {
-        match execution.graph.get(source) {
-            RelationNode::Latest { condition, .. } => break condition.clone(),
-            RelationNode::Join { left, .. } => source = left.id,
-            RelationNode::Owned { input, .. }
-            | RelationNode::Filter { input, .. }
-            | RelationNode::Project { input, .. }
-            | RelationNode::Bind { input, .. } => source = input.id,
-            RelationNode::Read { .. } | RelationNode::UnionAll { .. } => break vec![],
-        }
     }
 }

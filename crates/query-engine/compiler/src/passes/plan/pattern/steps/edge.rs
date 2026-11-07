@@ -3,17 +3,23 @@
 
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
+use query_data_model::implementations::relational::RelationalBackend;
 
 use super::super::relations::select_edge_layouts;
 use super::super::{EdgeRelation, Pattern};
 use super::{IdSet, RelationBuilder};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
-use crate::passes::plan::graph::{ReadOwner, ReadScope, RelationGraph, RelationId};
+use crate::passes::plan::current::latest_rows;
 use crate::passes::plan::predicates::*;
+use crate::passes::plan::rows::{ReadScope, Reads, Rel};
 use crate::passes::plan::sort_key;
 
-impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
+impl<M, B> RelationBuilder<'_, '_, '_, M, B>
+where
+    M: OrbitQueryModel + ?Sized,
+    B: RelationalBackend,
+{
     pub(super) fn add_edge(&mut self, index: usize, relation: &EdgeRelation) -> Result<()> {
         let pattern = self.pattern;
         let alias = &relation.alias;
@@ -52,16 +58,14 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             let column = relation.endpoint_column(node).expect("relation endpoint");
             predicates.push(membership(Column::new(alias, column), ids));
         }
-        let mut source = if relation.max_hops > 1 {
+        let source = if relation.max_hops > 1 {
             self.multi_hop_source(&physical)?
         } else {
             self.edge_source(&physical, predicates)?
         };
-        self.bind_relation_ids(index, relation, source);
-        if relation.max_hops == 1 && pattern.relations.len() > 1 {
-            source = self.graph.bind(source, alias);
-        }
-        self.join_edge(relation, source)?;
+        self.bind_relation_ids(index, relation, &source)?;
+        let wrapped = relation.max_hops == 1 && pattern.relations.len() > 1;
+        self.join_edge(relation, &source, wrapped)?;
         self.push_edge_outputs(relation);
         Ok(())
     }
@@ -109,42 +113,56 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         predicates
     }
 
-    fn edge_source(
-        &mut self,
-        relation: &EdgeRelation,
-        predicates: Vec<Predicate>,
-    ) -> Result<RelationId> {
+    fn edge_source(&mut self, relation: &EdgeRelation, predicates: Vec<Predicate>) -> Result<Rel> {
         let pattern = self.pattern;
         let alias = &relation.alias;
         if pattern.aggregate() && pattern.relations.len() == 1 {
             let Some(table) = relation.single_edge_table() else {
-                let rows = plain_edge_rows(&mut self.graph, relation, true)?;
-                return Ok(self.graph.filter(rows, predicates));
+                let rows = plain_edge_rows(&mut self.reads, relation, true)?;
+                return self.reads.filtered(&rows, &predicates);
             };
-            let rows = plain_edge_rows(&mut self.graph, relation, false)?;
+            let rows = plain_edge_rows(&mut self.reads, relation, false)?;
             let key = sort_key(pattern.model, table)?;
-            let identity = predicates
+            let identity: Vec<_> = predicates
                 .iter()
                 .filter(|predicate| predicate.filters_sort_key(key, true))
                 .cloned()
                 .collect();
-            let rows = self.graph.filter(rows, identity);
-            return Ok(self.graph.latest(rows, alias, key.to_vec(), predicates));
+            let rows = self.reads.filtered(&rows, &identity)?;
+            let latest = self.reads.subquery(alias, |reads| {
+                let rows = reads.read(&rows, None)?;
+                latest_rows(reads.q, rows, alias, key)
+            })?;
+            let rows = self.reads.q.read(&latest, Some(alias))?;
+            let rows = self.reads.filter(rows, &predicates)?;
+            self.condition = predicates;
+            return self.reads.share(rows, Some(alias));
         }
         if relation.single_edge_table().is_some()
             || pattern.model.supports_selective_latest_rows()
                 && predicates.iter().any(Predicate::is_selective)
         {
-            return current_edge_rows(&mut self.graph, pattern, relation, alias, predicates);
+            return current_edge_rows(&mut self.reads, pattern, relation, alias, predicates);
         }
-        let rows = plain_edge_rows(&mut self.graph, relation, true)?;
-        Ok(self.graph.filter(rows, predicates))
+        let rows = plain_edge_rows(&mut self.reads, relation, true)?;
+        self.reads.filtered(&rows, &predicates)
     }
 
-    fn join_edge(&mut self, relation: &EdgeRelation, source: RelationId) -> Result<()> {
+    /// Joins the edge rows to the chain; `wrapped` keeps them in their own block when other relations join too.
+    fn join_edge(&mut self, relation: &EdgeRelation, source: &Rel, wrapped: bool) -> Result<()> {
         let alias = &relation.alias;
         let (start, end) = relation.direction.edge_columns();
         let endpoints = [(&relation.from_node, start), (&relation.to_node, end)];
+        let rows = match wrapped {
+            true => {
+                let bound = self.reads.subquery(alias, |reads| {
+                    let rows = reads.read(source, Some(alias))?;
+                    Ok(reads.q.select_all(rows)?)
+                })?;
+                self.reads.q.read(&bound, Some(alias))?
+            }
+            false => self.reads.read(source, Some(alias))?,
+        };
         if let Some(previous) = self.root.take() {
             let (node, column, binding) = endpoints
                 .iter()
@@ -154,7 +172,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
                         .map(|binding| (*node, *column, binding))
                 })
                 .ok_or_else(|| QueryError::Lowering("stored relation is disconnected".into()))?;
-            let join_predicates = endpoints
+            let join_predicates: Vec<_> = endpoints
                 .iter()
                 .filter(|(other, _)| *other != node)
                 .filter_map(|(other, other_column)| {
@@ -165,17 +183,13 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
                     ))
                 })
                 .collect();
-            self.root = Some(self.graph.join(
-                previous,
-                source.alias(alias),
-                (
-                    Column::new(&binding.alias, &binding.column),
-                    Column::new(alias, column),
-                ),
-                join_predicates,
-            ));
+            let on = (
+                Column::new(&binding.alias, &binding.column),
+                Column::new(alias, column),
+            );
+            self.root = Some(self.reads.join(previous, rows, on, &join_predicates)?);
         } else {
-            self.root = Some(source);
+            self.root = Some(rows);
         }
         for (node, column) in endpoints {
             if self.binding(node).is_none() {
@@ -207,83 +221,84 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
     }
 }
 
-pub(super) fn current_edge_rows<M: OrbitQueryModel + ?Sized>(
-    graph: &mut RelationGraph,
+pub(super) fn current_edge_rows<M, B>(
+    reads: &mut Reads<'_, '_, B>,
     pattern: &Pattern<'_, M>,
     relation: &EdgeRelation,
     alias: &str,
     predicates: Vec<Predicate>,
-) -> Result<RelationId> {
+) -> Result<Rel>
+where
+    M: OrbitQueryModel + ?Sized,
+    B: RelationalBackend,
+{
     let model = pattern.model;
-    let owner = ReadOwner::Relationship(relation.input_index);
+    let bound = reads.relationship_bound(relation.input_index);
     if let Some(table) = relation.single_edge_table() {
-        return Ok(graph.current_rows(
-            table,
-            alias,
-            owner,
-            sort_key(model, table)?,
-            predicates,
-            ReadScope::Edge,
-        ));
+        let key = sort_key(model, table)?;
+        return reads.current_rows(table, alias, bound, key, predicates, ReadScope::Edge);
     }
     edge_union(
-        graph,
+        reads,
         &relation.edge_tables,
         alias,
         alias,
-        |graph, table| {
-            Ok(graph.current_rows(
+        |reads, table| {
+            let key = sort_key(model, table)?;
+            reads.current_rows(
                 table,
                 alias,
-                owner.clone(),
-                sort_key(model, table)?,
+                bound,
+                key,
                 predicates.clone(),
                 ReadScope::Edge,
-            ))
+            )
         },
     )
 }
 
-fn plain_edge_rows(
-    graph: &mut RelationGraph,
+fn plain_edge_rows<B: RelationalBackend>(
+    reads: &mut Reads<'_, '_, B>,
     relation: &EdgeRelation,
     final_: bool,
-) -> Result<RelationId> {
+) -> Result<Rel> {
     let alias = &relation.alias;
-    let owner = ReadOwner::Relationship(relation.input_index);
+    let bound = reads.relationship_bound(relation.input_index);
     if let Some(table) = relation.single_edge_table() {
-        let read = graph.read(table, alias, final_);
-        return Ok(graph.owned(read, owner, alias));
+        return reads.table(table, alias, final_, bound, &[]);
     }
     let route_alias = union_arm_alias(alias);
     edge_union(
-        graph,
+        reads,
         &relation.edge_tables,
         alias,
         &route_alias,
-        |graph, table| {
-            let read = graph.read(table, &route_alias, final_);
-            Ok(graph.owned(read, owner.clone(), &route_alias))
-        },
+        |reads, table| reads.table(table, &route_alias, final_, bound, &[]),
     )
 }
 
-fn edge_union(
-    graph: &mut RelationGraph,
+fn edge_union<B: RelationalBackend>(
+    reads: &mut Reads<'_, '_, B>,
     tables: &[String],
     alias: &str,
     route_alias: &str,
-    mut route: impl FnMut(&mut RelationGraph, &str) -> Result<RelationId>,
-) -> Result<RelationId> {
-    let mut routes = Vec::new();
-    for table in tables {
-        let rows = route(graph, table)?;
-        let outputs = EDGE_RESERVED_COLUMNS
-            .iter()
-            .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN, &DELETED_COLUMN])
-            .map(|column| Projection::col(route_alias, column))
-            .collect();
-        routes.push(graph.project(rows, outputs).into());
-    }
-    Ok(graph.union_all(routes, alias))
+    mut route: impl FnMut(&mut Reads<'_, '_, B>, &str) -> Result<Rel>,
+) -> Result<Rel> {
+    let outputs: Vec<Projection> = EDGE_RESERVED_COLUMNS
+        .iter()
+        .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN, &DELETED_COLUMN])
+        .map(|column| Projection::col(route_alias, column))
+        .collect();
+    let routes = tables
+        .iter()
+        .map(|table| route(reads, table))
+        .collect::<Result<Vec<_>>>()?;
+    reads.union(alias, |reads| {
+        let mut arms = Vec::new();
+        for rows in &routes {
+            let rows = reads.read(rows, Some(route_alias))?;
+            arms.push(reads.select(rows, &outputs)?);
+        }
+        Ok(arms)
+    })
 }

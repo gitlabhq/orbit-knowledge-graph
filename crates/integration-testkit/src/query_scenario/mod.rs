@@ -16,7 +16,7 @@ use std::sync::Arc;
 use format::ExpectedIndex;
 use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
-use query_engine::compiler::cte_statements;
+use query_engine::compiler::subquery_statements;
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ParameterizedQuery, Realm,
     ResultContext, SecurityContext,
@@ -425,7 +425,7 @@ async fn assert_indexes_used(
 ) {
     let query = &compiled.base;
     let plan = ctx.explain_plan(query).await;
-    let ctes = cte_statements(raw, frontend, data_model, security).expect("CTE statements render");
+    let ctes = subquery_statements(raw, frontend, data_model, security).expect("subqueries render");
     for ExpectedIndex { table, index } in expected {
         let mut cte_plans = Vec::new();
         let mut scans = Vec::new();

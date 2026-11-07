@@ -22,7 +22,7 @@ use crate::logical::Query;
 use crate::logical::facts::{anchors, facts};
 use crate::passes::codegen::RelationalModel;
 use crate::passes::lower::build::expr::{in_list, live};
-use crate::passes::lower::build::predicates::{Lowering, Shared};
+use crate::passes::lower::build::predicates::Lowering;
 use crate::passes::lower::build::{
     Built, call, col, computed, disjoin, filtered, scan, stored, string, versioning,
 };
@@ -216,11 +216,7 @@ fn arm<B: RelationalBackend>(q: &mut RelationalBuilder<'_, B>, node: &Arm<'_>) -
         false => Some(live::<B>(&[&rows], alias)?),
     };
     let rows = filtered(q, rows, vec![deleted])?;
-    let shared = Shared::default();
-    let lowering = Lowering {
-        scope: &[&rows],
-        shared: &shared,
-    };
+    let lowering = Lowering { scope: &[&rows] };
     let props = match node.columns.is_empty() {
         true => string("{}"),
         false => {

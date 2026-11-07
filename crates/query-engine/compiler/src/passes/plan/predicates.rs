@@ -6,7 +6,7 @@ use ontology::constants::*;
 use query_data_model::plan::logical::Comparison;
 
 use super::filters::{BoundFilter, NullAsEpoch, NullAsEpochColumns, Test};
-use super::graph::RelationId;
+use super::rows::Rel;
 use crate::input::BooleanExpression;
 
 #[derive(Clone, PartialEq, Eq)]
@@ -69,7 +69,7 @@ pub enum Predicate {
     },
     Membership {
         columns: Vec<Column>,
-        relation: RelationId,
+        relation: Rel,
         keys: Vec<String>,
     },
 }
@@ -229,7 +229,7 @@ pub fn property_filter(alias: &str, property: &str, bound: &BoundFilter) -> Pred
     bound.at(Column::new(alias, property))
 }
 
-pub fn membership(column: Column, (relation, key): (RelationId, String)) -> Predicate {
+pub fn membership(column: Column, (relation, key): (Rel, String)) -> Predicate {
     Predicate::Membership {
         columns: vec![column],
         relation,

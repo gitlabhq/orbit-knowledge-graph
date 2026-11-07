@@ -11,8 +11,8 @@ use crate::error::{QueryError, Result};
 use crate::input::BooleanExpression;
 use crate::logical::Query;
 use crate::passes::plan::filters::{BoundFilter, FilterOwner, Test, bind_filter};
-use crate::passes::plan::graph::BindingSource;
 use crate::passes::plan::predicates::{Column, Predicate, tag_filter};
+use crate::passes::plan::rows::BindingSource;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) enum Target {

@@ -8,14 +8,18 @@ mod nodes;
 mod relations;
 mod steps;
 
+pub use steps::Matched;
+
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::OrbitQueryModel;
+use query_data_model::implementations::relational::RelationalBackend;
+use query_data_model::implementations::relational::plan::RelationalBuilder;
 
 use super::filters::{BoundFilter, NullAsEpochColumns};
-use super::graph::{ExecutionPlan, ReadOwner, ReadScope, RelationGraph, RelationId};
 use super::predicates::{Column, Predicate, kind_column};
-use super::{DenormalizedKey, DenormalizedProperty, Plan, sort_key};
+use super::rows::{ReadScope, Reads, Rel};
+use super::{DenormalizedKey, DenormalizedProperty, sort_key};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::logical::Query;
@@ -65,7 +69,7 @@ pub struct Fk {
     pub column: String,
 }
 
-pub(super) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
+pub(crate) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
     pub query: Query<'a>,
     conditions: Vec<BooleanExpression<conditions::Condition>>,
     pub model: &'a M,
@@ -80,19 +84,24 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         self.query.kind() == QueryType::Aggregation
     }
 
-    fn node_read(&self, graph: &mut RelationGraph, node: &NodePlan) -> Result<RelationId> {
+    fn node_read<B: RelationalBackend>(
+        &self,
+        reads: &mut Reads<'_, '_, B>,
+        node: &NodePlan,
+    ) -> Result<Rel> {
         let table = node
             .table
             .as_ref()
             .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
-        Ok(graph.current_rows(
+        let bound = reads.node_bound(&node.alias);
+        reads.current_rows(
             table,
             &node.alias,
-            ReadOwner::Node(node.alias.clone()),
+            bound,
             sort_key(self.model, table)?,
             self.node_conditions(node),
             node.read_scope,
-        ))
+        )
     }
 
     fn node_conditions(&self, node: &NodePlan) -> Vec<Predicate> {
@@ -110,7 +119,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
 }
 
 impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
-    pub(super) fn new(query: Query<'a>, model: &'a M) -> Result<Self> {
+    pub(crate) fn new(query: Query<'a>, model: &'a M) -> Result<Self> {
         let facts = facts(query);
         let nodes = nodes::build_nodes(query, &anchors(query, &facts), model);
         let mut pattern = Self {
@@ -143,40 +152,20 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
         Ok(pattern)
     }
 
-    /// The relation graph for the pattern, with the conditions that span nodes applied at its root.
-    pub(super) fn execution(&self) -> Result<ExecutionPlan> {
-        let mut execution = steps::RelationBuilder::new(self).build()?;
-        let conditions = self
-            .conditions
-            .iter()
-            .zip(&self.scans)
-            .filter(|(_, scan)| scan.is_none())
-            .map(|(root, _)| conditions::bind_tree(self, root, Some(&execution.bindings)))
-            .collect::<Result<_>>()?;
-        execution.root = execution.graph.filter(execution.root, conditions);
-        Ok(execution)
-    }
-
-    pub(super) fn into_plan<T>(
-        self,
-        execution: ExecutionPlan,
-        operation: impl FnOnce(ExecutionPlan) -> T,
-    ) -> Plan<T> {
-        let node_edge_mappings = execution
-            .bindings
-            .iter()
-            .map(|binding| {
-                (
-                    binding.node.clone(),
-                    (binding.alias.clone(), binding.column.clone()),
-                )
-            })
-            .collect();
-        Plan {
-            nodes: self.nodes,
-            relations: self.relations,
-            node_edge_mappings,
-            operation: operation(execution),
-        }
+    /// The pattern's joined rows, with the conditions that span nodes applied on top.
+    pub(crate) fn execution<B: RelationalBackend>(
+        &self,
+        q: &mut RelationalBuilder<'_, B>,
+        tp_bounds: Option<&crate::tp_bounds::TpBounds>,
+    ) -> Result<Matched> {
+        let reads = Reads::new(q, tp_bounds, self.model.supports_selective_latest_rows());
+        steps::RelationBuilder::new(self, reads).build(|bindings| {
+            self.conditions
+                .iter()
+                .zip(&self.scans)
+                .filter(|(_, scan)| scan.is_none())
+                .map(|(root, _)| conditions::bind_tree(self, root, Some(bindings)))
+                .collect()
+        })
     }
 }

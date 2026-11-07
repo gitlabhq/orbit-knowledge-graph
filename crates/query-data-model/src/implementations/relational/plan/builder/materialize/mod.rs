@@ -58,7 +58,7 @@ struct Copier<'p, B> {
     wanted: HashSet<(BodyId, usize)>,
     refs: HashMap<Ref, Ref>,
     bodies: HashMap<BodyId, Subquery>,
-    kept: HashMap<BodyId, Vec<usize>>,
+    roots: HashMap<BodyId, Vec<Ref>>,
     named: usize,
 }
 
@@ -112,7 +112,7 @@ impl<'p, B: RelationalBackend> Copier<'p, B> {
             wanted,
             refs: HashMap::new(),
             bodies: HashMap::new(),
-            kept: HashMap::new(),
+            roots: HashMap::new(),
             named: 0,
         }
     }
