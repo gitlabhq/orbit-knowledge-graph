@@ -85,7 +85,7 @@ By default, setup writes to your user configuration, so the changes affect only 
 | Component | Agents | Changes |
 |-----------|--------|---------|
 | Instructions | All | Each new session loads instructions to search with `orbit grep` and read code with `orbit context`. Setup removes the block an earlier setup wrote to `CLAUDE.md` or `AGENTS.md`. |
-| Hooks | Claude Code, Codex, GitLab Duo, OpenCode, Pi | The files that load the instructions for Codex, GitLab Duo, OpenCode, and Pi, and a reminder to use `orbit grep`. For Claude Code, the reminder comes when the agent runs `grep`, `rg`, `ack`, or `ag` in an indexed repository, and never blocks the call. For OpenCode, the reminder comes once each session. |
+| Hooks | Claude Code, Codex, GitLab Duo, OpenCode, Pi | The hooks that load the instructions, and a reminder to use `orbit grep`. For Claude Code, the reminder comes when the agent runs `grep`, `rg`, `ack`, or `ag` in an indexed repository, and never blocks the call. For OpenCode, the reminder comes once each session. |
 | Skill | Claude Code, Codex, GitLab Duo, OpenCode | The `orbit` skill, in `~/.agents/skills/orbit`. For GitLab Duo, setup writes the full skill files. For Claude Code, setup also links the skill in `~/.claude/skills/`, and allows the skill command in `settings.json` so that the skill loads without a prompt. |
 
 Other agents that support the [Agent Skills specification](https://agentskills.io/specification), such as Gemini CLI,
@@ -107,18 +107,6 @@ Setup follows these rules:
   To set it for every repository, run `glab config set orbit_cli_auto_run true --global`.
 - With `--project` or `--dir`, setup writes files such as `.claude/settings.json`, `.codex/hooks.json`, `.gitlab/duo/hooks.json`, and `.pi/extensions/orbit.ts` in the project.
   Teams usually commit these files, so the change can reach your teammates.
-
-## How each agent loads the instructions
-
-Each agent asks the installed CLI for the instructions, so they always match your version.
-
-| Agent | Loaded from |
-|-------|-------------|
-| Claude Code | The `gitlab-orbit` plugin. |
-| Codex | A `SessionStart` hook in `hooks.json`. Codex runs a new hook only after you approve it, so open `/hooks` in Codex and trust the hook once. |
-| GitLab Duo | A `SessionStart` hook in `hooks.json`. With `--project`, start GitLab Duo with `--enable-project-hooks` or set `GITLAB_ENABLE_PROJECT_HOOKS=true`. |
-| OpenCode | The `orbit.js` plugin. |
-| Pi | The `orbit.ts` extension. |
 
 ## Remove the setup
 
