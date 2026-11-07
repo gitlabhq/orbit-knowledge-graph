@@ -351,6 +351,18 @@ pub(super) struct JsonMerge {
     pub(super) path: Vec<String>,
     pub(super) marker: String,
     pub(super) entries: Vec<Value>,
+    #[serde(default)]
+    pub(super) review_note: Option<ReviewNote>,
+}
+
+/// Shown when setup writes a hook the assistant runs only after the person enables or reviews it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ReviewNote {
+    #[serde(default)]
+    pub(super) project: Option<String>,
+    #[serde(default)]
+    pub(super) global: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -537,6 +549,16 @@ impl Agent {
 
     pub(super) fn has_ui(self) -> bool {
         self.plugin.is_some() || self.ui_files(true).next().is_some()
+    }
+
+    /// The component whose files make the agent load the Orbit instructions: the Claude Code
+    /// plugin, or the hook files and extensions of the other agents.
+    pub(super) fn instructions_component(self) -> super::Component {
+        if self.plugin.is_some() {
+            super::Component::AgentPlugins
+        } else {
+            super::Component::Hooks
+        }
     }
 }
 
@@ -976,6 +998,32 @@ mod tests {
                 "{name} is not shell-safe"
             );
         }
+    }
+
+    #[test]
+    fn every_agent_loads_the_instructions_from_the_cli() {
+        let pi = agent_named("pi").unwrap();
+        let extension = pi.template_files[0].render();
+        assert!(extension.contains("before_agent_start"));
+        assert!(extension.contains(r#""hook-guard", "instructions""#));
+        let opencode = read_embedded_text("opencode_plugin.js", false);
+        assert!(opencode.contains("experimental.chat.system.transform"));
+        assert!(opencode.contains(r#""hook-guard", "instructions""#));
+        for name in ["codex", "duo"] {
+            let agent = agent_named(name).unwrap();
+            let session = agent
+                .json_merges
+                .iter()
+                .find(|merge| merge.path == ["hooks", "SessionStart"])
+                .unwrap_or_else(|| panic!("{name} has no SessionStart hook"));
+            assert!(
+                session.entries[0]["hooks"][0]["command"]
+                    .as_str()
+                    .is_some_and(|command| command.ends_with("hook-guard instructions")),
+                "{name}"
+            );
+        }
+        assert!(agent_named("claude").unwrap().plugin.is_some());
     }
 
     #[test]

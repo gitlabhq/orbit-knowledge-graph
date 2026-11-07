@@ -15,6 +15,7 @@ use crate::commands::setup::spec;
 pub(crate) enum Kind {
     Search,
     Read,
+    Instructions,
 }
 
 const SEARCH_COMMANDS: &[&str] = &["ack", "ag", "egrep", "fgrep", "grep", "rg", "ripgrep"];
@@ -71,6 +72,10 @@ const VALUE_LONG: &[&str] = &[
 
 /// Returns whether it nudged, so telemetry counts nudges rather than every tool call.
 pub(crate) fn run(kind: Kind, gitlab: bool) -> bool {
+    if matches!(kind, Kind::Instructions) {
+        println!("{}", spec::instructions_text());
+        return false;
+    }
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() || !local_graph_exists() {
         return false;

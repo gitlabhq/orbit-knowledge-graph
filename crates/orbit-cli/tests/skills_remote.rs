@@ -898,23 +898,7 @@ fn error_reply(status: u16) -> Reply {
 fn setup_instructions(base_url: Option<&str>) -> (Output, String) {
     let project = tempfile::tempdir().unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let dir = project.path().to_str().unwrap();
-    let mut command = hermetic_orbit(
-        &cache,
-        &[
-            "setup",
-            "codex",
-            "--yes",
-            "--skip",
-            "hooks",
-            "--skip",
-            "skill",
-            "--no-index",
-            "--project",
-            "--dir",
-            dir,
-        ],
-    );
+    let mut command = hermetic_orbit(&cache, &["hook-guard", "instructions"]);
     command.current_dir(project.path());
     if let Some(base_url) = base_url {
         command
@@ -923,11 +907,7 @@ fn setup_instructions(base_url: Option<&str>) -> (Output, String) {
             .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test");
     }
     let output = command.output().unwrap();
-    let instructions = walk_files(project.path())
-        .into_iter()
-        .map(|path| std::fs::read_to_string(path).unwrap_or_default())
-        .find(|text| text.contains("orbit:setup:begin"))
-        .unwrap_or_else(|| panic!("no instruction block written: {}", stderr(&output)));
+    let instructions = String::from_utf8_lossy(&output.stdout).into_owned();
     (output, instructions)
 }
 
