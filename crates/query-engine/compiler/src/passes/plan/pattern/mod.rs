@@ -67,7 +67,7 @@ pub struct Fk {
 
 pub(super) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
     pub query: Query<'a>,
-    pub input: &'a Input,
+    conditions: Vec<BooleanExpression<conditions::Condition>>,
     pub model: &'a M,
     pub nodes: HashMap<String, NodePlan>,
     pub relations: Vec<EdgeRelation>,
@@ -110,12 +110,12 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
 }
 
 impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
-    pub(super) fn new(query: Query<'a>, input: &'a Input, model: &'a M) -> Result<Self> {
+    pub(super) fn new(query: Query<'a>, model: &'a M) -> Result<Self> {
         let facts = facts(query);
         let nodes = nodes::build_nodes(query, &anchors(query, &facts), model);
         let mut pattern = Self {
             query,
-            input,
+            conditions: conditions::conditions(query)?,
             model,
             relations: relations::build_relations(query, &facts, model, &nodes),
             nodes,
@@ -147,8 +147,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
     pub(super) fn execution(&self) -> Result<ExecutionPlan> {
         let mut execution = steps::RelationBuilder::new(self).build()?;
         let conditions = self
-            .input
-            .predicates
+            .conditions
             .iter()
             .zip(&self.scans)
             .filter(|(_, scan)| scan.is_none())

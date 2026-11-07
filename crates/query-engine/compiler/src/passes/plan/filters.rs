@@ -11,9 +11,8 @@ use serde_json::Value as Json;
 
 use super::predicates::{Column, Predicate};
 use super::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
-use crate::input::{FilterOp, InputFilter};
 use crate::logical::Query;
-use crate::logical::facts::{Anchor, Fact};
+use crate::logical::facts::Anchor;
 
 pub type NullAsEpochColumns = HashMap<String, ontology::DataType>;
 
@@ -35,67 +34,35 @@ pub enum Test {
 }
 
 impl Test {
-    pub fn of(fact: Fact<'_>, rhs: impl FnOnce(Logical) -> Column) -> Option<Self> {
-        Some(match fact.leaf {
+    /// The test of a logical leaf; `complemented` folds a negation into `=`, `<>`, and null checks.
+    pub fn of(
+        leaf: &Leaf,
+        complemented: bool,
+        rhs: impl FnOnce(Logical) -> Option<Column>,
+    ) -> Option<Self> {
+        let flip = |comparison: Comparison| match (comparison, complemented) {
+            (Comparison::Eq, true) => Comparison::Ne,
+            (Comparison::Ne, true) => Comparison::Eq,
+            (comparison, _) => comparison,
+        };
+        Some(match leaf {
             Leaf::Compare {
+                comparison,
                 right: Operand::Literal(literal),
                 ..
-            } => Self::Compare(fact.comparison?, literal.clone()),
+            } => Self::Compare(flip(*comparison), literal.clone()),
             Leaf::Compare {
+                comparison,
                 right: Operand::Expr(right),
                 ..
-            } => Self::Column(fact.comparison?, rhs(*right)),
+            } => Self::Column(flip(*comparison), rhs(*right)?),
             Leaf::In { values, .. } => Self::In(values.clone()),
-            Leaf::Null { null, .. } => Self::Null(*null != fact.complemented),
+            Leaf::Null { null, .. } => Self::Null(*null != complemented),
             Leaf::Text {
                 matching, needle, ..
             } => Self::Text(*matching, needle.clone()),
             Leaf::And(_) | Leaf::Not(_) => return None,
         })
-    }
-
-    pub fn from_input(filter: &InputFilter) -> Self {
-        let comparison = |op| match op {
-            FilterOp::Ne => Comparison::Ne,
-            FilterOp::Gt => Comparison::Gt,
-            FilterOp::Gte => Comparison::Ge,
-            FilterOp::Lt => Comparison::Lt,
-            FilterOp::Lte => Comparison::Le,
-            _ => Comparison::Eq,
-        };
-        let literal = |value: &Json| match value {
-            Json::String(text) => Literal::String(text.clone()),
-            Json::Bool(flag) => Literal::Bool(*flag),
-            value => match value.as_i64() {
-                Some(number) => Literal::Int(number),
-                None => Literal::Float(value.as_f64().unwrap_or_default()),
-            },
-        };
-        let op = filter.op.unwrap_or(FilterOp::Eq);
-        if let Some((alias, property)) = &filter.rhs_column {
-            return Self::Column(comparison(op), Column::new(alias, property));
-        }
-        let value = filter.value.as_ref().unwrap_or(&Json::Null);
-        let text = || filter.value_str().unwrap_or_default().to_string();
-        match op {
-            FilterOp::In => Self::In(
-                value
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .map(literal)
-                    .collect(),
-            ),
-            FilterOp::IsNull => Self::Null(true),
-            FilterOp::IsNotNull => Self::Null(false),
-            FilterOp::Contains => Self::Text(Matching::Contains, text()),
-            FilterOp::StartsWith => Self::Text(Matching::StartsWith, text()),
-            FilterOp::EndsWith => Self::Text(Matching::EndsWith, text()),
-            FilterOp::TokenMatch => Self::Text(Matching::Token, text()),
-            FilterOp::AllTokens => Self::Text(Matching::AllTokens, text()),
-            FilterOp::AnyTokens => Self::Text(Matching::AnyTokens, text()),
-            op => Self::Compare(comparison(op), literal(value)),
-        }
     }
 
     pub fn rhs(&self) -> Option<&Column> {
@@ -327,12 +294,12 @@ pub fn bind_facts<M: OrbitQueryModel + ?Sized>(
             };
             let name = &graph.property(property).name;
             let mut rhs = None;
-            let test = Test::of(*fact, |right| {
+            let test = Test::of(fact.leaf, fact.complemented, |right| {
                 let Logical::Property { property, .. } = right else {
-                    unreachable!("attached comparisons stay on one binding")
+                    return None;
                 };
                 rhs = Some(property);
-                Column::new(alias, &graph.property(property).name)
+                Some(Column::new(alias, &graph.property(property).name))
             })?;
             let mut bound = bind_filter(name, test, &owner, model);
             bound.null_as_epoch.rhs = rhs

@@ -203,9 +203,7 @@ where
                 }
                 _ => return None,
             };
-            let test = Test::of(*fact, |_| {
-                unreachable!("attached edge filters compare with literals")
-            })?;
+            let test = Test::of(fact.leaf, fact.complemented, |_| None)?;
             let bound = bind_filter(&name, test, &owner, model);
             Some((name, bound))
         })

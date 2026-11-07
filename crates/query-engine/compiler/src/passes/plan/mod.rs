@@ -176,9 +176,7 @@ where
     M: OrbitQueryModel + ?Sized,
 {
     Ok(match input.query_type {
-        QueryType::Traversal => {
-            QueryPlan::Traversal(query_types::traversal::plan(query, input, model)?)
-        }
+        QueryType::Traversal => QueryPlan::Traversal(query_types::traversal::plan(query, model)?),
         QueryType::Aggregation => {
             QueryPlan::Aggregation(query_types::aggregation::plan(query, input, model)?)
         }

@@ -48,7 +48,7 @@ pub(crate) fn plan<'a, M: OrbitQueryModel + ?Sized>(
     input: &'a Input,
     model: &'a M,
 ) -> Result<Plan<Aggregation>> {
-    let pattern = Pattern::new(query, input, model)?;
+    let pattern = Pattern::new(query, model)?;
     let execution = pattern.execution()?;
     let result = aggregation_plan(input, &pattern.nodes, &execution);
     Ok(pattern.into_plan(execution, |execution| Aggregation { execution, result }))
