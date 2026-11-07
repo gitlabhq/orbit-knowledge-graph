@@ -914,11 +914,11 @@ fn setup_instructions(base_url: Option<&str>) -> (Output, String) {
 fn assert_local_only(output: &Output, instructions: &str) {
     assert!(output.status.success(), "{}", stderr(output));
     assert!(
-        instructions.contains("grep` must be used"),
+        instructions.contains("grep` searches code"),
         "{instructions}"
     );
     assert!(
-        !instructions.contains("query` must be used"),
+        !instructions.contains("query` for counts"),
         "{instructions}"
     );
     assert!(!instructions.contains("Schema for"), "{instructions}");
@@ -927,10 +927,7 @@ fn assert_local_only(output: &Output, instructions: &str) {
 
 fn assert_remote_without_schema(output: &Output, instructions: &str) {
     assert!(output.status.success(), "{}", stderr(output));
-    assert!(
-        instructions.contains("query` must be used"),
-        "{instructions}"
-    );
+    assert!(instructions.contains("query` for counts"), "{instructions}");
     assert!(!instructions.contains("Schema for"), "{instructions}");
     assert!(!instructions.contains("{{"), "{instructions}");
 }
@@ -979,12 +976,20 @@ const SERVICE_STATUS: &str =
     r#"{"data":{"orbit":{"serviceStatus":{"state":"HEALTHY","version":"1","components":[]}}}}"#;
 
 #[test]
-fn setup_instructions_leave_the_schema_to_failing_queries() {
-    let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS)]);
+fn setup_instructions_keep_the_bundled_query_line_when_the_schema_read_fails() {
+    let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS), error_reply(404)]);
     let (output, instructions) = setup_instructions(Some(&url));
     let requests = server.join().unwrap();
     assert_remote_without_schema(&output, &instructions);
-    assert_eq!(request_paths(&requests), ["/api/graphql"]);
+    assert!(
+        !instructions.contains("Connected providers"),
+        "{instructions}"
+    );
+    assert!(instructions.contains("CALL db.schema()"), "{instructions}");
+    assert_eq!(
+        request_paths(&requests),
+        ["/api/graphql", "/api/v4/orbit/query"]
+    );
 }
 
 #[test]

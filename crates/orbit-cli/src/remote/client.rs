@@ -50,11 +50,7 @@ impl OrbitClient {
     }
 
     pub(crate) fn from_env_in(dir: &Path) -> Result<Self, RemoteError> {
-        let endpoint = resolve_endpoint(
-            |key| std::env::var(key).ok(),
-            || resolve_via_credential_helper(dir),
-        )?;
-        Self::new(endpoint)
+        Self::new(endpoint_in(dir)?)
     }
 
     /// Resolves credentials like `from_env`, but a missing credential is not an
@@ -385,6 +381,19 @@ impl std::fmt::Display for MissingCredential {
 }
 
 impl std::error::Error for MissingCredential {}
+
+fn endpoint_in(dir: &Path) -> anyhow::Result<ResolvedEndpoint> {
+    resolve_endpoint(
+        |key| std::env::var(key).ok(),
+        || resolve_via_credential_helper(dir),
+    )
+}
+
+pub(crate) fn instance_in(dir: &Path) -> Option<String> {
+    let url = reqwest::Url::parse(&endpoint_in(dir).ok()?.base_url).ok()?;
+    let origin = url.origin().ascii_serialization();
+    (origin != "null").then(|| format!("{origin}{}", url.path().trim_end_matches('/')))
+}
 
 pub(crate) fn gitlab_usable(dir: &Path) -> bool {
     let Ok(client) = OrbitClient::from_env_in(dir) else {

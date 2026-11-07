@@ -6,6 +6,7 @@
   "type": "object",
   "required": [
     "instructions",
+    "server_entities",
     "nudge_search",
     "nudge_gitlab"
   ],
@@ -22,6 +23,11 @@
         "type": "string"
       },
       "description": "Values for {{name}} placeholders in `instructions`, filled when Orbit can reach GitLab at setup time and left empty otherwise."
+    },
+    "server_entities": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Fills {{server_entities}} with the entities the GitLab server lists in CALL db.schema(), as {{entities}}: one line per provider with its entities, after the instructions. Left empty when the server cannot be asked or Orbit cannot reach GitLab."
     },
     "nudge_search": {
       "type": "string",
