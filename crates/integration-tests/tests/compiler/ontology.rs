@@ -1,7 +1,7 @@
 use super::setup::{admin_ctx, embedded_model, test_ctx};
 use compiler::{
-    ColumnSelection, Frontend, HydrationCompileOptions, HydrationPlan, Input, InputNode, QueryType,
-    compile, compile_input,
+    Frontend, HydrationArm, HydrationCompileOptions, HydrationPlan, HydrationRequest,
+    ParameterizedQuery, QueryType, compile, compile_hydration,
 };
 use orbit_utils::traversal_path::TraversalPath;
 
@@ -575,49 +575,53 @@ fn debug_json_round_trip() {
     assert!(parsed["hydration"].is_array());
 }
 
-#[test]
-fn hydration_query_type_generates_union_all() {
-    let input = Input {
-        query_type: QueryType::Hydration,
-        nodes: vec![
-            InputNode {
-                id: "hydrate".into(),
-                entity: Some("Note".into()),
-                columns: Some(ColumnSelection::List(vec![
-                    "id".into(),
-                    "noteable_type".into(),
-                ])),
-                node_ids: vec![1, 2, 3],
-                ..InputNode::default()
-            },
-            InputNode {
-                id: "hydrate".into(),
-                entity: Some("Project".into()),
-                columns: Some(ColumnSelection::List(vec!["id".into(), "name".into()])),
-                node_ids: vec![10, 20],
-                ..InputNode::default()
-            },
-        ],
-        limit: 10,
-        ..Input::default()
-    };
+fn hydration_arm(entity: &str, columns: &[&str], ids: &[i64]) -> HydrationArm {
+    hydration_arm_in(entity, columns, ids, Vec::new())
+}
 
-    let result = compile_input(
-        input,
-        HydrationCompileOptions::default(),
+fn hydration_arm_in(
+    entity: &str,
+    columns: &[&str],
+    ids: &[i64],
+    paths: Vec<TraversalPath>,
+) -> HydrationArm {
+    let columns: Vec<String> = columns.iter().map(|column| column.to_string()).collect();
+    HydrationArm::new(
+        embedded_model().catalog().model(),
+        entity,
+        ids,
+        &columns,
+        paths,
+    )
+    .unwrap()
+}
+
+fn compile_arms(arms: Vec<HydrationArm>, options: HydrationCompileOptions) -> ParameterizedQuery {
+    compile_hydration(
+        HydrationRequest { arms, options },
         &embedded_model(),
         &test_ctx(),
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn hydration_query_type_generates_union_all() {
+    let result = compile_arms(
+        vec![
+            hydration_arm("Note", &["id", "noteable_type"], &[1, 2, 3]),
+            hydration_arm("Project", &["id", "name"], &[10, 20]),
+        ],
+        HydrationCompileOptions::default(),
+    );
     // Hydration SQL uses ClickHouse array literals (`IN [1,2,3]`) which
     // sqlparser doesn't support yet, so we check the raw SQL string.
-    let raw = &result.base.render();
+    let raw = &result.render();
 
     assert!(raw.contains("UNION ALL"));
     assert!(raw.contains("toJSONString"));
     assert!(raw.contains("gl_note"));
     assert!(raw.contains("gl_project"));
-    assert!(matches!(result.hydration, HydrationPlan::None));
 }
 
 #[test]
@@ -627,35 +631,19 @@ fn hydration_widens_paths_to_segment_budget() {
             .map(|i| TraversalPath::new_unchecked(format!("1/{i:0>40}/{:0>40}/", i + 10000)))
             .collect()
     };
-    let node = |entity: &str, paths: Vec<TraversalPath>| InputNode {
-        id: "hydrate".into(),
-        entity: Some(entity.into()),
-        columns: Some(ColumnSelection::List(vec!["id".into()])),
-        node_ids: vec![1],
-        traversal_paths: paths,
-        ..InputNode::default()
-    };
-    let compile_hydration = |nodes: Vec<InputNode>, budget: Option<usize>| {
-        let input = Input {
-            query_type: QueryType::Hydration,
-            nodes,
-            limit: 10,
-            ..Input::default()
-        };
-        compile_input(
-            input,
+    let node =
+        |entity: &str, paths: Vec<TraversalPath>| hydration_arm_in(entity, &["id"], &[1], paths);
+    let compile_hydration = |arms: Vec<HydrationArm>, budget: Option<usize>| {
+        compile_arms(
+            arms,
             HydrationCompileOptions {
                 dynamic: true,
                 path_segment_budget: budget,
             },
-            &embedded_model(),
-            &test_ctx(),
         )
-        .unwrap()
     };
-    let bound_paths = |result: &compiler::CompiledQueryContext| -> Vec<TraversalPath> {
+    let bound_paths = |result: &ParameterizedQuery| -> Vec<TraversalPath> {
         result
-            .base
             .params
             .values()
             .filter_map(|p| match &p.value {
@@ -673,7 +661,6 @@ fn hydration_widens_paths_to_segment_budget() {
         Some(2000),
     );
     let array_params = result
-        .base
         .params
         .values()
         .filter(|p| matches!(p.value, serde_json::Value::Array(_)))
@@ -708,27 +695,11 @@ fn hydration_widens_paths_to_segment_budget() {
 
 #[test]
 fn hydration_single_entity_no_union_all() {
-    let input = Input {
-        query_type: QueryType::Hydration,
-        nodes: vec![InputNode {
-            id: "hydrate".into(),
-            entity: Some("User".into()),
-            columns: Some(ColumnSelection::List(vec!["id".into(), "username".into()])),
-            node_ids: vec![42],
-            ..InputNode::default()
-        }],
-        limit: 1,
-        ..Input::default()
-    };
-
-    let result = compile_input(
-        input,
+    let result = compile_arms(
+        vec![hydration_arm("User", &["id", "username"], &[42])],
         HydrationCompileOptions::default(),
-        &embedded_model(),
-        &test_ctx(),
-    )
-    .unwrap();
-    let rendered = result.base.render();
+    );
+    let rendered = result.render();
 
     assert!(!rendered.contains("UNION ALL"));
     assert!(rendered.contains("toJSONString"));
@@ -737,31 +708,15 @@ fn hydration_single_entity_no_union_all() {
 
 #[test]
 fn hydration_uses_parameterized_ids() {
-    let input = Input {
-        query_type: QueryType::Hydration,
-        nodes: vec![InputNode {
-            id: "hydrate".into(),
-            entity: Some("Note".into()),
-            columns: Some(ColumnSelection::List(vec![
-                "id".into(),
-                "confidential".into(),
-                "created_at".into(),
-            ])),
-            node_ids: vec![7777, 8888, 9999],
-            ..InputNode::default()
-        }],
-        limit: 3,
-        ..Input::default()
-    };
-
-    let result = compile_input(
-        input,
+    let result = compile_arms(
+        vec![hydration_arm(
+            "Note",
+            &["id", "confidential", "created_at"],
+            &[7777, 8888, 9999],
+        )],
         HydrationCompileOptions::default(),
-        &embedded_model(),
-        &test_ctx(),
-    )
-    .unwrap();
-    let parameterized = &result.base.sql;
+    );
+    let parameterized = &result.sql;
 
     assert!(
         parameterized.contains("Array(Int64)"),
@@ -772,70 +727,35 @@ fn hydration_uses_parameterized_ids() {
         "literal IDs should not appear in parameterized SQL"
     );
 
-    let rendered = result.base.render();
+    let rendered = result.render();
     assert!(rendered.contains("7777") && rendered.contains("8888") && rendered.contains("9999"));
 }
 
 #[test]
 fn hydration_applies_security_context() {
-    let input = Input {
-        query_type: QueryType::Hydration,
-        nodes: vec![InputNode {
-            id: "hydrate".into(),
-            entity: Some("Note".into()),
-            columns: Some(ColumnSelection::List(vec![
-                "id".into(),
-                "confidential".into(),
-            ])),
-            node_ids: vec![1],
-            ..InputNode::default()
-        }],
-        limit: 1,
-        ..Input::default()
-    };
-
-    let result = compile_input(
-        input,
+    let result = compile_arms(
+        vec![hydration_arm("Note", &["id", "confidential"], &[1])],
         HydrationCompileOptions::default(),
-        &embedded_model(),
-        &test_ctx(),
-    )
-    .unwrap();
-    let rendered = result.base.render();
+    );
+    let rendered = result.render();
 
     assert!(
         !rendered.contains("arrayExists"),
         "hydration should use the caller scope directly"
     );
     assert!(
-        rendered.contains("startsWith(hydrate.traversal_path, '1/')"),
+        rendered.contains("startsWith(_orbit_hydrate.traversal_path, '1/')"),
         "hydration should enforce the caller scope: {rendered}"
     );
 }
 
 #[test]
 fn hydration_id_only_columns_produces_map_with_id() {
-    let input = Input {
-        query_type: QueryType::Hydration,
-        nodes: vec![InputNode {
-            id: "hydrate".into(),
-            entity: Some("User".into()),
-            columns: Some(ColumnSelection::List(vec!["id".into()])),
-            node_ids: vec![1],
-            ..InputNode::default()
-        }],
-        limit: 1,
-        ..Input::default()
-    };
-
-    let result = compile_input(
-        input,
+    let result = compile_arms(
+        vec![hydration_arm("User", &["id"], &[1])],
         HydrationCompileOptions::default(),
-        &embedded_model(),
-        &test_ctx(),
-    )
-    .unwrap();
-    let rendered = result.base.render();
+    );
+    let rendered = result.render();
     assert!(
         rendered.contains("map(") && rendered.contains("'id'"),
         "PK should be included in map when requested"
@@ -844,27 +764,11 @@ fn hydration_id_only_columns_produces_map_with_id() {
 
 #[test]
 fn hydration_empty_columns_produces_empty_json() {
-    let input = Input {
-        query_type: QueryType::Hydration,
-        nodes: vec![InputNode {
-            id: "hydrate".into(),
-            entity: Some("User".into()),
-            columns: Some(ColumnSelection::List(vec![])),
-            node_ids: vec![1],
-            ..InputNode::default()
-        }],
-        limit: 1,
-        ..Input::default()
-    };
-
-    let result = compile_input(
-        input,
+    let result = compile_arms(
+        vec![hydration_arm("User", &[], &[1])],
         HydrationCompileOptions::default(),
-        &embedded_model(),
-        &test_ctx(),
-    )
-    .unwrap();
-    let rendered = result.base.render();
+    );
+    let rendered = result.render();
     assert!(
         !rendered.contains("map("),
         "empty props should use literal '{{}}', not map()"
@@ -873,31 +777,11 @@ fn hydration_empty_columns_produces_empty_json() {
 
 #[test]
 fn hydration_id_column_included_in_map() {
-    let input = Input {
-        query_type: QueryType::Hydration,
-        nodes: vec![InputNode {
-            id: "hydrate".into(),
-            entity: Some("User".into()),
-            columns: Some(ColumnSelection::List(vec![
-                "id".into(),
-                "username".into(),
-                "state".into(),
-            ])),
-            node_ids: vec![1],
-            ..InputNode::default()
-        }],
-        limit: 1,
-        ..Input::default()
-    };
-
-    let result = compile_input(
-        input,
+    let result = compile_arms(
+        vec![hydration_arm("User", &["id", "username", "state"], &[1])],
         HydrationCompileOptions::default(),
-        &embedded_model(),
-        &test_ctx(),
-    )
-    .unwrap();
-    let rendered = result.base.render();
+    );
+    let rendered = result.render();
 
     assert!(rendered.contains("'username'") && rendered.contains("'state'"));
     let map_section = rendered

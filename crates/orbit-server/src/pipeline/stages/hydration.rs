@@ -5,9 +5,10 @@ use std::time::Instant;
 use clickhouse_client::ArrowClickHouseClient;
 use orbit_log_fields::warn;
 use query_data_model::OrbitQueryModel;
-use query_engine::compiler::constants::{MAX_DYNAMIC_HYDRATION_RESULTS, hydration_node_alias};
+use query_engine::compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use query_engine::compiler::{
-    ColumnSelection, HydrationCompileOptions, HydrationPlan, InputNode, QueryType, compile_input,
+    HydrationArm, HydrationCompileOptions, HydrationPlan, HydrationRequest, QueryType,
+    compile_hydration,
 };
 
 use query_engine::pipeline::{
@@ -54,9 +55,8 @@ impl HydrationStage {
             .iter()
             .map(|tp| tp.path.clone())
             .collect();
-        let mut total_ids = 0;
         let mut id_columns = HashMap::new();
-        let mut nodes = Vec::new();
+        let mut arms = Vec::new();
         for (entity_type, mut ids) in lookups {
             let Some(auth) = query_result.ctx().get_entity_auth(&entity_type) else {
                 continue;
@@ -70,24 +70,22 @@ impl HydrationStage {
                 );
                 ids.truncate(MAX_DYNAMIC_HYDRATION_RESULTS);
             }
-            total_ids += ids.len();
             id_columns.insert(entity_type.clone(), auth.auth_id_column.clone());
-            nodes.push(InputNode {
-                id: hydration_node_alias().to_string(),
-                columns: Some(ColumnSelection::List(vec![auth.auth_id_column.clone()])),
-                node_ids: ids,
-                traversal_paths: if data_model.entity_has_traversal_path(&entity_type) {
-                    scope.clone()
-                } else {
-                    Vec::new()
-                },
-                entity: Some(entity_type),
-                ..InputNode::default()
-            });
+            let paths = if data_model.entity_has_traversal_path(&entity_type) {
+                scope.clone()
+            } else {
+                Vec::new()
+            };
+            arms.push(hydration_helpers::hydration_arm(
+                data_model.catalog().model(),
+                &entity_type,
+                &ids,
+                std::slice::from_ref(&auth.auth_id_column),
+                paths,
+            )?);
         }
 
-        let (property_map, _, executions) =
-            Self::execute_hydration(ctx, nodes, total_ids, "owner").await?;
+        let (property_map, _, executions) = Self::execute_hydration(ctx, arms, "owner").await?;
         ctx.phases
             .get_or_insert_default::<QueryExecutionLog>()
             .0
@@ -136,17 +134,15 @@ impl HydrationStage {
 
     async fn execute_hydration(
         ctx: &QueryPipelineContext,
-        nodes: Vec<InputNode>,
-        total_ids: usize,
+        arms: Vec<HydrationArm>,
         kind: &str,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        if nodes.is_empty() {
+        if arms.is_empty() {
             return Ok((HashMap::new(), Vec::new(), Vec::new()));
         }
 
         let client = Self::client(ctx)?;
 
-        let hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
         let options = HydrationCompileOptions {
             dynamic: matches!(
                 ctx.compiled()?.input.query_type,
@@ -159,9 +155,8 @@ impl HydrationStage {
             .server_extensions
             .get::<Arc<query_data_model::ClickHouseDataModel>>()
             .ok_or_else(|| PipelineError::custom("query data model missing"))?;
-        let compiled = compile_input(
-            hydration_input,
-            options,
+        let compiled = compile_hydration(
+            HydrationRequest { arms, options },
             data_model,
             ctx.security_context()?,
         )
@@ -171,10 +166,10 @@ impl HydrationStage {
             message: e.to_string(),
         })?;
 
-        let rendered_sql = compiled.base.render();
+        let rendered_sql = compiled.render();
         let debug = if ctx.compiled()?.input.options.include_debug_sql {
             vec![DebugQuery {
-                sql: compiled.base.sql.clone(),
+                sql: compiled.sql.clone(),
                 rendered: rendered_sql.clone(),
             }]
         } else {
@@ -182,14 +177,14 @@ impl HydrationStage {
         };
 
         let start = Instant::now();
-        let mut query = client.query(&compiled.base.sql);
+        let mut query = client.query(&compiled.sql);
 
         let query_id = correlation::query_id(&format!("hydration-{kind}"));
         query = query.with_setting("query_id", &query_id).with_setting(
             "log_comment",
             correlation::log_comment(Some(&format!("hydration:{kind}"))),
         );
-        for (key, param) in &compiled.base.params {
+        for (key, param) in &compiled.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.data_type);
         }
         let (batches, summary) = query
@@ -253,11 +248,19 @@ impl PipelineStage for HydrationStage {
         match &hydration_plan {
             HydrationPlan::None => {}
             HydrationPlan::Static(templates) => {
-                let (nodes, ids_count) =
-                    hydration_helpers::hydrate_static(templates, &query_result)
-                        .inspect_err(|e| obs.record_error(e))?;
+                let data_model = ctx
+                    .server_extensions
+                    .get::<Arc<query_data_model::ClickHouseDataModel>>()
+                    .ok_or_else(|| PipelineError::custom("query data model missing"))
+                    .inspect_err(|e| obs.record_error(e))?;
+                let arms = hydration_helpers::hydrate_static(
+                    data_model.catalog().model(),
+                    templates,
+                    &query_result,
+                )
+                .inspect_err(|e| obs.record_error(e))?;
                 let (property_map, debug, executions) =
-                    Self::execute_hydration(ctx, nodes, ids_count, "static")
+                    Self::execute_hydration(ctx, arms, "static")
                         .await
                         .inspect_err(|e| obs.record_error(e))?;
                 hydration_queries = debug;
@@ -314,11 +317,21 @@ impl PipelineStage for HydrationStage {
                         .unwrap_or_default();
                     let ref_paths =
                         hydration_helpers::collect_dynamic_ref_paths(&query_result, &static_nodes);
-                    let (nodes, ids_count) =
-                        hydration_helpers::hydrate_dynamic(entity_specs, &refs, &scope, &ref_paths)
-                            .inspect_err(|e| obs.record_error(e))?;
+                    let data_model = ctx
+                        .server_extensions
+                        .get::<Arc<query_data_model::ClickHouseDataModel>>()
+                        .ok_or_else(|| PipelineError::custom("query data model missing"))
+                        .inspect_err(|e| obs.record_error(e))?;
+                    let arms = hydration_helpers::hydrate_dynamic(
+                        data_model.catalog().model(),
+                        entity_specs,
+                        &refs,
+                        &scope,
+                        &ref_paths,
+                    )
+                    .inspect_err(|e| obs.record_error(e))?;
                     let (property_map, debug, executions) =
-                        Self::execute_hydration(ctx, nodes, ids_count, "dynamic")
+                        Self::execute_hydration(ctx, arms, "dynamic")
                             .await
                             .inspect_err(|e| obs.record_error(e))?;
                     hydration_queries = debug;

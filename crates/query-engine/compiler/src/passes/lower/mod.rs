@@ -156,13 +156,6 @@ pub fn emit<M: RelationalModel>(
             let stable_order = query_types::aggregation::stable_order(plan);
             (built, nodes, stable_order)
         }
-        QueryPlan::Hydration(plan) => {
-            query_types::hydration::check(plan)?;
-            let built = catalog
-                .build(|q| query_types::hydration::emit(q, plan))
-                .map_err(rejected)?;
-            (built, HashMap::new(), Vec::new())
-        }
     };
     let edges = plan
         .relations()

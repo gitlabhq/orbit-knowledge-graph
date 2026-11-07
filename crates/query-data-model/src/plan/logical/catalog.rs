@@ -1,3 +1,4 @@
+use super::limits::Limits;
 use super::{LogicalBuilder, LogicalPlan, PlanError, Rows};
 use crate::catalog::Store;
 use crate::plan::tracking::{self, Declared};
@@ -8,6 +9,7 @@ pub struct LogicalCatalog<'m> {
     model: &'m Model,
     admin: bool,
     connection: Option<&'m str>,
+    limits: Limits,
 }
 
 impl Model {
@@ -16,6 +18,7 @@ impl Model {
             model: self,
             admin: false,
             connection: None,
+            limits: Limits::QUERY,
         }
     }
 }
@@ -35,6 +38,15 @@ impl<'m> LogicalCatalog<'m> {
 
     pub fn admin(self) -> bool {
         self.admin
+    }
+
+    #[must_use]
+    pub fn with_limits(self, limits: Limits) -> Self {
+        Self { limits, ..self }
+    }
+
+    pub fn limits(self) -> Limits {
+        self.limits
     }
 
     #[must_use]

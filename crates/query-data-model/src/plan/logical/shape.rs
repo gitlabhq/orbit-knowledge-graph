@@ -2,17 +2,18 @@ use super::limits::RESERVED_PREFIX;
 use super::{Expr, LogicalOperation, LogicalPlan, LogicalType, Operand, PlanError, Predicate};
 use crate::plan::tracking::Ref;
 
-pub(super) fn plan(plan: &LogicalPlan) -> Result<(), PlanError> {
-    reserved(plan)?;
+pub(super) fn plan(plan: &LogicalPlan, internal: &[String]) -> Result<(), PlanError> {
+    reserved(plan, internal)?;
     overlapping(plan)?;
     conditions(plan)
 }
 
-fn reserved(plan: &LogicalPlan) -> Result<(), PlanError> {
+fn reserved(plan: &LogicalPlan, internal: &[String]) -> Result<(), PlanError> {
     let names = plan
         .nodes()
         .flat_map(|node| plan.outputs(node))
-        .filter_map(|output| plan.name(output));
+        .filter_map(|output| plan.name(output))
+        .filter(|name| !internal.iter().any(|allocated| allocated == name));
     for name in names {
         if format!("{name}_").starts_with(RESERVED_PREFIX) {
             return Err(PlanError::shape(format!(

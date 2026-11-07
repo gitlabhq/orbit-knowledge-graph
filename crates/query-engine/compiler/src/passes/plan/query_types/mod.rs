@@ -1,6 +1,4 @@
-//! One planner per query type. Traversal and aggregation share the pattern planner; hydration has
-//! its own shape.
+//! One planner per query type. Traversal and aggregation share the pattern planner.
 
 pub mod aggregation;
-pub mod hydration;
 pub mod traversal;

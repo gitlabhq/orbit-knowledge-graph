@@ -49,6 +49,5 @@ operators! {
     Offset => "Offset",
     Distinct => "Distinct",
     Neighbors => "Neighbors",
-    Hydration => "Hydration",
     Insert => "Insert",
 }

@@ -18,7 +18,7 @@ mod time;
 
 use ontology::DataType;
 
-pub use builder::LogicalBuilder;
+pub use builder::{InternalName, LogicalBuilder};
 pub use catalog::LogicalCatalog;
 pub use detach::Detached;
 pub use error::{ErrorClass, PlanError};

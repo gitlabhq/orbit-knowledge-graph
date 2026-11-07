@@ -116,66 +116,6 @@ pub fn physical(plan: &QueryPlan) -> Tree {
                 }),
             )
         }
-        QueryPlan::Hydration(plan) => Tree::node(
-            Operator::Hydration,
-            "",
-            plan.operation
-                .nodes
-                .iter()
-                .map(|node| {
-                    use compiler::passes::plan::query_types::hydration::HydrationPathFilter;
-                    let mut predicates = Vec::new();
-                    if !node.node_ids.is_empty() {
-                        predicates.push(format!(
-                            "{}.{} IN {:?}",
-                            node.alias, node.id_property, node.node_ids
-                        ));
-                    }
-                    if let Some(paths) = &node.path_filter {
-                        let (mode, paths) = match paths {
-                            HydrationPathFilter::PrefixUnion(paths) => ("PREFIX UNION", paths),
-                            HydrationPathFilter::PrefixSet(paths) => ("PREFIX SET", paths),
-                        };
-                        predicates.insert(
-                            0,
-                            format!(
-                                "{}.traversal_path {mode} [{}]",
-                                node.alias,
-                                paths
-                                    .iter()
-                                    .map(|path| text_literal(path.as_str()))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ),
-                        );
-                    }
-                    let read = Tree::node(
-                        Operator::Deduplicate,
-                        format!(
-                            "LimitBy {}",
-                            node.sort_key
-                                .iter()
-                                .map(|key| format!("{}.{key}", node.alias))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
-                        vec![filter(predicates, scan(&node.table, &node.alias, false))],
-                    );
-                    Tree::node(
-                        Operator::Project,
-                        node.columns
-                            .iter()
-                            .map(|column| format!("{}.{column}", node.alias))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        vec![filter(
-                            vec![format!("{}._deleted = false", node.alias)],
-                            read,
-                        )],
-                    )
-                })
-                .collect(),
-        ),
     }
 }
 

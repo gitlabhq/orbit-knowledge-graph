@@ -1,3 +1,4 @@
+use super::limits::RESERVED_PREFIX;
 use super::{
     Binding, Expr, Literal, Logical, LogicalCatalog, LogicalOperation, LogicalPlan, LogicalType,
     PlanError, Predicate, Rows, Step, filter,
@@ -8,6 +9,18 @@ use crate::{Direction, EntityId, RelationshipId};
 pub struct LogicalBuilder<'m> {
     catalog: LogicalCatalog<'m>,
     construction: Construction<Logical>,
+    internal: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InternalName(String);
+
+impl std::ops::Deref for InternalName {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.0
+    }
 }
 
 impl<'m> LogicalBuilder<'m> {
@@ -15,6 +28,7 @@ impl<'m> LogicalBuilder<'m> {
         Self {
             catalog,
             construction,
+            internal: Vec::new(),
         }
     }
 
@@ -35,7 +49,7 @@ impl<'m> LogicalBuilder<'m> {
         root: Result<tracking::Rows, PlanError>,
     ) -> Result<LogicalPlan, PlanError> {
         let plan = self.construction.finish(root?)?;
-        super::shape::plan(&plan)?;
+        super::shape::plan(&plan, &self.internal)?;
         Ok(plan)
     }
 
@@ -75,6 +89,20 @@ impl<'m> LogicalBuilder<'m> {
         Ok(self.construction.operation(rows.inner())?)
     }
 
+    pub fn internal_name(&mut self, purpose: &str) -> Result<InternalName, PlanError> {
+        let plain = purpose
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if purpose.is_empty() || !plain || purpose.starts_with('_') {
+            return Err(PlanError::shape(format!(
+                "internal name {purpose:?} must be a lowercase identifier"
+            )));
+        }
+        let name = format!("{RESERVED_PREFIX}{purpose}");
+        self.internal.push(name.clone());
+        Ok(InternalName(name))
+    }
+
     pub fn entities(&mut self, entity: Declared<EntityId>) -> Result<Rows<'m>, PlanError> {
         let name = self.attempt(|catalog, construction| {
             let id = construction.declared(entity)?;
@@ -103,7 +131,7 @@ impl<'m> LogicalBuilder<'m> {
             LogicalOperation::Filter(predicate),
             vec![rows],
             |catalog, construction, _| {
-                super::limits::in_values(catalog.model(), &checked)?;
+                super::limits::in_values(catalog.model(), &checked, catalog.limits())?;
                 super::conditions::conditions(catalog.model(), construction, &checked)?;
                 filter::predicate(catalog.model(), construction, &checked)?;
                 Ok(Outputs::preserve())
@@ -119,7 +147,7 @@ impl<'m> LogicalBuilder<'m> {
             LogicalOperation::Filter(predicate),
             vec![rows],
             |catalog, construction, _| {
-                super::limits::at_most("pinned ids", count, super::limits::MAX_PINS)?;
+                super::limits::at_most("pinned ids", count, catalog.limits().pins)?;
                 filter::predicate(catalog.model(), construction, &checked)?;
                 Ok(Outputs::preserve())
             },

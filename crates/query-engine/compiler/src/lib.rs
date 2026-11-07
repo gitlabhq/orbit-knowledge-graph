@@ -34,6 +34,7 @@ pub mod ast;
 pub mod bridge;
 pub mod constants;
 pub mod error;
+pub mod hydration;
 pub mod input;
 pub mod metrics;
 pub(crate) mod query_limits;
@@ -63,6 +64,7 @@ pub use query_data_model::EntityAuthConfig;
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
 
 pub use analytics::ExecMetrics;
+pub use hydration::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
     ddl::duckdb::emit_create_table as emit_duckdb_create_table, ddl::duckdb::generate_local_ddl,
@@ -72,7 +74,6 @@ pub use passes::hydrate::{
     DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
 };
-pub use passes::plan::HydrationCompileOptions;
 pub use passes::result_contract::{EdgeMeta, RedactionNode, ResultContext};
 pub use surface::{Frontend, gql};
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
@@ -185,23 +186,17 @@ pub fn check(raw: &str, fe: Frontend, data_model: &Arc<ClickHouseDataModel>) -> 
     .count_err()
 }
 
-/// Compile a pre-built hydration `Input` into ClickHouse SQL.
-///
-/// Runs the hydration pipeline: Restrict → Plan → Lower → Enforce → Settings → Codegen.
-/// Skips validation, normalization, security, check, and hydrate plan passes.
-/// Codegen defaults to `HydrationPlan::None`.
-pub fn compile_input(
-    input: Input,
-    options: HydrationCompileOptions,
+/// Compile a hydration request into ClickHouse SQL: restrict, plan, settings, security, render.
+pub fn compile_hydration(
+    request: HydrationRequest,
     data_model: &Arc<ClickHouseDataModel>,
     ctx: &SecurityContext,
-) -> Result<CompiledQueryContext> {
+) -> Result<ParameterizedQuery> {
     let mut ctx = config::ChHydrationCtx::new(ctx.clone(), Arc::clone(data_model));
-    ctx.set_input(input);
-    ctx.set_hydration_options(options);
+    ctx.set_hydration(request);
     config::run_ch_hydration(&mut ctx)
         .and_then(|()| {
-            ctx.take_output().ok_or_else(|| {
+            ctx.take_hydration_query().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
             })
         })

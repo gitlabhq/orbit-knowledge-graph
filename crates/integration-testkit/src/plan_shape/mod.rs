@@ -11,9 +11,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use compiler::input::Input;
+use compiler::logical::facts;
 use compiler::passes::codegen::RelationalModel;
 use compiler::passes::{normalize, page, plan, response_policy};
+use compiler::{HydrationArm, HydrationCompileOptions, HydrationRequest};
+use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::implementations::relational::plan::RelationalPlan;
+use query_data_model::plan::logical::{Columns, LogicalCatalog, LogicalPlan, Projection};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, Model};
 use serde::Deserialize;
 
@@ -275,33 +279,25 @@ fn check<M: RelationalModel>(
             let input = compiler::bridge::input(&statement, catalog.model(), model)?;
             Ok((statement, input))
         });
-        let (statement, mut input) = match parsed {
+        let (statement, input) = match parsed {
             Ok(parsed) => parsed,
             Err(error) => {
                 failures.push(format!("{label}: {error}"));
                 continue;
             }
         };
-        let mut options = plan::HydrationCompileOptions::default();
-        if let Some(hydration) = &scenario.hydration {
-            input.query_type = compiler::input::QueryType::Hydration;
-            for (alias, paths) in &hydration.paths {
-                let Some(node) = input.nodes.iter_mut().find(|node| &node.id == alias) else {
-                    failures.push(format!("{label}: unknown hydration node '{alias}'"));
-                    continue;
-                };
-                node.traversal_paths = paths
-                    .iter()
-                    .map(|path| {
-                        orbit_utils::traversal_path::TraversalPath::new_unchecked(path.clone())
-                    })
-                    .collect();
+        let hydration = match scenario
+            .hydration
+            .as_ref()
+            .map(|setup| hydration_request(&statement.plan, catalog, setup))
+            .transpose()
+        {
+            Ok(hydration) => hydration,
+            Err(error) => {
+                failures.push(format!("{label}: {error}"));
+                continue;
             }
-            options = plan::HydrationCompileOptions {
-                dynamic: hydration.dynamic,
-                path_segment_budget: hydration.path_segment_budget,
-            };
-        }
+        };
         if let Some(logical) = scenario.logical.surface(language)
             && let Err(error) = logical.check(
                 &logical::logical(&statement.plan, catalog.model()),
@@ -314,7 +310,11 @@ fn check<M: RelationalModel>(
         let query = compiler::logical::Query::new(&statement.plan, catalog.model());
         let tp_bounds = (backend == "clickhouse" && scenario.hydration.is_none())
             .then(|| compiler::tp_bounds::TpBounds::derive(query, model));
-        let relational = plan::plan(Some(query), &input, tp_bounds.as_ref(), model, options)
+        let request = match &hydration {
+            Some(hydration) => plan::Request::Hydration(hydration),
+            None => plan::Request::Query(query, &input),
+        };
+        let relational = plan::plan(request, tp_bounds.as_ref(), model)
             .and_then(|planned| {
                 let tree = match &planned.legacy {
                     Some(legacy) => explain::physical(legacy),
@@ -370,14 +370,82 @@ fn passes<M: RelationalModel>(
     model: &M,
     input: &Input,
 ) -> compiler::Result<RelationalPlan<M::Backend>> {
+    if scenario.hydration.is_some() {
+        return Ok(planned.plan);
+    }
     let relational = match backend {
         "clickhouse" => response_policy::apply_text_excerpts(planned.plan, model, input)?,
         _ => planned.plan,
     };
-    match scenario.hydration {
-        Some(_) => Ok(relational),
-        None => page::apply(relational, model, input, &planned.metadata),
+    page::apply(relational, model, input, &planned.metadata)
+}
+
+fn hydration_request(
+    plan: &LogicalPlan,
+    catalog: LogicalCatalog<'_>,
+    setup: &HydrationSetup,
+) -> compiler::Result<HydrationRequest> {
+    let query = compiler::logical::Query::new(plan, catalog.model());
+    let facts = facts::facts(query);
+    let anchors = facts::anchors(query, &facts);
+    if let Some(alias) = setup
+        .paths
+        .keys()
+        .find(|alias| anchors.iter().all(|anchor| anchor.binding.name != *alias))
+    {
+        return Err(compiler::QueryError::Lowering(format!(
+            "unknown hydration node '{alias}'"
+        )));
     }
+    let arms = anchors
+        .iter()
+        .map(|anchor| {
+            let binding = anchor.binding;
+            let columns = query
+                .selected()
+                .into_iter()
+                .find_map(|projection| match projection {
+                    Projection::Graph {
+                        binding: projected,
+                        columns: Columns::Listed(listed),
+                    } if *projected == binding.output => Some(listed.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let entity = query.entity_name(binding.output).unwrap_or_default();
+            let plan = catalog.build(|q| {
+                let rows = q.entities_as(catalog.entity(entity)?, binding.name)?;
+                let endpoint = rows.endpoint()?;
+                let rows = match anchor.pinned.as_slice() {
+                    [] => rows,
+                    pinned => q.pin(rows, endpoint.property("id")?, pinned)?,
+                };
+                let projection = Projection::Graph {
+                    binding: endpoint.output(),
+                    columns: Columns::Listed(columns),
+                };
+                q.select(rows, [projection.named(binding.name)])
+            })?;
+            let traversal_paths = setup
+                .paths
+                .get(binding.name)
+                .into_iter()
+                .flatten()
+                .map(|path| TraversalPath::new_unchecked(path.clone()))
+                .collect();
+            Ok(HydrationArm {
+                plan,
+                traversal_paths,
+            })
+        })
+        .collect::<compiler::Result<_>>()?;
+    Ok(HydrationRequest {
+        arms,
+        options: HydrationCompileOptions {
+            dynamic: setup.dynamic,
+            path_segment_budget: setup.path_segment_budget,
+        },
+    })
 }
 
 pub fn run_dir(directory: &Path) {
@@ -808,10 +876,6 @@ reject:
 
 #[test]
 fn hydration_planning_selects_paths_before_sql_rendering() {
-    use compiler::input::{InputNode, QueryType};
-    use compiler::passes::plan::query_types::hydration::HydrationPathFilter;
-    use orbit_utils::traversal_path::TraversalPath;
-
     let model = ClickHouseDataModel::embedded().unwrap();
     for (count, dynamic, budget, set, expected_paths) in [
         (256, true, None, false, 256),
@@ -819,48 +883,28 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         (257, false, None, false, 257),
         (257, true, Some(1), false, 1),
     ] {
-        let input = Input {
-            query_type: QueryType::Hydration,
-            nodes: vec![InputNode {
-                id: "f".into(),
-                entity: Some("File".into()),
-                node_ids: vec![1],
-                traversal_paths: (0..count)
-                    .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
-                    .collect(),
-                ..Default::default()
-            }],
-            ..Default::default()
+        let paths = (0..count)
+            .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
+            .collect();
+        let arm = HydrationArm::new(model.catalog().model(), "File", &[1], &[], paths).unwrap();
+        let request = HydrationRequest {
+            arms: vec![arm],
+            options: HydrationCompileOptions {
+                dynamic,
+                path_segment_budget: budget,
+            },
         };
-        let options = plan::HydrationCompileOptions {
-            dynamic,
-            path_segment_budget: budget,
-        };
-        let planned = plan::plan(None, &input, None, &model, options).unwrap();
-        let plan = planned.legacy.unwrap();
-        let plan::QueryPlan::Hydration(hydration) = &plan else {
-            panic!("expected hydration");
-        };
-        let (actual_set, paths) = match hydration.operation.nodes[0].path_filter.as_ref().unwrap() {
-            HydrationPathFilter::PrefixUnion(paths) => (false, paths),
-            HydrationPathFilter::PrefixSet(paths) => (true, paths),
-        };
-        assert_eq!((actual_set, paths.len()), (set, expected_paths));
-        let sql = model.catalog().render(&planned.plan).sql;
-        assert_eq!(sql.contains("arrayExists"), set);
+        let planned = plan::plan(plan::Request::Hydration(&request), None, &model).unwrap();
+        let rendered = model.catalog().render(&planned.plan);
+        assert_eq!(rendered.sql.contains("arrayExists"), set);
         assert_eq!(
-            sql.matches("startsWith").count(),
+            rendered.sql.matches("startsWith").count(),
             if set { 1 } else { expected_paths }
         );
-        let planned = explain::physical(&plan);
-        let mode = if set { "SET" } else { "UNION" };
-        Assertions {
-            expect: vec![format!(
-                "(Filter f.traversal_path PREFIX {mode} ?, ... (_))"
-            )],
-            ..Default::default()
-        }
-        .check(&planned, "hydration.planned")
-        .unwrap();
+        let bound = rendered
+            .parameters
+            .values()
+            .find_map(|param| param.value.as_array().map(Vec::len));
+        assert_eq!(bound, set.then_some(expected_paths));
     }
 }

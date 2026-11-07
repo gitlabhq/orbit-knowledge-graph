@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::limits::{self, MAX_COLUMNS, MAX_GROUPS, MAX_MEASURES, MAX_ROWS, MAX_SKIP};
+use super::limits::{self, MAX_GROUPS, MAX_MEASURES, MAX_ROWS, MAX_SKIP};
 use super::{
     Columns, Expr, LogicalBuilder, LogicalCatalog, LogicalOperation, LogicalType, Measure, Order,
     PlanError, Projection, Rows, check,
@@ -161,7 +161,7 @@ fn projection(
             match (kind, columns) {
                 (LogicalType::Scalar(_), _) => Err(check::mismatch(name, "a graph value", *kind)),
                 (LogicalType::Entity(entity), Columns::Listed(listed)) => {
-                    limits::at_most("columns", listed.len(), MAX_COLUMNS)?;
+                    limits::at_most("columns", listed.len(), catalog.limits().columns)?;
                     let graph = catalog.model().graph();
                     let foreign = listed
                         .iter()

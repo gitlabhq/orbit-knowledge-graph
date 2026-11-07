@@ -10,14 +10,12 @@ use compiler::constants::{
     hydration_node_alias, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
     traversal_path_column,
 };
-use compiler::{
-    ColumnSelection, DynamicEntityColumns, FilterOp, HydrationTemplate, Input, InputFilter,
-    InputNode, QueryType,
-};
+use compiler::{DynamicEntityColumns, FilterOp, HydrationArm, HydrationTemplate, InputFilter};
 use ontology::{DataType, Ontology};
 use orbit_arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
 use pipeline::PipelineError;
+use query_data_model::Model;
 use types::QueryResult;
 
 pub use crate::content::PropertyMap;
@@ -122,14 +120,20 @@ pub fn collect_dynamic_ref_paths(
         .collect()
 }
 
-/// Caps limit at `u32::MAX` to prevent truncation.
-pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
-    Input {
-        query_type: QueryType::Hydration,
-        nodes,
-        limit: total_ids.min(u32::MAX as usize) as u32,
-        ..Input::default()
-    }
+pub fn hydration_arm(
+    model: &Model,
+    entity: &str,
+    ids: &[i64],
+    columns: &[String],
+    traversal_paths: Vec<TraversalPath>,
+) -> Result<HydrationArm, PipelineError> {
+    HydrationArm::new(model, entity, ids, columns, traversal_paths).map_err(|error| {
+        PipelineError::Compile {
+            client_safe: false,
+            reason: error.rejection_reason(),
+            message: error.to_string(),
+        }
+    })
 }
 
 /// `{alias}_props` arrives as a JSON object of strings, so typed fields are re-typed from the ontology.
@@ -297,11 +301,11 @@ pub fn strip_injected_columns<'a>(
 }
 
 pub fn hydrate_static(
+    model: &Model,
     templates: &[HydrationTemplate],
     query_result: &QueryResult,
-) -> Result<(Vec<InputNode>, usize), PipelineError> {
-    let mut nodes = Vec::new();
-    let mut total_ids: usize = 0;
+) -> Result<Vec<HydrationArm>, PipelineError> {
+    let mut arms = Vec::new();
 
     for template in templates {
         if template.columns.is_empty() {
@@ -319,18 +323,16 @@ pub fn hydrate_static(
             Vec::new()
         };
 
-        total_ids += ids.len();
-        nodes.push(InputNode {
-            id: hydration_node_alias().to_string(),
-            entity: Some(template.entity_type.clone()),
-            columns: Some(ColumnSelection::List(template.columns.clone())),
-            node_ids: ids,
+        arms.push(hydration_arm(
+            model,
+            &template.entity_type,
+            &ids,
+            &template.columns,
             traversal_paths,
-            ..InputNode::default()
-        });
+        )?);
     }
 
-    Ok((nodes, total_ids))
+    Ok(arms)
 }
 
 /// Uses pre-resolved column specs from the compilation plan; no ontology
@@ -339,13 +341,13 @@ pub fn hydrate_static(
 /// `traversal_paths` is the authorized scope; `ref_paths` narrows an entity type to the paths
 /// its own rows carry. A neighbor can sit above the center node, so the center path is no fallback.
 pub fn hydrate_dynamic(
+    model: &Model,
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<i64>>,
     traversal_paths: &[TraversalPath],
     ref_paths: &HashMap<String, Vec<TraversalPath>>,
-) -> Result<(Vec<InputNode>, usize), PipelineError> {
-    let mut nodes = Vec::new();
-    let mut total_ids: usize = 0;
+) -> Result<Vec<HydrationArm>, PipelineError> {
+    let mut arms = Vec::new();
 
     for (entity_type, ids) in refs {
         if ids.is_empty() {
@@ -366,7 +368,6 @@ pub fn hydrate_dynamic(
             .copied()
             .take(MAX_DYNAMIC_HYDRATION_RESULTS)
             .collect();
-        total_ids += capped_ids.len();
 
         let tps = if spec.has_traversal_path {
             ref_paths
@@ -376,17 +377,16 @@ pub fn hydrate_dynamic(
             Vec::new()
         };
 
-        nodes.push(InputNode {
-            id: hydration_node_alias().to_string(),
-            entity: Some(entity_type.clone()),
-            columns: Some(ColumnSelection::List(spec.columns.clone())),
-            node_ids: capped_ids,
-            traversal_paths: tps,
-            ..InputNode::default()
-        });
+        arms.push(hydration_arm(
+            model,
+            entity_type,
+            &capped_ids,
+            &spec.columns,
+            tps,
+        )?);
     }
 
-    Ok((nodes, total_ids))
+    Ok(arms)
 }
 
 fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &InputFilter) -> bool {

@@ -19,6 +19,19 @@ pub const MAX_TEXT: usize = 1024;
 pub const MAX_IDENTIFIER: usize = 64;
 pub const MAX_NESTING: usize = 32;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    pub pins: usize,
+    pub columns: usize,
+}
+
+impl Limits {
+    pub const QUERY: Self = Self {
+        pins: MAX_PINS,
+        columns: MAX_COLUMNS,
+    };
+}
+
 pub(super) fn at_most(what: &str, found: usize, max: usize) -> Result<(), PlanError> {
     if found > max {
         return Err(PlanError::limit(what, found, max));
@@ -26,15 +39,21 @@ pub(super) fn at_most(what: &str, found: usize, max: usize) -> Result<(), PlanEr
     Ok(())
 }
 
-pub(super) fn in_values(model: &Model, predicate: &Predicate) -> Result<(), PlanError> {
+pub(super) fn in_values(
+    model: &Model,
+    predicate: &Predicate,
+    limits: Limits,
+) -> Result<(), PlanError> {
     match predicate {
         Predicate::In {
             left: Expr::Property { property, .. },
             values,
         } if model.graph().property(*property).name == DEFAULT_PRIMARY_KEY => {
-            at_most("pinned ids", values.len(), MAX_PINS)
+            at_most("pinned ids", values.len(), limits.pins)
         }
-        Predicate::And(all) => all.iter().try_for_each(|inner| in_values(model, inner)),
+        Predicate::And(all) => all
+            .iter()
+            .try_for_each(|inner| in_values(model, inner, limits)),
         nested => in_lists(nested),
     }
 }
