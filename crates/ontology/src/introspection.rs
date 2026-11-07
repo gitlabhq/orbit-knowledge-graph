@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::{EdgeEntity, Field, Ontology};
+use crate::{DataType, EdgeEntity, Field, NodeEntity, Ontology};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IntrospectionScope {
@@ -56,6 +56,12 @@ pub enum SchemaNode {
         props: Vec<String>,
         out: Vec<String>,
         r#in: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        shows: Option<Vec<String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        search: Option<Vec<String>>,
     },
 }
 
@@ -79,7 +85,7 @@ pub fn build_schema_response(
         return Err(UnknownNodes { unknown, valid });
     }
     Ok(SchemaResponse {
-        domains: build_domains(ontology, scope, expand_nodes, None, format_property),
+        domains: build_domains(ontology, scope, expand_nodes, None, format_property, false),
         edges: build_edge_names(ontology, scope, None),
     })
 }
@@ -96,7 +102,14 @@ pub fn build_compact_schema_response(
             edges: build_relationship_patterns(ontology, scope),
         },
         Some(node) => SchemaResponse {
-            domains: build_domains(ontology, scope, &[], Some(node), format_compact_property),
+            domains: build_domains(
+                ontology,
+                scope,
+                &[],
+                Some(node),
+                format_compact_property,
+                true,
+            ),
             edges: Vec::new(),
         },
     }
@@ -105,7 +118,7 @@ pub fn build_compact_schema_response(
 const OVERVIEW_DOMAINS: [&str; 3] = ["core", "code_review", "plan"];
 
 fn build_overview_domains(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaDomain> {
-    let mut domains = build_domains(ontology, scope, &[], None, format_compact_property);
+    let mut domains = build_domains(ontology, scope, &[], None, format_compact_property, false);
     for domain in &mut domains {
         if !OVERVIEW_DOMAINS.contains(&domain.name.as_str()) {
             continue;
@@ -179,6 +192,7 @@ fn build_domains(
     expand_nodes: &[String],
     only_node: Option<&str>,
     format: fn(&Field) -> String,
+    with_search: bool,
 ) -> Vec<SchemaDomain> {
     let mut domain_map: BTreeMap<String, Vec<SchemaNode>> = BTreeMap::new();
 
@@ -215,11 +229,24 @@ fn build_domains(
 
             let (outgoing, incoming) = node_relationships(ontology, scope, &node.name);
 
+            let (label, shows, search) = if with_search {
+                (
+                    Some(node.label.clone()),
+                    Some(shown_fields(node, &fields)),
+                    Some(search_fields(node, &fields)),
+                )
+            } else {
+                (None, None, None)
+            };
+
             SchemaNode::Expanded {
                 name: node.name.clone(),
                 props,
                 out: outgoing,
                 r#in: incoming,
+                label,
+                shows,
+                search,
             }
         } else {
             SchemaNode::Name(node.name.clone())
@@ -232,6 +259,45 @@ fn build_domains(
         .into_iter()
         .map(|(name, nodes)| SchemaDomain { name, nodes })
         .collect()
+}
+
+fn shown_fields(node: &NodeEntity, fields: &[&Field]) -> Vec<String> {
+    let shown = fields
+        .iter()
+        .filter(|field| !field.hidden && !field.admin_only);
+    if node.default_columns.is_empty() {
+        return shown.map(|field| field.name.clone()).collect();
+    }
+    let shown: Vec<&str> = shown.map(|field| field.name.as_str()).collect();
+    node.default_columns
+        .iter()
+        .filter(|name| shown.contains(&name.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Fields every caller may filter with CONTAINS, STARTS WITH, or ENDS WITH.
+#[must_use]
+pub fn is_text_searchable(field: &Field) -> bool {
+    field.data_type == DataType::String
+        && field.like_allowed
+        && field.filterable
+        && !field.admin_only
+        && !field.hidden
+        && !field.is_virtual()
+}
+
+fn search_fields(node: &NodeEntity, fields: &[&Field]) -> Vec<String> {
+    let mut search: Vec<String> = fields
+        .iter()
+        .filter(|field| is_text_searchable(field))
+        .map(|field| field.name.clone())
+        .collect();
+    if let Some(index) = search.iter().position(|name| *name == node.label) {
+        let label = search.remove(index);
+        search.insert(0, label);
+    }
+    search
 }
 
 fn build_edge_names(
@@ -499,6 +565,97 @@ mod tests {
         assert!(node.edges.is_empty());
     }
 
+    fn search_hints(
+        response: &SchemaResponse,
+    ) -> (Option<String>, Option<Vec<String>>, Option<Vec<String>>) {
+        match &response.domains[0].nodes[0] {
+            SchemaNode::Expanded {
+                label,
+                shows,
+                search,
+                ..
+            } => (label.clone(), shows.clone(), search.clone()),
+            other => panic!("expected an expanded node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn node_schema_says_how_to_search_each_node() {
+        let ont = load();
+        let pipeline =
+            build_compact_schema_response(&ont, IntrospectionScope::All, Some("Pipeline"));
+        let (label, shows, search) = search_hints(&pipeline);
+        assert_eq!(label.as_deref(), Some("id"));
+        assert_eq!(shows.unwrap(), ["id", "iid", "status", "ref", "source"]);
+        let search = search.unwrap();
+        assert!(search.contains(&"ref".to_string()), "{search:?}");
+        assert!(!search.contains(&"status".to_string()), "{search:?}");
+
+        let (label, _, search) = search_hints(&build_compact_schema_response(
+            &ont,
+            IntrospectionScope::All,
+            Some("Vulnerability"),
+        ));
+        assert_eq!(label.as_deref(), Some("title"));
+        assert!(!search.unwrap().contains(&"title".to_string()));
+
+        let (_, shows, search) = search_hints(&build_compact_schema_response(
+            &ont,
+            IntrospectionScope::All,
+            Some("User"),
+        ));
+        assert_eq!(search.as_ref().unwrap()[0], "username");
+        assert!(!search.unwrap().contains(&"email".to_string()));
+        assert_eq!(shows.unwrap(), ["id", "username", "name", "state"]);
+
+        let (_, _, search) = search_hints(&build_compact_schema_response(
+            &ont,
+            IntrospectionScope::All,
+            Some("MergeRequest"),
+        ));
+        assert_eq!(search.unwrap()[0], "title");
+    }
+
+    #[test]
+    fn search_hints_only_list_fields_the_schema_shows() {
+        let ont = load();
+        for scope in [IntrospectionScope::All, IntrospectionScope::Local] {
+            for name in ont.node_names().filter(|name| scope.includes(&ont, name)) {
+                let response = build_compact_schema_response(&ont, scope, Some(name));
+                let props = expanded_props(&response, name);
+                let (label, shows, search) = search_hints(&response);
+                assert_eq!(label.unwrap(), ont.get_node(name).unwrap().label);
+                for field in shows.unwrap().iter().chain(&search.unwrap()) {
+                    assert!(
+                        props.iter().any(|p| p.starts_with(&format!("{field}:"))),
+                        "{name}.{field} is not in {props:?}"
+                    );
+                    assert_ne!(field, "traversal_path", "{name}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn overview_and_full_schema_leave_out_search_hints() {
+        let ont = load();
+        let overview = serde_json::to_string(&build_compact_schema_response(
+            &ont,
+            IntrospectionScope::All,
+            None,
+        ))
+        .unwrap();
+        let full = serde_json::to_string(
+            &build_schema_response(&ont, IntrospectionScope::All, &["*".to_string()]).unwrap(),
+        )
+        .unwrap();
+        for text in [overview, full] {
+            for key in ["\"label\"", "\"shows\"", "\"search\""] {
+                assert!(!text.contains(key), "{key}");
+            }
+        }
+    }
+
     #[test]
     fn all_scope_contains_server_entities() {
         let ont = load();
@@ -578,6 +735,7 @@ mod tests {
                     out,
                     r#in,
                     props,
+                    ..
                 } if name == "File" => Some((out.clone(), r#in.clone(), props.clone())),
                 _ => None,
             })

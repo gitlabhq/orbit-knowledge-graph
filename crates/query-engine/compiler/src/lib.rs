@@ -1484,4 +1484,47 @@ mod tests {
             assert!(!sql.contains("lower(d."), "{query}:\n{sql}");
         }
     }
+
+    #[test]
+    fn schema_search_fields_accept_string_operators() {
+        use crate::types::{AccessLevel, AuthorizedPath};
+        use ontology::introspection::{
+            IntrospectionScope, SchemaNode, build_compact_schema_response,
+        };
+
+        let ctx = SecurityContext::new_with_roles(
+            1,
+            vec![AuthorizedPath::new("1/", AccessLevel::Owner as u32)],
+        )
+        .unwrap();
+
+        let mut checked = 0;
+        for name in ONTOLOGY.node_names() {
+            let response =
+                build_compact_schema_response(&ONTOLOGY, IntrospectionScope::All, Some(name));
+            let SchemaNode::Expanded { search, .. } = &response.domains[0].nodes[0] else {
+                panic!("{name} should be expanded");
+            };
+            let search = search.as_ref().expect("node schema lists search fields");
+            let node = ONTOLOGY.get_node(name).unwrap();
+            for field in node.listed_fields() {
+                let query = format!(
+                    "MATCH (n:{name}) WHERE n.{} CONTAINS 'abc' RETURN n LIMIT 1",
+                    field.name
+                );
+                let compiled = compile(&query, Frontend::Gql, &ONTOLOGY, &ctx);
+                if search.contains(&field.name) {
+                    compiled.unwrap_or_else(|error| panic!("{query}: {error}"));
+                    checked += 1;
+                } else if !field.like_allowed {
+                    let error = compiled.err().unwrap_or_else(|| panic!("{query} compiled"));
+                    assert!(
+                        error.to_string().contains("string operators"),
+                        "{query}: {error}"
+                    );
+                }
+            }
+        }
+        assert!(checked > 0);
+    }
 }
