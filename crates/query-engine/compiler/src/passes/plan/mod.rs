@@ -38,7 +38,6 @@ pub struct Plan<T> {
     pub nodes: HashMap<String, NodePlan>,
     pub relations: Vec<EdgeRelation>,
     pub node_edge_mappings: HashMap<String, (String, String)>,
-    pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     pub operation: T,
 }
 

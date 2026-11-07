@@ -164,7 +164,6 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
             nodes: self.nodes,
             relations: self.relations,
             node_edge_mappings,
-            denormalized: self.denormalized,
             operation: operation(execution),
         }
     }
