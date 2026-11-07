@@ -7,7 +7,7 @@ pub mod facts;
 pub use conditions::{Leaf, Literals, binding};
 
 use query_data_model::plan::logical::{
-    Expr, Hops, LogicalOperation, LogicalPlan, LogicalType, Measure, Predicate, Projection,
+    Expr, Hops, LogicalOperation, LogicalPlan, LogicalType, Measure, Order, Predicate, Projection,
 };
 use query_data_model::plan::tracking::{NodeId, Ref};
 use query_data_model::{Direction, EntityId, Hop, Model, RelationshipId};
@@ -170,13 +170,22 @@ impl<'p> Query<'p> {
     }
 
     pub fn ordered(self) -> Vec<Expr> {
+        self.sort_keys().into_iter().map(|(key, _)| key).collect()
+    }
+
+    pub fn sort_keys(self) -> Vec<(Expr, Order)> {
         self.operations()
             .filter_map(|(_, operation)| match operation {
-                LogicalOperation::Order(keys) => Some(keys.iter().map(|(key, _)| *key)),
+                LogicalOperation::Order(keys) => Some(keys.iter().copied()),
                 _ => None,
             })
             .flatten()
             .collect()
+    }
+
+    pub fn row_limit(self) -> Option<u32> {
+        self.limit()
+            .map(|(rows, _)| u32::try_from(rows).unwrap_or(u32::MAX))
     }
 
     pub fn limit(self) -> Option<(u64, Option<u64>)> {

@@ -161,7 +161,7 @@ pub fn plan<M: RelationalModel>(
         }
         _ => {
             let legacy = legacy(query, input, model)?;
-            let lowered = lower::emit(&legacy, input, tp_bounds, model)?;
+            let lowered = lower::emit(&legacy, query, input, tp_bounds, model)?;
             Ok(Planned {
                 plan: lowered.plan,
                 metadata: lowered.metadata,
@@ -178,7 +178,7 @@ where
     Ok(match input.query_type {
         QueryType::Traversal => QueryPlan::Traversal(query_types::traversal::plan(query, model)?),
         QueryType::Aggregation => {
-            QueryPlan::Aggregation(query_types::aggregation::plan(query, input, model)?)
+            QueryPlan::Aggregation(query_types::aggregation::plan(query, model)?)
         }
         QueryType::Neighbors | QueryType::PathFinding | QueryType::Hydration => {
             return Err(QueryError::PipelineInvariant(

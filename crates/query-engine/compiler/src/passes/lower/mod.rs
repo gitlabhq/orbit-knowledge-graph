@@ -7,6 +7,7 @@ pub mod query_types;
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::logical::Query;
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
 use crate::tp_bounds::TpBounds;
 use std::collections::HashMap;
@@ -133,11 +134,15 @@ fn redaction_columns<T>(plan: &Plan<T>, execution: &ExecutionPlan) -> Vec<Column
 
 pub fn emit<M: RelationalModel>(
     plan: &QueryPlan,
+    query: Query<'_>,
     input: &Input,
     tp_bounds: Option<&TpBounds>,
     model: &M,
 ) -> Result<LoweredQuery<PlanOf<M>>> {
     let catalog = model.catalog();
+    let limit = query
+        .row_limit()
+        .ok_or_else(|| QueryError::PipelineInvariant("queries carry a row limit".into()))?;
     let (built, nodes, stable_order) = match plan {
         QueryPlan::Traversal(plan) => {
             let nodes = bindings(plan, input, graph::bindings(&plan.operation.execution))?;
@@ -151,7 +156,7 @@ pub fn emit<M: RelationalModel>(
         QueryPlan::Aggregation(plan) => {
             let nodes = bindings(plan, input, graph::bindings(&plan.operation.execution))?;
             let built = catalog
-                .build(|q| query_types::aggregation::emit(q, plan, input, tp_bounds))
+                .build(|q| query_types::aggregation::emit(q, plan, limit, tp_bounds))
                 .map_err(rejected)?;
             let stable_order = query_types::aggregation::stable_order(plan);
             (built, nodes, stable_order)

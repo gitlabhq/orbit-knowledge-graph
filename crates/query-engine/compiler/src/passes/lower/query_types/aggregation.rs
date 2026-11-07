@@ -1,9 +1,8 @@
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
-    AggregateFunction, Expr, Measure, Order, Relation, RelationalBuilder, TimeUnit,
+    Expr, Measure, Order, Relation, RelationalBuilder, TimeUnit,
 };
 
-use crate::input::{AggFunction, Input, OrderDirection, TruncateUnit};
 use crate::passes::lower::build::predicates::Lowering;
 use crate::passes::lower::build::{Built, computed, conjoin, named};
 use crate::passes::lower::{Term, columns, graph};
@@ -11,11 +10,12 @@ use crate::passes::plan::predicates::OutputValue;
 use crate::passes::plan::query_types::aggregation::Group;
 use crate::passes::plan::{Aggregation, Plan};
 use crate::tp_bounds::TpBounds;
+use query_data_model::plan::logical::TimeUnit as Unit;
 
 pub(crate) fn emit<B: RelationalBackend>(
     q: &mut RelationalBuilder<'_, B>,
     plan: &Plan<Aggregation>,
-    input: &Input,
+    limit: u32,
     tp_bounds: Option<&TpBounds>,
 ) -> Built<Relation> {
     let result = &plan.operation.result;
@@ -70,7 +70,7 @@ pub(crate) fn emit<B: RelationalBackend>(
             None => Vec::new(),
         };
         let lowered = Measure {
-            function: function(measure.function),
+            function: measure.function,
             args,
             distinct: measure.distinct,
             condition: conjoin(condition),
@@ -100,17 +100,17 @@ pub(crate) fn emit<B: RelationalBackend>(
     );
     let (rows, columns) = computed(q, aggregated.rows, items)?;
     let rows = match &result.order {
-        Some(order) => {
-            let value = named(&[&rows], &order.column)?;
+        Some((column, descending)) => {
+            let value = named(&[&rows], column)?;
             let order = Order {
                 value,
-                descending: order.direction == OrderDirection::Desc,
+                descending: *descending,
             };
             q.order(rows, vec![order])?
         }
         None => rows,
     };
-    let rows = q.limit(rows, Some(input.limit), None)?;
+    let rows = q.limit(rows, Some(limit), None)?;
     q.select(rows, columns)
 }
 
@@ -131,25 +131,14 @@ pub(crate) fn stable_order(plan: &Plan<Aggregation>) -> Vec<Term> {
         .collect()
 }
 
-fn function(function: AggFunction) -> AggregateFunction {
-    match function {
-        AggFunction::Count => AggregateFunction::Count,
-        AggFunction::Sum => AggregateFunction::Sum,
-        AggFunction::Avg => AggregateFunction::Avg,
-        AggFunction::Min => AggregateFunction::Min,
-        AggFunction::Max => AggregateFunction::Max,
-        AggFunction::Collect => AggregateFunction::Collect,
-    }
-}
-
-fn time_unit(unit: TruncateUnit) -> TimeUnit {
+fn time_unit(unit: Unit) -> TimeUnit {
     match unit {
-        TruncateUnit::Minute => TimeUnit::Minute,
-        TruncateUnit::Hour => TimeUnit::Hour,
-        TruncateUnit::Day => TimeUnit::Day,
-        TruncateUnit::Week => TimeUnit::Week,
-        TruncateUnit::Month => TimeUnit::Month,
-        TruncateUnit::Quarter => TimeUnit::Quarter,
-        TruncateUnit::Year => TimeUnit::Year,
+        Unit::Minute => TimeUnit::Minute,
+        Unit::Hour => TimeUnit::Hour,
+        Unit::Day => TimeUnit::Day,
+        Unit::Week => TimeUnit::Week,
+        Unit::Month => TimeUnit::Month,
+        Unit::Quarter => TimeUnit::Quarter,
+        Unit::Year => TimeUnit::Year,
     }
 }

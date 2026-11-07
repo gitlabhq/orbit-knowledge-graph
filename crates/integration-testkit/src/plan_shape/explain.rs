@@ -1,4 +1,3 @@
-use compiler::input::OrderDirection;
 use compiler::passes::plan::QueryPlan;
 use compiler::passes::plan::Test;
 use compiler::passes::plan::graph::{
@@ -88,7 +87,7 @@ pub fn physical(plan: &QueryPlan) -> Tree {
                 let column = planned_value(&value.value);
                 value.truncate.map_or_else(
                     || column.clone(),
-                    |unit| format!("bucket({}, {column})", unit.name()),
+                    |unit| format!("bucket({}, {column})", <&str>::from(unit)),
                 )
             };
             let condition = if result.condition.is_empty() {
@@ -122,7 +121,7 @@ pub fn physical(plan: &QueryPlan) -> Tree {
                         .unwrap_or_default();
                     format!(
                         "{}({argument}){condition} AS {}",
-                        measure.function.to_string().to_uppercase(),
+                        format!("{:?}", measure.function).to_uppercase(),
                         measure.name
                     )
                 }))
@@ -133,15 +132,7 @@ pub fn physical(plan: &QueryPlan) -> Tree {
                 items,
                 vec![execution_tree(&plan.operation.execution)],
             );
-            sort(
-                tree,
-                result.order.iter().map(|order| {
-                    (
-                        order.column.clone(),
-                        order.direction == OrderDirection::Desc,
-                    )
-                }),
-            )
+            sort(tree, result.order.iter().cloned())
         }
     }
 }
