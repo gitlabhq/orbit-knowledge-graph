@@ -392,8 +392,12 @@ impl NodeEntity {
             .collect()
     }
 
+    /// A disabled virtual column resolves to nothing, so listing it would
+    /// advertise a column that never returns a value.
     pub fn listed_fields(&self) -> impl Iterator<Item = &Field> {
-        self.fields.iter().filter(|field| !field.hidden)
+        self.fields.iter().filter(|field| {
+            !field.hidden && !matches!(&field.source, FieldSource::Virtual(v) if v.disabled)
+        })
     }
 }
 
@@ -742,5 +746,71 @@ impl fmt::Display for DataType {
             DataType::Enum => write!(f, "Enum"),
             DataType::Uuid => write!(f, "Uuid"),
         }
+    }
+}
+
+#[cfg(test)]
+mod listed_fields_tests {
+    use super::*;
+
+    fn field(name: &str, source: FieldSource) -> Field {
+        Field {
+            name: name.to_string(),
+            source,
+            data_type: DataType::String,
+            nullable: true,
+            enum_values: None,
+            enum_type: EnumType::default(),
+            like_allowed: true,
+            filterable: true,
+            admin_only: false,
+            hidden: false,
+            mutable: true,
+            description: None,
+            selectivity: FieldSelectivity::default(),
+            high_fan_out: false,
+            terminal_values: None,
+            traversal_path_lookup: None,
+            binary: false,
+            unique: false,
+        }
+    }
+
+    fn virtual_source(disabled: bool) -> FieldSource {
+        FieldSource::Virtual(VirtualSource {
+            service: "observability".to_string(),
+            lookup: "pipeline_trace_id".to_string(),
+            disabled,
+            depends_on: Vec::new(),
+            allowed_ops: VirtualSource::DEFAULT_ALLOWED_OPS
+                .iter()
+                .map(|op| op.to_string())
+                .collect(),
+        })
+    }
+
+    fn node_with(fields: Vec<Field>) -> NodeEntity {
+        let mut node = NodeEntity::default();
+        node.fields = fields;
+        node
+    }
+
+    #[test]
+    fn a_disabled_virtual_field_is_not_listed() {
+        let node = node_with(vec![
+            field("id", FieldSource::DatabaseColumn("id".to_string())),
+            field("observability_trace_id", virtual_source(true)),
+        ]);
+
+        let listed: Vec<&str> = node.listed_fields().map(|f| f.name.as_str()).collect();
+
+        assert_eq!(listed, vec!["id"]);
+    }
+
+    #[test]
+    fn a_resolvable_virtual_field_is_listed() {
+        let node = node_with(vec![field("content", virtual_source(false))]);
+
+        assert_eq!(node.listed_fields().count(), 1);
     }
 }
