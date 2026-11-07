@@ -7,7 +7,6 @@ use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::OrbitQueryModel;
 
 use super::{NodePlan, Pattern};
-use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::filters::{FilterOwner, ordered_filters};
 use crate::passes::plan::graph::ReadScope;
@@ -16,33 +15,30 @@ use crate::passes::plan::predicates::{
 };
 
 impl NodePlan {
-    fn from_input<M>(node: &InputNode, model: &M, strip_virtuals: bool) -> Option<Self>
+    fn from_input<M>(node: &InputNode, model: &M) -> Option<Self>
     where
         M: OrbitQueryModel + ?Sized,
     {
         let entity = node.entity.as_deref()?;
         let entity_id = model.graph().entity_id(entity)?;
-        let stored_filters = strip_virtuals.then(|| {
-            node.filters
-                .iter()
-                .filter(|(property, _)| !model.property_is_virtual(entity_id, property))
-                .map(|(property, filters)| (property.clone(), filters.clone()))
-                .collect()
-        });
-        let filters = stored_filters.as_ref().unwrap_or(&node.filters);
+        let filters: HashMap<_, _> = node
+            .filters
+            .iter()
+            .filter(|(property, _)| !model.property_is_virtual(entity_id, property))
+            .map(|(property, filters)| (property.clone(), filters.clone()))
+            .collect();
         let columns = node.columns.as_ref().map(|selection| match selection {
             ColumnSelection::All => ColumnSelection::All,
-            ColumnSelection::List(columns) if strip_virtuals => ColumnSelection::List(
+            ColumnSelection::List(columns) => ColumnSelection::List(
                 columns
                     .iter()
                     .filter(|column| !model.property_is_virtual(entity_id, column))
                     .cloned()
                     .collect(),
             ),
-            ColumnSelection::List(columns) => ColumnSelection::List(columns.clone()),
         });
         let null_as_epoch = model.null_as_epoch_properties(entity_id);
-        let mut filters = ordered_filters(filters, FilterOwner::Entity(entity_id), model);
+        let mut filters = ordered_filters(&filters, FilterOwner::Entity(entity_id), model);
         for (_, bound) in &mut filters {
             if let Some((alias, property)) = &bound.filter.rhs_column
                 && *alias == node.id
@@ -75,16 +71,6 @@ impl NodePlan {
             columns,
             emit_select: true,
             null_as_epoch,
-        })
-    }
-
-    /// A node outside a pattern keeps its virtual filters; the lowerer for its query type handles them.
-    pub(crate) fn resolve<M>(node: &InputNode, model: &M) -> Result<Self>
-    where
-        M: OrbitQueryModel + ?Sized,
-    {
-        Self::from_input(node, model, false).ok_or_else(|| {
-            QueryError::Lowering(format!("node '{}' has an unknown entity", node.id))
         })
     }
 
@@ -162,7 +148,7 @@ where
     input
         .nodes
         .iter()
-        .filter_map(|node| Some((node.id.clone(), NodePlan::from_input(node, model, true)?)))
+        .filter_map(|node| Some((node.id.clone(), NodePlan::from_input(node, model)?)))
         .collect()
 }
 

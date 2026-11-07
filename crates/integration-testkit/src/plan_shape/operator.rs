@@ -32,7 +32,6 @@ operators! {
     Follow => "Follow",
     Shortest => "Shortest",
     Select => "Select",
-    NodeScan => "NodeScan",
     EdgeScan => "EdgeScan",
     Filter => "Filter",
     Project => "Project",

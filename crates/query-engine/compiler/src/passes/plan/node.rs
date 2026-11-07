@@ -2,7 +2,9 @@
 //! attached to it, each bound to the storage facts that decide how it lowers.
 
 use ontology::DataType;
+use ontology::constants::DEFAULT_PRIMARY_KEY;
 use orbit_utils::query_types::SqlType;
+use query_data_model::PropertyId;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, Function, TextMatch, UnaryOp,
@@ -23,7 +25,8 @@ use crate::passes::lower::build::{Built, and, binary, call, col, eq, param};
 pub(crate) struct Node<'p> {
     pub alias: &'p str,
     pub entity: &'p str,
-    pub table: &'p str,
+    pub table: Option<&'p str>,
+    pub redaction: &'p str,
     pub pinned: Vec<i64>,
     pub range: Option<(i64, i64)>,
     pub filters: Vec<Filter<'p>>,
@@ -32,6 +35,7 @@ pub(crate) struct Node<'p> {
 
 pub(crate) struct Filter<'p> {
     fact: Fact<'p>,
+    pub id: PropertyId,
     property: &'p str,
     rhs: Option<&'p str>,
     data_type: DataType,
@@ -48,7 +52,7 @@ impl<'p> Node<'p> {
             .catalog()
             .source(binding.entity)
             .map(|(_, source)| source);
-        let table = source.map_or("", |source| source.table.as_str());
+        let table = source.map(|source| source.table.as_str());
         let epoch_type = |property| {
             model
                 .null_as_epoch(property)
@@ -68,10 +72,12 @@ impl<'p> Node<'p> {
                 };
                 Some(Filter {
                     fact,
+                    id: property,
                     property: &declared.name,
                     rhs: rhs.map(|rhs| graph.property(rhs).name.as_str()),
                     data_type: declared.data_type,
-                    in_sort_key: model.in_sort_key(table, &declared.name),
+                    in_sort_key: table
+                        .is_some_and(|table| model.in_sort_key(table, &declared.name)),
                     text_indexed: model.has_text_index(property),
                     null_as_epoch: NullAsEpoch {
                         column: epoch_type(property),
@@ -93,6 +99,9 @@ impl<'p> Node<'p> {
             alias: binding.name,
             entity: &graph.entity(binding.entity).name,
             table,
+            redaction: model
+                .redaction_id_column(binding.entity)
+                .unwrap_or(DEFAULT_PRIMARY_KEY),
             pinned: anchor.pinned,
             range: anchor.range,
             filters,
@@ -103,9 +112,30 @@ impl<'p> Node<'p> {
     pub fn is_id_pinned_only(&self) -> bool {
         !self.pinned.is_empty() && self.filters.is_empty() && self.range.is_none()
     }
+
+    pub fn uses_default_pk(&self) -> bool {
+        self.redaction == DEFAULT_PRIMARY_KEY
+    }
 }
 
 impl Filter<'_> {
+    pub fn tags(&self, key: &str) -> Option<Vec<String>> {
+        let tag = |literal: &Literal| match json(literal) {
+            Json::String(text) => format!("{key}:{text}"),
+            value => format!("{key}:{value}"),
+        };
+        match self.fact.leaf {
+            Predicate::Compare {
+                right: Operand::Literal(literal),
+                ..
+            } if self.fact.comparison == Some(Comparison::Eq) => Some(vec![tag(literal)]),
+            Predicate::In { values, .. } if !values.is_empty() => {
+                Some(values.iter().map(tag).collect())
+            }
+            _ => None,
+        }
+    }
+
     fn matches_values(&self) -> bool {
         match self.fact.leaf {
             Predicate::In { .. } => true,

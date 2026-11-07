@@ -156,14 +156,6 @@ pub fn emit<M: RelationalModel>(
             let stable_order = query_types::aggregation::stable_order(plan);
             (built, nodes, stable_order)
         }
-        QueryPlan::Neighbors(plan) => {
-            let built = catalog
-                .build(|q| query_types::neighbors::emit(q, plan, input))
-                .map_err(rejected)?;
-            let center = (plan.operation.center.clone(), NodeBinding::Projected);
-            let stable_order = query_types::neighbors::stable_order(plan);
-            (built, HashMap::from([center]), stable_order)
-        }
         QueryPlan::Hydration(plan) => {
             query_types::hydration::check(plan)?;
             let built = catalog

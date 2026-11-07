@@ -1,14 +1,15 @@
-//! Planning turns a validated query into a relational plan. Path finding reads the logical plan and
-//! builds through the catalog in one step.
+//! Planning turns a validated query into a relational plan. Path finding and neighbors read the
+//! logical plan and build through the catalog in one step.
 //!
 //! The other query types still plan from `Input` into a `QueryPlan` that `lower` renders.
 //! `query_types/` picks the planner for the query type. Traversal and aggregation build a `pattern`
 //! (nodes, relations, conditions) whose steps assemble a `graph::RelationGraph`; `reuse` decides which
 //! relations lowering materializes; `filters` and `predicates` are the shared condition vocabulary.
-//! Neighbors and hydration keep their own hand-written shapes.
+//! Hydration keeps its own hand-written shape.
 
 pub(crate) mod filters;
 pub mod graph;
+mod neighbors;
 mod node;
 mod path_finding;
 mod pattern;
@@ -25,15 +26,14 @@ use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::logical::Query;
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
-use crate::passes::lower::{self, LoweredMetadata};
+use crate::passes::lower::{self, LoweredMetadata, NodeBinding};
 use crate::tp_bounds::TpBounds;
 
 pub use filters::BoundFilter;
 pub use pattern::{EdgeRelation, NodePlan};
 pub use query_types::{
-    EdgeTableConfig, aggregation::Aggregation, hydration::Hydration,
-    hydration::HydrationCompileOptions, hydration::HydrationNodePlan, neighbors::Neighbors,
-    traversal::Traversal,
+    aggregation::Aggregation, hydration::Hydration, hydration::HydrationCompileOptions,
+    hydration::HydrationNodePlan, traversal::Traversal,
 };
 
 pub struct Plan<T> {
@@ -59,7 +59,6 @@ impl<T> Plan<T> {
 pub enum QueryPlan {
     Traversal(Plan<Traversal>),
     Aggregation(Plan<Aggregation>),
-    Neighbors(Plan<Neighbors>),
     Hydration(Plan<Hydration>),
 }
 
@@ -126,9 +125,8 @@ pub fn plan<M: RelationalModel>(
     model: &M,
     hydration_options: HydrationCompileOptions,
 ) -> Result<Planned<PlanOf<M>>> {
-    if let Some(query) = query
-        && query.kind() == QueryType::PathFinding
-    {
+    let kind = query.map(Query::kind);
+    if let (Some(query), Some(QueryType::PathFinding)) = (query, kind) {
         let path = path_finding::PathFinding::new(query, model)?;
         let plan = model
             .catalog()
@@ -136,6 +134,23 @@ pub fn plan<M: RelationalModel>(
             .map_err(rejected)?;
         let metadata = LoweredMetadata {
             stable_order: path_finding::stable_order(),
+            ..LoweredMetadata::default()
+        };
+        return Ok(Planned {
+            plan,
+            metadata,
+            legacy: None,
+        });
+    }
+    if let (Some(query), Some(QueryType::Neighbors)) = (query, kind) {
+        let neighbors = neighbors::Neighbors::new(query, model)?;
+        let plan = model
+            .catalog()
+            .build(|q| neighbors::emit(q, &neighbors))
+            .map_err(rejected)?;
+        let metadata = LoweredMetadata {
+            nodes: HashMap::from([(neighbors.center().to_string(), NodeBinding::Projected)]),
+            stable_order: neighbors::stable_order(&neighbors),
             ..LoweredMetadata::default()
         };
         return Ok(Planned {
@@ -166,10 +181,9 @@ where
         QueryType::Aggregation => {
             QueryPlan::Aggregation(query_types::aggregation::plan(input, model)?)
         }
-        QueryType::Neighbors => QueryPlan::Neighbors(query_types::neighbors::plan(input, model)?),
-        QueryType::PathFinding => {
+        QueryType::Neighbors | QueryType::PathFinding => {
             return Err(QueryError::PipelineInvariant(
-                "path finding plans from the logical plan".into(),
+                "neighbors and path finding plan from the logical plan".into(),
             ));
         }
         QueryType::Hydration => QueryPlan::Hydration(query_types::hydration::plan(

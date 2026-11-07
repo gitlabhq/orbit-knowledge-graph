@@ -149,7 +149,7 @@ fn anchor<B: RelationalBackend>(
     node: &Node<'_>,
     force_cte: bool,
 ) -> Built<Anchor> {
-    let (alias, table) = (node.alias, node.table);
+    let (alias, table) = (node.alias, node.table.unwrap_or_default());
     if !force_cte && node.is_id_pinned_only() {
         return Ok(Anchor {
             filter: Some(AnchorFilter::Ids(node.pinned.clone())),

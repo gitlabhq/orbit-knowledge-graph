@@ -116,41 +116,6 @@ pub fn physical(plan: &QueryPlan) -> Tree {
                 }),
             )
         }
-        QueryPlan::Neighbors(plan) => {
-            let operation = &plan.operation;
-            let access = operation.fused_table.as_ref().map_or_else(
-                || {
-                    format!(
-                        "directional outgoing=[{}] incoming=[{}]",
-                        operation.edge.outgoing_tables.join(", "),
-                        operation.edge.incoming_tables.join(", ")
-                    )
-                },
-                |table| format!("fused table={table}"),
-            );
-            Tree::node(
-                Operator::Neighbors,
-                format!(
-                    "center={} direction={} {access} center_filter={} relationships=[{}] incoming_scoped=[{}] incoming_cross_scope=[{}]",
-                    operation.center,
-                    match operation.direction {
-                        compiler::input::Direction::Both => "both",
-                        compiler::input::Direction::Incoming => "incoming",
-                        compiler::input::Direction::Outgoing => "outgoing",
-                    },
-                    operation.has_non_denorm,
-                    operation
-                        .edge
-                        .rel_type_filter
-                        .as_deref()
-                        .unwrap_or_default()
-                        .join(", "),
-                    operation.incoming_scope_preserving.join(", "),
-                    operation.incoming_cross_scope.join(", ")
-                ),
-                vec![planned_node(&plan.nodes[&operation.center])],
-            )
-        }
         QueryPlan::Hydration(plan) => Tree::node(
             Operator::Hydration,
             "",
@@ -212,23 +177,6 @@ pub fn physical(plan: &QueryPlan) -> Tree {
                 .collect(),
         ),
     }
-}
-
-fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
-    filter(
-        node.conditions()
-            .iter()
-            .flat_map(planned_predicate)
-            .collect(),
-        leaf(
-            Operator::NodeScan,
-            format!(
-                "{} AS {}",
-                node.entity.as_deref().unwrap_or("Unresolved"),
-                node.alias
-            ),
-        ),
-    )
 }
 
 fn execution_tree(execution: &ExecutionPlan) -> Tree {

@@ -2,13 +2,9 @@ use ontology::constants::{DELETED_COLUMN, EDGE_RESERVED_COLUMNS};
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{Expr, Relation, RelationalBuilder};
 
-use super::expr::{Filter, filter, live, tags};
+use super::expr::live;
 use super::{Built, col, computed, filtered, scan, stored, versioning};
 use crate::constants::union_arm_alias;
-use crate::input::InputFilter;
-use crate::passes::plan::BoundFilter;
-use crate::passes::plan::filters::denorm_tag_values;
-use crate::passes::plan::predicates::Column;
 
 pub(crate) type Scope<'r> = [&'r Relation];
 
@@ -112,37 +108,4 @@ pub(crate) fn dedup<B: RelationalBackend>(
     let rows = q.read(&body, Some(alias))?;
     let deleted = deleted::<B>(&[&rows], alias)?;
     Ok((rows, deleted))
-}
-
-pub(crate) fn bound_filter<B: RelationalBackend>(
-    scope: &Scope<'_>,
-    alias: &str,
-    property: &str,
-    bound: &BoundFilter,
-) -> Built<Expr> {
-    filter::<B>(
-        scope,
-        Filter {
-            column: &Column::new(alias, property),
-            filter: &bound.filter,
-            data_type: bound.data_type.as_ref(),
-            in_sort_key: bound.in_sort_key,
-            text_indexed: bound.text_indexed,
-            null_as_epoch: bound.null_as_epoch,
-            negated: false,
-        },
-    )
-}
-
-pub(crate) fn denorm_tags(
-    scope: &Scope<'_>,
-    alias: &str,
-    column: &str,
-    key: &str,
-    filter: &InputFilter,
-) -> Built<Option<Expr>> {
-    match denorm_tag_values(key, filter) {
-        Some(values) => Ok(Some(tags(col(scope, alias, column)?, &values))),
-        None => Ok(None),
-    }
 }

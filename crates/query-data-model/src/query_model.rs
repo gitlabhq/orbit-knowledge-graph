@@ -829,9 +829,12 @@ where
     }
 
     fn relationship_routes(&self, relationship: &str) -> Vec<RelationshipRoute<'_>> {
-        let Some(relationship) = self.graph().relationship_id(relationship) else {
-            return Vec::new();
-        };
+        self.graph()
+            .relationship_id(relationship)
+            .map_or_else(Vec::new, |relationship| self.routes(relationship))
+    }
+
+    fn routes(&self, relationship: RelationshipId) -> Vec<RelationshipRoute<'_>> {
         let mut routes = std::collections::BTreeMap::<&str, Vec<&RelationshipVariant>>::new();
         for id in &self.graph().relationship(relationship).variants {
             if let Some(route) = self.bindings.variant_route(*id) {
@@ -873,6 +876,10 @@ where
         let source = self.graph().entity_id(source)?;
         let target = self.graph().entity_id(target)?;
         let variant = self.graph().variant_id(relationship, source, target)?;
+        self.edge_scope(variant)
+    }
+
+    fn edge_scope(&self, variant: RelationshipVariantId) -> Option<EdgeVariantScope> {
         self.bindings.variant_scope(variant)
     }
 
