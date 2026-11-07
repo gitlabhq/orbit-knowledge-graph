@@ -705,6 +705,9 @@ enum Commands {
         #[arg(long, value_name = "CODE", default_value_t = 0)]
         exit_code: i32,
     },
+    /// Refreshes the cached GitLab entity list; `hook-guard instructions` runs it detached.
+    #[command(hide = true)]
+    RefreshSchema,
     /// Refreshes edited files into the incremental graph; `grep` and `context` run it detached.
     #[command(hide = true)]
     Refresh {
@@ -809,6 +812,10 @@ async fn main() -> Result<()> {
             send_event(command, *exit_code, Duration::from_millis(*duration_ms)).await;
             // Skips the runtime's wait on blocking DNS lookups past the flush timeout.
             std::process::exit(0);
+        }
+        Commands::RefreshSchema => {
+            remote::server_schema::refresh_now(std::path::Path::new("."));
+            return Ok(());
         }
         Commands::Refresh { repo, db, files } => {
             return commands::index::incremental::refresh_now(
@@ -1023,7 +1030,7 @@ async fn dispatch(
             commands::hook_guard::run(kind, gitlab);
             Ok(())
         }
-        Commands::SendEvent { .. } | Commands::Refresh { .. } => Ok(()),
+        Commands::SendEvent { .. } | Commands::Refresh { .. } | Commands::RefreshSchema => Ok(()),
         Commands::Query {
             query,
             file,

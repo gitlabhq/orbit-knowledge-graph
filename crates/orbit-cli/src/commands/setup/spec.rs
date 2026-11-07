@@ -7,6 +7,8 @@ use rust_embed::Embed;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::remote::server_schema::Entities;
+
 #[derive(Embed)]
 #[folder = "$ORBIT_CONFIG_DIR/setup"]
 struct SetupAssets;
@@ -97,6 +99,7 @@ struct SetupTexts {
     instructions: String,
     #[serde(default)]
     remote: BTreeMap<String, String>,
+    server_entities: String,
     nudge_search: String,
     nudge_gitlab: String,
     #[serde(default)]
@@ -130,21 +133,51 @@ fn substitute_launcher(text: &str, launcher: &str) -> String {
     )
 }
 
-fn render_instructions(launcher: &str, remote: bool) -> String {
+fn render_entities(entities: &Entities) -> String {
+    entities
+        .providers
+        .iter()
+        .filter(|provider| !provider.entities.is_empty())
+        .map(|provider| format!("- {}: {}", provider.name, provider.entities.join(", ")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_instructions(launcher: &str, remote: bool, server: Option<&Entities>) -> String {
     let mut text = TEXTS.instructions.trim_end().to_string();
     for (name, value) in &TEXTS.remote {
         let value = if remote { value.as_str() } else { "" };
         text = text.replace(&format!("{{{{{name}}}}}"), value);
     }
-    let text = text.replace("{{query_syntax}}", crate::descriptions::gql_syntax());
+    let entities = server
+        .map(render_entities)
+        .filter(|entities| !entities.is_empty())
+        .map(|entities| {
+            TEXTS
+                .server_entities
+                .trim_end()
+                .replace("{{entities}}", &entities)
+        })
+        .unwrap_or_default();
+    let text = text
+        .replace("{{server_entities}}", &entities)
+        .replace("{{query_syntax}}", crate::descriptions::gql_syntax());
     substitute_launcher(&text, launcher)
 }
 
 static REACHES_GITLAB: LazyLock<bool> =
     LazyLock::new(|| crate::remote::client::gitlab_usable(Path::new(".")));
 
-static RENDERED_INSTRUCTIONS: LazyLock<String> =
-    LazyLock::new(|| render_instructions(launcher(), reaches_gitlab()));
+const INSTRUCTIONS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(6);
+
+static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| {
+    let deadline = std::time::Instant::now() + INSTRUCTIONS_DEADLINE;
+    let remote = reaches_gitlab();
+    let server = remote
+        .then(|| crate::remote::server_schema::server_entities(Path::new("."), deadline))
+        .flatten();
+    render_instructions(launcher(), remote, server.as_ref())
+});
 
 pub(crate) fn reaches_gitlab() -> bool {
     *REACHES_GITLAB
@@ -641,11 +674,14 @@ mod tests {
             (GLAB_LAUNCHER, "`glab orbit grep"),
         ] {
             for remote in [true, false] {
-                let rendered = render_instructions(launcher, remote);
+                let rendered = render_instructions(launcher, remote, None);
                 assert!(rendered.contains(expected), "{launcher}: {rendered}");
                 assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
+                assert_eq!(rendered.matches("MANDATORY").count(), 1, "{launcher}");
                 for phrase in [
-                    " grep` must be used for search",
+                    "MANDATORY: use these instead of grep, rg, or reading files",
+                    " grep` searches code",
+                    " context` reads code",
                     "Ignores case, `_`, `-`",
                     "`a|b` OR",
                     "Batch all reads and searches you can name",
@@ -658,16 +694,24 @@ mod tests {
                     "{launcher}: {rendered}"
                 );
                 assert!(
-                    rendered.contains("instead of glab and glab api") == remote,
+                    rendered.contains(
+                        "instead of glab and glab api for reading GitLab; glab is only for writes"
+                    ) == remote,
                     "{launcher}"
                 );
+                assert!(!rendered.contains("Connected providers"), "{launcher}");
                 assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
                 assert_eq!(rendered.contains("`branch:`"), remote, "{launcher}");
+                assert_eq!(
+                    rendered.matches("Prefix a GitLab kind").count(),
+                    usize::from(remote),
+                    "{launcher}"
+                );
                 let budget = if remote { 250 } else { 75 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
-        let local = render_instructions(DIRECT_LAUNCHER, false);
+        let local = render_instructions(DIRECT_LAUNCHER, false, None);
         assert_eq!(
             local.lines().filter(|line| line.starts_with("- ")).count(),
             2,
@@ -679,7 +723,101 @@ mod tests {
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }
 
-    const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh"];
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|name| name.to_string()).collect()
+    }
+
+    use crate::remote::server_schema::Provider;
+
+    fn providers(list: &[(&str, &[&str])]) -> Entities {
+        Entities {
+            providers: list
+                .iter()
+                .map(|(name, entities)| Provider {
+                    name: name.to_string(),
+                    entities: names(entities),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn server_entities_get_their_own_block_within_budget_and_leave_grep_alone() {
+        let server = providers(&[("gitlab", &["WorkItem", "File", "Widget"])]);
+        for (launcher, label) in [
+            (
+                DIRECT_LAUNCHER,
+                "Connected providers and their entities, for `orbit query`:",
+            ),
+            (
+                GLAB_LAUNCHER,
+                "Connected providers and their entities, for `glab orbit query`:",
+            ),
+        ] {
+            let rendered = render_instructions(launcher, true, Some(&server));
+            assert!(
+                rendered.ends_with(&format!("\n\n{label}\n- gitlab: WorkItem, File, Widget")),
+                "{rendered}"
+            );
+            let query = rendered
+                .lines()
+                .find(|line| line.contains(" query` for counts"))
+                .unwrap();
+            assert!(
+                query.ends_with(crate::descriptions::gql_syntax()),
+                "{query}"
+            );
+            let grep = rendered
+                .lines()
+                .find(|line| line.contains("Prefix a GitLab kind"))
+                .unwrap();
+            assert!(grep.contains(" grep` searches code"), "{grep}");
+            assert!(!grep.contains("Widget"), "{grep}");
+            assert!(grep.contains(&crate::commands::grep::gitlab_prefixes()));
+        }
+
+        let two = providers(&[("gitlab", &["WorkItem"]), ("jira", &["JiraIssue"])]);
+        let rendered = render_instructions(DIRECT_LAUNCHER, true, Some(&two));
+        assert!(
+            rendered.ends_with("\n- gitlab: WorkItem\n- jira: JiraIssue"),
+            "{rendered}"
+        );
+
+        let bundled = render_instructions(DIRECT_LAUNCHER, true, None);
+        assert!(!bundled.contains("Connected providers"));
+        assert!(bundled.contains("across GitLab. Read-only"), "{bundled}");
+
+        use crate::remote::server_schema::{MAX_ENTITIES, MAX_ENTITY_CHARS};
+        let short: Vec<String> = (0..MAX_ENTITIES).map(|n| format!("E{n}")).collect();
+        let long: Vec<String> = (0..MAX_ENTITY_CHARS / 50)
+            .map(|n| format!("E{n:0>47}"))
+            .collect();
+        for list in [short, long] {
+            let server = Entities {
+                providers: vec![Provider {
+                    name: "gitlab".into(),
+                    entities: list,
+                }],
+            };
+            for launcher in [DIRECT_LAUNCHER, GLAB_LAUNCHER] {
+                let rendered = render_instructions(launcher, true, Some(&server));
+                let fixed = render_instructions(launcher, true, None);
+                let words = rendered.split_whitespace().count();
+                let extra = words - fixed.split_whitespace().count();
+                assert!(
+                    extra <= MAX_ENTITIES + 12,
+                    "{launcher}: {extra} extra words"
+                );
+                assert!(
+                    words <= 250 + MAX_ENTITIES + 12,
+                    "{launcher}: {words} words"
+                );
+                assert!(rendered.chars().count() <= 5000, "{launcher}");
+            }
+        }
+    }
+
+    const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh", "refresh-schema"];
 
     #[derive(serde::Deserialize)]
     struct CallLabels {
