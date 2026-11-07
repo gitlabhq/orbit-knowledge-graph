@@ -78,7 +78,7 @@ cynic = { version = "3.14.0", features = ["rkyv"] }
 cynic-codegen = { version = "3.14.0", features = ["rkyv"] }
 cynic-querygen = { version = "3.14.0", default-features = false }
 croner = "3.0.1"
-futures = "0.3.31"
+futures = { version = "0.3.31", default-features = false, features = ["std"] }
 mimalloc = { version = "0.1.48", default-features = false }
 parking_lot = "0.12.5"
 petgraph = "0.8.3"
@@ -93,7 +93,7 @@ schemars = "1.2.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde-saphyr = "1.1.0"
-sha2 = "0.11.0"
+sha2 = { version = "0.11.0", default-features = false }
 smallvec = "1.15.1"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 stacker = "0.1.23"
@@ -162,7 +162,7 @@ proc-macro2 = "1.0.106"
 
 # Iglu schema codegen (build-time only; consumed by orbit-analytics/build.rs)
 prettyplease = "0.2.37"
-typify = "0.7.0"
+typify = { version = "0.7.0", default-features = false }
 
 # JS/TS ecosystem (v2 custom pipeline)
 oxc = { git = "https://github.com/oxc-project/oxc", rev = "45a17c25d188bf1b289638483e2bc61adbadd364", features = ["semantic", "ast_visit"] }
@@ -172,7 +172,7 @@ oxc_resolver = "11.24.2"
 # Simulator dependencies
 rand = "0.10"
 sqlformat = "0.5"
-tabled = "0.22"
+tabled = { version = "0.22", default-features = false, features = ["std", "derive"] }
 
 rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
