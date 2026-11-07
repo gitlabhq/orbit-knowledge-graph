@@ -16,7 +16,7 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Hydration (Project f.path (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.project_id, f.branch, f.id (_)))))"]
+      expect: ["(Filter f._deleted = false (Bind f (Deduplicate LimitBy 1 BY f.traversal_path, f.project_id, f.branch, f.id (Sort f.traversal_path, f.project_id, f.branch, f.id, f._version DESC (Project f.id AS id, f._deleted AS _deleted, f.path AS path (_))))))"]
     emitted:
       expect: ["(Project f.id AS id, f._deleted AS _deleted, f.path AS path (_))"]
       reject: ["(Project * (_))", "(Deduplicate Final (_))", "(Filter StartsWith(f.traversal_path, ?), ... (_))"]

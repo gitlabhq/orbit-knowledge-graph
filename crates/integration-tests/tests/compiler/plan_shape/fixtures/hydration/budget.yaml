@@ -21,7 +21,7 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Filter f.traversal_path PREFIX UNION ['1/'], f.id IN [1] (_))
+        - (Filter StartsWith(f.traversal_path, '1/'), f.id = 1 (Scan Table(gl_file) AS f))
     emitted:
       expect:
         - (Filter StartsWith(f.traversal_path, '1/'), f.id = 1 (_))

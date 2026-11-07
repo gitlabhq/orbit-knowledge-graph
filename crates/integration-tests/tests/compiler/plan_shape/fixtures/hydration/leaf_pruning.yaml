@@ -20,12 +20,13 @@ physical:
     planned:
       expect:
         - |
-          (Hydration
-            (Project f.path
-              (Filter f._deleted = false
-                (Deduplicate LimitBy ...
-                  (Filter f.traversal_path PREFIX UNION ['1/100/', '1/200/'], f.id IN [1, 2]
-                    (Scan Table(gl_file) AS f))))))
+          (Filter f._deleted = false
+            (Bind f
+              (Deduplicate LimitBy ...
+                (Sort f.traversal_path, f.project_id, f.branch, f.id, f._version DESC
+                  (Project f.id AS id, f._deleted AS _deleted, f.path AS path
+                    (Filter StartsWith(f.traversal_path, '1/100/') OR StartsWith(f.traversal_path, '1/200/'), f.id IN [1, 2]
+                      (Scan Table(gl_file) AS f)))))))
     emitted:
       expect:
         - (Filter StartsWith(f.traversal_path, '1/100/') OR StartsWith(f.traversal_path, '1/200/'), f.id IN [1, 2] (_))
