@@ -94,7 +94,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         plan {
             reads_env: [data_model]
-            reads_state: [statement, input, tp_bounds, hydration]
+            reads_state: [statement, tp_bounds, hydration]
             mutates: [query_plan, relational, lowered_metadata]
         }
         paginate {
@@ -277,7 +277,7 @@ fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
         None => {
             let statement = require(ctx.statement().as_ref(), "statement")?;
             let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
-            Request::Query(query, require(ctx.input().as_ref(), "input")?)
+            Request::Query(query)
         }
     };
     let planned = crate::passes::plan::plan(request, ctx.tp_bounds().as_ref(), model)?;

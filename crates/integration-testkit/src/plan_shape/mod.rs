@@ -312,7 +312,7 @@ fn check<M: RelationalModel>(
             .then(|| compiler::tp_bounds::TpBounds::derive(query, model));
         let request = match &hydration {
             Some(hydration) => plan::Request::Hydration(hydration),
-            None => plan::Request::Query(query, &input),
+            None => plan::Request::Query(query),
         };
         let relational = plan::plan(request, tp_bounds.as_ref(), model)
             .and_then(|planned| {

@@ -1,7 +1,7 @@
 //! Planning turns a validated query into a relational plan. Path finding, neighbors, and hydration
 //! read logical plans and build through the catalog in one step.
 //!
-//! Traversal and aggregation still plan from `Input` into a `QueryPlan` that `lower` renders.
+//! Traversal and aggregation still plan into a `QueryPlan` that `lower` renders.
 //! `query_types/` picks the planner for the query type. They build a `pattern` (nodes, relations,
 //! conditions) whose steps assemble a `graph::RelationGraph`; `reuse` decides which relations
 //! lowering materializes; `filters` and `predicates` are the shared condition vocabulary.
@@ -101,7 +101,7 @@ pub struct Planned<P> {
 }
 
 pub enum Request<'a> {
-    Query(Query<'a>, &'a Input),
+    Query(Query<'a>),
     Hydration(&'a HydrationRequest),
 }
 
@@ -110,8 +110,8 @@ pub fn plan<M: RelationalModel>(
     tp_bounds: Option<&TpBounds>,
     model: &M,
 ) -> Result<Planned<PlanOf<M>>> {
-    let (query, input) = match request {
-        Request::Query(query, input) => (query, input),
+    let query = match request {
+        Request::Query(query) => query,
         Request::Hydration(hydration) => {
             let arms = hydration::arms(hydration, model)?;
             let plan = model
@@ -160,8 +160,8 @@ pub fn plan<M: RelationalModel>(
             })
         }
         _ => {
-            let legacy = legacy(query, input, model)?;
-            let lowered = lower::emit(&legacy, query, input, tp_bounds, model)?;
+            let legacy = legacy(query, model)?;
+            let lowered = lower::emit(&legacy, query, tp_bounds, model)?;
             Ok(Planned {
                 plan: lowered.plan,
                 metadata: lowered.metadata,
@@ -171,11 +171,11 @@ pub fn plan<M: RelationalModel>(
     }
 }
 
-fn legacy<M>(query: Query<'_>, input: &Input, model: &M) -> Result<QueryPlan>
+fn legacy<M>(query: Query<'_>, model: &M) -> Result<QueryPlan>
 where
     M: OrbitQueryModel + ?Sized,
 {
-    Ok(match input.query_type {
+    Ok(match query.kind() {
         QueryType::Traversal => QueryPlan::Traversal(query_types::traversal::plan(query, model)?),
         QueryType::Aggregation => {
             QueryPlan::Aggregation(query_types::aggregation::plan(query, model)?)

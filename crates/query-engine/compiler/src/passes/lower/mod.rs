@@ -6,7 +6,6 @@ pub(crate) mod graph;
 pub mod query_types;
 
 use crate::error::{QueryError, Result};
-use crate::input::*;
 use crate::logical::Query;
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
 use crate::tp_bounds::TpBounds;
@@ -81,41 +80,35 @@ pub struct LoweredQuery<P> {
 
 fn bindings<T>(
     plan: &Plan<T>,
-    input: &Input,
+    query: Query<'_>,
     mut nodes: HashMap<String, NodeBinding>,
 ) -> Result<HashMap<String, NodeBinding>> {
-    for node in input
-        .nodes
-        .iter()
-        .filter(|node| plan.nodes.contains_key(&node.id))
+    for (alias, node) in query
+        .bindings()
+        .into_iter()
+        .filter_map(|binding| Some((binding.name, plan.nodes.get(binding.name)?)))
     {
-        if nodes.contains_key(&node.id) {
+        if nodes.contains_key(alias) {
             continue;
         }
-        let source = plan.node_edge_mappings.get(&node.id).ok_or_else(|| {
-            QueryError::Lowering(format!("node '{}' has no emitted identity", node.id))
-        })?;
+        let missing = || QueryError::Lowering(format!("node '{alias}' has no emitted identity"));
+        let source = plan.node_edge_mappings.get(alias).ok_or_else(missing)?;
         let binding = match (nodes.get(&source.0), node.node_ids.as_slice()) {
             (
                 Some(NodeBinding::Values {
-                    table_alias: Some(alias),
+                    table_alias: Some(table),
                     ..
                 }),
                 _,
-            ) => NodeBinding::source(alias, &source.1, None, None),
+            ) => NodeBinding::source(table, &source.1, None, None),
             (_, [id]) => NodeBinding::Values {
                 identity: Term::Id(*id),
                 table_alias: None,
                 traversal_path: None,
             },
-            _ => {
-                return Err(QueryError::Lowering(format!(
-                    "node '{}' has no emitted identity",
-                    node.id
-                )));
-            }
+            _ => return Err(missing()),
         };
-        nodes.insert(node.id.clone(), binding);
+        nodes.insert(alias.to_string(), binding);
     }
     Ok(nodes)
 }
@@ -135,7 +128,6 @@ fn redaction_columns<T>(plan: &Plan<T>, execution: &ExecutionPlan) -> Vec<Column
 pub fn emit<M: RelationalModel>(
     plan: &QueryPlan,
     query: Query<'_>,
-    input: &Input,
     tp_bounds: Option<&TpBounds>,
     model: &M,
 ) -> Result<LoweredQuery<PlanOf<M>>> {
@@ -145,16 +137,16 @@ pub fn emit<M: RelationalModel>(
         .ok_or_else(|| QueryError::PipelineInvariant("queries carry a row limit".into()))?;
     let (built, nodes, stable_order) = match plan {
         QueryPlan::Traversal(plan) => {
-            let nodes = bindings(plan, input, graph::bindings(&plan.operation.execution))?;
-            let shape = query_types::traversal::shape(plan, input)?;
+            let nodes = bindings(plan, query, graph::bindings(&plan.operation.execution))?;
+            let shape = query_types::traversal::shape(plan, query, limit)?;
             let built = catalog
-                .build(|q| query_types::traversal::emit(q, plan, input, &shape, tp_bounds))
+                .build(|q| query_types::traversal::emit(q, plan, &shape, tp_bounds))
                 .map_err(rejected)?;
-            let stable_order = query_types::traversal::stable_order(plan, input, &nodes);
+            let stable_order = query_types::traversal::stable_order(plan, query, &nodes);
             (built, nodes, stable_order)
         }
         QueryPlan::Aggregation(plan) => {
-            let nodes = bindings(plan, input, graph::bindings(&plan.operation.execution))?;
+            let nodes = bindings(plan, query, graph::bindings(&plan.operation.execution))?;
             let built = catalog
                 .build(|q| query_types::aggregation::emit(q, plan, limit, tp_bounds))
                 .map_err(rejected)?;
