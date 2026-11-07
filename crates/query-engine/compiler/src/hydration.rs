@@ -3,14 +3,15 @@
 
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::Model;
-use query_data_model::plan::logical::limits::Limits;
+use query_data_model::plan::logical::limits::{Limits, MAX_COLUMNS};
 use query_data_model::plan::logical::{Columns, LogicalPlan, PlanError, Projection};
 
+use crate::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use crate::error::Result;
 
-const CALLER_CAPPED: Limits = Limits {
-    pins: usize::MAX,
-    columns: usize::MAX,
+const HYDRATION_LIMITS: Limits = Limits {
+    pins: MAX_DYNAMIC_HYDRATION_RESULTS,
+    columns: MAX_COLUMNS,
 };
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -37,7 +38,7 @@ impl HydrationArm {
         columns: &[String],
         traversal_paths: Vec<TraversalPath>,
     ) -> Result<Self> {
-        let catalog = model.logical().with_limits(CALLER_CAPPED);
+        let catalog = model.logical().with_limits(HYDRATION_LIMITS);
         let plan = catalog.build(|q| {
             let declared = catalog.entity(entity)?;
             let name = q.internal_name("hydrate")?;
@@ -60,5 +61,25 @@ impl HydrationArm {
             plan,
             traversal_paths,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use query_data_model::ClickHouseDataModel;
+
+    use super::*;
+
+    #[test]
+    fn every_entity_hydrates_within_the_column_cap() {
+        let model = ClickHouseDataModel::embedded().unwrap();
+        for entity in model.catalog().model().graph().entities() {
+            assert!(
+                entity.properties.len() <= HYDRATION_LIMITS.columns,
+                "{} has {} properties",
+                entity.name,
+                entity.properties.len()
+            );
+        }
     }
 }
