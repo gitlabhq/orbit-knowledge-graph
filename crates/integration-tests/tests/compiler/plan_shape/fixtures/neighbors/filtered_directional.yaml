@@ -15,7 +15,8 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Neighbors center=d direction=both directional outgoing=[gl_code_edge] incoming=[gl_code_edge] center_filter=true ... (_))
+        - (Join ON _orbit_neighbor_edge.source_id = d.id (Scan Table(gl_code_edge) AS _orbit_neighbor_edge) (Bind d (Project d.id AS id, d._deleted AS _deleted, d.project_id AS project_id (Filter d.name = 'caller', Lower(d.name) = Lower('caller'), d.id = 1 (Deduplicate Final (Scan Table(gl_definition) AS d))))))
+        - (Join ON _orbit_neighbor_edge.target_id = d.id (Scan Table(gl_code_edge) AS _orbit_neighbor_edge) (Bind d (Project d.id AS id, d._deleted AS _deleted, d.project_id AS project_id (Filter d.name = 'caller', Lower(d.name) = Lower('caller'), d.id = 1 (Deduplicate Final (Scan Table(gl_definition) AS d))))))
     emitted:
       expect:
         - (Union ALL (_) (_))

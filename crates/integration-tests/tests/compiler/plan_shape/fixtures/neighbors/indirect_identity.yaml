@@ -19,15 +19,16 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Neighbors center=d direction=both directional outgoing=[gl_code_edge] incoming=[gl_code_edge] center_filter=false relationships=[CALLS] ... (_))
-        - (NodeScan Definition AS d)
+        - (Filter _orbit_neighbor_edge.source_kind = 'Definition', _orbit_neighbor_edge.source_id = 1, _orbit_neighbor_edge.relationship_kind = 'CALLS' (Join ON _orbit_neighbor_edge.source_id = d.id (Scan Table(gl_code_edge) AS _orbit_neighbor_edge) (Deduplicate Final (Scan Table(gl_definition) AS d))))
+        - (Filter _orbit_neighbor_edge.target_kind = 'Definition', _orbit_neighbor_edge.target_id = 1, _orbit_neighbor_edge.relationship_kind = 'CALLS' (Join ON _orbit_neighbor_edge.target_id = d.id (Scan Table(gl_code_edge) AS _orbit_neighbor_edge) (Deduplicate Final (Scan Table(gl_definition) AS d))))
     emitted:
       expect:
         - (Scan Table(gl_code_edge) ...)
   duckdb:
     planned:
       expect:
-        - (Neighbors center=d direction=both ... (_))
+        - (Filter _orbit_neighbor_edge.source_kind = 'Definition', _orbit_neighbor_edge.source_id = 1, _orbit_neighbor_edge.relationship_kind = 'CALLS' (Scan Table(gl_edge) AS _orbit_neighbor_edge))
+        - (Filter _orbit_neighbor_edge.target_kind = 'Definition', _orbit_neighbor_edge.target_id = 1, _orbit_neighbor_edge.relationship_kind = 'CALLS' (Scan Table(gl_edge) AS _orbit_neighbor_edge))
     emitted:
       expect:
         - (Scan Table(gl_edge) ...)

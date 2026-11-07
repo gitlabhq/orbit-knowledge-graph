@@ -14,7 +14,17 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Neighbors center=u direction=outgoing directional ... (_))"]
+      expect:
+        - (Filter _orbit_neighbor_edge_arm.source_kind = 'User', _orbit_neighbor_edge_arm.source_id = 1, ... (Scan Table(gl_ci_edge) AS _orbit_neighbor_edge_arm))
+        - (Filter _orbit_neighbor_edge_arm.source_kind = 'User', _orbit_neighbor_edge_arm.source_id = 1, ... (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm))
+        - (Filter _orbit_neighbor_edge_arm.source_kind = 'User', _orbit_neighbor_edge_arm.source_id = 1, ... (Scan Table(gl_sec_edge) AS _orbit_neighbor_edge_arm))
+      occurrences:
+        - pattern: (Scan Table(gl_ci_edge) AS _orbit_neighbor_edge_arm)
+          count: 1
+        - pattern: (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm)
+          count: 1
+        - pattern: (Scan Table(gl_sec_edge) AS _orbit_neighbor_edge_arm)
+          count: 1
     emitted:
       expect:
         - (Filter _orbit_neighbor_edge_arm.source_kind = 'User', _orbit_neighbor_edge_arm.source_id = 1, ... (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm))

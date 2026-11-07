@@ -63,7 +63,17 @@ cases:
     physical:
       clickhouse:
         planned:
-          expect: ["(Neighbors center=mr direction=outgoing directional ... (_))"]
+          expect:
+            - (Filter _orbit_neighbor_edge_arm.source_kind = 'MergeRequest', _orbit_neighbor_edge_arm.source_id = 1, _orbit_neighbor_edge_arm.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE', 'HAS_DIFF'] (Scan Table(gl_ci_edge) AS _orbit_neighbor_edge_arm))
+            - (Filter _orbit_neighbor_edge_arm.source_kind = 'MergeRequest', _orbit_neighbor_edge_arm.source_id = 1, _orbit_neighbor_edge_arm.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE', 'HAS_DIFF'] (Scan Table(gl_diff_edge) AS _orbit_neighbor_edge_arm))
+            - (Filter _orbit_neighbor_edge_arm.source_kind = 'MergeRequest', _orbit_neighbor_edge_arm.source_id = 1, _orbit_neighbor_edge_arm.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE', 'HAS_DIFF'] (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm))
+          occurrences:
+            - pattern: (Scan Table(gl_ci_edge) AS _orbit_neighbor_edge_arm)
+              count: 1
+            - pattern: (Scan Table(gl_diff_edge) AS _orbit_neighbor_edge_arm)
+              count: 1
+            - pattern: (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm)
+              count: 1
         emitted:
           expect:
             - (Union ALL AS _orbit_neighbor_edge (_) (_) (_))
@@ -84,7 +94,9 @@ cases:
     physical:
       clickhouse:
         planned:
-          expect: ["(Neighbors center=user direction=outgoing directional outgoing=[gl_edge, gl_sec_edge] ... (_))"]
+          expect:
+            - (Filter _orbit_neighbor_edge_arm.source_kind = 'User', _orbit_neighbor_edge_arm.source_id = 1, _orbit_neighbor_edge_arm.relationship_kind = 'AUTHORED', _orbit_neighbor_edge_arm._deleted = false (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm))
+            - (Filter _orbit_neighbor_edge_arm.source_kind = 'User', _orbit_neighbor_edge_arm.source_id = 1, _orbit_neighbor_edge_arm.relationship_kind = 'AUTHORED', _orbit_neighbor_edge_arm._deleted = false (Scan Table(gl_sec_edge) AS _orbit_neighbor_edge_arm))
         emitted:
           expect:
             - (Union ALL AS _orbit_neighbor_edge (_) (_))

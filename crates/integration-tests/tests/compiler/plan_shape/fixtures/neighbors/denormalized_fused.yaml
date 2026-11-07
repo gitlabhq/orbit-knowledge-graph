@@ -13,7 +13,9 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Neighbors center=mr direction=both fused table=gl_edge center_filter=false ... (_))"]
+      expect:
+        - (Filter ((_orbit_neighbor_edge.source_kind = 'MergeRequest') AND ArrayContains(_orbit_neighbor_edge.source_tags, 'state:merged')) OR ((_orbit_neighbor_edge.target_kind = 'MergeRequest') AND ArrayContains(_orbit_neighbor_edge.target_tags, 'state:merged')), ... (Scan Table(gl_edge) AS _orbit_neighbor_edge))
+      reject: ["(Scan Table(gl_merge_request) AS mr)"]
     emitted:
       expect:
         - (Filter ((_orbit_neighbor_edge.source_kind = 'MergeRequest') AND ArrayContains(_orbit_neighbor_edge.source_tags, 'state:merged')) OR ((_orbit_neighbor_edge.target_kind = 'MergeRequest') AND ArrayContains(_orbit_neighbor_edge.target_tags, 'state:merged')), ... (_))

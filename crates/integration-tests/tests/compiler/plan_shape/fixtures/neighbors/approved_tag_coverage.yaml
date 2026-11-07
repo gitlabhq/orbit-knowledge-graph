@@ -16,7 +16,11 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Neighbors center=mr direction=incoming directional outgoing=[gl_edge] incoming=[gl_edge] center_filter=false relationships=[APPROVED] incoming_scoped=[] incoming_cross_scope=[APPROVED] (_))
+        - (SemiJoin _orbit_neighbor_edge.target_id IN subquery (Filter ArrayContains(_orbit_neighbor_edge.target_tags, 'state:opened'), _orbit_neighbor_edge.target_kind = 'MergeRequest', _orbit_neighbor_edge.target_id = 99000, _orbit_neighbor_edge.relationship_kind = 'APPROVED' (Scan Table(gl_edge) AS _orbit_neighbor_edge)) (Project _orbit_center_rows.id AS id (Scan Table(_orbit_center_rows) AS _orbit_center_rows)))
+      reject: ["(Scan Table(gl_merge_request) AS mr)"]
+      occurrences:
+        - pattern: (Scan Table(gl_edge) AS _orbit_neighbor_edge)
+          count: 1
     emitted:
       expect:
         - (SemiJoin _orbit_neighbor_edge.target_id IN subquery (Filter ArrayContains(_orbit_neighbor_edge.target_tags, 'state:opened'), _orbit_neighbor_edge.target_kind = 'MergeRequest', _orbit_neighbor_edge.target_id = 99000, _orbit_neighbor_edge.relationship_kind = 'APPROVED' (Scan Table(gl_edge) AS _orbit_neighbor_edge)) (Project _orbit_center_rows.id AS id (Scan Table(_orbit_center_rows) AS _orbit_center_rows)))
