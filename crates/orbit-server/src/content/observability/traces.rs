@@ -178,6 +178,23 @@ fn build_error_count_sql() -> String {
 /// from the time range to avoid clipping a span at either edge.
 const BUCKET_SECONDS: i64 = 1_800;
 
+/// Tenant traces expire after 15 days, so a row older than that can only
+/// resolve to null. The batch window spans every key, so keeping one stretches
+/// the scan across everything the tenant still holds.
+const RETENTION_SECONDS: i64 = 15 * 86_400;
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+pub fn retained(keys: &[TraceKey], now: i64) -> Vec<&TraceKey> {
+    let oldest = now - RETENTION_SECONDS;
+    keys.iter().filter(|key| key.to_unix >= oldest).collect()
+}
+
 pub fn bucket_bounds(from_unix: i64, to_unix: i64) -> (u64, u64) {
     let from = (from_unix - BUCKET_SECONDS).max(0) / BUCKET_SECONDS * BUCKET_SECONDS;
     let to = (to_unix + BUCKET_SECONDS) / BUCKET_SECONDS * BUCKET_SECONDS;
@@ -190,15 +207,19 @@ pub async fn fetch(
     lookup: TraceLookup,
     keys: &[TraceKey],
 ) -> Result<HashMap<String, String>, clickhouse_client::ClickHouseError> {
-    let Some(from_unix) = keys.iter().map(|key| key.from_unix).min() else {
+    let within_retention = retained(keys, now_unix());
+    let Some(from_unix) = within_retention.iter().map(|key| key.from_unix).min() else {
         return Ok(HashMap::new());
     };
-    let to_unix = keys
+    let to_unix = within_retention
         .iter()
         .map(|key| key.to_unix)
         .max()
         .unwrap_or(from_unix);
-    let ids: Vec<String> = keys.iter().map(|key| key.entity_id.clone()).collect();
+    let ids: Vec<String> = within_retention
+        .iter()
+        .map(|key| key.entity_id.clone())
+        .collect();
     let (from_bucket, to_bucket) = bucket_bounds(from_unix, to_unix);
 
     let client: ArrowClickHouseClient = pool.traces_client(route);
@@ -211,6 +232,7 @@ pub async fn fetch(
         .param("from_unix", from_unix.max(0) as u64)
         .param("to_unix", to_unix.max(0) as u64)
         .param("ids", &ids)
+        .with_setting("cancel_http_readonly_queries_on_client_close", "1")
         .fetch_arrow()
         .await?;
 
@@ -407,6 +429,39 @@ mod tests {
     #[test]
     fn a_row_without_an_id_has_no_key() {
         assert!(trace_key(&HashMap::new()).is_none());
+    }
+
+    #[test]
+    fn a_key_past_retention_is_dropped_before_it_widens_the_window() {
+        let now = 1_800_000_000;
+        let recent = TraceKey {
+            entity_id: "recent".to_string(),
+            from_unix: now - 600,
+            to_unix: now,
+        };
+        let expired = TraceKey {
+            entity_id: "expired".to_string(),
+            from_unix: now - 90 * 86_400,
+            to_unix: now - 89 * 86_400,
+        };
+
+        let keys = vec![recent.clone(), expired];
+        let kept = retained(&keys, now);
+
+        assert_eq!(kept.len(), 1, "an expired key can only resolve to null");
+        assert_eq!(kept[0].entity_id, "recent");
+    }
+
+    #[test]
+    fn a_key_inside_retention_is_kept() {
+        let now = 1_800_000_000;
+        let key = TraceKey {
+            entity_id: "recent".to_string(),
+            from_unix: now - 14 * 86_400,
+            to_unix: now - 13 * 86_400,
+        };
+
+        assert_eq!(retained(std::slice::from_ref(&key), now).len(), 1);
     }
 
     #[test]
