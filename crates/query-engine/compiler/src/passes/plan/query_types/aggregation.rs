@@ -11,6 +11,7 @@ use crate::error::Result;
 use crate::input::{
     AggExpr, AggFunction, Input, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
 };
+use crate::logical::Query;
 use crate::passes::plan::graph::{ExecutionPlan, RelationNode};
 use crate::passes::plan::pattern::Pattern;
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate};
@@ -42,11 +43,12 @@ pub struct AggregationPlan {
     pub order: Option<InputAggSort>,
 }
 
-pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
-    input: &Input,
-    model: &M,
+pub(crate) fn plan<'a, M: OrbitQueryModel + ?Sized>(
+    query: Query<'a>,
+    input: &'a Input,
+    model: &'a M,
 ) -> Result<Plan<Aggregation>> {
-    let pattern = Pattern::new(input, model)?;
+    let pattern = Pattern::new(query, input, model)?;
     let execution = pattern.execution()?;
     let result = aggregation_plan(input, &pattern.nodes, &execution);
     Ok(pattern.into_plan(execution, |execution| Aggregation { execution, result }))

@@ -3,9 +3,11 @@
 
 use ontology::constants::*;
 
-use super::filters::{BoundFilter, NullAsEpoch, NullAsEpochColumns};
+use query_data_model::plan::logical::Comparison;
+
+use super::filters::{BoundFilter, NullAsEpoch, NullAsEpochColumns, Test};
 use super::graph::RelationId;
-use crate::input::{BooleanExpression, FilterOp, InputFilter};
+use crate::input::BooleanExpression;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Column {
@@ -27,7 +29,7 @@ pub enum Predicate {
     Boolean(BooleanExpression<Box<Predicate>>),
     Property {
         column: Column,
-        filter: InputFilter,
+        test: Test,
         data_type: Option<ontology::DataType>,
         selective: bool,
         in_sort_key: bool,
@@ -91,7 +93,13 @@ impl Predicate {
 
     /// A text match on a changing column finds rows through the text index but does not bound a keyed re-read, so that scan keeps FINAL.
     pub fn is_text_match(&self) -> bool {
-        matches!(self, Self::Property { filter, .. } if filter.op.is_some_and(FilterOp::is_text))
+        matches!(
+            self,
+            Self::Property {
+                test: Test::Text(..),
+                ..
+            }
+        )
     }
 
     pub fn narrows_keys(&self) -> bool {
@@ -100,13 +108,9 @@ impl Predicate {
             Self::Property {
                 in_sort_key,
                 foreign_key,
-                filter,
+                test,
                 ..
-            } => {
-                (*in_sort_key || *foreign_key)
-                    && filter.rhs_column.is_none()
-                    && matches!(filter.op, None | Some(FilterOp::Eq | FilterOp::In))
-            }
+            } => (*in_sort_key || *foreign_key) && test.matches_values(),
             _ => false,
         }
     }
@@ -114,10 +118,12 @@ impl Predicate {
     pub fn is_point_lookup(&self) -> bool {
         match self {
             Self::Ids { values, .. } => values.len() == 1,
-            Self::Property { unique, filter, .. } => {
+            Self::Property { unique, test, .. } => {
                 *unique
-                    && matches!(filter.op, None | Some(FilterOp::Eq))
-                    && !matches!(filter.value, Some(serde_json::Value::Array(_)))
+                    && matches!(
+                        test,
+                        Test::Compare(Comparison::Eq, _) | Test::Column(Comparison::Eq, _)
+                    )
             }
             _ => false,
         }
@@ -143,12 +149,10 @@ impl Predicate {
             ),
             Self::Property {
                 column,
-                filter,
+                test,
                 immutable,
                 ..
-            } => {
-                filter.rhs_column.is_none() && (*immutable && immutable_ok || in_key(&column.name))
-            }
+            } => test.rhs().is_none() && (*immutable && immutable_ok || in_key(&column.name)),
             Self::Ids { column, .. }
             | Self::IdRange { column, .. }
             | Self::EntityKind { column, .. } => in_key(&column.name),
@@ -250,8 +254,8 @@ pub fn relationship_kinds(alias: &str, kinds: &[String]) -> Option<Predicate> {
     })
 }
 
-pub fn tag_filter(alias: &str, column: &str, key: &str, filter: &InputFilter) -> Option<Predicate> {
-    super::filters::denorm_tag_values(key, filter).map(|values| Predicate::Tags {
+pub fn tag_filter(alias: &str, column: &str, key: &str, test: &Test) -> Option<Predicate> {
+    test.tags(key).map(|values| Predicate::Tags {
         column: Column::new(alias, column),
         values,
     })

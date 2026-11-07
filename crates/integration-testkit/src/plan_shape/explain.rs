@@ -1,9 +1,11 @@
-use compiler::input::{FilterOp, InputFilter, OrderDirection};
+use compiler::input::OrderDirection;
 use compiler::passes::plan::QueryPlan;
+use compiler::passes::plan::Test;
 use compiler::passes::plan::graph::{
     ExecutionPlan, RelationGraph, RelationId, RelationNode, RelationRef,
 };
 use compiler::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
+use query_data_model::plan::logical::{Comparison, Literal, Matching};
 use query_engine::compiler;
 
 use super::operator::Operator;
@@ -26,30 +28,55 @@ pub(super) fn filter(predicates: Vec<String>, input: Tree) -> Tree {
     }
 }
 
-fn property_filter(alias: &str, property: &str, filter: &InputFilter) -> String {
-    let value = filter.rhs_column.as_ref().map_or_else(
-        || literal(filter.value.as_ref().unwrap_or(&serde_json::Value::Null)),
-        |(node, column)| format!("{node}.{column}"),
-    );
-    let op = filter.op.unwrap_or(FilterOp::Eq);
-    let operator = match op {
-        FilterOp::Eq => "=",
-        FilterOp::Ne => "!=",
-        FilterOp::Gt => ">",
-        FilterOp::Gte => ">=",
-        FilterOp::Lt => "<",
-        FilterOp::Lte => "<=",
-        FilterOp::In => "IN",
-        FilterOp::IsNull => return format!("{alias}.{property} IS NULL"),
-        FilterOp::IsNotNull => return format!("{alias}.{property} IS NOT NULL"),
-        FilterOp::Contains
-        | FilterOp::StartsWith
-        | FilterOp::EndsWith
-        | FilterOp::TokenMatch
-        | FilterOp::AllTokens
-        | FilterOp::AnyTokens => return format!("{}({alias}.{property}, {value})", op.as_ref()),
+fn property_filter(alias: &str, property: &str, test: &Test) -> String {
+    let operator = |comparison: &Comparison| match comparison {
+        Comparison::Eq => "=",
+        Comparison::Ne => "!=",
+        Comparison::Gt => ">",
+        Comparison::Ge => ">=",
+        Comparison::Lt => "<",
+        Comparison::Le => "<=",
+    };
+    let (operator, value) = match test {
+        Test::Null(true) => return format!("{alias}.{property} IS NULL"),
+        Test::Null(false) => return format!("{alias}.{property} IS NOT NULL"),
+        Test::Text(matching, needle) => {
+            let function = match matching {
+                Matching::Contains => "contains",
+                Matching::StartsWith => "starts_with",
+                Matching::EndsWith => "ends_with",
+                Matching::Token => "token_match",
+                Matching::AllTokens => "all_tokens",
+                Matching::AnyTokens => "any_tokens",
+            };
+            return format!("{function}({alias}.{property}, {})", text_literal(needle));
+        }
+        Test::Compare(comparison, value) => (operator(comparison), test_literal(value)),
+        Test::Column(comparison, rhs) => {
+            (operator(comparison), format!("{}.{}", rhs.source, rhs.name))
+        }
+        Test::In(values) => (
+            "IN",
+            format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(test_literal)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ),
     };
     format!("{alias}.{property} {operator} {value}")
+}
+
+fn test_literal(value: &Literal) -> String {
+    match value {
+        Literal::String(text) | Literal::Temporal(text) => text_literal(text),
+        Literal::Int(number) => number.to_string(),
+        Literal::Float(number) => serde_json::Value::from(*number).to_string(),
+        Literal::Bool(flag) => flag.to_string(),
+    }
 }
 
 pub fn physical(plan: &QueryPlan) -> Tree {
@@ -289,8 +316,8 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
         Predicate::Boolean(expression) => vec![boolean_text(expression, &|leaf| {
             planned_predicate(leaf).join(" AND ")
         })],
-        Predicate::Property { column, filter, .. } => {
-            vec![property_filter(&column.source, &column.name, filter)]
+        Predicate::Property { column, test, .. } => {
+            vec![property_filter(&column.source, &column.name, test)]
         }
         Predicate::Ids { column, values } => vec![membership(
             planned_column(column),

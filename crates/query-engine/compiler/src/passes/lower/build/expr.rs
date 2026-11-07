@@ -6,14 +6,15 @@ use query_data_model::implementations::relational::plan::{
 };
 use serde_json::Value;
 
+use query_data_model::plan::logical::{Comparison, Matching};
+
 use super::{Built, and, binary, call, col, conjoin, eq, param};
-use crate::input::{FilterOp, InputFilter};
-use crate::passes::plan::filters::NullAsEpoch;
+use crate::passes::plan::filters::{NullAsEpoch, Test, json};
 use crate::passes::plan::predicates::Column;
 
 pub(crate) struct Filter<'a> {
     pub column: &'a Column,
-    pub filter: &'a InputFilter,
+    pub test: &'a Test,
     pub data_type: Option<&'a ontology::DataType>,
     pub in_sort_key: bool,
     pub text_indexed: bool,
@@ -70,59 +71,45 @@ fn unary(op: UnaryOp, value: Expr) -> Expr {
 pub(crate) fn filter<B: RelationalBackend>(scope: &[&Relation], f: Filter<'_>) -> Built<Expr> {
     let raw = col(scope, &f.column.source, &f.column.name)?;
     let epochs = f.null_as_epoch;
-    if let Some((alias, property)) = &f.filter.rhs_column {
-        let rhs = read::<B>(col(scope, alias, property)?, epochs.rhs);
-        let left = read::<B>(raw, epochs.column);
-        return Ok(comparison(left, f.filter.op.unwrap_or(FilterOp::Eq), rhs)
-            .expect("validated property comparison"));
-    }
     let value = read::<B>(raw.clone(), epochs.column.filter(|_| f.negated));
-    let given = || f.filter.value.clone().unwrap_or(Value::Null);
     let data_type = parameter_type(f.data_type);
-    let op = f.filter.op.unwrap_or(FilterOp::Eq);
-    let expression = match op {
-        FilterOp::IsNull if let Some(epoch_type) = epochs.column => {
-            return Ok(eq(raw, epoch::<B>(epoch_type)));
+    let expression = match f.test {
+        Test::Column(comparison, rhs) => {
+            let rhs = read::<B>(col(scope, &rhs.source, &rhs.name)?, epochs.rhs);
+            let left = read::<B>(raw, epochs.column);
+            return Ok(binary(binary_op(*comparison), left, rhs));
         }
-        FilterOp::IsNotNull if let Some(epoch_type) = epochs.column => {
-            return Ok(binary(BinaryOp::Ne, raw, epoch::<B>(epoch_type)));
-        }
-        op @ (FilterOp::Eq
-        | FilterOp::Ne
-        | FilterOp::Gt
-        | FilterOp::Gte
-        | FilterOp::Lt
-        | FilterOp::Lte) => {
-            comparison(value, op, param::<B>(data_type, given())).expect("comparison operator")
-        }
-        FilterOp::In => {
-            let values = f
-                .filter
-                .value
-                .as_ref()
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
+        Test::Null(null) => match (null, epochs.column) {
+            (true, Some(epoch_type)) => return Ok(eq(raw, epoch::<B>(epoch_type))),
+            (false, Some(epoch_type)) => {
+                return Ok(binary(BinaryOp::Ne, raw, epoch::<B>(epoch_type)));
+            }
+            (true, None) => unary(UnaryOp::IsNull, value),
+            (false, None) => unary(UnaryOp::IsNotNull, value),
+        },
+        Test::Compare(comparison, literal) => binary(
+            binary_op(*comparison),
+            value,
+            param::<B>(data_type, json(literal)),
+        ),
+        Test::In(values) => {
+            let values = values.iter().map(json).collect();
             in_list::<B>(value, data_type, values).expect("validated non-empty IN list")
         }
-        FilterOp::IsNull => unary(UnaryOp::IsNull, value),
-        FilterOp::IsNotNull => unary(UnaryOp::IsNotNull, value),
-        op => {
+        Test::Text(matching, needle) => {
             let fold = |expr: Expr| match f.in_sort_key {
                 true => expr,
                 false => call(Function::Lower, vec![expr]),
             };
-            let text = f.filter.value_str().unwrap_or("").to_string();
-            let needle = fold(param::<B>(SqlType::String, text.into()));
+            let needle = fold(param::<B>(SqlType::String, needle.clone().into()));
             let value = fold(value);
-            let mode = match op {
-                FilterOp::Contains => TextMatch::Contains,
-                FilterOp::TokenMatch => TextMatch::Token,
-                FilterOp::AllTokens => TextMatch::AllTokens,
-                FilterOp::AnyTokens => TextMatch::AnyTokens,
-                FilterOp::StartsWith => return Ok(call(Function::StartsWith, vec![value, needle])),
-                FilterOp::EndsWith => return Ok(call(Function::EndsWith, vec![value, needle])),
-                _ => unreachable!(),
+            let mode = match matching {
+                Matching::Contains => TextMatch::Contains,
+                Matching::Token => TextMatch::Token,
+                Matching::AllTokens => TextMatch::AllTokens,
+                Matching::AnyTokens => TextMatch::AnyTokens,
+                Matching::StartsWith => return Ok(call(Function::StartsWith, vec![value, needle])),
+                Matching::EndsWith => return Ok(call(Function::EndsWith, vec![value, needle])),
             };
             Expr::TextSearch {
                 mode,
@@ -138,17 +125,15 @@ pub(crate) fn filter<B: RelationalBackend>(scope: &[&Relation], f: Filter<'_>) -
         ),
         _ => expression,
     };
-    if !(f.text_indexed && matches!(op, FilterOp::Eq | FilterOp::In)) {
+    if !(f.text_indexed && f.test.matches_values()) {
         return Ok(expression);
     }
-    let values = match given() {
-        Value::Array(values) => values,
-        value => vec![value],
-    };
     let lower = |expr| call(Function::Lower, vec![expr]);
-    let mut candidates: Vec<_> = values
-        .into_iter()
-        .map(|value| lower(param::<B>(data_type, value)))
+    let mut candidates: Vec<_> = f
+        .test
+        .literals()
+        .iter()
+        .map(|literal| lower(param::<B>(data_type, json(literal))))
         .collect();
     let matched = match candidates.len() {
         1 => eq(lower(raw), candidates.remove(0)),
@@ -157,17 +142,15 @@ pub(crate) fn filter<B: RelationalBackend>(scope: &[&Relation], f: Filter<'_>) -
     Ok(and(expression, matched))
 }
 
-pub(crate) fn comparison(left: Expr, operator: FilterOp, right: Expr) -> Option<Expr> {
-    let op = match operator {
-        FilterOp::Eq => BinaryOp::Eq,
-        FilterOp::Ne => BinaryOp::Ne,
-        FilterOp::Gt => BinaryOp::Gt,
-        FilterOp::Gte => BinaryOp::Ge,
-        FilterOp::Lt => BinaryOp::Lt,
-        FilterOp::Lte => BinaryOp::Le,
-        _ => return None,
-    };
-    Some(binary(op, left, right))
+fn binary_op(comparison: Comparison) -> BinaryOp {
+    match comparison {
+        Comparison::Eq => BinaryOp::Eq,
+        Comparison::Ne => BinaryOp::Ne,
+        Comparison::Lt => BinaryOp::Lt,
+        Comparison::Le => BinaryOp::Le,
+        Comparison::Gt => BinaryOp::Gt,
+        Comparison::Ge => BinaryOp::Ge,
+    }
 }
 
 pub(crate) fn in_list<B: RelationalBackend>(

@@ -7,7 +7,7 @@ use query_data_model::OrbitQueryModel;
 use super::Pattern;
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use crate::passes::plan::filters::{BoundFilter, FilterOwner, bind_filter};
+use crate::passes::plan::filters::{BoundFilter, FilterOwner, Test, bind_filter};
 use crate::passes::plan::graph::BindingSource;
 use crate::passes::plan::predicates::{Column, Predicate, tag_filter};
 
@@ -126,13 +126,12 @@ where
     } else {
         column
     };
-    if let Some((alias, property)) = &bound.filter.rhs_column {
+    if let Some(rhs) = bound.test.rhs_mut() {
         bound.null_as_epoch.rhs = pattern
             .nodes
-            .get(alias)
-            .and_then(|node| node.null_as_epoch.get(property).copied());
-        let rhs = resolve_column(bindings, Column::new(alias, property))?;
-        bound.filter.rhs_column = Some((rhs.source, rhs.name));
+            .get(&rhs.source)
+            .and_then(|node| node.null_as_epoch.get(&rhs.name).copied());
+        *rhs = resolve_column(bindings, rhs.clone())?;
     }
     Ok(bound.at(column))
 }
@@ -171,7 +170,12 @@ where
     };
     Ok((
         column,
-        bind_filter(&condition.property, condition.filter, &owner, pattern.model),
+        bind_filter(
+            &condition.property,
+            Test::from_input(&condition.filter),
+            &owner,
+            pattern.model,
+        ),
     ))
 }
 
@@ -181,14 +185,14 @@ where
 {
     let (position, facts) = pattern.denorm_hop(node, bound)?;
     let relation = &pattern.relations[position];
-    if bound.filter.rhs_column.is_some() || facts.nullable || relation.max_hops != 1 {
+    if bound.test.rhs().is_some() || facts.nullable || relation.max_hops != 1 {
         return None;
     }
     tag_filter(
         &relation.alias,
         &facts.edge_column,
         &facts.tag_key,
-        &bound.filter,
+        &bound.test,
     )
 }
 

@@ -14,7 +14,8 @@ use query_data_model::{
     DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Direction, RelationshipId,
 };
 
-use super::node::{Filter, Node};
+use super::filters::BoundFilter;
+use super::node::Node;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
@@ -36,7 +37,8 @@ struct Tag<'p> {
 }
 
 struct CenterFilter<'p> {
-    filter: Filter<'p>,
+    property: String,
+    filter: BoundFilter,
     source: Option<Tag<'p>>,
     target: Option<Tag<'p>>,
 }
@@ -195,19 +197,20 @@ impl<'p> Neighbors<'p> {
         let (outgoing_scope_preserving, outgoing_cross_scope) = split_by_path(&outgoing, false);
         let filters: Vec<CenterFilter<'p>> = std::mem::take(&mut center.filters)
             .into_iter()
-            .map(|filter| {
+            .map(|(property, filter)| {
                 let tag = |direction| {
                     let key = DenormalizedKey {
-                        property: filter.id,
+                        property: filter.property?,
                         direction,
                     };
                     let facts = model.denormalized().property(key)?;
-                    let values = filter.tags(&facts.tag_key)?;
+                    let values = filter.test.tags(&facts.tag_key)?;
                     Some(Tag { facts, values })
                 };
                 CenterFilter {
                     source: tag(DenormalizedDirection::Source),
                     target: tag(DenormalizedDirection::Target),
+                    property,
                     filter,
                 }
             })
@@ -588,7 +591,8 @@ impl Context<'_> {
             let (joined, live) = dedup(q, center_alias, table, &names, |scope| {
                 let mut parts = Vec::new();
                 for filter in &plan.filters {
-                    parts.push(filter.filter.lower::<B>(scope, center_alias)?);
+                    let column = Column::new(center_alias, &filter.property);
+                    parts.push(filter.filter.lower::<B>(scope, &column)?);
                 }
                 if !center.pinned.is_empty() {
                     let id = col(scope, center_alias, DEFAULT_PRIMARY_KEY)?;

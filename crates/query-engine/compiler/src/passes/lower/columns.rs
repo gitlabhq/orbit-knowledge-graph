@@ -94,10 +94,10 @@ pub(super) fn referenced(predicate: &Predicate, out: &mut Vec<Column>) {
                 referenced(leaf, out);
             }
         }
-        Predicate::Property { column, filter, .. } => {
+        Predicate::Property { column, test, .. } => {
             out.push(column.clone());
-            if let Some((alias, property)) = &filter.rhs_column {
-                out.push(Column::new(alias, property));
+            if let Some(rhs) = test.rhs() {
+                out.push(rhs.clone());
             }
         }
         Predicate::Ids { column, .. }

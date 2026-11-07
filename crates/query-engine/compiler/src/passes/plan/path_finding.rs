@@ -175,8 +175,8 @@ fn anchor<B: RelationalBackend>(
         inner.push(DELETED_COLUMN);
         let (rows, live) = dedup(q, alias, table, &inner, |scope| {
             let mut parts = Vec::new();
-            for filter in &node.filters {
-                parts.push(filter.lower::<B>(scope, alias)?);
+            for (property, filter) in &node.filters {
+                parts.push(filter.lower::<B>(scope, &Column::new(alias, property))?);
             }
             if !node.pinned.is_empty() {
                 let id = col(scope, alias, DEFAULT_PRIMARY_KEY)?;

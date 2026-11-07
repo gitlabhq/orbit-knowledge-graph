@@ -18,6 +18,7 @@ use super::predicates::{Column, Predicate, kind_column};
 use super::{DenormalizedKey, DenormalizedProperty, Plan, sort_key};
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::logical::Query;
 
 #[derive(Clone)]
 pub struct NodePlan {
@@ -106,14 +107,14 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
 }
 
 impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
-    pub(super) fn new(input: &'a Input, model: &'a M) -> Result<Self> {
+    pub(super) fn new(query: Query<'a>, input: &'a Input, model: &'a M) -> Result<Self> {
         let nodes = nodes::build_nodes(input, model);
         let mut pattern = Self {
             input,
             model,
             relations: relations::build_relations(input, model, &nodes),
             nodes,
-            denormalized: super::filters::denormalized_facts(input, model),
+            denormalized: super::filters::denormalized_facts(query, model),
             scans: Vec::new(),
         };
         let placement = conditions::place_conditions(&pattern)?;

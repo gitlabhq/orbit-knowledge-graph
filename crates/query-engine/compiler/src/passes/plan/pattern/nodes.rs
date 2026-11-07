@@ -40,10 +40,10 @@ impl NodePlan {
         let null_as_epoch = model.null_as_epoch_properties(entity_id);
         let mut filters = ordered_filters(&filters, FilterOwner::Entity(entity_id), model);
         for (_, bound) in &mut filters {
-            if let Some((alias, property)) = &bound.filter.rhs_column
-                && *alias == node.id
+            if let Some(rhs) = bound.test.rhs()
+                && rhs.source == node.id
             {
-                bound.null_as_epoch.rhs = null_as_epoch.get(property).copied();
+                bound.null_as_epoch.rhs = null_as_epoch.get(&rhs.name).copied();
             }
         }
         Some(Self {

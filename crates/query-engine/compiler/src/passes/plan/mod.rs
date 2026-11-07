@@ -30,7 +30,7 @@ use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
 use crate::passes::lower::{self, LoweredMetadata, NodeBinding};
 use crate::tp_bounds::TpBounds;
 
-pub use filters::BoundFilter;
+pub use filters::{BoundFilter, Test};
 pub use pattern::{EdgeRelation, NodePlan};
 pub use query_types::{aggregation::Aggregation, traversal::Traversal};
 
@@ -160,7 +160,7 @@ pub fn plan<M: RelationalModel>(
             })
         }
         _ => {
-            let legacy = legacy(input, model)?;
+            let legacy = legacy(query, input, model)?;
             let lowered = lower::emit(&legacy, input, tp_bounds, model)?;
             Ok(Planned {
                 plan: lowered.plan,
@@ -171,14 +171,16 @@ pub fn plan<M: RelationalModel>(
     }
 }
 
-fn legacy<M>(input: &Input, model: &M) -> Result<QueryPlan>
+fn legacy<M>(query: Query<'_>, input: &Input, model: &M) -> Result<QueryPlan>
 where
     M: OrbitQueryModel + ?Sized,
 {
     Ok(match input.query_type {
-        QueryType::Traversal => QueryPlan::Traversal(query_types::traversal::plan(input, model)?),
+        QueryType::Traversal => {
+            QueryPlan::Traversal(query_types::traversal::plan(query, input, model)?)
+        }
         QueryType::Aggregation => {
-            QueryPlan::Aggregation(query_types::aggregation::plan(input, model)?)
+            QueryPlan::Aggregation(query_types::aggregation::plan(query, input, model)?)
         }
         QueryType::Neighbors | QueryType::PathFinding | QueryType::Hydration => {
             return Err(QueryError::PipelineInvariant(

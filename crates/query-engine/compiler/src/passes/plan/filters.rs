@@ -1,13 +1,19 @@
-//! Binds an input filter to the backend facts about its property (sort key, text index, selectivity,
+//! Binds a filter test to the backend facts about its property (sort key, text index, selectivity,
 //! uniqueness, mutability). Those facts decide where the planner may apply the filter.
 
 use std::collections::HashMap;
 
 use query_data_model::OrbitQueryModel;
+use query_data_model::plan::logical::{
+    Comparison, Expr as Logical, Literal, Matching, Operand, Predicate as Leaf,
+};
+use serde_json::Value as Json;
 
 use super::predicates::{Column, Predicate};
 use super::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
-use crate::input::{FilterOp, Input, InputFilter, PredicateTarget};
+use crate::input::{FilterOp, InputFilter};
+use crate::logical::Query;
+use crate::logical::facts::Fact;
 
 pub type NullAsEpochColumns = HashMap<String, ontology::DataType>;
 
@@ -18,9 +24,131 @@ pub struct NullAsEpoch {
     pub rhs: Option<ontology::DataType>,
 }
 
+/// What a filter tests on its column, with any complement already folded into the operator.
+#[derive(Clone, PartialEq)]
+pub enum Test {
+    Compare(Comparison, Literal),
+    Column(Comparison, Column),
+    In(Vec<Literal>),
+    Null(bool),
+    Text(Matching, String),
+}
+
+impl Test {
+    pub fn of(fact: Fact<'_>, rhs: impl FnOnce(Logical) -> Column) -> Option<Self> {
+        Some(match fact.leaf {
+            Leaf::Compare {
+                right: Operand::Literal(literal),
+                ..
+            } => Self::Compare(fact.comparison?, literal.clone()),
+            Leaf::Compare {
+                right: Operand::Expr(right),
+                ..
+            } => Self::Column(fact.comparison?, rhs(*right)),
+            Leaf::In { values, .. } => Self::In(values.clone()),
+            Leaf::Null { null, .. } => Self::Null(*null != fact.complemented),
+            Leaf::Text {
+                matching, needle, ..
+            } => Self::Text(*matching, needle.clone()),
+            Leaf::And(_) | Leaf::Not(_) => return None,
+        })
+    }
+
+    pub fn from_input(filter: &InputFilter) -> Self {
+        let comparison = |op| match op {
+            FilterOp::Ne => Comparison::Ne,
+            FilterOp::Gt => Comparison::Gt,
+            FilterOp::Gte => Comparison::Ge,
+            FilterOp::Lt => Comparison::Lt,
+            FilterOp::Lte => Comparison::Le,
+            _ => Comparison::Eq,
+        };
+        let literal = |value: &Json| match value {
+            Json::String(text) => Literal::String(text.clone()),
+            Json::Bool(flag) => Literal::Bool(*flag),
+            value => match value.as_i64() {
+                Some(number) => Literal::Int(number),
+                None => Literal::Float(value.as_f64().unwrap_or_default()),
+            },
+        };
+        let op = filter.op.unwrap_or(FilterOp::Eq);
+        if let Some((alias, property)) = &filter.rhs_column {
+            return Self::Column(comparison(op), Column::new(alias, property));
+        }
+        let value = filter.value.as_ref().unwrap_or(&Json::Null);
+        let text = || filter.value_str().unwrap_or_default().to_string();
+        match op {
+            FilterOp::In => Self::In(
+                value
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(literal)
+                    .collect(),
+            ),
+            FilterOp::IsNull => Self::Null(true),
+            FilterOp::IsNotNull => Self::Null(false),
+            FilterOp::Contains => Self::Text(Matching::Contains, text()),
+            FilterOp::StartsWith => Self::Text(Matching::StartsWith, text()),
+            FilterOp::EndsWith => Self::Text(Matching::EndsWith, text()),
+            FilterOp::TokenMatch => Self::Text(Matching::Token, text()),
+            FilterOp::AllTokens => Self::Text(Matching::AllTokens, text()),
+            FilterOp::AnyTokens => Self::Text(Matching::AnyTokens, text()),
+            op => Self::Compare(comparison(op), literal(value)),
+        }
+    }
+
+    pub fn rhs(&self) -> Option<&Column> {
+        match self {
+            Self::Column(_, rhs) => Some(rhs),
+            _ => None,
+        }
+    }
+
+    pub fn rhs_mut(&mut self) -> Option<&mut Column> {
+        match self {
+            Self::Column(_, rhs) => Some(rhs),
+            _ => None,
+        }
+    }
+
+    pub fn matches_values(&self) -> bool {
+        matches!(self, Self::Compare(Comparison::Eq, _) | Self::In(_))
+    }
+
+    pub fn literals(&self) -> &[Literal] {
+        match self {
+            Self::Compare(_, literal) => std::slice::from_ref(literal),
+            Self::In(values) => values,
+            _ => &[],
+        }
+    }
+
+    pub fn tags(&self, key: &str) -> Option<Vec<String>> {
+        let tag = |literal: &Literal| match json(literal) {
+            Json::String(text) => format!("{key}:{text}"),
+            value => format!("{key}:{value}"),
+        };
+        match self {
+            Self::Compare(Comparison::Eq, literal) => Some(vec![tag(literal)]),
+            Self::In(values) if !values.is_empty() => Some(values.iter().map(tag).collect()),
+            _ => None,
+        }
+    }
+}
+
+pub fn json(literal: &Literal) -> Json {
+    match literal {
+        Literal::String(text) | Literal::Temporal(text) => Json::String(text.clone()),
+        Literal::Int(number) => Json::from(*number),
+        Literal::Float(number) => Json::from(*number),
+        Literal::Bool(flag) => Json::Bool(*flag),
+    }
+}
+
 #[derive(Clone)]
 pub struct BoundFilter {
-    pub filter: InputFilter,
+    pub test: Test,
     pub property: Option<query_data_model::PropertyId>,
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
@@ -35,22 +163,22 @@ pub struct BoundFilter {
 
 impl BoundFilter {
     pub fn is_selective(&self) -> bool {
-        if self.namespace_anchor || self.filter.rhs_column.is_some() {
+        if self.namespace_anchor {
             return false;
         }
         let high = self.selectivity == ontology::FieldSelectivity::High;
-        match self.filter.op {
-            Some(op) if op.is_text() => self.text_indexed,
-            Some(FilterOp::Ne | FilterOp::IsNotNull) => false,
-            None | Some(FilterOp::Eq | FilterOp::In) => high || self.text_indexed,
-            Some(_) => high,
+        match self.test {
+            Test::Column(..) | Test::Compare(Comparison::Ne, _) | Test::Null(false) => false,
+            Test::Text(..) => self.text_indexed,
+            Test::Compare(Comparison::Eq, _) | Test::In(_) => high || self.text_indexed,
+            Test::Compare(..) | Test::Null(true) => high,
         }
     }
 
     pub fn at(&self, column: Column) -> Predicate {
         Predicate::Property {
             column,
-            filter: self.filter.clone(),
+            test: self.test.clone(),
             data_type: self.data_type,
             selective: self.is_selective(),
             in_sort_key: self.in_sort_key,
@@ -81,29 +209,30 @@ pub fn ordered_filters(
             filters.iter().map(|filter| {
                 (
                     property.clone(),
-                    bind_filter(property, filter.clone(), &owner, model),
+                    bind_filter(property, Test::from_input(filter), &owner, model),
                 )
             })
         })
         .collect();
-    let key_narrowed = bound.iter().any(|(_, filter)| {
-        filter.in_sort_key
-            && matches!(
-                filter.filter.op.unwrap_or(FilterOp::Eq),
-                FilterOp::Eq | FilterOp::In
-            )
-    });
-    if key_narrowed {
-        for (_, filter) in &mut bound {
+    unindex_if_key_narrowed(&mut bound);
+    bound
+}
+
+/// A sort-key match already narrows the read, so no filter in the set also asks for the text index.
+pub fn unindex_if_key_narrowed(filters: &mut [(String, BoundFilter)]) {
+    if filters
+        .iter()
+        .any(|(_, filter)| filter.in_sort_key && filter.test.matches_values())
+    {
+        for (_, filter) in filters {
             filter.text_indexed = false;
         }
     }
-    bound
 }
 
 pub fn bind_filter(
     property: &str,
-    filter: InputFilter,
+    test: Test,
     owner: &FilterOwner<'_>,
     model: &(impl OrbitQueryModel + ?Sized),
 ) -> BoundFilter {
@@ -138,7 +267,7 @@ pub fn bind_filter(
         .and_then(|property| model.property_column(property))
         .unwrap_or(property);
     BoundFilter {
-        filter,
+        test,
         property: property_id,
         data_type,
         selectivity: property_id
@@ -159,39 +288,6 @@ pub fn bind_filter(
     }
 }
 
-fn tag_value(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(value) => Some(value.clone()),
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => None,
-        value => Some(value.to_string()),
-    }
-}
-
-pub fn denorm_tag_values(key: &str, filter: &InputFilter) -> Option<Vec<String>> {
-    if filter.rhs_column.is_some() {
-        return None;
-    }
-    match filter.op {
-        None | Some(FilterOp::Eq) => Some(vec![format!(
-            "{key}:{}",
-            filter
-                .value
-                .as_ref()
-                .and_then(tag_value)
-                .unwrap_or_default()
-        )]),
-        Some(FilterOp::In) => {
-            let values = filter.value.as_ref()?.as_array()?;
-            let tags: Vec<_> = values
-                .iter()
-                .filter_map(|value| tag_value(value).map(|value| format!("{key}:{value}")))
-                .collect();
-            (!tags.is_empty()).then_some(tags)
-        }
-        _ => None,
-    }
-}
-
 pub fn lowerable_denorm<'a>(
     filter: &BoundFilter,
     direction: DenormalizedDirection,
@@ -202,44 +298,34 @@ pub fn lowerable_denorm<'a>(
             property: filter.property?,
             direction,
         })
-        .filter(|facts| denorm_tag_values(&facts.tag_key, &filter.filter).is_some())
+        .filter(|facts| filter.test.tags(&facts.tag_key).is_some())
 }
 
+/// The denormalized facts of every property a filter or condition tests on a binding.
 pub fn denormalized_facts(
-    input: &Input,
+    query: Query<'_>,
     model: &(impl OrbitQueryModel + ?Sized),
 ) -> HashMap<DenormalizedKey, DenormalizedProperty> {
-    input
-        .nodes
-        .iter()
-        .filter_map(|node| Some((model.graph().entity_id(node.entity.as_deref()?)?, node)))
-        .flat_map(|(entity, node)| {
+    query
+        .leaves()
+        .into_iter()
+        .filter_map(|leaf| match leaf.left {
+            Logical::Property { property, .. } => Some(property),
+            _ => None,
+        })
+        .flat_map(|property| {
             [DenormalizedDirection::Source, DenormalizedDirection::Target]
                 .into_iter()
-                .flat_map(move |direction| {
-                    node.filters
-                        .keys()
-                        .map(String::as_str)
-                        .chain(
-                            input
-                                .conditions()
-                                .filter(|condition| {
-                                    condition.target == PredicateTarget::Node(node.id.clone())
-                                })
-                                .map(|condition| condition.property.as_str()),
-                        )
-                        .filter_map(move |property| {
-                            let property = model.graph().property_id(entity, property)?;
-                            let key = DenormalizedKey {
-                                property,
-                                direction,
-                            };
-                            model
-                                .denormalized()
-                                .property(key)
-                                .cloned()
-                                .map(|facts| (key, facts))
-                        })
+                .filter_map(move |direction| {
+                    let key = DenormalizedKey {
+                        property,
+                        direction,
+                    };
+                    model
+                        .denormalized()
+                        .property(key)
+                        .cloned()
+                        .map(|facts| (key, facts))
                 })
         })
         .collect()

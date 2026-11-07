@@ -76,7 +76,7 @@ impl Lowering<'_> {
             Predicate::Boolean(expression) => self.boolean(q, expression, negated)?,
             Predicate::Property {
                 column,
-                filter,
+                test,
                 data_type,
                 in_sort_key,
                 text_indexed,
@@ -86,7 +86,7 @@ impl Lowering<'_> {
                 self.scope,
                 Filter {
                     column,
-                    filter,
+                    test,
                     data_type: data_type.as_ref(),
                     in_sort_key: *in_sort_key,
                     text_indexed: *text_indexed,
