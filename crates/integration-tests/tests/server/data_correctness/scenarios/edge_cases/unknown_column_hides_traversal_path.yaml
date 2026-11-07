@@ -1,5 +1,8 @@
 description: The unknown-field error lists valid fields without the hidden traversal_path field
 
+config:
+  skip: { json: JSON DSL deprecated }
+
 query:
   json: |
     {

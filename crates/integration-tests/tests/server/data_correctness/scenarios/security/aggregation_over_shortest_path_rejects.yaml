@@ -1,5 +1,8 @@
 description: Aggregation over a shortest path rejects at compile for both frontends
 
+config:
+  skip: { json: JSON DSL deprecated }
+
 query:
   json: |
     {
