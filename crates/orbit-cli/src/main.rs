@@ -599,6 +599,7 @@ impl SetupFlags {
             index,
             components,
             ask_agent_plugins,
+            ask_sources: !self.dry_run,
             skill,
         }
     }
@@ -666,6 +667,36 @@ enum Commands {
 
         #[command(flatten)]
         flags: SetupFlags,
+    },
+    /// Connect a third-party source such as Slack or Argo CD, so grep, context, and query can
+    /// search it. The token is checked and kept in the OS keychain. Without a source, lists
+    /// what is connected.
+    Auth {
+        #[arg(value_name = "SOURCE", value_parser = commands::third_party::source_name_parser())]
+        source: Option<String>,
+
+        /// Server URL, for sources that need one such as Argo CD.
+        #[arg(long, value_name = "URL", requires = "source")]
+        url: Option<String>,
+
+        /// Read the token from stdin instead of prompting. Without this, a token already in the
+        /// source's variable, such as SLACK_TOKEN, is used and not saved.
+        #[arg(long, requires = "source", conflicts_with = "logout")]
+        token_stdin: bool,
+
+        /// Workspace to read, by ID or name, for tokens that span several such as Slack
+        /// Enterprise Grid. Asked for when there are several and this is not given.
+        #[arg(
+            long,
+            value_name = "TEAM",
+            requires = "source",
+            conflicts_with = "logout"
+        )]
+        team: Option<String>,
+
+        /// Remove the source and its saved token.
+        #[arg(long, requires = "source", conflicts_with = "url")]
+        logout: bool,
     },
     #[command(about = descriptions::short("uninstall"), long_about = descriptions::long("uninstall"))]
     Uninstall {
@@ -991,6 +1022,26 @@ async fn dispatch(
             }
             Ok(())
         }
+        Commands::Auth { source: None, .. } => commands::third_party::status(),
+        Commands::Auth {
+            source: Some(source),
+            logout: true,
+            ..
+        } => commands::third_party::disconnect(&source),
+        Commands::Auth {
+            source: Some(source),
+            url,
+            token_stdin,
+            team,
+            ..
+        } => {
+            use commands::third_party::TokenInput;
+            let input = match token_stdin {
+                true => TokenInput::Given(commands::third_party::read_token_stdin()?),
+                false => TokenInput::Prompt,
+            };
+            commands::third_party::connect(&source, input, url, team).await
+        }
         Commands::Uninstall { agents, flags } => {
             let options = flags.to_options(
                 agents,
@@ -1028,7 +1079,14 @@ async fn dispatch(
             response_format,
         } => {
             let input = match (query, file) {
-                (Some(query), None) => remote::QueryInput::Text(query),
+                (Some(query), None) => {
+                    if response_format.is_none()
+                        && commands::third_party::query_locally(&query).await?
+                    {
+                        return Ok(());
+                    }
+                    remote::QueryInput::Text(query)
+                }
                 (None, Some(path)) => remote::QueryInput::File(path),
                 _ => unreachable!("clap requires exactly one of QUERY or --file"),
             };
@@ -1046,7 +1104,12 @@ async fn dispatch(
             warn_moved("schema <table>", "workspace schema <table>");
             run_schema(db, raw, nodes)
         }
-        Commands::Schema { nodes, .. } => Ok(remote::run_ontology(nodes).await?),
+        Commands::Schema { nodes, .. } => {
+            if commands::third_party::print_schema(&nodes).await? {
+                return Ok(());
+            }
+            Ok(remote::run_ontology(nodes).await?)
+        }
         Commands::GraphStatus(args) => Ok(args.run().await?),
     }
 }

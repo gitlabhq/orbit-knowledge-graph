@@ -1,0 +1,84 @@
+description: Slack workspace channels, messages, and people
+base_url: https://slack.com
+auth:
+  header: Authorization
+  scheme: Bearer
+  token_env: SLACK_TOKEN
+setup:
+  title: Slack
+  token_help: "A bot token (xoxb-…) from a Slack app with the channels:read, channels:history, and users:read scopes."
+  token_prefix: xoxb-
+  verify:
+    path: /api/auth.test
+    ok: /ok
+    error: /error
+    shows: /team
+  team:
+    when: /is_enterprise_install
+    path: /api/auth.teams.list
+    items: /teams
+    id: /id
+    name: /name
+entities:
+  SlackChannel:
+    type: channel
+    description: A Slack channel you are a member of
+    fetch:
+      path: /api/users.conversations
+      params: {limit: "200", types: "public_channel,private_channel", exclude_archived: "true", team_id: "{team}"}
+      items: /channels
+      cursor: {param: cursor, next: /response_metadata/next_cursor}
+      error: /error
+    key: [/id]
+    label: name
+    search: [name, topic, purpose]
+    properties:
+      name: {from: /name, description: "Channel name without the leading #."}
+      topic: {from: /topic/value}
+      purpose: {from: /purpose/value}
+      members: {type: int, from: /num_members}
+      created_at: {type: timestamp, from: /created, format: unix}
+  SlackUser:
+    type: user
+    description: A person in the Slack workspace
+    fetch:
+      path: /api/users.list
+      params: {limit: "200", team_id: "{team}"}
+      items: /members
+      cursor: {param: cursor, next: /response_metadata/next_cursor}
+      error: /error
+    key: [/id]
+    label: name
+    search: [name, real_name, title]
+    properties:
+      name: {from: /name}
+      real_name: {from: /real_name}
+      title: {from: /profile/title}
+      email: {from: /profile/email}
+  SlackMessage:
+    type: message
+    description: A message posted in a Slack channel
+    fetch:
+      path: /api/conversations.history
+      params: {channel: "{key}", limit: "100"}
+      for_each: SlackChannel
+      items: /messages
+      cursor: {param: cursor, next: /response_metadata/next_cursor}
+      error: /error
+      max_pages: 1
+      max_parents: 50
+    key: ["^key", /ts]
+    label: text
+    search: [text]
+    newest: posted_at
+    shows: [IN_CHANNEL.name, AUTHORED_BY.name, posted_at]
+    properties:
+      text: {from: /text}
+      channel: {from: "^key", description: Key of the SlackChannel it was posted in.}
+      author: {from: /user, description: Key of the SlackUser who posted it.}
+      posted_at: {type: timestamp, from: /ts, format: unix}
+      thread_ts: {from: /thread_ts}
+      replies: {type: int, from: /reply_count}
+    links:
+      - {type: IN_CHANNEL, to: SlackChannel, via: channel}
+      - {type: AUTHORED_BY, to: SlackUser, via: author}

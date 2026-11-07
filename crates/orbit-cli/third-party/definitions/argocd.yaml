@@ -1,0 +1,76 @@
+description: Argo CD projects, applications, and the Kubernetes resources they manage
+auth:
+  header: Authorization
+  scheme: Bearer
+  token_env: ARGOCD_TOKEN
+setup:
+  title: Argo CD
+  token_help: "An account token, from `argocd account generate-token` or the Argo CD UI under User Info."
+  asks_url: true
+  url_help: "The Argo CD server, such as https://argocd.example.com"
+  verify:
+    path: /api/v1/session/userinfo
+    ok: /loggedIn
+    shows: /username
+entities:
+  ArgoProject:
+    type: project
+    description: An Argo CD project that groups applications
+    fetch:
+      path: /api/v1/projects
+      items: /items
+    key: [/metadata/name]
+    label: name
+    search: [name, description]
+    properties:
+      name: {from: /metadata/name}
+      description: {from: /spec/description}
+  ArgoApplication:
+    type: app
+    description: An Argo CD application deploying a Git source to a cluster
+    fetch:
+      path: /api/v1/applications
+      items: /items
+    key: [/metadata/name]
+    label: name
+    search: [name, repo_url, path, destination_namespace, sync_status, health_status, last_operation_message]
+    newest: last_synced_at
+    shows: [health_status, sync_status, last_synced_at]
+    properties:
+      name: {from: /metadata/name}
+      namespace: {from: /metadata/namespace}
+      project: {from: /spec/project}
+      repo_url: {from: /spec/source/repoURL}
+      path: {from: /spec/source/path}
+      target_revision: {from: /spec/source/targetRevision}
+      destination_server: {from: /spec/destination/server}
+      destination_namespace: {from: /spec/destination/namespace}
+      sync_status: {from: /status/sync/status}
+      synced_revision: {from: /status/sync/revision}
+      health_status: {from: /status/health/status}
+      last_operation: {from: /status/operationState/phase}
+      last_operation_message: {from: /status/operationState/message}
+      last_synced_at: {type: timestamp, from: /status/operationState/finishedAt}
+    links:
+      - {type: IN_PROJECT, to: ArgoProject, via: project}
+  ArgoResource:
+    type: resource
+    description: A Kubernetes resource managed by an Argo CD application
+    fetch:
+      within: ArgoApplication
+      items: /status/resources
+    key: ["^key", /kind, /namespace, /name]
+    label: name
+    search: [name, kind, sync_status, health_status, health_message]
+    shows: [kind, MANAGED_BY.name, health_status]
+    properties:
+      name: {from: /name}
+      kind: {from: /kind}
+      api_group: {from: /group}
+      namespace: {from: /namespace}
+      sync_status: {from: /status}
+      health_status: {from: /health/status}
+      health_message: {from: /health/message}
+      application: {from: "^key", description: Key of the ArgoApplication that manages it.}
+    links:
+      - {type: MANAGED_BY, to: ArgoApplication, via: application}

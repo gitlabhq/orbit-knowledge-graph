@@ -1,0 +1,26 @@
+sources:
+  - name: slack
+    definition: slack
+    token_env: SLACK_TOKEN
+    refresh: 15m
+  - name: argocd
+    definition: argocd
+    url: https://argocd.example.com
+    token_env: ARGOCD_TOKEN
+    refresh: 5m
+  - name: incidents
+    url: https://incidents.example.com
+    token_env: INCIDENTS_TOKEN
+    entities:
+      Incident:
+        type: incident
+        description: An incident from an internal service
+        fetch: {path: /incidents, params: {limit: "100"}, items: /incidents}
+        key: [/id]
+        label: title
+        search: [title, status, service]
+        properties:
+          title: {from: /title}
+          status: {from: /status}
+          service: {from: /service/summary}
+          created_at: {type: timestamp, from: /created_at}

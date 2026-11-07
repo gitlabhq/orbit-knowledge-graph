@@ -265,6 +265,28 @@ pub(crate) fn multiselect(
 
 struct Stock;
 
+/// A line of text, starting from `initial` when there is one.
+pub(crate) fn input(prompt: &str, hint: &str, initial: Option<&str>) -> Result<String> {
+    let mut field = cliclack::input(prompt).placeholder(hint);
+    if let Some(initial) = initial {
+        field = field.default_input(initial);
+    }
+    Ok(field.interact::<String>()?.trim().to_string())
+}
+
+/// Hidden input for a secret, such as a token.
+pub(crate) fn secret(prompt: &str) -> Result<String> {
+    Ok(cliclack::password(prompt)
+        .mask('•')
+        .interact()?
+        .trim()
+        .to_string())
+}
+
+pub(crate) fn success(message: impl Display) {
+    let _ = cliclack::log::success(message);
+}
+
 impl Theme for Stock {}
 
 /// Set for the whole run: cards without the empty top row.
