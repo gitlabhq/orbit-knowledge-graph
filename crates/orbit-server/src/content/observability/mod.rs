@@ -44,8 +44,11 @@ impl ObservabilityService {
     pub fn new(settings: &ObservabilityResolverSettings) -> Result<Self, reqwest::Error> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
+        // The https check only sees the configured URL, so a redirect would
+        // carry the provisioner key somewhere unchecked.
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(settings.request_timeout_seconds))
+            .redirect(reqwest::redirect::Policy::none())
             .build()?;
 
         Ok(Self {

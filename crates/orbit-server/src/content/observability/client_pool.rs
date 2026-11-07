@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
@@ -34,7 +34,7 @@ impl TenantClientPool {
     /// Drops clients whose tenant no longer appears in the host map, so a
     /// moved or deprovisioned tenant does not keep a connection pool alive.
     pub fn retain_routes(&self, live: &[TenantRoute]) {
-        let keys: Vec<ClientKey> = live
+        let keys: HashSet<ClientKey> = live
             .iter()
             .map(|route| Self::key_for(route, &route.traces_db))
             .collect();
