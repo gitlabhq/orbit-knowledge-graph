@@ -84,8 +84,8 @@ By default, setup writes to your user configuration, so the changes affect only 
 
 | Component | Agents | Changes |
 |-----------|--------|---------|
-| Instructions | All | A block between `<!-- orbit:setup:begin -->` and `<!-- orbit:setup:end -->` in the instruction file of the agent. The block tells the agent to search with `orbit grep` and to read code with `orbit context`. |
-| Hooks | Claude Code, OpenCode | A reminder to use `orbit grep`. For Claude Code, the reminder comes when the agent runs `grep`, `rg`, `ack`, or `ag` in an indexed repository, and never blocks the call. For OpenCode, the reminder comes once each session. |
+| Instructions | All | Each new session loads instructions to search with `orbit grep` and read code with `orbit context`. Setup removes the block an earlier setup wrote to `CLAUDE.md` or `AGENTS.md`. |
+| Hooks | Claude Code, Codex, GitLab Duo, OpenCode, Pi | The hooks that load the instructions, and a reminder to use `orbit grep`. For Claude Code, the reminder comes when the agent runs `grep`, `rg`, `ack`, or `ag` in an indexed repository, and never blocks the call. For OpenCode, the reminder comes once each session. |
 | Skill | Claude Code, Codex, GitLab Duo, OpenCode | The `orbit` skill, in `~/.agents/skills/orbit`. For GitLab Duo, setup writes the full skill files. For Claude Code, setup also links the skill in `~/.claude/skills/`, and allows the skill command in `settings.json` so that the skill loads without a prompt. |
 
 Other agents that support the [Agent Skills specification](https://agentskills.io/specification), such as Gemini CLI,
@@ -105,7 +105,7 @@ Setup follows these rules:
 - Before setup changes a file for the first time, it saves a copy as `<name>.orbit-backup`.
 - Setup sets the `glab` option `orbit_cli_auto_run` to `true` for the repository where you run it, so the hooks run without a prompt.
   To set it for every repository, run `glab config set orbit_cli_auto_run true --global`.
-- With `--project` or `--dir`, setup writes files such as `CLAUDE.md` and `AGENTS.md` in the project.
+- With `--project` or `--dir`, setup writes files such as `.claude/settings.json`, `.codex/hooks.json`, `.gitlab/duo/hooks.json`, and `.pi/extensions/orbit.ts` in the project.
   Teams usually commit these files, so the change can reach your teammates.
 
 ## Remove the setup
