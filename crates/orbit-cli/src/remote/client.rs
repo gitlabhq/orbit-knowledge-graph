@@ -57,6 +57,16 @@ impl OrbitClient {
         Self::new(endpoint)
     }
 
+    pub(crate) fn identity(&self) -> String {
+        let endpoint = &self.endpoint;
+        format!(
+            "{}\n{}: {}",
+            endpoint.base_url.trim_end_matches('/'),
+            endpoint.header_name,
+            endpoint.header_value
+        )
+    }
+
     /// Resolves credentials like `from_env`, but a missing credential is not an
     /// error: it returns `None` so callers serve the embedded local skill. An
     /// invalid base URL is still an error so callers can say why they fall back.
@@ -386,25 +396,6 @@ impl std::fmt::Display for MissingCredential {
 
 impl std::error::Error for MissingCredential {}
 
-pub(crate) fn gitlab_usable(dir: &Path) -> bool {
-    let Ok(client) = OrbitClient::from_env_in(dir) else {
-        return false;
-    };
-    let Ok(host) = client.get_host() else {
-        return false;
-    };
-    let origin = super::origin::project(dir)
-        .filter(|(origin_host, _)| *origin_host == host)
-        .map(|(_, path)| path);
-    block_on_short(async move {
-        match origin {
-            Some(path) => client.check_graph_status(path).await,
-            None => client.check_status().await,
-        }
-    })
-    .is_some()
-}
-
 impl OrbitClient {
     pub(crate) async fn schema_overview(&self, request: Vec<u8>) -> Option<String> {
         let body = tokio::time::timeout(SHORT_REQUEST_TIMEOUT, self.query_raw(request))
@@ -415,7 +406,7 @@ impl OrbitClient {
     }
 }
 
-fn block_on_short<T, F>(future: F) -> Option<T>
+pub(crate) fn block_on_short<T, F>(future: F) -> Option<T>
 where
     T: Send + 'static,
     F: std::future::Future<Output = Result<T, RemoteError>> + Send + 'static,

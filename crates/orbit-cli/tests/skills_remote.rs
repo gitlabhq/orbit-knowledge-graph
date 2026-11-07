@@ -914,11 +914,11 @@ fn setup_instructions(base_url: Option<&str>) -> (Output, String) {
 fn assert_local_only(output: &Output, instructions: &str) {
     assert!(output.status.success(), "{}", stderr(output));
     assert!(
-        instructions.contains("grep` must be used"),
+        instructions.contains("grep` searches code"),
         "{instructions}"
     );
     assert!(
-        !instructions.contains("query` must be used"),
+        !instructions.contains("query` for counts"),
         "{instructions}"
     );
     assert!(!instructions.contains("Schema for"), "{instructions}");
@@ -927,10 +927,7 @@ fn assert_local_only(output: &Output, instructions: &str) {
 
 fn assert_remote_without_schema(output: &Output, instructions: &str) {
     assert!(output.status.success(), "{}", stderr(output));
-    assert!(
-        instructions.contains("query` must be used"),
-        "{instructions}"
-    );
+    assert!(instructions.contains("query` for counts"), "{instructions}");
     assert!(!instructions.contains("Schema for"), "{instructions}");
     assert!(!instructions.contains("{{"), "{instructions}");
 }
@@ -979,12 +976,58 @@ const SERVICE_STATUS: &str =
     r#"{"data":{"orbit":{"serviceStatus":{"state":"HEALTHY","version":"1","components":[]}}}}"#;
 
 #[test]
-fn setup_instructions_leave_the_schema_to_failing_queries() {
+fn setup_instructions_keep_the_bundled_query_line_without_a_schema() {
     let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS)]);
     let (output, instructions) = setup_instructions(Some(&url));
     let requests = server.join().unwrap();
     assert_remote_without_schema(&output, &instructions);
+    assert!(
+        !instructions.contains("Connected providers"),
+        "{instructions}"
+    );
     assert_eq!(request_paths(&requests), ["/api/graphql"]);
+}
+
+#[test]
+fn setup_instructions_list_the_servers_entities_and_cache_them() {
+    let schema = |names: &str| {
+        format!(
+            r#"{{"data":{{"orbit":{{"serviceStatus":{{"state":"HEALTHY"}},"schema":{{"nodes":{{"nodes":[{names}]}}}}}}}}}}"#
+        )
+    };
+    let (url, server) = mock_server(vec![
+        ok_reply(&schema(
+            r#"{"name":"Project"},{"name":"bad name"},{"name":"Widget"}"#,
+        )),
+        ok_reply(&schema(r#"{"name":"Gadget"}"#)),
+    ]);
+    let (cache, project) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    for _ in 0..2 {
+        let output = hermetic_orbit(&cache, &["hook-guard", "instructions"])
+            .current_dir(project.path())
+            .env("ORBIT_DATA_DIR", cache.path())
+            .env("ORBIT_API_BASE_URL", &url)
+            .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+            .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
+            .output()
+            .unwrap();
+        let instructions = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            instructions
+                .trim_end()
+                .ends_with("- gitlab: Project, Widget"),
+            "{instructions}"
+        );
+        assert_eq!(
+            instructions.matches("MANDATORY").count(),
+            1,
+            "{instructions}"
+        );
+    }
+    assert_eq!(
+        request_paths(&server.join().unwrap()),
+        ["/api/graphql", "/api/graphql"]
+    );
 }
 
 #[test]
