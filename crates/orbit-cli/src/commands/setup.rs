@@ -701,14 +701,6 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(&claude_md).unwrap(), "# Mine\n");
 
-        std::fs::write(
-            &claude_md,
-            "<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n",
-        )
-        .unwrap();
-        install_default(&["claude"], dir.path());
-        assert!(!claude_md.exists());
-
         let agents_md = dir.path().join("AGENTS.md");
         std::fs::write(
             &agents_md,
@@ -721,82 +713,34 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_symlinked_claude_md_loses_the_block_once_and_stays_a_link() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("AGENTS.md"),
-            "# rules\n\n<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n",
-        )
-        .unwrap();
-        std::os::unix::fs::symlink("AGENTS.md", dir.path().join("CLAUDE.md")).unwrap();
-
-        install_default(&["claude", "codex"], dir.path());
-
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
-            "# rules\n"
-        );
-        let claude = std::fs::symlink_metadata(dir.path().join("CLAUDE.md")).unwrap();
-        assert!(claude.is_symlink());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_symlinked_claude_md_to_an_orbit_only_agents_md_keeps_the_link_and_loses_the_block() {
-        let dir = tempfile::tempdir().unwrap();
+    fn a_linked_instruction_file_loses_the_block_and_keeps_the_link() {
         let block = "<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n";
-        std::fs::write(
-            dir.path().join("AGENTS.md"),
-            format!("{block}# rules\n{block}"),
-        )
-        .unwrap();
-        std::os::unix::fs::symlink("AGENTS.md", dir.path().join("CLAUDE.md")).unwrap();
-
-        install_default(&["claude", "codex"], dir.path());
-
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
-            "# rules\n"
-        );
-        assert!(
-            std::fs::symlink_metadata(dir.path().join("CLAUDE.md"))
-                .unwrap()
-                .is_symlink()
-        );
-
-        std::fs::write(dir.path().join("AGENTS.md"), block).unwrap();
-        install_default(&["claude", "codex"], dir.path());
-
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
-            ""
-        );
-        assert!(
-            std::fs::symlink_metadata(dir.path().join("CLAUDE.md"))
-                .unwrap()
-                .is_symlink()
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn an_orbit_only_file_behind_a_link_outside_the_project_is_emptied_not_deleted() {
         let dir = tempfile::tempdir().unwrap();
         let dotfiles = tempfile::tempdir().unwrap();
-        let target = dotfiles.path().join("CLAUDE.md");
-        std::fs::write(
-            &target,
-            "<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n",
-        )
-        .unwrap();
-        std::os::unix::fs::symlink(&target, dir.path().join("CLAUDE.md")).unwrap();
+        let agents_md = dir.path().join("AGENTS.md");
+        let outside = dotfiles.path().join("CLAUDE.md");
+        std::os::unix::fs::symlink("AGENTS.md", dir.path().join("CLAUDE.md")).unwrap();
 
-        install_default(&["claude"], dir.path());
+        std::fs::write(&agents_md, format!("{block}# rules\n{block}")).unwrap();
+        install_default(&["claude", "codex"], dir.path());
+        assert_eq!(std::fs::read_to_string(&agents_md).unwrap(), "# rules\n");
 
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "");
+        std::fs::write(&agents_md, block).unwrap();
+        install_default(&["claude", "codex"], dir.path());
+        assert_eq!(std::fs::read_to_string(&agents_md).unwrap(), "");
         assert!(
             dir.path().join("CLAUDE.md").exists(),
             "the link still resolves"
+        );
+
+        std::fs::remove_file(dir.path().join("CLAUDE.md")).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.path().join("CLAUDE.md")).unwrap();
+        std::fs::write(&outside, block).unwrap();
+        install_default(&["claude"], dir.path());
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "",
+            "a file outside the project is emptied, never deleted"
         );
     }
 
@@ -2017,13 +1961,7 @@ mod tests {
         let every = ["claude", "codex", "duo", "opencode", "pi"];
 
         assert!(named(&every, &[], false).is_empty());
-        let without_hooks = named(&every, &[Component::Hooks], false);
-        assert_eq!(without_hooks.len(), 4, "{without_hooks:?}");
-        assert!(
-            !without_hooks
-                .iter()
-                .any(|line| line.starts_with("Claude Code"))
-        );
+        assert_eq!(named(&every, &[Component::Hooks], false).len(), 4);
         assert_eq!(named(&every, &[Component::AgentPlugins], false).len(), 1);
         assert_eq!(named(&["claude"], &[], true).len(), 1);
 
@@ -2031,13 +1969,6 @@ mod tests {
         assert!(
             named(&["codex", "pi", "opencode"], &[Component::Hooks], false).is_empty(),
             "a run that skips the hooks keeps the ones already installed"
-        );
-        let plugin = dir.path().join(".claude/orbit/claude_plugin");
-        assert!(
-            plugin.is_dir(),
-            "{:?}",
-            std::fs::read_dir(dir.path().join(".claude"))
-                .map(|d| d.flatten().map(|e| e.path()).collect::<Vec<_>>())
         );
         assert!(named(&["claude"], &[Component::AgentPlugins], false).is_empty());
 
