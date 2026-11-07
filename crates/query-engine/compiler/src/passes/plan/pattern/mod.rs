@@ -117,7 +117,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
             query,
             input,
             model,
-            relations: relations::build_relations(input, model, &nodes),
+            relations: relations::build_relations(query, &facts, model, &nodes),
             nodes,
             denormalized: super::filters::denormalized_facts(query, model),
             scans: Vec::new(),

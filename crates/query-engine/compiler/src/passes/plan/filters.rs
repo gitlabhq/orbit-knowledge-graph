@@ -196,28 +196,6 @@ pub enum FilterOwner<'a> {
     Tables(&'a [String]),
 }
 
-pub fn ordered_filters(
-    filters: &HashMap<String, Vec<InputFilter>>,
-    owner: FilterOwner<'_>,
-    model: &(impl OrbitQueryModel + ?Sized),
-) -> Vec<(String, BoundFilter)> {
-    let mut properties: Vec<_> = filters.iter().collect();
-    properties.sort_unstable_by_key(|(property, _)| *property);
-    let mut bound: Vec<_> = properties
-        .into_iter()
-        .flat_map(|(property, filters)| {
-            filters.iter().map(|filter| {
-                (
-                    property.clone(),
-                    bind_filter(property, Test::from_input(filter), &owner, model),
-                )
-            })
-        })
-        .collect();
-    unindex_if_key_narrowed(&mut bound);
-    bound
-}
-
 /// A sort-key match already narrows the read, so no filter in the set also asks for the text index.
 pub fn unindex_if_key_narrowed(filters: &mut [(String, BoundFilter)]) {
     if filters

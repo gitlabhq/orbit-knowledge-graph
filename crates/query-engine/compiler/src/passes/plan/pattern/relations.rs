@@ -4,13 +4,22 @@
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
-use query_data_model::OrbitQueryModel;
+use ontology::constants::{
+    SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
+};
+use query_data_model::plan::logical::{EdgeField, Expr as Logical};
+use query_data_model::plan::tracking::Ref;
+use query_data_model::{Direction as Way, OrbitQueryModel};
 
 use super::{EdgeRelation, Fk, NodePlan};
 use crate::constants::{EDGE_PATH_NODES_SUFFIX, edge_column_prefix, edge_relation_alias};
 use crate::error::{QueryError, Result};
-use crate::input::*;
-use crate::passes::plan::filters::{FilterOwner, ordered_filters};
+use crate::input::Direction;
+use crate::logical::Query;
+use crate::logical::facts::Fact;
+use crate::passes::plan::filters::{
+    BoundFilter, FilterOwner, Test, bind_filter, unindex_if_key_narrowed,
+};
 
 impl EdgeRelation {
     pub(super) fn reversed(&self) -> Self {
@@ -66,98 +75,144 @@ impl EdgeRelation {
 }
 
 pub(super) fn build_relations<M>(
-    input: &Input,
+    query: Query<'_>,
+    facts: &[Fact<'_>],
     model: &M,
     nodes: &HashMap<String, NodePlan>,
 ) -> Vec<EdgeRelation>
 where
     M: OrbitQueryModel + ?Sized,
 {
-    input
-        .relationships
-        .iter()
+    let graph = model.graph();
+    let leaves = query.leaves();
+    query
+        .steps()
+        .into_iter()
         .enumerate()
-        .map(|(input_index, relationship)| {
-            let (source_node, target_node) = relationship
-                .direction
-                .stored_order(&relationship.from, &relationship.to);
-            let source = input.entity_of(source_node).unwrap_or_default();
-            let target = input.entity_of(target_node).unwrap_or_default();
-            let mut edge_tables = if relationship.hops.max > 1 {
-                model.relationship_tables(&relationship.types)
+        .map(|(input_index, step)| {
+            let (near, far) = (query.name(step.from), query.name(step.to));
+            let (from, to, direction) = match step.direction {
+                Way::Incoming => (far, near, Direction::Outgoing),
+                Way::Outgoing => (near, far, Direction::Outgoing),
+                Way::Both => (near, far, Direction::Both),
+            };
+            let types: Vec<String> = match step.relationships {
+                [] => vec!["*".to_string()],
+                named => named
+                    .iter()
+                    .map(|relationship| graph.relationship(*relationship).name.clone())
+                    .collect(),
+            };
+            let entity = |node: &str| nodes.get(node).and_then(|node| node.entity.as_deref());
+            let (source_node, target_node) = direction.stored_order(from, to);
+            let source = entity(source_node).unwrap_or_default();
+            let target = entity(target_node).unwrap_or_default();
+            let max_hops = step.range.max;
+            let mut edge_tables = if max_hops > 1 {
+                model.relationship_tables(&types)
             } else {
-                let mut tables =
-                    model.relationship_tables_between(&relationship.types, source, target);
-                if relationship.direction == Direction::Both {
-                    tables.extend(model.relationship_tables_between(
-                        &relationship.types,
-                        target,
-                        source,
-                    ));
+                let mut tables = model.relationship_tables_between(&types, source, target);
+                if direction == Direction::Both {
+                    tables.extend(model.relationship_tables_between(&types, target, source));
                     tables.sort();
                     tables.dedup();
                 }
                 tables
             };
             if edge_tables.is_empty() {
-                edge_tables = model.relationship_tables(&relationship.types);
+                edge_tables = model.relationship_tables(&types);
             }
             if edge_tables.is_empty() {
                 edge_tables.push(model.default_edge_table().to_string());
             }
-            let (start, end) = relationship.direction.edge_columns();
-            let pinned: Vec<&str> = [(&relationship.from, start), (&relationship.to, end)]
+            let (start, end) = direction.edge_columns();
+            let pinned: Vec<&str> = [(from, start), (to, end)]
                 .into_iter()
                 .filter(|(node, _)| {
-                    relationship.hops.max == 1
-                        && nodes.get(node.as_str()).is_some_and(NodePlan::is_pinned)
+                    max_hops == 1 && nodes.get(*node).is_some_and(NodePlan::is_pinned)
                 })
                 .map(|(_, column)| column)
                 .collect();
             select_edge_layouts(model, &mut edge_tables, &pinned);
-            let fk = (relationship.hops.max == 1
-                && relationship.filters.is_empty()
-                && !input.references(&PredicateTarget::Relationship(input_index))
-                && relationship.direction != Direction::Both)
+            let tested = leaves
+                .iter()
+                .any(|leaf| leaf.binding() == step.edge && !leaf.edge_kind());
+            let fk = (max_hops == 1 && !tested && direction != Direction::Both)
                 .then(|| {
-                    let foreign_key = model.foreign_key(&relationship.types, source, target)?;
+                    let foreign_key = model.foreign_key(&types, source, target)?;
                     let column = model.property_column(foreign_key.property)?.to_string();
                     model.property_column(foreign_key.referenced_key)?;
                     let node = match foreign_key.holder {
-                        query_data_model::Endpoint::Source => source_node.clone(),
-                        query_data_model::Endpoint::Target => target_node.clone(),
+                        query_data_model::Endpoint::Source => source_node,
+                        query_data_model::Endpoint::Target => target_node,
                     };
-                    model.entity_table(input.entity_of(&node)?)?;
-                    Some(Fk { node, column })
+                    nodes.get(node)?.table.as_ref()?;
+                    Some(Fk {
+                        node: node.to_string(),
+                        column,
+                    })
                 })
                 .flatten();
-            let filters = ordered_filters(
-                &relationship.filters,
-                FilterOwner::Tables(&edge_tables),
-                model,
-            );
+            let filters = edge_filters(facts, step.edge, &edge_tables, model);
             EdgeRelation {
                 input_index,
-                rel_types: relationship.types.clone(),
-                relationships: relationship
-                    .types
-                    .iter()
-                    .filter_map(|kind| model.graph().relationship_id(kind))
-                    .collect(),
+                rel_types: types,
+                relationships: step.relationships.to_vec(),
                 alias: edge_relation_alias(input_index),
-                source_entity: model.graph().entity_id(source),
-                target_entity: model.graph().entity_id(target),
-                from_node: relationship.from.clone(),
-                to_node: relationship.to.clone(),
-                direction: relationship.direction,
-                min_hops: relationship.hops.min,
-                max_hops: relationship.hops.max,
+                source_entity: graph.entity_id(source),
+                target_entity: graph.entity_id(target),
+                from_node: from.to_string(),
+                to_node: to.to_string(),
+                direction,
+                min_hops: step.range.min,
+                max_hops,
                 filters,
                 edge_tables,
                 fk,
             }
         })
         .collect()
+}
+
+/// The filters attached to an edge, bound to the columns its tables store.
+fn edge_filters<M>(
+    facts: &[Fact<'_>],
+    edge: Ref,
+    tables: &[String],
+    model: &M,
+) -> Vec<(String, BoundFilter)>
+where
+    M: OrbitQueryModel + ?Sized,
+{
+    let owner = FilterOwner::Tables(tables);
+    let mut filters: Vec<(String, BoundFilter)> = facts
+        .iter()
+        .filter(|fact| fact.attached && fact.binding() == edge)
+        .filter_map(|fact| {
+            let name = match fact.left {
+                Logical::Edge { field, .. } => match field {
+                    EdgeField::Kind => return None,
+                    EdgeField::Source => SOURCE_ID_COLUMN,
+                    EdgeField::SourceKind => SOURCE_KIND_COLUMN,
+                    EdgeField::Target => TARGET_ID_COLUMN,
+                    EdgeField::TargetKind => TARGET_KIND_COLUMN,
+                }
+                .to_string(),
+                Logical::Attribute { attribute, .. } => {
+                    model.graph().attribute(attribute).name.clone()
+                }
+                _ => return None,
+            };
+            let test = Test::of(*fact, |_| {
+                unreachable!("attached edge filters compare with literals")
+            })?;
+            let bound = bind_filter(&name, test, &owner, model);
+            Some((name, bound))
+        })
+        .collect();
+    filters.sort_by(|(left, _), (right, _)| left.cmp(right));
+    unindex_if_key_narrowed(&mut filters);
+    filters
 }
 
 /// Swaps each table for the equivalent layout whose sort key reaches a pinned endpoint column soonest.
