@@ -51,8 +51,8 @@ fn holding_block(agents: &[Agent], target: &Target) -> Result<Vec<(PathBuf, Stri
         if canonicals.contains(&canonical) || !file_mentions(&path, BLOCK_BEGIN) {
             continue;
         }
-        canonicals.push(canonical.clone());
-        files.push((canonical, label));
+        canonicals.push(canonical);
+        files.push((path, label));
     }
     Ok(files)
 }
@@ -71,7 +71,8 @@ fn strip_block_from_file(
     let Some(remaining) = strip_block(&existing) else {
         return Ok(());
     };
-    if remaining.trim().is_empty() {
+    let is_link = std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_symlink());
+    if remaining.trim().is_empty() && !is_link {
         remove_file_and_empty_parents(path, target)?;
         report.note(label, "removed (was orbit-only)");
     } else {

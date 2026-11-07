@@ -11,6 +11,8 @@ json_merges:
       global: "~/.gitlab/duo/hooks.json"
     path: [hooks, SessionStart]
     marker: hook-guard instructions
+    review_note:
+      project: GitLab Duo runs project hooks only with --enable-project-hooks or GITLAB_ENABLE_PROJECT_HOOKS=true; without it, Duo gets no Orbit instructions in this project
     entries:
       - hooks:
           - type: command

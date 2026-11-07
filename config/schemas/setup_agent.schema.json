@@ -189,8 +189,13 @@
           "description": "Entries orbit owns at path. `{{orbit}}` in any nested string resolves to the launcher command."
         },
         "review_note": {
-          "type": "string",
-          "description": "Shown after install when the assistant runs a new hook only after the person reviews it."
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Shown when setup writes or changes the file, for an assistant that runs a new hook only after the person enables or reviews it. Give the text for project scope, user scope, or both.",
+          "properties": {
+            "project": { "type": "string", "minLength": 1 },
+            "global": { "type": "string", "minLength": 1 }
+          }
         }
       }
     },

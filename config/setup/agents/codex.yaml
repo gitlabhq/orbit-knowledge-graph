@@ -11,7 +11,9 @@ json_merges:
       global: "${CODEX_HOME:-~/.codex}/hooks.json"
     path: [hooks, SessionStart]
     marker: hook-guard instructions
-    review_note: Codex runs the Orbit hook once you approve it; open /hooks in Codex and trust it
+    review_note:
+      project: Codex runs the Orbit hook once you approve it; open /hooks in Codex and trust it
+      global: Codex runs the Orbit hook once you approve it; open /hooks in Codex and trust it
     entries:
       - hooks:
           - type: command

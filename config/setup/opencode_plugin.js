@@ -23,11 +23,8 @@ function run(command, args) {
 }
 
 async function loadInstructions() {
-  for (const [command, prefix] of LAUNCHERS) {
-    const text = await run(command, [...prefix, "hook-guard", "instructions"]);
-    if (text) return text;
-  }
-  return "";
+  const texts = await Promise.all(LAUNCHERS.map(([command, prefix]) => run(command, [...prefix, "hook-guard", "instructions"])));
+  return texts.find(Boolean) ?? "";
 }
 
 function withReminder(result) {
@@ -52,10 +49,11 @@ export default {
   },
   async server() {
     let reminded = false;
-    const instructions = loadInstructions();
+    let instructions = loadInstructions();
     return {
       "experimental.chat.system.transform": async (_input, output) => {
         const text = await instructions;
+        if (!text) instructions = loadInstructions();
         if (text && !output.system.includes(text)) output.system.push(text);
       },
       "tool.execute.after": async (input, output) => {

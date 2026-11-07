@@ -72,8 +72,13 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
         json::replace_marked_entries(&mut root, &merge.path, &merge.marker, &entries)
             .with_context(|| format!("failed to update {}", path.display()))?;
         let installed = json::render(&root)?;
+        let changed = std::fs::read(&path).map_or(true, |current| current != installed.as_bytes());
         write_unless_unchanged(&path, &label, &installed, "orbit entries installed", report)?;
-        if let Some(note) = &merge.review_note {
+        let note = merge.review_note.as_ref().and_then(|note| match target {
+            Target::Project(_) => note.project.as_ref(),
+            Target::Global(_) => note.global.as_ref(),
+        });
+        if let Some(note) = note.filter(|_| changed) {
             report.note(&label, format!("WARNING: {note}"));
         }
     }
@@ -334,6 +339,32 @@ mod tests {
         assert!(retired.is_file());
         assert_eq!(report.outcomes.len(), 1);
         assert_eq!(report.outcomes[0].action, KEPT_RETIRED);
+    }
+
+    #[test]
+    fn review_notes_show_for_their_scope_only_when_the_hook_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
+        let notes = |agent: &str| {
+            let mut report = Report::default();
+            install_for_agent(spec::agent_named(agent).unwrap(), &target, &mut report).unwrap();
+            report
+                .outcomes
+                .iter()
+                .filter(|outcome| outcome.action.starts_with("WARNING: "))
+                .map(|outcome| outcome.action.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let codex = notes("codex");
+        assert_eq!(codex.len(), 1, "{codex:?}");
+        assert!(codex[0].contains("/hooks in Codex"), "{codex:?}");
+        assert!(
+            notes("codex").is_empty(),
+            "an unchanged hook file asks nothing again"
+        );
+        let duo = notes("duo");
+        assert!(duo[0].contains("--enable-project-hooks"), "{duo:?}");
     }
 
     #[test]

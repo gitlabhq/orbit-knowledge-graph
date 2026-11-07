@@ -146,7 +146,7 @@ pub(crate) async fn install(
     let report = apply_and_report(&options, |report| {
         components::install(&selection, &target, report)
     })?;
-    for warning in missing_instructions(&selection, &report) {
+    for warning in missing_instructions(&selection, &target, &report) {
         tui::warning(warning);
     }
     tui::card(
@@ -233,16 +233,17 @@ pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> 
 
 /// Agents left without Orbit instructions because the component that loads them was skipped or
 /// could not be installed.
-fn missing_instructions(selection: &Selection, report: &Report) -> Vec<String> {
+fn missing_instructions(selection: &Selection, target: &Target, report: &Report) -> Vec<String> {
     let skipped: Vec<&str> = report.skipped_agent_plugins().collect();
     selection
         .agents
         .iter()
         .filter_map(|agent| {
             let component = agent.instructions_component();
-            let installed = selection.components.contains(&component)
+            let installed = (selection.components.contains(&component)
                 && !(component == Component::AgentPlugins
-                    && skipped.contains(&agent.title.as_str()));
+                    && skipped.contains(&agent.title.as_str())))
+                || components::installer_for(component).is_installed(*agent, target);
             (!installed).then(|| {
                 format!(
                     "{} gets no Orbit instructions: they load from the {}, which this run skipped",
@@ -766,11 +767,36 @@ mod tests {
         std::fs::write(dir.path().join("AGENTS.md"), block).unwrap();
         install_default(&["claude", "codex"], dir.path());
 
-        assert!(!dir.path().join("AGENTS.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
+            ""
+        );
         assert!(
             std::fs::symlink_metadata(dir.path().join("CLAUDE.md"))
                 .unwrap()
                 .is_symlink()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_orbit_only_file_behind_a_link_outside_the_project_is_emptied_not_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let dotfiles = tempfile::tempdir().unwrap();
+        let target = dotfiles.path().join("CLAUDE.md");
+        std::fs::write(
+            &target,
+            "<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&target, dir.path().join("CLAUDE.md")).unwrap();
+
+        install_default(&["claude"], dir.path());
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "");
+        assert!(
+            dir.path().join("CLAUDE.md").exists(),
+            "the link still resolves"
         );
     }
 
@@ -1971,6 +1997,8 @@ mod tests {
 
     #[test]
     fn agents_without_the_component_that_loads_the_instructions_are_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = project(dir.path());
         let named = |agents: &[&str], skip: &[Component], skipped_plugin: bool| {
             let selection = Selection {
                 agents: agents
@@ -1984,7 +2012,7 @@ mod tests {
             if skipped_plugin {
                 report.note_plugin_skipped("Claude Code", "plugin", "too old");
             }
-            missing_instructions(&selection, &report)
+            missing_instructions(&selection, &target, &report)
         };
         let every = ["claude", "codex", "duo", "opencode", "pi"];
 
@@ -1998,6 +2026,12 @@ mod tests {
         );
         assert_eq!(named(&every, &[Component::AgentPlugins], false).len(), 1);
         assert_eq!(named(&["claude"], &[], true).len(), 1);
+
+        install_default(&["codex", "pi"], dir.path());
+        assert!(
+            named(&["codex", "pi"], &[Component::Hooks], false).is_empty(),
+            "a run that skips the hooks keeps the ones already installed"
+        );
     }
 
     #[test]

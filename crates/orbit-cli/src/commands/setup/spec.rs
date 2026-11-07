@@ -352,7 +352,17 @@ pub(super) struct JsonMerge {
     pub(super) marker: String,
     pub(super) entries: Vec<Value>,
     #[serde(default)]
-    pub(super) review_note: Option<String>,
+    pub(super) review_note: Option<ReviewNote>,
+}
+
+/// Shown when setup writes a hook the assistant runs only after the person enables or reviews it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ReviewNote {
+    #[serde(default)]
+    pub(super) project: Option<String>,
+    #[serde(default)]
+    pub(super) global: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

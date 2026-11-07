@@ -318,7 +318,10 @@ test('the conversation context carries the Orbit instructions the installed CLI 
   on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
   const answer = await $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'mine' }] })
 
-  expect(runs).toEqual([['glab', 'orbit', 'hook-guard', 'instructions']])
+  expect(runs).toEqual([
+    ['glab', 'orbit', 'hook-guard', 'instructions'],
+    ['orbit', 'hook-guard', 'instructions'],
+  ])
   expect(answer.blocks).toEqual([
     { name: 'claudeMd', text: 'mine' },
     { name: 'orbit', text: '## Orbit\n\n- MANDATORY: `glab orbit grep`' },

@@ -89,12 +89,13 @@ function resetConversation(): void {
 const INSTRUCTIONS_BLOCK = 'orbit'
 
 async function orbitInstructions(run: (argv: readonly string[]) => Promise<{ exitCode: number; stdout: string }>): Promise<string> {
-  for (const launcher of [['glab', 'orbit'], ['orbit']]) {
-    const answer = await run([...launcher, 'hook-guard', 'instructions']).catch(() => null)
-    const text = answer?.exitCode === 0 ? answer.stdout.trim() : ''
-    if (text) return text
-  }
-  return ''
+  const texts = await Promise.all(
+    [['glab', 'orbit'], ['orbit']].map(async (launcher) => {
+      const answer = await run([...launcher, 'hook-guard', 'instructions']).catch(() => null)
+      return answer?.exitCode === 0 ? answer.stdout.trim() : ''
+    }),
+  )
+  return texts.find(Boolean) ?? ''
 }
 
 export const register: Register = (on) => {
