@@ -14,7 +14,11 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(PathFinding a->b depth=1 forward=1 backward=0 scoped=false ... (_) (_))"]
+      ctes:
+        exact_order: [_orbit_forward]
+      expect:
+        - (Filter _orbit_e1.source_id = 1, _orbit_e1.relationship_kind = 'MEMBER_OF', _orbit_e1.source_kind = 'User' (Deduplicate Final (Scan Table(gl_edge) AS _orbit_e1)))
+        - (Filter _orbit_forward._orbit_depth = 1, _orbit_forward._orbit_end_kind = 'Group', _orbit_forward._orbit_end_node = 2 (Scan Table(_orbit_forward) AS _orbit_forward))
     emitted:
       ctes:
         exact_order: [_orbit_forward]

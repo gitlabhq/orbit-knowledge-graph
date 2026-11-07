@@ -14,7 +14,16 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(PathFinding a->b depth=3 forward=2 backward=1 scoped=false ... (_) (_))"]
+      ctes:
+        exact_order: [_orbit_forward, _orbit_backward]
+      expect:
+        - (Filter _orbit_e1.target_id = 100, _orbit_e1.relationship_kind IN ['MEMBER_OF', 'CONTAINS'], _orbit_e1.target_kind = 'Project' (_))
+        - (Filter (_orbit_forward._orbit_depth + _orbit_backward._orbit_depth) <= 3 (Join ON (_orbit_forward._orbit_end_node = _orbit_backward._orbit_end_node) AND (_orbit_forward._orbit_end_kind = _orbit_backward._orbit_end_kind) (Scan Table(_orbit_forward) AS _orbit_forward) (Scan Table(_orbit_backward) AS _orbit_backward)))
+      occurrences:
+        - pattern: (Filter _orbit_e1.source_id = 1, _orbit_e1.relationship_kind IN ['MEMBER_OF', 'CONTAINS'], _orbit_e1.source_kind = 'User' (_))
+          count: 2
+        - pattern: (Scan Table(gl_edge) AS _orbit_e2_arm)
+          count: 1
     emitted:
       ctes:
         exact_order: [_orbit_forward, _orbit_backward]

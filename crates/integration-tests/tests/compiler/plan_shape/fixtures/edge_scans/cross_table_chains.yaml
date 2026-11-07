@@ -104,8 +104,24 @@ cases:
     physical:
       clickhouse:
         planned:
+          ctes:
+            exact_order: [_orbit_nf_pipeline, _orbit_nf_branch, _orbit_path_scope, _orbit_forward, _orbit_backward]
           expect:
-            - (PathFinding pipeline->branch depth=2 forward=1 backward=1 scoped=true tables=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] relationships=[IN_PROJECT, CONTAINS] ... (_) (_))
+            - (Filter _orbit_e1.source_id IN _orbit_nf_pipeline.id, _orbit_e1.relationship_kind IN ['IN_PROJECT', 'CONTAINS'], _orbit_e1.source_kind = 'Pipeline', _orbit_e1.traversal_path IN _orbit_path_scope.traversal_path (_))
+            - (Filter _orbit_e1.target_id IN _orbit_nf_branch.id, _orbit_e1.relationship_kind IN ['IN_PROJECT', 'CONTAINS'], _orbit_e1.target_kind = 'Branch', _orbit_e1.traversal_path IN _orbit_path_scope.traversal_path (_))
+            - (Filter (_orbit_forward._orbit_depth + _orbit_backward._orbit_depth) <= 2 (Join ON (_orbit_forward._orbit_end_node = _orbit_backward._orbit_end_node) AND (_orbit_forward._orbit_end_kind = _orbit_backward._orbit_end_kind) AND (_orbit_forward.traversal_path = _orbit_backward.traversal_path) (Scan Table(_orbit_forward) AS _orbit_forward) (Scan Table(_orbit_backward) AS _orbit_backward)))
+          reject: ["(Scan Table(gl_edge) AS _orbit_e2_arm)"]
+          occurrences:
+            - pattern: (Scan Table(gl_ci_edge) AS _orbit_e1_arm)
+              count: 2
+            - pattern: (Scan Table(gl_code_edge) AS _orbit_e1_arm)
+              count: 2
+            - pattern: (Scan Table(gl_diff_edge) AS _orbit_e1_arm)
+              count: 2
+            - pattern: (Scan Table(gl_edge) AS _orbit_e1_arm)
+              count: 2
+            - pattern: (Scan Table(gl_sec_edge) AS _orbit_e1_arm)
+              count: 2
         emitted:
           expect:
             - (CTE _orbit_path_scope (Union ALL (_) (_)))
