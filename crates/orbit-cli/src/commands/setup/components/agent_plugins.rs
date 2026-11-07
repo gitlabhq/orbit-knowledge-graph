@@ -96,7 +96,7 @@ fn skip_reason(agent: Agent, plugin: &PluginSpec, target: &Target) -> Option<Str
         return None;
     }
     Some(format!(
-        "Orbit UI skipped: needs {} {}+ (you have {})",
+        "WARNING: Orbit plugin requires {} {}+ (you have {})",
         agent.title,
         plugin.min_version,
         found.as_deref().unwrap_or("none")

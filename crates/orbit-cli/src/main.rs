@@ -645,8 +645,10 @@ enum Commands {
         #[arg(long, value_enum, value_name = "COMPONENT")]
         install: Vec<commands::setup::Component>,
 
-        /// Leave a component out (repeatable). By default setup installs instructions, hooks,
-        /// skill, and agent-plugins, which shows Orbit calls in Claude Code and OpenCode.
+        /// Leave a component out (repeatable). By default setup installs hooks, skill, and
+        /// agent-plugins, through which each agent loads the Orbit instructions; agent-plugins
+        /// also shows Orbit calls in Claude Code and OpenCode. `instructions` removes the
+        /// instruction block an earlier release wrote to CLAUDE.md or AGENTS.md.
         #[arg(long, value_enum, value_name = "COMPONENT")]
         skip: Vec<commands::setup::Component>,
 

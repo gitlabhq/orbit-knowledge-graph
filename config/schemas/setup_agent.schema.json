@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "setup_agent.schema.json",
   "title": "Orbit setup assistant spec",
-  "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: detection paths, a managed instruction-file block, marker-owned JSON merges, templated files, string registrations, and skill directories. Each file's name field must match its file stem. Applied by crates/orbit-cli/src/commands/setup.",
+  "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: detection paths, the instruction file an earlier release wrote a block into, marker-owned JSON merges, templated files, string registrations, and skill directories. Each file's name field must match its file stem. Applied by crates/orbit-cli/src/commands/setup.",
   "type": "object",
   "required": ["name", "title", "detect", "instruction_file"],
   "additionalProperties": false,
@@ -28,7 +28,7 @@
     },
     "instruction_file": {
       "$ref": "#/definitions/scopedPath",
-      "description": "Instruction file receiving the managed guidance block."
+      "description": "Instruction file an earlier release wrote the managed guidance block into. Setup and uninstall remove that block; the agent loads the instructions itself."
     },
     "json_merges": {
       "type": "array",
@@ -187,6 +187,15 @@
           "type": "array",
           "minItems": 1,
           "description": "Entries orbit owns at path. `{{orbit}}` in any nested string resolves to the launcher command."
+        },
+        "review_note": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Shown when setup writes or changes the file, for an assistant that runs a new hook only after the person enables or reviews it. Give the text for project scope, user scope, or both.",
+          "properties": {
+            "project": { "type": "string", "minLength": 1 },
+            "global": { "type": "string", "minLength": 1 }
+          }
         }
       }
     },

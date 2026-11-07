@@ -102,10 +102,16 @@ pub(crate) async fn install(
         .filter(|agent| agent.has_ui())
         .map(|agent| agent.title.as_str())
         .collect();
+    let plugin_instructions: Vec<&str> = selection
+        .agents
+        .iter()
+        .filter(|agent| agent.instructions_component() == Component::AgentPlugins)
+        .map(|agent| agent.title.as_str())
+        .collect();
     if interactive
         && options.ask_agent_plugins
         && !ui_agents.is_empty()
-        && !ask_install_agent_plugins(&ui_agents)?
+        && !ask_install_agent_plugins(&ui_agents, &plugin_instructions)?
     {
         selection.components.remove(&Component::AgentPlugins);
     }
@@ -140,11 +146,14 @@ pub(crate) async fn install(
     let report = apply_and_report(&options, |report| {
         components::install(&selection, &target, report)
     })?;
+    for warning in missing_instructions(&selection, &target, &report) {
+        tui::warning(warning);
+    }
     tui::card(
         "Configured",
         summary::format_configured_per_agent(&plan, &report),
     )?;
-    if selection.components.contains(&Component::Instructions) && !spec::reaches_gitlab() {
+    if !spec::reaches_gitlab() {
         tui::card(
             "GitLab",
             format!(
@@ -222,6 +231,30 @@ pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> 
     Ok(finish(&selection, Outcome::Applied))
 }
 
+/// Agents left without Orbit instructions because the component that loads them was skipped or
+/// could not be installed.
+fn missing_instructions(selection: &Selection, target: &Target, report: &Report) -> Vec<String> {
+    let skipped: Vec<&str> = report.skipped_agent_plugins().collect();
+    selection
+        .agents
+        .iter()
+        .filter_map(|agent| {
+            let component = agent.instructions_component();
+            let installed = (selection.components.contains(&component)
+                && !(component == Component::AgentPlugins
+                    && skipped.contains(&agent.title.as_str())))
+                || components::loads_instructions(*agent, target);
+            (!installed).then(|| {
+                format!(
+                    "{} gets no Orbit instructions: setup removed the old instruction block, and the {} that load them now were skipped",
+                    agent.title,
+                    component.label()
+                )
+            })
+        })
+        .collect()
+}
+
 fn ask_which_agents(
     selection: Selection,
     question: &str,
@@ -238,7 +271,7 @@ const INSTALL_AGENT_PLUGINS: &str = "install";
 const SKIP_AGENT_PLUGINS: &str = "skip";
 
 /// Asks whether to install the agent plugins, starting on the recommended install.
-fn ask_install_agent_plugins(ui_agents: &[&str]) -> Result<bool> {
+fn ask_install_agent_plugins(ui_agents: &[&str], plugin_instructions: &[&str]) -> Result<bool> {
     let choices = [
         tui::Choice {
             key: INSTALL_AGENT_PLUGINS.to_string(),
@@ -249,7 +282,10 @@ fn ask_install_agent_plugins(ui_agents: &[&str]) -> Result<bool> {
         tui::Choice {
             key: SKIP_AGENT_PLUGINS.to_string(),
             label: "Skip the agent plugins".to_string(),
-            hint: String::new(),
+            hint: match plugin_instructions {
+                [] => String::new(),
+                agents => format!("{} gets no Orbit instructions", agents.join(" and ")),
+            },
             section: None,
         },
     ];
@@ -278,6 +314,12 @@ fn apply_and_report(
                 .contains(&outcome.action.as_str())
             {
                 tui::warning(format!("{}: {}", outcome.label, outcome.action));
+            } else if let Some(warning) = outcome
+                .action
+                .strip_prefix("WARNING: ")
+                .filter(|_| outcome.skipped_plugin_agent.is_none())
+            {
+                tui::warning(format!("{}: {warning}", outcome.label));
             }
         }
         show_outcomes_per_component(&report.only_plugin_skips())?;
@@ -537,9 +579,10 @@ mod tests {
         assert_eq!(run.selected_agents, ["claude", "codex"]);
         assert_eq!(run.outcome, Outcome::Applied);
         assert!(!run.global);
-        assert!(dir.path().join("CLAUDE.md").is_file());
-        assert!(dir.path().join("AGENTS.md").is_file());
+        assert!(!dir.path().join("CLAUDE.md").exists());
+        assert!(!dir.path().join("AGENTS.md").exists());
         assert!(dir.path().join(".claude/settings.json").is_file());
+        assert!(dir.path().join(".codex/hooks.json").is_file());
         assert!(!dir.path().join(".opencode").exists());
     }
 
@@ -567,6 +610,8 @@ mod tests {
     #[test]
     fn skipped_components_are_left_alone() {
         let dir = tempfile::tempdir().unwrap();
+        let old = "# Mine\n\n<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n";
+        std::fs::write(dir.path().join("AGENTS.md"), old).unwrap();
         let mut only_instructions = options_for(&["claude", "opencode"]);
         only_instructions.components = Component::from_flags(
             &[],
@@ -575,8 +620,11 @@ mod tests {
         .unwrap();
         install(only_instructions, project(dir.path()), &bare_machine()).unwrap();
 
-        assert!(dir.path().join("CLAUDE.md").is_file());
-        assert!(dir.path().join("AGENTS.md").is_file());
+        assert!(!dir.path().join("CLAUDE.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
+            "# Mine\n"
+        );
         assert!(!dir.path().join(".claude").exists());
         assert!(!dir.path().join(".opencode").exists());
         assert!(!dir.path().join(".agents").exists());
@@ -609,10 +657,12 @@ mod tests {
 
         install_default(&["codex", "opencode"], dir.path());
 
-        let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
-        assert!(agents.contains("<!-- orbit:setup:begin -->"));
-        assert!(agents.contains("# My rules"));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
+            "# My rules\n"
+        );
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
+        assert!(dir.path().join(".codex/hooks.json").is_file());
         for part in ["index.js", "rpc.ts", "tui.tsx"] {
             let path = dir.path().join(".opencode/plugins/orbit-ui").join(part);
             assert!(path.is_file(), "{}", path.display());
@@ -637,19 +687,61 @@ mod tests {
         assert!(!dir.path().join(".agents").exists());
     }
 
+    #[test]
+    fn setup_removes_an_earlier_instruction_block_and_keeps_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_md = dir.path().join("CLAUDE.md");
+        std::fs::write(
+            &claude_md,
+            "# Mine\n\n<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n",
+        )
+        .unwrap();
+
+        install_default(&["claude"], dir.path());
+
+        assert_eq!(std::fs::read_to_string(&claude_md).unwrap(), "# Mine\n");
+
+        let agents_md = dir.path().join("AGENTS.md");
+        std::fs::write(
+            &agents_md,
+            "# Rules\n\n<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n",
+        )
+        .unwrap();
+        install_default(&["codex", "duo", "opencode", "pi"], dir.path());
+        assert_eq!(std::fs::read_to_string(&agents_md).unwrap(), "# Rules\n");
+    }
+
     #[cfg(unix)]
     #[test]
-    fn symlinked_claude_md_gets_one_orbit_block() {
+    fn a_linked_instruction_file_loses_the_block_and_keeps_the_link() {
+        let block = "<!-- orbit:setup:begin -->\nold\n<!-- orbit:setup:end -->\n";
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("AGENTS.md"), "# rules\n").unwrap();
+        let dotfiles = tempfile::tempdir().unwrap();
+        let agents_md = dir.path().join("AGENTS.md");
+        let outside = dotfiles.path().join("CLAUDE.md");
         std::os::unix::fs::symlink("AGENTS.md", dir.path().join("CLAUDE.md")).unwrap();
 
+        std::fs::write(&agents_md, format!("{block}# rules\n{block}")).unwrap();
         install_default(&["claude", "codex"], dir.path());
+        assert_eq!(std::fs::read_to_string(&agents_md).unwrap(), "# rules\n");
 
-        let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
-        assert_eq!(agents.matches("<!-- orbit:setup:begin -->").count(), 1);
-        let claude = std::fs::symlink_metadata(dir.path().join("CLAUDE.md")).unwrap();
-        assert!(claude.is_symlink());
+        std::fs::write(&agents_md, block).unwrap();
+        install_default(&["claude", "codex"], dir.path());
+        assert_eq!(std::fs::read_to_string(&agents_md).unwrap(), "");
+        assert!(
+            dir.path().join("CLAUDE.md").exists(),
+            "the link still resolves"
+        );
+
+        std::fs::remove_file(dir.path().join("CLAUDE.md")).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.path().join("CLAUDE.md")).unwrap();
+        std::fs::write(&outside, block).unwrap();
+        install_default(&["claude"], dir.path());
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "",
+            "a file outside the project is emptied, never deleted"
+        );
     }
 
     #[test]
@@ -1647,12 +1739,11 @@ mod tests {
         install_default(&["claude", "codex", "opencode"], dir.path());
         install_default(&["claude", "codex", "opencode"], dir.path());
 
-        let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
-        assert_eq!(agents.matches("<!-- orbit:setup:begin -->").count(), 1);
         assert_eq!(
-            std::fs::read_to_string(dir.path().join("AGENTS.md.orbit-backup")).unwrap(),
+            std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
             "# Mine\n"
         );
+        assert!(!dir.path().join("AGENTS.md.orbit-backup").exists());
         assert_eq!(
             std::fs::read_to_string(dir.path().join(".claude/settings.json.orbit-backup")).unwrap(),
             "{\"permissions\": {}}"
@@ -1780,7 +1871,7 @@ mod tests {
 
         install(options(), target(), &machine).unwrap();
 
-        assert!(config.path().join("CLAUDE.md").is_file());
+        assert!(!config.path().join("CLAUDE.md").exists());
         assert!(!config.path().join(".claude.json").exists());
         assert!(config.path().join("skills/orbit").exists());
         let settings = read_json(&config.path().join("settings.json"));
@@ -1843,9 +1934,55 @@ mod tests {
         )
         .unwrap();
 
-        assert!(home.path().join(".claude/CLAUDE.md").is_file());
+        assert!(!home.path().join(".claude/CLAUDE.md").exists());
         assert!(home.path().join(".claude/settings.json").is_file());
         assert!(!home.path().join(".claude.json").exists());
+    }
+
+    #[test]
+    fn agents_without_the_component_that_loads_the_instructions_are_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = project(dir.path());
+        let named = |agents: &[&str], skip: &[Component], skipped_plugin: bool| {
+            let selection = Selection {
+                agents: agents
+                    .iter()
+                    .map(|name| spec::agent_named(name).unwrap())
+                    .collect(),
+                components: Component::from_flags(&[], skip).unwrap(),
+                skill: SkillRequest::default(),
+            };
+            let mut report = Report::default();
+            if skipped_plugin {
+                report.note_plugin_skipped("Claude Code", "plugin", "too old");
+            }
+            missing_instructions(&selection, &target, &report)
+        };
+        let every = ["claude", "codex", "duo", "opencode", "pi"];
+
+        assert!(named(&every, &[], false).is_empty());
+        assert_eq!(named(&every, &[Component::Hooks], false).len(), 4);
+        assert_eq!(named(&every, &[Component::AgentPlugins], false).len(), 1);
+        assert_eq!(named(&["claude"], &[], true).len(), 1);
+
+        install_default(&["codex", "pi", "opencode", "claude"], dir.path());
+        assert!(
+            named(&["codex", "pi", "opencode"], &[Component::Hooks], false).is_empty(),
+            "a run that skips the hooks keeps the ones already installed"
+        );
+        assert!(named(&["claude"], &[Component::AgentPlugins], false).is_empty());
+
+        std::fs::write(
+            dir.path().join(".opencode/plugins/orbit.js"),
+            "export default { id: \"orbit\" };\n",
+        )
+        .unwrap();
+        let stale = named(&["opencode"], &[Component::Hooks], false);
+        assert_eq!(
+            stale.len(),
+            1,
+            "a plugin from an earlier release loads nothing: {stale:?}"
+        );
     }
 
     #[test]
