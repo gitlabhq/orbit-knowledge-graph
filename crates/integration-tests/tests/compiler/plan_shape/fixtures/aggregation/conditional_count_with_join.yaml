@@ -15,7 +15,7 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Join ON b.id = _orbit_edge_0.target_id (_) (Bind b (Filter b._deleted = false (Deduplicate LimitBy ... (Filter b.id IN ?.id (_))))))
+        - (Join ON b.id = _orbit_edge_0.target_id (_) (Filter b._deleted = false (Bind b (Deduplicate LimitBy ... (Sort b.traversal_path, b.project_id, b.branch, b.id, b._version DESC (Project * (Filter StartsWith(b.traversal_path, scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1)) OR (scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1) = '0/'), b.id IN ?.id (Scan Table(gl_definition) AS b))))))))
         - (Aggregate COUNT() FILTER ? AS n, ... (_))
     emitted:
       expect: ["(Aggregate COUNT() FILTER [(_orbit_edge_0.relationship_kind = 'CALLS') AND (_orbit_edge_0.source_kind = 'Definition') AND (_orbit_edge_0.target_kind = 'Definition') AND (_orbit_edge_0._deleted = false) AND (_orbit_edge_0.source_id = 1)] AS n, ... (_))", "(Deduplicate LimitBy 1 BY ... (_))"]

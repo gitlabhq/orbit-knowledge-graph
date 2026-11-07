@@ -30,7 +30,7 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Project (Filter ... (Bind d (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS d))))))
+        - (Bind d (Project * (Filter d.id IN [1, 2] (Scan Table(gl_definition) AS d))))
         - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))
     emitted:
       expect:

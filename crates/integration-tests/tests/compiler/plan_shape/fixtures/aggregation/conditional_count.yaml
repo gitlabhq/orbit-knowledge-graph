@@ -22,8 +22,8 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Project (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_code_edge) AS _orbit_edge_0))))
-        - (Aggregate COUNT() FILTER [_orbit_edge_0.relationship_kind = 'CALLS', _orbit_edge_0.source_kind = 'Definition', _orbit_edge_0.target_kind = 'Definition', _orbit_edge_0._deleted = false, _orbit_edge_0.source_id = 1] AS n (_))
+        - (Bind _orbit_edge_0 (Deduplicate LimitBy ... (Sort _orbit_edge_0.traversal_path, _orbit_edge_0.relationship_kind, _orbit_edge_0.project_id, _orbit_edge_0.branch, _orbit_edge_0.source_id, _orbit_edge_0.target_id, _orbit_edge_0.source_kind, _orbit_edge_0.target_kind, _orbit_edge_0._version DESC (Project * (Filter ... (Scan Table(gl_code_edge) AS _orbit_edge_0))))))
+        - (Aggregate COUNT() FILTER [(_orbit_edge_0.relationship_kind = 'CALLS') AND (_orbit_edge_0.source_kind = 'Definition') AND (_orbit_edge_0.target_kind = 'Definition') AND (_orbit_edge_0._deleted = false) AND (_orbit_edge_0.source_id = 1)] AS n (_))
       reject:
         - (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0))
     emitted:
