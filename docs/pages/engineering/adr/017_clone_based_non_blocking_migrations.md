@@ -9,6 +9,8 @@ toc_hide: true
 
 Accepted
 
+Amended by [ADR 023](023_self_contained_indexing_engine.md): campaigns replace checkpoint seeding and the checkpoint promotion gate.
+
 ## Date
 
 2026-07-13
