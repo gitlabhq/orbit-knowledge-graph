@@ -243,7 +243,7 @@ fn missing_instructions(selection: &Selection, target: &Target, report: &Report)
             let installed = (selection.components.contains(&component)
                 && !(component == Component::AgentPlugins
                     && skipped.contains(&agent.title.as_str())))
-                || components::installer_for(component).is_installed(*agent, target);
+                || components::loads_instructions(*agent, target);
             (!installed).then(|| {
                 format!(
                     "{} gets no Orbit instructions: they load from the {}, which this run skipped",
@@ -2027,10 +2027,30 @@ mod tests {
         assert_eq!(named(&every, &[Component::AgentPlugins], false).len(), 1);
         assert_eq!(named(&["claude"], &[], true).len(), 1);
 
-        install_default(&["codex", "pi"], dir.path());
+        install_default(&["codex", "pi", "opencode", "claude"], dir.path());
         assert!(
-            named(&["codex", "pi"], &[Component::Hooks], false).is_empty(),
+            named(&["codex", "pi", "opencode"], &[Component::Hooks], false).is_empty(),
             "a run that skips the hooks keeps the ones already installed"
+        );
+        let plugin = dir.path().join(".claude/orbit/claude_plugin");
+        assert!(
+            plugin.is_dir(),
+            "{:?}",
+            std::fs::read_dir(dir.path().join(".claude"))
+                .map(|d| d.flatten().map(|e| e.path()).collect::<Vec<_>>())
+        );
+        assert!(named(&["claude"], &[Component::AgentPlugins], false).is_empty());
+
+        std::fs::write(
+            dir.path().join(".opencode/plugins/orbit.js"),
+            "export default { id: \"orbit\" };\n",
+        )
+        .unwrap();
+        let stale = named(&["opencode"], &[Component::Hooks], false);
+        assert_eq!(
+            stale.len(),
+            1,
+            "a plugin from an earlier release loads nothing: {stale:?}"
         );
     }
 

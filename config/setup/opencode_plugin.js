@@ -15,6 +15,7 @@ function hasGraph() {
 }
 
 const LAUNCHERS = [["glab", ["orbit"]], ["orbit", []]];
+const RETRY_AFTER_MS = 60000;
 
 function run(command, args) {
   return new Promise((resolve) => {
@@ -50,10 +51,14 @@ export default {
   async server() {
     let reminded = false;
     let instructions = loadInstructions();
+    let loadedAt = Date.now();
     return {
       "experimental.chat.system.transform": async (_input, output) => {
         const text = await instructions;
-        if (!text) instructions = loadInstructions();
+        if (!text && Date.now() - loadedAt > RETRY_AFTER_MS) {
+          instructions = loadInstructions();
+          loadedAt = Date.now();
+        }
         if (text && !output.system.includes(text)) output.system.push(text);
       },
       "tool.execute.after": async (input, output) => {

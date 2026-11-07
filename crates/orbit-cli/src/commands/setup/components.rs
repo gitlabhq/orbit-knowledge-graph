@@ -42,6 +42,50 @@ fn file_mentions(path: &Path, marker: &str) -> bool {
     std::fs::read_to_string(path).is_ok_and(|text| text.contains(marker))
 }
 
+/// Whether a file setup installed for the agent already asks the CLI for the instructions, so a
+/// run that skips the component that writes it leaves the agent its instructions.
+pub(super) fn loads_instructions(agent: Agent, target: &Target) -> bool {
+    const CALLS: [&str; 3] = [
+        "hook-guard instructions",
+        "\"hook-guard\", \"instructions\"",
+        "'hook-guard', 'instructions'",
+    ];
+    let mentions = |path: &Path| {
+        std::fs::read_to_string(path).is_ok_and(|text| CALLS.iter().any(|call| text.contains(call)))
+    };
+    let resolved = |file: &spec::ScopedPath| target.resolve(file).ok().map(|(path, _)| path);
+    let merged = agent
+        .json_merges
+        .iter()
+        .filter_map(|merge| resolved(&merge.file))
+        .any(|path| mentions(&path));
+    let templated = agent
+        .all_ui_files(false)
+        .filter_map(|file| resolved(&file.path))
+        .any(|path| mentions(&path));
+    let plugin = agent
+        .plugin
+        .as_ref()
+        .and_then(|plugin| resolved(&plugin.dir))
+        .is_some_and(|dir| any_file_mentions(&dir, &mentions));
+    merged || templated || plugin
+}
+
+fn any_file_mentions(dir: &Path, mentions: &dyn Fn(&Path) -> bool) -> bool {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| {
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => any_file_mentions(&path, mentions),
+                Ok(kind) if kind.is_file() => mentions(&path),
+                _ => false,
+            }
+        })
+}
+
 pub(super) fn installer_for(component: Component) -> &'static dyn Installer {
     match component {
         Component::Instructions => &instructions::Instructions,

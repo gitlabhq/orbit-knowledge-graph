@@ -1,4 +1,5 @@
 const LAUNCHERS: [string, string[]][] = [["glab", ["orbit"]], ["orbit", []]];
+const RETRY_AFTER_MS = 60000;
 
 async function loadInstructions(pi: any): Promise<string> {
   const texts = await Promise.all(
@@ -12,11 +13,15 @@ async function loadInstructions(pi: any): Promise<string> {
 
 export default function (pi: any) {
   let instructions: Promise<string> | undefined;
+  let loadedAt = 0;
   pi.on("before_agent_start", async (event: any) => {
-    instructions ??= loadInstructions(pi);
+    if (!instructions) {
+      instructions = loadInstructions(pi);
+      loadedAt = Date.now();
+    }
     const text = await instructions;
     if (!text) {
-      instructions = undefined;
+      if (Date.now() - loadedAt > RETRY_AFTER_MS) instructions = undefined;
       return;
     }
     if (String(event.systemPrompt).includes(text)) return;
