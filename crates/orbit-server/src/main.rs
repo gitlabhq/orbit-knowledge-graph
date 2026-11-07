@@ -191,17 +191,20 @@ async fn run_webserver(
     );
     info!("Content resolution enabled (GitlabClient configured)");
 
-    match config
-        .observability
-        .resolver_settings()
-        .as_ref()
-        .and_then(content::observability::build)
-    {
-        Some(service) => {
-            resolver_registry.register(content::observability::SERVICE_NAME, service);
-            info!("Observability column resolution enabled");
-        }
-        None => info!("Observability column resolution disabled (not configured)"),
+    match config.observability.resolver_settings() {
+        Ok(Some(settings)) => match content::observability::build(&settings) {
+            Some(service) => {
+                resolver_registry.register(content::observability::SERVICE_NAME, service);
+                info!("Observability column resolution enabled");
+            }
+            None => info!("Observability column resolution disabled (client unavailable)"),
+        },
+        Ok(None) => info!("Observability column resolution disabled (not configured)"),
+        Err(e) => warn!(
+            safe(ERROR_TYPE) = "observability_config",
+            expanded(ERROR_MESSAGE) = %e,
+            "Observability column resolution disabled (misconfigured)"
+        ),
     }
 
     info!("initializing NATS connection");
