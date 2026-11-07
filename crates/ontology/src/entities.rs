@@ -790,9 +790,10 @@ mod listed_fields_tests {
     }
 
     fn node_with(fields: Vec<Field>) -> NodeEntity {
-        let mut node = NodeEntity::default();
-        node.fields = fields;
-        node
+        NodeEntity {
+            fields,
+            ..Default::default()
+        }
     }
 
     #[test]
