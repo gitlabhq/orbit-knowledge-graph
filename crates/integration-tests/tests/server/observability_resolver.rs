@@ -20,7 +20,18 @@ CREATE TABLE IF NOT EXISTS signoz_index_v3 (
 ORDER BY (ts_bucket_start, timestamp)
 ";
 
-const PIPELINE_STARTED: i64 = 1_760_000_000;
+/// Relative to now: the resolver drops keys past the tenant's trace
+/// retention, so a fixed timestamp would age out of the window.
+fn pipeline_started() -> i64 {
+    now_unix() - 3_600
+}
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64
+}
 
 fn bucket(unix: i64) -> u64 {
     (unix / 1_800 * 1_800) as u64
@@ -97,8 +108,8 @@ fn route(ctx: &TestContext) -> TenantRoute {
 fn key(entity_id: &str) -> traces::TraceKey {
     traces::TraceKey {
         entity_id: entity_id.to_string(),
-        from_unix: PIPELINE_STARTED - 3_600,
-        to_unix: PIPELINE_STARTED + 86_400,
+        from_unix: pipeline_started() - 3_600,
+        to_unix: pipeline_started() + 86_400,
     }
 }
 
@@ -133,7 +144,7 @@ async fn seeded_pipeline() -> TestContext {
 
     seed_span(
         &ctx,
-        PIPELINE_STARTED,
+        pipeline_started(),
         "4bf92f3577b34da6a3ce929d0e0e4736",
         "00f067aa0ba902b7",
         412_000_000,
@@ -143,7 +154,7 @@ async fn seeded_pipeline() -> TestContext {
     .await;
     seed_span(
         &ctx,
-        PIPELINE_STARTED + 10,
+        pipeline_started() + 10,
         "4bf92f3577b34da6a3ce929d0e0e4736",
         "00f067aa0ba902b8",
         118_000_000,
@@ -214,7 +225,7 @@ async fn every_requested_id_is_resolved_in_one_query() {
     let ctx = seeded_pipeline().await;
     seed_span(
         &ctx,
-        PIPELINE_STARTED + 20,
+        pipeline_started() + 20,
         "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
         "11a2b3c4d5e6f708",
         90_000_000,
@@ -242,8 +253,8 @@ async fn a_span_outside_the_time_window_is_not_returned() {
     let ctx = seeded_pipeline().await;
     let stale = traces::TraceKey {
         entity_id: "3000".to_string(),
-        from_unix: PIPELINE_STARTED - 86_400 * 10,
-        to_unix: PIPELINE_STARTED - 86_400 * 9,
+        from_unix: pipeline_started() - 86_400 * 10,
+        to_unix: pipeline_started() - 86_400 * 9,
     };
 
     let rows = fetch(&ctx, TraceLookup::PipelineTraceId, &[stale]).await;
