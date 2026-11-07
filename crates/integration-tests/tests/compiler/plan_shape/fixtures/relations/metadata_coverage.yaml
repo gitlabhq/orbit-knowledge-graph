@@ -12,10 +12,8 @@ cases:
     physical:
       clickhouse:
         planned:
-          bind:
-            - (CTE $p (Project * (Filter p.full_path = 'gitlab-org/orbit', p._deleted = false (Bind p (Project * (Deduplicate Final (Scan Table(gl_project) AS p)))))))
           expect:
-            - (Join ON p.id = mr.project_id (_) (Scan Share($p) AS p))
+            - (Join ON p.id = mr.project_id (_) (Filter p.full_path = 'gitlab-org/orbit', p._deleted = false (Bind p (Project * (Deduplicate Final (Scan Table(gl_project) AS p))))))
 
   - name: Filtered aggregation endpoints use exact reusable keys
     query:

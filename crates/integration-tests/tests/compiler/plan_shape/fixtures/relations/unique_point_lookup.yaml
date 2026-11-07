@@ -1,5 +1,5 @@
 cases:
-  - name: A unique-column point lookup read twice is shared once
+  - name: A unique-column point lookup is recomputed inline at each use
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"}},{"id":"mr","entity":"MergeRequest"},{"id":"mr2","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"APPROVED","from":"u","to":"mr2"}]}
@@ -12,10 +12,12 @@ cases:
     physical:
       clickhouse:
         planned:
-          bind:
-            - (CTE $users (Project * (Filter u.username = 'alice', ... (Bind u (Deduplicate LimitBy 1 BY u.id (_))))))
+          expect:
+            - (Filter u.username = 'alice', ... (Bind u (Deduplicate LimitBy 1 BY u.id (_))))
           occurrences:
-            - { pattern: "(Deduplicate LimitBy 1 BY u.id (_))", count: 1 }
+            - { pattern: "(Deduplicate LimitBy 1 BY u.id (_))", count: 2 }
+          reject:
+            - (CTE ? (Project * (Filter u.username = 'alice', ... (Bind u (Deduplicate LimitBy 1 BY u.id (_))))))
 
   - name: A non-unique selective lookup is materialized once and reused
     query:
