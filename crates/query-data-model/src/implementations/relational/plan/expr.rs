@@ -182,6 +182,40 @@ impl Expr {
         }
     }
 
+    pub(super) fn bodies(&mut self, visit: &mut dyn FnMut(&mut BodyId)) {
+        match self {
+            Self::In { value, query } => {
+                visit(query);
+                value.bodies(visit);
+            }
+            Self::Scalar(body) => visit(body),
+            _ => {
+                for child in self.children_mut() {
+                    child.bodies(visit);
+                }
+            }
+        }
+    }
+
+    fn children_mut(&mut self) -> Vec<&mut Expr> {
+        match self {
+            Self::List(items) | Self::Call { args: items, .. } => items.iter_mut().collect(),
+            Self::TimeBucket { value, .. }
+            | Self::Lambda { body: value, .. }
+            | Self::Unary { value, .. }
+            | Self::In { value, .. } => vec![value],
+            Self::TextSearch { value, query, .. } => vec![value, query],
+            Self::Binary { left, right, .. } => vec![left, right],
+            Self::Column(_)
+            | Self::Variable(_)
+            | Self::Parameter { .. }
+            | Self::Null
+            | Self::Bool(_)
+            | Self::EmptyArray(_)
+            | Self::Scalar(_) => Vec::new(),
+        }
+    }
+
     pub(super) fn children(&self) -> Vec<&Expr> {
         match self {
             Self::List(items) | Self::Call { args: items, .. } => items.iter().collect(),

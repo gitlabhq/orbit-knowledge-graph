@@ -3,7 +3,9 @@ use crate::implementations::relational::RelationalBackend;
 use crate::implementations::relational::plan::{BodyUse, Expr, Relation, RelationalError, Sharing};
 use crate::plan::tracking::{Body, BodyId};
 
-#[derive(Debug, Clone)]
+const SHARED: &str = "shared";
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Subquery {
     pub(super) body: Body,
     pub(super) name: String,
@@ -38,6 +40,23 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
             false => Ok(()),
         })?;
         self.define(name, Sharing::Shared { materialized }, build)
+    }
+
+    /// Rows that every read of the returned handle sees; `Catalog::materialize` decides how each is shared.
+    pub fn share(&mut self, rows: Relation) -> Result<Subquery, RelationalError> {
+        let rows = self.guard(complete(rows, "a shared relation"))?;
+        let width = self.construction.outputs(&rows.rows)?.len();
+        let body = self.construction.share(SHARED, rows.rows)?;
+        self.bodies.push(BodyUse {
+            sharing: Sharing::Pending,
+            with: Vec::new(),
+        });
+        self.names.push(SHARED.to_string());
+        self.widths.push(width);
+        Ok(Subquery {
+            body,
+            name: SHARED.to_string(),
+        })
     }
 
     pub fn subquery(

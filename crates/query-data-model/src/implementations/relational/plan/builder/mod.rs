@@ -2,6 +2,7 @@ mod bodies;
 mod check;
 mod clauses;
 mod detach;
+mod materialize;
 mod rewrite;
 mod sources;
 mod tail;
@@ -13,6 +14,7 @@ use ontology::DataType;
 pub use bodies::Subquery;
 pub use clauses::Aggregated;
 pub use detach::Detached;
+pub use materialize::SharePolicy;
 
 use super::relation::Visible;
 use super::stage::Stage;

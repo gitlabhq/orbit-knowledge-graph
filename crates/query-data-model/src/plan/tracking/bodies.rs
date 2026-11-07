@@ -43,6 +43,29 @@ impl<L: Language> Construction<L> {
         })
     }
 
+    pub fn share(&mut self, name: impl Into<String>, root: Rows) -> Result<Body, Rejected> {
+        let name = name.into();
+        self.attempt(|this| {
+            let root = this.node(&root)?;
+            this.arena.parents.push(Some(this.scope));
+            let scope = ScopeId(this.arena.parents.len() - 1);
+            let mut stack = vec![root];
+            while let Some(node) = stack.pop() {
+                let node = &mut this.arena.nodes[node.0];
+                if node.scope == this.scope {
+                    node.scope = scope;
+                    stack.extend(node.inputs.iter().copied());
+                }
+            }
+            this.arena.nodes[root.0].consumed = true;
+            this.arena.bodies.push(BodyInfo { name, scope, root });
+            Ok(Body {
+                plan: this.arena.plan,
+                body: BodyId(this.arena.bodies.len() - 1),
+            })
+        })
+    }
+
     pub fn read(&mut self, body: Body, operation: L::Operation) -> Result<Connected, Rejected> {
         self.attempt(|this| {
             if body.plan != this.arena.plan {

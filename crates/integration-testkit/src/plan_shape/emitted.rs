@@ -135,12 +135,12 @@ impl<B: RelationalBackend> Emitted<'_, B> {
                 let range = alias.as_deref().unwrap_or(name);
                 match (self.plan.body(*body).sharing, self.operation(root)) {
                     (Sharing::Shared { .. }, _) => scan(name, range, false),
-                    (Sharing::Inline, Operation::Union) => {
+                    (Sharing::Inline | Sharing::Pending, Operation::Union) => {
                         let arms = self.plan.plan.inputs(root).iter();
                         let arms = arms.map(|arm| self.query(*arm)).collect();
                         Tree::node(Operator::Union, format!("ALL AS {range}"), arms)
                     }
-                    (Sharing::Inline, _) => {
+                    (Sharing::Inline | Sharing::Pending, _) => {
                         Tree::node(Operator::Bind, range, vec![self.body(*body)])
                     }
                 }

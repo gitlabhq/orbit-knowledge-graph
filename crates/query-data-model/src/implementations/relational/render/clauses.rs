@@ -84,14 +84,16 @@ impl<D: Dialect> Renderer<'_, D> {
                 self.dialect.scan(table, alias, *read)
             }
             Operation::Read { body, alias } => match (plan.body(*body).sharing, alias) {
-                (Sharing::Inline, alias) => {
-                    let alias = alias.as_deref().unwrap_or_default();
-                    format!("({}) AS {alias}", self.subquery(*body))
-                }
                 (Sharing::Shared { .. }, Some(alias)) => {
                     format!("{} AS {alias}", plan.plan.body(*body).0)
                 }
                 (Sharing::Shared { .. }, None) => plan.plan.body(*body).0.to_string(),
+                (Sharing::Inline | Sharing::Pending, Some(alias)) => {
+                    format!("({}) AS {alias}", self.subquery(*body))
+                }
+                (Sharing::Inline | Sharing::Pending, None) => {
+                    format!("({})", self.subquery(*body))
+                }
             },
             Operation::Join(kind) => {
                 let inputs = plan.plan.inputs(node);

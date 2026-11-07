@@ -11,7 +11,7 @@ use std::marker::PhantomData;
 use ontology::DataType;
 
 pub use block::Block;
-pub use builder::{Aggregated, Detached, RelationalBuilder, Subquery};
+pub use builder::{Aggregated, Detached, RelationalBuilder, SharePolicy, Subquery};
 pub use error::RelationalError;
 pub use expr::{BinaryOp, Expr, Function, TextMatch, TimeUnit, UnaryOp};
 pub use operation::{
@@ -38,6 +38,7 @@ impl<B> Language for Relational<B> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sharing {
     Inline,
+    Pending,
     Shared { materialized: bool },
 }
 
