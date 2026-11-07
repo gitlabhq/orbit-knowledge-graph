@@ -148,10 +148,7 @@ async fn seeded_pipeline() -> TestContext {
         "00f067aa0ba902b8",
         118_000_000,
         true,
-        &[
-            ("cicd.pipeline.run.id", "3000"),
-            ("cicd.pipeline.task.run.id", "4000"),
-        ],
+        &[("cicd.pipeline.task.run.id", "4000")],
     )
     .await;
 

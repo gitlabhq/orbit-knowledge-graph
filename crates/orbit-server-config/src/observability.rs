@@ -14,7 +14,9 @@ pub struct ObservabilityConfig {
     pub host_map_retry_after_seconds: u64,
     #[schemars(range(min = 1))]
     pub request_timeout_seconds: u64,
-    /// Server-side bound on a tenant ClickHouse query, sent as max_execution_time.
+    /// Client-side wait on a tenant ClickHouse query. The server-side bound is
+    /// max_execution_time in the reader's settings profile, which the
+    /// provisioner pins.
     #[schemars(range(min = 1))]
     pub query_timeout_seconds: u64,
     #[schemars(range(min = 1))]
