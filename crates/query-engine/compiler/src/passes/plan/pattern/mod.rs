@@ -19,6 +19,8 @@ use super::{DenormalizedKey, DenormalizedProperty, Plan, sort_key};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::logical::Query;
+use crate::logical::facts::{anchors, facts};
+use query_data_model::plan::logical::Expr;
 
 #[derive(Clone)]
 pub struct NodePlan {
@@ -29,11 +31,11 @@ pub struct NodePlan {
     pub filters: Vec<(String, BoundFilter)>,
     pub predicates: Vec<Predicate>,
     pub node_ids: Vec<i64>,
-    pub id_range: Option<InputIdRange>,
+    pub id_range: Option<(i64, i64)>,
     pub has_traversal_path: bool,
     pub read_scope: ReadScope,
     pub redaction_id_column: String,
-    pub columns: Option<ColumnSelection>,
+    pub columns: Vec<String>,
     pub emit_select: bool,
     pub null_as_epoch: NullAsEpochColumns,
 }
@@ -64,6 +66,7 @@ pub struct Fk {
 }
 
 pub(super) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
+    pub query: Query<'a>,
     pub input: &'a Input,
     pub model: &'a M,
     pub nodes: HashMap<String, NodePlan>,
@@ -74,7 +77,7 @@ pub(super) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
 
 impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
     fn aggregate(&self) -> bool {
-        self.input.query_type == QueryType::Aggregation
+        self.query.kind() == QueryType::Aggregation
     }
 
     fn node_read(&self, graph: &mut RelationGraph, node: &NodePlan) -> Result<RelationId> {
@@ -108,8 +111,10 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
 
 impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
     pub(super) fn new(query: Query<'a>, input: &'a Input, model: &'a M) -> Result<Self> {
-        let nodes = nodes::build_nodes(input, model);
+        let facts = facts(query);
+        let nodes = nodes::build_nodes(query, &anchors(query, &facts), model);
         let mut pattern = Self {
+            query,
             input,
             model,
             relations: relations::build_relations(input, model, &nodes),
@@ -122,7 +127,14 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
         nodes::assign_node_access(&mut pattern, &placement.joined_nodes);
         relations::linearize_relations(&mut pattern.relations, &pattern.nodes)?;
         if pattern.aggregate() {
-            let groups: HashSet<&str> = node_group_ids(&input.aggregation.group_by).collect();
+            let (groups, _) = query.aggregate().unwrap_or_default();
+            let groups: HashSet<&str> = groups
+                .iter()
+                .filter_map(|group| match group {
+                    Expr::Node(binding) => Some(query.name(*binding)),
+                    _ => None,
+                })
+                .collect();
             for node in pattern.nodes.values_mut() {
                 node.emit_select = groups.contains(node.alias.as_str());
             }

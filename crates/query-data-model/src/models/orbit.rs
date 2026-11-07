@@ -95,8 +95,9 @@ pub trait OrbitQueryModel {
     fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property>;
     fn entity_table(&self, entity: &str) -> Option<&str>;
     fn entity_has_traversal_path(&self, entity: &str) -> bool;
+    fn has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: &str) -> bool;
-    fn entity_high_fan_out(&self, entity: &str) -> bool;
+    fn high_fan_out(&self, entity: EntityId) -> bool;
     fn property_column_named(&self, entity: &str, property: &str) -> Option<&str>;
     fn property_column(&self, property: PropertyId) -> Option<&str>;
     fn property_is_stored(&self, property: PropertyId) -> bool;
@@ -127,6 +128,7 @@ pub trait OrbitQueryModel {
     fn property_is_filterable(&self, entity: &str, property: &str) -> bool;
     fn property_allows_like(&self, entity: &str, property: &str) -> bool;
     fn property_is_free_text(&self, entity: &str, property: &str) -> bool;
+    fn property_free_text(&self, property: PropertyId) -> bool;
     fn entity_authorized_by_namespace(&self, entity: &str) -> bool;
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str>;
     fn table_has_path_columns(&self, table: &str) -> bool;

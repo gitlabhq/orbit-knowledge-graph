@@ -59,20 +59,20 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             }
         }
         let joined: Vec<&str> = pattern
-            .input
-            .nodes
-            .iter()
-            .map(|node| node.id.as_str())
+            .query
+            .bindings()
+            .into_iter()
+            .map(|binding| binding.name)
             .filter(|alias| self.nodes.contains_key(*alias) && pattern.nodes[*alias].joined)
             .collect();
         for alias in joined {
             self.ensure_node(alias)?;
         }
         let bindings = pattern
-            .input
-            .nodes
-            .iter()
-            .filter_map(|node| self.nodes.get(&node.id)?.binding.clone())
+            .query
+            .bindings()
+            .into_iter()
+            .filter_map(|binding| self.nodes.get(binding.name)?.binding.clone())
             .collect();
         Ok(ExecutionPlan {
             root: self

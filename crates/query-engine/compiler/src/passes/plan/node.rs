@@ -4,9 +4,8 @@
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::Expr;
-use query_data_model::plan::logical::Expr as Logical;
 
-use super::filters::{BoundFilter, FilterOwner, Test, bind_filter, unindex_if_key_narrowed};
+use super::filters::{BoundFilter, bind_facts, unindex_if_key_narrowed};
 use super::predicates::Column;
 use crate::logical::Query;
 use crate::logical::facts::Anchor;
@@ -58,40 +57,6 @@ impl<'p> Node<'p> {
     pub fn uses_default_pk(&self) -> bool {
         self.redaction == DEFAULT_PRIMARY_KEY
     }
-}
-
-/// The anchor's attached filters, each bound to its property on the binding's entity.
-pub(crate) fn bind_facts<M: RelationalModel + ?Sized>(
-    query: Query<'_>,
-    anchor: &Anchor<'_>,
-    alias: &str,
-    model: &M,
-) -> Vec<(String, BoundFilter)> {
-    let graph = query.model.graph();
-    let owner = FilterOwner::Entity(anchor.binding.entity);
-    anchor
-        .filters
-        .iter()
-        .filter_map(|fact| {
-            let Logical::Property { property, .. } = fact.left else {
-                return None;
-            };
-            let name = &graph.property(property).name;
-            let mut rhs = None;
-            let test = Test::of(*fact, |right| {
-                let Logical::Property { property, .. } = right else {
-                    unreachable!("attached comparisons stay on one binding")
-                };
-                rhs = Some(property);
-                Column::new(alias, &graph.property(property).name)
-            })?;
-            let mut bound = bind_filter(name, test, &owner, model);
-            bound.null_as_epoch.rhs = rhs
-                .filter(|rhs| model.null_as_epoch(*rhs))
-                .map(|rhs| graph.property(rhs).data_type);
-            Some((name.clone(), bound))
-        })
-        .collect()
 }
 
 impl BoundFilter {

@@ -90,7 +90,7 @@ fn aggregation_plan(
                 let Some(metadata) = nodes.get(node.as_str()) else {
                     continue;
                 };
-                for column in metadata.requested_columns() {
+                for column in &metadata.columns {
                     add_group(
                         &mut plan.groups,
                         Group {

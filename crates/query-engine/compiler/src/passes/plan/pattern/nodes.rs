@@ -1,77 +1,60 @@
-//! Node planning: a `NodePlan` per input node, and the decision whether each node joins the result
+//! Node planning: a `NodePlan` per binding, and the decision whether each node joins the result
 //! as a table read or only narrows an edge scan.
 
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
-use query_data_model::OrbitQueryModel;
+use query_data_model::plan::logical::{
+    Columns, Expr, LogicalOperation, Measure, Projection as Item,
+};
+use query_data_model::plan::tracking::Ref;
+use query_data_model::{OrbitQueryModel, PropertyId};
 
 use super::{NodePlan, Pattern};
-use crate::input::*;
-use crate::passes::plan::filters::{FilterOwner, ordered_filters};
+use crate::logical::facts::Anchor;
+use crate::logical::{Query, binding};
+use crate::passes::plan::filters::{bind_facts, unindex_if_key_narrowed};
 use crate::passes::plan::graph::ReadScope;
 use crate::passes::plan::predicates::{
     Column, OutputValue, Predicate, Projection, live, property_filter,
 };
 
 impl NodePlan {
-    fn from_input<M>(node: &InputNode, model: &M) -> Option<Self>
+    fn new<M>(query: Query<'_>, anchor: &Anchor<'_>, selection: Option<&Columns>, model: &M) -> Self
     where
         M: OrbitQueryModel + ?Sized,
     {
-        let entity = node.entity.as_deref()?;
-        let entity_id = model.graph().entity_id(entity)?;
-        let filters: HashMap<_, _> = node
-            .filters
-            .iter()
-            .filter(|(property, _)| !model.property_is_virtual(entity_id, property))
-            .map(|(property, filters)| (property.clone(), filters.clone()))
-            .collect();
-        let columns = node.columns.as_ref().map(|selection| match selection {
-            ColumnSelection::All => ColumnSelection::All,
-            ColumnSelection::List(columns) => ColumnSelection::List(
-                columns
-                    .iter()
-                    .filter(|column| !model.property_is_virtual(entity_id, column))
-                    .cloned()
-                    .collect(),
-            ),
-        });
-        let null_as_epoch = model.null_as_epoch_properties(entity_id);
-        let mut filters = ordered_filters(&filters, FilterOwner::Entity(entity_id), model);
-        for (_, bound) in &mut filters {
-            if let Some(rhs) = bound.test.rhs()
-                && rhs.source == node.id
-            {
-                bound.null_as_epoch.rhs = null_as_epoch.get(&rhs.name).copied();
-            }
-        }
-        Some(Self {
-            alias: node.id.clone(),
-            entity: node.entity.clone(),
-            table: model.entity_table(entity).map(String::from),
+        let binding = anchor.binding;
+        let entity = binding.entity;
+        let graph = model.graph();
+        let mut filters = bind_facts(query, anchor, binding.name, model);
+        filters.retain(|(property, _)| !model.property_is_virtual(entity, property));
+        filters.sort_by(|(left, _), (right, _)| left.cmp(right));
+        unindex_if_key_narrowed(&mut filters);
+        let has_traversal_path = model.has_traversal_path(entity);
+        Self {
+            alias: binding.name.to_string(),
+            entity: Some(graph.entity(entity).name.clone()),
+            table: model.table_of(entity).map(String::from),
             joined: false,
             filters,
             predicates: Vec::new(),
-            node_ids: node.node_ids.clone(),
-            id_range: node.id_range.clone(),
-            has_traversal_path: model.entity_has_traversal_path(entity),
-            read_scope: match (
-                model.entity_has_traversal_path(entity),
-                model.entity_high_fan_out(entity),
-            ) {
+            node_ids: anchor.pinned.clone(),
+            id_range: anchor.range,
+            has_traversal_path,
+            read_scope: match (has_traversal_path, model.high_fan_out(entity)) {
                 (false, _) => ReadScope::Unscoped,
                 (true, false) => ReadScope::Scoped,
                 (true, true) => ReadScope::HighFanOut,
             },
             redaction_id_column: model
-                .redaction_id_column_named(entity)
+                .redaction_id_column(entity)
                 .unwrap_or(DEFAULT_PRIMARY_KEY)
                 .to_string(),
-            columns,
+            columns: columns(model, entity, selection),
             emit_select: true,
-            null_as_epoch,
-        })
+            null_as_epoch: model.null_as_epoch_properties(entity),
+        }
     }
 
     pub fn is_id_pinned_only(&self) -> bool {
@@ -94,12 +77,8 @@ impl NodePlan {
                 values: self.node_ids.clone(),
             });
         }
-        if let Some(range) = &self.id_range {
-            predicates.push(Predicate::IdRange {
-                column,
-                start: range.start,
-                end: range.end,
-            });
+        if let Some((start, end)) = self.id_range {
+            predicates.push(Predicate::IdRange { column, start, end });
         }
         predicates
     }
@@ -121,34 +100,91 @@ impl NodePlan {
         if !self.emit_select {
             return vec![];
         }
-        self.requested_columns()
-            .into_iter()
+        self.columns
+            .iter()
             .map(|column| {
                 Projection::new(
-                    OutputValue::property(&self.null_as_epoch, Column::new(&self.alias, &column)),
+                    OutputValue::property(&self.null_as_epoch, Column::new(&self.alias, column)),
                     format!("{}_{column}", self.alias),
                 )
             })
             .collect()
     }
-
-    pub(crate) fn requested_columns(&self) -> Vec<String> {
-        match &self.columns {
-            Some(ColumnSelection::List(columns)) => columns.clone(),
-            Some(ColumnSelection::All) => vec!["*".to_string()],
-            None => vec![],
-        }
-    }
 }
 
-pub(super) fn build_nodes<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>
+/// The columns a node returns: the listed ones, else the defaults or every readable property.
+fn columns<M>(
+    model: &M,
+    entity: query_data_model::EntityId,
+    selection: Option<&Columns>,
+) -> Vec<String>
 where
     M: OrbitQueryModel + ?Sized,
 {
-    input
-        .nodes
+    let graph = model.graph();
+    let properties: Vec<PropertyId> = match selection {
+        Some(Columns::Listed(listed)) => listed.clone(),
+        selection => {
+            let defaults = model.default_properties(entity);
+            let defaulted = matches!(selection, None | Some(Columns::Default));
+            let properties = match defaulted && !defaults.is_empty() {
+                true => defaults,
+                false => &graph.entity(entity).properties,
+            };
+            properties
+                .iter()
+                .copied()
+                .filter(|property| model.property_realization(*property).is_some())
+                .filter(|property| !model.property_is_hidden(*property))
+                .filter(|property| !model.property_is_admin_only(*property))
+                .collect()
+        }
+    };
+    properties
+        .into_iter()
+        .map(|property| graph.property(property).name.clone())
+        .filter(|name| !model.property_is_virtual(entity, name))
+        .collect()
+}
+
+/// The first graph projection of each binding, through the group outputs that stand for a node.
+fn selections<'p>(query: Query<'p>) -> HashMap<Ref, &'p Columns> {
+    let mut nodes = HashMap::new();
+    for (node, operation) in query.operations() {
+        if let LogicalOperation::Aggregate { groups, .. } = operation {
+            for (group, output) in groups.iter().zip(query.plan.outputs(node)) {
+                if let Expr::Node(binding) = group {
+                    nodes.insert(output, *binding);
+                }
+            }
+        }
+    }
+    let mut selected = HashMap::new();
+    for item in query.selected() {
+        if let Item::Graph { binding, columns } = item {
+            let binding = nodes.get(binding).copied().unwrap_or(*binding);
+            selected.entry(binding).or_insert(columns);
+        }
+    }
+    selected
+}
+
+pub(super) fn build_nodes<M>(
+    query: Query<'_>,
+    anchors: &[Anchor<'_>],
+    model: &M,
+) -> HashMap<String, NodePlan>
+where
+    M: OrbitQueryModel + ?Sized,
+{
+    let selected = selections(query);
+    anchors
         .iter()
-        .filter_map(|node| Some((node.id.clone(), NodePlan::from_input(node, model)?)))
+        .map(|anchor| {
+            let selection = selected.get(&anchor.binding.output).copied();
+            let node = NodePlan::new(query, anchor, selection, model);
+            (node.alias.clone(), node)
+        })
         .collect()
 }
 
@@ -171,9 +207,28 @@ where
         let authorization_only;
         (node.joined, authorization_only) = access[&node.alias];
         if authorization_only {
-            node.columns = Some(ColumnSelection::List(vec![]));
+            node.columns = Vec::new();
         }
     }
+}
+
+/// The nodes an aggregation returns one row per: node groups, and nodes grouped by free text.
+fn aggregation_row_nodes<'p>(
+    query: Query<'p>,
+    model: &(impl OrbitQueryModel + ?Sized),
+) -> HashSet<&'p str> {
+    let (groups, _) = query.aggregate().unwrap_or_default();
+    groups
+        .iter()
+        .filter(|group| match group {
+            Expr::Node(_) => true,
+            Expr::Property { property, .. } | Expr::Truncate { property, .. } => {
+                model.property_free_text(*property)
+            }
+            _ => false,
+        })
+        .map(|group| query.name(binding(*group)))
+        .collect()
 }
 
 fn node_access<M: OrbitQueryModel + ?Sized>(
@@ -181,37 +236,37 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
     node: &NodePlan,
     condition_nodes: &HashSet<String>,
 ) -> (bool, bool) {
-    let input = pattern.input;
-    let group_target = input
-        .aggregation
-        .group_by
-        .iter()
-        .any(|group| group.node() == node.alias);
-    let metric_target = input.aggregation.metrics.iter().any(|metric| {
-        metric.expr.node() == node.alias
-            && metric.expr.property().is_some_and(|property| {
-                metric.distinct
-                    || !matches!(metric.expr.function(), AggFunction::Count)
-                    || node
-                        .entity
-                        .as_deref()
-                        .is_some_and(|entity| pattern.model.property_is_nullable(entity, property))
-            })
+    let query = pattern.query;
+    let model = pattern.model;
+    let on_node = |expr: &Expr| query.name(binding(*expr)) == node.alias;
+    let (groups, measures) = query.aggregate().unwrap_or_default();
+    let group_target = groups.iter().any(on_node);
+    let metric_target = measures.iter().any(|measure| {
+        let (expr, distinct, count) = match measure {
+            Measure::Count(Some(expr)) => (expr, false, true),
+            Measure::CountDistinct(expr) => (expr, true, true),
+            Measure::Sum(expr) | Measure::Avg(expr) | Measure::Min(expr) | Measure::Max(expr) => {
+                (expr, false, false)
+            }
+            Measure::Count(None) => return false,
+        };
+        on_node(expr)
+            && matches!(expr, Expr::Property { property, .. }
+                if distinct || !count || model.graph().property(*property).nullable)
     });
-    let ordered = input
-        .order_by
-        .as_ref()
-        .is_some_and(|order| order.node == node.alias);
+    let ordered = query
+        .ordered()
+        .into_iter()
+        .filter(|key| matches!(key, Expr::Property { .. }))
+        .last()
+        .is_some_and(|key| on_node(&key));
     let local_predicate = condition_nodes.contains(&node.alias) && !pattern.holds_fk(&node.alias);
     let uncovered_filter = pattern.has_uncovered_filter(node);
-    let returned = !pattern.aggregate()
-        || input
-            .aggregation_row_nodes(pattern.model)
-            .contains(node.alias.as_str());
-    let role_floor = node.entity.as_deref().is_some_and(|entity| {
-        pattern
-            .model
-            .entity_minimum_access_level(entity)
+    let returned =
+        !pattern.aggregate() || aggregation_row_nodes(query, model).contains(node.alias.as_str());
+    let role_floor = query.binding(&node.alias).is_some_and(|binding| {
+        model
+            .required_access_level(binding.entity)
             .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
     });
     let authorized_from_table =
@@ -222,8 +277,8 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         && !metric_target
         && !ordered
         && !local_predicate;
-    let joined_as_rows = input.relationships.is_empty()
-        || !pattern.model.supports_deferred_node_loading()
+    let joined_as_rows = query.steps().is_empty()
+        || !model.supports_deferred_node_loading()
         || group_target
         || metric_target
         || ordered

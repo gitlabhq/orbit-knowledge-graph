@@ -7,7 +7,6 @@ use query_data_model::OrbitQueryModel;
 use super::super::{EdgeRelation, Fk};
 use super::RelationBuilder;
 use crate::error::{QueryError, Result};
-use crate::input::ColumnSelection;
 use crate::passes::plan::predicates::*;
 
 impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
@@ -45,7 +44,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
                 None if read_later && unfiltered => {}
                 reached if self.ids(endpoint).is_none() => {
                     let mut node = pattern.nodes[endpoint].clone();
-                    node.columns = Some(ColumnSelection::List(vec![]));
+                    node.columns = Vec::new();
                     if let Some(reached) = reached {
                         node.predicates.push(membership(
                             Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
@@ -91,7 +90,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             && pattern.has_selective_uncovered_filter(endpoint)
         {
             let mut far = pattern.nodes[endpoint].clone();
-            far.columns = Some(ColumnSelection::List(vec![]));
+            far.columns = Vec::new();
             let ids = self.node_ids_from(&far)?;
             node.predicates.push(membership(key_column.clone(), ids));
         } else if let Some(ids) = self.endpoint_ids(endpoint) {

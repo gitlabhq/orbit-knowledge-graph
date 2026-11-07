@@ -589,10 +589,12 @@ where
             .is_some_and(|entity| self.bindings.entity_is_global(entity))
     }
 
-    fn entity_high_fan_out(&self, entity: &str) -> bool {
-        self.graph()
-            .entity_id(entity)
-            .is_some_and(|entity| self.bindings.entity_high_fan_out(entity))
+    fn has_traversal_path(&self, entity: EntityId) -> bool {
+        self.bindings.entity_has_traversal_path(entity)
+    }
+
+    fn high_fan_out(&self, entity: EntityId) -> bool {
+        self.bindings.entity_high_fan_out(entity)
     }
 
     fn property_column_named(&self, entity: &str, property: &str) -> Option<&str> {
@@ -715,13 +717,17 @@ where
 
     fn property_is_free_text(&self, entity: &str, property: &str) -> bool {
         self.property(entity, property)
-            .is_some_and(|property| match property.data_type {
-                ontology::DataType::Uuid => true,
-                ontology::DataType::String => {
-                    self.property_selectivity(property.id) != ontology::FieldSelectivity::Low
-                }
-                _ => false,
-            })
+            .is_some_and(|property| self.property_free_text(property.id))
+    }
+
+    fn property_free_text(&self, property: PropertyId) -> bool {
+        match self.graph().property(property).data_type {
+            ontology::DataType::Uuid => true,
+            ontology::DataType::String => {
+                self.property_selectivity(property) != ontology::FieldSelectivity::Low
+            }
+            _ => false,
+        }
     }
 
     fn entity_authorized_by_namespace(&self, entity: &str) -> bool {
