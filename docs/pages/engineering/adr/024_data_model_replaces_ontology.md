@@ -158,11 +158,7 @@ pub trait StorageBackend: Sized {
 }
 ```
 
-A catalog is the typed view of one connection, with all of its stores and the facts of its backend:
-
-```rust
-let catalog = model.physical::<ClickHouse>("main")?;
-```
+A physical catalog is the typed view of one connection, with all of its stores and the facts of its backend.
 
 Each backend owns its query facts, its physical schema and its renderer.
 The ClickHouse backend owns tables, codecs, engines, sort keys, skip indexes and projections, and the migrations read them from the catalog.
@@ -171,29 +167,83 @@ The generated DDL is byte-identical to the ontology's DDL for every bundled sche
 Backends declare capabilities as facts, such as current-row reads or materialized CTEs, and shared code branches on capabilities rather than backend names.
 A compile targets one connection, and one query can read any store on that connection.
 
-### Every pipeline builds plans the same way
+### Catalogs build every plan
 
-There is one logical plan language and one physical plan language per kind of backend.
-Every plan is built only through a checked builder:
+A catalog is the set of declarations for one model and one plan language, plus the API that builds plans in that language.
+The model exposes one logical catalog and one physical catalog per connection:
 
-| Plan | Built by | Operations |
-|---|---|---|
-| Logical | Surfaces | Graph operations against the model: entities, follow, filter, aggregate, order, limit, paths and neighbors |
-| Relational (ClickHouse, DuckDB) | The compiler's `plan` phase | Scan, read, join, filter, latest row, share, limit and select against a catalog |
-| Search (for example, Zoekt) | The compiler's `plan` phase | Search an index for text, rank, take the top results and select fields |
+```rust
+let logical = model.logical();
+let clickhouse = model.physical::<ClickHouse>("main")?;
+```
 
-The physical languages do not have to look alike.
-A relational plan is a graph of joins and filters; a search plan is a ranked query against a text index, and it renders to the backend's native request rather than SQL.
-What they share is the tracking layer underneath, which records owners, outputs and scopes for any language and rejects an invalid connection at the call that makes it.
-Rewrites go through the same builder, so a phase cannot produce a plan the builder would reject, whichever language it targets.
+Each catalog has its own vocabulary.
+The logical catalog speaks in entities and relationships; a relational catalog speaks in tables and relational operations; a search catalog speaks in indexes, matches and ranking.
+They share one construction discipline, not one operation set:
 
-A surface parses query text into a logical plan:
+```plaintext
+                          query-data-model
+               shared tracking: identities and connections
+                                  |
+           +----------------------+----------------------+
+           |                      |                      |
+    Logical builder        Relational builder      Search builder
+    entities, follow       scan, join, latest      search, rank, top
+    filter, aggregate      filter, share, limit    select fields
+           |                      |                      |
+      Logical plan          Relational plan          Search plan
+```
+
+Nothing builds a plan by hand.
+Surfaces build logical plans, the compiler's `plan` phase builds physical plans, and every later phase rewrites through the same builder.
+
+#### Shared tracking owns identities and connections
+
+Every plan language plugs into one tracking layer by naming its operations and the values they reference:
+
+```rust
+pub trait Language: Sized {
+    type Operation: Debug;
+    type Value: Clone + Debug + PartialEq;
+
+    fn references(operation: &mut Self::Operation, visit: &mut dyn FnMut(&mut Ref));
+}
+```
+
+Declarations stay owned by the catalog.
+A plan owns its occurrences of them: scanning `gl_user` twice gives two occurrences of one declaration, so an author and a reviewer join without ambiguity.
+Names are lookup conveniences, not identity.
+Each plan also carries the `ModelId` it was built against, so a plan can never be checked against a different snapshot.
+
+Each builder call runs two kinds of checks.
+Tracking proves the structural facts: the handle belongs to this plan, the input is visible in this scope, the referenced output still exists, and a replacement keeps the outputs its consumers need.
+The language supplies the rest: a relational join condition is boolean, an aggregate does not nest another aggregate, a search index supports the requested match mode.
+SQL notions such as cardinality or nullability live in the relational language and are never forced on a search backend.
+
+#### Rewrites use the same builder
+
+A phase changes a plan by building replacements through the same API the planner used:
+
+```rust
+let plan = catalog.rewrite(plan, |q, root| {
+    let rows = q.detach(root)?;
+    let rows = q.limit(rows, Some(fetch_limit), None)?;
+    q.reattach(rows)
+})?;
+```
+
+The rewrite contract is fixed: inputs are visited before their consumers, each shared body is visited once, operations inserted during the pass are not revisited, and a replacement that changes outputs must reconnect its consumers explicitly.
+A phase therefore cannot produce a plan the builder would reject.
+Checked construction proves structure, not meaning: a rewrite can still be wrong, but it cannot be malformed.
+
+#### Planning stays in the compiler
+
+The query engine translates logical plans into physical plans.
+A surface parses text into a logical plan, with name, type and connectivity errors raised as construction errors, so there is no separate validation pass:
 
 ```rust
 let statement = surface::gql::parse(text, model.logical())?;
 ```
-
-Name, type and connectivity errors are construction errors, so there is no separate validation pass, and the surface makes no planning decisions.
 
 The compiler phases then decide how the query runs:
 
@@ -204,33 +254,39 @@ The compiler phases then decide how the query runs:
 | `plan` | Logical plan | Physical plan for the target backend |
 | `response_policy`, `result_contract`, `paginate`, `materialize`, `settings` | Physical plan | Physical plan |
 | `security`, `security_check` | Physical plan | Physical plan, or a rejection |
-| `codegen` | Physical plan | SQL and parameters, or a native request |
+| `codegen` | Physical plan | The backend's executable request |
 
-The `plan` phase decides and builds in one step, with no intermediate plan description.
+The `plan` phase decides and builds in one step.
+Its helpers return builder values, such as rows, expressions or shared bodies, never an intermediate plan description that a later helper interprets.
 For the example query, it takes the `author_id` foreign key from the catalog instead of reading the edge table, reads only the current row of each merge request, and leaves `u.username` to hydration:
 
 ```rust
-let plan = catalog.build(|q| {
+let plan = clickhouse.build(|q| {
     let requests = q.filter(q.scan(merge_requests, "mr")?, state.eq("opened"))?;
     let joined = q.join(q.scan(users, "u")?, requests, author_id.eq(user_id))?;
     q.select(q.limit(joined, Some(10), None)?, [username, title])
 })?;
 ```
 
-Every later phase is a checked rewrite through `catalog.rewrite`.
-Security remains its own phase, and no other phase adds or removes a scope filter.
+Security remains its own phase: it inserts ordinary operations through the builder, and a final policy check verifies that every read carries its guard.
+No other phase adds or removes a scope filter.
 
-The backend renders the final plan:
+#### Rendering belongs to the catalog
+
+The catalog that builds a plan also renders it, because the builder and the renderer must agree on what each operation means:
 
 ```rust
-let request = catalog.render(&plan);
+let request = clickhouse.render(&plan);
 ```
 
-ClickHouse and DuckDB share one relational renderer and differ only in a small dialect.
+The executable stays backend-specific.
+ClickHouse and DuckDB return SQL with parameters and settings, sharing one relational renderer with a small dialect each.
+A search backend returns its native request object.
+A backend whose operations need lowering, such as expanding a latest-row read into sort and first-row-per-key, lowers inside its own render path; a search catalog whose operations map directly to a native request renders the plan as is.
 
-#### A non-relational backend
+#### A search catalog looks quite different
 
-A Zoekt integration follows the same path with a different physical language.
+A Zoekt adapter shows that the shared layer is not secretly relational.
 A storage fragment declares a store on a Zoekt connection and binds the searchable fields:
 
 ```yaml
@@ -245,19 +301,25 @@ entities:
     text: [content, path]
 ```
 
-The `plan` phase targets the search catalog and builds a search plan through its builder:
+The `plan` phase builds a search plan through the search catalog:
 
 ```rust
-let catalog = model.physical::<Zoekt>("zoekt")?;
-let plan = catalog.build(|q| {
-    let hits = q.search(catalog.index("code_search", "File")?, "fn plan")?;
-    q.select(q.top(q.rank(hits, Ranking::Relevance)?, 50)?, [path, line])
+let zoekt = model.physical::<Zoekt>("zoekt")?;
+let plan = zoekt.build(|q| {
+    let repositories = q.repositories(zoekt.index("code_search", "File")?, project_ids)?;
+    let matches = q.search(repositories, Search::Literal("fn compile"))?;
+    let matches = q.top(q.rank(matches, Ranking::Relevance)?, 20)?;
+    q.select(matches, [matches.field("path")?, matches.field("snippet")?])
 })?;
-let request = catalog.render(&plan);
+let request = zoekt.render(&plan);
 ```
 
-The same guards apply: the loader computes a guard for each searchable source, and the security phase applies it to the search plan as a filter the backend understands.
-One compile targets one connection, so a query that needs both code search results and graph data reads its keys from one backend and fetches the rest through a lookup, as virtual columns do.
+The loader computes a guard for each searchable source, as for any other store, and the security phase applies it as a restriction the backend understands, here the set of repositories the caller can read.
+If the tracking layer ever needed a SQL table or a join to express this, it would be too specific.
+
+One compile targets one connection.
+A query that needs both code search results and graph data reads its keys from one backend and fetches the rest through a lookup, as virtual columns do.
+General cross-engine execution needs separate orchestration and is out of scope.
 
 ### What a new pipeline needs
 
