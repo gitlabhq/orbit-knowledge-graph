@@ -527,7 +527,6 @@ fn system_columns(version: Option<&str>, deleted: Option<&str>) -> Vec<(String, 
 impl crate::query_model::QueryFacts for ClickHouseStore {
     const SELECTIVE_LATEST_ROWS: bool = true;
     const DEFERRED_NODE_LOADING: bool = true;
-    const REFERENCE_HINTS: bool = true;
     const ALL_PROPERTIES_BY_DEFAULT: bool = false;
 
     fn text_index(&self, property: PropertyId) -> bool {

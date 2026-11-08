@@ -24,7 +24,6 @@ pub struct EntityAuthConfig {
 pub trait QueryFacts: RelationalFacts + std::fmt::Debug + Send + Sync {
     const SELECTIVE_LATEST_ROWS: bool;
     const DEFERRED_NODE_LOADING: bool;
-    const REFERENCE_HINTS: bool;
     const ALL_PROPERTIES_BY_DEFAULT: bool;
 
     fn text_index(&self, property: PropertyId) -> bool;
@@ -304,12 +303,11 @@ where
     }
 
     pub(crate) fn property_is_foreign_key(&self, property: PropertyId) -> bool {
-        B::Store::REFERENCE_HINTS
-            && !self
-                .graph_catalog()
-                .property(property)
-                .references
-                .is_empty()
+        !self
+            .graph_catalog()
+            .property(property)
+            .references
+            .is_empty()
     }
 
     pub(crate) fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
