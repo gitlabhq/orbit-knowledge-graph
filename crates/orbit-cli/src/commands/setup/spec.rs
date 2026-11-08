@@ -7,6 +7,8 @@ use rust_embed::Embed;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::remote::server_schema::Providers;
+
 #[derive(Embed)]
 #[folder = "$ORBIT_CONFIG_DIR/setup"]
 struct SetupAssets;
@@ -97,6 +99,7 @@ struct SetupTexts {
     instructions: String,
     #[serde(default)]
     remote: BTreeMap<String, String>,
+    server_entities: String,
     nudge_search: String,
     nudge_gitlab: String,
     #[serde(default)]
@@ -130,24 +133,38 @@ fn substitute_launcher(text: &str, launcher: &str) -> String {
     )
 }
 
-fn render_instructions(launcher: &str, remote: bool) -> String {
+fn render_instructions(launcher: &str, remote: bool, providers: &Providers) -> String {
     let mut text = TEXTS.instructions.trim_end().to_string();
     for (name, value) in &TEXTS.remote {
         let value = if remote { value.as_str() } else { "" };
         text = text.replace(&format!("{{{{{name}}}}}"), value);
     }
-    let text = text.replace("{{query_syntax}}", crate::descriptions::gql_syntax());
+    let entities = providers
+        .iter()
+        .filter(|(_, entities)| remote && !entities.is_empty())
+        .map(|(name, entities)| format!("- {name}: {}", entities.join(", ")))
+        .collect::<Vec<_>>();
+    let entities = match entities.is_empty() {
+        true => String::new(),
+        false => TEXTS
+            .server_entities
+            .trim_end()
+            .replace("{{entities}}", &entities.join("\n")),
+    };
+    let text = text
+        .replace("{{server_entities}}", &entities)
+        .replace("{{query_syntax}}", crate::descriptions::gql_syntax());
     substitute_launcher(&text, launcher)
 }
 
-static REACHES_GITLAB: LazyLock<bool> =
-    LazyLock::new(|| crate::remote::client::gitlab_usable(Path::new(".")));
+static SESSION: LazyLock<crate::remote::server_schema::Session> =
+    LazyLock::new(|| crate::remote::server_schema::session_start(Path::new(".")));
 
 static RENDERED_INSTRUCTIONS: LazyLock<String> =
-    LazyLock::new(|| render_instructions(launcher(), reaches_gitlab()));
+    LazyLock::new(|| render_instructions(launcher(), SESSION.reachable, &SESSION.providers));
 
 pub(crate) fn reaches_gitlab() -> bool {
-    *REACHES_GITLAB
+    SESSION.reachable
 }
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
@@ -641,11 +658,12 @@ mod tests {
             (GLAB_LAUNCHER, "`glab orbit grep"),
         ] {
             for remote in [true, false] {
-                let rendered = render_instructions(launcher, remote);
+                let rendered = render_instructions(launcher, remote, &Providers::new());
                 assert!(rendered.contains(expected), "{launcher}: {rendered}");
                 assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
+                assert_eq!(rendered.matches("MANDATORY").count(), 1, "{launcher}");
                 for phrase in [
-                    " grep` must be used for search",
+                    "MANDATORY: use these instead of grep, rg, or reading files",
                     "Ignores case, `_`, `-`",
                     "`a|b` OR",
                     "Batch all reads and searches you can name",
@@ -667,7 +685,7 @@ mod tests {
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
-        let local = render_instructions(DIRECT_LAUNCHER, false);
+        let local = render_instructions(DIRECT_LAUNCHER, false, &Providers::new());
         assert_eq!(
             local.lines().filter(|line| line.starts_with("- ")).count(),
             2,
@@ -677,6 +695,17 @@ mod tests {
         assert!(gitlab_nudge_text().contains("`milestone:`"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
+    }
+
+    #[test]
+    fn server_entities_get_their_own_block_and_leave_grep_alone() {
+        let providers = Providers::from([("gitlab".into(), vec!["Widget".into()])]);
+        let rendered = render_instructions(GLAB_LAUNCHER, true, &providers);
+        assert!(
+            rendered.ends_with("for `glab orbit query`:\n- gitlab: Widget"),
+            "{rendered}"
+        );
+        assert!(!render_instructions(GLAB_LAUNCHER, false, &providers).contains("Widget"));
     }
 
     const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh"];
