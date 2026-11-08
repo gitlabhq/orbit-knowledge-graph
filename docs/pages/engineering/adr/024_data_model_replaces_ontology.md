@@ -199,16 +199,35 @@ Surfaces build logical plans, the compiler's `plan` phase builds physical plans,
 
 #### Shared tracking owns identities and connections
 
-Every plan language plugs into one tracking layer by naming its operations and the values they reference:
+Three small public traits describe the boundary that every catalog implements:
 
 ```rust
-pub trait Language: Sized {
-    type Operation: Debug;
-    type Value: Clone + Debug + PartialEq;
+pub trait Catalog: Sized {
+    type Operation;
+    type ValueType;
+    type Error;
 
-    fn references(operation: &mut Self::Operation, visit: &mut dyn FnMut(&mut Ref));
+    fn identity(&self) -> ModelId;
+}
+
+pub trait Construct: Catalog {
+    type Builder<'catalog>
+    where
+        Self: 'catalog;
+
+    fn builder(&self) -> Self::Builder<'_>;
+}
+
+pub trait Render: Catalog {
+    type Executable;
+
+    fn render(&self, plan: &Plan<Self>) -> Result<Self::Executable, Self::Error>;
 }
 ```
+
+The associated types keep engine details local: the logical catalog's operations are graph operations, ClickHouse's are relational operations with SQL types, and Zoekt's are search operations.
+Each catalog chooses its own builder methods through `Construct`, and a logical catalog does not implement `Render` at all.
+Underneath, the tracking layer is generic over the operation language and holds the concrete plan, node, output and scope identities.
 
 Declarations stay owned by the catalog.
 A plan owns its occurrences of them: scanning `gl_user` twice gives two occurrences of one declaration, so an author and a reviewer join without ambiguity.
@@ -345,7 +364,7 @@ Plan construction is consistent across pipelines.
 Each pass is a checked rewrite and cannot leave an invalid plan behind.
 The compiler keeps one representation per layer, and `Input`, `QueryPlan`, the relation graph, the SQL AST and both dialect emitters go away.
 
-Backends are pluggable, and planning reads capabilities rather than backend names, so one pipeline serves ClickHouse and DuckDB today and has room for search.
+Backends are pluggable, and planning reads capabilities rather than backend names, so one pipeline serves relational backends such as ClickHouse and DuckDB and search backends such as Zoekt.
 
 ### Costs and constraints
 
@@ -386,7 +405,7 @@ The model makes a number of smaller features cheap:
 - **Relationship attributes.** A relationship can declare typed attributes, such as the branch on a `CALLS` edge, that queries filter and select like properties.
 - **Tenant overlays.** Agent memory adds custom node types as a package scoped to one tenant, with its own authorization entries.
 - **Service lookups.** A service fragment declares properties served by an external service, such as a diff from Gitaly. The engine reads the keys from the graph and then calls the service.
-- **Search targets.** A search plan language and backend sit on the same tracking layer, ready for a phase to plan into.
+- **Search targets.** Code search through Zoekt, or any text index, is a backend with its own plan language on the same tracking layer.
 - **Shared reads.** The planner marks a read that several parts of a query use, and one backend-generic rule decides whether it becomes a CTE or stays inline.
 - **Better errors.** Unknown names list the valid candidates and reversed arrows get a hint. Both come from the builder, so every surface gets them for free.
 - **Layered plan tests.** Tests assert the logical and relational plans separately, before any SQL is rendered.
