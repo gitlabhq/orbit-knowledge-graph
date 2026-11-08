@@ -21,9 +21,11 @@ use super::predicates::{Column, Predicate, kind_column};
 use super::rows::{ReadScope, Reads, Rel};
 use super::{DenormalizedKey, DenormalizedProperty, sort_key};
 use crate::error::{QueryError, Result};
-use crate::input::*;
+use crate::logical::Kind;
 use crate::logical::Query;
 use crate::logical::facts::{anchors, facts};
+use crate::passes::plan::boolean::Boolean;
+use query_data_model::Direction;
 use query_data_model::plan::logical::Expr;
 
 #[derive(Clone)]
@@ -71,7 +73,7 @@ pub struct Fk {
 
 pub(crate) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
     pub query: Query<'a>,
-    conditions: Vec<BooleanExpression<conditions::Condition>>,
+    conditions: Vec<Boolean<conditions::Condition>>,
     pub model: &'a M,
     pub nodes: HashMap<String, NodePlan>,
     pub relations: Vec<EdgeRelation>,
@@ -81,7 +83,7 @@ pub(crate) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
 
 impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
     fn aggregate(&self) -> bool {
-        self.query.kind() == QueryType::Aggregation
+        self.query.kind() == Kind::Aggregation
     }
 
     fn node_read<B: RelationalBackend>(

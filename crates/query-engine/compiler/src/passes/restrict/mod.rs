@@ -20,7 +20,7 @@ use query_data_model::plan::tracking::Ref;
 use query_data_model::{EntityId, Model, OrbitQueryModel};
 
 use crate::error::{QueryError, Result};
-use crate::input::QueryType;
+use crate::logical::Kind;
 use crate::logical::Query;
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 
@@ -38,7 +38,7 @@ pub fn restrict(
     if security_ctx.admin {
         return Ok(());
     }
-    if query.kind() == QueryType::Aggregation {
+    if query.kind() == Kind::Aggregation {
         aggregation_scope(query, &entities, model)?;
     }
     properties::admin_only(query, model)

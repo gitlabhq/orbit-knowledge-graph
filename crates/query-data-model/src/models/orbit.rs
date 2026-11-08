@@ -141,6 +141,7 @@ pub trait OrbitQueryModel {
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String>;
     fn routes(&self, relationship: RelationshipId) -> Vec<RelationshipRoute<'_>>;
     fn edge_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope>;
+    fn variant_foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey>;
     fn relationship_tables_between(
         &self,
         relationships: &[String],

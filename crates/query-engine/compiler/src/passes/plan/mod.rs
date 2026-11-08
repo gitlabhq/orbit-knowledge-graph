@@ -6,6 +6,7 @@
 //! the shared condition vocabulary.
 
 pub mod aggregation;
+mod boolean;
 pub(crate) mod build;
 mod current;
 pub(crate) mod filters;
@@ -26,8 +27,7 @@ pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedP
 
 use crate::error::{QueryError, Result};
 use crate::hydration::HydrationRequest;
-use crate::input::*;
-use crate::logical::Query;
+use crate::logical::{Kind, Query};
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
 use crate::tp_bounds::TpBounds;
 
@@ -90,7 +90,7 @@ pub fn plan<M: RelationalModel>(
         }
     };
     match query.kind() {
-        QueryType::PathFinding => {
+        Kind::PathFinding => {
             let path = path_finding::PathFinding::new(query, model)?;
             let plan = model
                 .catalog()
@@ -102,7 +102,7 @@ pub fn plan<M: RelationalModel>(
             };
             Ok(Planned { plan, metadata })
         }
-        QueryType::Neighbors => {
+        Kind::Neighbors => {
             let neighbors = neighbors::Neighbors::new(query, model)?;
             let plan = model
                 .catalog()
@@ -115,10 +115,7 @@ pub fn plan<M: RelationalModel>(
             };
             Ok(Planned { plan, metadata })
         }
-        QueryType::Traversal | QueryType::Aggregation => pattern(query, tp_bounds, model),
-        QueryType::Hydration => Err(QueryError::PipelineInvariant(
-            "hydration plans from a hydration request".into(),
-        )),
+        Kind::Traversal | Kind::Aggregation => pattern(query, tp_bounds, model),
     }
 }
 
@@ -137,7 +134,7 @@ fn pattern<M: RelationalModel>(
         let matched = pattern.execution(q, tp_bounds)?;
         let nodes = metadata::bindings(&pattern.nodes, query, &matched.bindings)?;
         let (rows, stable_order) = match query.kind() {
-            QueryType::Aggregation => {
+            Kind::Aggregation => {
                 let result = aggregation::aggregation_plan(query, &pattern.nodes, &matched);
                 let stable_order = aggregation::emit::stable_order(&result);
                 let rows = aggregation::emit::emit(q, matched, &result, limit)?;

@@ -14,6 +14,27 @@ use query_data_model::{Direction, EntityId, Hop, Model, RelationshipId};
 
 use crate::input::QueryType;
 
+/// What a query returns, read off its result operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub enum Kind {
+    Traversal,
+    Aggregation,
+    PathFinding,
+    Neighbors,
+}
+
+impl From<Kind> for QueryType {
+    fn from(kind: Kind) -> Self {
+        match kind {
+            Kind::Traversal => Self::Traversal,
+            Kind::Aggregation => Self::Aggregation,
+            Kind::PathFinding => Self::PathFinding,
+            Kind::Neighbors => Self::Neighbors,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Query<'p> {
     pub plan: &'p LogicalPlan,
@@ -50,13 +71,13 @@ impl<'p> Query<'p> {
             .map(move |node| (node, self.plan.operation(node)))
     }
 
-    pub fn kind(self) -> QueryType {
-        let mut kind = QueryType::Traversal;
+    pub fn kind(self) -> Kind {
+        let mut kind = Kind::Traversal;
         for (_, operation) in self.operations() {
             kind = match operation {
-                LogicalOperation::Neighbors { .. } => QueryType::Neighbors,
-                LogicalOperation::Shortest { .. } => QueryType::PathFinding,
-                LogicalOperation::Aggregate { .. } => QueryType::Aggregation,
+                LogicalOperation::Neighbors { .. } => Kind::Neighbors,
+                LogicalOperation::Shortest { .. } => Kind::PathFinding,
+                LogicalOperation::Aggregate { .. } => Kind::Aggregation,
                 _ => continue,
             };
         }

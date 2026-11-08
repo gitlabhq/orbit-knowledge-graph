@@ -6,7 +6,6 @@ use ontology::constants::*;
 use query_data_model::{DenormalizedDirection, DenormalizedProperty, OrbitQueryModel};
 
 use super::{EdgeRelation, NodePlan, Pattern};
-use crate::input::is_wildcard;
 use crate::passes::plan::filters::{BoundFilter, FilterOwner, bind_filter, lowerable_denorm};
 use crate::passes::plan::predicates::{Predicate, property_filter, tag_filter};
 
@@ -17,7 +16,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         node: &str,
         filter: &BoundFilter,
     ) -> Option<&DenormalizedProperty> {
-        if relation.fk.is_some() || is_wildcard(&relation.rel_types) {
+        if relation.fk.is_some() || relation.relationships.is_empty() {
             return None;
         }
         let direction = if relation.endpoint_column(node)? == SOURCE_ID_COLUMN {

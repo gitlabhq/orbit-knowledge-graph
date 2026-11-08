@@ -2,7 +2,7 @@ use query_data_model::plan::logical::LogicalOperation;
 use query_data_model::plan::tracking::Ref;
 
 use crate::error::{QueryError, Result};
-use crate::input::QueryType;
+use crate::logical::Kind;
 use crate::logical::Query;
 use crate::logical::facts::{Anchor, Fact};
 use crate::query_limits::{MAX_ID_RANGE_SPAN, MAX_PATH_ANCHOR_RANGE};
@@ -19,7 +19,7 @@ pub(super) fn selectivity(
     };
     let operations = || query.operations().map(|(_, operation)| operation);
     match query.kind() {
-        QueryType::PathFinding => {
+        Kind::PathFinding => {
             let ends = operations().find_map(|operation| match operation {
                 LogicalOperation::Shortest { from, to, .. } => Some([*from, *to]),
                 _ => None,
@@ -34,7 +34,7 @@ pub(super) fn selectivity(
                 }
             }
         }
-        QueryType::Neighbors => {
+        Kind::Neighbors => {
             let center = operations().find_map(|operation| match operation {
                 LogicalOperation::Neighbors { from, .. } => anchor(*from),
                 _ => None,

@@ -5,7 +5,7 @@ use query_data_model::implementations::relational::plan::{
 
 use super::expr::{self, Filter};
 use super::{Built, call, column, eq, int, string};
-use crate::input::BooleanExpression;
+use crate::passes::plan::boolean::Boolean;
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
 
 pub(crate) struct Lowering<'s> {
@@ -24,19 +24,19 @@ impl Lowering<'_> {
     fn boolean<B: RelationalBackend>(
         &self,
         q: &mut RelationalBuilder<'_, B>,
-        expression: &BooleanExpression<Box<Predicate>>,
+        expression: &Boolean<Box<Predicate>>,
         negated: bool,
     ) -> Built<Expr> {
         Ok(match expression {
-            BooleanExpression::Leaf(leaf) => self.lower(q, leaf, negated)?,
-            BooleanExpression::And(children) => {
+            Boolean::Leaf(leaf) => self.lower(q, leaf, negated)?,
+            Boolean::And(children) => {
                 let mut parts = Vec::new();
                 for child in children {
                     parts.push(self.boolean(q, child, negated)?);
                 }
                 expr::conjoined(parts)
             }
-            BooleanExpression::Not(child) => Expr::Unary {
+            Boolean::Not(child) => Expr::Unary {
                 op: UnaryOp::Not,
                 value: Box::new(self.boolean(q, child, true)?),
             },

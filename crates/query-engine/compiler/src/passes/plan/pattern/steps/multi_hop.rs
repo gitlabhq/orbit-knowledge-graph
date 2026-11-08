@@ -6,15 +6,15 @@ use query_data_model::OrbitQueryModel;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::Relation;
 
-use super::super::relations::select_edge_layouts;
+use super::super::relations::{edge_columns, select_edge_layouts, stored_order};
 use super::super::{EdgeRelation, Pattern};
 use super::edge::current_edge_rows;
 use super::{IdSet, RelationBuilder};
 use crate::constants::*;
 use crate::error::Result;
-use crate::input::Direction;
 use crate::passes::plan::predicates::*;
 use crate::passes::plan::rows::{Reads, Rel};
+use query_data_model::Direction;
 
 impl<M, B> RelationBuilder<'_, '_, '_, M, B>
 where
@@ -37,7 +37,7 @@ where
         select_edge_layouts(
             pattern.model,
             &mut expansion.edge_tables,
-            &[expansion.direction.edge_columns().0],
+            &[edge_columns(expansion.direction).0],
         );
         let mut walk = Walk {
             reads: &mut self.reads,
@@ -66,7 +66,7 @@ impl<M: OrbitQueryModel + ?Sized, B: RelationalBackend> Walk<'_, '_, '_, '_, M, 
             .iter()
             .map(|(property, _)| (*property).to_string())
             .collect();
-        let (start_id, end_id) = relation.direction.edge_columns();
+        let (start_id, end_id) = edge_columns(relation.direction);
         let path_id = if self.reverse { start_id } else { end_id };
         let from = &pattern.nodes[&relation.from_node];
         let tagged = relation.edge_tables.iter().all(|table| {
@@ -139,9 +139,8 @@ impl<M: OrbitQueryModel + ?Sized, B: RelationalBackend> Walk<'_, '_, '_, '_, M, 
                     Column::new(&current_alias, kind_column(start_id)),
                 )],
             )?;
-            let (source, target) = relation
-                .direction
-                .stored_order(&previous_alias, &current_alias);
+            let (source, target) =
+                stored_order(relation.direction, &previous_alias, &current_alias);
             let step = (
                 Column::new(&previous_alias, path_nodes_column()),
                 Column::new(&current_alias, path_id),
@@ -184,7 +183,7 @@ impl<M: OrbitQueryModel + ?Sized, B: RelationalBackend> Walk<'_, '_, '_, '_, M, 
 
     fn hop_rows(&mut self, alias: &str, mut predicates: Vec<Predicate>) -> Result<Rel> {
         let relation = self.relation;
-        predicates.extend(relationship_kinds(alias, &relation.rel_types));
+        predicates.extend(relationship_kinds(alias, relation.kinds()));
         predicates.extend(
             relation
                 .filters
@@ -243,7 +242,7 @@ fn complete_depth<M: OrbitQueryModel + ?Sized, B: RelationalBackend>(
     depth: &Rel,
     target_ids: Option<&IdSet>,
 ) -> Result<Relation> {
-    let end_id = relation.direction.edge_columns().1;
+    let end_id = edge_columns(relation.direction).1;
     let mut predicates: Vec<Predicate> = pattern
         .entity_kind(alias, &relation.to_node, end_id)
         .into_iter()

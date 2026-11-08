@@ -6,7 +6,7 @@ use query_data_model::{Direction, EntityId};
 
 use super::keys::{TpLookupKey, keys};
 use super::{TpBound, TpBounds, TpLookup};
-use crate::input::QueryType;
+use crate::logical::Kind;
 use crate::logical::Query;
 
 const MAX_LOOKUPS_PER_ALIAS: usize = 8;
@@ -31,7 +31,7 @@ impl TpBounds {
             .map(|binding| (binding.output, keys(query, binding.output, &anchors)))
             .collect();
         let nodes = match query.kind() {
-            QueryType::Traversal | QueryType::Aggregation => nodes(query, &keys, &edges, model),
+            Kind::Traversal | Kind::Aggregation => nodes(query, &keys, &edges, model),
             _ => HashMap::new(),
         };
         let relationships: Vec<Option<TpBound>> = edges

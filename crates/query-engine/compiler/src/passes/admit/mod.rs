@@ -11,7 +11,7 @@ use query_data_model::OrbitQueryModel;
 use query_data_model::plan::logical::{Expr, Predicate, TimeUnit};
 
 use crate::error::{QueryError, Result};
-use crate::input::QueryType;
+use crate::logical::Kind;
 use crate::logical::Query;
 use crate::logical::facts::{self, Anchor, Fact};
 
@@ -57,7 +57,7 @@ fn filters(
         if model.virtual_source(entity, property).is_some() {
             if matches!(
                 kind,
-                QueryType::Aggregation | QueryType::Neighbors | QueryType::PathFinding
+                Kind::Aggregation | Kind::Neighbors | Kind::PathFinding
             ) {
                 let kind: &str = kind.into();
                 return Err(QueryError::Validation(format!(

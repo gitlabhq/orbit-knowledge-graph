@@ -5,7 +5,7 @@ use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
 use query_data_model::implementations::relational::RelationalBackend;
 
-use super::super::relations::select_edge_layouts;
+use super::super::relations::{edge_columns, select_edge_layouts};
 use super::super::{EdgeRelation, Pattern};
 use super::{IdSet, RelationBuilder};
 use crate::constants::*;
@@ -75,7 +75,7 @@ where
         let alias = &relation.alias;
         let endpoints = [&relation.from_node, &relation.to_node];
         let (source_node, target_node) = relation.stored_endpoints();
-        let mut predicates: Vec<Predicate> = relationship_kinds(alias, &relation.rel_types)
+        let mut predicates: Vec<Predicate> = relationship_kinds(alias, relation.kinds())
             .into_iter()
             .collect();
         predicates.extend(pattern.entity_kind(alias, source_node, SOURCE_ID_COLUMN));
@@ -151,7 +151,7 @@ where
     /// Joins the edge rows to the chain; `wrapped` keeps them in their own block when other relations join too.
     fn join_edge(&mut self, relation: &EdgeRelation, source: &Rel, wrapped: bool) -> Result<()> {
         let alias = &relation.alias;
-        let (start, end) = relation.direction.edge_columns();
+        let (start, end) = edge_columns(relation.direction);
         let endpoints = [(&relation.from_node, start), (&relation.to_node, end)];
         let rows = match wrapped {
             true => {

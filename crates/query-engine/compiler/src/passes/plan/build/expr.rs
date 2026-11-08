@@ -200,7 +200,7 @@ pub(crate) fn relationship_kinds<B: RelationalBackend>(
     alias: &str,
     kinds: &[String],
 ) -> Built<Option<Expr>> {
-    if crate::input::is_wildcard(kinds) {
+    if kinds.is_empty() {
         return Ok(None);
     }
     let kind = col(scope, alias, RELATIONSHIP_KIND_COLUMN)?;

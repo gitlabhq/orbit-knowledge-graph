@@ -2,24 +2,86 @@
 //! shortcut), ordered most selective first along a connected chain.
 
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use ontology::constants::{
     SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
 };
 use query_data_model::plan::logical::{EdgeField, Expr as Logical};
 use query_data_model::plan::tracking::Ref;
-use query_data_model::{Direction as Way, OrbitQueryModel};
+use query_data_model::{Direction, EntityId, ForeignKey, OrbitQueryModel, RelationshipId};
 
 use super::{EdgeRelation, Fk, NodePlan};
 use crate::constants::{EDGE_PATH_NODES_SUFFIX, edge_column_prefix, edge_relation_alias};
 use crate::error::{QueryError, Result};
-use crate::input::Direction;
 use crate::logical::Query;
 use crate::logical::facts::Fact;
 use crate::passes::plan::filters::{
     BoundFilter, FilterOwner, Test, bind_filter, unindex_if_key_narrowed,
 };
+
+/// The edge tables storing a variant of `relationships` from `source` to `target`; any relationship when none is named.
+fn tables_between(
+    model: &(impl OrbitQueryModel + ?Sized),
+    relationships: &[RelationshipId],
+    source: EntityId,
+    target: EntityId,
+) -> Vec<String> {
+    let graph = model.graph();
+    let any: Vec<RelationshipId>;
+    let relationships = match relationships {
+        [] => {
+            any = graph
+                .relationships()
+                .map(|relationship| relationship.id)
+                .collect();
+            &any
+        }
+        named => named,
+    };
+    relationships
+        .iter()
+        .flat_map(|relationship| model.routes(*relationship))
+        .filter(|route| {
+            route
+                .variants()
+                .any(|variant| variant.source == source && variant.target == target)
+        })
+        .map(|route| route.table.to_string())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// The foreign key every variant of `relationships` from `source` to `target` shares.
+fn shared_foreign_key(
+    model: &(impl OrbitQueryModel + ?Sized),
+    relationships: &[RelationshipId],
+    source: EntityId,
+    target: EntityId,
+) -> Option<ForeignKey> {
+    let graph = model.graph();
+    let mut keys = relationships.iter().map(|relationship| {
+        model.variant_foreign_key(graph.variant_id(*relationship, source, target)?)
+    });
+    let first = keys.next()??;
+    keys.all(|key| key == Some(first)).then_some(first)
+}
+
+pub(super) fn edge_columns(direction: Direction) -> (&'static str, &'static str) {
+    match direction {
+        Direction::Outgoing | Direction::Both => (SOURCE_ID_COLUMN, TARGET_ID_COLUMN),
+        Direction::Incoming => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN),
+    }
+}
+
+/// Orders a relationship's from/to pair as the edge row stores it: source first, then target.
+pub(super) fn stored_order<T>(direction: Direction, from: T, to: T) -> (T, T) {
+    match direction {
+        Direction::Outgoing | Direction::Both => (from, to),
+        Direction::Incoming => (to, from),
+    }
+}
 
 impl EdgeRelation {
     pub(super) fn reversed(&self) -> Self {
@@ -31,6 +93,14 @@ impl EdgeRelation {
             Direction::Both => Direction::Both,
         };
         relation
+    }
+
+    /// The kinds an edge read must test; none for a wildcard.
+    pub fn kinds(&self) -> &[String] {
+        match self.relationships.is_empty() {
+            true => &[],
+            false => &self.rel_types,
+        }
     }
 
     pub fn single_edge_table(&self) -> Option<&str> {
@@ -49,7 +119,7 @@ impl EdgeRelation {
     }
 
     pub(super) fn endpoint_column(&self, node: &str) -> Option<&'static str> {
-        let (start, end) = self.direction.edge_columns();
+        let (start, end) = edge_columns(self.direction);
         if self.from_node == node {
             Some(start)
         } else if self.to_node == node {
@@ -61,8 +131,11 @@ impl EdgeRelation {
 
     /// The endpoints as the edge row stores them: the node in `source_id`, then the node in `target_id`.
     pub(super) fn stored_endpoints(&self) -> (&str, &str) {
-        self.direction
-            .stored_order(self.from_node.as_str(), self.to_node.as_str())
+        stored_order(
+            self.direction,
+            self.from_node.as_str(),
+            self.to_node.as_str(),
+        )
     }
 
     pub(super) fn other_end(&self, node: &str) -> &str {
@@ -92,9 +165,9 @@ where
         .map(|(input_index, step)| {
             let (near, far) = (query.name(step.from), query.name(step.to));
             let (from, to, direction) = match step.direction {
-                Way::Incoming => (far, near, Direction::Outgoing),
-                Way::Outgoing => (near, far, Direction::Outgoing),
-                Way::Both => (near, far, Direction::Both),
+                Direction::Incoming => (far, near, Direction::Outgoing),
+                Direction::Outgoing => (near, far, Direction::Outgoing),
+                Direction::Both => (near, far, Direction::Both),
             };
             let types: Vec<String> = match step.relationships {
                 [] => vec!["*".to_string()],
@@ -103,29 +176,39 @@ where
                     .map(|relationship| graph.relationship(*relationship).name.clone())
                     .collect(),
             };
-            let entity = |node: &str| nodes.get(node).and_then(|node| node.entity.as_deref());
-            let (source_node, target_node) = direction.stored_order(from, to);
-            let source = entity(source_node).unwrap_or_default();
-            let target = entity(target_node).unwrap_or_default();
+            let entity = |node: &str| {
+                let name = nodes.get(node)?.entity.as_deref()?;
+                graph.entity_id(name)
+            };
+            let (source_node, target_node) = stored_order(direction, from, to);
+            let (source, target) = (entity(source_node), entity(target_node));
+            let relationships = step.relationships;
+            let between =
+                |source: Option<EntityId>, target: Option<EntityId>| match (source, target) {
+                    (Some(source), Some(target)) => {
+                        tables_between(model, relationships, source, target)
+                    }
+                    _ => Vec::new(),
+                };
             let max_hops = step.range.max;
             let mut edge_tables = if max_hops > 1 {
-                model.relationship_tables(&types)
+                model.edge_tables(relationships)
             } else {
-                let mut tables = model.relationship_tables_between(&types, source, target);
+                let mut tables = between(source, target);
                 if direction == Direction::Both {
-                    tables.extend(model.relationship_tables_between(&types, target, source));
+                    tables.extend(between(target, source));
                     tables.sort();
                     tables.dedup();
                 }
                 tables
             };
             if edge_tables.is_empty() {
-                edge_tables = model.relationship_tables(&types);
+                edge_tables = model.edge_tables(relationships);
             }
             if edge_tables.is_empty() {
                 edge_tables.push(model.default_edge_table().to_string());
             }
-            let (start, end) = direction.edge_columns();
+            let (start, end) = edge_columns(direction);
             let pinned: Vec<&str> = [(from, start), (to, end)]
                 .into_iter()
                 .filter(|(node, _)| {
@@ -139,7 +222,7 @@ where
                 .any(|leaf| leaf.binding() == step.edge && !leaf.edge_kind());
             let fk = (max_hops == 1 && !tested && direction != Direction::Both)
                 .then(|| {
-                    let foreign_key = model.foreign_key(&types, source, target)?;
+                    let foreign_key = shared_foreign_key(model, relationships, source?, target?)?;
                     let column = model.property_column(foreign_key.property)?.to_string();
                     model.property_column(foreign_key.referenced_key)?;
                     let node = match foreign_key.holder {
@@ -157,10 +240,10 @@ where
             EdgeRelation {
                 input_index,
                 rel_types: types,
-                relationships: step.relationships.to_vec(),
+                relationships: relationships.to_vec(),
                 alias: edge_relation_alias(input_index),
-                source_entity: graph.entity_id(source),
-                target_entity: graph.entity_id(target),
+                source_entity: source,
+                target_entity: target,
                 from_node: from.to_string(),
                 to_node: to.to_string(),
                 direction,
@@ -310,4 +393,56 @@ fn relation_selectivity(relation: &EdgeRelation, nodes: &HashMap<String, NodePla
             .iter()
             .any(|(_, filter)| filter.is_selective()),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
+
+    use super::{shared_foreign_key, tables_between};
+
+    fn same_as_by_name(model: &impl OrbitQueryModel) {
+        let graph = model.graph();
+        let sets: Vec<Vec<_>> = std::iter::once(Vec::new())
+            .chain(
+                graph
+                    .relationships()
+                    .map(|relationship| vec![relationship.id]),
+            )
+            .collect();
+        for relationships in &sets {
+            let names: Vec<String> = match relationships.as_slice() {
+                [] => vec!["*".to_string()],
+                named => named
+                    .iter()
+                    .map(|id| graph.relationship(*id).name.clone())
+                    .collect(),
+            };
+            assert_eq!(
+                model.edge_tables(relationships),
+                model.relationship_tables(&names)
+            );
+            for source in graph.entities() {
+                for target in graph.entities() {
+                    let pair = format!("{names:?} {} -> {}", source.name, target.name);
+                    assert_eq!(
+                        tables_between(model, relationships, source.id, target.id),
+                        model.relationship_tables_between(&names, &source.name, &target.name),
+                        "{pair}"
+                    );
+                    assert_eq!(
+                        shared_foreign_key(model, relationships, source.id, target.id),
+                        model.foreign_key(&names, &source.name, &target.name),
+                        "{pair}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn by_id_edge_lookups_match_by_name() {
+        same_as_by_name(&ClickHouseDataModel::embedded().unwrap());
+        same_as_by_name(&DuckDbDataModel::embedded().unwrap());
+    }
 }

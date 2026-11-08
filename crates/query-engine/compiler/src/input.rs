@@ -134,10 +134,6 @@ impl Input {
     }
 }
 
-pub(crate) fn is_wildcard(types: &[String]) -> bool {
-    types.is_empty() || (types.len() == 1 && types[0] == "*")
-}
-
 impl Default for Input {
     fn default() -> Self {
         Self {

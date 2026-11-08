@@ -7,7 +7,7 @@ use query_data_model::plan::logical::Comparison;
 
 use super::filters::{BoundFilter, NullAsEpoch, NullAsEpochColumns, Test};
 use super::rows::Rel;
-use crate::input::BooleanExpression;
+use crate::passes::plan::boolean::Boolean;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Column {
@@ -26,7 +26,7 @@ impl Column {
 
 #[derive(Clone, PartialEq)]
 pub enum Predicate {
-    Boolean(BooleanExpression<Box<Predicate>>),
+    Boolean(Boolean<Box<Predicate>>),
     Property {
         column: Column,
         test: Test,
@@ -248,7 +248,7 @@ pub fn live(alias: &str) -> Predicate {
 }
 
 pub fn relationship_kinds(alias: &str, kinds: &[String]) -> Option<Predicate> {
-    (!crate::input::is_wildcard(kinds) && !kinds.is_empty()).then(|| Predicate::RelationshipKinds {
+    (!kinds.is_empty()).then(|| Predicate::RelationshipKinds {
         alias: alias.into(),
         kinds: kinds.to_vec(),
     })

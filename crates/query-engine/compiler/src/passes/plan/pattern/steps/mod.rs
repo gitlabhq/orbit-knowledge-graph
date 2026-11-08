@@ -12,6 +12,7 @@ use query_data_model::OrbitQueryModel;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::Relation;
 
+use super::relations::edge_columns;
 use super::{EdgeRelation, NodePlan, Pattern};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
@@ -308,7 +309,7 @@ where
         source: &Rel,
     ) -> Result<()> {
         let pattern = self.pattern;
-        let (start, end) = relation.direction.edge_columns();
+        let (start, end) = edge_columns(relation.direction);
         let bounded = [&relation.from_node, &relation.to_node]
             .into_iter()
             .any(|node| self.ids(node).is_some() || pattern.endpoint_is_selective(node));

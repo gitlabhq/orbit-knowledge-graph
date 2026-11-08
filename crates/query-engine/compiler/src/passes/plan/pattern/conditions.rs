@@ -8,8 +8,8 @@ use query_data_model::plan::tracking::Ref;
 
 use super::Pattern;
 use crate::error::{QueryError, Result};
-use crate::input::BooleanExpression;
 use crate::logical::Query;
+use crate::passes::plan::boolean::Boolean;
 use crate::passes::plan::filters::{BoundFilter, FilterOwner, Test, bind_filter};
 use crate::passes::plan::predicates::{Column, Predicate, tag_filter};
 use crate::passes::plan::rows::BindingSource;
@@ -56,7 +56,7 @@ impl Condition {
     }
 }
 
-fn local_node(root: &BooleanExpression<Condition>) -> Option<&str> {
+fn local_node(root: &Boolean<Condition>) -> Option<&str> {
     let mut aliases = root.leaves().map(|condition| match &condition.target {
         Target::Node(alias) if !condition.compares_aliases() => Some(alias.as_str()),
         _ => None,
@@ -67,7 +67,7 @@ fn local_node(root: &BooleanExpression<Condition>) -> Option<&str> {
 
 /// The condition trees no single binding's filters absorb: negated groups, negations that do not
 /// complement, and comparisons across bindings.
-pub(super) fn conditions(query: Query<'_>) -> Result<Vec<BooleanExpression<Condition>>> {
+pub(super) fn conditions(query: Query<'_>) -> Result<Vec<Boolean<Condition>>> {
     let edges: HashMap<Ref, usize> = query
         .steps()
         .iter()
@@ -81,7 +81,7 @@ pub(super) fn conditions(query: Query<'_>) -> Result<Vec<BooleanExpression<Condi
         };
         for conjunct in polarized(query, &edges, predicate, false)?.conjuncts() {
             match conjunct {
-                BooleanExpression::Leaf(condition)
+                Boolean::Leaf(condition)
                     if !condition.compares_aliases() && !condition.is_kind() => {}
                 root => roots.push(root),
             }
@@ -95,7 +95,7 @@ fn polarized(
     edges: &HashMap<Ref, usize>,
     predicate: &Logical,
     negated: bool,
-) -> Result<BooleanExpression<Condition>> {
+) -> Result<Boolean<Condition>> {
     Ok(match predicate {
         Logical::Not(inner) => polarized(query, edges, inner, !negated)?,
         Logical::And(all) if all.len() == 1 => polarized(query, edges, &all[0], negated)?,
@@ -104,17 +104,17 @@ fn polarized(
             for child in all {
                 children.extend(polarized(query, edges, child, false)?.conjuncts());
             }
-            let conjunction = BooleanExpression::And(children);
+            let conjunction = Boolean::And(children);
             match negated {
-                true => BooleanExpression::Not(Box::new(conjunction)),
+                true => Boolean::Not(Box::new(conjunction)),
                 false => conjunction,
             }
         }
         leaf => {
             let complemented = negated && leaf.complementable();
-            let condition = BooleanExpression::Leaf(condition(query, edges, leaf, complemented)?);
+            let condition = Boolean::Leaf(condition(query, edges, leaf, complemented)?);
             match negated && !complemented {
-                true => BooleanExpression::Not(Box::new(condition)),
+                true => Boolean::Not(Box::new(condition)),
                 false => condition,
             }
         }
@@ -251,7 +251,7 @@ where
 
 pub(super) fn bind_tree<M>(
     pattern: &Pattern<'_, M>,
-    root: &BooleanExpression<Condition>,
+    root: &Boolean<Condition>,
     bindings: Option<&[BindingSource]>,
 ) -> Result<Predicate>
 where
@@ -261,7 +261,7 @@ where
         .clone()
         .try_map(&mut |condition| bind_condition(pattern, condition, bindings).map(Box::new))?;
     Ok(match expression {
-        BooleanExpression::Leaf(predicate) => *predicate,
+        Boolean::Leaf(predicate) => *predicate,
         expression => Predicate::Boolean(expression),
     })
 }
@@ -281,9 +281,9 @@ where
         && let Some(tag) = edge_tag(pattern, &column.source, &bound)
     {
         return Ok(match resolve_column(bindings, column) {
-            Ok(column) => Predicate::Boolean(BooleanExpression::And(vec![
-                BooleanExpression::Leaf(Box::new(bound.at(column))),
-                BooleanExpression::Leaf(Box::new(tag)),
+            Ok(column) => Predicate::Boolean(Boolean::And(vec![
+                Boolean::Leaf(Box::new(bound.at(column))),
+                Boolean::Leaf(Box::new(tag)),
             ])),
             Err(_) => tag,
         });

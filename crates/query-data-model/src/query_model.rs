@@ -889,6 +889,10 @@ where
         self.bindings.variant_scope(variant)
     }
 
+    fn variant_foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey> {
+        self.bindings.variant_route(variant)?.foreign_key
+    }
+
     fn traversal_path_lookup(
         &self,
         entity: &str,
