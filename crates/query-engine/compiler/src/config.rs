@@ -6,7 +6,6 @@ use orbit_server_config::QueryConfig;
 
 use crate::error::{QueryError, Result};
 use crate::hydration::HydrationRequest;
-use crate::input::Input;
 use crate::passes::codegen::{CompiledQueryContext, ParameterizedQuery, RelationalModel as _};
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::PlanMetadata;
@@ -33,7 +32,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
     state {
         pub raw: String,
         pub statement: Statement,
-        pub input: Input,
         pub tp_bounds: crate::tp_bounds::TpBounds,
         pub hydration: HydrationRequest,
         pub plan_metadata: PlanMetadata,
@@ -61,11 +59,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
         gql_parse_trusted {
             reads_env: [data_model]
             mutates: [raw, statement]
-        }
-        bridge {
-            reads_env: [data_model]
-            reads_state: [statement]
-            mutates: [input]
         }
         admit {
             reads_env: [data_model]
@@ -136,7 +129,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         codegen {
             reads_env: [data_model]
-            reads_state: [input]
+            reads_state: [statement]
             mutates: [relational, result_ctx, query_config, hydration_plan, output]
         }
         render_hydration {
@@ -150,14 +143,14 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, statement, input, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, normalize, restrict, bridge, admit, tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
+            state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [json_dsl_parse, normalize, restrict, admit, tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, statement, input, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse, normalize, restrict, bridge, admit, tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
+            state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [gql_parse, normalize, restrict, admit, tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
@@ -168,14 +161,14 @@ compiler_pipeline_macros::define_compiler_ctx! {
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, statement, input, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse_trusted, normalize, bridge, admit_local, plan, result_contract, paginate, materialize, codegen]
+            state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [json_dsl_parse_trusted, normalize, admit_local, plan, result_contract, paginate, materialize, codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, statement, input, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [gql_parse_trusted, normalize, bridge, admit_local, plan, result_contract, paginate, materialize, codegen]
+            state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            phases: [gql_parse_trusted, normalize, admit_local, plan, result_contract, paginate, materialize, codegen]
         }
         check_gql {
             model: query_data_model::ClickHouseDataModel
@@ -216,14 +209,6 @@ fn json_dsl_parse_trusted(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn gql_parse_trusted(ctx: &mut impl CompilerCtx) -> Result<()> {
     parse(ctx, Frontend::Gql, true)
-}
-
-fn bridge(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let statement = require(ctx.statement().as_ref(), "statement")?;
-    let model = ctx.data_model();
-    let input = crate::bridge::input(statement, model.catalog().model(), model)?;
-    ctx.set_input(input);
-    Ok(())
 }
 
 fn admit_with(ctx: &mut impl CompilerCtx, selectivity: bool) -> Result<()> {
@@ -398,16 +383,22 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
     let query_config = ctx.take_query_config().unwrap_or_default();
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
-    let input = require(ctx.input().clone(), "input")?;
+    let statement = require(ctx.statement().as_ref(), "statement")?;
+    let model = ctx.data_model();
+    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+    let query_type = QueryType::from(query.kind());
+    let shape = crate::passes::result_contract::ResultShape::new(query)?;
+    let stats = crate::analytics::QueryStats::new(query, model);
     let plan = require(ctx.relational().as_ref(), "relational")?;
-    let base = codegen::render(plan, ctx.data_model(), result_context, query_config);
-    let query_type = input.query_type;
+    let base = codegen::render(plan, model, result_context, query_config);
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
         query_type,
         base,
         hydration,
-        input,
+        shape,
+        stats,
+        debug: statement.debug,
         has_virtual_columns,
     });
     Ok(())

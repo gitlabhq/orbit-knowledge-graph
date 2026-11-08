@@ -18,8 +18,8 @@ use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use query_engine::compiler::subquery_statements;
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ParameterizedQuery, Realm,
-    ResultContext, SecurityContext,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, ParameterizedQuery, QueryStats,
+    Realm, ResultContext, SecurityContext,
 };
 use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
@@ -111,8 +111,8 @@ pub async fn run_query(
     )
     .await;
     assert_pagination(&output, "run_query");
-    let response = validate_response(&compiled.input, GraphFormatter.format(&output), "run_query");
-    ResponseView::for_query(&compiled.input, response)
+    let response = validate_response(&compiled.stats, GraphFormatter.format(&output), "run_query");
+    ResponseView::for_query(&compiled.stats, response)
 }
 
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
@@ -581,7 +581,7 @@ async fn run_pages(
             .await;
             assert_pagination(&output, label);
             let response =
-                validate_response(&compiled.input, GraphFormatter.format(&output), label);
+                validate_response(&compiled.stats, GraphFormatter.format(&output), label);
             collected.assert_matches(&response, label);
         }
     }
@@ -689,10 +689,7 @@ fn pipeline_output(
     result_context: ResultContext,
     sql: String,
 ) -> PipelineOutput {
-    let pagination = Some(query_engine::shared::paginate(
-        &mut query_result,
-        &compiled.input,
-    ));
+    let pagination = Some(query_engine::shared::paginate(&mut query_result, compiled));
     PipelineOutput {
         row_count: query_result.authorized_count(),
         redacted_count,
@@ -706,10 +703,15 @@ fn pipeline_output(
     }
 }
 
-fn assert_response(input: &Input, response: serde_json::Value, expect: &QueryExpect, label: &str) {
-    expect.validate_response_type(input.query_type, label);
-    let response = validate_response(input, response, label);
-    apply_expect(&ResponseView::for_query(input, response), expect, label);
+fn assert_response(
+    stats: &QueryStats,
+    response: serde_json::Value,
+    expect: &QueryExpect,
+    label: &str,
+) {
+    expect.validate_response_type(stats.query_type, label);
+    let response = validate_response(stats, response, label);
+    apply_expect(&ResponseView::for_query(stats, response), expect, label);
 }
 
 fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) {

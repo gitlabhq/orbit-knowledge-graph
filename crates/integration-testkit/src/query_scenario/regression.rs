@@ -194,9 +194,10 @@ fn repeated_aggregation_runs_check_row_values() {
 #[test]
 fn repeated_responses_reject_changes_that_individual_expectations_allow() {
     use crate::visitor::tests::sample_grouped_aggregation_response;
-    use query_engine::compiler::input::parse_input;
 
-    let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
+    let input = crate::test_stats(
+        r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#,
+    );
     let expect = orbit_utils::yaml::from_str("groups: {u: {entity: User, count: 2}}").unwrap();
     let baseline = serde_json::to_value(sample_grouped_aggregation_response()).unwrap();
     super::assert_response(&input, baseline.clone(), &expect, "baseline");
@@ -294,9 +295,10 @@ fn compile_only_rejects_runtime_expectations() {
 #[test]
 fn empty_aggregation_requires_rows_and_column_metadata() {
     use crate::visitor::tests::sample_grouped_aggregation_response;
-    use query_engine::compiler::input::parse_input;
 
-    let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
+    let input = crate::test_stats(
+        r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#,
+    );
     let expect = orbit_utils::yaml::from_str("empty_aggregation: true").unwrap();
     let mut baseline = serde_json::to_value(sample_grouped_aggregation_response()).unwrap();
     baseline["rows"] = json!([]);
@@ -329,10 +331,9 @@ fn traversal_rejects_aggregation_and_path_assertions() {
 #[test]
 fn pagination_coverage_compares_typed_node_identities_without_excerpt_values() {
     use crate::visitor::tests::sample_search_response;
-    use query_engine::compiler::input::parse_input;
 
     let input =
-        parse_input(r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}]}"#).unwrap();
+        crate::test_stats(r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}]}"#);
     let mut full = serde_json::to_value(sample_search_response()).unwrap();
     full["pagination"] = json!({"has_more": false, "truncated": false});
     let mut page = full.clone();
@@ -355,14 +356,15 @@ fn pagination_coverage_compares_typed_node_identities_without_excerpt_values() {
 fn numeric_metric_assertions_reject_numeric_strings() {
     use crate::visitor::ResponseView;
     use crate::visitor::tests::{sample_aggregation_response, sample_grouped_aggregation_response};
-    use query_engine::compiler::input::parse_input;
 
     for assertion in [
         (|view: &ResponseView| view.assert_row_value_i64(0, "c", 2)) as fn(&ResponseView),
         |view: &ResponseView| view.assert_aggregation_value_i64("c", 2),
     ] {
         let check = |metric: Value| {
-            let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
+            let input = crate::test_stats(
+                r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"aggregations":[{"count":"u","as":"c"}]}"#,
+            );
             let mut response = sample_aggregation_response();
             response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
             assertion(&ResponseView::for_query(&input, response));
@@ -372,7 +374,9 @@ fn numeric_metric_assertions_reject_numeric_strings() {
     }
 
     let check_group = |metric: Value| {
-        let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
+        let input = crate::test_stats(
+            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#,
+        );
         let mut response = sample_grouped_aggregation_response();
         response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
         ResponseView::for_query(&input, response)
@@ -382,7 +386,9 @@ fn numeric_metric_assertions_reject_numeric_strings() {
     assert_panics(|| check_group(json!("2")), "column 'c' is not an integer");
 
     let check_average = |metric: Value| {
-        let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"avg":"u.id","as":"c"}]}"#).unwrap();
+        let input = crate::test_stats(
+            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"avg":"u.id","as":"c"}]}"#,
+        );
         let mut response = sample_grouped_aggregation_response();
         response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
         ResponseView::for_query(&input, response)

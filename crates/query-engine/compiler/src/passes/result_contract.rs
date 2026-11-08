@@ -1,12 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
+use query_data_model::Direction;
 use query_data_model::EntityAuthConfig;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     Column, Expr, Operation, Relation, RelationalBuilder, RelationalError, Selection,
 };
-use query_data_model::plan::logical::Expr as Logical;
+use query_data_model::plan::logical::{
+    EdgeField, Expr as Logical, LogicalOperation, LogicalType, Measure, Projection,
+};
 use query_data_model::plan::tracking::{Declare, Ref};
 
 use crate::constants::{
@@ -123,6 +126,189 @@ impl ResultContext {
 
     pub fn label(&self, entity: &str) -> Option<&str> {
         self.labels.get(entity).map(String::as_str)
+    }
+}
+
+/// The columns a query returns, as the formatters lay them out.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ResultShape {
+    /// Each binding's alias and entity, in declaration order.
+    pub nodes: Vec<(String, String)>,
+    pub relationship_columns: Vec<RelationshipColumn>,
+    pub column_order: Vec<String>,
+    pub groups: Vec<GroupColumn>,
+    pub measures: Vec<MeasureColumn>,
+    pub neighbors_direction: Option<Direction>,
+    pub limit: u32,
+    pub skip: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationshipColumn {
+    pub name: String,
+    pub relationship: usize,
+    pub kind: RelationshipColumnKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelationshipColumnKind {
+    Type,
+    Relationship,
+}
+
+/// A group key: a node, or one of its properties.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupColumn {
+    pub name: String,
+    pub node: String,
+    pub property: Option<String>,
+    pub entity: Option<String>,
+}
+
+impl GroupColumn {
+    pub fn kind(&self) -> &'static str {
+        match self.property {
+            None => "node",
+            Some(_) => "property",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeasureColumn {
+    pub name: String,
+    pub function: &'static str,
+    pub node: String,
+    pub property: Option<String>,
+}
+
+impl ResultShape {
+    pub fn new(query: Query<'_>) -> Result<Self> {
+        let graph = query.model.graph();
+        let bindings = query.bindings();
+        let nodes: Vec<(String, String)> = bindings
+            .iter()
+            .map(|binding| {
+                let entity = graph.entity(binding.entity).name.clone();
+                (binding.name.to_string(), entity)
+            })
+            .collect();
+        let entity = |alias: &str| {
+            nodes
+                .iter()
+                .find(|(node, _)| node == alias)
+                .map(|(_, entity)| entity.clone())
+        };
+        let target = |expr: &Logical| -> (String, Option<String>) {
+            match expr {
+                Logical::Property { binding, property }
+                | Logical::Truncate {
+                    binding, property, ..
+                } => (
+                    query.name(*binding).to_string(),
+                    Some(query.property_name(*property).to_string()),
+                ),
+                other => (
+                    query.name(crate::logical::binding(*other)).to_string(),
+                    None,
+                ),
+            }
+        };
+        let mut shape = Self {
+            limit: query
+                .row_limit()
+                .ok_or_else(|| QueryError::PipelineInvariant("queries carry a row limit".into()))?,
+            skip: query.skip(),
+            ..Self::default()
+        };
+        let steps = query.steps();
+        let mut grouped: HashMap<Ref, String> = HashMap::new();
+        let mut edges: HashMap<Ref, usize> = steps
+            .iter()
+            .enumerate()
+            .map(|(index, step)| (step.edge, index))
+            .collect();
+        for (node, operation) in query.operations() {
+            let outputs: Vec<Ref> = query.plan.outputs(node).collect();
+            match operation {
+                LogicalOperation::Neighbors { direction, .. } => {
+                    edges.insert(outputs[outputs.len() - 2], 0);
+                    shape.neighbors_direction = Some(*direction);
+                }
+                LogicalOperation::Aggregate { groups, measures } => {
+                    for (group, output) in groups.iter().zip(&outputs) {
+                        let (node, property) = target(group);
+                        if property.is_none() {
+                            grouped.insert(*output, node.clone());
+                        }
+                        shape.groups.push(GroupColumn {
+                            name: query.name(*output).to_string(),
+                            entity: entity(&node),
+                            node,
+                            property,
+                        });
+                    }
+                    for (measure, output) in measures.iter().zip(&outputs[groups.len()..]) {
+                        let (function, input) = match measure {
+                            Measure::Count(input) => ("count", input.as_ref()),
+                            Measure::CountDistinct(input) => ("count", Some(input)),
+                            Measure::Sum(input) => ("sum", Some(input)),
+                            Measure::Avg(input) => ("avg", Some(input)),
+                            Measure::Min(input) => ("min", Some(input)),
+                            Measure::Max(input) => ("max", Some(input)),
+                        };
+                        let (node, property) = input.map(target).unwrap_or_default();
+                        shape.measures.push(MeasureColumn {
+                            name: query.name(*output).to_string(),
+                            function,
+                            node,
+                            property,
+                        });
+                    }
+                }
+                LogicalOperation::Select(items) => {
+                    let mut order = Vec::new();
+                    for (item, output) in items.iter().zip(outputs) {
+                        let name = query.name(output).to_string();
+                        let (binding, kind) = match item {
+                            Projection::Graph { binding, .. } => match query.plan.value(*binding) {
+                                LogicalType::Entity(_) => {
+                                    let alias = grouped.get(binding).cloned();
+                                    order.push(
+                                        alias.unwrap_or_else(|| query.name(*binding).to_string()),
+                                    );
+                                    continue;
+                                }
+                                LogicalType::Edge => {
+                                    (binding, RelationshipColumnKind::Relationship)
+                                }
+                                _ => continue,
+                            },
+                            Projection::Value(Logical::Edge {
+                                binding,
+                                field: EdgeField::Kind,
+                            }) => (binding, RelationshipColumnKind::Type),
+                            Projection::Value(_) => continue,
+                        };
+                        let relationship = edges.get(binding).copied().ok_or_else(|| {
+                            QueryError::PipelineInvariant("an unbound edge projection".into())
+                        })?;
+                        shape.relationship_columns.push(RelationshipColumn {
+                            name: name.clone(),
+                            relationship,
+                            kind,
+                        });
+                        order.push(name);
+                    }
+                    if !shape.relationship_columns.is_empty() {
+                        shape.column_order = order;
+                    }
+                }
+                _ => {}
+            }
+        }
+        shape.nodes = nodes;
+        Ok(shape)
     }
 }
 

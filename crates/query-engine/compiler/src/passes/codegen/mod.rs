@@ -16,10 +16,10 @@ use query_data_model::{
     Catalog, ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, QueryModel,
 };
 
+use crate::analytics::QueryStats;
 use crate::error::{QueryError, Result};
-use crate::input::Input;
 use crate::passes::hydrate::HydrationPlan;
-use crate::passes::result_contract::ResultContext;
+use crate::passes::result_contract::{ResultContext, ResultShape};
 use crate::types::QueryType;
 pub use orbit_utils::query_types::ParamValue;
 use orbit_utils::query_types::SqlType;
@@ -158,7 +158,10 @@ pub struct CompiledQueryContext {
     pub query_type: QueryType,
     pub base: ParameterizedQuery,
     pub hydration: HydrationPlan,
-    pub input: Input,
+    pub shape: ResultShape,
+    pub stats: QueryStats,
+    /// Whether the caller asked for the generated SQL in the response.
+    pub debug: bool,
     pub has_virtual_columns: bool,
 }
 

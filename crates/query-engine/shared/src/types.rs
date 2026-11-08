@@ -87,8 +87,11 @@ pub struct PaginationMeta {
 }
 
 /// Trims the overfetched probe row and derives honest pagination metadata.
-pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> PaginationMeta {
-    let window = input.limit as usize;
+pub fn paginate(
+    query_result: &mut QueryResult,
+    compiled: &compiler::CompiledQueryContext,
+) -> PaginationMeta {
+    let window = compiled.shape.limit as usize;
     let has_more = query_result.len() > window;
     if has_more {
         query_result.truncate(window);

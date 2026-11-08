@@ -120,7 +120,7 @@ impl HydrationStage {
         let resolver_ctx = ResolverContext {
             security_context: Some(ctx.security_context()?.clone()),
         };
-        let requested_rows = ctx.compiled()?.input.limit as usize;
+        let requested_rows = ctx.compiled()?.shape.limit as usize;
 
         resolve_virtual_columns(
             registry,
@@ -145,7 +145,7 @@ impl HydrationStage {
 
         let options = HydrationCompileOptions {
             dynamic: matches!(
-                ctx.compiled()?.input.query_type,
+                ctx.compiled()?.query_type,
                 QueryType::Neighbors | QueryType::PathFinding
             ),
             path_segment_budget: Some(orbit_utils::clickhouse::MAX_BOUND_PATH_SEGMENTS),
@@ -167,7 +167,7 @@ impl HydrationStage {
         })?;
 
         let rendered_sql = compiled.render();
-        let debug = if ctx.compiled()?.input.options.include_debug_sql {
+        let debug = if ctx.compiled()?.debug {
             vec![DebugQuery {
                 sql: compiled.sql.clone(),
                 rendered: rendered_sql.clone(),

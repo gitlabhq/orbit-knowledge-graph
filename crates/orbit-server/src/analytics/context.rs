@@ -134,103 +134,42 @@ fn apply_metrics(
     redacted_count: usize,
     total_elapsed: Duration,
 ) {
-    if let Some(input) = &metrics.input {
-        let query_type: &str = input.query_type.into();
+    if let Some(stats) = &metrics.stats {
+        fn to_vec<T: std::str::FromStr>(set: &BTreeSet<String>) -> Vec<T> {
+            set.iter().filter_map(|s| s.parse().ok()).collect()
+        }
+        let query_type: &str = stats.query_type.into();
         q.query_type = query_type.parse().ok();
-        q.node_count = Some(input.nodes.len() as i64);
-        q.relationship_count = Some(input.relationships.len() as i64);
-        q.is_search = Some(input.is_search());
+        q.node_count = Some(stats.node_count as i64);
+        q.relationship_count = Some(stats.relationship_count as i64);
+        q.is_search = Some(stats.is_search);
         q.has_cursor = Some(false);
-        q.has_order_by = Some(input.order_by.is_some());
-        q.limit = Some(input.limit as i64);
-        q.group_by_count = Some(input.aggregation.group_by.len() as i64);
-        q.dynamic_columns = <&str>::from(input.options.dynamic_columns).parse().ok();
-        q.path_max_depth = input.path.as_ref().map(|p| p.max_depth as i64);
-
-        let mut entities = BTreeSet::new();
-        let mut rel_types = BTreeSet::new();
-        let mut fields = BTreeSet::new();
-        let mut ops = BTreeSet::new();
-        let mut filter_count: i64 = 0;
-        let mut max_hops: i64 = 0;
-        let mut variable_hops = false;
-
-        let mut columns = BTreeSet::new();
-        let mut has_star = false;
-
-        for node in &input.nodes {
-            if let Some(e) = &node.entity {
-                entities.insert(e.clone());
-            }
-            match &node.columns {
-                Some(query_engine::compiler::ColumnSelection::All) => has_star = true,
-                Some(query_engine::compiler::ColumnSelection::List(cols)) => {
-                    columns.extend(cols.iter().cloned());
-                }
-                None => {}
-            }
-            for (f, entries) in &node.filters {
-                fields.insert(f.clone());
-                for ef in entries {
-                    filter_count += 1;
-                    if let Some(op) = &ef.op {
-                        ops.insert(op.as_ref().to_owned());
-                    }
-                }
-            }
-        }
-        for rel in &input.relationships {
-            rel_types.extend(rel.types.iter().cloned());
-            max_hops = max_hops.max(rel.hops.max as i64);
-            variable_hops |= rel.hops.min != rel.hops.max;
-            for (f, entries) in &rel.filters {
-                fields.insert(f.clone());
-                for ef in entries {
-                    filter_count += 1;
-                    if let Some(op) = &ef.op {
-                        ops.insert(op.as_ref().to_owned());
-                    }
-                }
-            }
-        }
-
-        fn to_vec<T: std::str::FromStr>(set: BTreeSet<String>) -> Vec<T> {
-            set.into_iter().filter_map(|s| s.parse().ok()).collect()
-        }
-        q.entity_types = Some(to_vec(entities));
-        q.relationship_types = Some(to_vec(rel_types));
-        q.filter_fields = Some(to_vec(fields));
-        q.filter_ops = Some(to_vec(ops));
-        q.agg_functions = Some(
-            input
-                .aggregation
-                .metrics
-                .iter()
-                .map(|m| m.expr.function().to_string())
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .filter_map(|s| s.parse().ok())
-                .collect(),
-        );
-        q.filter_count = Some(filter_count);
-        q.max_hops = Some(max_hops);
-        q.has_variable_hops = Some(variable_hops);
+        q.has_order_by = Some(stats.has_order_by);
+        q.limit = Some(stats.limit as i64);
+        q.group_by_count = Some(stats.group_by_count as i64);
+        q.dynamic_columns = <&str>::from(stats.dynamic_columns).parse().ok();
+        q.path_max_depth = stats.path_max_depth.map(i64::from);
+        q.entity_types = Some(to_vec(&stats.entity_types));
+        q.relationship_types = Some(to_vec(&stats.relationship_types));
+        q.filter_fields = Some(to_vec(&stats.filter_fields));
+        q.filter_ops = Some(to_vec(&stats.filter_ops));
+        q.agg_functions = Some(to_vec(&stats.agg_functions));
+        q.filter_count = Some(stats.filter_count as i64);
+        q.max_hops = Some(i64::from(stats.max_hops));
+        q.has_variable_hops = Some(stats.variable_hops);
         q.has_virtual_columns = Some(metrics.has_virtual_columns);
-        q.column_selection_mode = if has_star {
-            "all"
-        } else if !columns.is_empty() {
-            "list"
-        } else {
-            "default"
+        let columns = &stats.requested_columns;
+        q.column_selection_mode = match columns.is_empty() {
+            true => "default",
+            false => "list",
         }
         .parse()
         .ok();
-        q.requested_columns = if columns.is_empty() {
-            None
-        } else {
-            Some(to_vec(columns))
-        };
-        q.traversal_shape = traversal_shape(input).and_then(|s| s.parse().ok());
+        q.requested_columns = (!columns.is_empty()).then(|| to_vec(columns));
+        q.traversal_shape = stats
+            .traversal_shape
+            .as_deref()
+            .and_then(|s| s.parse().ok());
         let label: &str = metrics
             .hydration
             .as_ref()
@@ -250,33 +189,6 @@ fn apply_metrics(
 
     q.query_dsl_version = VERSIONS.query_dsl.parse().ok();
     q.raw_output_format_version = VERSIONS.raw_output_format.parse().ok();
-}
-
-/// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
-/// Returns `None` for search queries (no relationships).
-fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
-    if input.relationships.is_empty() {
-        return None;
-    }
-    let entity_of = |id: &str| -> &str {
-        input
-            .nodes
-            .iter()
-            .find(|n| n.id == id)
-            .and_then(|n| n.entity.as_deref())
-            .unwrap_or("?")
-    };
-    let mut parts = Vec::new();
-    for rel in &input.relationships {
-        let types = rel.types.join("|");
-        parts.push(format!(
-            "{}-[{}]->{}",
-            entity_of(&rel.from),
-            types,
-            entity_of(&rel.to),
-        ));
-    }
-    Some(parts.join(", "))
 }
 
 /// Bounds are 255 chars for instance/host fields; exceeding that surfaces a
@@ -666,66 +578,78 @@ mod tests {
         }
     }
 
-    #[test]
-    fn input_fields_mapped_to_context() {
-        use query_engine::compiler::HydrationPlan;
-        use query_engine::compiler::input::{
-            Direction, FilterOp, HopRange, InputFilter, InputNode, InputRelationship,
-        };
-
-        let claims = claims_with_paths(vec!["1/22/"]);
-        let metrics = ExecMetrics {
-            input: Some(query_engine::compiler::Input {
-                nodes: vec![
-                    InputNode {
-                        entity: Some("User".into()),
-                        ..Default::default()
-                    },
-                    InputNode {
-                        entity: Some("MergeRequest".into()),
-                        filters: [(
-                            "state".into(),
-                            vec![InputFilter {
-                                op: Some(FilterOp::Eq),
-                                ..Default::default()
-                            }],
-                        )]
-                        .into(),
-                        ..Default::default()
-                    },
-                ],
-                relationships: vec![InputRelationship {
-                    types: vec!["AUTHORED".into()],
-                    from: "u".into(),
-                    to: "mr".into(),
-                    hops: HopRange::default(),
-                    direction: Direction::Outgoing,
-                    filters: Default::default(),
-                }],
-                ..Default::default()
-            }),
-            hydration: Some(HydrationPlan::Static(vec![])),
+    fn compiled_metrics(gql: &str) -> ExecMetrics {
+        use query_engine::compiler::{Frontend, SecurityContext, compile};
+        let model = std::sync::Arc::new(query_data_model::ClickHouseDataModel::embedded().unwrap());
+        let ctx = SecurityContext::new(1, vec!["1/22/".into()]).unwrap();
+        let compiled = compile(gql, Frontend::Gql, &model, &ctx).unwrap();
+        ExecMetrics {
+            stats: Some(compiled.stats),
+            hydration: Some(compiled.hydration),
+            has_virtual_columns: compiled.has_virtual_columns,
             ..Default::default()
-        };
-        let query = build_query(
+        }
+    }
+
+    fn query_fields(metrics: &ExecMetrics) -> serde_json::Value {
+        let claims = claims_with_paths(vec!["1/22/"]);
+        build_query(
             &claims,
             "query_graph",
             &UserAgent::default(),
-            &metrics,
+            metrics,
             0,
             0,
             Duration::ZERO,
         )
-        .unwrap();
-        let data = query.data();
+        .unwrap()
+        .data()
+        .clone()
+    }
 
+    #[test]
+    fn traversal_fields_mapped_to_context() {
+        let data = query_fields(&compiled_metrics(
+            "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}) RETURN u, mr LIMIT 5",
+        ));
         assert_eq!(data["source_type"], "mcp");
         assert_eq!(data["queried_namespace_ids"][0], 22);
         assert_eq!(data["query_type"], "traversal");
         assert_eq!(data["node_count"], 2);
-        assert_eq!(data["entity_types"][0], "MergeRequest");
-        assert_eq!(data["filter_ops"][0], "eq");
+        assert_eq!(data["relationship_count"], 1);
+        assert_eq!(
+            data["entity_types"],
+            serde_json::json!(["MergeRequest", "User"])
+        );
+        assert_eq!(data["relationship_types"], serde_json::json!(["AUTHORED"]));
+        assert_eq!(data["filter_fields"], serde_json::json!(["state"]));
+        assert_eq!(data["filter_ops"], serde_json::json!(["eq"]));
+        assert_eq!(data["filter_count"], 1);
+        assert_eq!(data["max_hops"], 1);
+        assert_eq!(data["has_variable_hops"], false);
         assert_eq!(data["is_search"], false);
-        assert_eq!(data["hydration_plan"], "static");
+        assert_eq!(data["has_order_by"], false);
+        assert_eq!(data["limit"], 5);
+        assert_eq!(data["column_selection_mode"], "list");
+        assert_eq!(data["traversal_shape"], "User-[AUTHORED]->MergeRequest");
+        assert_eq!(data["dynamic_columns"], "default");
+    }
+
+    #[test]
+    fn aggregation_fields_mapped_to_context() {
+        let data = query_fields(&compiled_metrics(
+            "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.state, count(mr) AS total ORDER BY total DESC LIMIT 10",
+        ));
+        assert_eq!(data["query_type"], "aggregation");
+        assert_eq!(data["node_count"], 2);
+        assert_eq!(data["is_search"], false);
+        assert_eq!(data["group_by_count"], 1);
+        assert_eq!(data["agg_functions"], serde_json::json!(["count"]));
+        assert_eq!(data["has_order_by"], false);
+        assert_eq!(data["filter_count"], 0);
+        assert_eq!(
+            data["traversal_shape"],
+            "MergeRequest-[IN_PROJECT]->Project"
+        );
     }
 }

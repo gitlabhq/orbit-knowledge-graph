@@ -1,6 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
-use query_engine::compiler::{CompiledQueryContext, Frontend, Input, QueryType};
+use query_engine::compiler::{CompiledQueryContext, Frontend, QueryStats, QueryType};
 use query_engine::formatters::{GraphFormatter, GraphResponse, ResultFormatter};
 use query_engine::shared::PipelineOutput;
 use serde_json::Value;
@@ -16,7 +16,7 @@ static RESPONSE_SCHEMA: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
     jsonschema::validator_for(&schema).unwrap()
 });
 
-pub(super) fn validate_response(input: &Input, response: Value, label: &str) -> GraphResponse {
+pub(super) fn validate_response(stats: &QueryStats, response: Value, label: &str) -> GraphResponse {
     let errors: Vec<_> = RESPONSE_SCHEMA.iter_errors(&response).collect();
     assert!(
         errors.is_empty(),
@@ -28,7 +28,7 @@ pub(super) fn validate_response(input: &Input, response: Value, label: &str) -> 
         !response.format_version.is_empty(),
         "{label}: empty format_version"
     );
-    if input.query_type == QueryType::Aggregation {
+    if stats.query_type == QueryType::Aggregation {
         assert!(
             response.rows.is_some(),
             "{label}: aggregation response missing rows"
@@ -170,7 +170,7 @@ pub(super) fn assert_output(
         assert_gql_table(output, expect, label);
     }
     let response = GraphFormatter.format(output);
-    assert_response(&output.compiled.input, response.clone(), expect, label);
+    assert_response(&output.compiled.stats, response.clone(), expect, label);
     response
 }
 

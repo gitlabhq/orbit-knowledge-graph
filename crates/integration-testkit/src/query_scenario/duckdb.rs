@@ -114,7 +114,7 @@ fn run_step(
                 let output = execute(database, &compiled, &label);
                 assert_pagination(&output, &label);
                 let response =
-                    validate_response(&compiled.input, GraphFormatter.format(&output), &label);
+                    validate_response(&compiled.stats, GraphFormatter.format(&output), &label);
                 collected.assert_matches(&response, &label);
             }
         }

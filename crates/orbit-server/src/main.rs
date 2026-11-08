@@ -24,7 +24,7 @@ use orbit_server::health_check as health_check_mode;
 use orbit_server::probes;
 use orbit_server::shutdown;
 use orbit_server_config::AppConfig;
-use query_engine::compiler::input::QueryType;
+use query_engine::compiler::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
 

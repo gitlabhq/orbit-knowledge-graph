@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use compiler::{
-    EdgeMeta, QueryType, ResultContext, neighbor_is_outgoing_column, relationship_type_column,
+    EdgeMeta, GroupColumn, MeasureColumn, QueryType, ResultContext, neighbor_is_outgoing_column,
+    relationship_type_column,
 };
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -168,8 +169,8 @@ impl GraphFormatter {
         let mut columns: Option<Vec<ColumnDescriptor>> = None;
         let mut group_columns: Option<Vec<GroupColumnDescriptor>> = None;
         let mut rows: Option<Vec<Map<String, Value>>> = None;
-        let aggregations = Some(&output.compiled.input.aggregation.metrics);
-        let group_by = &output.compiled.input.aggregation.group_by;
+        let aggregations = Some(&output.compiled.shape.measures);
+        let group_by = &output.compiled.shape.groups;
 
         match result_context.query_type {
             Some(QueryType::Traversal) => {
@@ -184,10 +185,7 @@ impl GraphFormatter {
             Some(QueryType::Aggregation) => {
                 if let Some(aggs) = aggregations {
                     columns = Some(Self::build_column_descriptors(aggs));
-                    group_columns = Some(Self::build_group_column_descriptors(
-                        group_by,
-                        &output.compiled.input.nodes,
-                    ));
+                    group_columns = Some(Self::build_group_column_descriptors(group_by));
                     rows = Some(Self::extract_aggregation_rows(
                         result,
                         result_context,
@@ -319,40 +317,30 @@ impl GraphFormatter {
         }
     }
 
-    fn agg_col_names(aggs: &[compiler::input::InputAggregationMetric]) -> Vec<String> {
-        aggs.iter().map(|agg| agg.output_name()).collect()
+    fn agg_col_names(aggs: &[MeasureColumn]) -> Vec<String> {
+        aggs.iter().map(|agg| agg.name.clone()).collect()
     }
 
-    fn build_column_descriptors(
-        aggs: &[compiler::input::InputAggregationMetric],
-    ) -> Vec<ColumnDescriptor> {
+    fn build_column_descriptors(aggs: &[MeasureColumn]) -> Vec<ColumnDescriptor> {
         aggs.iter()
             .map(|agg| ColumnDescriptor {
-                name: agg.output_name(),
-                function: agg.expr.function().to_string(),
-                target: agg.expr.node().to_string(),
-                property: agg.expr.property().map(str::to_owned),
+                name: agg.name.clone(),
+                function: agg.function.to_string(),
+                target: agg.node.clone(),
+                property: agg.property.clone(),
             })
             .collect()
     }
 
-    fn build_group_column_descriptors(
-        groups: &[compiler::input::InputGroupByKey],
-        input_nodes: &[compiler::input::InputNode],
-    ) -> Vec<GroupColumnDescriptor> {
-        let names = compiler::input::group_by_output_names(groups);
+    fn build_group_column_descriptors(groups: &[GroupColumn]) -> Vec<GroupColumnDescriptor> {
         groups
             .iter()
-            .zip(names)
-            .map(|(group, name)| GroupColumnDescriptor {
-                name,
-                kind: compiler::input::group_by_kind(group).to_string(),
-                node: group.node().to_string(),
-                property: group.property().map(ToString::to_string),
-                entity: input_nodes
-                    .iter()
-                    .find(|node| node.id == group.node())
-                    .and_then(|node| node.entity.clone()),
+            .map(|group| GroupColumnDescriptor {
+                name: group.name.clone(),
+                kind: group.kind().to_string(),
+                node: group.node.clone(),
+                property: group.property.clone(),
+                entity: group.entity.clone(),
             })
             .collect()
     }
@@ -360,19 +348,19 @@ impl GraphFormatter {
     fn extract_aggregation_rows(
         result: &QueryResult,
         result_context: &ResultContext,
-        aggs: &[compiler::input::InputAggregationMetric],
-        groups: &[compiler::input::InputGroupByKey],
+        aggs: &[MeasureColumn],
+        groups: &[GroupColumn],
     ) -> Vec<Map<String, Value>> {
-        let group_col_names = compiler::input::group_by_output_names(groups);
         let agg_col_names = Self::agg_col_names(aggs);
         let mut rows = Vec::new();
 
         for row in result.authorized_rows() {
             let mut obj = Map::new();
 
-            for (group, col_name) in groups.iter().zip(&group_col_names) {
-                match group {
-                    compiler::input::InputGroupByKey::Property { .. } => {
+            for group in groups {
+                let col_name = &group.name;
+                match group.property {
+                    Some(_) => {
                         obj.insert(
                             col_name.clone(),
                             row.get(col_name)
@@ -380,10 +368,10 @@ impl GraphFormatter {
                                 .unwrap_or(Value::Null),
                         );
                     }
-                    compiler::input::InputGroupByKey::Node { node, .. } => {
+                    None => {
                         obj.insert(
                             col_name.clone(),
-                            Self::extract_group_node(row, result_context, node),
+                            Self::extract_group_node(row, result_context, &group.node),
                         );
                     }
                 }
@@ -499,12 +487,7 @@ impl GraphFormatter {
         edges: &mut Vec<GraphEdge>,
         edge_set: &mut HashSet<EdgeKey>,
     ) {
-        let direction = output
-            .compiled
-            .input
-            .neighbors
-            .as_ref()
-            .map(|n| n.direction);
+        let direction = output.compiled.shape.neighbors_direction;
 
         for row in result.authorized_rows() {
             let mut center: Option<(String, i64)> = None;
@@ -541,10 +524,7 @@ impl GraphFormatter {
                 .get(neighbor_is_outgoing_column())
                 .and_then(|value| value.as_int64().copied())
                 .map(|value| value != 0)
-                .unwrap_or(!matches!(
-                    direction,
-                    Some(compiler::input::Direction::Incoming)
-                ));
+                .unwrap_or(direction != Some(compiler::Direction::Incoming));
 
             let (from, from_id, to, to_id) = if is_outgoing {
                 (
@@ -607,12 +587,11 @@ impl GraphFormatter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use compiler::{CompiledQueryContext, HydrationPlan, ParameterizedQuery, ResultContext};
+    use compiler::ResultContext;
     use std::sync::Arc;
 
     fn make_search_output() -> PipelineOutput {
@@ -642,24 +621,9 @@ mod tests {
             redacted_count: 0,
             query_type: "traversal".to_string(),
             raw_query_strings: vec![],
-            compiled: Arc::new(CompiledQueryContext {
-                query_type: QueryType::Traversal,
-                base: ParameterizedQuery {
-                    sql: String::new(),
-                    params: HashMap::new(),
-                    result_context: result_ctx.clone(),
-                    query_config: Default::default(),
-                    dialect: Default::default(),
-                },
-                hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "traversal",
-                    "nodes": [{"id": "p", "entity": "Project"}],
-                    "limit": 10
-                }))
-                .unwrap(),
-                has_virtual_columns: false,
-            }),
+            compiled: Arc::new(crate::compiled(
+                "MATCH (p:Project {id: 1}) RETURN p LIMIT 10",
+            )),
             query_result: qr,
             result_context: result_ctx,
             execution_log: vec![],
@@ -689,29 +653,9 @@ mod tests {
             redacted_count: 0,
             query_type: "aggregation".to_string(),
             raw_query_strings: vec![],
-            compiled: Arc::new(CompiledQueryContext {
-                query_type: QueryType::Aggregation,
-                base: ParameterizedQuery {
-                    sql: String::new(),
-                    params: HashMap::new(),
-                    result_context: result_ctx.clone(),
-                    query_config: Default::default(),
-                    dialect: Default::default(),
-                },
-                hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "aggregation",
-                    "nodes": [{"id": "v", "entity": "Vulnerability"}],
-                    "group_by": ["v.severity"],
-                    "aggregations": [{
-                        "count": "v",
-                        "as": "vulnerability_count"
-                    }],
-                    "limit": 10
-                }))
-                .unwrap(),
-                has_virtual_columns: false,
-            }),
+            compiled: Arc::new(crate::compiled(
+                "MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN v.severity, count(v) AS vulnerability_count LIMIT 10",
+            )),
             query_result: qr,
             result_context: result_ctx,
             execution_log: vec![],
@@ -884,24 +828,9 @@ mod tests {
             redacted_count: 0,
             query_type: "traversal".to_string(),
             raw_query_strings: vec![],
-            compiled: Arc::new(CompiledQueryContext {
-                query_type: QueryType::Traversal,
-                base: ParameterizedQuery {
-                    sql: String::new(),
-                    params: HashMap::new(),
-                    result_context: result_ctx.clone(),
-                    query_config: Default::default(),
-                    dialect: Default::default(),
-                },
-                hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "traversal",
-                    "nodes": [{"id": "p", "entity": "Project"}],
-                    "limit": 10
-                }))
-                .unwrap(),
-                has_virtual_columns: false,
-            }),
+            compiled: Arc::new(crate::compiled(
+                "MATCH (p:Project {id: 1}) RETURN p LIMIT 10",
+            )),
             query_result: qr,
             result_context: result_ctx,
             execution_log: vec![],
@@ -1011,28 +940,9 @@ mod tests {
             redacted_count: 0,
             query_type: "path_finding".to_string(),
             raw_query_strings: vec![],
-            compiled: Arc::new(CompiledQueryContext {
-                query_type: QueryType::PathFinding,
-                base: ParameterizedQuery {
-                    sql: String::new(),
-                    params: HashMap::new(),
-                    result_context: result_ctx.clone(),
-                    query_config: Default::default(),
-                    dialect: Default::default(),
-                },
-                hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "path_finding",
-                    "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2},
-                    "nodes": [
-                        {"id": "u", "entity": "User"},
-                        {"id": "p", "entity": "Project"}
-                    ],
-                    "limit": 5
-                }))
-                .unwrap(),
-                has_virtual_columns: false,
-            }),
+            compiled: Arc::new(crate::compiled(
+                "MATCH path = ANY SHORTEST (u:User)-[:AUTHORED|IN_PROJECT*1..2]->(p:Project) WHERE u.id IN [1] AND p.id IN [2] RETURN path LIMIT 5",
+            )),
             query_result: qr,
             result_context: result_ctx,
             execution_log: vec![],
@@ -1108,28 +1018,9 @@ mod tests {
             redacted_count: 0,
             query_type: "path_finding".to_string(),
             raw_query_strings: vec![],
-            compiled: Arc::new(CompiledQueryContext {
-                query_type: QueryType::PathFinding,
-                base: ParameterizedQuery {
-                    sql: String::new(),
-                    params: HashMap::new(),
-                    result_context: result_ctx.clone(),
-                    query_config: Default::default(),
-                    dialect: Default::default(),
-                },
-                hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "path_finding",
-                    "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2},
-                    "nodes": [
-                        {"id": "u", "entity": "User"},
-                        {"id": "p", "entity": "Project"}
-                    ],
-                    "limit": 5
-                }))
-                .unwrap(),
-                has_virtual_columns: false,
-            }),
+            compiled: Arc::new(crate::compiled(
+                "MATCH path = ANY SHORTEST (u:User)-[:AUTHORED|IN_PROJECT*1..2]->(p:Project) WHERE u.id IN [1] AND p.id IN [2] RETURN path LIMIT 5",
+            )),
             query_result: qr,
             result_context: result_ctx,
             execution_log: vec![],

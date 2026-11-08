@@ -3,18 +3,16 @@ use crate::compiler::setup::{
 };
 use crate::compiler::utils::has_param_value;
 use compiler::gql::{PreparedStatement, prepare};
-use compiler::input::DynamicColumnMode;
-use compiler::{Frontend, QueryError, compile};
+use compiler::{DynamicColumnMode, Frontend, QueryError, compile};
 use ontology::introspection::{
     IntrospectionScope::{All, Local},
     build_compact_schema_response,
 };
 
-fn gql_input(query: &str) -> compiler::Result<compiler::Input> {
+fn gql_statement(query: &str) -> compiler::Result<query_data_model::surface::Statement> {
     let model = embedded_model();
     let catalog = model.catalog().model().logical().as_admin();
-    let statement = compiler::surface::parse(query, Frontend::Gql, catalog)?;
-    compiler::bridge::input(&statement, catalog.model(), model.as_ref())
+    compiler::surface::parse(query, Frontend::Gql, catalog)
 }
 
 #[ignore = "fixture ontology fails the data model load checks"]
@@ -1094,12 +1092,16 @@ fn orbit_query_id_list_and_range_promote_independently() {
                 let conditions = order.map(|i| predicates[i]).join(" AND ");
                 let query =
                     format!("MATCH (u:User) WHERE {conditions} AND u.state = 'active' RETURN u");
-                let input = gql_input(&query).unwrap();
-                let node = &input.nodes[0];
-                assert_eq!(node.node_ids, [1, 2, 3, 5], "{query}");
-                let range = node.id_range.as_ref().unwrap();
-                assert_eq!((range.start, range.end), (1, 3), "{query}");
-                assert!(!node.filters.contains_key("id"), "{query}");
+                let statement = gql_statement(&query).unwrap();
+                let embedded = embedded_model();
+                let logical =
+                    compiler::logical::Query::new(&statement.plan, embedded.catalog().model());
+                let facts = compiler::logical::facts::facts(logical);
+                let anchor = &compiler::logical::facts::anchors(logical, &facts)[0];
+                assert_eq!(anchor.pinned, [1, 2, 3, 5], "{query}");
+                assert_eq!(anchor.range, Some((1, 3)), "{query}");
+                let id = |fact: &compiler::logical::facts::Fact<'_>| matches!(fact.left, query_data_model::plan::logical::Expr::Property { property, .. } if logical.property_name(property) == "id");
+                assert!(!anchor.filters.iter().any(id), "{query}");
                 compile_pair(json, &query, &model(&ontology), &context).unwrap();
             }
         }
@@ -1166,7 +1168,7 @@ fn orbit_query_rejects_inline_filters_on_variable_length_relationships() {
         "MATCH (a:Group {id: 1})-[:CONTAINS*1..2 {source_id: 1}]->(b:Group) RETURN a, b",
         "MATCH (a:Group {id: 1})<-[r:CONTAINS*2..3 {target_id: 1}]-(b:Group) RETURN a, b",
     ] {
-        let error = gql_input(query).expect_err(query);
+        let error = gql_statement(query).expect_err(query);
         assert!(
             error
                 .to_string()
@@ -1203,7 +1205,7 @@ fn orbit_query_rejects_aggregation_over_shortest_paths() {
         "MATCH path = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF*1..3]->(p:Project) RETURN path, count(u)",
         "MATCH path = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF*1..3]->(p:Project) RETURN properties(path), count(u)",
     ] {
-        let error = gql_input(query).expect_err(query);
+        let error = gql_statement(query).expect_err(query);
         assert!(
             error.to_string().contains("aggregation"),
             "{query}: {error}"
@@ -1218,7 +1220,7 @@ fn orbit_query_rejects_neighbors_center_all_properties() {
         "MATCH (center:File {id: 1})-->(n) RETURN properties(center)",
         "MATCH (center:Project {id: 1})<--(n) RETURN n, properties(center)",
     ] {
-        let error = gql_input(query).expect_err(query);
+        let error = gql_statement(query).expect_err(query);
         assert!(
             error
                 .to_string()
@@ -1560,7 +1562,7 @@ fn orbit_query_nesting_guard_sees_through_escaped_names() {
         "(".repeat(2_000),
         ")".repeat(2_000)
     );
-    let error = gql_input(&hidden).unwrap_err();
+    let error = gql_statement(&hidden).unwrap_err();
     assert!(error.to_string().contains("nesting is too deep"), "{error}");
 
     let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":5}"#;
@@ -1580,7 +1582,7 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
         "x".repeat(40_000)
     );
     for query in [nested, oversized] {
-        assert!(gql_input(&query).is_err());
+        assert!(gql_statement(&query).is_err());
     }
     let query = "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u";
     assert!(
@@ -1612,7 +1614,7 @@ fn orbit_query_caps_reject_during_lowering() {
     ] {
         let column = query.find(first_rejected).unwrap() + 1;
         let expected = format!("line 1, column {column}: {message}");
-        let error = gql_input(&query).unwrap_err();
+        let error = gql_statement(&query).unwrap_err();
         assert!(
             matches!(&error, QueryError::Validation(m) if *m == expected),
             "{error:?}"
@@ -1922,7 +1924,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
         &test_ctx(),
     )
     .unwrap();
-    assert!(compiled.input.options.include_debug_sql);
+    assert!(compiled.debug);
 
     let json = r#"{"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[100]}],"neighbors":{"direction":"both"},"options":{"dynamic_columns":"*"}}"#;
     let compiled = compile_pair(
@@ -1932,10 +1934,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
         &test_ctx(),
     )
     .unwrap();
-    assert_eq!(
-        compiled.input.options.dynamic_columns,
-        DynamicColumnMode::All
-    );
+    assert_eq!(compiled.stats.dynamic_columns, DynamicColumnMode::All);
 
     let json = r#"{"query_type":"path_finding","nodes":[{"id":"start","entity":"Project","node_ids":[100]},{"id":"end","entity":"Project","node_ids":[200]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["CONTAINS"]},"options":{"dynamic_columns":"*"}}"#;
     let compiled = compile_pair(
@@ -1945,10 +1944,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
         &test_ctx(),
     )
     .unwrap();
-    assert_eq!(
-        compiled.input.options.dynamic_columns,
-        DynamicColumnMode::All
-    );
+    assert_eq!(compiled.stats.dynamic_columns, DynamicColumnMode::All);
 }
 
 #[ignore = "fixture ontology fails the data model load checks"]
@@ -1964,16 +1960,11 @@ fn orbit_query_optional_clauses_preserve_options() {
             for debug in ["", " DEBUG"] {
                 let query = format!("MATCH (u:User {{id: 1}}) RETURN u{order}{limit}{debug}");
                 let compiled = compile(&query, Frontend::Gql, &test_model(), &test_ctx()).unwrap();
-                let input = compiled.input;
-                assert_eq!(
-                    input.options.include_debug_sql,
-                    !debug.is_empty(),
-                    "{query}"
-                );
-                assert_eq!(input.order_by.is_some(), !order.is_empty(), "{query}");
-                assert_eq!(input.skip, skip, "{query}");
+                assert_eq!(compiled.debug, !debug.is_empty(), "{query}");
+                assert_eq!(compiled.stats.has_order_by, !order.is_empty(), "{query}");
+                assert_eq!(compiled.shape.skip, skip, "{query}");
                 if let Some(rows) = rows {
-                    assert_eq!(input.limit, rows, "{query}");
+                    assert_eq!(compiled.shape.limit, rows, "{query}");
                 }
             }
         }
@@ -1995,7 +1986,7 @@ fn orbit_query_debug_in_literals_and_comments_stays_data() {
         for comment in ["", " /* DEBUG */", " // DEBUG"] {
             let query = format!("MATCH (u:User {{username: {literal}}}) RETURN u{comment}");
             let compiled = compile(&query, Frontend::Gql, &test_model(), &test_ctx()).unwrap();
-            assert!(!compiled.input.options.include_debug_sql, "{query}");
+            assert!(!compiled.debug, "{query}");
             assert!(
                 has_param_value(&compiled.base.params, &serde_json::json!(value)),
                 "{query}"

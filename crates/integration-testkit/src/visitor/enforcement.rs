@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use query_engine::compiler::input::{Input, QueryType};
+use query_engine::compiler::{QueryStats, QueryType};
 
 /// Some variants carry data from the AST (field name, edge type) so the
 /// enforcement is granular: a query with two filter fields or two
@@ -64,26 +64,22 @@ pub trait QueryRequirements {
     fn requirements(&self) -> HashSet<Requirement>;
 }
 
-impl QueryRequirements for Input {
+impl QueryRequirements for QueryStats {
     fn requirements(&self) -> HashSet<Requirement> {
         let mut reqs = HashSet::new();
 
-        if self.order_by.is_some() {
+        if self.has_order_by {
             reqs.insert(Requirement::OrderBy);
         }
 
-        for node in &self.nodes {
-            for field in node.filters.keys() {
-                reqs.insert(Requirement::Filter {
-                    field: field.clone(),
-                });
-            }
+        for field in &self.node_filter_fields {
+            reqs.insert(Requirement::Filter {
+                field: field.clone(),
+            });
         }
 
         // node_ids in path_finding defines endpoints, not a result filter.
-        if self.query_type != QueryType::PathFinding
-            && self.nodes.iter().any(|n| !n.node_ids.is_empty())
-        {
+        if self.query_type != QueryType::PathFinding && self.pinned {
             reqs.insert(Requirement::NodeIds);
         }
 
@@ -107,16 +103,14 @@ impl QueryRequirements for Input {
         // Traversal queries with joins produce edges the test must verify per type.
         // Aggregation also uses relationships for joins but doesn't produce edges.
         if self.query_type == QueryType::Traversal {
-            for rel in &self.relationships {
-                for edge_type in &rel.types {
-                    reqs.insert(Requirement::Relationship {
-                        edge_type: edge_type.clone(),
-                    });
-                }
+            for edge_type in &self.relationship_types {
+                reqs.insert(Requirement::Relationship {
+                    edge_type: edge_type.clone(),
+                });
             }
         }
 
-        if self.aggregation.sort.is_some() {
+        if self.has_output_sort {
             reqs.insert(Requirement::AggregationSort);
         }
 
@@ -131,7 +125,7 @@ impl QueryRequirements for Input {
 /// Tracks which query-derived requirements have been satisfied by test assertions.
 ///
 /// When created via [`super::ResponseView::for_query`], requirements are derived
-/// from the compiled [`Input`]. Each assertion method on `ResponseView` marks the
+/// from the compiled [`QueryStats`]. Each assertion method on `ResponseView` marks the
 /// relevant requirement as satisfied. On drop, panics if any requirement was not met.
 pub(super) struct AssertionTracker {
     required: HashSet<Requirement>,
@@ -205,7 +199,6 @@ impl Drop for AssertionTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use query_engine::compiler::input::parse_input;
 
     use crate::visitor::tests::{
         make_node, make_path_edge, sample_aggregation_response,
@@ -215,8 +208,8 @@ mod tests {
     use crate::visitor::{NodeExt, ResponseView};
     use query_engine::formatters::GraphResponse;
 
-    fn parse_test_input(json: &str) -> Input {
-        parse_input(json).expect("test query JSON should parse into Input")
+    fn parse_test_input(json: &str) -> QueryStats {
+        crate::test_stats(json)
     }
 
     #[test]
@@ -286,7 +279,7 @@ mod tests {
                     {"id": "s", "entity": "User", "node_ids": [1]},
                     {"id": "e", "entity": "Project", "node_ids": [1000]}
                 ],
-                "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3}}"#,
+                "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3, "rel_types": ["AUTHORED", "IN_PROJECT"]}}"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::PathFinding));
@@ -319,14 +312,6 @@ mod tests {
         );
         let reqs = input.requirements();
         assert_eq!(reqs, HashSet::from([Requirement::NodeCount]));
-    }
-
-    #[test]
-    fn requirements_from_default_input_has_node_count() {
-        assert_eq!(
-            Input::default().requirements(),
-            HashSet::from([Requirement::NodeCount])
-        );
     }
 
     #[test]
@@ -518,7 +503,7 @@ mod tests {
             r#"{"query_type": "path_finding",
                 "nodes": [{"id": "s", "entity": "User", "node_ids": [1]},
                            {"id": "e", "entity": "Project", "node_ids": [1000]}],
-                "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3}}"#,
+                "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3, "rel_types": ["AUTHORED", "IN_PROJECT"]}}"#,
         );
         let resp = GraphResponse {
             format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
@@ -838,7 +823,7 @@ mod tests {
             r#"{"query_type": "path_finding",
                 "nodes": [{"id": "s", "entity": "User", "node_ids": [1]},
                            {"id": "e", "entity": "Project", "node_ids": [1000]}],
-                "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3}}"#,
+                "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3, "rel_types": ["AUTHORED", "IN_PROJECT"]}}"#,
         );
         let resp = GraphResponse {
             format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),

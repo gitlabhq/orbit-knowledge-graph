@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
 use crate::common::{DummyClaims, GRAPH_SCHEMA_SQL, TestContext, load_data_model, load_ontology};
-use compiler::{Frontend, parse_input};
+use compiler::Frontend;
 use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use integration_testkit::load_seed;
@@ -389,7 +389,6 @@ fn normalize_doc_query(body: &str) -> Result<String, String> {
         .ok_or_else(|| "marked fence does not contain an Orbit query".to_string())?;
     let json =
         serde_json::to_string(query).map_err(|e| format!("serialize Orbit query JSON: {e}"))?;
-    parse_input(&json).map_err(|e| format!("invalid Orbit query JSON: {e}"))?;
     Ok(json)
 }
 

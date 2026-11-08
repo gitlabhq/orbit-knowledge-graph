@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use compiler::input::{
-    Direction, RelationshipColumn, RelationshipColumnKind, group_by_output_names,
+use compiler::{
+    Direction, QueryType, RelationshipColumn, RelationshipColumnKind, ResultContext,
+    neighbor_is_outgoing_column, relationship_type_column,
 };
-use compiler::{QueryType, ResultContext, neighbor_is_outgoing_column, relationship_type_column};
 use orbit_arrow::ColumnValue;
 use orbit_utils::strings::quote_escaped;
 use serde_json::{Map, Value};
@@ -23,7 +23,7 @@ pub fn encode(output: &PipelineOutput) -> String {
 type Table = (Vec<String>, Vec<Vec<String>>);
 
 pub fn table(output: &PipelineOutput) -> Table {
-    match output.compiled.input.query_type {
+    match output.compiled.query_type {
         QueryType::Aggregation => aggregation_table(output),
         QueryType::PathFinding | QueryType::Neighbors => path_table(output),
         _ => node_table(output),
@@ -32,15 +32,15 @@ pub fn table(output: &PipelineOutput) -> Table {
 
 fn node_table(output: &PipelineOutput) -> Table {
     let context = &output.result_context;
-    let input = &output.compiled.input;
-    let aliases: Vec<String> = input.nodes.iter().map(|n| n.id.clone()).collect();
-    let relationships = &input.relationship_return.columns;
+    let shape = &output.compiled.shape;
+    let aliases: Vec<String> = shape.nodes.iter().map(|(alias, _)| alias.clone()).collect();
+    let relationships = &shape.relationship_columns;
     let columns: Vec<String> = aliases
         .iter()
         .cloned()
         .chain(relationships.iter().map(|column| column.name.clone()))
         .collect();
-    let order = &input.relationship_return.column_order;
+    let order = &shape.column_order;
     let mut positions: Vec<usize> = (0..columns.len()).collect();
     positions.sort_by_key(|&index| {
         order
@@ -98,12 +98,14 @@ fn relationship_cell(
 }
 
 fn path_table(output: &PipelineOutput) -> Table {
-    let rows = output.query_result.authorized_rows().filter_map(|row| {
-        match output.compiled.input.query_type {
-            QueryType::Neighbors => neighbor_path(row, output),
-            _ => shortest_path(row),
-        }
-    });
+    let rows =
+        output
+            .query_result
+            .authorized_rows()
+            .filter_map(|row| match output.compiled.query_type {
+                QueryType::Neighbors => neighbor_path(row, output),
+                _ => shortest_path(row),
+            });
     let mut seen = HashSet::new();
     let rows = rows
         .filter(|path| seen.insert(path.clone()))
@@ -113,15 +115,12 @@ fn path_table(output: &PipelineOutput) -> Table {
 }
 
 fn aggregation_table(output: &PipelineOutput) -> Table {
-    let aggregation = &output.compiled.input.aggregation;
-    let columns: Vec<String> = group_by_output_names(&aggregation.group_by)
-        .into_iter()
-        .chain(
-            aggregation
-                .metrics
-                .iter()
-                .map(|metric| metric.output_name()),
-        )
+    let shape = &output.compiled.shape;
+    let columns: Vec<String> = shape
+        .groups
+        .iter()
+        .map(|group| group.name.clone())
+        .chain(shape.measures.iter().map(|measure| measure.name.clone()))
         .collect();
     let rows = GraphFormatter
         .build_response(output)
@@ -155,11 +154,11 @@ fn row_node(row: &QueryResultRow, context: &ResultContext, alias: &str) -> Optio
 }
 
 fn neighbor_path(row: &QueryResultRow, output: &PipelineOutput) -> Option<String> {
-    let input = &output.compiled.input;
-    let center = input
+    let shape = &output.compiled.shape;
+    let center = shape
         .nodes
         .first()
-        .and_then(|center| row_node(row, &output.result_context, &center.id))
+        .and_then(|(center, _)| row_node(row, &output.result_context, center))
         .unwrap_or_else(null);
     let neighbor = dynamic_node(row.neighbor_node()?);
     let relationship = row
@@ -169,10 +168,7 @@ fn neighbor_path(row: &QueryResultRow, output: &PipelineOutput) -> Option<String
         .get(neighbor_is_outgoing_column())
         .and_then(|value| value.as_int64().copied())
         .map(|value| value != 0)
-        .unwrap_or(!matches!(
-            input.neighbors.as_ref().map(|n| n.direction),
-            Some(Direction::Incoming)
-        ));
+        .unwrap_or(shape.neighbors_direction != Some(Direction::Incoming));
     Some(if outgoing {
         format!("{center}-[:{relationship}]->{neighbor}")
     } else {

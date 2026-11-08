@@ -134,7 +134,7 @@ actually assert the query features they exercise.
 
 ### Creating a view
 
-The only public constructor is `for_query`, which takes the compiled `Input` AST
+The only public constructor is `for_query`, which takes the compiled `QueryStats`
 and the formatted `GraphResponse`:
 
 ```rust
@@ -143,7 +143,7 @@ use compiler::{compile, Frontend};
 
 let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
 // ... run pipeline, get response ...
-let resp = ResponseView::for_query(&compiled.input, response);
+let resp = ResponseView::for_query(&compiled.stats, response);
 ```
 
 On construction, `for_query` validates two structural invariants:
@@ -155,7 +155,7 @@ On construction, `for_query` validates two structural invariants:
 
 ### Assertion enforcement
 
-`for_query` inspects the `Input` AST and derives a set of requirements — one per
+`for_query` inspects the `QueryStats` and derives a set of requirements — one per
 query feature that needs to be asserted. When the `ResponseView` is dropped, it
 panics if any requirement was not satisfied.
 

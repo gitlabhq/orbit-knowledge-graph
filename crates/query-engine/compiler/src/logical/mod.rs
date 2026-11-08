@@ -241,7 +241,8 @@ impl<'p> Query<'p> {
     pub fn dynamic_columns(self) -> DynamicColumnMode {
         self.selected()
             .into_iter()
-            .filter_map(|item| match item {
+            .rev()
+            .find_map(|item| match item {
                 Projection::Graph { binding, columns }
                     if matches!(
                         self.plan.value(*binding),
@@ -255,7 +256,6 @@ impl<'p> Query<'p> {
                 }
                 _ => None,
             })
-            .last()
             .unwrap_or_default()
     }
 

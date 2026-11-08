@@ -243,10 +243,7 @@ pub(super) async fn pipeline_output(
         .expect("pipeline should succeed");
 
     let mut query_result = hydration_output.query_result;
-    let pagination = Some(query_engine::shared::paginate(
-        &mut query_result,
-        &compiled.input,
-    ));
+    let pagination = Some(query_engine::shared::paginate(&mut query_result, &compiled));
 
     PipelineOutput {
         row_count: query_result.authorized_count(),

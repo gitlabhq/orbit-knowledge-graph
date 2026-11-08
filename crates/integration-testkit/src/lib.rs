@@ -9,6 +9,20 @@ mod seed;
 pub mod seeded_resolver;
 pub mod visitor;
 
+/// The stats of a normalized JSON DSL query on the embedded ClickHouse model, before admission.
+#[cfg(test)]
+pub(crate) fn test_stats(json: &str) -> query_engine::compiler::QueryStats {
+    use query_engine::compiler::{
+        Frontend, QueryStats, logical::Query, passes::normalize, surface,
+    };
+    let model = query_data_model::ClickHouseDataModel::embedded().unwrap();
+    let catalog = model.catalog().model().logical().as_admin();
+    let statement = surface::parse(json, Frontend::JsonDsl, catalog)
+        .unwrap_or_else(|error| panic!("{json}: {error}"));
+    let plan = normalize::normalize(statement.plan, catalog.model(), &model).unwrap();
+    QueryStats::new(Query::new(&plan, catalog.model()), &model)
+}
+
 pub use assertions::{
     assert_edge_count, assert_edge_count_for_traversal_path, assert_edge_tags,
     assert_edge_tags_by_source, assert_edge_tags_by_target, assert_edges_have_traversal_path,

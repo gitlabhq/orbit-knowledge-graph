@@ -1,31 +1,28 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::{Array, ArrayRef, Int64Array, ListArray, StringArray, StructArray};
 use arrow::buffer::OffsetBuffer;
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use compiler::input::{RelationshipColumn, RelationshipColumnKind};
 use compiler::{
-    CompiledQueryContext, EdgeMeta, HydrationPlan, ParameterizedQuery, ResultContext,
-    edge_kinds_column, neighbor_id_column, neighbor_is_outgoing_column, neighbor_type_column,
-    path_column, relationship_type_column,
+    EdgeMeta, ResultContext, edge_kinds_column, neighbor_id_column, neighbor_is_outgoing_column,
+    neighbor_type_column, path_column, relationship_type_column,
 };
 use orbit_arrow::ColumnValue;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, json};
 use shared::{PaginationMeta, PipelineOutput};
 use types::QueryResult;
 
 use super::{encode, literal, node_literal, render};
 
 fn output(
-    input: Value,
+    gql: &str,
     context: &[(&str, &str)],
     columns: Vec<(String, ArrayRef)>,
     pagination: Option<PaginationMeta>,
 ) -> PipelineOutput {
-    let input: compiler::Input = serde_json::from_value(input).unwrap();
-    let mut result_context = ResultContext::new().with_query_type(input.query_type);
+    let compiled = crate::compiled(gql);
+    let mut result_context = ResultContext::new().with_query_type(compiled.query_type);
     for (alias, entity) in context {
         result_context.add_node(alias, entity);
     }
@@ -39,21 +36,9 @@ fn output(
     PipelineOutput {
         row_count: query_result.authorized_count(),
         redacted_count: 0,
-        query_type: input.query_type.to_string(),
+        query_type: compiled.query_type.to_string(),
         raw_query_strings: vec![],
-        compiled: Arc::new(CompiledQueryContext {
-            query_type: input.query_type,
-            base: ParameterizedQuery {
-                sql: String::new(),
-                params: HashMap::new(),
-                result_context: result_context.clone(),
-                query_config: Default::default(),
-                dialect: Default::default(),
-            },
-            hydration: HydrationPlan::None,
-            input,
-            has_virtual_columns: false,
-        }),
+        compiled: Arc::new(compiled),
         query_result,
         result_context,
         execution_log: vec![],
@@ -152,7 +137,7 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
         truncated: true,
     };
     let output = output(
-        json!({"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}, {"id": "g", "entity": "Group"}]}),
+        "MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group) RETURN u, g LIMIT 10",
         &[("u", "User"), ("g", "Group")],
         vec![
             column("_orbit_u_id", ints(&[1, 1])),
@@ -179,9 +164,7 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
 #[test]
 fn returned_relationships_add_columns_in_return_order() {
     let mut output = output(
-        json!({"query_type": "traversal",
-               "nodes": [{"id": "u", "entity": "User"}, {"id": "mr", "entity": "MergeRequest"}],
-               "relationships": [{"type": ["AUTHORED", "APPROVED"], "from": "u", "to": "mr"}]}),
+        "MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN type(r) AS kind, mr, r LIMIT 10",
         &[("u", "User"), ("mr", "MergeRequest")],
         vec![
             column("_orbit_u_id", ints(&[1, 1])),
@@ -205,23 +188,6 @@ fn returned_relationships_add_columns_in_return_order() {
         dst_type_column: "_orbit_e0_dst_kind".into(),
         relationship: 0,
     });
-    let relationship_return = &mut Arc::get_mut(&mut output.compiled)
-        .unwrap()
-        .input
-        .relationship_return;
-    relationship_return.column_order = vec!["kind".into(), "mr".into(), "r".into()];
-    relationship_return.columns = vec![
-        RelationshipColumn {
-            name: "kind".into(),
-            relationship: 0,
-            kind: RelationshipColumnKind::Type,
-        },
-        RelationshipColumn {
-            name: "r".into(),
-            relationship: 0,
-            kind: RelationshipColumnKind::Relationship,
-        },
-    ];
     assert_eq!(
         encode(&output),
         "+----------------------------------------------------------------------+\n\
@@ -238,10 +204,7 @@ fn returned_relationships_add_columns_in_return_order() {
 #[test]
 fn node_groups_render_as_nodes() {
     let output = output(
-        json!({"query_type": "aggregation",
-               "nodes": [{"id": "g", "entity": "Group"}, {"id": "u", "entity": "User"}],
-               "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-               "group_by": ["g"], "aggregations": [{"count": "u", "as": "user_count"}]}),
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 22}) RETURN g, count(u) AS user_count LIMIT 10",
         &[("g", "Group")],
         vec![
             column("_orbit_g_id", ints(&[22])),
@@ -265,8 +228,7 @@ fn node_groups_render_as_nodes() {
 #[test]
 fn neighbors_follow_the_stored_edge_direction() {
     let mut output = output(
-        json!({"query_type": "neighbors", "nodes": [{"id": "c", "entity": "Group", "node_ids": [22]}],
-               "neighbors": {"direction": "both"}}),
+        "MATCH (c:Group {id: 22})--(n) RETURN n LIMIT 10",
         &[("c", "Group")],
         vec![
             column("_orbit_c_id", ints(&[22, 22])),
@@ -331,9 +293,7 @@ fn path_finding_prints_each_distinct_path_once() {
         None,
     );
     let mut output = output(
-        json!({"query_type": "path_finding",
-               "nodes": [{"id": "u", "entity": "User"}, {"id": "p", "entity": "Project"}],
-               "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2}}),
+        "MATCH path = ANY SHORTEST (u:User)-[:AUTHORED|IN_PROJECT*1..2]->(p:Project) WHERE u.id IN [1] AND p.id IN [2] RETURN path LIMIT 5",
         &[],
         vec![
             (path_column().to_string(), Arc::new(paths) as ArrayRef),

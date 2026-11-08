@@ -55,7 +55,7 @@ impl AnalyticsObserver {
 impl PipelineObserver for AnalyticsObserver {
     fn set_query_type(&mut self, _query_type: &'static str) {}
     fn set_compiled(&mut self, ctx: &CompiledQueryContext) {
-        self.metrics.input = Some(ctx.input.clone());
+        self.metrics.stats = Some(ctx.stats.clone());
         self.metrics.has_virtual_columns = ctx.has_virtual_columns;
         self.metrics.hydration = Some(ctx.hydration.clone());
     }
@@ -241,25 +241,17 @@ mod tests {
             UserAgent::default(),
             "33".to_string(),
         );
-        obs.set_compiled(&CompiledQueryContext {
-            query_type: query_engine::compiler::input::QueryType::Traversal,
-            base: query_engine::compiler::passes::codegen::ParameterizedQuery {
-                sql: String::new(),
-                params: Default::default(),
-                result_context: query_engine::compiler::ResultContext::new(),
-                query_config: Default::default(),
-                dialect: query_engine::compiler::passes::codegen::SqlDialect::ClickHouse,
-            },
-            hydration: query_engine::compiler::HydrationPlan::None,
-            input: query_engine::compiler::Input {
-                nodes: vec![query_engine::compiler::InputNode {
-                    entity: Some("User".into()),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            },
-            has_virtual_columns: false,
-        });
+        let model = Arc::new(query_data_model::ClickHouseDataModel::embedded().unwrap());
+        let ctx = query_engine::compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let gql = "MATCH (u:User {id: 1}) RETURN u LIMIT 10";
+        let compiled = query_engine::compiler::compile(
+            gql,
+            query_engine::compiler::Frontend::Gql,
+            &model,
+            &ctx,
+        )
+        .unwrap();
+        obs.set_compiled(&compiled);
         obs.compiled(Duration::from_millis(5));
         obs.executed(Duration::from_millis(50), 2);
         obs.authorized(Duration::from_millis(10));

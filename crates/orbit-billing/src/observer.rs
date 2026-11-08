@@ -199,7 +199,6 @@ impl PipelineObserver for BillingObserver {
         self.query_type = query_type;
     }
     fn set_compiled(&mut self, ctx: &CompiledQueryContext) {
-        self.metrics.input = Some(ctx.input.clone());
         self.metrics.hydration = Some(ctx.hydration.clone());
     }
     fn compiled(&mut self, elapsed: Duration) {
@@ -331,6 +330,52 @@ mod tests {
         assert_eq!(metadata["coding_agent"], "claude-code");
         assert_eq!(metadata["is_gitlab_team_member"], true);
         assert_eq!(metadata["orbit_version"], orbit_utils::version::get());
+    }
+
+    #[test]
+    fn metadata_is_the_same_for_every_compiled_query_shape() {
+        let model = Arc::new(query_data_model::ClickHouseDataModel::embedded().unwrap());
+        let ctx = compiler::SecurityContext::new(1, vec!["1/9970/".into()]).unwrap();
+        let queries = [
+            (
+                "traversal",
+                "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}) RETURN u, mr LIMIT 5",
+            ),
+            (
+                "aggregation",
+                "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.state, count(mr) AS total LIMIT 10",
+            ),
+            ("search", "MATCH (p:Project {id: 1}) RETURN p LIMIT 1"),
+        ];
+        for (query_type, gql) in queries {
+            let compiled = compiler::compile(gql, compiler::Frontend::Gql, &model, &ctx).unwrap();
+            let mut obs = BillingObserver::new(None, test_inputs());
+            obs.set_query_type(query_type);
+            obs.set_compiled(&compiled);
+            obs.compiled(std::time::Duration::from_millis(5));
+            obs.executed(std::time::Duration::from_millis(50), 2);
+            obs.query_executed("base", 1000, 50000, 8_000_000);
+
+            assert_eq!(
+                obs.build_metadata(),
+                json!({
+                    "compile_ms": 5,
+                    "execute_ms": 50,
+                    "authorization_ms": null,
+                    "hydration_ms": null,
+                    "ch_read_rows": 1000,
+                    "ch_read_bytes": 50000,
+                    "ch_memory_usage": 8_000_000,
+                    "query_type": query_type,
+                    "feature_qualified_name": "orbit_mcp",
+                    "source_type": "mcp",
+                    "coding_agent": "claude-code",
+                    "is_gitlab_team_member": true,
+                    "orbit_version": orbit_utils::version::get(),
+                }),
+                "{gql}"
+            );
+        }
     }
 
     #[test]

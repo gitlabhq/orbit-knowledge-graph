@@ -150,10 +150,10 @@ fn execute_cypher(
         arrow::compute::concat_batches(&batches[0].schema(), &batches)
             .map_err(|e| anyhow::anyhow!("concat batches: {e}"))?
     };
-    let window = compiled.input.limit as usize;
+    let window = compiled.shape.limit as usize;
     let has_more = batch.num_rows() > window;
     let batch = batch.slice(0, batch.num_rows().min(window));
-    Ok((apply_aliases(batch, &compiled.input, &aliases), has_more))
+    Ok((apply_aliases(batch, &aliases), has_more))
 }
 
 /// Rewrite a fixture Cypher query for the Orbit GQL compiler:
@@ -209,11 +209,7 @@ fn rewrite_query(cypher: &str) -> (String, Vec<(String, String, String)>) {
 /// Columns with an explicit alias get renamed (e.g. `caller_fqn` → `caller`).
 /// Columns without an alias keep the `{node}_{prop}` name to avoid collisions
 /// when multiple nodes project the same property.
-fn apply_aliases(
-    batch: RecordBatch,
-    _input: &compiler::Input,
-    aliases: &[(String, String, String)],
-) -> RecordBatch {
+fn apply_aliases(batch: RecordBatch, aliases: &[(String, String, String)]) -> RecordBatch {
     let alias_map: HashMap<String, String> = aliases
         .iter()
         .map(|(node, prop, alias)| (format!("{node}_{prop}"), alias.clone()))

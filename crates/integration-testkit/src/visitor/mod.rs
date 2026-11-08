@@ -26,7 +26,7 @@ pub use enforcement::{QueryRequirements, Requirement};
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use query_engine::compiler::input::{Input, QueryType};
+use query_engine::compiler::{QueryStats, QueryType};
 #[cfg(test)]
 use query_engine::formatters::ColumnDescriptor;
 use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor};
@@ -160,35 +160,35 @@ impl ResponseView {
         }
     }
 
-    /// Create a view with assertion enforcement derived from the compiled [`Input`].
+    /// Create a view with assertion enforcement derived from the compiled [`QueryStats`].
     ///
     /// Validates structural invariants on construction:
     /// - `response.query_type` matches the input
     /// - Search and aggregation responses have zero edges (the formatter never
     ///   produces edges for these query types)
-    pub fn for_query(input: &Input, response: GraphResponse) -> Self {
+    pub fn for_query(stats: &QueryStats, response: GraphResponse) -> Self {
         let response_type: QueryType = serde_json::from_value(Value::String(
             response.query_type.clone(),
         ))
         .unwrap_or_else(|_| panic!("unknown response query_type '{}'", response.query_type));
         assert_eq!(
-            response_type, input.query_type,
+            response_type, stats.query_type,
             "response query_type '{}' does not match input '{}'",
-            response.query_type, input.query_type,
+            response.query_type, stats.query_type,
         );
 
-        if input.is_search() || input.query_type == QueryType::Aggregation {
+        if stats.is_search || stats.query_type == QueryType::Aggregation {
             assert!(
                 response.edges.is_empty(),
                 "{} response must have zero edges, got {}",
-                input.query_type,
+                stats.query_type,
                 response.edges.len(),
             );
         }
 
         Self {
             response,
-            tracker: AssertionTracker::new(input.requirements()),
+            tracker: AssertionTracker::new(stats.requirements()),
             asserted_edge_types: RefCell::new(HashSet::new()),
         }
     }

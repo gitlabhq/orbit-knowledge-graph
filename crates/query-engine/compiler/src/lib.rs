@@ -31,11 +31,9 @@
 
 pub mod analytics;
 pub mod ast;
-pub mod bridge;
 pub mod constants;
 pub mod error;
 pub mod hydration;
-pub mod input;
 pub mod metrics;
 pub(crate) mod query_limits;
 
@@ -54,16 +52,16 @@ pub use constants::{
     neighbor_is_outgoing_column, neighbor_type_column, path_column, relationship_type_column,
 };
 pub use error::{QueryError, RejectionReason, Result};
-pub use input::{ColumnSelection, Input, InputFilter, InputNode, parse_input};
 pub use logical::DynamicColumnMode;
 pub use logical::facts::FilterOp;
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
-pub use query_data_model::EntityAuthConfig;
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
+pub use query_data_model::{Direction, EntityAuthConfig};
 pub use types::QueryType;
 
 pub use analytics::ExecMetrics;
+pub use analytics::QueryStats;
 pub use hydration::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
@@ -74,7 +72,10 @@ pub use passes::hydrate::{
     DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     VirtualFilter, generate_hydration_plan,
 };
-pub use passes::result_contract::{EdgeMeta, RedactionNode, ResultContext};
+pub use passes::result_contract::{
+    EdgeMeta, GroupColumn, MeasureColumn, RedactionNode, RelationshipColumn,
+    RelationshipColumnKind, ResultContext, ResultShape,
+};
 pub use surface::{Frontend, gql};
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 

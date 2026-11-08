@@ -66,6 +66,14 @@ pub fn column_value_to_json(value: &ColumnValue) -> Value {
 }
 
 #[cfg(test)]
+pub(crate) fn compiled(gql: &str) -> compiler::CompiledQueryContext {
+    let model = std::sync::Arc::new(query_data_model::ClickHouseDataModel::embedded().unwrap());
+    let paths = vec![compiler::AuthorizedPath::new("1/", 30)];
+    let ctx = compiler::SecurityContext::new_with_roles(1, paths).unwrap();
+    compiler::compile(gql, compiler::Frontend::Gql, &model, &ctx).unwrap()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
