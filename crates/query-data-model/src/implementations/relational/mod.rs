@@ -33,8 +33,6 @@ pub struct RelationalOptions {
     pub sort_key: Vec<String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub edge_tables: IndexMap<String, EdgeTableSpec>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub route_all_variants: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -216,7 +214,7 @@ impl RelationalStore {
         let mut edge_routes = vec![None; graph.variants().count()];
         for variant in graph.variants() {
             let bound = store.source(variant.source).is_some() && on_connection(variant.target);
-            if !bound && !options.route_all_variants {
+            if !bound {
                 continue;
             }
             let route = input

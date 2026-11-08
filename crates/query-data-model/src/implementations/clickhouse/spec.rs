@@ -59,7 +59,6 @@ impl ClickHouseOptions {
                     (name.clone(), spec)
                 })
                 .collect(),
-            route_all_variants: false,
         }
     }
 }

@@ -24,4 +24,3 @@ engine:
           target_id: int64
           target_kind: string
           traversal_path: string
-    route_all_variants: true

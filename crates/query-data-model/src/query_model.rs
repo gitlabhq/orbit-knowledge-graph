@@ -127,22 +127,9 @@ where
                     .collect()
             })
             .collect();
-        let edge_table_names: Vec<&str> = stores
-            .iter()
-            .flat_map(|(_, facts)| {
-                facts
-                    .relational()
-                    .edge_tables
-                    .iter()
-                    .map(|table| table.name.as_str())
-            })
-            .collect();
         let relationship_tables = graph
             .relationships()
             .map(|relationship| {
-                if let [only] = edge_table_names.as_slice() {
-                    return vec![only.to_string()];
-                }
                 relationship
                     .variants
                     .iter()

@@ -469,7 +469,6 @@ fn local_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
                 columns: edge_columns(ontology.local_edge_columns()),
             },
         )]),
-        route_all_variants: true,
         ..RelationalOptions::default()
     };
     let local = ontology.local_entity_names();
