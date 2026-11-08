@@ -186,7 +186,7 @@ pub struct SchemaProperty {
     /// human-readable description from the ontology
     #[prost(string, tag = "5")]
     pub description: ::prost::alloc::string::String,
-    /// CONTAINS, STARTS WITH, and ENDS WITH compile on the property; populated when expanded
+    /// whether clients may text-search the property with CONTAINS, STARTS WITH, or ENDS WITH; false for enum, virtual, admin_only, non-filterable, non-text, and like_allowed: false properties; populated when expanded
     #[prost(bool, optional, tag = "6")]
     pub text_searchable: ::core::option::Option<bool>,
 }

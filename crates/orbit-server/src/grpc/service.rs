@@ -769,6 +769,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 impl OrbitServiceImpl {
     fn property_is_text_searchable(field: &Field) -> bool {
         field.like_allowed
+            && field.filterable
             && !field.is_virtual()
             && !field.admin_only
             && matches!(field.data_type, DataType::String | DataType::Uuid)
@@ -1360,7 +1361,15 @@ mod tests {
     fn test_structured_schema_text_searchable_matches_the_query_validator() {
         let ontology = test_ontology();
         let response = OrbitServiceImpl::build_structured_schema(&ontology, &["*".to_string()]);
-        let ctx = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let model = compiler::data_model::clickhouse(Arc::clone(&ontology)).unwrap();
+        let ctx = compiler::SecurityContext::new_with_roles(
+            1,
+            vec![compiler::AuthorizedPath::new(
+                "1/",
+                compiler::AccessLevel::Owner as u32,
+            )],
+        )
+        .unwrap();
         let mut allowed = 0;
 
         for node in &response.nodes {
@@ -1369,7 +1378,8 @@ mod tests {
                     "MATCH (n:{}) WHERE n.{} CONTAINS 'abc' RETURN n.id LIMIT 1",
                     node.name, property.name
                 );
-                let compiled = compiler::compile(&query, compiler::Frontend::Gql, &ontology, &ctx);
+                let compiled =
+                    compiler::compile_model(&query, compiler::Frontend::Gql, &model, &ctx);
                 let text_searchable = property.text_searchable.unwrap_or_else(|| {
                     panic!("{}.{} has no text_searchable", node.name, property.name)
                 });

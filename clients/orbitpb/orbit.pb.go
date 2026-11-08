@@ -1307,7 +1307,7 @@ type SchemaProperty struct {
 	Nullable       bool                   `protobuf:"varint,3,opt,name=nullable,proto3" json:"nullable,omitempty"`
 	EnumValues     []string               `protobuf:"bytes,4,rep,name=enum_values,json=enumValues,proto3" json:"enum_values,omitempty"`                    // allowed values for enum-typed properties
 	Description    string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`                                    // human-readable description from the ontology
-	TextSearchable *bool                  `protobuf:"varint,6,opt,name=text_searchable,json=textSearchable,proto3,oneof" json:"text_searchable,omitempty"` // CONTAINS, STARTS WITH, and ENDS WITH compile on the property; populated when expanded
+	TextSearchable *bool                  `protobuf:"varint,6,opt,name=text_searchable,json=textSearchable,proto3,oneof" json:"text_searchable,omitempty"` // whether clients may text-search the property with CONTAINS, STARTS WITH, or ENDS WITH; false for enum, virtual, admin_only, non-filterable, non-text, and like_allowed: false properties; populated when expanded
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }

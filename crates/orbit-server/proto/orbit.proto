@@ -215,7 +215,7 @@ message SchemaProperty {
   bool nullable = 3;
   repeated string enum_values = 4; // allowed values for enum-typed properties
   string description = 5;         // human-readable description from the ontology
-  optional bool text_searchable = 6; // CONTAINS, STARTS WITH, and ENDS WITH compile on the property; populated when expanded
+  optional bool text_searchable = 6; // whether clients may text-search the property with CONTAINS, STARTS WITH, or ENDS WITH; false for enum, virtual, admin_only, non-filterable, non-text, and like_allowed: false properties; populated when expanded
 }
 
 // A named relationship type with its valid source/target combinations.
