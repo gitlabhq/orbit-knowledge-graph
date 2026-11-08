@@ -14,6 +14,8 @@ set -euo pipefail
 : "${CI_COMMIT_TAG:?CI_COMMIT_TAG is required}"
 
 VERSION="${CI_COMMIT_TAG#v}"
+DRY_RUN=false
+if [ "${1:-}" = "--dry-run" ]; then DRY_RUN=true; fi
 PLATFORMS=(darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64)
 STAGING=$(mktemp -d)
 
@@ -44,6 +46,10 @@ publish_package() {
   name=$(cd "$pkg_dir" && npm pkg get name | tr -d '"')
   if already_published "$name"; then
     echo "$name@$VERSION already published; skipping"
+    return 0
+  fi
+  if [ "$DRY_RUN" = true ]; then
+    (cd "$pkg_dir" && npm publish --dry-run --tag dry-run)
     return 0
   fi
   echo "Publishing $name@$VERSION"

@@ -225,11 +225,17 @@ local-cli-publish:
   script:
     - bash ./scripts/release/upload-local-cli-release.sh
 
+.local-cli-npm:
+  image: node:26
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends unzip zip
+    - npm install --global npm@11.19.0
+
 local-cli-publish-npm:
   extends:
+    - .local-cli-npm
     - .local-cli-release-rules
   stage: publish
-  image: node:26
   tags:
     - saas-linux-medium-amd64
   id_tokens:
@@ -243,8 +249,25 @@ local-cli-publish-npm:
     - local-cli-smoke-linux-amd64
     - local-cli-smoke-linux-arm64
     - local-cli-code-sign
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends unzip
-    - npm install --global npm@11.19.0
   script:
     - ./scripts/release/publish-npm.sh
+
+local-cli-publish-npm-dry-run:
+  extends:
+    - .local-cli-npm
+  stage: test
+  tags:
+    - saas-linux-small-amd64
+  needs: []
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+      changes:
+        - npm/**/*
+        - scripts/release/publish-npm.sh
+        - .gitlab/ci/release-local.yml
+      interruptible: true
+  script:
+    - touch orbit orbit.exe
+    - for a in darwin-aarch64 darwin-x86_64 linux-musl-aarch64 linux-musl-x86_64; do tar -czf "orbit-cli-$a.tar.gz" orbit; done
+    - zip -q orbit-cli-windows-x86_64.zip orbit.exe
+    - CI_COMMIT_TAG=v0.0.0 ./scripts/release/publish-npm.sh --dry-run
