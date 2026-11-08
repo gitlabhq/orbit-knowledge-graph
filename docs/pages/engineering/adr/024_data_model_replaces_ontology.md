@@ -373,8 +373,6 @@ Backends are pluggable, and planning reads capabilities rather than backend name
 - Every namespaced entity needs a guard, which means its package must declare a path column, an anchor foreign key or a redaction rule.
 - A package change that alters physical storage needs a new schema version, which the migration path builds before the new model goes live. A change that only adds query metadata takes effect on the next load.
 - The server must hold every active model snapshot until the compiles that use it finish, and caches keyed by `ModelId` must evict old snapshots.
-- The JSON DSL is kept only until it is removed and gets no new features.
-- The ontology crate stays until ETL moves into source packages. Until then the indexer reads `config/ontology` for ETL only.
 
 ### Out of scope
 
@@ -395,8 +393,7 @@ Every new pipeline would repeat the same plumbing.
 
 ### Derive the new model from the ontology at runtime
 
-A converter could build the model from today's ontology files, but the ontology would remain the source of truth with the same mixed concerns.
-A converter exists only for the migration and is deleted once the packages are checked in.
+A converter could build the model from the ontology files, but the ontology would remain the source of truth, with the same mixed concerns and the same late, name-based checks.
 
 ## What it enables
 
