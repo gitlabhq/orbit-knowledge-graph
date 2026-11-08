@@ -1184,18 +1184,19 @@ func (x *SchemaDomain) GetNodeNames() []string {
 // A node type in the ontology. Properties, style, and edges are only
 // populated when the node name appears in expand_nodes.
 type SchemaNode struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Domain        string                 `protobuf:"bytes,2,opt,name=domain,proto3" json:"domain,omitempty"`
-	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	PrimaryKey    string                 `protobuf:"bytes,4,opt,name=primary_key,json=primaryKey,proto3" json:"primary_key,omitempty"`
-	LabelField    string                 `protobuf:"bytes,5,opt,name=label_field,json=labelField,proto3" json:"label_field,omitempty"`
-	Properties    []*SchemaProperty      `protobuf:"bytes,6,rep,name=properties,proto3" json:"properties,omitempty"`                            // populated when expanded
-	Style         *SchemaNodeStyle       `protobuf:"bytes,7,opt,name=style,proto3" json:"style,omitempty"`                                      // populated when expanded
-	OutgoingEdges []string               `protobuf:"bytes,8,rep,name=outgoing_edges,json=outgoingEdges,proto3" json:"outgoing_edges,omitempty"` // populated when expanded
-	IncomingEdges []string               `protobuf:"bytes,9,rep,name=incoming_edges,json=incomingEdges,proto3" json:"incoming_edges,omitempty"` // populated when expanded
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Domain         string                 `protobuf:"bytes,2,opt,name=domain,proto3" json:"domain,omitempty"`
+	Description    string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	PrimaryKey     string                 `protobuf:"bytes,4,opt,name=primary_key,json=primaryKey,proto3" json:"primary_key,omitempty"`
+	LabelField     string                 `protobuf:"bytes,5,opt,name=label_field,json=labelField,proto3" json:"label_field,omitempty"`
+	Properties     []*SchemaProperty      `protobuf:"bytes,6,rep,name=properties,proto3" json:"properties,omitempty"`                                // populated when expanded
+	Style          *SchemaNodeStyle       `protobuf:"bytes,7,opt,name=style,proto3" json:"style,omitempty"`                                          // populated when expanded
+	OutgoingEdges  []string               `protobuf:"bytes,8,rep,name=outgoing_edges,json=outgoingEdges,proto3" json:"outgoing_edges,omitempty"`     // populated when expanded
+	IncomingEdges  []string               `protobuf:"bytes,9,rep,name=incoming_edges,json=incomingEdges,proto3" json:"incoming_edges,omitempty"`     // populated when expanded
+	DefaultColumns []string               `protobuf:"bytes,10,rep,name=default_columns,json=defaultColumns,proto3" json:"default_columns,omitempty"` // returned in neighbor and path results and when a query selects no columns; populated when expanded
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SchemaNode) Reset() {
@@ -1291,16 +1292,24 @@ func (x *SchemaNode) GetIncomingEdges() []string {
 	return nil
 }
 
+func (x *SchemaNode) GetDefaultColumns() []string {
+	if x != nil {
+		return x.DefaultColumns
+	}
+	return nil
+}
+
 // A single property on a node type.
 type SchemaProperty struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	DataType      string                 `protobuf:"bytes,2,opt,name=data_type,json=dataType,proto3" json:"data_type,omitempty"` // e.g. "int64", "string", "datetime"
-	Nullable      bool                   `protobuf:"varint,3,opt,name=nullable,proto3" json:"nullable,omitempty"`
-	EnumValues    []string               `protobuf:"bytes,4,rep,name=enum_values,json=enumValues,proto3" json:"enum_values,omitempty"` // allowed values for enum-typed properties
-	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`                 // human-readable description from the ontology
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	DataType       string                 `protobuf:"bytes,2,opt,name=data_type,json=dataType,proto3" json:"data_type,omitempty"` // e.g. "int64", "string", "datetime"
+	Nullable       bool                   `protobuf:"varint,3,opt,name=nullable,proto3" json:"nullable,omitempty"`
+	EnumValues     []string               `protobuf:"bytes,4,rep,name=enum_values,json=enumValues,proto3" json:"enum_values,omitempty"`                    // allowed values for enum-typed properties
+	Description    string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`                                    // human-readable description from the ontology
+	TextSearchable *bool                  `protobuf:"varint,6,opt,name=text_searchable,json=textSearchable,proto3,oneof" json:"text_searchable,omitempty"` // CONTAINS, STARTS WITH, and ENDS WITH compile on the property; populated when expanded
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SchemaProperty) Reset() {
@@ -1366,6 +1375,13 @@ func (x *SchemaProperty) GetDescription() string {
 		return x.Description
 	}
 	return ""
+}
+
+func (x *SchemaProperty) GetTextSearchable() bool {
+	if x != nil && x.TextSearchable != nil {
+		return *x.TextSearchable
+	}
+	return false
 }
 
 // A named relationship type with its valid source/target combinations.
@@ -4424,7 +4440,7 @@ const file_orbit_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1d\n" +
 	"\n" +
-	"node_names\x18\x03 \x03(\tR\tnodeNames\"\xd5\x02\n" +
+	"node_names\x18\x03 \x03(\tR\tnodeNames\"\xfe\x02\n" +
 	"\n" +
 	"SchemaNode\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
@@ -4439,14 +4455,18 @@ const file_orbit_proto_rawDesc = "" +
 	"properties\x12/\n" +
 	"\x05style\x18\a \x01(\v2\x19.orbit.v1.SchemaNodeStyleR\x05style\x12%\n" +
 	"\x0eoutgoing_edges\x18\b \x03(\tR\routgoingEdges\x12%\n" +
-	"\x0eincoming_edges\x18\t \x03(\tR\rincomingEdges\"\xa0\x01\n" +
+	"\x0eincoming_edges\x18\t \x03(\tR\rincomingEdges\x12'\n" +
+	"\x0fdefault_columns\x18\n" +
+	" \x03(\tR\x0edefaultColumns\"\xe2\x01\n" +
 	"\x0eSchemaProperty\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1b\n" +
 	"\tdata_type\x18\x02 \x01(\tR\bdataType\x12\x1a\n" +
 	"\bnullable\x18\x03 \x01(\bR\bnullable\x12\x1f\n" +
 	"\venum_values\x18\x04 \x03(\tR\n" +
 	"enumValues\x12 \n" +
-	"\vdescription\x18\x05 \x01(\tR\vdescription\"{\n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\x12,\n" +
+	"\x0ftext_searchable\x18\x06 \x01(\bH\x00R\x0etextSearchable\x88\x01\x01B\x12\n" +
+	"\x10_text_searchable\"{\n" +
 	"\n" +
 	"SchemaEdge\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
@@ -4925,6 +4945,7 @@ func file_orbit_proto_init() {
 		(*GetGraphSchemaResponse_Structured)(nil),
 		(*GetGraphSchemaResponse_FormattedText)(nil),
 	}
+	file_orbit_proto_msgTypes[11].OneofWrappers = []any{}
 	file_orbit_proto_msgTypes[16].OneofWrappers = []any{
 		(*GetQueryDslResponse_RawJsonSchema)(nil),
 		(*GetQueryDslResponse_FormattedText)(nil),

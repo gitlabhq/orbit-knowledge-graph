@@ -166,6 +166,9 @@ pub struct SchemaNode {
     /// populated when expanded
     #[prost(string, repeated, tag = "9")]
     pub incoming_edges: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// returned in neighbor and path results and when a query selects no columns; populated when expanded
+    #[prost(string, repeated, tag = "10")]
+    pub default_columns: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// A single property on a node type.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -183,6 +186,9 @@ pub struct SchemaProperty {
     /// human-readable description from the ontology
     #[prost(string, tag = "5")]
     pub description: ::prost::alloc::string::String,
+    /// CONTAINS, STARTS WITH, and ENDS WITH compile on the property; populated when expanded
+    #[prost(bool, optional, tag = "6")]
+    pub text_searchable: ::core::option::Option<bool>,
 }
 /// A named relationship type with its valid source/target combinations.
 #[derive(Clone, PartialEq, ::prost::Message)]

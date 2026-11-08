@@ -205,6 +205,7 @@ message SchemaNode {
   SchemaNodeStyle style = 7;                // populated when expanded
   repeated string outgoing_edges = 8;       // populated when expanded
   repeated string incoming_edges = 9;       // populated when expanded
+  repeated string default_columns = 10;     // returned in neighbor and path results and when a query selects no columns; populated when expanded
 }
 
 // A single property on a node type.
@@ -214,6 +215,7 @@ message SchemaProperty {
   bool nullable = 3;
   repeated string enum_values = 4; // allowed values for enum-typed properties
   string description = 5;         // human-readable description from the ontology
+  optional bool text_searchable = 6; // CONTAINS, STARTS WITH, and ENDS WITH compile on the property; populated when expanded
 }
 
 // A named relationship type with its valid source/target combinations.

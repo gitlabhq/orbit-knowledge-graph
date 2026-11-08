@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
-use ontology::Ontology;
 use ontology::introspection::SchemaResponse;
+use ontology::{DataType, Field, Ontology};
 use orbit_log_fields::{info, warn};
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use orbit_utils::traversal_path::TraversalPath;
@@ -767,6 +767,13 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 }
 
 impl OrbitServiceImpl {
+    fn property_is_text_searchable(field: &Field) -> bool {
+        field.like_allowed
+            && !field.is_virtual()
+            && !field.admin_only
+            && matches!(field.data_type, DataType::String | DataType::Uuid)
+    }
+
     fn build_structured_schema(ontology: &Ontology, expand_nodes: &[String]) -> StructuredSchema {
         let domains: Vec<SchemaDomain> = ontology
             .domains()
@@ -794,6 +801,7 @@ impl OrbitServiceImpl {
                                 .map(|ev| ev.values().cloned().collect())
                                 .unwrap_or_default(),
                             description: f.description.clone().unwrap_or_default(),
+                            text_searchable: Some(Self::property_is_text_searchable(f)),
                         })
                         .collect()
                 } else {
@@ -815,6 +823,16 @@ impl OrbitServiceImpl {
                     (vec![], vec![])
                 };
 
+                let default_columns = if should_expand {
+                    n.default_columns
+                        .iter()
+                        .filter(|column| n.listed_fields().any(|f| &f.name == *column))
+                        .cloned()
+                        .collect()
+                } else {
+                    vec![]
+                };
+
                 SchemaNode {
                     name: n.name.clone(),
                     domain: n.domain.clone(),
@@ -829,6 +847,7 @@ impl OrbitServiceImpl {
                     style,
                     outgoing_edges,
                     incoming_edges,
+                    default_columns,
                 }
             })
             .collect();
@@ -1335,6 +1354,87 @@ mod tests {
                 domain.name
             );
         }
+    }
+
+    #[test]
+    fn test_structured_schema_text_searchable_matches_the_query_validator() {
+        let ontology = test_ontology();
+        let response = OrbitServiceImpl::build_structured_schema(&ontology, &["*".to_string()]);
+        let ctx = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let mut allowed = 0;
+
+        for node in &response.nodes {
+            for property in &node.properties {
+                let query = format!(
+                    "MATCH (n:{}) WHERE n.{} CONTAINS 'abc' RETURN n.id LIMIT 1",
+                    node.name, property.name
+                );
+                let compiled = compiler::compile(&query, compiler::Frontend::Gql, &ontology, &ctx);
+                let text_searchable = property.text_searchable.unwrap_or_else(|| {
+                    panic!("{}.{} has no text_searchable", node.name, property.name)
+                });
+                allowed += usize::from(text_searchable);
+                if property.data_type == "Enum" {
+                    assert!(!text_searchable, "{query}");
+                    continue;
+                }
+                assert_eq!(
+                    compiled.is_ok(),
+                    text_searchable,
+                    "{query}: {:?}",
+                    compiled.err()
+                );
+            }
+        }
+        assert!(allowed > 0);
+
+        let text_searchable = |node: &str, property: &str| {
+            response
+                .nodes
+                .iter()
+                .find(|n| n.name == node)
+                .and_then(|n| n.properties.iter().find(|p| p.name == property))
+                .and_then(|p| p.text_searchable)
+        };
+        assert_eq!(text_searchable("Vulnerability", "title"), Some(false));
+        assert_eq!(text_searchable("User", "email"), Some(false));
+        assert_eq!(text_searchable("User", "public_email"), Some(false));
+        assert_eq!(text_searchable("User", "username"), Some(true));
+        assert_eq!(text_searchable("File", "content"), Some(false));
+        assert_eq!(text_searchable("Pipeline", "ref"), Some(true));
+        assert_eq!(text_searchable("Pipeline", "id"), Some(false));
+        assert_eq!(text_searchable("Pipeline", "status"), Some(false));
+    }
+
+    #[test]
+    fn test_structured_schema_default_columns_are_listed_properties() {
+        let ontology = test_ontology();
+        let response = OrbitServiceImpl::build_structured_schema(&ontology, &["*".to_string()]);
+
+        for node in &response.nodes {
+            let names: Vec<&str> = node.properties.iter().map(|p| p.name.as_str()).collect();
+            for column in &node.default_columns {
+                assert!(names.contains(&column.as_str()), "{}.{column}", node.name);
+            }
+        }
+
+        let pipeline = response
+            .nodes
+            .iter()
+            .find(|n| n.name == "Pipeline")
+            .unwrap();
+        assert_eq!(
+            pipeline.default_columns,
+            ["id", "iid", "status", "ref", "source"]
+        );
+
+        let unexpanded = OrbitServiceImpl::build_structured_schema(&ontology, &[]);
+        assert!(
+            unexpanded
+                .nodes
+                .iter()
+                .all(|n| n.default_columns.is_empty())
+        );
     }
 
     #[test]
