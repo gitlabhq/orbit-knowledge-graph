@@ -66,17 +66,40 @@ async fn ask(
     scope: Option<String>,
     with_schema: bool,
 ) -> Result<Option<Providers>, RemoteError> {
-    let read = read(&client, &scope, with_schema);
-    match tokio::time::timeout(SCHEMA_WAIT, read).await {
-        Ok(Ok(Some(data))) if reachable(&data) => return Ok(providers(&data)),
-        Ok(Ok(Some(_))) => return Err(super::status::build_unavailable_error()),
-        _ => {}
+    match answer(&client, &scope, with_schema).await? {
+        Some(data) if reachable(&data) => Ok(providers(&data)),
+        Some(_) => Err(super::status::build_unavailable_error()),
+        None => {
+            match scope {
+                Some(path) => client.check_graph_status(path).await?,
+                None => client.check_status().await?,
+            }
+            Ok(None)
+        }
     }
-    match scope {
-        Some(path) => client.check_graph_status(path).await?,
-        None => client.check_status().await?,
+}
+
+async fn answer(
+    client: &OrbitClient,
+    scope: &Option<String>,
+    with_schema: bool,
+) -> Result<Option<SessionStart>, RemoteError> {
+    if !with_schema {
+        return read(client, scope, false).await;
     }
-    Ok(None)
+    let combined = read(client, scope, true);
+    tokio::pin!(combined);
+    match tokio::time::timeout(SCHEMA_WAIT, &mut combined).await {
+        Ok(Ok(Some(data))) => return Ok(Some(data)),
+        Ok(_) => return read(client, scope, false).await,
+        Err(_) => {}
+    }
+    let plain = read(client, scope, false);
+    tokio::pin!(plain);
+    tokio::select! {
+        Ok(Some(data)) = &mut combined => Ok(Some(data)),
+        data = &mut plain => data,
+    }
 }
 
 async fn read(
