@@ -10,7 +10,7 @@ use compiler::constants::{
     hydration_node_alias, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
     traversal_path_column,
 };
-use compiler::{DynamicEntityColumns, FilterOp, HydrationArm, HydrationTemplate, InputFilter};
+use compiler::{DynamicEntityColumns, FilterOp, HydrationArm, HydrationTemplate, VirtualFilter};
 use ontology::{DataType, Ontology};
 use orbit_arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
@@ -389,8 +389,8 @@ pub fn hydrate_dynamic(
     Ok(arms)
 }
 
-fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &InputFilter) -> bool {
-    let op = filter.op.unwrap_or(FilterOp::Eq);
+fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &VirtualFilter) -> bool {
+    let op = filter.op;
     match op {
         FilterOp::IsNull => value.is_none() || matches!(value, Some(ColumnValue::Null)),
         FilterOp::IsNotNull => value.is_some() && !matches!(value, Some(ColumnValue::Null)),

@@ -2,8 +2,8 @@ use orbit_server_config::QueryConfig;
 
 use query_data_model::implementations::relational::plan::{Operation, ReadMode, Sharing};
 
-use crate::input::QueryType;
 use crate::passes::codegen::ClickHousePlan;
+use crate::types::QueryType;
 
 // Deployment config can tighten these compiler-enforced ceilings but cannot raise them.
 const PATHFINDING_EXECUTION_TIME_CEILING_SECONDS: u64 = 15;

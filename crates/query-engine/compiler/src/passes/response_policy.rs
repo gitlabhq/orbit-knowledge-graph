@@ -5,7 +5,8 @@ use orbit_utils::query_types::SqlType;
 use query_data_model::implementations::relational::plan::{BinaryOp, Expr, Function, Operation};
 
 use crate::error::Result;
-use crate::input::{ColumnSelection, Input};
+use crate::logical::Query;
+use crate::logical::columns::{returned, selections};
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
 
 const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
@@ -15,20 +16,19 @@ const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
 pub fn apply_text_excerpts<M: RelationalModel>(
     plan: PlanOf<M>,
     model: &M,
-    input: &Input,
+    query: Query<'_>,
 ) -> Result<PlanOf<M>> {
     let max_chars = (WORKHORSE_GRPC_MESSAGE_CAP_BYTES
         / MAX_UTF8_BYTES_PER_CHAR
-        / u64::from(input.sorted_rows().max(1))) as u32;
-    let columns: HashMap<String, HashSet<String>> = input
-        .nodes
-        .iter()
-        .filter_map(|node| {
-            let entity = model.entity(node.entity.as_deref()?)?;
-            let requested = match &node.columns {
-                Some(ColumnSelection::List(columns)) => columns,
-                _ => return None,
-            };
+        / u64::from(query.sorted_rows()?.max(1))) as u32;
+    let selected = selections(query);
+    let columns: HashMap<String, HashSet<String>> = query
+        .bindings()
+        .into_iter()
+        .map(|binding| {
+            let entity = model.graph().entity(binding.entity);
+            let selection = selected.get(&binding.output).copied();
+            let requested = returned(model, binding.entity, selection);
             let mut excerpted: HashSet<String> = model
                 .graph()
                 .entity(entity.id)
@@ -50,7 +50,7 @@ pub fn apply_text_excerpts<M: RelationalModel>(
                 }
             }
             excerpted.retain(|column| requested.contains(column));
-            Some((node.id.clone(), excerpted))
+            (binding.name.to_string(), excerpted)
         })
         .collect();
 

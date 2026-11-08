@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use compiler::input::Input;
 use compiler::logical::facts;
 use compiler::passes::codegen::{self, RelationalModel};
 use compiler::passes::{normalize, page, plan, response_policy};
@@ -275,11 +274,9 @@ fn check<M: RelationalModel>(
         let catalog = model.catalog().model().logical().as_admin();
         let parsed = compiler::surface::parse(raw, frontend, catalog).and_then(|statement| {
             let plan = normalize::normalize(statement.plan, catalog.model(), model)?;
-            let statement = query_data_model::surface::Statement { plan, ..statement };
-            let input = compiler::bridge::input(&statement, catalog.model(), model)?;
-            Ok((statement, input))
+            Ok(query_data_model::surface::Statement { plan, ..statement })
         });
-        let (statement, input) = match parsed {
+        let statement = match parsed {
             Ok(parsed) => parsed,
             Err(error) => {
                 failures.push(format!("{label}: {error}"));
@@ -317,7 +314,7 @@ fn check<M: RelationalModel>(
         let relational = plan::plan(request, tp_bounds.as_ref(), model)
             .and_then(|planned| {
                 let tree = emitted::tree(&planned.plan, model.catalog());
-                Ok((tree, passes(planned, scenario, backend, model, &input)?))
+                Ok((tree, passes(planned, scenario, backend, model, query)?))
             })
             .map_err(|error| error.to_string());
         let assertions = &scenario.physical[backend];
@@ -365,16 +362,16 @@ fn passes<M: RelationalModel>(
     scenario: &Scenario,
     backend: &str,
     model: &M,
-    input: &Input,
+    query: compiler::logical::Query<'_>,
 ) -> compiler::Result<RelationalPlan<M::Backend>> {
     if scenario.hydration.is_some() {
         return Ok(planned.plan);
     }
     let relational = match backend {
-        "clickhouse" => response_policy::apply_text_excerpts(planned.plan, model, input)?,
+        "clickhouse" => response_policy::apply_text_excerpts(planned.plan, model, query)?,
         _ => planned.plan,
     };
-    let relational = page::apply(relational, model, input, &planned.metadata)?;
+    let relational = page::apply(relational, model, query, &planned.metadata)?;
     codegen::materialize(relational, model)
 }
 

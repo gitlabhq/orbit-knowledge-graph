@@ -54,14 +54,14 @@ pub use constants::{
     neighbor_is_outgoing_column, neighbor_type_column, path_column, relationship_type_column,
 };
 pub use error::{QueryError, RejectionReason, Result};
-pub use input::{
-    ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, InputNode, QueryType,
-    parse_input,
-};
+pub use input::{ColumnSelection, Input, InputFilter, InputNode, parse_input};
+pub use logical::DynamicColumnMode;
+pub use logical::facts::FilterOp;
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
 pub use query_data_model::EntityAuthConfig;
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
+pub use types::QueryType;
 
 pub use analytics::ExecMetrics;
 pub use hydration::{HydrationArm, HydrationCompileOptions, HydrationRequest};
@@ -72,7 +72,7 @@ pub use passes::codegen::{
 };
 pub use passes::hydrate::{
     DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
-    generate_hydration_plan,
+    VirtualFilter, generate_hydration_plan,
 };
 pub use passes::result_contract::{EdgeMeta, RedactionNode, ResultContext};
 pub use surface::{Frontend, gql};

@@ -1306,7 +1306,7 @@ fn orbit_query_virtual_filter_equality_hydration_parity() {
             .virtual_filters;
         assert_eq!(filters.len(), 1);
         assert_eq!(filters[0].0, "content");
-        assert_eq!(filters[0].1.op, Some(compiler::input::FilterOp::Eq));
+        assert_eq!(filters[0].1.op, compiler::FilterOp::Eq);
         assert_eq!(filters[0].1.value, Some(serde_json::Value::from("abc")));
     }
 }

@@ -1,18 +1,29 @@
 //! Read access to a logical plan for the compiler phases: bindings, steps,
 //! conjuncts, and the result operations, all by declaration id.
 
+pub mod columns;
 mod conditions;
 pub mod facts;
 
 pub use conditions::{Leaf, Literals, binding};
 
 use query_data_model::plan::logical::{
-    Expr, Hops, LogicalOperation, LogicalPlan, LogicalType, Measure, Order, Predicate, Projection,
+    Columns, Expr, Hops, LogicalOperation, LogicalPlan, LogicalType, Measure, Order, Predicate,
+    Projection,
 };
 use query_data_model::plan::tracking::{NodeId, Ref};
 use query_data_model::{Direction, EntityId, Hop, Model, RelationshipId};
 
-use crate::input::QueryType;
+use crate::error::QueryError;
+use crate::types::QueryType;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
+pub enum DynamicColumnMode {
+    All,
+    #[default]
+    Default,
+}
 
 /// What a query returns, read off its result operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
@@ -207,6 +218,45 @@ impl<'p> Query<'p> {
     pub fn row_limit(self) -> Option<u32> {
         self.limit()
             .map(|(rows, _)| u32::try_from(rows).unwrap_or(u32::MAX))
+    }
+
+    /// Rows to fetch: the page plus one probe row that proves `has_more` without being returned.
+    pub fn fetch_limit(self) -> Result<u32, QueryError> {
+        self.row_limit()
+            .map(|rows| rows + 1)
+            .ok_or_else(|| QueryError::PipelineInvariant("queries carry a row limit".into()))
+    }
+
+    /// Rows the final sort materializes: the skipped prefix plus the fetched window.
+    pub fn sorted_rows(self) -> Result<u32, QueryError> {
+        Ok(self.skip().unwrap_or(0) + self.fetch_limit()?)
+    }
+
+    pub fn skip(self) -> Option<u32> {
+        let (_, skip) = self.limit()?;
+        skip.map(|skip| u32::try_from(skip).unwrap_or(u32::MAX))
+    }
+
+    /// The columns hydration fetches for nodes the query discovers: the last node or path projection decides.
+    pub fn dynamic_columns(self) -> DynamicColumnMode {
+        self.selected()
+            .into_iter()
+            .filter_map(|item| match item {
+                Projection::Graph { binding, columns }
+                    if matches!(
+                        self.plan.value(*binding),
+                        LogicalType::Node | LogicalType::Path
+                    ) =>
+                {
+                    Some(match columns {
+                        Columns::All => DynamicColumnMode::All,
+                        _ => DynamicColumnMode::Default,
+                    })
+                }
+                _ => None,
+            })
+            .last()
+            .unwrap_or_default()
     }
 
     pub fn limit(self) -> Option<(u64, Option<u64>)> {

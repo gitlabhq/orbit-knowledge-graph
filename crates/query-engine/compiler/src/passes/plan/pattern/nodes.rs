@@ -4,13 +4,11 @@
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
-use query_data_model::plan::logical::{
-    Columns, Expr, LogicalOperation, Measure, Projection as Item,
-};
-use query_data_model::plan::tracking::Ref;
-use query_data_model::{OrbitQueryModel, PropertyId};
+use query_data_model::OrbitQueryModel;
+use query_data_model::plan::logical::{Columns, Expr, Measure};
 
 use super::{NodePlan, Pattern};
+use crate::logical::columns::{returned, selections};
 use crate::logical::facts::Anchor;
 use crate::logical::{Query, binding};
 use crate::passes::plan::filters::{bind_facts, unindex_if_key_narrowed};
@@ -51,7 +49,10 @@ impl NodePlan {
                 .redaction_id_column(entity)
                 .unwrap_or(DEFAULT_PRIMARY_KEY)
                 .to_string(),
-            columns: columns(model, entity, selection),
+            columns: returned(model, entity, selection)
+                .into_iter()
+                .filter(|name| !model.property_is_virtual(entity, name))
+                .collect(),
             emit_select: true,
             null_as_epoch: model.null_as_epoch_properties(entity),
         }
@@ -110,63 +111,6 @@ impl NodePlan {
             })
             .collect()
     }
-}
-
-/// The columns a node returns: the listed ones, else the defaults or every readable property.
-fn columns<M>(
-    model: &M,
-    entity: query_data_model::EntityId,
-    selection: Option<&Columns>,
-) -> Vec<String>
-where
-    M: OrbitQueryModel + ?Sized,
-{
-    let graph = model.graph();
-    let properties: Vec<PropertyId> = match selection {
-        Some(Columns::Listed(listed)) => listed.clone(),
-        selection => {
-            let defaults = model.default_properties(entity);
-            let defaulted = matches!(selection, None | Some(Columns::Default));
-            let properties = match defaulted && !defaults.is_empty() {
-                true => defaults,
-                false => &graph.entity(entity).properties,
-            };
-            properties
-                .iter()
-                .copied()
-                .filter(|property| model.property_realization(*property).is_some())
-                .filter(|property| !model.property_is_hidden(*property))
-                .filter(|property| !model.property_is_admin_only(*property))
-                .collect()
-        }
-    };
-    properties
-        .into_iter()
-        .map(|property| graph.property(property).name.clone())
-        .filter(|name| !model.property_is_virtual(entity, name))
-        .collect()
-}
-
-/// The first graph projection of each binding, through the group outputs that stand for a node.
-fn selections<'p>(query: Query<'p>) -> HashMap<Ref, &'p Columns> {
-    let mut nodes = HashMap::new();
-    for (node, operation) in query.operations() {
-        if let LogicalOperation::Aggregate { groups, .. } = operation {
-            for (group, output) in groups.iter().zip(query.plan.outputs(node)) {
-                if let Expr::Node(binding) = group {
-                    nodes.insert(output, *binding);
-                }
-            }
-        }
-    }
-    let mut selected = HashMap::new();
-    for item in query.selected() {
-        if let Item::Graph { binding, columns } = item {
-            let binding = nodes.get(binding).copied().unwrap_or(*binding);
-            selected.entry(binding).or_insert(columns);
-        }
-    }
-    selected
 }
 
 pub(super) fn build_nodes<M>(

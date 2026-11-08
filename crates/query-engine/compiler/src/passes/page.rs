@@ -10,7 +10,7 @@ use query_data_model::implementations::relational::plan::{
 };
 
 use crate::error::Result;
-use crate::input::Input;
+use crate::logical::Query;
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
 use crate::passes::plan::build::term;
 use crate::passes::plan::{PlanMetadata, Term};
@@ -18,16 +18,14 @@ use crate::passes::plan::{PlanMetadata, Term};
 pub fn apply<M: RelationalModel>(
     plan: PlanOf<M>,
     model: &M,
-    input: &Input,
+    query: Query<'_>,
     metadata: &PlanMetadata,
 ) -> Result<PlanOf<M>> {
     let root = plan.plan.root();
     let block = plan.block(root);
-    let (count, offset) = (
-        Some(input.fetch_limit()),
-        input.skip.filter(|skip| *skip > 0),
-    );
-    let keys = match input.skip {
+    let skip = query.skip();
+    let (count, offset) = (Some(query.fetch_limit()?), skip.filter(|skip| *skip > 0));
+    let keys = match skip {
         Some(_) => metadata.stable_order.as_slice(),
         None => &[],
     };

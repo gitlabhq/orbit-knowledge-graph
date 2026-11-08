@@ -6,18 +6,21 @@ use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     Column, Expr, Operation, Relation, RelationalBuilder, RelationalError, Selection,
 };
+use query_data_model::plan::logical::Expr as Logical;
 use query_data_model::plan::tracking::{Declare, Ref};
 
 use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
-use crate::input::{Input, QueryType};
+use crate::logical::facts::{anchors, facts};
+use crate::logical::{Binding, Kind, Query};
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
 use crate::passes::plan::Term;
 use crate::passes::plan::build::term;
 use crate::passes::plan::predicates::{Column as Named, OutputValue};
 use crate::passes::plan::{NodeBinding, PlanMetadata};
+use crate::types::QueryType;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactionNode {
@@ -125,42 +128,40 @@ impl ResultContext {
 
 pub fn apply<M: RelationalModel>(
     plan: PlanOf<M>,
-    input: &Input,
+    query: Query<'_>,
     metadata: &PlanMetadata,
     model: &M,
 ) -> Result<(PlanOf<M>, ResultContext)> {
-    let mut ctx = ResultContext::new().with_query_type(input.query_type);
+    let kind = query.kind();
+    let mut ctx = ResultContext::new().with_query_type(kind.into());
     ctx.entity_auth.clone_from(model.entity_auth());
-    if input.query_type == QueryType::Neighbors
-        && let Some(node) = input.nodes.first()
-        && let (Some(entity), [id]) = (&node.entity, node.node_ids.as_slice())
+    let facts = facts(query);
+    let anchors = anchors(query, &facts);
+    if kind == Kind::Neighbors
+        && let Some(center) = anchors.first()
+        && let [id] = center.pinned.as_slice()
     {
-        ctx.neighbors_center = Some((entity.clone(), *id));
+        let entity = model.graph().entity(center.binding.entity);
+        ctx.neighbors_center = Some((entity.name.clone(), *id));
         ctx.labels = model
             .graph()
             .entities()
             .map(|entity| (entity.name.clone(), entity.label.clone()))
             .collect();
     }
-    let selectable_nodes: HashSet<&str> = match input.query_type {
-        QueryType::Aggregation => input.aggregation_row_nodes(model),
-        QueryType::Traversal | QueryType::Neighbors => {
-            input.nodes.iter().map(|n| n.id.as_str()).collect()
-        }
-        QueryType::PathFinding | QueryType::Hydration => HashSet::new(),
+    let bindings = query.bindings();
+    let selectable_nodes: HashSet<&str> = match kind {
+        Kind::Aggregation => aggregation_row_nodes(query, model),
+        Kind::Traversal | Kind::Neighbors => bindings.iter().map(|binding| binding.name).collect(),
+        Kind::PathFinding => HashSet::new(),
     };
-    for node in &input.nodes {
-        if selectable_nodes.contains(node.id.as_str())
-            && let Some(entity) = &node.entity
-        {
-            ctx.add_node(&node.id, entity);
+    for binding in &bindings {
+        if selectable_nodes.contains(binding.name) {
+            ctx.add_node(binding.name, &model.graph().entity(binding.entity).name);
         }
     }
-    let contract = return_columns(input, &selectable_nodes, &metadata.nodes, model)?;
-    if matches!(
-        input.query_type,
-        QueryType::Traversal | QueryType::Aggregation
-    ) {
+    let contract = return_columns(kind, &bindings, &selectable_nodes, &metadata.nodes, model)?;
+    if matches!(kind, Kind::Traversal | Kind::Aggregation) {
         use crate::constants::{
             EDGE_DST_KIND_SUFFIX, EDGE_DST_SUFFIX, EDGE_KIND_SUFFIX, EDGE_SRC_KIND_SUFFIX,
             EDGE_SRC_SUFFIX,
@@ -184,9 +185,30 @@ pub fn apply<M: RelationalModel>(
     }
     let plan = match contract.outputs.is_empty() {
         true => plan,
-        false => enforce(plan, model, contract, input.query_type)?,
+        false => enforce(plan, model, contract, kind)?,
     };
     Ok((plan, ctx))
+}
+
+/// The aliases an aggregation returns as rows: node groups and free-text property groups.
+fn aggregation_row_nodes<'p>(
+    query: Query<'p>,
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+) -> HashSet<&'p str> {
+    let Some((groups, _)) = query.aggregate() else {
+        return HashSet::new();
+    };
+    groups
+        .iter()
+        .filter_map(|group| match group {
+            Logical::Node(binding) => Some(query.name(*binding)),
+            Logical::Property { binding, property }
+            | Logical::Truncate {
+                binding, property, ..
+            } if model.property_free_text(*property) => Some(query.name(*binding)),
+            _ => None,
+        })
+        .collect()
 }
 
 struct Contract {
@@ -195,7 +217,8 @@ struct Contract {
 }
 
 fn return_columns(
-    input: &Input,
+    kind: Kind,
+    nodes: &[Binding<'_>],
     selectable_nodes: &HashSet<&str>,
     bindings: &HashMap<String, NodeBinding>,
     model: &impl query_data_model::OrbitQueryModel,
@@ -204,24 +227,19 @@ fn return_columns(
         outputs: Vec::new(),
         groups: Vec::new(),
     };
-    for node in &input.nodes {
-        let Some(entity) = &node.entity else {
-            continue;
-        };
-        if !selectable_nodes.contains(node.id.as_str()) {
+    for node in nodes {
+        if !selectable_nodes.contains(node.name) {
             continue;
         }
-        let entity_id = model
-            .entity(entity)
-            .map(|entity| entity.id)
-            .ok_or_else(|| QueryError::PipelineInvariant(format!("unknown entity '{entity}'")))?;
-        let binding = bindings.get(&node.id).ok_or_else(|| {
-            QueryError::PipelineInvariant(format!("node '{}' has no lowered binding", node.id))
+        let entity_id = node.entity;
+        let entity = &model.graph().entity(entity_id).name;
+        let binding = bindings.get(node.name).ok_or_else(|| {
+            QueryError::PipelineInvariant(format!("node '{}' has no lowered binding", node.name))
         })?;
         if matches!(binding, NodeBinding::Filtered) {
             return Err(QueryError::PipelineInvariant(format!(
                 "node '{}' has no result identity",
-                node.id
+                node.name
             )));
         }
         let NodeBinding::Values {
@@ -240,7 +258,7 @@ fn return_columns(
             let table_alias = table_alias.as_deref().ok_or_else(|| {
                 QueryError::PipelineInvariant(format!(
                     "node '{}' is authorized by {redaction_column} but has no table read",
-                    node.id
+                    node.name
                 ))
             })?;
             Term::Column(Named::new(table_alias, redaction_column))
@@ -248,19 +266,19 @@ fn return_columns(
             identity.clone()
         };
         if needs_separate_pk {
-            contract.set(primary_key_column(&node.id), identity.clone());
+            contract.set(primary_key_column(node.name), identity.clone());
             contract.group(identity.clone());
         }
-        contract.set(redaction_id_column(&node.id), authorization_id.clone());
+        contract.set(redaction_id_column(node.name), authorization_id.clone());
         contract.group(authorization_id);
-        let kind = Term::Value(Box::new(OutputValue::Text(entity.clone())));
-        contract.set(redaction_type_column(&node.id), kind);
-        if input.query_type != QueryType::Aggregation
+        let label = Term::Value(Box::new(OutputValue::Text(entity.clone())));
+        contract.set(redaction_type_column(node.name), label);
+        if kind != Kind::Aggregation
             && model.entity_has_traversal_path(entity)
             && let Some(path) = traversal_path
         {
             let path = Term::Column(path.clone());
-            contract.set(traversal_path_column(&node.id), path);
+            contract.set(traversal_path_column(node.name), path);
         }
     }
     Ok(contract)
@@ -289,7 +307,7 @@ fn enforce<M: RelationalModel>(
     plan: PlanOf<M>,
     model: &M,
     contract: Contract,
-    query_type: QueryType,
+    kind: Kind,
 ) -> Result<PlanOf<M>> {
     let root = plan.plan.root();
     let block = plan.block(root);
@@ -325,7 +343,7 @@ fn enforce<M: RelationalModel>(
             .cloned()
             .zip(outputs.iter().copied())
             .collect();
-        if query_type == QueryType::Aggregation && !groups.is_empty() {
+        if kind == Kind::Aggregation && !groups.is_empty() {
             aggregate = Some((node, groups.len(), outputs));
         }
     }

@@ -1,9 +1,31 @@
 use query_data_model::plan::logical::{
-    Comparison, Conjunct, Expr, Literal, LogicalOperation, Operand, Predicate,
+    Comparison, Conjunct, Expr, Literal, LogicalOperation, Matching, Operand, Predicate,
 };
 use query_data_model::plan::tracking::Ref;
 
+use serde_json::Value;
+
 use super::{Binding, Query, binding};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr)]
+#[strum(serialize_all = "snake_case")]
+pub enum FilterOp {
+    Eq,
+    Ne,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+    In,
+    Contains,
+    StartsWith,
+    EndsWith,
+    IsNull,
+    IsNotNull,
+    TokenMatch,
+    AllTokens,
+    AnyTokens,
+}
 
 #[derive(Clone, Copy)]
 pub struct Fact<'p> {
@@ -35,6 +57,53 @@ impl<'p> Fact<'p> {
             Expr::Property { .. } => binding(right) != self.binding(),
             _ => true,
         })
+    }
+
+    /// The operator the leaf applies once its negation is folded in.
+    pub fn op(self) -> Option<FilterOp> {
+        Some(match self.leaf {
+            Predicate::Null { null, .. } => match *null != self.complemented {
+                true => FilterOp::IsNull,
+                false => FilterOp::IsNotNull,
+            },
+            Predicate::In { .. } => FilterOp::In,
+            Predicate::Text { matching, .. } => match matching {
+                Matching::Contains => FilterOp::Contains,
+                Matching::StartsWith => FilterOp::StartsWith,
+                Matching::EndsWith => FilterOp::EndsWith,
+                Matching::Token => FilterOp::TokenMatch,
+                Matching::AllTokens => FilterOp::AllTokens,
+                Matching::AnyTokens => FilterOp::AnyTokens,
+            },
+            Predicate::Compare { .. } => match self.comparison? {
+                Comparison::Eq => FilterOp::Eq,
+                Comparison::Ne => FilterOp::Ne,
+                Comparison::Lt => FilterOp::Lt,
+                Comparison::Le => FilterOp::Lte,
+                Comparison::Gt => FilterOp::Gt,
+                Comparison::Ge => FilterOp::Gte,
+            },
+            Predicate::And(_) | Predicate::Not(_) => return None,
+        })
+    }
+
+    /// The literal operand: the compared value, the IN list, or the text needle.
+    pub fn value(self) -> Option<Value> {
+        let json = |literal: &Literal| match literal {
+            Literal::String(text) | Literal::Temporal(text) => Value::String(text.clone()),
+            Literal::Int(number) => Value::from(*number),
+            Literal::Float(number) => Value::from(*number),
+            Literal::Bool(flag) => Value::Bool(*flag),
+        };
+        match self.leaf {
+            Predicate::Compare {
+                right: Operand::Literal(literal),
+                ..
+            } => Some(json(literal)),
+            Predicate::In { values, .. } => Some(Value::Array(values.iter().map(json).collect())),
+            Predicate::Text { needle, .. } => Some(Value::String(needle.clone())),
+            _ => None,
+        }
     }
 
     pub fn literals(self) -> &'p [Literal] {

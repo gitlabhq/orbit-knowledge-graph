@@ -9,6 +9,7 @@ use strum::VariantNames;
 
 mod predicates;
 mod schema;
+pub use crate::types::QueryType;
 pub use predicates::{BooleanExpression, Condition, PredicateTarget};
 
 /// Controls which columns are fetched for dynamically-discovered entities
@@ -98,20 +99,6 @@ pub struct Input {
 }
 
 impl Input {
-    pub(crate) fn aggregation_row_nodes(
-        &self,
-        model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-    ) -> std::collections::HashSet<&str> {
-        let groups = &self.aggregation.group_by;
-        let text_groups = property_groups(groups)
-            .filter(|(node, property)| {
-                self.entity_of(node)
-                    .is_some_and(|entity| model.property_is_free_text(entity, property))
-            })
-            .map(|(node, _)| node);
-        node_group_ids(groups).chain(text_groups).collect()
-    }
-
     /// Whether this query has the "search shape": a single-node table scan
     /// with no relationships (traversal with 1 node + 0 relationships).
     pub fn is_search(&self) -> bool {
@@ -155,31 +142,6 @@ impl Default for Input {
 
 fn default_limit() -> u32 {
     30
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Deserialize,
-    strum::Display,
-    strum::IntoStaticStr,
-    strum::VariantNames,
-)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
-pub enum QueryType {
-    Traversal,
-    Aggregation,
-    PathFinding,
-    Neighbors,
-    /// Internal-only: consolidated hydration for multiple entity types.
-    /// Generates a UNION ALL of search-like arms, one per node. Skips
-    /// security context injection (IDs are pre-authorized by the pipeline).
-    #[serde(skip)]
-    Hydration,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

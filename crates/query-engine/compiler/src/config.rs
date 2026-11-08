@@ -6,7 +6,7 @@ use orbit_server_config::QueryConfig;
 
 use crate::error::{QueryError, Result};
 use crate::hydration::HydrationRequest;
-use crate::input::{Input, QueryType};
+use crate::input::Input;
 use crate::passes::codegen::{CompiledQueryContext, ParameterizedQuery, RelationalModel as _};
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::PlanMetadata;
@@ -17,6 +17,7 @@ use crate::passes::{
     security_check, settings,
 };
 use crate::surface::{self, Frontend};
+use crate::types::QueryType;
 use crate::types::SecurityContext;
 use query_data_model::surface::Statement;
 
@@ -98,22 +99,22 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         paginate {
             reads_env: [data_model]
-            reads_state: [input, plan_metadata]
+            reads_state: [statement, plan_metadata]
             mutates: [relational]
         }
         response_policy {
             reads_env: [data_model]
-            reads_state: [input]
+            reads_state: [statement]
             mutates: [relational]
         }
         result_contract {
             reads_env: [data_model]
-            reads_state: [input, plan_metadata]
+            reads_state: [statement, plan_metadata]
             mutates: [relational, result_ctx]
         }
         hydrate_plan {
             reads_env: [security_ctx, data_model]
-            reads_state: [input, relational]
+            reads_state: [statement, relational]
             mutates: [hydration_plan]
         }
         materialize {
@@ -122,7 +123,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         settings {
             reads_env: [data_model]
-            reads_state: [input, hydration, plan_metadata]
+            reads_state: [statement, hydration, plan_metadata]
             mutates: [query_config, relational]
         }
         security {
@@ -298,17 +299,21 @@ fn materialize(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
-    let input = require(ctx.input().as_ref(), "input")?;
-    let plan = response_policy::apply_text_excerpts(plan, ctx.data_model(), input)?;
+    let model = ctx.data_model();
+    let statement = require(ctx.statement().as_ref(), "statement")?;
+    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+    let plan = response_policy::apply_text_excerpts(plan, model, query)?;
     ctx.set_relational(plan);
     Ok(())
 }
 
 fn result_contract(ctx: &mut impl CompilerCtx) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
-    let input = require(ctx.input().as_ref(), "input")?;
+    let model = ctx.data_model();
+    let statement = require(ctx.statement().as_ref(), "statement")?;
+    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
     let metadata = require(ctx.plan_metadata().as_ref(), "plan_metadata")?;
-    let (plan, result_context) = result_contract::apply(plan, input, metadata, ctx.data_model())?;
+    let (plan, result_context) = result_contract::apply(plan, query, metadata, model)?;
     ctx.set_relational(plan);
     ctx.set_result_ctx(result_context);
     Ok(())
@@ -326,9 +331,11 @@ fn security(
 
 fn paginate(ctx: &mut impl CompilerCtx) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
-    let input = require(ctx.input().as_ref(), "input")?;
+    let model = ctx.data_model();
+    let statement = require(ctx.statement().as_ref(), "statement")?;
+    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
     let metadata = require(ctx.plan_metadata().as_ref(), "plan_metadata")?;
-    let plan = page::apply(plan, ctx.data_model(), input, metadata)?;
+    let plan = page::apply(plan, model, query, metadata)?;
     ctx.set_relational(plan);
     Ok(())
 }
@@ -344,14 +351,15 @@ fn security_check(
 fn hydrate_plan(
     ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
 ) -> Result<()> {
-    let input = require(ctx.input().as_ref(), "input")?;
+    let model = ctx.data_model();
+    let statement = require(ctx.statement().as_ref(), "statement")?;
+    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
     let relational = &require(ctx.relational().as_ref(), "relational")?.plan;
     let projected: Vec<&str> = relational
         .outputs(relational.root())
         .filter_map(|output| relational.name(output))
         .collect();
-    let plan =
-        hydrate::generate_hydration_plan(input, &projected, ctx.data_model(), ctx.security_ctx());
+    let plan = hydrate::generate_hydration_plan(query, &projected, model, ctx.security_ctx());
     ctx.set_hydration_plan(plan);
     Ok(())
 }
@@ -363,8 +371,13 @@ fn settings(
     let (query_type, negation) = match ctx.hydration() {
         Some(_) => (QueryType::Hydration, false),
         None => {
-            let input = require(ctx.input().as_ref(), "input")?;
-            (input.query_type, input.has_negation())
+            let statement = require(ctx.statement().as_ref(), "statement")?;
+            let query =
+                crate::logical::Query::new(&statement.plan, ctx.data_model().catalog().model());
+            let negated = crate::logical::facts::facts(query)
+                .iter()
+                .any(|fact| fact.negated);
+            (QueryType::from(query.kind()), negated)
         }
     };
     let metadata = require(ctx.plan_metadata().as_ref(), "plan_metadata")?;

@@ -17,9 +17,10 @@ use query_data_model::{
 };
 
 use crate::error::{QueryError, Result};
-use crate::input::{Input, QueryType};
+use crate::input::Input;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::result_contract::ResultContext;
+use crate::types::QueryType;
 pub use orbit_utils::query_types::ParamValue;
 use orbit_utils::query_types::SqlType;
 use std::collections::HashMap;
