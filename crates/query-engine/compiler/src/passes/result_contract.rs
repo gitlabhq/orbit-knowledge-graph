@@ -457,7 +457,7 @@ fn return_columns(
         let label = Term::Value(Box::new(OutputValue::Text(entity.clone())));
         contract.set(redaction_type_column(node.name), label);
         if kind != Kind::Aggregation
-            && model.entity_has_traversal_path(entity)
+            && model.catalog().has_path_column(entity_id)
             && let Some(path) = traversal_path
         {
             let path = Term::Column(path.clone());

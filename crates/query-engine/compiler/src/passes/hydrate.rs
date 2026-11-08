@@ -3,10 +3,10 @@
 
 use std::collections::HashSet;
 
-use ontology::VirtualSource;
-use query_data_model::PropertyRealization;
+use query_data_model::EntityId;
+use query_data_model::catalog::Lookup;
 
-use crate::logical::columns::{returned, selections};
+use crate::logical::columns::{defaults, returned, selections};
 use crate::logical::facts::{FilterOp, anchors, facts};
 use crate::logical::{DynamicColumnMode, Kind, Query};
 use crate::passes::codegen::RelationalModel;
@@ -154,7 +154,8 @@ fn build_static_templates(
         .iter()
         .filter_map(|anchor| {
             let (alias, entity_id) = (anchor.binding.name, anchor.binding.entity);
-            let entity = &model.graph().entity(entity_id).name;
+            let catalog = model.catalog();
+            let entity = &catalog.graph().entity(entity_id).name;
             let selection = selected.get(&anchor.binding.output).copied();
             let requested = returned(model, entity_id, selection);
 
@@ -165,7 +166,7 @@ fn build_static_templates(
                 .collect();
             let requested_virtuals: HashSet<String> = requested
                 .iter()
-                .filter(|property| model.property_is_virtual(entity_id, property))
+                .filter(|property| served(model, entity_id, property).is_some())
                 .cloned()
                 .collect();
             let (mut columns, mut virtual_columns) =
@@ -176,7 +177,7 @@ fn build_static_templates(
                     continue;
                 };
                 let property = query.property_name(property);
-                if !model.property_is_virtual(entity_id, property) {
+                if served(model, entity_id, property).is_none() {
                     continue;
                 }
                 let filter = VirtualFilter {
@@ -209,11 +210,11 @@ fn build_static_templates(
             Some(HydrationTemplate {
                 entity_type: entity.clone(),
                 node_alias: alias.to_string(),
-                destination_table: model.entity_table(entity)?.to_string(),
+                destination_table: catalog.table_of(entity_id)?.to_string(),
                 columns,
                 virtual_columns,
                 injected_columns,
-                has_traversal_path: model.entity_has_traversal_path(entity),
+                has_traversal_path: catalog.has_path_column(entity_id),
                 virtual_filters,
                 filter_injected_columns,
             })
@@ -235,12 +236,13 @@ fn build_dynamic_specs(
     model: &impl RelationalModel,
     security_ctx: &SecurityContext,
 ) -> Vec<DynamicEntityColumns> {
-    model
-        .graph()
+    let catalog = model.catalog();
+    let graph = catalog.graph();
+    graph
         .entities()
         .filter_map(|entity| {
             let name = entity.name.as_str();
-            model.entity_table(name)?;
+            let table = catalog.table_of(entity.id)?;
 
             let admin_only: HashSet<&str> = if security_ctx.admin {
                 HashSet::new()
@@ -249,7 +251,7 @@ fn build_dynamic_specs(
                     .properties
                     .iter()
                     .filter(|property| model.property_is_admin_only(**property))
-                    .map(|property| model.graph().property(*property).name.as_str())
+                    .map(|property| graph.property(*property).name.as_str())
                     .collect()
             };
 
@@ -260,22 +262,18 @@ fn build_dynamic_specs(
                 DynamicColumnMode::All => entity
                     .properties
                     .iter()
-                    .map(|property| model.graph().property(*property))
+                    .map(|property| graph.property(*property))
                     .filter(|property| {
-                        !matches!(
-                            model.property_realization(property.id),
-                            Some(PropertyRealization::Virtual(_))
-                        ) && !model.property_is_hidden(property.id)
+                        catalog.lookup(property.id).is_none()
+                            && !model.property_is_hidden(property.id)
                             && property.name != "_version"
                             && property.name != "_deleted"
                     })
                     .filter(|property| !admin_only.contains(property.name.as_str()))
                     .map(|property| property.name.clone())
                     .collect(),
-                DynamicColumnMode::Default => model
-                    .default_properties(entity.id)
-                    .iter()
-                    .map(|property| model.graph().property(*property).name.as_str())
+                DynamicColumnMode::Default => defaults(entity)
+                    .map(|property| graph.property(property).name.as_str())
                     .filter(|property| !admin_only.contains(property))
                     .map(String::from)
                     .collect(),
@@ -296,14 +294,24 @@ fn build_dynamic_specs(
 
             Some(DynamicEntityColumns {
                 entity_type: name.to_string(),
-                destination_table: model.entity_table(name)?.to_string(),
+                destination_table: table.to_string(),
                 columns,
                 virtual_columns,
                 injected_columns,
-                has_traversal_path: model.entity_has_traversal_path(name),
+                has_traversal_path: catalog.has_path_column(entity.id),
             })
         })
         .collect()
+}
+
+/// The lookup serving an entity's property, by property name.
+fn served<'m>(
+    model: &'m impl RelationalModel,
+    entity: EntityId,
+    property: &str,
+) -> Option<&'m Lookup> {
+    let catalog = model.catalog();
+    catalog.lookup(catalog.graph().property_id(entity, property)?)
 }
 
 /// Returns the columns that were injected (not originally requested).
@@ -311,19 +319,17 @@ fn inject_model_virtual_dependencies(
     columns: &mut Vec<String>,
     virtual_columns: &[VirtualColumnRequest],
     model: &impl RelationalModel,
-    entity: query_data_model::EntityId,
+    entity: EntityId,
 ) -> Vec<String> {
+    let catalog = model.catalog();
     let mut injected = Vec::new();
     for vc in virtual_columns {
-        let Some(source) = model.virtual_source_for_entity_id(entity, &vc.column_name) else {
+        let Some(lookup) = served(model, entity, &vc.column_name) else {
             continue;
         };
-        for dependency in &source.depends_on {
-            if !columns.contains(dependency)
-                && model
-                    .property_for_entity_id(entity, dependency)
-                    .is_some_and(|property| model.property_is_stored(property.id))
-            {
+        for key in &lookup.keys {
+            let dependency = &catalog.graph().property(*key).name;
+            if !columns.contains(dependency) && catalog.column(*key).is_some() {
                 columns.push(dependency.clone());
                 injected.push(dependency.clone());
             }
@@ -335,33 +341,18 @@ fn inject_model_virtual_dependencies(
 fn split_model_columns(
     requested: &[String],
     model: &impl RelationalModel,
-    entity: query_data_model::EntityId,
+    entity: EntityId,
 ) -> (Vec<String>, Vec<VirtualColumnRequest>) {
     let mut columns = Vec::new();
     let mut virtual_columns = Vec::new();
 
     for col_name in requested {
-        match model
-            .property_for_entity_id(entity, col_name)
-            .and_then(|property| model.property_realization(property.id))
-        {
-            Some(realization) => match realization {
-                PropertyRealization::Stored { .. } => columns.push(col_name.clone()),
-                PropertyRealization::Virtual(VirtualSource {
-                    service,
-                    lookup,
-                    disabled,
-                    ..
-                }) => {
-                    if !disabled {
-                        virtual_columns.push(VirtualColumnRequest {
-                            column_name: col_name.clone(),
-                            service: service.clone(),
-                            lookup: lookup.clone(),
-                        });
-                    }
+        match served(model, entity, col_name) {
+            Some(lookup) => {
+                if !lookup.disabled {
+                    virtual_columns.push(request(col_name, lookup));
                 }
-            },
+            }
             None => columns.push(col_name.clone()),
         }
     }
@@ -371,22 +362,26 @@ fn split_model_columns(
 
 fn virtual_request(
     model: &impl RelationalModel,
-    entity: query_data_model::EntityId,
+    entity: EntityId,
     property: &str,
 ) -> Option<VirtualColumnRequest> {
-    let source = model.virtual_source_for_entity_id(entity, property)?;
-    (!source.disabled).then(|| VirtualColumnRequest {
-        column_name: property.to_string(),
-        service: source.service.clone(),
-        lookup: source.lookup.clone(),
-    })
+    let lookup = served(model, entity, property)?;
+    (!lookup.disabled).then(|| request(property, lookup))
+}
+
+fn request(column: &str, lookup: &Lookup) -> VirtualColumnRequest {
+    VirtualColumnRequest {
+        column_name: column.to_string(),
+        service: lookup.service.clone(),
+        lookup: lookup.operation.clone(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ontology::{DataType, FieldSource, Ontology, VirtualSource};
-    use query_data_model::{ClickHouseDataModel, OrbitQueryModel};
+    use query_data_model::ClickHouseDataModel;
 
     fn model(dependencies: &[&str], disabled: bool) -> ClickHouseDataModel {
         let ontology = Ontology::new()
@@ -412,7 +407,7 @@ mod tests {
     }
 
     fn entity(model: &ClickHouseDataModel) -> query_data_model::EntityId {
-        model.entity("TestNode").unwrap().id
+        model.catalog().graph().entity_id("TestNode").unwrap()
     }
 
     #[ignore = "fixture ontology fails the data model load checks"]

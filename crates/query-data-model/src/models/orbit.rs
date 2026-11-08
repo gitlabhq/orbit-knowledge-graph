@@ -91,25 +91,10 @@ pub trait OrbitQueryModel {
     fn null_as_epoch(&self, property: PropertyId) -> bool;
     fn null_as_epoch_properties(&self, entity: EntityId) -> HashMap<String, ontology::DataType>;
     fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property>;
-    fn entity_table(&self, entity: &str) -> Option<&str>;
-    fn entity_has_traversal_path(&self, entity: &str) -> bool;
-    fn has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: &str) -> bool;
     fn high_fan_out(&self, entity: EntityId) -> bool;
-    fn property_column_named(&self, entity: &str, property: &str) -> Option<&str>;
-    fn property_column(&self, property: PropertyId) -> Option<&str>;
-    fn property_is_stored(&self, property: PropertyId) -> bool;
-    fn property_realization(&self, property: PropertyId) -> Option<&PropertyRealization>;
     fn property_selectivity(&self, property: PropertyId) -> ontology::FieldSelectivity;
-    fn property_is_virtual(&self, entity: EntityId, property: &str) -> bool;
-    fn virtual_source_for_entity_id(
-        &self,
-        entity: EntityId,
-        property: &str,
-    ) -> Option<&ontology::VirtualSource>;
-    fn virtual_source(&self, entity: &str, property: &str) -> Option<&ontology::VirtualSource>;
     fn relationship_exists(&self, relationship: &str) -> bool;
-    fn default_properties(&self, entity: EntityId) -> &[PropertyId];
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType>;
     fn table_columns(&self, table: &str) -> Option<&HashSet<String>>;
     fn table_sort_key(&self, table: &str) -> Option<&[String]>;
@@ -172,7 +157,6 @@ pub trait OrbitQueryModel {
         entity: &str,
         kind: ontology::TraversalPathKind,
     ) -> Option<(&str, &str)>;
-    fn table_of(&self, entity: EntityId) -> Option<&str>;
     fn property_is_foreign_key(&self, property: PropertyId) -> bool;
     fn required_access_level(&self, entity: EntityId) -> Option<u32>;
     fn materialized_joins(&self) -> &[MaterializedJoin];

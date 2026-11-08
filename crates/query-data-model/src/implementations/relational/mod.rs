@@ -9,6 +9,7 @@ use crate::spec::parse_word;
 use crate::{EntityId, ForeignKey, GraphCatalog, RelationshipVariantId};
 
 mod capabilities;
+mod catalog;
 pub mod plan;
 pub mod render;
 mod tables;

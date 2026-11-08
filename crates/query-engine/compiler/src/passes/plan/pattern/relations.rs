@@ -224,8 +224,8 @@ where
             let fk = (max_hops == 1 && !tested && direction != Direction::Both)
                 .then(|| {
                     let foreign_key = shared_foreign_key(model, relationships, source?, target?)?;
-                    let column = model.property_column(foreign_key.property)?.to_string();
-                    model.property_column(foreign_key.referenced_key)?;
+                    let column = model.catalog().column(foreign_key.property)?.to_string();
+                    model.catalog().column(foreign_key.referenced_key)?;
                     let node = match foreign_key.holder {
                         query_data_model::Endpoint::Source => source_node,
                         query_data_model::Endpoint::Target => target_node,

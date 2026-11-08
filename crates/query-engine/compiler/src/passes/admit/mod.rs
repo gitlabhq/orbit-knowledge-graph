@@ -32,6 +32,11 @@ pub fn admit(query: Query<'_>, model: &impl RelationalModel, selectivity: bool) 
     Ok(())
 }
 
+/// Whether a lookup serves the property an expression reads.
+fn served(model: &impl RelationalModel, expr: Expr) -> bool {
+    matches!(expr, Expr::Property { property, .. } if model.catalog().lookup(property).is_some())
+}
+
 fn node_property<'p>(query: Query<'p>, expr: Expr) -> Option<(&'p str, &'p str, &'p str)> {
     let Expr::Property { binding, property } = expr else {
         return None;
@@ -54,7 +59,7 @@ fn filters(
         let Some((alias, entity, property)) = node_property(query, fact.left) else {
             continue;
         };
-        if model.virtual_source(entity, property).is_some() {
+        if served(model, fact.left) {
             if matches!(
                 kind,
                 Kind::Aggregation | Kind::Neighbors | Kind::PathFinding

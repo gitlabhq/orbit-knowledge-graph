@@ -34,8 +34,8 @@ pub fn normalize(
 fn available(query: Query<'_>, data: &impl RelationalModel) -> Result<()> {
     let entities = query.plan.nodes().flat_map(|node| query.plan.outputs(node));
     for entity in entities.filter_map(|output| query.entity(output)) {
-        let entity = &query.model.graph().entity(entity).name;
-        if data.entity_table(entity).is_none() {
+        if data.catalog().table_of(entity).is_none() {
+            let entity = &query.model.graph().entity(entity).name;
             return Err(QueryError::AllowlistRejected(format!(
                 "entity '{entity}' is not available in this data model"
             )));

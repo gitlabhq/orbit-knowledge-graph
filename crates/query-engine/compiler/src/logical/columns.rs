@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use query_data_model::plan::logical::{Columns, Expr, LogicalOperation, Projection};
 use query_data_model::plan::tracking::Ref;
-use query_data_model::{EntityId, PropertyId};
+use query_data_model::{Entity, EntityId, PropertyId};
 
 use super::Query;
 
@@ -31,25 +31,34 @@ pub fn selections<'p>(query: Query<'p>) -> HashMap<Ref, &'p Columns> {
     selected
 }
 
+/// An entity's declared default properties, in property order.
+pub fn defaults(entity: &Entity) -> impl Iterator<Item = PropertyId> + '_ {
+    entity
+        .properties
+        .iter()
+        .copied()
+        .filter(|property| entity.defaults.contains(property))
+}
+
 /// The properties a binding returns: the listed ones, else the defaults or every readable property.
 pub fn returned<M>(model: &M, entity: EntityId, selection: Option<&Columns>) -> Vec<String>
 where
     M: RelationalModel,
 {
-    let graph = model.graph();
+    let catalog = model.catalog();
+    let graph = catalog.graph();
     let properties: Vec<PropertyId> = match selection {
         Some(Columns::Listed(listed)) => listed.clone(),
         selection => {
-            let defaults = model.default_properties(entity);
+            let entity = graph.entity(entity);
             let defaulted = matches!(selection, None | Some(Columns::Default));
-            let properties = match defaulted && !defaults.is_empty() {
-                true => defaults,
-                false => &graph.entity(entity).properties,
+            let properties: Vec<PropertyId> = match defaulted && !entity.defaults.is_empty() {
+                true => defaults(entity).collect(),
+                false => entity.properties.clone(),
             };
             properties
-                .iter()
-                .copied()
-                .filter(|property| model.property_realization(*property).is_some())
+                .into_iter()
+                .filter(|property| catalog.readable(*property))
                 .filter(|property| !model.property_is_hidden(*property))
                 .filter(|property| !model.property_is_admin_only(*property))
                 .collect()

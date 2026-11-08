@@ -75,7 +75,7 @@ fn routing_facts(model: &ClickHouseDataModel) -> Vec<String> {
     let mut tables = vec![model.default_edge_table().to_string()];
     let mut facts = Vec::new();
     for entity in graph.entities() {
-        let table = model.table_of(entity.id).map(str::to_string);
+        let table = model.catalog().table_of(entity.id).map(str::to_string);
         tables.extend(table.clone());
         facts.push(format!("{} table {table:?}", entity.name));
         for kind in [TraversalPathKind::Id, TraversalPathKind::FullPath] {

@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
 use orbit_log_fields::warn;
-use query_data_model::OrbitQueryModel;
 use query_engine::compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use query_engine::compiler::{
     HydrationArm, HydrationCompileOptions, HydrationPlan, HydrationRequest, QueryType,
@@ -71,11 +70,12 @@ impl HydrationStage {
                 ids.truncate(MAX_DYNAMIC_HYDRATION_RESULTS);
             }
             id_columns.insert(entity_type.clone(), auth.auth_id_column.clone());
-            let paths = if data_model.entity_has_traversal_path(&entity_type) {
-                scope.clone()
-            } else {
-                Vec::new()
-            };
+            let catalog = data_model.catalog();
+            let scoped = catalog
+                .graph()
+                .entity_id(&entity_type)
+                .is_some_and(|entity| catalog.has_path_column(entity));
+            let paths = if scoped { scope.clone() } else { Vec::new() };
             arms.push(hydration_helpers::hydration_arm(
                 data_model.catalog().model(),
                 &entity_type,

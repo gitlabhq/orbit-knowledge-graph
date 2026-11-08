@@ -1,9 +1,7 @@
 use ontology::FieldSource;
 use query_data_model::from_ontology;
 use query_data_model::implementations::clickhouse::schema::Schema;
-use query_data_model::{
-    ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, Packages, PropertyRealization,
-};
+use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, Packages};
 
 fn overlay_ontology(name: &str) -> ontology::Ontology {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -147,8 +145,14 @@ fn loads_remote_and_local_models_from_the_same_packages() {
 
     let definition = remote.graph().entity_id("Definition").unwrap();
 
-    assert_eq!(remote.table_of(definition).unwrap(), "gl_definition");
-    assert_eq!(local.table_of(definition).unwrap(), "gl_definition");
+    assert_eq!(
+        remote.catalog().table_of(definition).unwrap(),
+        "gl_definition"
+    );
+    assert_eq!(
+        local.catalog().table_of(definition).unwrap(),
+        "gl_definition"
+    );
     assert_eq!(remote.relationship_table("CONTAINS"), None);
     assert_eq!(local.relationship_table("CONTAINS"), Some("gl_edge"));
 }
@@ -184,7 +188,7 @@ fn keeps_extraction_sources_separate_from_query_columns() {
     let model = ClickHouseDataModel::embedded().unwrap();
     let entity = model.graph().entity_id("MergeRequest").unwrap();
     let property = model.graph().property_id(entity, "project_id").unwrap();
-    let table = model.table_of(entity).unwrap();
+    let table = model.catalog().table_of(entity).unwrap();
 
     let source = &ontology
         .get_node("MergeRequest")
@@ -195,11 +199,7 @@ fn keeps_extraction_sources_separate_from_query_columns() {
         .unwrap()
         .source;
     assert!(matches!(source, FieldSource::DatabaseColumn(source) if source == "target_project_id"));
-    assert!(matches!(
-        model.property_realization(property),
-        Some(PropertyRealization::Stored { column }) if column == "project_id"
-    ));
-    assert_eq!(model.property_column(property), Some("project_id"));
+    assert_eq!(model.catalog().column(property), Some("project_id"));
     let backend = &model;
     assert!(backend.table_column_type(table, "project_id").is_some());
     assert!(
@@ -214,9 +214,9 @@ fn exposes_storage_columns_as_query_identifiers() {
     let model = ClickHouseDataModel::embedded().unwrap();
     let entity = model.graph().entity_id("Job").unwrap();
     let property = model.graph().property_id(entity, "when").unwrap();
-    let table = model.table_of(entity).unwrap();
+    let table = model.catalog().table_of(entity).unwrap();
 
-    assert_eq!(model.property_column(property), Some("when"));
+    assert_eq!(model.catalog().column(property), Some("when"));
     let columns = model.table_columns(table).unwrap();
     assert!(columns.contains("when"));
     assert!(!columns.contains("`when`"));
@@ -285,16 +285,11 @@ fn property_realization_reports_backend_availability() {
     let local_entity = local.graph().entity_id("MergeRequest").unwrap();
     let remote_property = remote.graph().property_id(remote_entity, "title").unwrap();
     let local_property = local.graph().property_id(local_entity, "title").unwrap();
-    assert!(matches!(remote.property_realization(remote_property),
-        Some(PropertyRealization::Stored { column }) if column == "title"));
-    assert!(local.property_realization(local_property).is_none());
-    assert!(local.property_column(local_property).is_none());
+    assert_eq!(remote.catalog().column(remote_property), Some("title"));
+    assert!(!local.catalog().readable(local_property));
 
     let file = remote.graph().entity_id("File").unwrap();
     let content = remote.graph().property_id(file, "content").unwrap();
-    assert!(matches!(
-        remote.property_realization(content),
-        Some(PropertyRealization::Virtual(_))
-    ));
-    assert!(remote.property_column(content).is_none());
+    assert!(remote.catalog().lookup(content).is_some());
+    assert!(remote.catalog().column(content).is_none());
 }

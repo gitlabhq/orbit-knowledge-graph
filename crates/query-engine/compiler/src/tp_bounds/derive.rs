@@ -138,8 +138,8 @@ fn nodes(
     let mut bounds = super::propagate::propagate(query, edges, &seed, model);
     bounds.retain(|output, _| {
         query
-            .entity_name(*output)
-            .is_some_and(|entity| model.entity_has_traversal_path(entity))
+            .entity(*output)
+            .is_some_and(|entity| model.catalog().has_path_column(entity))
     });
     bounds
 }

@@ -4,7 +4,7 @@ use crate::passes::codegen::RelationalModel;
 use query_data_model::plan::logical::{Comparison, Expr, Literal, Predicate};
 use query_data_model::plan::tracking::Ref;
 
-use super::node_property;
+use super::{node_property, served};
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
 use crate::logical::facts::Fact;
@@ -19,8 +19,11 @@ pub(super) fn negated(
     model: &impl RelationalModel,
 ) -> Result<()> {
     let negated = facts.iter().filter(|fact| fact.negated).flat_map(sides);
-    for (_, entity, property) in negated.filter_map(|expr| node_property(query, expr)) {
-        if model.virtual_source(entity, property).is_some() {
+    for expr in negated {
+        let Some((_, entity, property)) = node_property(query, expr) else {
+            continue;
+        };
+        if served(model, expr) {
             return Err(QueryError::Validation(format!(
                 "filter on \"{property}\" for {entity}: virtual columns cannot be used under NOT"
             )));
@@ -120,10 +123,10 @@ pub(super) fn aggregation_text(
 
 pub(super) fn order(query: Query<'_>, model: &impl RelationalModel) -> Result<()> {
     for key in query.ordered() {
-        let Some((alias, entity, property)) = node_property(query, key) else {
+        let Some((alias, _, property)) = node_property(query, key) else {
             continue;
         };
-        if model.virtual_source(entity, property).is_some() {
+        if served(model, key) {
             return Err(QueryError::Validation(format!(
                 "order_by property {alias}.{property} is virtual and cannot be read in SQL"
             )));

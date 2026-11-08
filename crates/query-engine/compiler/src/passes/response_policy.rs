@@ -26,26 +26,24 @@ pub fn apply_text_excerpts<M: RelationalModel>(
         .bindings()
         .into_iter()
         .map(|binding| {
-            let entity = model.graph().entity(binding.entity);
+            let catalog = model.catalog();
+            let graph = catalog.graph();
+            let entity = graph.entity(binding.entity);
             let selection = selected.get(&binding.output).copied();
             let requested = returned(model, binding.entity, selection);
-            let mut excerpted: HashSet<String> = model
-                .graph()
-                .entity(entity.id)
+            let mut excerpted: HashSet<String> = entity
                 .properties
                 .iter()
-                .map(|property| model.graph().property(*property))
+                .map(|property| graph.property(*property))
                 .filter(|property| {
-                    model.property_is_stored(property.id) && property.data_type == DataType::String
+                    catalog.column(property.id).is_some() && property.data_type == DataType::String
                 })
                 .map(|property| property.name.clone())
                 .collect();
             for property in &entity.properties {
-                if let Some(query_data_model::PropertyRealization::Virtual(source)) =
-                    model.property_realization(*property)
-                {
-                    for dependency in &source.depends_on {
-                        excerpted.remove(dependency);
+                if let Some(lookup) = catalog.lookup(*property) {
+                    for key in &lookup.keys {
+                        excerpted.remove(&graph.property(*key).name);
                     }
                 }
             }

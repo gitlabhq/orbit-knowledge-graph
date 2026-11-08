@@ -183,7 +183,7 @@ pub fn bind_filter(
 ) -> BoundFilter {
     let (metadata, in_sort_key) = match owner {
         FilterOwner::Entity(entity) => {
-            let table = model.table_of(*entity);
+            let table = model.catalog().table_of(*entity);
             (
                 model
                     .property_for_entity_id(*entity, property)
@@ -209,7 +209,7 @@ pub fn bind_filter(
     };
     let (property_id, data_type) = metadata.unwrap_or_default();
     let column = property_id
-        .and_then(|property| model.property_column(property))
+        .and_then(|property| model.catalog().column(property))
         .unwrap_or(property);
     BoundFilter {
         test,

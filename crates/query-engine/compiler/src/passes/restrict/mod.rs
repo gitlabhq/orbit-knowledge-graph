@@ -79,10 +79,9 @@ fn aggregation_scope(
     entities: &[(Ref, EntityId)],
     model: &impl RelationalModel,
 ) -> Result<()> {
-    let graph = query.model.graph();
     let mut reachable: HashSet<Ref> = entities
         .iter()
-        .filter(|(_, entity)| model.entity_has_traversal_path(&graph.entity(*entity).name))
+        .filter(|(_, entity)| model.catalog().has_path_column(*entity))
         .map(|(output, _)| *output)
         .collect();
     if reachable.is_empty() {

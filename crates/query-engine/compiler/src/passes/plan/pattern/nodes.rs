@@ -25,16 +25,23 @@ impl NodePlan {
     {
         let binding = anchor.binding;
         let entity = binding.entity;
-        let graph = model.graph();
+        let catalog = model.catalog();
+        let graph = catalog.graph();
+        let stored = |name: &str| {
+            graph
+                .property_id(entity, name)
+                .and_then(|property| catalog.lookup(property))
+                .is_none()
+        };
         let mut filters = bind_facts(query, anchor, binding.name, model);
-        filters.retain(|(property, _)| !model.property_is_virtual(entity, property));
+        filters.retain(|(property, _)| stored(property));
         filters.sort_by(|(left, _), (right, _)| left.cmp(right));
         unindex_if_key_narrowed(&mut filters);
-        let has_traversal_path = model.has_traversal_path(entity);
+        let has_traversal_path = catalog.has_path_column(entity);
         Self {
             alias: binding.name.to_string(),
             entity: Some(graph.entity(entity).name.clone()),
-            table: model.table_of(entity).map(String::from),
+            table: catalog.table_of(entity).map(String::from),
             joined: false,
             filters,
             predicates: Vec::new(),
@@ -52,7 +59,7 @@ impl NodePlan {
                 .to_string(),
             columns: returned(model, entity, selection)
                 .into_iter()
-                .filter(|name| !model.property_is_virtual(entity, name))
+                .filter(|name| stored(name))
                 .collect(),
             emit_select: true,
             null_as_epoch: model.null_as_epoch_properties(entity),

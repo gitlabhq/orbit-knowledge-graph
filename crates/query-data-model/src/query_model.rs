@@ -44,7 +44,6 @@ where
     homes: Vec<Option<usize>>,
     routes: Vec<Option<VariantRoute>>,
     realizations: Vec<Option<PropertyRealization>>,
-    defaults: Vec<Vec<PropertyId>>,
     relationship_tables: Vec<Vec<String>>,
     edge_tables: Vec<String>,
     default_edge_table: String,
@@ -108,20 +107,6 @@ where
                 Some(PropertyRealization::Stored {
                     column: store.column(property.id)?.to_string(),
                 })
-            })
-            .collect();
-        let defaults = graph
-            .entities()
-            .map(|entity| {
-                if homes[entity.id.index()].is_none() {
-                    return Vec::new();
-                }
-                entity
-                    .properties
-                    .iter()
-                    .filter(|property| entity.defaults.contains(property))
-                    .copied()
-                    .collect()
             })
             .collect();
         let relationship_tables = graph
@@ -193,7 +178,6 @@ where
             homes,
             routes,
             realizations,
-            defaults,
             relationship_tables,
             edge_tables,
             default_edge_table,
@@ -249,17 +233,6 @@ where
             .unwrap_or_default()
     }
 
-    pub(crate) fn entity_table(&self, entity: EntityId) -> Option<&str> {
-        let (store, _) = self.home(entity)?;
-        Some(&store.source(entity)?.table)
-    }
-
-    pub(crate) fn entity_has_traversal_path(&self, entity: EntityId) -> bool {
-        self.home(entity)
-            .and_then(|(store, _)| store.source(entity))
-            .is_some_and(|source| source.path_column.is_some())
-    }
-
     pub(crate) fn entity_is_global(&self, entity: EntityId) -> bool {
         !self.trusted
             && self
@@ -281,10 +254,6 @@ where
             .property(property)
             .references
             .is_empty()
-    }
-
-    pub(crate) fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
-        &self.defaults[entity.index()]
     }
 
     pub(crate) fn property_column(&self, property: PropertyId) -> Option<&str> {
@@ -479,10 +448,6 @@ where
         self.bindings.graph_catalog()
     }
 
-    fn table_of(&self, entity: EntityId) -> Option<&str> {
-        self.bindings.entity_table(entity)
-    }
-
     fn property_is_foreign_key(&self, property: PropertyId) -> bool {
         self.bindings.property_is_foreign_key(property)
     }
@@ -535,46 +500,14 @@ where
             .map(|property| self.graph().property(property))
     }
 
-    fn entity_table(&self, entity: &str) -> Option<&str> {
-        let entity = self.graph().entity_id(entity)?;
-        self.bindings.entity_table(entity)
-    }
-
-    fn entity_has_traversal_path(&self, entity: &str) -> bool {
-        self.graph()
-            .entity_id(entity)
-            .is_some_and(|entity| self.bindings.entity_has_traversal_path(entity))
-    }
-
     fn entity_is_global(&self, entity: &str) -> bool {
         self.graph()
             .entity_id(entity)
             .is_some_and(|entity| self.bindings.entity_is_global(entity))
     }
 
-    fn has_traversal_path(&self, entity: EntityId) -> bool {
-        self.bindings.entity_has_traversal_path(entity)
-    }
-
     fn high_fan_out(&self, entity: EntityId) -> bool {
         self.bindings.entity_high_fan_out(entity)
-    }
-
-    fn property_column_named(&self, entity: &str, property: &str) -> Option<&str> {
-        let property = self.property(entity, property)?;
-        self.property_column(property.id)
-    }
-
-    fn property_column(&self, property: PropertyId) -> Option<&str> {
-        self.bindings.property_column(property)
-    }
-
-    fn property_is_stored(&self, property: PropertyId) -> bool {
-        self.property_column(property).is_some()
-    }
-
-    fn property_realization(&self, property: PropertyId) -> Option<&PropertyRealization> {
-        self.bindings.property_realization(property)
     }
 
     fn property_selectivity(&self, property: PropertyId) -> ontology::FieldSelectivity {
@@ -583,34 +516,8 @@ where
             .unwrap_or_default()
     }
 
-    fn property_is_virtual(&self, entity: EntityId, property: &str) -> bool {
-        self.virtual_source_for_entity_id(entity, property)
-            .is_some()
-    }
-
-    fn virtual_source_for_entity_id(
-        &self,
-        entity: EntityId,
-        property: &str,
-    ) -> Option<&ontology::VirtualSource> {
-        let property = self.graph().property_id(entity, property)?;
-        let PropertyRealization::Virtual(source) = self.property_realization(property)? else {
-            return None;
-        };
-        Some(source)
-    }
-
-    fn virtual_source(&self, entity: &str, property: &str) -> Option<&ontology::VirtualSource> {
-        let entity = self.graph().entity_id(entity)?;
-        self.virtual_source_for_entity_id(entity, property)
-    }
-
     fn relationship_exists(&self, relationship: &str) -> bool {
         self.graph().relationship_id(relationship).is_some()
-    }
-
-    fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
-        self.bindings.default_properties(entity)
     }
 
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
