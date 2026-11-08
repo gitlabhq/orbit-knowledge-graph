@@ -121,15 +121,21 @@ Shared storage fields cover what every backend understands; the `backend` block 
 
 Packages compose under four rules: a package cannot redeclare an entity another package owns, cannot add a second authorization entry for the same entity, property or relationship, can add variants to a platform relationship, and can bind additional entities to a store another package declares.
 
-### The model does the work once, at load
+### The model is loaded at runtime
 
-The loader composes every package into a single `Model`:
+Packages are data, not code.
+The server reads them at runtime from a package source, such as the platform packages bundled with the binary, an integration's package in object storage, or a tenant overlay, and composes them into a single `Model`:
 
 ```rust
-let model = Packages::embedded().load()?;
+let model = Packages::from_source(&source).await?.load()?;
 ```
 
-Work that the compiler used to repeat on every query moves here:
+A new or changed package does not need a rebuild or a deploy.
+The loader validates the candidate packages in full, and only a model that passes every check replaces the active one.
+The swap is atomic: compiles already in flight keep the snapshot they started with, through an `Arc<Model>`, and new compiles pick up the new one.
+A package that fails validation is rejected with its errors, and the previous model stays active.
+
+Work that the compiler used to repeat on every query moves into this load:
 
 - Every name resolves to an ID. Later stages read facts by ID and never search by name.
 - Every rule is checked, and all errors are collected with the package that caused each one before the load fails.
@@ -234,9 +240,9 @@ End-to-end plan tests assert three checked stages of each query: the `logical` p
 
 ### Benefits
 
-The ontology's concerns separate, so graph, storage, access and services evolve independently, and a new entity, source or tenant overlay is a package rather than a compiler change.
+The ontology's concerns separate, so graph, storage, access and services evolve independently, and a new entity, source or tenant overlay is a package loaded at runtime rather than a compiler change or a deploy.
 
-Validation happens once: bad YAML fails at startup with every error reported, and the compiler reads facts by ID instead of searching by name.
+Validation happens once per load: a bad package is rejected with every error reported before it can serve a query, and the compiler reads facts by ID instead of searching by name.
 
 Plan construction is consistent across pipelines.
 Each pass is a checked rewrite and cannot leave an invalid plan behind.
@@ -246,10 +252,11 @@ Backends are pluggable, and planning reads capabilities rather than backend name
 
 ### Costs and constraints
 
-- A package that fails its load checks blocks startup, so a broken integration package must not ship to every tenant.
+- A package that fails its load checks is rejected and the previous model keeps serving. Package publishing needs the same validation up front, so authors see the errors before the server does.
 - The loader is strict: a fragment cannot carry unknown fields for later use.
 - Every namespaced entity needs a guard, which means its package must declare a path column, an anchor foreign key or a redaction rule.
-- Packages and schema archives must stay in step, and changing a package at a released schema version requires a schema bump.
+- A package change that alters physical storage needs a new schema version, which the migration path builds before the new model goes live. A change that only adds query metadata takes effect on the next load.
+- The server must hold every active model snapshot until the compiles that use it finish, and caches keyed by `ModelId` must evict old snapshots.
 - The JSON DSL is kept only until it is removed and gets no new features.
 - The ontology crate stays until ETL moves into source packages. Until then the indexer reads `config/ontology` for ETL only.
 
