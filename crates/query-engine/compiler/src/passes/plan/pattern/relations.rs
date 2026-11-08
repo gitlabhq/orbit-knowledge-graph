@@ -1,6 +1,7 @@
 //! Relation planning: an `EdgeRelation` per input relationship (edge tables, layout, foreign-key
 //! shortcut), ordered most selective first along a connected chain.
 
+use crate::passes::codegen::RelationalModel;
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -9,7 +10,7 @@ use ontology::constants::{
 };
 use query_data_model::plan::logical::{EdgeField, Expr as Logical};
 use query_data_model::plan::tracking::Ref;
-use query_data_model::{Direction, EntityId, ForeignKey, OrbitQueryModel, RelationshipId};
+use query_data_model::{Direction, EntityId, ForeignKey, RelationshipId};
 
 use super::{EdgeRelation, Fk, NodePlan};
 use crate::constants::{EDGE_PATH_NODES_SUFFIX, edge_column_prefix, edge_relation_alias};
@@ -22,7 +23,7 @@ use crate::passes::plan::filters::{
 
 /// The edge tables storing a variant of `relationships` from `source` to `target`; any relationship when none is named.
 fn tables_between(
-    model: &(impl OrbitQueryModel + ?Sized),
+    model: &impl RelationalModel,
     relationships: &[RelationshipId],
     source: EntityId,
     target: EntityId,
@@ -55,7 +56,7 @@ fn tables_between(
 
 /// The foreign key every variant of `relationships` from `source` to `target` shares.
 fn shared_foreign_key(
-    model: &(impl OrbitQueryModel + ?Sized),
+    model: &impl RelationalModel,
     relationships: &[RelationshipId],
     source: EntityId,
     target: EntityId,
@@ -154,7 +155,7 @@ pub(super) fn build_relations<M>(
     nodes: &HashMap<String, NodePlan>,
 ) -> Vec<EdgeRelation>
 where
-    M: OrbitQueryModel + ?Sized,
+    M: RelationalModel,
 {
     let graph = model.graph();
     let leaves = query.leaves();
@@ -265,7 +266,7 @@ fn edge_filters<M>(
     model: &M,
 ) -> Vec<(String, BoundFilter)>
 where
-    M: OrbitQueryModel + ?Sized,
+    M: RelationalModel,
 {
     let owner = FilterOwner::Tables(tables);
     let mut filters: Vec<(String, BoundFilter)> = facts
@@ -298,7 +299,7 @@ where
 
 /// Swaps each table for the equivalent layout whose sort key reaches a pinned endpoint column soonest.
 pub(super) fn select_edge_layouts(
-    model: &(impl OrbitQueryModel + ?Sized),
+    model: &impl RelationalModel,
     tables: &mut [String],
     endpoints: &[&str],
 ) {
@@ -393,56 +394,4 @@ fn relation_selectivity(relation: &EdgeRelation, nodes: &HashMap<String, NodePla
             .iter()
             .any(|(_, filter)| filter.is_selective()),
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
-
-    use super::{shared_foreign_key, tables_between};
-
-    fn same_as_by_name(model: &impl OrbitQueryModel) {
-        let graph = model.graph();
-        let sets: Vec<Vec<_>> = std::iter::once(Vec::new())
-            .chain(
-                graph
-                    .relationships()
-                    .map(|relationship| vec![relationship.id]),
-            )
-            .collect();
-        for relationships in &sets {
-            let names: Vec<String> = match relationships.as_slice() {
-                [] => vec!["*".to_string()],
-                named => named
-                    .iter()
-                    .map(|id| graph.relationship(*id).name.clone())
-                    .collect(),
-            };
-            assert_eq!(
-                model.edge_tables(relationships),
-                model.relationship_tables(&names)
-            );
-            for source in graph.entities() {
-                for target in graph.entities() {
-                    let pair = format!("{names:?} {} -> {}", source.name, target.name);
-                    assert_eq!(
-                        tables_between(model, relationships, source.id, target.id),
-                        model.relationship_tables_between(&names, &source.name, &target.name),
-                        "{pair}"
-                    );
-                    assert_eq!(
-                        shared_foreign_key(model, relationships, source.id, target.id),
-                        model.foreign_key(&names, &source.name, &target.name),
-                        "{pair}"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn by_id_edge_lookups_match_by_name() {
-        same_as_by_name(&ClickHouseDataModel::embedded().unwrap());
-        same_as_by_name(&DuckDbDataModel::embedded().unwrap());
-    }
 }

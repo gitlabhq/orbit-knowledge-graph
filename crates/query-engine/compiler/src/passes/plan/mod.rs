@@ -22,7 +22,6 @@ mod traversal;
 
 use std::collections::HashMap;
 
-use query_data_model::OrbitQueryModel;
 pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 
 use crate::error::{QueryError, Result};
@@ -46,10 +45,7 @@ pub(crate) fn property_value(
     }
 }
 
-pub(crate) fn sort_key<'m>(
-    model: &'m (impl OrbitQueryModel + ?Sized),
-    table: &str,
-) -> Result<&'m [String]> {
+pub(crate) fn sort_key<'m>(model: &'m impl RelationalModel, table: &str) -> Result<&'m [String]> {
     model
         .table_sort_key(table)
         .filter(|key| !key.is_empty())

@@ -5,10 +5,11 @@ mod edge;
 mod fk;
 mod multi_hop;
 
+use crate::passes::codegen::RelationalModel;
+use crate::passes::plan::build::stored;
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::*;
-use query_data_model::OrbitQueryModel;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::Relation;
 
@@ -39,7 +40,7 @@ impl Matched {
     }
 }
 
-pub(super) struct RelationBuilder<'a, 'q, 'c, M: OrbitQueryModel + ?Sized, B: RelationalBackend> {
+pub(super) struct RelationBuilder<'a, 'q, 'c, M: RelationalModel, B: RelationalBackend> {
     pattern: &'a Pattern<'a, M>,
     reads: Reads<'q, 'c, B>,
     root: Option<Relation>,
@@ -60,7 +61,7 @@ struct PlannedNode {
 
 impl<'a, 'q, 'c, M, B> RelationBuilder<'a, 'q, 'c, M, B>
 where
-    M: OrbitQueryModel + ?Sized,
+    M: RelationalModel,
     B: RelationalBackend,
 {
     pub fn new(pattern: &'a Pattern<'a, M>, reads: Reads<'q, 'c, B>) -> Self {
@@ -322,7 +323,7 @@ where
                 && pattern.relations[index + 1..]
                     .iter()
                     .any(|next| next.endpoint_column(node).is_some())
-                || pattern.model.supports_selective_latest_rows()
+                || !stored::<B>()
                     && pattern.nodes[node].joined
                     && (pattern.endpoint_is_selective(other) || self.ids(other).is_some());
             if used_later {
@@ -345,7 +346,7 @@ where
     }
 
     fn ids_through_holder(&mut self, holder: &str, column: &str) -> Result<Option<IdSet>> {
-        if !self.pattern.model.supports_selective_latest_rows() {
+        if stored::<B>() {
             return Ok(None);
         }
         let Some(read) = self

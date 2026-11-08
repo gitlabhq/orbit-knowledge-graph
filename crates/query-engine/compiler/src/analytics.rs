@@ -1,8 +1,9 @@
+use crate::passes::codegen::RelationalModel;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
+use query_data_model::Direction;
 use query_data_model::plan::logical::{EdgeField, Expr, LogicalOperation, Measure};
-use query_data_model::{Direction, OrbitQueryModel};
 use serde::Serialize;
 
 use crate::logical::columns::{returned, selections};
@@ -75,7 +76,7 @@ pub struct QueryStats {
 }
 
 impl QueryStats {
-    pub fn new(query: Query<'_>, model: &(impl OrbitQueryModel + ?Sized)) -> Self {
+    pub fn new(query: Query<'_>, model: &impl RelationalModel) -> Self {
         let graph = model.graph();
         let kind = query.kind();
         let steps = query.steps();

@@ -1,8 +1,9 @@
 //! Step for a relation stored as edge rows: read the current rows under the relation's predicates,
 //! narrow by known endpoint ids, join to the chain, and expose the edge columns.
 
+use crate::passes::codegen::RelationalModel;
+use crate::passes::plan::build::stored;
 use ontology::constants::*;
-use query_data_model::OrbitQueryModel;
 use query_data_model::implementations::relational::RelationalBackend;
 
 use super::super::relations::{edge_columns, select_edge_layouts};
@@ -17,7 +18,7 @@ use crate::passes::plan::sort_key;
 
 impl<M, B> RelationBuilder<'_, '_, '_, M, B>
 where
-    M: OrbitQueryModel + ?Sized,
+    M: RelationalModel,
     B: RelationalBackend,
 {
     pub(super) fn add_edge(&mut self, index: usize, relation: &EdgeRelation) -> Result<()> {
@@ -139,8 +140,7 @@ where
             return self.reads.share(rows, Some(alias), false);
         }
         if relation.single_edge_table().is_some()
-            || pattern.model.supports_selective_latest_rows()
-                && predicates.iter().any(Predicate::is_selective)
+            || !stored::<B>() && predicates.iter().any(Predicate::is_selective)
         {
             return current_edge_rows(&mut self.reads, pattern, relation, alias, predicates);
         }
@@ -229,7 +229,7 @@ pub(super) fn current_edge_rows<M, B>(
     predicates: Vec<Predicate>,
 ) -> Result<Rel>
 where
-    M: OrbitQueryModel + ?Sized,
+    M: RelationalModel,
     B: RelationalBackend,
 {
     let model = pattern.model;

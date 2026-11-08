@@ -1,9 +1,9 @@
 //! Binds a filter test to the backend facts about its property (sort key, text index, selectivity,
 //! uniqueness, mutability). Those facts decide where the planner may apply the filter.
 
+use crate::passes::codegen::RelationalModel;
 use std::collections::HashMap;
 
-use query_data_model::OrbitQueryModel;
 use query_data_model::plan::logical::{
     Comparison, Expr as Logical, Literal, Matching, Operand, Predicate as Leaf,
 };
@@ -179,7 +179,7 @@ pub fn bind_filter(
     property: &str,
     test: Test,
     owner: &FilterOwner<'_>,
-    model: &(impl OrbitQueryModel + ?Sized),
+    model: &impl RelationalModel,
 ) -> BoundFilter {
     let (metadata, in_sort_key) = match owner {
         FilterOwner::Entity(entity) => {
@@ -249,7 +249,7 @@ pub fn lowerable_denorm<'a>(
 /// The denormalized facts of every property a filter or condition tests on a binding.
 pub fn denormalized_facts(
     query: Query<'_>,
-    model: &(impl OrbitQueryModel + ?Sized),
+    model: &impl RelationalModel,
 ) -> HashMap<DenormalizedKey, DenormalizedProperty> {
     query
         .leaves()
@@ -277,7 +277,7 @@ pub fn denormalized_facts(
 }
 
 /// The anchor's attached filters, each bound to its property on the binding's entity.
-pub fn bind_facts<M: OrbitQueryModel + ?Sized>(
+pub fn bind_facts<M: RelationalModel>(
     query: Query<'_>,
     anchor: &Anchor<'_>,
     alias: &str,

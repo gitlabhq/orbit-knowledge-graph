@@ -1,8 +1,8 @@
 //! Step for a relation stored as a column on one node: read the holder table, filter its key column
 //! by the other endpoint, and expose the pair as edge columns.
 
+use crate::passes::codegen::RelationalModel;
 use ontology::constants::*;
-use query_data_model::OrbitQueryModel;
 use query_data_model::implementations::relational::RelationalBackend;
 
 use super::super::{EdgeRelation, Fk};
@@ -12,7 +12,7 @@ use crate::passes::plan::predicates::*;
 
 impl<M, B> RelationBuilder<'_, '_, '_, M, B>
 where
-    M: OrbitQueryModel + ?Sized,
+    M: RelationalModel,
     B: RelationalBackend,
 {
     pub(super) fn add_fk(&mut self, relation: &EdgeRelation, key: &Fk) -> Result<()> {

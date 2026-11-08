@@ -140,9 +140,6 @@ fn entity_schemas<'a>(input: &'a StoreInput<'_, DuckDb>) -> impl Iterator<Item =
 }
 
 impl crate::query_model::QueryFacts for DuckDbStore {
-    const SELECTIVE_LATEST_ROWS: bool = false;
-    const DEFERRED_NODE_LOADING: bool = false;
-
     fn text_index(&self, _property: crate::PropertyId) -> bool {
         false
     }

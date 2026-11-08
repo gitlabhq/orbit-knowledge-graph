@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use query_data_model::OrbitQueryModel;
+use crate::passes::codegen::RelationalModel;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{Order, Relation, RelationalBuilder};
 use query_data_model::plan::logical::{EdgeField, Expr, Order as Sort};
@@ -20,7 +20,7 @@ pub(crate) struct Shape {
     limit: u32,
 }
 
-pub(crate) fn shape<M: OrbitQueryModel + ?Sized>(
+pub(crate) fn shape<M: RelationalModel>(
     pattern: &Pattern<'_, M>,
     matched: &Matched,
     query: Query<'_>,
@@ -87,7 +87,7 @@ pub(crate) fn emit<B: RelationalBackend>(
     Ok(q.select(rows, columns)?)
 }
 
-pub(crate) fn stable_order<M: OrbitQueryModel + ?Sized>(
+pub(crate) fn stable_order<M: RelationalModel>(
     pattern: &Pattern<'_, M>,
     matched: &Matched,
     query: Query<'_>,

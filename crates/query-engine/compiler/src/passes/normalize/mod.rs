@@ -5,13 +5,14 @@
 mod enums;
 mod kinds;
 
+use crate::passes::codegen::RelationalModel;
 use std::collections::HashMap;
 
 use query_data_model::plan::logical::{
     EdgeField, Expr, LogicalBuilder, LogicalOperation, LogicalPlan, PlanError, Projection, Rows,
 };
 use query_data_model::plan::tracking::Ref;
-use query_data_model::{Direction, Model, OrbitQueryModel};
+use query_data_model::{Direction, Model};
 
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
@@ -20,7 +21,7 @@ use kinds::Narrowed;
 pub fn normalize(
     plan: LogicalPlan,
     model: &Model,
-    data: &impl OrbitQueryModel,
+    data: &impl RelationalModel,
 ) -> Result<LogicalPlan> {
     let query = Query::new(&plan, model);
     available(query, data)?;
@@ -30,7 +31,7 @@ pub fn normalize(
     Ok(catalog.rewrite(plan, |q, rows| rewrite(q, rows, &narrowed, model))?)
 }
 
-fn available(query: Query<'_>, data: &impl OrbitQueryModel) -> Result<()> {
+fn available(query: Query<'_>, data: &impl RelationalModel) -> Result<()> {
     let entities = query.plan.nodes().flat_map(|node| query.plan.outputs(node));
     for entity in entities.filter_map(|output| query.entity(output)) {
         let entity = &query.model.graph().entity(entity).name;
@@ -46,7 +47,7 @@ fn available(query: Query<'_>, data: &impl OrbitQueryModel) -> Result<()> {
 fn shared_keys(
     query: Query<'_>,
     narrowed: &HashMap<Ref, Narrowed>,
-    data: &impl OrbitQueryModel,
+    data: &impl RelationalModel,
 ) -> Result<()> {
     let returned = |edge: Ref| {
         let selected = query.selected().into_iter().any(|item| match item {

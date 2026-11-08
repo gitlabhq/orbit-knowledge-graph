@@ -1,10 +1,10 @@
-use query_data_model::OrbitQueryModel;
 use query_data_model::plan::logical::{Columns, Expr, Measure, Projection};
 
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
+use crate::passes::codegen::RelationalModel;
 
-pub(super) fn admin_only(query: Query<'_>, model: &impl OrbitQueryModel) -> Result<()> {
+pub(super) fn admin_only(query: Query<'_>, model: &impl RelationalModel) -> Result<()> {
     let check = |expr: Expr, what: &str| -> Result<()> {
         let (Expr::Property { binding, property }
         | Expr::Truncate {

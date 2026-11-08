@@ -1,5 +1,6 @@
+use crate::passes::codegen::RelationalModel;
+use query_data_model::Model;
 use query_data_model::plan::logical::{Columns, Projection};
-use query_data_model::{Model, OrbitQueryModel};
 
 use crate::error::{QueryError, Result};
 use crate::hydration::HydrationRequest;
@@ -9,7 +10,7 @@ use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 pub fn restrict_hydration(
     request: &HydrationRequest,
     logical: &Model,
-    model: &impl OrbitQueryModel,
+    model: &impl RelationalModel,
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     let graph = model.graph();

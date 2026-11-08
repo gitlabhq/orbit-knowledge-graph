@@ -14,5 +14,6 @@ impl RelationalBackend for DuckDb {
         settings: false,
         materialized_bodies: false,
         token_search: false,
+        deferred_nodes: false,
     };
 }

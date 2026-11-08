@@ -19,5 +19,6 @@ impl RelationalBackend for ClickHouse {
         settings: true,
         materialized_bodies: true,
         token_search: true,
+        deferred_nodes: true,
     };
 }

@@ -10,9 +10,10 @@ mod steps;
 
 pub use steps::Matched;
 
+use crate::passes::codegen::RelationalModel;
+use crate::passes::plan::build::stored;
 use std::collections::{HashMap, HashSet};
 
-use query_data_model::OrbitQueryModel;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::RelationalBuilder;
 
@@ -71,7 +72,7 @@ pub struct Fk {
     pub column: String,
 }
 
-pub(crate) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
+pub(crate) struct Pattern<'a, M: RelationalModel> {
     pub query: Query<'a>,
     conditions: Vec<Boolean<conditions::Condition>>,
     pub model: &'a M,
@@ -81,7 +82,7 @@ pub(crate) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
     scans: Vec<Option<String>>,
 }
 
-impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
+impl<M: RelationalModel> Pattern<'_, M> {
     fn aggregate(&self) -> bool {
         self.query.kind() == Kind::Aggregation
     }
@@ -120,7 +121,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
     }
 }
 
-impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
+impl<'a, M: RelationalModel> Pattern<'a, M> {
     pub(crate) fn new(query: Query<'a>, model: &'a M) -> Result<Self> {
         let facts = facts(query);
         let nodes = nodes::build_nodes(query, &anchors(query, &facts), model);
@@ -160,7 +161,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
         q: &mut RelationalBuilder<'_, B>,
         tp_bounds: Option<&crate::tp_bounds::TpBounds>,
     ) -> Result<Matched> {
-        let reads = Reads::new(q, tp_bounds, self.model.supports_selective_latest_rows());
+        let reads = Reads::new(q, tp_bounds, !stored::<B>());
         steps::RelationBuilder::new(self, reads).build(|bindings| {
             self.conditions
                 .iter()

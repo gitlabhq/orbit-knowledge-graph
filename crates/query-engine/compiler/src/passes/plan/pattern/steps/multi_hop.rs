@@ -1,8 +1,8 @@
 //! Step for a variable-length relation: expand hop by hop from the pinned end and union the requested
 //! depths, carrying the path so far.
 
+use crate::passes::codegen::RelationalModel;
 use ontology::constants::*;
-use query_data_model::OrbitQueryModel;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::Relation;
 
@@ -18,7 +18,7 @@ use query_data_model::Direction;
 
 impl<M, B> RelationBuilder<'_, '_, '_, M, B>
 where
-    M: OrbitQueryModel + ?Sized,
+    M: RelationalModel,
     B: RelationalBackend,
 {
     /// Walks a variable-length relation from its pinned end, so the walk reverses when only the target is pinned.
@@ -50,7 +50,7 @@ where
     }
 }
 
-struct Walk<'w, 'q, 'c, 'p, M: OrbitQueryModel + ?Sized, B: RelationalBackend> {
+struct Walk<'w, 'q, 'c, 'p, M: RelationalModel, B: RelationalBackend> {
     reads: &'w mut Reads<'q, 'c, B>,
     pattern: &'w Pattern<'p, M>,
     relation: &'w EdgeRelation,
@@ -58,7 +58,7 @@ struct Walk<'w, 'q, 'c, 'p, M: OrbitQueryModel + ?Sized, B: RelationalBackend> {
     reverse: bool,
 }
 
-impl<M: OrbitQueryModel + ?Sized, B: RelationalBackend> Walk<'_, '_, '_, '_, M, B> {
+impl<M: RelationalModel, B: RelationalBackend> Walk<'_, '_, '_, '_, M, B> {
     fn expand(&mut self, [source_ids, target_ids]: [Option<IdSet>; 2]) -> Result<Rel> {
         let (pattern, relation) = (self.pattern, self.relation);
         let covered = pattern.edge_column_filters(relation);
@@ -234,7 +234,7 @@ struct Depth<'r> {
     tagged: bool,
 }
 
-fn complete_depth<M: OrbitQueryModel + ?Sized, B: RelationalBackend>(
+fn complete_depth<M: RelationalModel, B: RelationalBackend>(
     reads: &mut Reads<'_, '_, B>,
     pattern: &Pattern<'_, M>,
     relation: &EdgeRelation,

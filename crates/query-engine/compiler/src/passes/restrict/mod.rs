@@ -17,17 +17,18 @@ use std::collections::HashSet;
 
 use query_data_model::plan::logical::{LogicalOperation, LogicalPlan};
 use query_data_model::plan::tracking::Ref;
-use query_data_model::{EntityId, Model, OrbitQueryModel};
+use query_data_model::{EntityId, Model};
 
 use crate::error::{QueryError, Result};
 use crate::logical::Kind;
 use crate::logical::Query;
+use crate::passes::codegen::RelationalModel;
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 
 pub fn restrict(
     plan: &LogicalPlan,
     logical: &Model,
-    model: &impl OrbitQueryModel,
+    model: &impl RelationalModel,
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     let query = Query::new(plan, logical);
@@ -55,7 +56,7 @@ fn entities(query: Query<'_>) -> Vec<(Ref, EntityId)> {
 pub(super) fn role_floor(
     query: Query<'_>,
     entity: EntityId,
-    model: &impl OrbitQueryModel,
+    model: &impl RelationalModel,
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     let Some(min_role) = model
@@ -76,7 +77,7 @@ pub(super) fn role_floor(
 fn aggregation_scope(
     query: Query<'_>,
     entities: &[(Ref, EntityId)],
-    model: &impl OrbitQueryModel,
+    model: &impl RelationalModel,
 ) -> Result<()> {
     let graph = query.model.graph();
     let mut reachable: HashSet<Ref> = entities

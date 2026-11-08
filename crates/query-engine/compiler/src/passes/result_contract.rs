@@ -377,10 +377,7 @@ pub fn apply<M: RelationalModel>(
 }
 
 /// The aliases an aggregation returns as rows: node groups and free-text property groups.
-fn aggregation_row_nodes<'p>(
-    query: Query<'p>,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> HashSet<&'p str> {
+fn aggregation_row_nodes<'p>(query: Query<'p>, model: &impl RelationalModel) -> HashSet<&'p str> {
     let Some((groups, _)) = query.aggregate() else {
         return HashSet::new();
     };
@@ -407,7 +404,7 @@ fn return_columns(
     nodes: &[Binding<'_>],
     selectable_nodes: &HashSet<&str>,
     bindings: &HashMap<String, NodeBinding>,
-    model: &impl query_data_model::OrbitQueryModel,
+    model: &impl RelationalModel,
 ) -> Result<Contract> {
     let mut contract = Contract {
         outputs: Vec::new(),

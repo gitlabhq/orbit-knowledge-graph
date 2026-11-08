@@ -14,6 +14,8 @@ pub struct Capabilities {
     pub settings: bool,
     pub materialized_bodies: bool,
     pub token_search: bool,
+    /// Node properties may load in a later hydration query instead of joining the base read.
+    pub deferred_nodes: bool,
 }
 
 pub trait RelationalBackend: StorageBackend<Store: RelationalFacts> {

@@ -523,9 +523,6 @@ fn system_columns(version: Option<&str>, deleted: Option<&str>) -> Vec<(String, 
 }
 
 impl crate::query_model::QueryFacts for ClickHouseStore {
-    const SELECTIVE_LATEST_ROWS: bool = true;
-    const DEFERRED_NODE_LOADING: bool = true;
-
     fn text_index(&self, property: PropertyId) -> bool {
         self.column(property)
             .is_some_and(|column| column.indexes.contains(&IndexKind::Text))

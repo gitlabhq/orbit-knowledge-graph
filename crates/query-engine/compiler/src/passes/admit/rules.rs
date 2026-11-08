@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use query_data_model::OrbitQueryModel;
+use crate::passes::codegen::RelationalModel;
 use query_data_model::plan::logical::{Comparison, Expr, Literal, Predicate};
 use query_data_model::plan::tracking::Ref;
 
@@ -16,7 +16,7 @@ fn sides(fact: &Fact<'_>) -> impl Iterator<Item = Expr> {
 pub(super) fn negated(
     query: Query<'_>,
     facts: &[Fact<'_>],
-    model: &impl OrbitQueryModel,
+    model: &impl RelationalModel,
 ) -> Result<()> {
     let negated = facts.iter().filter(|fact| fact.negated).flat_map(sides);
     for (_, entity, property) in negated.filter_map(|expr| node_property(query, expr)) {
@@ -32,7 +32,7 @@ pub(super) fn negated(
 pub(super) fn epoch(
     query: Query<'_>,
     facts: &[Fact<'_>],
-    model: &impl OrbitQueryModel,
+    model: &impl RelationalModel,
 ) -> Result<()> {
     for fact in facts {
         let Some((_, entity, property)) = node_property(query, fact.left) else {
@@ -68,7 +68,7 @@ fn at_or_before_epoch(value: &str) -> bool {
 pub(super) fn aggregation_text(
     query: Query<'_>,
     facts: &[Fact<'_>],
-    model: &impl OrbitQueryModel,
+    model: &impl RelationalModel,
 ) -> Result<()> {
     let Some((groups, _)) = query.aggregate() else {
         return Ok(());
@@ -118,7 +118,7 @@ pub(super) fn aggregation_text(
     Ok(())
 }
 
-pub(super) fn order(query: Query<'_>, model: &impl OrbitQueryModel) -> Result<()> {
+pub(super) fn order(query: Query<'_>, model: &impl RelationalModel) -> Result<()> {
     for key in query.ordered() {
         let Some((alias, entity, property)) = node_property(query, key) else {
             continue;

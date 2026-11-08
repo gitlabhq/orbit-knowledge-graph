@@ -1,10 +1,11 @@
 //! Node planning: a `NodePlan` per binding, and the decision whether each node joins the result
 //! as a table read or only narrows an edge scan.
 
+use crate::passes::codegen::RelationalModel;
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
-use query_data_model::OrbitQueryModel;
+use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::plan::logical::{Columns, Expr, Measure};
 
 use super::{NodePlan, Pattern};
@@ -20,7 +21,7 @@ use crate::passes::plan::rows::ReadScope;
 impl NodePlan {
     fn new<M>(query: Query<'_>, anchor: &Anchor<'_>, selection: Option<&Columns>, model: &M) -> Self
     where
-        M: OrbitQueryModel + ?Sized,
+        M: RelationalModel,
     {
         let binding = anchor.binding;
         let entity = binding.entity;
@@ -119,7 +120,7 @@ pub(super) fn build_nodes<M>(
     model: &M,
 ) -> HashMap<String, NodePlan>
 where
-    M: OrbitQueryModel + ?Sized,
+    M: RelationalModel,
 {
     let selected = selections(query);
     anchors
@@ -135,7 +136,7 @@ where
 /// Decides which nodes join the result as rows and which join only to carry their authorization columns.
 pub(super) fn assign_node_access<M>(pattern: &mut Pattern<'_, M>, condition_nodes: &HashSet<String>)
 where
-    M: OrbitQueryModel + ?Sized,
+    M: RelationalModel,
 {
     let access: HashMap<String, (bool, bool)> = pattern
         .nodes
@@ -157,10 +158,7 @@ where
 }
 
 /// The nodes an aggregation returns one row per: node groups, and nodes grouped by free text.
-fn aggregation_row_nodes<'p>(
-    query: Query<'p>,
-    model: &(impl OrbitQueryModel + ?Sized),
-) -> HashSet<&'p str> {
+fn aggregation_row_nodes<'p>(query: Query<'p>, model: &impl RelationalModel) -> HashSet<&'p str> {
     let (groups, _) = query.aggregate().unwrap_or_default();
     groups
         .iter()
@@ -175,7 +173,7 @@ fn aggregation_row_nodes<'p>(
         .collect()
 }
 
-fn node_access<M: OrbitQueryModel + ?Sized>(
+fn node_access<M: RelationalModel>(
     pattern: &Pattern<'_, M>,
     node: &NodePlan,
     condition_nodes: &HashSet<String>,
@@ -222,7 +220,7 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         && !ordered
         && !local_predicate;
     let joined_as_rows = query.steps().is_empty()
-        || !model.supports_deferred_node_loading()
+        || !M::Backend::CAPABILITIES.deferred_nodes
         || group_target
         || metric_target
         || ordered

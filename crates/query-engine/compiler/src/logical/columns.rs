@@ -1,10 +1,11 @@
 //! The properties each binding returns.
 
+use crate::passes::codegen::RelationalModel;
 use std::collections::HashMap;
 
 use query_data_model::plan::logical::{Columns, Expr, LogicalOperation, Projection};
 use query_data_model::plan::tracking::Ref;
-use query_data_model::{EntityId, OrbitQueryModel, PropertyId};
+use query_data_model::{EntityId, PropertyId};
 
 use super::Query;
 
@@ -33,7 +34,7 @@ pub fn selections<'p>(query: Query<'p>) -> HashMap<Ref, &'p Columns> {
 /// The properties a binding returns: the listed ones, else the defaults or every readable property.
 pub fn returned<M>(model: &M, entity: EntityId, selection: Option<&Columns>) -> Vec<String>
 where
-    M: OrbitQueryModel + ?Sized,
+    M: RelationalModel,
 {
     let graph = model.graph();
     let properties: Vec<PropertyId> = match selection {

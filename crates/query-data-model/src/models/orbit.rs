@@ -85,8 +85,6 @@ impl RelationshipRoute<'_> {
 pub trait OrbitQueryModel {
     fn graph(&self) -> &GraphCatalog;
     fn property_is_hidden(&self, property: PropertyId) -> bool;
-    fn supports_deferred_node_loading(&self) -> bool;
-    fn supports_selective_latest_rows(&self) -> bool;
     fn entity(&self, name: &str) -> Option<&Entity>;
     fn property(&self, entity: &str, property: &str) -> Option<&Property>;
     fn property_is_nullable(&self, entity: &str, property: &str) -> bool;

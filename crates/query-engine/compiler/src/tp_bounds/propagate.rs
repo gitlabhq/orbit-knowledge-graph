@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use query_data_model::OrbitQueryModel;
+use crate::passes::codegen::RelationalModel;
 use query_data_model::plan::tracking::Ref;
 
 use super::TpBound;
@@ -18,7 +18,7 @@ pub(super) fn propagate(
     query: Query<'_>,
     edges: &[Edge],
     seed: &HashMap<Ref, TpBound>,
-    model: &impl OrbitQueryModel,
+    model: &impl RelationalModel,
 ) -> HashMap<Ref, TpBound> {
     if seed.is_empty() {
         return HashMap::new();
@@ -67,7 +67,7 @@ pub(super) fn propagate(
     result
 }
 
-fn scoped(query: Query<'_>, edge: &Edge, model: &impl OrbitQueryModel) -> Scoped {
+fn scoped(query: Query<'_>, edge: &Edge, model: &impl RelationalModel) -> Scoped {
     let source = query.entity_name(edge.from).unwrap_or_default();
     let target = query.entity_name(edge.to).unwrap_or_default();
     let scope = |kind: &String| model.variant_scope(kind, source, target);

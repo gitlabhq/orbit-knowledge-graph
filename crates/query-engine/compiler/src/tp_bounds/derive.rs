@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use query_data_model::OrbitQueryModel;
+use crate::passes::codegen::RelationalModel;
 use query_data_model::plan::tracking::Ref;
 use query_data_model::{Direction, EntityId};
 
@@ -18,7 +18,7 @@ pub(super) struct Edge {
 }
 
 impl TpBounds {
-    pub fn derive(query: Query<'_>, model: &impl OrbitQueryModel) -> Self {
+    pub fn derive(query: Query<'_>, model: &impl RelationalModel) -> Self {
         let anchors: Vec<(String, EntityId)> = model
             .anchor_foreign_keys()
             .iter()
@@ -93,7 +93,7 @@ fn relationship(
     query: Query<'_>,
     edge: &Edge,
     bounds: &HashMap<Ref, TpBound>,
-    model: &impl OrbitQueryModel,
+    model: &impl RelationalModel,
 ) -> Option<TpBound> {
     let (from_bound, to_bound) = (bounds.get(&edge.from), bounds.get(&edge.to));
     if from_bound == to_bound {
@@ -114,7 +114,7 @@ fn nodes(
     query: Query<'_>,
     keys: &HashMap<Ref, Vec<TpLookupKey>>,
     edges: &[Edge],
-    model: &impl OrbitQueryModel,
+    model: &impl RelationalModel,
 ) -> HashMap<Ref, TpBound> {
     let seed: HashMap<Ref, TpBound> = keys
         .iter()

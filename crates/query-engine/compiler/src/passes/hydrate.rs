@@ -9,6 +9,7 @@ use query_data_model::PropertyRealization;
 use crate::logical::columns::{returned, selections};
 use crate::logical::facts::{FilterOp, anchors, facts};
 use crate::logical::{DynamicColumnMode, Kind, Query};
+use crate::passes::codegen::RelationalModel;
 use crate::types::SecurityContext;
 use query_data_model::plan::logical::Expr;
 
@@ -115,7 +116,7 @@ pub struct VirtualColumnRequest {
 pub fn generate_hydration_plan(
     query: Query<'_>,
     projected: &[&str],
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    model: &impl RelationalModel,
     security_ctx: &SecurityContext,
 ) -> HydrationPlan {
     match query.kind() {
@@ -144,7 +145,7 @@ pub fn generate_hydration_plan(
 fn build_static_templates(
     query: Query<'_>,
     projected: &[&str],
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    model: &impl RelationalModel,
 ) -> Vec<HydrationTemplate> {
     let projected = |alias: &str| projected.contains(&alias);
     let facts = facts(query);
@@ -231,7 +232,7 @@ fn build_static_templates(
 /// rather than from `node.columns` that `RestrictPass` pruned.
 fn build_dynamic_specs(
     mode: DynamicColumnMode,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    model: &impl RelationalModel,
     security_ctx: &SecurityContext,
 ) -> Vec<DynamicEntityColumns> {
     model
@@ -309,7 +310,7 @@ fn build_dynamic_specs(
 fn inject_model_virtual_dependencies(
     columns: &mut Vec<String>,
     virtual_columns: &[VirtualColumnRequest],
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    model: &impl RelationalModel,
     entity: query_data_model::EntityId,
 ) -> Vec<String> {
     let mut injected = Vec::new();
@@ -333,7 +334,7 @@ fn inject_model_virtual_dependencies(
 
 fn split_model_columns(
     requested: &[String],
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    model: &impl RelationalModel,
     entity: query_data_model::EntityId,
 ) -> (Vec<String>, Vec<VirtualColumnRequest>) {
     let mut columns = Vec::new();
@@ -369,7 +370,7 @@ fn split_model_columns(
 }
 
 fn virtual_request(
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    model: &impl RelationalModel,
     entity: query_data_model::EntityId,
     property: &str,
 ) -> Option<VirtualColumnRequest> {

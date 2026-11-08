@@ -22,9 +22,6 @@ pub struct EntityAuthConfig {
 }
 
 pub trait QueryFacts: RelationalFacts + std::fmt::Debug + Send + Sync {
-    const SELECTIVE_LATEST_ROWS: bool;
-    const DEFERRED_NODE_LOADING: bool;
-
     fn text_index(&self, property: PropertyId) -> bool;
     fn null_as_epoch(&self, property: PropertyId) -> bool;
     fn high_fan_out(&self, entity: EntityId) -> bool;
@@ -233,14 +230,6 @@ impl<B: StorageBackend> Bindings<B>
 where
     B::Store: QueryFacts,
 {
-    pub(crate) fn supports_selective_latest_rows(&self) -> bool {
-        B::Store::SELECTIVE_LATEST_ROWS
-    }
-
-    pub(crate) fn supports_deferred_node_loading(&self) -> bool {
-        B::Store::DEFERRED_NODE_LOADING
-    }
-
     pub(crate) fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
         self.routes[variant.index()].as_ref()
     }
@@ -508,14 +497,6 @@ where
 
     fn property_is_hidden(&self, property: PropertyId) -> bool {
         self.bindings.is_hidden(property)
-    }
-
-    fn supports_deferred_node_loading(&self) -> bool {
-        self.bindings.supports_deferred_node_loading()
-    }
-
-    fn supports_selective_latest_rows(&self) -> bool {
-        self.bindings.supports_selective_latest_rows()
     }
 
     fn entity(&self, name: &str) -> Option<&Entity> {

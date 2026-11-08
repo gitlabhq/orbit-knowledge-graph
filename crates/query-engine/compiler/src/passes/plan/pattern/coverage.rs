@@ -1,15 +1,16 @@
 //! What an edge row already answers about its endpoint nodes, so the node table need not be read.
 
+use crate::passes::codegen::RelationalModel;
 use std::collections::HashSet;
 
 use ontology::constants::*;
-use query_data_model::{DenormalizedDirection, DenormalizedProperty, OrbitQueryModel};
+use query_data_model::{DenormalizedDirection, DenormalizedProperty};
 
 use super::{EdgeRelation, NodePlan, Pattern};
 use crate::passes::plan::filters::{BoundFilter, FilterOwner, bind_filter, lowerable_denorm};
 use crate::passes::plan::predicates::{Predicate, property_filter, tag_filter};
 
-impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
+impl<M: RelationalModel> Pattern<'_, M> {
     pub fn denorm_facts(
         &self,
         relation: &EdgeRelation,
