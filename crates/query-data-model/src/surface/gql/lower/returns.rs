@@ -377,7 +377,7 @@ impl Returned {
                     let columns = match (columns, all) {
                         (Some(names), _) => Columns::Listed(property_ids(rows, alias, names)?),
                         (None, true) => Columns::All,
-                        (None, false) => Columns::Default,
+                        (None, false) => rows.binding(alias)?.catalog().default_columns(),
                     };
                     (alias, alias, Some(columns))
                 }
@@ -395,8 +395,12 @@ impl Returned {
             });
         }
         if let Shape::Path(name) | Shape::Neighbors(name) = &scope.shape {
-            let columns = self.dynamic.unwrap_or(Columns::Default);
-            let binding = rows.binding(name)?.output();
+            let binding = rows.binding(name)?;
+            let columns = match self.dynamic.unwrap_or(Columns::Default) {
+                Columns::Default => binding.catalog().default_columns(),
+                columns => columns,
+            };
+            let binding = binding.output();
             items.push(Projection::Graph { binding, columns }.named(name));
         }
         Ok(items)

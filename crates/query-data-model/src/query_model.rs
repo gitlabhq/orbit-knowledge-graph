@@ -24,7 +24,6 @@ pub struct EntityAuthConfig {
 pub trait QueryFacts: RelationalFacts + std::fmt::Debug + Send + Sync {
     const SELECTIVE_LATEST_ROWS: bool;
     const DEFERRED_NODE_LOADING: bool;
-    const ALL_PROPERTIES_BY_DEFAULT: bool;
 
     fn text_index(&self, property: PropertyId) -> bool;
     fn null_as_epoch(&self, property: PropertyId) -> bool;
@@ -123,9 +122,7 @@ where
                 entity
                     .properties
                     .iter()
-                    .filter(|property| {
-                        B::Store::ALL_PROPERTIES_BY_DEFAULT || entity.defaults.contains(property)
-                    })
+                    .filter(|property| entity.defaults.contains(property))
                     .copied()
                     .collect()
             })

@@ -10,6 +10,7 @@ pub struct LogicalCatalog<'m> {
     admin: bool,
     connection: Option<&'m str>,
     limits: Limits,
+    all_columns: bool,
 }
 
 impl Model {
@@ -19,6 +20,7 @@ impl Model {
             admin: false,
             connection: None,
             limits: Limits::QUERY,
+            all_columns: false,
         }
     }
 }
@@ -38,6 +40,22 @@ impl<'m> LogicalCatalog<'m> {
 
     pub fn admin(self) -> bool {
         self.admin
+    }
+
+    #[must_use]
+    pub fn with_all_columns(self) -> Self {
+        Self {
+            all_columns: true,
+            ..self
+        }
+    }
+
+    /// The columns a node returns when the query lists none.
+    pub fn default_columns(self) -> super::Columns {
+        match self.all_columns {
+            true => super::Columns::All,
+            false => super::Columns::Default,
+        }
     }
 
     #[must_use]

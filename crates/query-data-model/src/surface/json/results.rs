@@ -158,7 +158,7 @@ pub(super) fn columns(
     columns: Option<&Value>,
 ) -> Result<Columns, SurfaceError> {
     match columns {
-        None => Ok(Columns::Default),
+        None => Ok(binding.catalog().default_columns()),
         Some(Value::String(all)) if all == "*" => Ok(Columns::All),
         Some(Value::Array(names)) => {
             let listed = names

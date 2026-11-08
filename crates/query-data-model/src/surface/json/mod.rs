@@ -131,11 +131,12 @@ fn project<'m>(
         .map(|node| results::node_projection(&rows, node))
         .collect::<Result<Vec<_>, _>>()?;
     if let Some(name) = dynamic {
+        let binding = rows.binding(name)?;
         let columns = match request.options.dynamic_columns.as_deref() {
             Some("*") => Columns::All,
-            _ => Columns::Default,
+            _ => binding.catalog().default_columns(),
         };
-        let binding = rows.binding(name)?.output();
+        let binding = binding.output();
         items.push(Projection::Graph { binding, columns }.named(name));
     }
     Ok(q.select(rows, items)?)

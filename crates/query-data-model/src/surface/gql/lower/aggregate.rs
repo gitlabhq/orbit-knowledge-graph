@@ -178,7 +178,7 @@ fn node(
     let columns = match (columns, all) {
         (Some(listed), _) => Columns::Listed(property_ids(rows, &alias, &listed)?),
         (None, true) => Columns::All,
-        (None, false) => Columns::Default,
+        (None, false) => rows.binding(&alias)?.catalog().default_columns(),
     };
     if groups.iter().any(|group| {
         matches!(&group.node, Some((other, previous)) if *other == alias && !same(previous, &columns))
