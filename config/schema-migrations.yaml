@@ -19,8 +19,9 @@ migrations:
 - version: 119
   scope: none
   note: >-
-    Declares relationship attributes over existing edge columns; DDL and indexed
-    output unchanged
+    Declares relationship attributes over existing edge columns, and the DuckDB
+    local store routes only the variants it holds; DDL and indexed output
+    unchanged
 - version: 118
   scope: "*"
   note: >-
