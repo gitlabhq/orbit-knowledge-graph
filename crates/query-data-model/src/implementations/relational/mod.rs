@@ -51,10 +51,10 @@ pub struct EdgeTableSpec {
 #[derive(Debug, Clone, Default)]
 pub struct TableFacts {
     pub entity: Option<EntityId>,
-    pub columns: Option<HashSet<String>>,
+    pub columns: HashSet<String>,
     pub column_types: HashMap<String, DataType>,
     pub sort_key: Vec<String>,
-    pub path_columns: Option<Vec<PathColumn>>,
+    pub path_columns: Vec<PathColumn>,
 }
 
 impl EdgeTableSpec {

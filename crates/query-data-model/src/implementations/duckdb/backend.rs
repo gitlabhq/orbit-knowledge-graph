@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
-use ontology::TraversalPathKind;
+use ontology::{DataType, TraversalPathKind};
 use serde::{Deserialize, Serialize};
 
 use super::DuckDb;
+use crate::EntityId;
 use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
 use crate::implementations::relational::{
-    RelationalFacts, RelationalOptions, RelationalRoute, RelationalStore, TableFacts, TableSchema,
+    PathColumn, RelationalFacts, RelationalOptions, RelationalRoute, RelationalStore, TableFacts,
+    TableSchema,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -53,15 +55,27 @@ impl StorageBackend for DuckDb {
         relational.tables = entity_schemas(&input).collect();
         let mut tables = HashMap::new();
         for source in input.store.sources() {
+            let properties = input.graph.entity(source.entity).properties.iter();
+            let column_types: HashMap<String, DataType> = properties
+                .filter_map(|property| {
+                    let column = input.store.column(*property)?;
+                    Some((
+                        column.to_string(),
+                        input.graph.property(*property).data_type,
+                    ))
+                })
+                .collect();
             tables.insert(
                 source.table.clone(),
                 TableFacts {
                     entity: Some(source.entity),
+                    columns: column_types.keys().cloned().collect(),
+                    column_types,
                     sort_key: relational
                         .sort_key(source.entity)
                         .unwrap_or_default()
                         .to_vec(),
-                    ..TableFacts::default()
+                    path_columns: path_columns(&input, Some(source.entity)),
                 },
             );
         }
@@ -77,10 +91,10 @@ impl StorageBackend for DuckDb {
                 name.clone(),
                 TableFacts {
                     entity: None,
-                    columns: Some(column_types.keys().cloned().collect()),
+                    columns: column_types.keys().cloned().collect(),
                     column_types,
                     sort_key: spec.sort_key.clone(),
-                    path_columns: None,
+                    path_columns: path_columns(&input, None),
                 },
             );
         }
@@ -88,6 +102,23 @@ impl StorageBackend for DuckDb {
         store.check_attribute_columns(input.store, input.graph, diagnostics);
         store
     }
+}
+
+fn path_columns(input: &StoreInput<'_, DuckDb>, entity: Option<EntityId>) -> Vec<PathColumn> {
+    let column = match entity {
+        Some(entity) => input
+            .store
+            .source(entity)
+            .and_then(|source| source.path_column.as_ref()),
+        None => input.store.path_column.as_ref(),
+    };
+    column
+        .map(|name| PathColumn {
+            name: name.clone(),
+            entity,
+        })
+        .into_iter()
+        .collect()
 }
 
 fn entity_schemas<'a>(input: &'a StoreInput<'_, DuckDb>) -> impl Iterator<Item = TableSchema> + 'a {

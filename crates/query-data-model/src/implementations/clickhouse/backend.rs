@@ -253,14 +253,14 @@ impl ClickHouseStore {
                 source.table.clone(),
                 TableFacts {
                     entity: Some(source.entity),
-                    columns: Some(columns),
+                    columns,
                     column_types,
                     sort_key: self
                         .relational
                         .sort_key(source.entity)
                         .unwrap_or_default()
                         .to_vec(),
-                    path_columns: Some(path_columns),
+                    path_columns,
                 },
             );
         }
@@ -294,20 +294,18 @@ impl ClickHouseStore {
                 name.clone(),
                 TableFacts {
                     entity: None,
-                    columns: Some(columns),
+                    columns,
                     column_types,
                     sort_key: spec.sort_key.clone(),
-                    path_columns: Some(
-                        input
-                            .store
-                            .path_column
-                            .iter()
-                            .map(|name| PathColumn {
-                                name: name.clone(),
-                                entity: None,
-                            })
-                            .collect(),
-                    ),
+                    path_columns: input
+                        .store
+                        .path_column
+                        .iter()
+                        .map(|name| PathColumn {
+                            name: name.clone(),
+                            entity: None,
+                        })
+                        .collect(),
                 },
             );
         }
@@ -472,10 +470,10 @@ impl ClickHouseStore {
                 table.clone(),
                 TableFacts {
                     entity: None,
-                    columns: Some(columns),
+                    columns,
                     column_types,
                     sort_key: spec.sort_key.clone(),
-                    path_columns: Some(path_columns),
+                    path_columns,
                 },
             );
             self.joins.push(MaterializedJoin {
@@ -581,7 +579,7 @@ impl ClickHouseStore {
                     tables.len() - 1
                 }
             };
-            let mut columns: Vec<_> = facts.columns.iter().flatten().collect();
+            let mut columns: Vec<_> = facts.columns.iter().collect();
             columns.sort();
             tables[index].extend(
                 columns

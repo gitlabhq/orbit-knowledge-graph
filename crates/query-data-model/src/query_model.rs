@@ -343,7 +343,7 @@ where
     }
 
     pub(crate) fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {
-        self.table(table)?.path_columns.as_deref()
+        Some(&self.table(table)?.path_columns)
     }
 
     pub(crate) fn default_edge_table(&self) -> &str {
@@ -389,7 +389,7 @@ where
     }
 
     pub(crate) fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
-        self.table(table)?.columns.as_ref()
+        Some(&self.table(table)?.columns)
     }
 
     pub(crate) fn table_sort_key(&self, table: &str) -> Option<&[String]> {
