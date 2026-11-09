@@ -96,11 +96,11 @@ pub(crate) async fn install(
             &location_hints,
         )?;
     }
-    let ui_agents: Vec<&str> = selection
+    let ui_agents: Vec<(&str, &str)> = selection
         .agents
         .iter()
         .filter(|agent| agent.has_ui())
-        .map(|agent| agent.title.as_str())
+        .map(|agent| (agent.name.as_str(), agent.title.as_str()))
         .collect();
     let plugin_instructions: Vec<&str> = selection
         .agents
@@ -271,7 +271,10 @@ const INSTALL_AGENT_PLUGINS: &str = "install";
 const SKIP_AGENT_PLUGINS: &str = "skip";
 
 /// Asks whether to install the agent plugins, starting on the recommended install.
-fn ask_install_agent_plugins(ui_agents: &[&str], plugin_instructions: &[&str]) -> Result<bool> {
+fn ask_install_agent_plugins(
+    ui_agents: &[(&str, &str)],
+    plugin_instructions: &[&str],
+) -> Result<bool> {
     let choices = [
         tui::Choice {
             key: INSTALL_AGENT_PLUGINS.to_string(),
@@ -297,13 +300,14 @@ fn ask_install_agent_plugins(ui_agents: &[&str], plugin_instructions: &[&str]) -
     Ok(chosen == INSTALL_AGENT_PLUGINS)
 }
 
-const PI_TITLE: &str = "Pi";
+const PI_AGENT: &str = "pi";
 
-fn agent_plugins_question(ui_agents: &[&str]) -> String {
+/// `ui_agents` holds `(name, title)` pairs; Pi is found by name so a retitle cannot break it.
+fn agent_plugins_question(ui_agents: &[(&str, &str)]) -> String {
     let showing_calls: Vec<&str> = ui_agents
         .iter()
-        .copied()
-        .filter(|title| *title != PI_TITLE)
+        .filter(|(name, _)| *name != PI_AGENT)
+        .map(|(_, title)| *title)
         .collect();
     let mut clauses = Vec::new();
     if !showing_calls.is_empty() {
@@ -315,7 +319,14 @@ fn agent_plugins_question(ui_agents: &[&str]) -> String {
     if showing_calls.len() < ui_agents.len() {
         clauses.push("The Pi plugin cuts large tool output.".to_string());
     }
-    clauses.push("Install them?".to_string());
+    clauses.push(
+        if ui_agents.len() == 1 {
+            "Install it?"
+        } else {
+            "Install them?"
+        }
+        .to_string(),
+    );
     clauses.join(" ")
 }
 
@@ -2368,17 +2379,31 @@ mod tests {
 
     #[test]
     fn the_plugin_question_names_only_what_each_selected_agent_does() {
+        let [claude_agent, opencode_agent, pi_agent] =
+            ["claude", "opencode", "pi"].map(|name| spec::agent_named(name).unwrap());
+        fn pair(agent: &spec::Agent) -> (&str, &str) {
+            (agent.name.as_str(), agent.title.as_str())
+        }
+        let (claude, opencode, pi) = (pair(&claude_agent), pair(&opencode_agent), pair(&pi_agent));
         assert_eq!(
-            agent_plugins_question(&["Claude Code", "OpenCode"]),
+            agent_plugins_question(&[claude, opencode]),
             "Agent plugins for Claude Code and OpenCode show each Orbit call. Install them?"
         );
         assert_eq!(
-            agent_plugins_question(&["Pi"]),
-            "The Pi plugin cuts large tool output. Install them?"
+            agent_plugins_question(&[pi]),
+            "The Pi plugin cuts large tool output. Install it?"
         );
         assert_eq!(
-            agent_plugins_question(&["Claude Code", "Pi"]),
+            agent_plugins_question(&[claude]),
+            "Agent plugins for Claude Code show each Orbit call. Install it?"
+        );
+        assert_eq!(
+            agent_plugins_question(&[claude, pi]),
             "Agent plugins for Claude Code show each Orbit call. The Pi plugin cuts large tool output. Install them?"
+        );
+        assert_eq!(
+            agent_plugins_question(&[("pi", "Renamed Pi")]),
+            "The Pi plugin cuts large tool output. Install it?"
         );
     }
 
