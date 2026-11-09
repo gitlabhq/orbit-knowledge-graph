@@ -64,8 +64,8 @@ Every worker has a default lane and a backfill lane. Backfills never slow down l
 The engine keeps one waiting task for each piece of work.
 Fifty pushes to the same project give one task. A push during a run queues one more.
 
-Helm decides how much runs where.
-A set of worker pods serves some lanes, with a number of slots for each lane on one pod.
+Each pod reads only its own config. It lists the lanes the pod pulls, and how many tasks run at once.
+Helm decides which configs run, and how many pods run each one.
 KEDA scales those pods on the tasks that wait, down to zero when nothing waits.
 
 ### 4. A worker runs the task

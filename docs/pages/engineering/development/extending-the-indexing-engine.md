@@ -227,6 +227,7 @@ pub trait Reconciler: FromResources + Send + Sync + 'static {
 ```
 
 A timer is the only trigger of a reconciler. The engine runs it every `EVERY`, on one planner replica.
+The first tick runs when the engine starts. If a planner pod crash-loops, each restart ticks again, with no backoff. Dedupe keeps those replans cheap, so we accept this risk until we hit it.
 
 ```rust
 const EVERY: Duration = Duration::from_secs(60);
@@ -249,33 +250,51 @@ for ns in self.status.not_indexed(&version).await? {
 
 A reconciler never submits a task. It calls `replan` or `campaign` on a planner. One reconciler writes each table. A tick is idempotent and has a 30 s limit, and a failed tick has no retry.
 
-## Step 7: Configure lanes, instances and pools
+## Step 7: Configure what each pod pulls
 
-A lane sets how its tasks behave on a timeout.
+Each pod reads only its own config. It lists the lanes and sinks that the pod pulls, with their slots and pools. The pod knows nothing about other pods.
 
 ```yaml
 engine:
   lanes:
-    code.index:
-      default:  { timeout: 15m, on_timeout: big }
-      big:      { timeout: 2h }
-      backfill: { timeout: 2h }
+    code.index/default: { slots: 16, timeout: 15m, on_timeout: code.index/big }
+  pools: { parse: 10 }
 ```
 
-An instance sets the pods, the slots of each lane on one pod, and the pod pools.
+Helm decides which configs run, and how many pods run each one.
 
 ```yaml
-engine:
-  pools:
-    gitaly_archives: { per_key: 8, unknown_key: 4, max_wait: 60s }
-  instances:
-    code:
-      pods: { min: 1, max: 20 }
-      lanes: { code.index/default: 16, code.index/big: 6 }
-      pools: { parse: 10, parse_big: 4, insert: 32 }
-    backfill:
-      pods: { min: 0, max: 40 }
-      lanes: { code.index/backfill: 2 }
+shared:
+  engine:
+    pools: { gitaly_archives: { cluster: true, per_key: 8, unknown_key: 4, max_wait: 60s } }
+deployments:
+  code-small:
+    pods: { min: 1, max: 20 }
+    config:
+      engine:
+        lanes: { code.index/default: { slots: 16, timeout: 15m, on_timeout: code.index/big } }
+        pools: { parse: 10 }
+  code-big:
+    pods: { min: 0, max: 4 }
+    resources: { cpu: 8, memory: 32Gi }
+    config:
+      engine:
+        lanes: { code.index/big: { slots: 6, timeout: 2h } }
+        pools: { parse_big: 4 }
+```
+
+A test instance can run one deployment whose config lists every lane.
+
+```yaml
+deployments:
+  universal:
+    pods: { min: 1, max: 1 }
+    config:
+      engine:
+        lanes:
+          code.index/default: { slots: 4, timeout: 15m, on_timeout: code.index/big }
+          code.index/big: { slots: 1, timeout: 2h }
+          code.index/backfill: { slots: 1, timeout: 2h }
 ```
 
 | Task source | Lane |
@@ -286,7 +305,7 @@ engine:
 | A spawned child | The lane of its parent |
 | A lane timeout with `on_timeout` | The `on_timeout` lane |
 
-Helm renders each instance as one Deployment and one KEDA ScaledObject. Its pods pull the lanes in its `lanes` list, with that many slots on each pod. Every worker has a `default` and a `backfill` lane, and one instance serves each lane. `timeout` limits one attempt, including the time after `ctx.detach()`.
+Helm renders each deployment as one Deployment and one KEDA ScaledObject, with one trigger for each lane in its config. The chart merges `shared` into every config, so all pods agree on cluster pools and leases. Every worker has a `default` and a `backfill` lane. `mise engine:check-helm` warns when no deployment pulls a lane, and fails when two deployments give one lane different timeouts. `timeout` limits one attempt, including the time after `ctx.detach()`.
 
 ## Step 8: Change a system table
 
@@ -319,15 +338,11 @@ Engine::builder()
     .system_stores(orbit_store::embed!("stores"), clickhouse)
     .module(code::register)
     .build()?
-    .serve(Role::from_env()?)
+    .serve()
     .await
 ```
 
-| Role | Runs |
-|---|---|
-| `planner` | Two pods: system migrations, triggers, reconcilers, the ledger sink and the admin API |
-| `worker` | The pods of one instance, with its `lanes` and `sinks` |
-| `all` | Everything in one process, for local development and tests |
+A pod does what its config lists. A config with `planner: true` runs the triggers, the reconcilers, the system migrations, the ledger sink and the admin API. A config with lanes or sinks pulls them. A local config can list everything, for development and tests.
 
 `build()` fails on a duplicate name, a missing resource or a worker without a `default` or `backfill` lane.
 It also fails on an unknown `on_timeout` lane or a cycle of `done` triggers.
@@ -397,21 +412,24 @@ engine.worker::<TrigramBuild>().planner::<TrigramPlanner>().sink::<TrigramSink>(
 ```
 
 ```yaml
-engine:
-  sinks:
-    trigram:
-      partitions: 16
-      batch: { max_bytes: 64MiB, max_wait: 30s }
-  instances:
-    trigram-build:
-      pods: { min: 1, max: 40 }
-      lanes: { trigram.build/default: 8 }
-    trigram-writer:
-      pods: { min: 1, max: 5 }
-      sinks: { trigram: 4 }
+shared:
+  engine:
+    sinks:
+      trigram: { partitions: 16, batch: { max_bytes: 64MiB, max_wait: 30s } }
+deployments:
+  trigram-build:
+    pods: { min: 1, max: 40 }
+    config:
+      engine:
+        lanes: { trigram.build/default: { slots: 8, timeout: 15m } }
+  trigram-writer:
+    pods: { min: 1, max: 5 }
+    config:
+      engine:
+        sinks: { trigram: { write_at_once: 4 } }
 ```
 
-A sink is not a worker. Its pods run a pull loop for each partition they own, and call `write` for each batch. `sinks: { trigram: 4 }` lets a pod write four of its partitions at once.
+A sink is not a worker. Its pods run a pull loop for each partition they own, and call `write` for each batch. `write_at_once: 4` lets a pod write four of its partitions at once.
 
 Records travel through object storage, and NATS carries only a pointer to them. `ctx.stage` returns once the records are durable, so the producer's pod can die safely. The writer pods share the partitions, and a lease makes sure only one pod writes each one. That pod opens its writer once, then calls `write` for each batch. It deletes staged records only after `write` succeeds, so `write` must be idempotent. A DuckLake sink works the same way, with one transaction for each batch.
 
@@ -536,11 +554,11 @@ Both config blocks are accepted until V1 is removed.
 
 | V1 key | V2 equivalent |
 |---|---|
-| `topics` | `engine.lanes` |
-| `concurrency_groups` | The slots in `engine.instances.<name>.lanes` |
-| `fetch_concurrency` | The lane slots in `lanes` |
+| `topics` | `engine.lanes` in a pod config |
+| `concurrency_groups` | The `slots` of each lane in a pod config |
+| `fetch_concurrency` | The `slots` of the lane |
 | `small_indexing_slots`, `big_indexing_slots` | The pod pools `parse` and `parse_big` |
 | `write_max_concurrent` | The pod pool `insert` |
-| `archive_storage_budget`, `archive_tenant_budget` | `per_key` and `unknown_key` of the cluster pool `gitaly_archives` |
+| `archive_storage_budget`, `archive_tenant_budget` | `per_key` and `unknown_key` of the cluster pool `gitaly_archives`, in `shared` |
 | `archive_lease_max_wait_secs` | `max_wait` of the pool |
 | `job_timeout_secs` | `timeout` on the lane |
