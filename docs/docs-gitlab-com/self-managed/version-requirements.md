@@ -43,6 +43,11 @@ Each chart release installs a default GitLab Orbit version.
 To install a different supported version, set `image.tag` in `orbit-values.yaml`.
 The chart stops the installation when the GitLab Orbit version is older than the chart supports.
 
+After each GitLab Orbit minor or patch release, a chart patch release makes the new version the default, usually in less than a week.
+A new GitLab Orbit major version becomes the default in a separate chart release, which can take longer.
+If you run `helm install` or `helm upgrade` without `--version`, you get the latest chart and its default GitLab Orbit version.
+To stay on a GitLab Orbit version, set `--version` to a chart version, or set `image.tag`.
+
 For all chart releases, see [GitLab Orbit Helm chart releases](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/releases).
 
 ## ClickHouse
