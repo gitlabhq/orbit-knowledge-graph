@@ -128,9 +128,6 @@ To install the plugin, run `glab orbit setup` and select **Install the agent plu
 Then start a new Claude Code session.
 
 To turn off the plugin, in Claude Code, run `/plugin` and turn off `gitlab-orbit`.
-If you run `glab orbit setup` again and install the agent plugins, the plugin turns back on.
-To set up GitLab Orbit without the plugin, select **Skip the agent plugins**, or run `glab orbit setup --skip agent-plugins`.
-The skill, instructions, and hooks work without it.
 
 ## Remove the setup
 
