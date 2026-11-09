@@ -79,6 +79,16 @@ On GitLab Dedicated, GitLab runs GitLab Orbit for your instance.
 On GitLab Self-Managed, you run GitLab Orbit yourself.
 For more information, see [GitLab Orbit on GitLab Self-Managed](https://docs.gitlab.com/orbit/self-managed/).
 
+## Service level agreement
+
+On GitLab.com and GitLab Dedicated, GitLab Orbit queries have a 99.9% monthly availability commitment for eligible customers.
+It covers queries through the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/) and the [MCP endpoint](agents/mcp.md).
+For the full definition, see the
+[GitLab Orbit service level agreement](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/service-level-agreement/#gitlab-orbit-service-level-agreement---availability-definition).
+
+On GitLab Self-Managed, you run GitLab Orbit, so no service level agreement applies.
+For what GitLab Support covers, see the [Statement of Support](https://about.gitlab.com/support/statement-of-support/).
+
 ## Data retention and deletion
 
 When you turn off GitLab Orbit for a group, GitLab keeps the indexed data for 30 days.
