@@ -1,4 +1,5 @@
 /*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
+import { readFileSync } from "fs";
 import { Container, Text } from "@earendil-works/pi-tui";
 
 function grepPatternOption(arg) {
@@ -1151,7 +1152,7 @@ function commandOf(input) {
   return typeof command === "string" ? command : "";
 }
 function rowText(theme, call, context) {
-  const finished = context.durationMs !== undefined;
+  const finished = !context.isPartial;
   const tone = context.isError ? "error" : "accent";
   let text = theme.fg(tone, theme.bold(MARK + " " + (finished ? call.label : call.active)));
   if (call.detail)
@@ -1172,6 +1173,7 @@ function queryLines(theme, query) {
 }
 function orbitRenderers(toolName, theirs) {
   return {
+    renderShell: theirs?.renderShell,
     renderCall(args, theme, context) {
       const call = describeOrbitCall(toolName, args);
       if (!call)
@@ -1190,6 +1192,19 @@ function orbitRenderers(toolName, theirs) {
     }
   };
 }
+var FULL_OUTPUT = /Full output: ([^\s\]]+)/;
+function responseText(event) {
+  const shown = (event.content ?? []).map((block) => block.text ?? "").join(`
+`);
+  const path = event.details?.fullOutputPath ?? shown.match(FULL_OUTPUT)?.[1];
+  if (!path)
+    return shown;
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return shown;
+  }
+}
 function record(event) {
   const call = describeOrbitCall(event.toolName, event.input);
   if (!call || event.isError)
@@ -1198,9 +1213,7 @@ function record(event) {
   if (call.label !== QUERY_LABEL)
     return true;
   const command = commandOf(event.input);
-  const text = (event.content ?? []).map((block) => block.text ?? "").join(`
-`);
-  const parsed = parseResponse(text);
+  const parsed = parseResponse(responseText(event));
   stats.nodes += parsed.nodes + parsed.aggregated;
   stats.apiCalls += apiCallsFor(parsed, queryOf(command));
   stats.edges += parsed.edges + parsed.aggregated * hopsOf(queryOf(command));
@@ -1224,6 +1237,8 @@ function show(ctx) {
     ctx.ui.setStatus("orbit", usageStatus(ctx.ui.theme));
 }
 function pi_default(pi) {
+  if (typeof pi.registerToolRenderer !== "function")
+    return;
   pi.registerToolRenderer((toolName, next) => {
     const theirs = next();
     const isShell = toolName.toLowerCase() === "bash";

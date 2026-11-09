@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+
 import { Container, Text } from '@earendil-works/pi-tui'
 import type { Color, ExtensionApi, ExtensionContext, RenderContext, Theme, ToolRenderers, ToolResultEvent } from 'pi'
 
@@ -24,7 +26,7 @@ function commandOf(input: unknown): string {
 }
 
 function rowText(theme: Theme, call: NonNullable<ReturnType<typeof describeOrbitCall>>, context: RenderContext): string {
-  const finished = context.durationMs !== undefined
+  const finished = !context.isPartial
   const tone: Color = context.isError ? 'error' : 'accent'
   let text = theme.fg(tone, theme.bold(MARK + ' ' + (finished ? call.label : call.active)))
   if (call.detail) text += theme.fg('muted', '  ' + call.detail)
@@ -45,6 +47,7 @@ function queryLines(theme: Theme, query: string): string {
 
 function orbitRenderers(toolName: string, theirs: ToolRenderers | undefined): ToolRenderers {
   return {
+    renderShell: theirs?.renderShell,
     renderCall(args, theme, context) {
       const call = describeOrbitCall(toolName, args)
       if (!call) return theirs?.renderCall?.(args, theme, context) ?? new Text(theme.fg('toolTitle', toolName), 0, 0)
@@ -61,14 +64,28 @@ function orbitRenderers(toolName: string, theirs: ToolRenderers | undefined): To
   }
 }
 
+// Pi keeps only the tail of a long result and names the full file in `details`. The output guard of
+// the nightly channel shortens it first and names its spill file only in the text it leaves.
+const FULL_OUTPUT = /Full output: ([^\s\]]+)/
+
+function responseText(event: ToolResultEvent): string {
+  const shown = (event.content ?? []).map((block) => block.text ?? '').join('\n')
+  const path = event.details?.fullOutputPath ?? shown.match(FULL_OUTPUT)?.[1]
+  if (!path) return shown
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return shown
+  }
+}
+
 function record(event: ToolResultEvent): boolean {
   const call = describeOrbitCall(event.toolName, event.input)
   if (!call || event.isError) return false
   stats.calls += 1
   if (call.label !== QUERY_LABEL) return true
   const command = commandOf(event.input)
-  const text = (event.content ?? []).map((block) => block.text ?? '').join('\n')
-  const parsed = parseResponse(text)
+  const parsed = parseResponse(responseText(event))
   stats.nodes += parsed.nodes + parsed.aggregated
   stats.apiCalls += apiCallsFor(parsed, queryOf(command))
   stats.edges += parsed.edges + parsed.aggregated * hopsOf(queryOf(command))
@@ -93,6 +110,8 @@ function show(ctx: ExtensionContext): void {
 }
 
 export default function (pi: ExtensionApi) {
+  // Older Pi has no renderer hook, and an extension that throws on load is reported at every start.
+  if (typeof pi.registerToolRenderer !== 'function') return
   pi.registerToolRenderer((toolName, next) => {
     const theirs = next()
     const isShell = toolName.toLowerCase() === 'bash'

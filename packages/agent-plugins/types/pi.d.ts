@@ -1,3 +1,5 @@
+// Mirrors the parts of @earendil-works/pi-coding-agent 1.5.0 that the Pi extension uses
+// (dist/core/extensions/types.d.ts). `registerToolRenderer` needs Pi 1.0.1 or newer.
 declare module '@earendil-works/pi-tui' {
   export interface Component {
     render(width: number): string[]
@@ -28,10 +30,10 @@ declare module 'pi' {
     expanded: boolean
     isError: boolean
     isPartial: boolean
-    durationMs?: number
     lastComponent?: Component
   }
   export interface ToolRenderers {
+    renderShell?: 'default' | 'self'
     renderCall?(args: unknown, theme: Theme, context: RenderContext): Component
     renderResult?(result: unknown, options: { expanded: boolean; isPartial: boolean }, theme: Theme, context: RenderContext): Component
   }
@@ -40,6 +42,7 @@ declare module 'pi' {
     input: unknown
     content?: readonly { type: string; text?: string }[]
     isError?: boolean
+    details?: { fullOutputPath?: string }
   }
   export interface ExtensionContext {
     hasUI: boolean
@@ -48,6 +51,6 @@ declare module 'pi' {
   export interface ExtensionApi {
     on(event: 'session_start', handler: (event: unknown, ctx: ExtensionContext) => void): void
     on(event: 'tool_result', handler: (event: ToolResultEvent, ctx: ExtensionContext) => void): void
-    registerToolRenderer(resolver: (toolName: string, next: () => ToolRenderers | undefined) => ToolRenderers | undefined): void
+    registerToolRenderer?(resolver: (toolName: string, next: () => ToolRenderers | undefined) => ToolRenderers | undefined): void
   }
 }

@@ -1,4 +1,7 @@
 import { expect, mock, test } from 'bun:test'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import type { Component } from '@earendil-works/pi-tui'
 import type { ExtensionApi, ExtensionContext, RenderContext, Theme, ToolRenderers, ToolResultEvent } from 'pi'
@@ -18,7 +21,7 @@ const { default: extension } = await import('./index.ts')
 const theme: Theme = { fg: (_color, text) => text, bold: (text) => text }
 const QUERY = `orbit query '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project"}]}'`
 
-type Resolver = Parameters<ExtensionApi['registerToolRenderer']>[0]
+type Resolver = Parameters<NonNullable<ExtensionApi['registerToolRenderer']>>[0]
 
 function load() {
   const handlers: Record<string, (event: never, ctx: ExtensionContext) => void> = {}
@@ -33,6 +36,8 @@ function load() {
   } as ExtensionApi)
   const statuses: (string | undefined)[] = []
   const ctx: ExtensionContext = { hasUI: true, ui: { theme, setStatus: (_key, text) => statuses.push(text) } }
+  handlers['session_start']!(undefined as never, ctx)
+  statuses.length = 0
   const rendererFor = (tool: string, theirs?: ToolRenderers) => resolver!(tool, () => theirs)
   return { handlers, statuses, ctx, rendererFor }
 }
@@ -44,9 +49,9 @@ const bash = (command: string) => ({ command })
 test('an Orbit shell call shows its running and finished label', () => {
   const renderer = load().rendererFor('bash')!
   const args = bash(QUERY)
-  expect(textOf(renderer.renderCall!(args, theme, context({ args })))).toContain('◎ Exploring Orbit')
-  expect(textOf(renderer.renderCall!(args, theme, context({ args, durationMs: 5 })))).toContain('◎ Explored Orbit')
-  expect(textOf(renderer.renderCall!(args, theme, context({ args, durationMs: 5, isError: true })))).toContain('· failed')
+  expect(textOf(renderer.renderCall!(args, theme, context({ args, isPartial: true })))).toContain('◎ Exploring Orbit')
+  expect(textOf(renderer.renderCall!(args, theme, context({ args })))).toContain('◎ Explored Orbit')
+  expect(textOf(renderer.renderCall!(args, theme, context({ args, isError: true })))).toContain('· failed')
 })
 
 test('an expanded Orbit call adds the query and shows the raw result, a collapsed one hides it', () => {
@@ -95,4 +100,47 @@ test('each finished Orbit query updates the usage line and a new session clears 
 test('a result that cannot be read never throws into Pi', () => {
   const { handlers, ctx } = load()
   expect(() => handlers['tool_result']!({ toolName: 'bash', input: bash(QUERY), content: undefined } as never, ctx)).not.toThrow()
+})
+
+const fullResponse = JSON.stringify({ result: { query_type: 'traversal', nodes: Array.from({ length: 50 }, () => ({ type: 'Project' })), edges: [{}, {}] } })
+const spill = () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'orbit-pi-')), 'full.txt')
+  writeFileSync(path, fullResponse)
+  return path
+}
+
+test('a result Pi truncated is counted from the full output file', () => {
+  const { handlers, statuses, ctx } = load()
+  const event: ToolResultEvent = {
+    toolName: 'bash',
+    input: bash(QUERY),
+    content: [{ type: 'text', text: '{"result":{"nodes":[{"type":"Pro' }],
+    details: { fullOutputPath: spill() },
+  }
+  handlers['tool_result']!(event as never, ctx)
+  expect(statuses.at(-1)).toContain('50 nodes')
+  expect(statuses.at(-1)).toContain('2 edges')
+})
+
+test('a result the nightly output guard shortened is counted from its spill file', () => {
+  const { handlers, statuses, ctx } = load()
+  const text = `{"result"\n[... 900 of 1000 bytes omitted. Full output: ${spill()} (read a range of it or rg it; do not cat it) ...]\n"}}`
+  handlers['tool_result']!({ toolName: 'bash', input: bash(QUERY), content: [{ type: 'text', text }] } as never, ctx)
+  expect(statuses.at(-1)).toContain('50 nodes')
+})
+
+test('a missing full output file falls back to the shown text', () => {
+  const { handlers, statuses, ctx } = load()
+  const event = { toolName: 'bash', input: bash(QUERY), content: [{ type: 'text', text: 'cut' }], details: { fullOutputPath: '/nonexistent/full.txt' } }
+  handlers['tool_result']!(event as never, ctx)
+  expect(statuses.at(-1)).toContain('1 call')
+})
+
+test('a Pi without the renderer hook loads without throwing', () => {
+  expect(() => extension({ on: () => {} } as unknown as ExtensionApi)).not.toThrow()
+})
+
+test('the renderer keeps the shell choice of the renderer it wraps', () => {
+  const renderer = load().rendererFor('bash', { renderShell: 'self' })!
+  expect(renderer.renderShell).toBe('self')
 })
