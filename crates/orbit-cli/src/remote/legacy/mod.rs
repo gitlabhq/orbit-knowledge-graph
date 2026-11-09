@@ -1,5 +1,5 @@
 mod graph_status;
-mod ontology;
+mod schema;
 mod status;
 
 use super::client::OrbitClient;
@@ -7,7 +7,7 @@ use super::error::RemoteError;
 use super::graph_status::Scope;
 
 pub(crate) use graph_status::{check_graph_status, run_graph_status};
-pub(crate) use ontology::run_ontology;
+pub(crate) use schema::run_schema;
 pub(crate) use status::{check_status, run_status};
 
 const SCHEMA_PATH: &str = "/api/v4/orbit/schema";

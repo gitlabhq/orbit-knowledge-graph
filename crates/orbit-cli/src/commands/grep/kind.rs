@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ontology::Ontology;
+use query_data_model::Packages;
 
 use super::Output;
 
@@ -162,7 +162,7 @@ fn family_of(kind: &str) -> Option<usize> {
 }
 
 pub(super) fn resolve(requested: &[String], known: &[String]) -> Result<Kinds> {
-    let ontology = Ontology::load_embedded()?;
+    let model = Packages::embedded().load()?;
     let mut kinds = Kinds::default();
     let mut everything = false;
     for name in requested {
@@ -206,11 +206,12 @@ pub(super) fn resolve(requested: &[String], known: &[String]) -> Result<Kinds> {
                 kinds.shown.extend(exact.clone());
                 kinds.definitions.extend(exact);
             }
-            _ => match ontology
-                .node_names()
-                .find(|node| node.eq_ignore_ascii_case(name))
+            _ => match model
+                .graph()
+                .entities()
+                .find(|entity| entity.name.eq_ignore_ascii_case(name))
             {
-                Some(node) => kinds.hosted.push(node.to_string()),
+                Some(entity) => kinds.hosted.push(entity.name.clone()),
                 None => kinds.unknown.push(name.clone()),
             },
         }

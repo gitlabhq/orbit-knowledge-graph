@@ -1370,7 +1370,7 @@ mod tests {
     fn stamped(body: &str) -> String {
         format!(
             "// orbit setup checksum: {}\n{body}",
-            ontology::migrations::sha256_hex(body)
+            crate::skill::sha256_hex(body.as_bytes())
         )
     }
 

@@ -10,7 +10,6 @@ use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{
     Context, Env, Envelope, Killed, Limits, Pipeline, Scalar, State, templates,
 };
-use ontology::Ontology;
 use query_data_model::{Catalog, DuckDb};
 
 struct FixturePolicy;
@@ -118,7 +117,6 @@ fn index_and_check(yaml: &str) {
         .map(|(path, _)| path)
         .collect();
     let lang_id = detect_lang(&suite, &paths);
-    let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
     let data_model = Arc::new(Catalog::<DuckDb>::embedded().expect("embedded model"));
     let env = Env::with_limits(lang_id, suite_limits(&suite)).expect("rules compile");
 
@@ -135,7 +133,6 @@ fn index_and_check(yaml: &str) {
         templates::index(Context::new(&env, repository)).expect("suite exceeded the total budget");
     let (mut state, mut failures) = check(
         graph,
-        &ontology,
         &data_model,
         &suite.tests,
         &suite.skipped,
@@ -170,7 +167,7 @@ fn index_and_check(yaml: &str) {
         );
         let graph = templates::reindex(Context::new(&env, changes), state, step.remove.clone())
             .expect("suite exceeded the total budget");
-        let (next, step_failures) = check(graph, &ontology, &data_model, &step.tests, &[], &[]);
+        let (next, step_failures) = check(graph, &data_model, &step.tests, &[], &[]);
         state = next;
         failures.extend(step_failures);
     }
@@ -181,7 +178,6 @@ fn index_and_check(yaml: &str) {
 /// graph comes back for the next step.
 fn check(
     graph: Pipeline<'_, Resolved>,
-    ontology: &Arc<Ontology>,
     data_model: &Arc<Catalog<DuckDb>>,
     tests: &[TestCase],
     skipped: &[SkippedFile],
@@ -221,10 +217,7 @@ fn check(
         tests: tests.to_vec(),
         steps: Vec::new(),
     };
-    (
-        displayed.state,
-        run_suite(&suite, &db, ontology, data_model, true),
-    )
+    (displayed.state, run_suite(&suite, &db, data_model, true))
 }
 
 /// Fails unless the files the budgets `kind` (skipped or limited) are the

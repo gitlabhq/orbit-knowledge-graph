@@ -2,10 +2,7 @@ use crate::remote::client::OrbitClient;
 use crate::remote::error::RemoteError;
 use crate::remote::{pretty_json, write_stdout};
 
-pub(crate) async fn run_ontology(
-    client: &OrbitClient,
-    nodes: &[String],
-) -> Result<(), RemoteError> {
+pub(crate) async fn run_schema(client: &OrbitClient, nodes: &[String]) -> Result<(), RemoteError> {
     let params: Vec<(&str, String)> = expand_param(nodes).into_iter().collect();
     let schema = client.get_schema(&params).await?;
     write_stdout(&pretty_json(&schema))

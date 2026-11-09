@@ -15,7 +15,7 @@ arrow = { workspace = true }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
 anyhow = { workspace = true }
-ontology = { path = "../ontology" }
+query-data-model = { path = "../query-data-model" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 

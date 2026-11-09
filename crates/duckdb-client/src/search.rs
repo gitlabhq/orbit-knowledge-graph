@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
-use ontology::Ontology;
+use query_data_model::{Catalog, DuckDb, PropertyId};
 use serde_json::{Map, Value};
 
 use crate::{DuckDbClient, i64_column, sql_lit, string_column};
@@ -25,43 +25,49 @@ pub struct NodeHydrator {
 }
 
 impl NodeHydrator {
-    pub fn new(ontology: &Ontology, entity_type: &str) -> Result<Self> {
-        let node = ontology
-            .get_node(entity_type)
-            .with_context(|| format!("ontology node {entity_type:?} does not exist"))?;
-        let columns: HashMap<String, String> = node
-            .fields
+    pub fn new(catalog: &Catalog<DuckDb>, entity_type: &str) -> Result<Self> {
+        let graph = catalog.graph();
+        let entity = graph
+            .entity_named(entity_type)
+            .with_context(|| format!("entity {entity_type:?} does not exist"))?;
+        let (_, source) = catalog
+            .source(entity.id)
+            .with_context(|| format!("entity {entity_type:?} is not in the local store"))?;
+        let name = |property: &PropertyId| graph.property(*property).name.clone();
+        let columns: HashMap<String, String> = entity
+            .properties
             .iter()
-            .filter_map(|field| Some((field.name.clone(), field.column_name()?.to_string())))
+            .filter_map(|property| Some((name(property), catalog.column(*property)?.to_string())))
             .collect();
-        let properties = if node.default_columns.is_empty() {
+        let properties = if entity.defaults.is_empty() {
             columns
                 .keys()
                 .filter(|name| *name != "id")
                 .cloned()
                 .collect()
         } else {
-            node.default_columns
+            entity
+                .defaults
                 .iter()
-                .filter(|name| *name != "id" && columns.contains_key(*name))
-                .cloned()
+                .map(name)
+                .filter(|name| name != "id" && columns.contains_key(name))
                 .collect()
         };
         anyhow::ensure!(
             columns.contains_key("id"),
-            "ontology node has no database-backed id property"
+            "entity {entity_type:?} has no stored id property"
         );
         Ok(Self {
-            entity_type: node.name.clone(),
-            table: node.destination_table.clone(),
+            entity_type: entity.name.clone(),
+            table: source.table.clone(),
             columns,
             properties,
         })
     }
 
     pub fn embedded(entity_type: &str) -> Result<Self> {
-        let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
-        Self::new(&ontology, entity_type)
+        let catalog = Catalog::<DuckDb>::embedded().context("failed to load the embedded model")?;
+        Self::new(&catalog, entity_type)
     }
 
     pub fn column(&self, property: &str) -> Result<&str> {

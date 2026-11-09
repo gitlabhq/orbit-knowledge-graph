@@ -666,7 +666,7 @@ fn validate_sha256(kind: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     hex_digest(Sha256::digest(bytes))
 }
 

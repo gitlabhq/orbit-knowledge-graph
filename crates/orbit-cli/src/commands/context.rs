@@ -44,8 +44,12 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
 }
 
 pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
-    let ontology = ontology::Ontology::load_embedded()?;
-    let nodes: Vec<&str> = ontology.node_names().collect();
+    let model = query_data_model::Packages::embedded().load()?;
+    let nodes: Vec<&str> = model
+        .graph()
+        .entities()
+        .map(|entity| entity.name.as_str())
+        .collect();
     let (mut local, mut remote) = (Vec::new(), Vec::new());
     let dir = args.repo.clone().unwrap_or_else(|| ".".into());
     let mut client = None;

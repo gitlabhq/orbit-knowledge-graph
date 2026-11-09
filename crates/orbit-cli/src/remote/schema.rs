@@ -14,7 +14,7 @@ use super::{pretty_value, write_stdout};
 const EXPAND_ALL: &str = "*";
 
 #[derive(Serialize, Default)]
-struct Ontology {
+struct Schema {
     nodes: Vec<NodeKind>,
     edges: Vec<EdgeKind>,
 }
@@ -26,23 +26,23 @@ struct PageCursor {
     done: bool,
 }
 
-pub(crate) async fn run_ontology(nodes: Vec<String>) -> Result<(), RemoteError> {
+pub(crate) async fn run_schema(nodes: Vec<String>) -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
-    let Some(mut ontology) = read_ontology(&client, !nodes.is_empty()).await? else {
-        return legacy::run_ontology(&client, &nodes).await;
+    let Some(mut schema) = read_schema(&client, !nodes.is_empty()).await? else {
+        return legacy::run_schema(&client, &nodes).await;
     };
-    ontology.keep_properties_of(&nodes);
-    write_stdout(&pretty_value(&ontology))
+    schema.keep_properties_of(&nodes);
+    write_stdout(&pretty_value(&schema))
 }
 
-async fn read_ontology(
+async fn read_schema(
     client: &OrbitClient,
     with_properties: bool,
-) -> Result<Option<Ontology>, RemoteError> {
-    let mut ontology = Ontology::default();
+) -> Result<Option<Schema>, RemoteError> {
+    let mut schema = Schema::default();
     let (mut nodes, mut edges) = (PageCursor::default(), PageCursor::default());
     while !(nodes.done && edges.done) {
-        let Some(schema) = read_schema_page(
+        let Some(fetched) = read_schema_page(
             client,
             SchemaPageVariables {
                 nodes_after: nodes.after.as_deref(),
@@ -57,15 +57,15 @@ async fn read_ontology(
             return Ok(None);
         };
         nodes.read(
-            schema.nodes.map(|page| (page.page_info, page.nodes)),
-            &mut ontology.nodes,
+            fetched.nodes.map(|page| (page.page_info, page.nodes)),
+            &mut schema.nodes,
         )?;
         edges.read(
-            schema.edges.map(|page| (page.page_info, page.nodes)),
-            &mut ontology.edges,
+            fetched.edges.map(|page| (page.page_info, page.nodes)),
+            &mut schema.edges,
         )?;
     }
-    Ok(Some(ontology))
+    Ok(Some(schema))
 }
 
 async fn read_schema_page(
@@ -90,7 +90,7 @@ async fn read_schema_page(
     })
 }
 
-impl Ontology {
+impl Schema {
     fn keep_properties_of(&mut self, names: &[String]) {
         if names.iter().any(|name| name == EXPAND_ALL) {
             return;

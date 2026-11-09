@@ -5,9 +5,8 @@ use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use compiler::{Frontend, compile_local};
 use duckdb_client::DuckDbClient;
-use ontology::Ontology;
 use orbit_arrow::ArrowUtils;
-use query_data_model::{Catalog, DuckDb};
+use query_data_model::{Catalog, DuckDb, GraphCatalog};
 use tabled::{Table, builder::Builder};
 
 use super::assertions::{
@@ -26,11 +25,10 @@ pub struct Failure {
 pub fn run_suite(
     suite: &TestSuite,
     client: &DuckDbClient,
-    ontology: &Ontology,
     data_model: &Arc<Catalog<DuckDb>>,
     probe_skipped: bool,
 ) -> Vec<Failure> {
-    let mut failures = undeclared_edges(client, ontology);
+    let mut failures = undeclared_edges(client, data_model.graph());
     for test in &suite.tests {
         if test.skip {
             eprintln!("  [SKIP] \"{}\"", test.name);
@@ -44,7 +42,7 @@ pub fn run_suite(
     failures
 }
 
-fn undeclared_edges(client: &DuckDbClient, ontology: &Ontology) -> Vec<Failure> {
+fn undeclared_edges(client: &DuckDbClient, graph: &GraphCatalog) -> Vec<Failure> {
     let batches = client
         .query_arrow(
             "SELECT DISTINCT relationship_kind, source_kind, target_kind FROM gl_edge ORDER BY ALL",
@@ -60,17 +58,12 @@ fn undeclared_edges(client: &DuckDbClient, ontology: &Ontology) -> Vec<Failure> 
                 value("source_kind"),
                 value("target_kind"),
             );
-            if !ontology
-                .get_edge(&kind)
-                .unwrap_or_default()
-                .iter()
-                .any(|edge| edge.source_kind == source && edge.target_kind == target)
-            {
+            if graph.variant_named(&kind, &source, &target).is_none() {
                 failures.push(Failure {
-                    test: "ontology declares every indexed edge".into(),
+                    test: "the model declares every indexed edge".into(),
                     severity: Severity::Error,
                     message: format!(
-                        "{kind} {source} -> {target} is indexed but not declared in config/ontology/edges"
+                        "{kind} {source} -> {target} is indexed but not declared in config/model"
                     ),
                 });
             }

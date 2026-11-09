@@ -1038,7 +1038,7 @@ async fn dispatch(
             warn_moved("schema <table>", "workspace schema <table>");
             run_schema(db, raw, nodes)
         }
-        Commands::Schema { nodes, .. } => Ok(remote::run_ontology(nodes).await?),
+        Commands::Schema { nodes, .. } => Ok(remote::run_schema(nodes).await?),
         Commands::GraphStatus(args) => Ok(args.run().await?),
     }
 }

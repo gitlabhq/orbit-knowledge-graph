@@ -4,11 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use code_graph_incremental::pipeline::Observer;
 use code_graph_incremental::treesitter::SupportLang;
-
-use ontology::Ontology;
 
 use crate::database::schema::graph_lacks_commit;
 use crate::database::{GraphWriter, lock_index_state, manifest, wait_timeout};
@@ -239,7 +237,6 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
         let folder = dunce::canonicalize(&path).unwrap_or(path);
         return Err(super::NoRepositoryFound(folder).into());
     }
-    let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
     let wait = options.wait.unwrap_or_else(wait_timeout);
     let ready = options.ready_file.clone().map(detached::ReadyFile);
     let mut outputs = Vec::new();
@@ -278,7 +275,6 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
         let project = Project {
             git: &git,
             writer: &writer,
-            ontology: &ontology,
             manifest_path: &manifest_path,
             state_dir,
             budget_ms: options
@@ -481,11 +477,9 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
         return Ok(());
     }
     let _state_lock = lock_index_state(&state_dir, &git.repo_path, crate::database::BRIEF_WAIT)?;
-    let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
     let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
     let reader = state::Reader {
         git: &git,
-        ontology: &ontology,
         state_dir: &state_dir,
         owner,
         families: &families,
@@ -502,9 +496,7 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
     // Snapshots go in place only after the rows land, so a failed write keeps the files stale.
     let written = workspace::resolve_db_path(db, &git)
         .and_then(|path| GraphWriter::open_waiting(&path, &git, crate::database::BRIEF_WAIT))
-        .and_then(|writer| {
-            writer.in_transaction(|| output::apply_refresh(&writer, &ontology, &refresh))
-        });
+        .and_then(|writer| writer.in_transaction(|| output::apply_refresh(&writer, &refresh)));
     match written {
         Ok(()) => state::commit_snapshots(&refresh.families),
         Err(error) => {

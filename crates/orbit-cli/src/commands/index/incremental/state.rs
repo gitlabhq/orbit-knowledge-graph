@@ -20,7 +20,6 @@ use crate::workspace::{self, GitInfo};
 pub(super) struct Project<'a> {
     pub git: &'a GitInfo,
     pub writer: &'a GraphWriter,
-    pub ontology: &'a ontology::Ontology,
     pub manifest_path: &'a std::path::Path,
     pub state_dir: PathBuf,
     pub budget_ms: u64,
@@ -46,7 +45,7 @@ impl Project<'_> {
         std::fs::create_dir_all(&self.state_dir)?;
         let mut staged = Vec::new();
         let written = self.writer.in_transaction(|| {
-            self.writer.clear(self.ontology)?;
+            self.writer.clear()?;
             let mut exporter = Exporter::new(self.git, self.writer);
             let mut outputs = Vec::new();
             for (family, paths) in families.into_values() {
@@ -93,7 +92,6 @@ impl Project<'_> {
         let changes = self.changes(&saved, owner, &families, &saved_files)?;
         let reader = Reader {
             git: self.git,
-            ontology: self.ontology,
             state_dir: &self.state_dir,
             owner,
             families: &families,
@@ -116,7 +114,7 @@ impl Project<'_> {
         let refresh = reader.read(work, self.budget_ms, &|| self.cancelled())?;
         let written = self
             .writer
-            .in_transaction(|| output::apply_refresh(self.writer, self.ontology, &refresh));
+            .in_transaction(|| output::apply_refresh(self.writer, &refresh));
         let outputs: Vec<FamilyOutput> = names
             .iter()
             .filter_map(|name| {
@@ -411,7 +409,6 @@ type ContextFor<'a> = dyn for<'e> Fn(&'e Env, Vec<String>) -> Result<Context<'e>
 /// How `orbit index` and a refresh read changed files into the saved graph.
 pub(super) struct Reader<'a> {
     pub git: &'a GitInfo,
-    pub ontology: &'a ontology::Ontology,
     pub state_dir: &'a std::path::Path,
     pub owner: Option<SupportLang>,
     pub families: &'a [SupportLang],
@@ -523,7 +520,7 @@ impl Reader<'_> {
             .map(|tree| tree.label.to_string())
             .chain(removed)
             .collect();
-        let replacement = output::replacement(self.git, self.ontology, &env, &state, &files)?;
+        let replacement = output::replacement(self.git, &env, &state, &files)?;
         let mut staged = stage(&env, &state, &snapshot, Some(&touched), read_at)?;
         staged.replacement = Some(replacement);
         staged.output =

@@ -4,23 +4,35 @@
 
 use bolero::generator::TypeGenerator;
 use bolero::generator::bolero_generator::Driver;
-use compiler::Ontology;
+use query_data_model::{Model, Packages};
 use serde_json::{Map, Value, json};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
-fn ontology() -> &'static Ontology {
-    static ONT: OnceLock<Ontology> = OnceLock::new();
-    ONT.get_or_init(|| Ontology::load_embedded().expect("load embedded ontology"))
+fn model() -> &'static Arc<Model> {
+    static MODEL: OnceLock<Arc<Model>> = OnceLock::new();
+    MODEL.get_or_init(|| Packages::embedded().load().expect("load embedded model"))
 }
 
-fn ontology_node_names() -> &'static Vec<String> {
+fn entity_names() -> &'static Vec<String> {
     static NAMES: OnceLock<Vec<String>> = OnceLock::new();
-    NAMES.get_or_init(|| ontology().node_names().map(String::from).collect())
+    NAMES.get_or_init(|| {
+        model()
+            .graph()
+            .entities()
+            .map(|entity| entity.name.clone())
+            .collect()
+    })
 }
 
-fn ontology_edge_names() -> &'static Vec<String> {
+fn relationship_names() -> &'static Vec<String> {
     static NAMES: OnceLock<Vec<String>> = OnceLock::new();
-    NAMES.get_or_init(|| ontology().edge_names().map(String::from).collect())
+    NAMES.get_or_init(|| {
+        model()
+            .graph()
+            .relationships()
+            .map(|relationship| relationship.name.clone())
+            .collect()
+    })
 }
 
 fn pick<'a, T>(driver: &mut impl Driver, items: &'a [T]) -> Option<&'a T> {
@@ -34,7 +46,7 @@ fn pick<'a, T>(driver: &mut impl Driver, items: &'a [T]) -> Option<&'a T> {
 fn pick_entity_name(driver: &mut impl Driver) -> Option<String> {
     let use_valid: bool = driver.produce()?;
     if use_valid {
-        pick(driver, ontology_node_names()).cloned()
+        pick(driver, entity_names()).cloned()
     } else {
         let garbage: Vec<u8> = driver.produce()?;
         Some(String::from_utf8_lossy(&garbage[..garbage.len().min(20)]).into_owned())
@@ -44,7 +56,7 @@ fn pick_entity_name(driver: &mut impl Driver) -> Option<String> {
 fn pick_edge_name(driver: &mut impl Driver) -> Option<String> {
     let use_valid: bool = driver.produce()?;
     if use_valid {
-        pick(driver, ontology_edge_names()).cloned()
+        pick(driver, relationship_names()).cloned()
     } else {
         let garbage: Vec<u8> = driver.produce()?;
         Some(String::from_utf8_lossy(&garbage[..garbage.len().min(20)]).into_owned())

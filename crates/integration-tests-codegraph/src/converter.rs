@@ -1,6 +1,7 @@
 use arrow::record_batch::RecordBatch;
-use ontology::{DataType as OntDataType, Ontology};
+use code_graph_incremental::export::{EntityTable, ExportTables};
 use orbit_arrow::{AsRecordBatch, ColumnSpec, ColumnType};
+use query_data_model::DataType;
 
 use anyhow::Result;
 
@@ -10,34 +11,30 @@ pub struct LocalGraphData {
 
 /// DuckDB's Appender does not support dictionary-encoded Arrow arrays,
 /// so all string columns use plain Utf8.
-fn entity_specs(ontology: &Ontology, entity: &str) -> Vec<ColumnSpec> {
-    ontology
-        .local_entity_fields(entity)
-        .unwrap_or_else(|| panic!("entity '{entity}' not in local_entities"))
+fn column_spec(name: &str, data_type: DataType, nullable: bool) -> ColumnSpec {
+    ColumnSpec {
+        name: name.to_string(),
+        col_type: match data_type {
+            DataType::Int => ColumnType::Int,
+            _ => ColumnType::Str,
+        },
+        nullable,
+    }
+}
+
+fn entity_specs(entity: &EntityTable) -> Vec<ColumnSpec> {
+    entity
+        .columns
         .iter()
-        .map(|f| ColumnSpec {
-            name: f.name.clone(),
-            col_type: match f.data_type {
-                OntDataType::Int => ColumnType::Int,
-                _ => ColumnType::Str,
-            },
-            nullable: f.nullable,
-        })
+        .map(|(name, data_type, nullable)| column_spec(name, *data_type, *nullable))
         .collect()
 }
 
-fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
-    ontology
-        .local_edge_columns()
+fn edge_specs(tables: &ExportTables) -> Vec<ColumnSpec> {
+    tables
+        .edge_columns
         .iter()
-        .map(|c| ColumnSpec {
-            name: c.name.clone(),
-            col_type: match c.data_type {
-                OntDataType::Int => ColumnType::Int,
-                _ => ColumnType::Str,
-            },
-            nullable: false,
-        })
+        .map(|(name, data_type)| column_spec(name, *data_type, false))
         .collect()
 }
 
@@ -46,7 +43,7 @@ pub fn convert_v2_graph(
     project_id: i64,
     branch: &str,
     commit_sha: &str,
-    ontology: &Ontology,
+    tables: &ExportTables,
 ) -> Result<LocalGraphData> {
     use code_graph::v2::linker::graph::{
         DefinitionRow, DirectoryRow, EdgeRow, FileRow, ImportRow, RowContext as V2RowContext,
@@ -59,17 +56,11 @@ pub fn convert_v2_graph(
     };
     let ids = graph.assign_ids(project_id, branch);
     let write_repository_structure = graph.output.writes_repository_structure();
-    let mut tables = Vec::new();
+    let mut batches = Vec::new();
 
-    for entity_name in ontology.local_entity_names() {
-        let dest_table = ontology
-            .get_node(entity_name)
-            .expect("local entity must exist in nodes")
-            .destination_table
-            .clone();
-
-        let specs = entity_specs(ontology, entity_name);
-        let batch = match entity_name {
+    for entity in &tables.entities {
+        let specs = entity_specs(entity);
+        let batch = match entity.entity.as_str() {
             "Directory" => {
                 let rows: Vec<_> = if write_repository_structure {
                     graph
@@ -125,13 +116,8 @@ pub fn convert_v2_graph(
             other => panic!("no v2 converter for local entity '{other}'"),
         };
 
-        tables.push((dest_table, batch));
+        batches.push((entity.table.clone(), batch));
     }
-
-    let edge_table = ontology
-        .local_edge_table_name()
-        .expect("local_db.edge_table.name must be configured")
-        .to_string();
 
     let edge_indices: Vec<_> = graph
         .graph
@@ -142,7 +128,7 @@ pub fn convert_v2_graph(
         })
         .collect();
 
-    let edge_batch = orbit_arrow::BatchBuilder::new(&edge_specs(ontology), edge_indices.len())?
+    let edge_batch = orbit_arrow::BatchBuilder::new(&edge_specs(tables), edge_indices.len())?
         .build(&edge_indices, |&ei, b| {
             let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
             let edge = &graph.graph[ei];
@@ -155,16 +141,16 @@ pub fn convert_v2_graph(
             }
             .write_row(b, &())
         })?;
-    tables.push((edge_table, edge_batch));
+    batches.push((tables.edge_table.clone(), edge_batch));
 
-    Ok(LocalGraphData { tables })
+    Ok(LocalGraphData { tables: batches })
 }
 
 pub struct DuckDbConverter {
     pub project_id: i64,
     pub branch: String,
     pub commit_sha: String,
-    pub ontology: std::sync::Arc<Ontology>,
+    pub tables: &'static ExportTables,
 }
 
 impl code_graph::v2::GraphConverter for DuckDbConverter {
@@ -177,7 +163,7 @@ impl code_graph::v2::GraphConverter for DuckDbConverter {
             self.project_id,
             &self.branch,
             &self.commit_sha,
-            &self.ontology,
+            self.tables,
         )
         .map(|data| data.tables)
         .map_err(|e| code_graph::v2::SinkError(format!("DuckDB graph conversion: {e}")))
@@ -188,24 +174,19 @@ impl code_graph::v2::GraphConverter for DuckDbConverter {
 mod tests {
     use super::*;
 
-    fn test_ontology() -> Ontology {
-        Ontology::load_from_dir(std::path::Path::new(env!("ONTOLOGY_DIR")))
-            .expect("failed to load ontology")
-    }
-
     #[test]
     fn entity_specs_returns_columns_for_all_local_entities() {
-        let ont = test_ontology();
-        for entity_name in ont.local_entity_names() {
-            let specs = entity_specs(&ont, entity_name);
-            assert!(!specs.is_empty(), "no specs for {entity_name}");
+        for entity in &ExportTables::embedded().entities {
+            assert!(
+                !entity_specs(entity).is_empty(),
+                "no specs for {}",
+                entity.entity
+            );
         }
     }
 
     #[test]
     fn edge_specs_returns_columns() {
-        let ont = test_ontology();
-        let specs = edge_specs(&ont);
-        assert!(!specs.is_empty());
+        assert!(!edge_specs(ExportTables::embedded()).is_empty());
     }
 }

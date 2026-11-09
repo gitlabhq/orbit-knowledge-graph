@@ -82,14 +82,12 @@ pub fn run_yaml_suite(yaml: &str) {
     let client = Arc::new(Mutex::new(
         create_test_db().expect("Failed to create test DuckDB"),
     ));
-    let ontology =
-        std::sync::Arc::new(ontology::Ontology::load_embedded().expect("embedded ontology"));
     let converter: Arc<dyn code_graph::v2::GraphConverter> =
         Arc::new(crate::converter::DuckDbConverter {
             project_id: 1,
             branch: "main".to_string(),
             commit_sha: "test".to_string(),
-            ontology: ontology.clone(),
+            tables: code_graph_incremental::export::ExportTables::embedded(),
         });
 
     let pipeline_ctx = match suite.pipeline.as_deref() {
@@ -180,7 +178,7 @@ pub fn run_yaml_suite(yaml: &str) {
 
     let db = client.lock().unwrap();
     let data_model = Arc::new(Catalog::<DuckDb>::embedded().expect("embedded model"));
-    let failures = run_suite(&suite, &db, &ontology, &data_model, false);
+    let failures = run_suite(&suite, &db, &data_model, false);
     drop(db);
     report(&suite, &failures);
 }

@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
+use code_graph_incremental::export::ExportTables;
 use duckdb_client::{DuckDbClient, OpenMode};
-use ontology::Ontology;
 
 use super::{locks::lock_database_waiting, schema};
 use crate::workspace::GitInfo;
@@ -43,10 +43,10 @@ impl GraphWriter {
         })
     }
 
-    pub fn clear(&self, ontology: &Ontology) -> Result<()> {
+    pub fn clear(&self) -> Result<()> {
         self.client
             .execute("DELETE FROM _orbit_meta WHERE key = 'indexed_commit'", &[])?;
-        let local = LocalTables::of(ontology)?;
+        let local = LocalTables::of(ExportTables::embedded())?;
         let mut tables: Vec<&str> = local.entities.iter().map(|entity| entity.table).collect();
         tables.push(local.edges);
         self.client
@@ -58,11 +58,11 @@ impl GraphWriter {
     /// Deletes the rows of `paths`: their files, the entities in them, and
     /// every edge that starts or ends at one of those. Directories are left
     /// alone: one can share a path with a file it replaced.
-    pub fn delete_files(&self, ontology: &Ontology, paths: &[String]) -> Result<()> {
+    pub fn delete_files(&self, paths: &[String]) -> Result<()> {
         if paths.is_empty() {
             return Ok(());
         }
-        let local = LocalTables::of(ontology)?;
+        let local = LocalTables::of(ExportTables::embedded())?;
         let in_files: Vec<&LocalEntity> = local
             .entities
             .iter()
@@ -117,13 +117,13 @@ impl GraphWriter {
 
     /// Deletes every directory and the edges between directories; the edges
     /// from a directory to a file go with the file.
-    pub fn delete_directories(&self, ontology: &Ontology) -> Result<()> {
-        let local = LocalTables::of(ontology)?;
+    pub fn delete_directories(&self) -> Result<()> {
+        let local = LocalTables::of(ExportTables::embedded())?;
         let directory = local
             .entities
             .iter()
             .find(|entity| entity.name == DIRECTORY)
-            .context("the ontology has no local Directory entity")?;
+            .context("the local store has no Directory entity")?;
         self.client.execute(
             &format!(
                 "DELETE FROM {} WHERE source_kind = ?1 AND target_kind = ?1",
@@ -171,7 +171,7 @@ impl GraphWriter {
 
 const DIRECTORY: &str = "Directory";
 
-/// The local graph tables, as the ontology names them.
+/// The local graph tables, as the model's local store names them.
 struct LocalTables<'a> {
     edges: &'a str,
     entities: Vec<LocalEntity<'a>>,
@@ -185,31 +185,30 @@ struct LocalEntity<'a> {
 }
 
 impl<'a> LocalTables<'a> {
-    fn of(ontology: &'a Ontology) -> Result<Self> {
-        let edges = ontology
-            .local_edge_table_name()
-            .context("local_db.edge_table.name must be configured")?;
-        let entities = ontology
-            .local_entity_names()
-            .into_iter()
-            .map(|name| {
-                let node = ontology
-                    .get_node(name)
-                    .with_context(|| format!("local entity {name} is not in the ontology"))?;
-                let has = |field: &str| node.fields.iter().any(|f| f.name == field);
+    fn of(tables: &'a ExportTables) -> Result<Self> {
+        let entities = tables
+            .entities
+            .iter()
+            .map(|entity| {
                 let file_column = ["file_path", "path"]
                     .into_iter()
-                    .find(|column| has(column))
+                    .find(|column| entity.columns.iter().any(|(name, ..)| name == column))
                     .with_context(|| {
-                        format!("local entity {name} has no file_path or path field")
+                        format!(
+                            "local entity {} has no file_path or path column",
+                            entity.entity
+                        )
                     })?;
                 Ok(LocalEntity {
-                    name: node.name.as_str(),
-                    table: node.destination_table.as_str(),
+                    name: entity.entity.as_str(),
+                    table: entity.table.as_str(),
                     file_column,
                 })
             })
             .collect::<Result<_>>()?;
-        Ok(Self { edges, entities })
+        Ok(Self {
+            edges: tables.edge_table.as_str(),
+            entities,
+        })
     }
 }

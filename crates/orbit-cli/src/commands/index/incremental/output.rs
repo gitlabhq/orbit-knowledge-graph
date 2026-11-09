@@ -180,19 +180,17 @@ pub(super) struct Replacement {
 
 pub(super) fn replacement(
     git: &GitInfo,
-    ontology: &ontology::Ontology,
     env: &Env,
     state: &State,
     files: &FxHashSet<String>,
 ) -> Result<Replacement> {
     let envelope = envelope(git);
-    let plan = ExportPlan::from_config(&env.export_config, ExportTables::embedded(), &env.lang)?;
-    let edge_table = ontology
-        .local_edge_table_name()
-        .ok_or_else(|| anyhow::anyhow!("local_db.edge_table.name must be configured"))?;
-    let directories = ontology
-        .get_node("Directory")
-        .map(|node| node.destination_table.as_str());
+    let tables = ExportTables::embedded();
+    let plan = ExportPlan::from_config(&env.export_config, tables, &env.lang)?;
+    let edge_table = tables.edge_table.as_str();
+    let directories = tables
+        .entity("Directory")
+        .map(|entity| entity.table.as_str());
     let mut rows = Vec::new();
     let mut edges = Vec::new();
     let only: FxHashSet<u32> = state
@@ -277,20 +275,16 @@ pub(super) fn directory_rows(git: &GitInfo, paths: &[&str]) -> Result<Vec<(Strin
 
 /// Writes what a refresh read: each family's rows, then every directory
 /// again when files came or went.
-pub(super) fn apply_refresh(
-    writer: &GraphWriter,
-    ontology: &ontology::Ontology,
-    refresh: &super::state::Refresh,
-) -> Result<()> {
+pub(super) fn apply_refresh(writer: &GraphWriter, refresh: &super::state::Refresh) -> Result<()> {
     for replacement in refresh
         .families
         .iter()
         .filter_map(|family| family.replacement.as_ref())
     {
-        apply(writer, ontology, replacement)?;
+        apply(writer, replacement)?;
     }
     if let Some(rows) = &refresh.directories {
-        writer.delete_directories(ontology)?;
+        writer.delete_directories()?;
         for (table, batch) in rows {
             writer.insert_batch(table, batch)?;
         }
@@ -298,12 +292,8 @@ pub(super) fn apply_refresh(
     Ok(())
 }
 
-fn apply(
-    writer: &GraphWriter,
-    ontology: &ontology::Ontology,
-    replacement: &Replacement,
-) -> Result<()> {
-    writer.delete_files(ontology, &replacement.files)?;
+fn apply(writer: &GraphWriter, replacement: &Replacement) -> Result<()> {
+    writer.delete_files(&replacement.files)?;
     for (table, batch) in &replacement.rows {
         writer.insert_batch(table, batch)?;
     }

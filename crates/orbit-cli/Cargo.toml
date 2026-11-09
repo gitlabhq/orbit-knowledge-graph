@@ -30,7 +30,7 @@ orbit-prompts = { path = "../orbit-prompts", features = ["skill-markers"] }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
 orbit-arrow = { path = "../utils/arrow" }
-ontology = { path = "../ontology" }
+query-data-model = { path = "../query-data-model" }
 gitalisk-core = { workspace = true }
 clap = { workspace = true }
 cliclack = { workspace = true }

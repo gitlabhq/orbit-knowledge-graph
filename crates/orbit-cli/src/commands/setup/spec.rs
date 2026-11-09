@@ -2,10 +2,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::LazyLock;
 
-use ontology::migrations::sha256_hex;
 use rust_embed::Embed;
 use serde::Deserialize;
 use serde_json::Value;
+
+use crate::skill::sha256_hex;
 
 #[derive(Embed)]
 #[folder = "$ORBIT_CONFIG_DIR/setup"]
@@ -132,7 +133,7 @@ impl PluginSpec {
                 format!(
                     "{}-{}",
                     self.marketplace,
-                    &sha256_hex(&root.display().to_string())[..8]
+                    &sha256_hex(root.display().to_string().as_bytes())[..8]
                 )
             }
         }
@@ -350,12 +351,16 @@ impl TemplateFile {
             body = body.replace(&format!("{{{{{name}}}}}"), value);
         }
         let body = substitute_launcher(&body, launcher());
-        format!("{TEMPLATE_CHECKSUM_PREFIX}{}\n{body}", sha256_hex(&body))
+        format!(
+            "{TEMPLATE_CHECKSUM_PREFIX}{}\n{body}",
+            sha256_hex(body.as_bytes())
+        )
     }
 
     pub(super) fn is_unmodified(contents: &str) -> bool {
         contents.split_once('\n').is_some_and(|(stamp, body)| {
-            stamp.strip_prefix(TEMPLATE_CHECKSUM_PREFIX) == Some(sha256_hex(body).as_str())
+            stamp.strip_prefix(TEMPLATE_CHECKSUM_PREFIX)
+                == Some(sha256_hex(body.as_bytes()).as_str())
         })
     }
 }
