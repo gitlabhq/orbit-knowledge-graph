@@ -115,7 +115,8 @@ impl<M: RelationalModel> Pattern<'_, M> {
     }
 
     fn edge_columns(&self, relation: &EdgeRelation) -> Option<&HashSet<String>> {
-        self.model.table_columns(relation.single_edge_table()?)
+        let table = relation.single_edge_table()?;
+        Some(&self.model.catalog().table_facts(table)?.columns)
     }
 
     /// Endpoint filters on properties the edge table stores as columns, each property once.
@@ -146,7 +147,8 @@ impl<M: RelationalModel> Pattern<'_, M> {
         let columns = node
             .table
             .as_deref()
-            .and_then(|table| self.model.table_columns(table));
+            .and_then(|table| self.model.catalog().table_facts(table))
+            .map(|facts| &facts.columns);
         let (Some(entity), Some(columns)) = (entity, columns) else {
             return vec![];
         };

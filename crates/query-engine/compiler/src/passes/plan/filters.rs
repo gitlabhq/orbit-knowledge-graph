@@ -5,6 +5,8 @@ use crate::passes::codegen::RelationalModel;
 use std::collections::HashMap;
 
 use crate::tp_bounds::anchor_keys;
+use query_data_model::Catalog;
+use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::plan::logical::{
     Comparison, Expr as Logical, Literal, Matching, Operand, Predicate as Leaf,
 };
@@ -192,22 +194,22 @@ pub fn bind_filter(
                     .property_id(*entity, property)
                     .map(|property| graph.property(property))
                     .map(|property| (Some(property.id), Some(property.data_type))),
-                table.is_some_and(|table| model.in_sort_key(table, property)),
+                table.is_some_and(|table| in_sort_key(catalog, table, property)),
             )
         }
         FilterOwner::Tables(tables) => {
             let data_type = tables.first().and_then(|first| {
-                let data_type = model.table_column_type(first, property)?;
+                let data_type = column_type(catalog, first, property)?;
                 tables[1..]
                     .iter()
-                    .all(|table| model.table_column_type(table, property) == Some(data_type))
+                    .all(|table| column_type(catalog, table, property) == Some(data_type))
                     .then_some(data_type)
             });
             (
                 Some((None, data_type)),
                 tables
                     .iter()
-                    .all(|table| model.in_sort_key(table, property)),
+                    .all(|table| in_sort_key(catalog, table, property)),
             )
         }
     };
@@ -224,17 +226,36 @@ pub fn bind_filter(
             .or_else(|| data_type.map(ontology::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
         namespace_anchor: anchor_keys(model).iter().any(|(name, _)| name == column),
-        foreign_key: property_id.is_some_and(|property| model.property_is_foreign_key(property)),
+        foreign_key: property_id
+            .is_some_and(|property| !graph.property(property).references.is_empty()),
         in_sort_key,
-        text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
+        text_indexed: property_id.is_some_and(|property| catalog.text_index(property)),
         unique: property_id.is_some_and(|property| graph.property(property).unique),
         immutable: property_id.is_some_and(|property| !graph.property(property).mutable),
         null_as_epoch: NullAsEpoch {
             column: data_type
-                .filter(|_| property_id.is_some_and(|property| model.null_as_epoch(property))),
+                .filter(|_| property_id.is_some_and(|property| catalog.null_as_epoch(property))),
             rhs: None,
         },
     }
+}
+
+fn in_sort_key<B: RelationalBackend>(catalog: &Catalog<B>, table: &str, column: &str) -> bool {
+    catalog
+        .table_facts(table)
+        .is_some_and(|facts| facts.sort_key.iter().any(|key| key == column))
+}
+
+fn column_type<B: RelationalBackend>(
+    catalog: &Catalog<B>,
+    table: &str,
+    column: &str,
+) -> Option<ontology::DataType> {
+    catalog
+        .table_facts(table)?
+        .column_types
+        .get(column)
+        .copied()
 }
 
 pub fn lowerable_denorm<'a>(
@@ -271,8 +292,8 @@ pub fn denormalized_facts(
                         direction,
                     };
                     model
-                        .denormalized()
-                        .property(key)
+                        .catalog()
+                        .denormalized(key)
                         .cloned()
                         .map(|facts| (key, facts))
                 })
@@ -307,7 +328,7 @@ pub fn bind_facts<M: RelationalModel>(
             })?;
             let mut bound = bind_filter(name, test, &owner, model);
             bound.null_as_epoch.rhs = rhs
-                .filter(|rhs| model.null_as_epoch(*rhs))
+                .filter(|rhs| model.catalog().null_as_epoch(*rhs))
                 .map(|rhs| graph.property(rhs).data_type);
             Some((name.clone(), bound))
         })

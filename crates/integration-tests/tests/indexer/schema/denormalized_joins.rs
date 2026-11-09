@@ -3,7 +3,6 @@ use integration_testkit::{
     GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_data_model, load_ontology, load_seed,
 };
 use ontology::denormalized::{DenormalizedJoin, alias};
-use query_data_model::OrbitQueryModel;
 
 #[tokio::test]
 async fn denormalized_tables_match_their_source_join() {
@@ -31,7 +30,8 @@ async fn denormalized_tables_match_their_source_join() {
             join.table
         );
         let binding = model
-            .materialized_joins()
+            .catalog()
+            .joins()
             .iter()
             .find(|binding| binding.table == join.table)
             .unwrap();

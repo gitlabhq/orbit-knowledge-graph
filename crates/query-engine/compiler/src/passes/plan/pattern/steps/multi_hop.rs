@@ -72,8 +72,9 @@ impl<M: RelationalModel, B: RelationalBackend> Walk<'_, '_, '_, '_, M, B> {
         let tagged = relation.edge_tables.iter().all(|table| {
             pattern
                 .model
-                .table_columns(table)
-                .is_none_or(|columns| columns.contains(SOURCE_TAGS_COLUMN))
+                .catalog()
+                .table_facts(table)
+                .is_none_or(|facts| facts.columns.contains(SOURCE_TAGS_COLUMN))
         });
         let shape = Depth {
             required: &required,

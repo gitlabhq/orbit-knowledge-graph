@@ -14,18 +14,15 @@ fn overlay_ontology(name: &str) -> ontology::Ontology {
 fn reordered_tables_retain_source_columns_and_dependencies() {
     let ontology = overlay_ontology("reordered_edges");
     let model = from_ontology::clickhouse(&ontology).unwrap();
-    let backend = &model;
+    let catalog = model.catalog();
     assert_eq!(
-        backend.equivalent_layouts("gl_code_edge"),
+        catalog.copies_of("gl_code_edge"),
         ["gl_code_edge_by_target"]
     );
-    let source = backend.table_columns("gl_code_edge").unwrap();
-    let copy = backend.table_columns("gl_code_edge_by_target").unwrap();
-    assert_eq!(copy, source);
-    assert_eq!(
-        backend.table_sort_key("gl_code_edge_by_target").unwrap()[1],
-        "target_id"
-    );
+    let source = &catalog.table_facts("gl_code_edge").unwrap().columns;
+    let copy = catalog.table_facts("gl_code_edge_by_target").unwrap();
+    assert_eq!(&copy.columns, source);
+    assert_eq!(copy.sort_key[1], "target_id");
     let storage = from_ontology::schema(&ontology).unwrap();
     assert_eq!(
         storage.dependencies()["gl_code_edge_by_target"],
@@ -84,7 +81,8 @@ fn writer_catalog_tracks_exact_node_mapping_routes() {
 fn materialized_bindings_resolve_graph_identities_and_source_columns() {
     let model = from_ontology::clickhouse(&overlay_ontology("denorm_approved")).unwrap();
     let approved = model
-        .materialized_joins()
+        .catalog()
+        .joins()
         .iter()
         .find(|binding| binding.table == "gl_denorm_approved")
         .unwrap();
@@ -95,7 +93,8 @@ fn materialized_bindings_resolve_graph_identities_and_source_columns() {
     let approved_project_model =
         from_ontology::clickhouse(&overlay_ontology("denorm_approved_project")).unwrap();
     let approved_project = approved_project_model
-        .materialized_joins()
+        .catalog()
+        .joins()
         .iter()
         .find(|binding| binding.table == "gl_denorm_approved_project")
         .unwrap();
@@ -112,8 +111,8 @@ fn materialized_bindings_resolve_graph_identities_and_source_columns() {
         ]
     );
 
-    for binding in model.materialized_joins() {
-        let columns = model.table_columns(&binding.table).unwrap();
+    for binding in model.catalog().joins() {
+        let columns = &model.catalog().table_facts(&binding.table).unwrap().columns;
         let has_column = |name: &str| columns.contains(name);
         for node in &binding.nodes {
             assert!(has_column(&node.identity_column));
@@ -210,13 +209,9 @@ fn keeps_extraction_sources_separate_from_query_columns() {
         .source;
     assert!(matches!(source, FieldSource::DatabaseColumn(source) if source == "target_project_id"));
     assert_eq!(model.catalog().column(property), Some("project_id"));
-    let backend = &model;
-    assert!(backend.table_column_type(table, "project_id").is_some());
-    assert!(
-        backend
-            .table_column_type(table, "target_project_id")
-            .is_none()
-    );
+    let types = &model.catalog().table_facts(table).unwrap().column_types;
+    assert!(types.contains_key("project_id"));
+    assert!(!types.contains_key("target_project_id"));
 }
 
 #[test]
@@ -227,7 +222,7 @@ fn exposes_storage_columns_as_query_identifiers() {
     let table = model.catalog().table_of(entity).unwrap();
 
     assert_eq!(model.catalog().column(property), Some("when"));
-    let columns = model.table_columns(table).unwrap();
+    let columns = &model.catalog().table_facts(table).unwrap().columns;
     assert!(columns.contains("when"));
     assert!(!columns.contains("`when`"));
 }

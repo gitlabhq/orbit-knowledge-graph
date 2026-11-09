@@ -47,7 +47,9 @@ pub(crate) fn property_value(
 
 pub(crate) fn sort_key<'m>(model: &'m impl RelationalModel, table: &str) -> Result<&'m [String]> {
     model
-        .table_sort_key(table)
+        .catalog()
+        .table_facts(table)
+        .map(|facts| facts.sort_key.as_slice())
         .filter(|key| !key.is_empty())
         .ok_or_else(|| {
             QueryError::Lowering(format!(

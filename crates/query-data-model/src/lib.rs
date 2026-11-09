@@ -24,8 +24,6 @@ pub use implementations::clickhouse::facts::{
 };
 pub use implementations::relational::PathColumn;
 pub use implementations::relational::RelationshipRoute;
-pub use models::orbit::{
-    ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, PropertyRealization,
-};
+pub use models::orbit::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
 pub use packages::Packages;
-pub use query_model::{QueryFacts, QueryModel};
+pub use query_model::QueryModel;

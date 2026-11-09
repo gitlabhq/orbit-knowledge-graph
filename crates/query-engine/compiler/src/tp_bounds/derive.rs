@@ -118,10 +118,12 @@ fn nodes(
             let lookups: Vec<TpLookup> = keys
                 .iter()
                 .filter_map(|key| {
-                    let (table, column) = model.traversal_path_lookup(&key.entity, key.kind)?;
+                    let catalog = model.catalog();
+                    let entity = catalog.graph().entity_id(&key.entity)?;
+                    let lookup = catalog.path_lookup(entity, key.kind)?;
                     Some(TpLookup {
-                        source_table: table.to_string(),
-                        key_column: column.to_string(),
+                        source_table: lookup.table.clone(),
+                        key_column: catalog.column(lookup.property)?.to_string(),
                         value: key.value.clone(),
                     })
                 })

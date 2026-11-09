@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use ontology::{EdgeVariantScope, RequiredRole};
+use ontology::{EdgeVariantScope, RequiredRole, TraversalPathKind};
 
-use super::RelationalFacts;
+use super::{RelationalFacts, TableFacts};
 use crate::catalog::{Catalog, Lookup, Redaction, StorageBackend};
 use crate::{
-    EntityId, ForeignKey, PropertyId, RelationshipId, RelationshipVariant, RelationshipVariantId,
+    DenormalizedKey, DenormalizedProperty, EntityId, ForeignKey, MaterializedJoin, PropertyId,
+    RelationshipId, RelationshipVariant, RelationshipVariantId, TraversalPathLookup,
 };
 
 /// One edge table of a relationship, with the variants it stores.
@@ -188,5 +189,51 @@ where
         self.stores()
             .find_map(|(_, facts)| facts.relational().default_edge_table())
             .map(|table| table.name.as_str())
+    }
+
+    /// The facts of a table on any store of the connection.
+    pub fn table_facts(&self, name: &str) -> Option<&TableFacts> {
+        self.stores().find_map(|(_, facts)| facts.table(name))
+    }
+
+    /// The copies of a table that store the same rows in another sort order.
+    pub fn copies_of(&self, table: &str) -> Vec<&str> {
+        self.stores()
+            .flat_map(|(_, facts)| facts.copies_of(table))
+            .collect()
+    }
+
+    pub fn joins(&self) -> &[MaterializedJoin] {
+        self.stores()
+            .map(|(_, facts)| facts.joins())
+            .find(|joins| !joins.is_empty())
+            .unwrap_or_default()
+    }
+
+    pub fn denormalized(&self, key: DenormalizedKey) -> Option<&DenormalizedProperty> {
+        self.stores().next()?.1.denormalized(key)
+    }
+
+    pub fn text_index(&self, property: PropertyId) -> bool {
+        self.home(self.graph().property(property).entity)
+            .is_some_and(|(_, facts)| facts.text_index(property))
+    }
+
+    pub fn null_as_epoch(&self, property: PropertyId) -> bool {
+        self.home(self.graph().property(property).entity)
+            .is_some_and(|(_, facts)| facts.null_as_epoch(property))
+    }
+
+    pub fn high_fan_out(&self, entity: EntityId) -> bool {
+        self.home(entity)
+            .is_some_and(|(_, facts)| facts.high_fan_out(entity))
+    }
+
+    pub fn path_lookup(
+        &self,
+        entity: EntityId,
+        kind: TraversalPathKind,
+    ) -> Option<&TraversalPathLookup> {
+        self.home(entity)?.1.path_lookup(entity, kind)
     }
 }

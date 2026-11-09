@@ -92,7 +92,10 @@ impl<'p> Arm<'p> {
             .flatten()
             .map(|property| {
                 let declared = graph.property(*property);
-                let epoch = model.null_as_epoch(*property).then_some(declared.data_type);
+                let epoch = model
+                    .catalog()
+                    .null_as_epoch(*property)
+                    .then_some(declared.data_type);
                 (declared.name.as_str(), epoch)
             })
             .collect();

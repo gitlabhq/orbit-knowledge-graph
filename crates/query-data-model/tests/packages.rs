@@ -84,7 +84,10 @@ fn routing_facts(model: &ClickHouseDataModel) -> Vec<String> {
         tables.extend(table.clone());
         facts.push(format!("{} table {table:?}", entity.name));
         for kind in [TraversalPathKind::Id, TraversalPathKind::FullPath] {
-            let lookup = model.traversal_path_lookup(&entity.name, kind);
+            let lookup = catalog.path_lookup(entity.id, kind).map(|lookup| {
+                let column = catalog.column(lookup.property);
+                (lookup.table.as_str(), column)
+            });
             facts.push(format!("{} {kind:?} lookup {lookup:?}", entity.name));
         }
     }
@@ -105,16 +108,16 @@ fn routing_facts(model: &ClickHouseDataModel) -> Vec<String> {
             ));
         }
     }
-    for join in model.materialized_joins() {
+    for join in catalog.joins() {
         facts.push(format!("join {} {:?}", join.table, join.sources));
     }
     for table in tables {
-        facts.push(format!(
-            "{table} copies {:?}",
-            model.equivalent_layouts(&table)
-        ));
-        let columns: std::collections::BTreeSet<_> =
-            model.table_columns(&table).into_iter().flatten().collect();
+        facts.push(format!("{table} copies {:?}", catalog.copies_of(&table)));
+        let columns: std::collections::BTreeSet<_> = catalog
+            .table_facts(&table)
+            .into_iter()
+            .flat_map(|facts| &facts.columns)
+            .collect();
         facts.push(format!("{table} columns {columns:?}"));
     }
     facts

@@ -42,8 +42,7 @@ pub(super) fn epoch(
         let Some((_, entity, property)) = node_property(query, fact.left) else {
             continue;
         };
-        let epoch_null =
-            matches!(fact.left, Expr::Property { property, .. } if model.null_as_epoch(property));
+        let epoch_null = matches!(fact.left, Expr::Property { property, .. } if model.catalog().null_as_epoch(property));
         let early = fact.literals().iter().any(|literal| match literal {
             Literal::String(text) | Literal::Temporal(text) => at_or_before_epoch(text),
             _ => false,

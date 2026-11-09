@@ -90,6 +90,44 @@ impl RelationalFacts for ClickHouseStore {
     fn table(&self, name: &str) -> Option<&TableFacts> {
         self.tables.get(name)
     }
+
+    fn text_index(&self, property: PropertyId) -> bool {
+        self.column(property)
+            .is_some_and(|column| column.indexes.contains(&IndexKind::Text))
+    }
+
+    fn null_as_epoch(&self, property: PropertyId) -> bool {
+        self.column(property)
+            .is_some_and(|column| column.null_as_epoch)
+    }
+
+    fn high_fan_out(&self, entity: EntityId) -> bool {
+        ClickHouseStore::high_fan_out(self, entity)
+    }
+
+    fn denormalized(&self, key: DenormalizedKey) -> Option<&DenormalizedProperty> {
+        self.denormalized.property(key)
+    }
+
+    fn path_lookup(
+        &self,
+        entity: EntityId,
+        kind: TraversalPathKind,
+    ) -> Option<&TraversalPathLookup> {
+        ClickHouseStore::path_lookup(self, entity, kind)
+    }
+
+    fn copies_of(&self, table: &str) -> Vec<&str> {
+        self.copies
+            .iter()
+            .filter(|(_, source)| source == table)
+            .map(|(copy, _)| copy.as_str())
+            .collect()
+    }
+
+    fn joins(&self) -> &[MaterializedJoin] {
+        &self.joins
+    }
 }
 
 impl StorageBackend for ClickHouse {
@@ -520,46 +558,6 @@ fn system_columns(version: Option<&str>, deleted: Option<&str>) -> Vec<(String, 
         .into_iter()
         .chain(deleted.map(|column| (column.to_string(), DataType::Bool)))
         .collect()
-}
-
-impl crate::query_model::QueryFacts for ClickHouseStore {
-    fn text_index(&self, property: PropertyId) -> bool {
-        self.column(property)
-            .is_some_and(|column| column.indexes.contains(&IndexKind::Text))
-    }
-
-    fn null_as_epoch(&self, property: PropertyId) -> bool {
-        self.column(property)
-            .is_some_and(|column| column.null_as_epoch)
-    }
-
-    fn high_fan_out(&self, entity: EntityId) -> bool {
-        ClickHouseStore::high_fan_out(self, entity)
-    }
-
-    fn denormalized(&self) -> &DenormalizedCatalog {
-        &self.denormalized
-    }
-
-    fn path_lookup(
-        &self,
-        entity: EntityId,
-        kind: TraversalPathKind,
-    ) -> Option<&TraversalPathLookup> {
-        ClickHouseStore::path_lookup(self, entity, kind)
-    }
-
-    fn copies_of<'a>(&'a self, table: &str) -> Vec<&'a str> {
-        self.copies
-            .iter()
-            .filter(|(_, source)| source == table)
-            .map(|(copy, _)| copy.as_str())
-            .collect()
-    }
-
-    fn joins(&self) -> &[MaterializedJoin] {
-        &self.joins
-    }
 }
 
 impl ClickHouseStore {

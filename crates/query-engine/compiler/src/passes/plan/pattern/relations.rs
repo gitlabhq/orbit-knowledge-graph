@@ -296,9 +296,13 @@ pub(super) fn select_edge_layouts(
     }
     for table in tables {
         let selected = std::iter::once(table.as_str())
-            .chain(model.equivalent_layouts(table))
+            .chain(model.catalog().copies_of(table))
             .min_by_key(|layout| {
-                model.table_sort_key(layout).map_or(usize::MAX, |key| {
+                let key = model
+                    .catalog()
+                    .table_facts(layout)
+                    .map(|facts| &facts.sort_key);
+                key.map_or(usize::MAX, |key| {
                     endpoints
                         .iter()
                         .filter_map(|endpoint| key.iter().position(|column| column == endpoint))

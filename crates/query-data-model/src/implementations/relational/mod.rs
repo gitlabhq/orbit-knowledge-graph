@@ -6,7 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::{Catalog, Diagnostics, StorageBackend, Store, StoreInput};
 use crate::spec::parse_word;
-use crate::{EntityId, ForeignKey, GraphCatalog, RelationshipVariantId};
+use ontology::TraversalPathKind;
+
+use crate::{
+    DenormalizedKey, DenormalizedProperty, EntityId, ForeignKey, GraphCatalog, MaterializedJoin,
+    PropertyId, RelationshipVariantId, TraversalPathLookup,
+};
 
 mod capabilities;
 mod catalog;
@@ -278,6 +283,38 @@ impl RelationalStore {
 pub trait RelationalFacts {
     fn relational(&self) -> &RelationalStore;
     fn table(&self, name: &str) -> Option<&TableFacts>;
+
+    fn text_index(&self, _property: PropertyId) -> bool {
+        false
+    }
+
+    fn null_as_epoch(&self, _property: PropertyId) -> bool {
+        false
+    }
+
+    fn high_fan_out(&self, _entity: EntityId) -> bool {
+        false
+    }
+
+    fn denormalized(&self, _key: DenormalizedKey) -> Option<&DenormalizedProperty> {
+        None
+    }
+
+    fn path_lookup(
+        &self,
+        _entity: EntityId,
+        _kind: TraversalPathKind,
+    ) -> Option<&TraversalPathLookup> {
+        None
+    }
+
+    fn copies_of(&self, _table: &str) -> Vec<&str> {
+        Vec::new()
+    }
+
+    fn joins(&self) -> &[MaterializedJoin] {
+        &[]
+    }
 
     fn check_attribute_columns(
         &self,

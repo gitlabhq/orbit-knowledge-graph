@@ -48,7 +48,7 @@ impl NodePlan {
             node_ids: anchor.pinned.clone(),
             id_range: anchor.range,
             has_traversal_path,
-            read_scope: match (has_traversal_path, model.high_fan_out(entity)) {
+            read_scope: match (has_traversal_path, catalog.high_fan_out(entity)) {
                 (false, _) => ReadScope::Unscoped,
                 (true, false) => ReadScope::Scoped,
                 (true, true) => ReadScope::HighFanOut,
@@ -61,7 +61,16 @@ impl NodePlan {
                 .filter(|name| stored(name))
                 .collect(),
             emit_select: true,
-            null_as_epoch: model.null_as_epoch_properties(entity),
+            null_as_epoch: graph
+                .entity(entity)
+                .properties
+                .iter()
+                .filter(|property| catalog.null_as_epoch(**property))
+                .map(|property| {
+                    let property = graph.property(*property);
+                    (property.name.clone(), property.data_type)
+                })
+                .collect(),
         }
     }
 

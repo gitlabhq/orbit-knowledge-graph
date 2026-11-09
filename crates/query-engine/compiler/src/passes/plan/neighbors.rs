@@ -200,7 +200,7 @@ impl<'p> Neighbors<'p> {
                         property: filter.property?,
                         direction,
                     };
-                    let facts = model.denormalized().property(key)?;
+                    let facts = model.catalog().denormalized(key)?;
                     let values = filter.test.tags(&facts.tag_key)?;
                     Some(Tag { facts, values })
                 };
@@ -289,7 +289,7 @@ impl<'p> Neighbors<'p> {
                 let alias = query.name(binding);
                 let declared = graph.property(property);
                 let column = Column::new(alias, &declared.name);
-                let value = match alias == center.alias && model.null_as_epoch(property) {
+                let value = match alias == center.alias && model.catalog().null_as_epoch(property) {
                     true => OutputValue::EpochAsNull(column, declared.data_type),
                     false => OutputValue::Column(column),
                 };

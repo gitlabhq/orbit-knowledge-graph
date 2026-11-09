@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ontology::{DataType, TraversalPathKind};
+use ontology::DataType;
 use serde::{Deserialize, Serialize};
 
 use super::DuckDb;
@@ -137,40 +137,4 @@ fn entity_schemas<'a>(input: &'a StoreInput<'_, DuckDb>) -> impl Iterator<Item =
             });
         TableSchema::new(&source.table, columns)
     })
-}
-
-impl crate::query_model::QueryFacts for DuckDbStore {
-    fn text_index(&self, _property: crate::PropertyId) -> bool {
-        false
-    }
-
-    fn null_as_epoch(&self, _property: crate::PropertyId) -> bool {
-        false
-    }
-
-    fn high_fan_out(&self, _entity: crate::EntityId) -> bool {
-        false
-    }
-
-    fn denormalized(&self) -> &crate::DenormalizedCatalog {
-        static EMPTY: std::sync::LazyLock<crate::DenormalizedCatalog> =
-            std::sync::LazyLock::new(crate::DenormalizedCatalog::default);
-        &EMPTY
-    }
-
-    fn path_lookup(
-        &self,
-        _entity: crate::EntityId,
-        _kind: TraversalPathKind,
-    ) -> Option<&crate::TraversalPathLookup> {
-        None
-    }
-
-    fn copies_of<'a>(&'a self, _table: &str) -> Vec<&'a str> {
-        Vec::new()
-    }
-
-    fn joins(&self) -> &[crate::MaterializedJoin] {
-        &[]
-    }
 }
