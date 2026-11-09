@@ -61,58 +61,64 @@ RETURN u.username, mr.title LIMIT 10
 ```plantuml
 @startuml
 set separator none
-skinparam componentStyle rectangle
 skinparam shadowing false
+skinparam componentStyle rectangle
 skinparam nodesep 60
 skinparam ranksep 70
-skinparam linetype polyline
+skinparam component {
+  BackgroundColor<<qdm>> #E3F2FD
+  BorderColor<<qdm>> #1565C0
+  BackgroundColor<<engine>> #FFF3E0
+  BorderColor<<engine>> #E65100
+}
+hide stereotype
 
-package "Package registry" {
+package "Package registry" as REG {
   [gitlab.*] as P1
   [integration.jira] as P2
   [integration.slack] as P3
   [tenant.agent_memory] as P4
 }
 
-package "query-data-model" {
-  [Loader] as L
-  [Model\n(graph, access, sources,\nstores, guards, ModelId)] as M
-  [Physical catalogs\n(one per connection)] as PC
-  [Logical catalog] as LC
-  [Surfaces\n(GQL)] as S
-  [Shared tracking] as T
-}
+[Loader] <<qdm>> as L
+[Model\n(graph, access, sources,\nstores, guards, ModelId)] <<qdm>> as M
+[Surfaces\n(GQL)] <<qdm>> as S
+[Logical catalog] <<qdm>> as LC
+[Physical catalogs\n(one per connection)] <<qdm>> as PC
+[Shared tracking] <<qdm>> as T
 
-package "Query engine" {
-  [Compiler phases] as E
-}
-
-package "Indexing engine (ADR 023)" {
-  [Planners and workers] as IX
-}
+[Query engine\n(compiler phases)] <<engine>> as E
+[Indexing engine\n(ADR 023)] <<engine>> as IX
 
 database "ClickHouse\ngraph store" as CH
 database "DuckDB\nlocal store" as DD
 node "Orbit Next\ncode service" as ON
 node "Data Extraction\nService" as DES
 
-P1 --> L
-P2 --> L
-P3 --> L
-P4 --> L
+P1 -[hidden]right- P2
+P2 -[hidden]right- P3
+P3 -[hidden]right- P4
+
+REG --> L : package versions
 L --> M : checked once
 M --> LC
 M --> PC
-S --> LC : builds logical plans
-E -down-> PC : builds and rewrites\nphysical plans
+E --> S : parse
+S --> LC : logical plans
+E --> PC : builds and rewrites\nphysical plans
+IX --> M : reads sources\nand storage
 LC ..> T
 PC ..> T
 PC --> CH : SQL
 PC --> DD : SQL
-PC --> ON : gRPC request
-PC --> DES : live API call
-IX --> M : reads sources\nand storage
+PC --> ON : gRPC
+PC --> DES : live call
 IX --> CH : writes rows
+
+legend right
+  |<#E3F2FD> query-data-model |
+  |<#FFF3E0> engines |
+endlegend
 @enduml
 ```
 
@@ -150,9 +156,6 @@ package "gitlab.code_review" {
     source: siphon
     tables, query, column map
   }
-}
-
-package "gitlab.ci" {
   class "service" as SV {
     lookups for virtual
     properties
@@ -163,7 +166,6 @@ A --> G : refers to
 ST --> G : binds
 SO --> G : feeds
 SV --> G : provides
-note right of G : The graph knows\nnothing about tables,\nsources or access.
 @enduml
 ```
 
@@ -256,16 +258,16 @@ skinparam componentStyle rectangle
 skinparam nodesep 50
 skinparam ranksep 90
 
-component "Logical catalog" {
+component "Logical catalog" as LCAT {
   [entities, follow, filter,\naggregate, paths, neighbors] as LO
 }
-component "Relational catalog\n(ClickHouse, DuckDB)" {
+component "Relational catalog\n(ClickHouse, DuckDB)" as RCAT {
   [scan, read, join, filter,\nlatest, share, limit] as RO
 }
-component "Code catalog\n(Orbit Next)" {
+component "Code catalog\n(Orbit Next)" as CCAT {
   [repositories, languages,\nprefilter, structural, top] as CO
 }
-component "Live catalog\n(Data Extraction Service)" {
+component "Live catalog\n(Data Extraction Service)" as VCAT {
   [call, push-down filters,\nwindow, page, limit] as VO
 }
 rectangle TH [
@@ -275,10 +277,10 @@ handles, owners, outputs, scopes
 rewrite contract
 ]
 
-LO .down.> TH
-RO .down.> TH
-CO .down.> TH
-VO .down.> TH
+LCAT .down.> TH
+RCAT .down.> TH
+CCAT .down.> TH
+VCAT .down.> TH
 note right of TH
   Every catalog implements Catalog, Construct and Render.
   Tracking proves structure; each language proves its own rules.
