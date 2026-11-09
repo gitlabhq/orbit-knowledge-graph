@@ -30,7 +30,8 @@ const DELETED_NAMESPACE_ID: i64 = 100;
 #[tokio::test]
 async fn deletes_namespace_data_and_marks_schedule_complete() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+        .expect("embedded catalog must load");
 
     seed_graph_data(&context).await;
     seed_sdlc_checkpoints(&context).await;
@@ -38,7 +39,7 @@ async fn deletes_namespace_data_and_marks_schedule_complete() {
     seed_deletion_schedule(&context).await;
     seed_namespace_as_deleted(&context).await;
 
-    run_deletion_handler(&context, &ontology).await;
+    run_deletion_handler(&context, &catalog).await;
 
     assert_graph_data_deleted(&context).await;
     assert_sibling_graph_data_retained(&context).await;
@@ -123,11 +124,14 @@ async fn seed_namespace_as_deleted(context: &TestContext) {
         .await;
 }
 
-async fn run_deletion_handler(context: &TestContext, ontology: &ontology::Ontology) {
+async fn run_deletion_handler(
+    context: &TestContext,
+    catalog: &query_data_model::Catalog<query_data_model::ClickHouse>,
+) {
     let graph = Arc::new(context.config.build_client("graph"));
     let datalake = Arc::new(context.config.build_client("graph"));
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
-        datalake, graph, ontology,
+        datalake, graph, catalog,
     ));
     let handler = NamespaceDeletionHandler::new(
         store,
@@ -254,12 +258,13 @@ const LIVE_CURRENT_PATH: &str = "1/300/7/";
 #[tokio::test]
 async fn reconcile_tombstones_old_path_rows_left_by_a_move() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+        .expect("embedded catalog must load");
 
     seed_moved_and_live_graph_rows(&context).await;
     seed_current_routes(&context).await;
 
-    reconcile_root(&context, &ontology, ROOT_PATH).await;
+    reconcile_root(&context, &catalog, ROOT_PATH).await;
 
     assert_active_row_count(&context, &t("gl_project"), MOVED_OLD_PATH, 0).await;
     assert_active_row_count(&context, &t("gl_edge"), MOVED_OLD_PATH, 0).await;
@@ -270,11 +275,12 @@ async fn reconcile_tombstones_old_path_rows_left_by_a_move() {
 #[tokio::test]
 async fn reconcile_is_a_noop_when_root_has_no_current_routes() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+        .expect("embedded catalog must load");
 
     seed_moved_and_live_graph_rows(&context).await;
 
-    reconcile_root(&context, &ontology, ROOT_PATH).await;
+    reconcile_root(&context, &catalog, ROOT_PATH).await;
 
     assert_active_row_count(&context, &t("gl_project"), LIVE_CURRENT_PATH, 1).await;
     assert_active_row_count(&context, &t("gl_project"), MOVED_OLD_PATH, 1).await;
@@ -288,14 +294,15 @@ const CONTROL_PROJECT_ID: i64 = 2;
 #[tokio::test]
 async fn reconcile_tombstones_old_path_after_move() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+        .expect("embedded catalog must load");
 
     seed_duplicated_across_old_and_new_path(&context).await;
     seed_routes_after_transfer(&context).await;
 
     assert_active_id_count(&context, TRANSFERRED_PROJECT_ID, 2).await;
 
-    reconcile_root(&context, &ontology, ROOT_PATH).await;
+    reconcile_root(&context, &catalog, ROOT_PATH).await;
 
     assert_active_row_count(&context, &t("gl_project"), TRANSFERRED_OLD_PATH, 0).await;
     assert_active_row_count(&context, &t("gl_edge"), TRANSFERRED_OLD_PATH, 0).await;
@@ -304,7 +311,7 @@ async fn reconcile_tombstones_old_path_after_move() {
     assert_active_id_count(&context, TRANSFERRED_PROJECT_ID, 1).await;
     assert_active_id_count(&context, CONTROL_PROJECT_ID, 1).await;
 
-    reconcile_root(&context, &ontology, ROOT_PATH).await;
+    reconcile_root(&context, &catalog, ROOT_PATH).await;
 
     assert_active_id_count(&context, TRANSFERRED_PROJECT_ID, 1).await;
     assert_active_id_count(&context, CONTROL_PROJECT_ID, 1).await;
@@ -317,7 +324,8 @@ const LARGE_ROOT_STALE_PREFIX: &str = "1/400/20/";
 #[tokio::test]
 async fn reconcile_handles_route_sets_larger_than_a_request_uri() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+        .expect("embedded catalog must load");
 
     context
         .execute(&format!(
@@ -351,7 +359,7 @@ async fn reconcile_handles_route_sets_larger_than_a_request_uri() {
         ))
         .await;
 
-    reconcile_root(&context, &ontology, LARGE_ROOT_PATH).await;
+    reconcile_root(&context, &catalog, LARGE_ROOT_PATH).await;
 
     assert_active_row_count(&context, &t("gl_project"), LARGE_ROOT_STALE_PREFIX, 0).await;
     assert_active_row_count(&context, &t("gl_project"), LARGE_ROOT_CURRENT_PREFIX, 3000).await;
@@ -433,12 +441,13 @@ async fn index_moved_root(context: &TestContext) {
 }
 
 async fn run_namespace_deletion_scheduler(context: &TestContext) {
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+        .expect("embedded catalog must load");
     let graph = Arc::new(context.config.build_client("graph"));
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
         Arc::new(context.config.build_client("graph")),
         graph.clone(),
-        &ontology,
+        &catalog,
     ));
     NamespaceDeletionScheduler::new(
         store,
@@ -544,11 +553,15 @@ async fn seed_current_routes(context: &TestContext) {
         .await;
 }
 
-async fn reconcile_root(context: &TestContext, ontology: &ontology::Ontology, root: &str) {
+async fn reconcile_root(
+    context: &TestContext,
+    catalog: &query_data_model::Catalog<query_data_model::ClickHouse>,
+    root: &str,
+) {
     let graph = Arc::new(context.config.build_client("graph"));
     let datalake = Arc::new(context.config.build_client("graph"));
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
-        datalake, graph, ontology,
+        datalake, graph, catalog,
     ));
 
     let outcomes = store

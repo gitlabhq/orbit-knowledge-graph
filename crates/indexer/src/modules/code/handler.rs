@@ -543,8 +543,10 @@ mod tests {
 
             let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
             let table_names = Arc::new(
-                crate::modules::code::config::CodeTableNames::from_ontology(&ontology)
-                    .expect("code tables must resolve"),
+                crate::modules::code::config::CodeTableNames::from_catalog(
+                    &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+                )
+                .expect("code tables must resolve"),
             );
 
             let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");

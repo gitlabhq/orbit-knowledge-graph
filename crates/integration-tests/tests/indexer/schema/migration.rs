@@ -1214,8 +1214,10 @@ impl MigrationScenario {
     }
 
     async fn run_code_stale_sweep(&self) {
-        let table_names =
-            CodeTableNames::from_ontology(&self.ontology).expect("code tables must resolve");
+        let table_names = CodeTableNames::from_catalog(
+            &query_data_model::from_ontology::clickhouse(&self.ontology).unwrap(),
+        )
+        .expect("code tables must resolve");
         let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
             self.ctx.config.build_client("graph"),
         )));

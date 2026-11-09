@@ -6,9 +6,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use futures::StreamExt;
-use ontology::{PathResolution, ReindexSource};
 use orbit_log_fields::{error, warn};
 use orbit_utils::traversal_path::{TOP_LEVEL_PREFIX_REGEX, TraversalPath};
+use query_data_model::catalog::Sources;
+use query_data_model::catalog::sources::{PathResolution, ReindexTrigger};
 
 use crate::clickhouse::{ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT};
 use crate::orchestrator::dispatch::NamespaceDispatchRequest;
@@ -54,12 +55,12 @@ pub(super) struct DatalakeChangeDetector {
 impl DatalakeChangeDetector {
     pub(super) fn new(
         datalake: ArrowClickHouseClient,
-        ontology: &ontology::Ontology,
+        sources: &Sources,
         metrics: ScheduledTaskMetrics,
     ) -> Self {
         Self {
             datalake: Arc::new(datalake),
-            query: NamespaceChangeQuery::from_ontology(ontology),
+            query: NamespaceChangeQuery::from_sources(sources),
             metrics,
         }
     }
@@ -228,12 +229,12 @@ struct NamespaceChangeQuery {
 }
 
 impl NamespaceChangeQuery {
-    fn from_ontology(ontology: &ontology::Ontology) -> Self {
-        Self::new(ontology.reindex_sources())
+    fn from_sources(sources: &Sources) -> Self {
+        Self::new(sources.reindex_triggers().iter().cloned())
     }
 
-    fn new(reindex_sources: impl IntoIterator<Item = ReindexSource>) -> Self {
-        let sources: BTreeSet<ReindexSource> = reindex_sources.into_iter().collect();
+    fn new(reindex_sources: impl IntoIterator<Item = ReindexTrigger>) -> Self {
+        let sources: BTreeSet<ReindexTrigger> = reindex_sources.into_iter().collect();
         let branches = sources
             .iter()
             .map(|source| BranchQuery {
@@ -252,7 +253,7 @@ impl NamespaceChangeQuery {
 /// Renders `select` over the changed rows of every source, as `changed`, and the enabled roots, as `enabled`.
 pub(super) fn render_change_query(
     select: &str,
-    reindex_sources: &BTreeSet<ReindexSource>,
+    reindex_sources: &BTreeSet<ReindexTrigger>,
 ) -> String {
     let branches = reindex_sources
         .iter()
@@ -265,14 +266,14 @@ pub(super) fn render_change_query(
         .replace("{{branches}}", &branches)
 }
 
-fn render_change_branch(source_table: &ReindexSource) -> String {
+fn render_change_branch(source_table: &ReindexTrigger) -> String {
     let path = path_expression(&source_table.traversal_path);
 
     CHANGE_BRANCH_SQL
         .replace("{{root_path}}", &root_path_expression(&path))
         .replace("{{target}}", &source_table.target)
         .replace("{{table}}", &source_table.table)
-        .replace("{{watermark_column}}", ontology::siphon_watermark_column())
+        .replace("{{watermark_column}}", &source_table.watermark)
         .replace("{{path}}", &path)
         .replace("{{root_namespace_path_pattern}}", TOP_LEVEL_PREFIX_REGEX)
 }
@@ -347,11 +348,12 @@ mod tests {
     use super::*;
     use crate::orchestrator::dispatch::enabled_namespaces::ENABLED_NAMESPACE_TABLE;
 
-    fn column_source(table: &str) -> ReindexSource {
-        ReindexSource {
+    fn column_source(table: &str) -> ReindexTrigger {
+        ReindexTrigger {
             table: table.to_string(),
             target: "WorkItem".to_string(),
             traversal_path: PathResolution::Column("traversal_path".to_string()),
+            watermark: "_siphon_watermark".to_string(),
         }
     }
 
@@ -430,7 +432,7 @@ mod tests {
 
     fn detector(
         client: Arc<StubClient>,
-        sources: impl IntoIterator<Item = ReindexSource>,
+        sources: impl IntoIterator<Item = ReindexTrigger>,
     ) -> DatalakeChangeDetector {
         DatalakeChangeDetector {
             datalake: client,
@@ -579,13 +581,14 @@ INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#,
 
     #[test]
     fn change_query_renders_dictionary_lookup() {
-        let query = NamespaceChangeQuery::new([ReindexSource {
+        let query = NamespaceChangeQuery::new([ReindexTrigger {
             table: "siphon_projects".to_string(),
             target: "Project".to_string(),
             traversal_path: PathResolution::Dictionary {
                 dictionary: "project_traversal_paths_dict".to_string(),
                 key_column: "id".to_string(),
             },
+            watermark: "_siphon_watermark".to_string(),
         }]);
         assert!(query.combined_sql.contains(
             "dictGetOrDefault('project_traversal_paths_dict', 'traversal_path', toUInt64(id), '0/')"
@@ -620,9 +623,9 @@ INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#,
     }
 
     #[test]
-    fn ontology_reindex_sources_cover_data_tables_not_the_enabled_table() {
-        let ontology = ontology::Ontology::load_embedded().unwrap();
-        let sources = ontology.reindex_sources();
+    fn model_reindex_triggers_cover_data_tables_not_the_enabled_table() {
+        let model = query_data_model::Packages::embedded().load().unwrap();
+        let sources = model.sources().reindex_triggers();
         let tables: BTreeSet<&str> = sources.iter().map(|s| s.table.as_str()).collect();
         assert!(tables.contains("work_items"));
         assert!(!tables.contains(ENABLED_NAMESPACE_TABLE));

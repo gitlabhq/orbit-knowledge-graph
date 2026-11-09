@@ -5,8 +5,6 @@ use std::time::Instant;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
 use clickhouse_client::FromArrowColumn;
-use ontology::EtlScope;
-use ontology::pipelines::PipelineDescriptor;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Histogram, ObservableGauge};
 use orbit_migrations::catalog::OntologyCatalog;
@@ -14,6 +12,8 @@ use orbit_migrations::version::read_active_version;
 use orbit_observability::indexer::sdlc;
 use orbit_server_config::{NamespaceFreshnessConfig, ScheduleConfiguration};
 use parking_lot::Mutex;
+use query_data_model::Model;
+use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor};
 
 use super::datalake::render_change_query;
 use crate::checkpoint::{
@@ -134,7 +134,7 @@ impl NamespaceFreshness {
 
     async fn latest_changes(
         &self,
-        ontology: &ontology::Ontology,
+        model: &Model,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<LatestChanges, TaskError> {
@@ -142,7 +142,7 @@ impl NamespaceFreshness {
             .datalake
             .query(&render_change_query(
                 FRESHNESS_QUERY_SQL,
-                &ontology.reindex_sources(),
+                model.sources().reindex_triggers(),
             ))
             .param("lower", from.format(TIMESTAMP_FORMAT).to_string())
             .param("upper", to.format(TIMESTAMP_FORMAT).to_string())
@@ -189,12 +189,13 @@ impl NamespaceFreshness {
         else {
             return Ok(());
         };
-        let ontology = self
+        let model = self
             .catalog
             .load(version)
             .await
             .map_err(TaskError::new)?
-            .load_ontology()
+            .packages()
+            .load()
             .map_err(TaskError::new)?;
         let checkpoint_store =
             ClickHouseCheckpointStore::for_version(Arc::new(self.graph.clone()), version);
@@ -205,7 +206,7 @@ impl NamespaceFreshness {
             load_checkpoints(&checkpoint_store, NAMESPACE_KEY_PREFIX),
             load_checkpoints(&checkpoint_store, &global_prefix),
             self.enabled_roots(),
-            self.latest_changes(&ontology, scanned_from, now),
+            self.latest_changes(&model, scanned_from, now),
         )?;
         let state = SyncState {
             now,
@@ -219,7 +220,7 @@ impl NamespaceFreshness {
         };
 
         let mut oldest_sync = Vec::new();
-        for plan in ontology.pipeline_descriptors() {
+        for plan in model.sources().descriptors(model.graph()) {
             let synced_until = match plan.scope {
                 EtlScope::Namespaced => self.record_plan_lag(&plan, &state),
                 EtlScope::Global => global_synced_until(&plan, &state),

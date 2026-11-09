@@ -15,6 +15,7 @@ use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{NAMESPACE_DELETION_TOPIC, NamespaceDeletionRequest};
 use crate::types::Event;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
+use query_data_model::{Catalog, ClickHouse};
 
 const NAMESPACE_DELETION_CONCURRENCY_GROUP: &str =
     IndexerModule::NamespaceDeletion.concurrency_group();
@@ -33,7 +34,7 @@ pub fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     clients: &ClickHouseClients,
-    ontology: &ontology::Ontology,
+    catalog: &Catalog<ClickHouse>,
 ) -> Result<(), HandlerInitError> {
     let graph_client = Arc::new(clients.graph.clone());
     let datalake_client = Arc::new(clients.datalake.clone());
@@ -41,7 +42,7 @@ pub fn register_handlers(
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
         datalake_client,
         graph_client,
-        ontology,
+        catalog,
     ));
 
     let policy = namespace_deletion_topic_policy()

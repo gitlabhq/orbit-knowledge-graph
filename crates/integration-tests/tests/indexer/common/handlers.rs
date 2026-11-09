@@ -207,13 +207,13 @@ pub fn namespace_envelope_with_targets(
 pub fn stale_edge_task(
     ctx: &TestContext,
 ) -> indexer::orchestrator::scheduled::StaleEdgeReconciliation {
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog must load");
     let checkpoint_store = Arc::new(indexer::checkpoint::ClickHouseCheckpointStore::new(
         Arc::new(ctx.config.build_client("graph")),
     ));
     indexer::orchestrator::scheduled::StaleEdgeReconciliation::new(
         ctx.config.build_client("graph"),
-        &ontology,
+        &catalog,
         checkpoint_store,
         indexer::orchestrator::scheduled::ScheduledTaskMetrics::new(),
         orbit_server_config::AppConfig::embedded_defaults()

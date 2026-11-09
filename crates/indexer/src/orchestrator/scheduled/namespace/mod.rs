@@ -55,12 +55,12 @@ impl NamespaceDispatcher {
         metrics: ScheduledTaskMetrics,
         config: NamespaceDispatcherConfig,
         campaign: Arc<CampaignState>,
-        ontology: &ontology::Ontology,
+        sources: &query_data_model::catalog::Sources,
     ) -> Self {
         Self {
             detector: Arc::new(DatalakeChangeDetector::new(
                 datalake.clone(),
-                ontology,
+                sources,
                 metrics.clone(),
             )),
             reader: Arc::new(DatalakeEnabledNamespaceReader::new(datalake)),

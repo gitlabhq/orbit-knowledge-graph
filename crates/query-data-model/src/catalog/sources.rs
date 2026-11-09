@@ -143,6 +143,7 @@ pub struct ReindexTrigger {
     pub table: String,
     pub target: String,
     pub traversal_path: PathResolution,
+    pub watermark: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -380,7 +381,7 @@ impl<'a> Resolver<'a> {
                 .collect::<Vec<_>>();
             let edges = self.enrich(package, name, edges, &spec.edges);
             let columns = self.extracted_columns(entity, spec);
-            self.reindex(package, name, &spec.reindex);
+            self.reindex(package, name, &spec.reindex, item.source);
             pipelines.push(Pipeline {
                 name: name.to_string(),
                 source: item.source,
@@ -424,7 +425,7 @@ impl<'a> Resolver<'a> {
             {
                 continue;
             }
-            self.reindex(package, name, &spec.reindex);
+            self.reindex(package, name, &spec.reindex, item.source);
             for (pipeline, edge) in &spec.pipelines {
                 let extract = Extract {
                     name: pipeline,
@@ -513,7 +514,7 @@ impl<'a> Resolver<'a> {
                     format!("derived source {name} needs a template, not a generated query"),
                 );
             }
-            self.reindex(package, name, &spec.reindex);
+            self.reindex(package, name, &spec.reindex, item.source);
             let index = self.sources.derived.len();
             self.sources.derived.push(Derived {
                 name: name.to_string(),
@@ -940,7 +941,8 @@ impl<'a> Resolver<'a> {
         lookups
     }
 
-    fn reindex(&mut self, package: &str, target: &str, specs: &[ReindexSpec]) {
+    fn reindex(&mut self, package: &str, target: &str, specs: &[ReindexSpec], source: usize) {
+        let watermark = self.sources.sources[source].watermark.clone();
         for spec in specs {
             let (table, traversal_path) = match spec {
                 ReindexSpec::Table(table) => (table, PathResolution::Column(PATH_COLUMN.into())),
@@ -967,6 +969,7 @@ impl<'a> Resolver<'a> {
                 table: table.clone(),
                 target: target.to_string(),
                 traversal_path,
+                watermark: watermark.clone(),
             };
             if !self.sources.reindex.insert(trigger) {
                 self.diagnostics

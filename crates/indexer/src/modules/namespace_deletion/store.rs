@@ -15,6 +15,8 @@ use orbit_utils::traversal_path::TraversalPath;
 
 use std::sync::LazyLock;
 
+use query_data_model::{Catalog, ClickHouse};
+
 use super::lower::{self, DeletionStatement, ReconcileStatement};
 use crate::checkpoint::namespace_position_key;
 
@@ -257,13 +259,13 @@ impl ClickHouseNamespaceDeletionStore {
     pub fn new(
         datalake: Arc<ArrowClickHouseClient>,
         graph: Arc<ArrowClickHouseClient>,
-        ontology: &ontology::Ontology,
+        catalog: &Catalog<ClickHouse>,
     ) -> Self {
         Self {
             datalake,
             graph,
-            deletion_statements: lower::build_deletion_statements(ontology),
-            reconcile_statements: lower::build_reconcile_statements(ontology),
+            deletion_statements: lower::build_deletion_statements(catalog),
+            reconcile_statements: lower::build_reconcile_statements(catalog),
         }
     }
 

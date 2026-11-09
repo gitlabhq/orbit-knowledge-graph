@@ -769,8 +769,10 @@ async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_waterma
     .await;
 
     let graph_client = Arc::new(clickhouse.config.build_client("graph"));
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-    let table_names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
+    let table_names = CodeTableNames::from_catalog(
+        &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+    )
+    .expect("code tables must resolve");
     let cleaner = ClickHouseStaleDataCleaner::new(graph_client, &table_names);
 
     let watermark = Utc.with_ymd_and_hms(2026, 1, 2, 0, 0, 0).unwrap();

@@ -268,8 +268,10 @@ mod tests {
 
     #[test]
     fn node_tombstones_carry_the_unchanging_columns() {
-        let ontology = ontology::Ontology::load_embedded().expect("embedded ontology");
-        let names = CodeTableNames::from_ontology(&ontology).expect("code tables");
+        let names = CodeTableNames::from_catalog(
+            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+        )
+        .expect("code tables");
         let carried = names.immutable_columns(&names.file);
         assert!(carried.iter().any(|c| c == "path"), "{carried:?}");
         let sql = ClickHouseStaleDataCleaner::build_node_delete_query(&names.file, carried);

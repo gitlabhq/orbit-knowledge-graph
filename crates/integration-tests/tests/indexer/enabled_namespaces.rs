@@ -27,11 +27,12 @@ async fn migration_gate_skips_a_disabled_namespace_before_the_delete_merges() {
 async fn moved_entity_reconcile_skips_a_disabled_namespace_before_the_delete_merges() {
     let context = TestContext::new(&[SIPHON_SCHEMA_SQL]).await;
     disable_one_of_two_namespaces(&context).await;
-    let ontology = ontology::Ontology::load_embedded().unwrap();
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+        .expect("embedded catalog must load");
     let store = ClickHouseNamespaceDeletionStore::new(
         Arc::new(context.create_client()),
         Arc::new(context.create_client()),
-        &ontology,
+        &catalog,
     );
 
     let roots = store.enabled_namespace_roots().await.unwrap();

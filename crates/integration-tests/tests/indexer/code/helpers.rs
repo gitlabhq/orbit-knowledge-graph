@@ -75,8 +75,9 @@ impl CodeIndexingDeps {
             &graph_client,
         )));
         let table_names = Arc::new(
-            CodeTableNames::from_ontology(
-                &ontology::Ontology::load_embedded().expect("ontology must load"),
+            CodeTableNames::from_catalog(
+                &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+                    .expect("embedded catalog must load"),
             )
             .expect("code tables must resolve"),
         );
@@ -146,8 +147,12 @@ impl CodeIndexingDeps {
         lock_ttl: std::time::Duration,
     ) -> CodeIndexingTaskHandler {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let table_names =
-            Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
+        let table_names = Arc::new(
+            CodeTableNames::from_catalog(
+                &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+            )
+            .expect("code tables must resolve"),
+        );
         let graph_client = Arc::new(self.clickhouse_config.build_client("graph"));
         let stale_data_cleaner =
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));

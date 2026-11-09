@@ -72,7 +72,7 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
     let checkpoint_store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
         ctx.config.build_client("graph"),
     )));
-    let ontology = ontology::Ontology::load_embedded().unwrap();
+    let model = query_data_model::Packages::embedded().load().unwrap();
     let dispatcher = NamespaceDispatcher::new(
         services.nats,
         ctx.config.build_client("graph"),
@@ -83,7 +83,7 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
             .tasks
             .namespace,
         Arc::new(indexer::campaign::CampaignState::new()),
-        &ontology,
+        model.sources(),
     );
 
     dispatcher.run().await.unwrap();

@@ -4,8 +4,9 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use ontology::{EdgeMapping, NodeRef, NodeRefKind, Ontology};
 use orbit_log_fields::{info, warn};
+use query_data_model::catalog::sources::{EdgeMapping, Endpoint, EtlScope, Writer};
+use query_data_model::{Catalog, ClickHouse, EntityId};
 
 use crate::checkpoint::{CheckpointStore, NAMESPACE_KEY_PREFIX, namespace_id_from_key};
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
@@ -39,12 +40,12 @@ pub struct StaleEdgeReconciliation {
 impl StaleEdgeReconciliation {
     pub fn new(
         graph: ArrowClickHouseClient,
-        ontology: &Ontology,
+        catalog: &Catalog<ClickHouse>,
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: ScheduledTaskMetrics,
         config: StaleEdgeReconciliationConfig,
     ) -> Self {
-        let groups = group_mutable_edges_by_emitting_node(ontology);
+        let groups = group_mutable_edges_by_emitting_node(catalog);
         let kinds: Vec<&str> = groups
             .iter()
             .flat_map(|group| group.relationship_kinds.iter().map(String::as_str))
@@ -177,55 +178,59 @@ impl StaleEdgeReconciliation {
     }
 }
 
-fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<ReconciliationGroup> {
+fn group_mutable_edges_by_emitting_node(catalog: &Catalog<ClickHouse>) -> Vec<ReconciliationGroup> {
+    let graph = catalog.graph();
     let mut kinds_by_group: BTreeMap<(String, String, &'static str), Vec<String>> = BTreeMap::new();
     let mut tables_by_emitting_node: BTreeMap<String, String> = BTreeMap::new();
 
-    for node in ontology.nodes() {
-        if node.global {
+    for pipeline in catalog.model().sources().pipelines() {
+        let Writer::Entity(entity) = pipeline.writer else {
+            continue;
+        };
+        if pipeline.scope == EtlScope::Global {
             continue;
         }
-        for pipeline in &node.pipelines {
-            for mapping in pipeline.transform.edges() {
-                if !mapping.mutable {
-                    continue;
-                }
-                let Some(emitting_node_id_column) =
-                    find_emitting_node_id_column(mapping, &node.name)
-                else {
-                    continue;
-                };
-                tables_by_emitting_node.insert(
-                    node.name.clone(),
-                    prefixed_table_name(&node.destination_table, *SCHEMA_VERSION),
-                );
-                for edge_table in ontology
-                    .edge_routes_for_mapping(mapping)
-                    .into_iter()
-                    .map(|edge| edge.destination_table.as_str())
-                {
-                    kinds_by_group
-                        .entry((
-                            node.name.clone(),
-                            edge_table.to_string(),
-                            emitting_node_id_column,
-                        ))
-                        .or_default()
-                        .push(mapping.label.clone());
-                }
+        let name = &graph.entity(entity).name;
+        for mapping in pipeline.transform.edges() {
+            if !mapping.mutable {
+                continue;
+            }
+            let Some(emitting_node_id_column) = find_emitting_node_id_column(mapping, entity)
+            else {
+                continue;
+            };
+            let Some(table) = catalog.table_of(entity) else {
+                continue;
+            };
+            tables_by_emitting_node
+                .insert(name.clone(), prefixed_table_name(table, *SCHEMA_VERSION));
+            for edge_table in mapping
+                .variants
+                .iter()
+                .filter_map(|variant| catalog.edge_table(*variant))
+            {
+                kinds_by_group
+                    .entry((
+                        name.clone(),
+                        edge_table.to_string(),
+                        emitting_node_id_column,
+                    ))
+                    .or_default()
+                    .push(graph.relationship(mapping.relationship).name.clone());
             }
         }
     }
 
+    let schema = catalog.schema().ok();
     kinds_by_group
         .into_iter()
         .map(
             |((emitting_node, edge_table, emitting_node_id_column), mut kinds)| {
                 kinds.sort();
                 kinds.dedup();
-                let edge_sort_key = ontology
-                    .edge_table_config(&edge_table)
-                    .map(|config| config.sort_key.join(", "))
+                let edge_sort_key = schema
+                    .and_then(|schema| schema.table(&edge_table))
+                    .map(|table| table.order_by.join(", "))
                     .unwrap_or_default();
                 ReconciliationGroup {
                     emitting_node_table: tables_by_emitting_node[&emitting_node].clone(),
@@ -246,11 +251,9 @@ fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<Reconciliati
 }
 
 /// `None` when neither side binds the emitting node's `id`, so there is no node row to compare against.
-fn find_emitting_node_id_column(mapping: &EdgeMapping, node_name: &str) -> Option<&'static str> {
-    let binds_emitting_node = |node_ref: &NodeRef| {
-        matches!(&node_ref.kind, NodeRefKind::Literal(kind) if kind == node_name)
-            && node_ref.field == "id"
-    };
+fn find_emitting_node_id_column(mapping: &EdgeMapping, entity: EntityId) -> Option<&'static str> {
+    let binds_emitting_node =
+        |endpoint: &Endpoint| endpoint.kind.entity() == Some(entity) && endpoint.field == "id";
     if binds_emitting_node(&mapping.source) {
         Some("source_id")
     } else if binds_emitting_node(&mapping.target) {
@@ -328,8 +331,8 @@ mod tests {
         "traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind";
 
     fn groups() -> Vec<ReconciliationGroup> {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        group_mutable_edges_by_emitting_node(&ontology)
+        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        group_mutable_edges_by_emitting_node(&catalog)
     }
 
     fn find<'a>(
@@ -413,35 +416,38 @@ mod tests {
         ] {
             assert!(
                 !swept.contains(immutable),
-                "{immutable} is not marked mutable in the ontology and must not be swept",
+                "{immutable} is not marked mutable in its source and must not be swept",
             );
         }
     }
 
     #[test]
     fn polymorphic_endpoint_has_no_emitting_node_row_to_compare() {
+        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let graph = catalog.graph();
         let polymorphic = EdgeMapping {
-            source: NodeRef {
+            relationship: graph.relationship_id("HAS_NOTE").unwrap(),
+            source: Endpoint {
                 field: "noteable_id".to_string(),
-                property_inputs: Default::default(),
-                enrich: false,
-                kind: NodeRefKind::Derived {
+                kind: query_data_model::catalog::sources::EndpointKind::Column {
                     column: "noteable_type".to_string(),
                     mapping: Default::default(),
                 },
+                properties: Default::default(),
             },
-            target: NodeRef {
+            target: Endpoint {
                 field: "user_id".to_string(),
-                kind: NodeRefKind::Literal("User".to_string()),
-                property_inputs: Default::default(),
-                enrich: false,
+                kind: query_data_model::catalog::sources::EndpointKind::Entity(
+                    graph.entity_id("User").unwrap(),
+                ),
+                properties: Default::default(),
             },
-            label: "HAS_NOTE".to_string(),
             array_field: None,
             mutable: true,
+            variants: Vec::new(),
         };
         assert_eq!(
-            find_emitting_node_id_column(&polymorphic, "MergeRequest"),
+            find_emitting_node_id_column(&polymorphic, graph.entity_id("MergeRequest").unwrap()),
             None
         );
     }

@@ -254,8 +254,10 @@ mod tests {
     use super::*;
 
     fn table_names() -> CodeTableNames {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        CodeTableNames::from_ontology(&ontology).expect("code tables must resolve")
+        CodeTableNames::from_catalog(
+            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+        )
+        .expect("code tables must resolve")
     }
 
     #[test]

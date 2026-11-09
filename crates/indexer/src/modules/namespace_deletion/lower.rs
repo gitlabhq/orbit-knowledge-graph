@@ -1,4 +1,6 @@
-use ontology::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
+use query_data_model::{
+    Catalog, ClickHouse, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
+};
 
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
@@ -10,7 +12,7 @@ pub struct DeletionStatement {
 }
 
 /// Builds `INSERT INTO ... SELECT` statements that soft-delete all rows for a
-/// namespace across every ontology-driven table.
+/// namespace across every graph table.
 ///
 /// For each namespaced node table and the shared edge table, emits:
 /// ```sql
@@ -20,8 +22,8 @@ pub struct DeletionStatement {
 /// WHERE startsWith(traversal_path, {traversal_path:String})
 ///   AND _deleted = false
 /// ```
-pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionStatement> {
-    build_statements(ontology, None)
+pub fn build_deletion_statements(catalog: &Catalog<ClickHouse>) -> Vec<DeletionStatement> {
+    build_statements(catalog, None)
 }
 
 pub struct ReconcileStatement {
@@ -29,8 +31,8 @@ pub struct ReconcileStatement {
     pub tombstone: DeletionStatement,
 }
 
-pub fn build_reconcile_statements(ontology: &ontology::Ontology) -> Vec<ReconcileStatement> {
-    build_statements(ontology, Some(STALE_PATH_PREDICATE))
+pub fn build_reconcile_statements(catalog: &Catalog<ClickHouse>) -> Vec<ReconcileStatement> {
+    build_statements(catalog, Some(STALE_PATH_PREDICATE))
         .into_iter()
         .map(|tombstone| {
             let prefixed = prefixed_table_name(&tombstone.table, *SCHEMA_VERSION);
@@ -48,48 +50,79 @@ pub fn build_reconcile_statements(ontology: &ontology::Ontology) -> Vec<Reconcil
 
 const STALE_PATH_PREDICATE: &str = "AND traversal_path IN {stale_paths:Array(String)}";
 
-#[expect(
-    clippy::expect_used,
-    reason = "`edge_tables()` only returns keys present in the edge table configs"
-)]
+struct DeletionTable<'a> {
+    table: &'a str,
+    sort_key: &'a [String],
+    carried: Vec<&'a str>,
+}
+
+fn deletion_tables(catalog: &Catalog<ClickHouse>) -> Vec<DeletionTable<'_>> {
+    let graph = catalog.graph();
+    let Ok(schema) = catalog.schema() else {
+        return Vec::new();
+    };
+    let sort_key = |table: &str| schema.table(table).map_or(&[][..], |table| &table.order_by);
+    let mut entities: Vec<_> = graph
+        .entities()
+        .filter(|entity| catalog.has_path_column(entity.id))
+        .collect();
+    entities.sort_by_key(|entity| entity.name.as_str());
+    let mut tables: Vec<DeletionTable<'_>> = entities
+        .into_iter()
+        .filter_map(|entity| {
+            let table = catalog.table_of(entity.id)?;
+            let sort_key = sort_key(table);
+            let carried = entity
+                .properties
+                .iter()
+                .map(|property| graph.property(*property))
+                .filter(|property| !property.mutable && catalog.column(property.id).is_some())
+                .map(|property| property.name.as_str())
+                .filter(|name| !sort_key.iter().any(|key| key == name))
+                .collect();
+            Some(DeletionTable {
+                table,
+                sort_key,
+                carried,
+            })
+        })
+        .collect();
+    let relationships: Vec<_> = graph
+        .relationships()
+        .map(|relationship| relationship.id)
+        .collect();
+    let mut edge_tables = catalog.edge_tables(&relationships);
+    edge_tables.extend(catalog.default_edge_table().map(str::to_string));
+    edge_tables.sort();
+    edge_tables.dedup();
+    for table in edge_tables {
+        if let Some(table) = schema.table(&table) {
+            tables.push(DeletionTable {
+                table: &table.name,
+                sort_key: &table.order_by,
+                carried: Vec::new(),
+            });
+        }
+    }
+    tables
+}
+
 fn build_statements(
-    ontology: &ontology::Ontology,
+    catalog: &Catalog<ClickHouse>,
     extra_predicate: Option<&str>,
 ) -> Vec<DeletionStatement> {
-    let mut statements = Vec::new();
-
-    for node in ontology.nodes() {
-        if !node.has_traversal_path {
-            continue;
-        }
-        let sort_key = ontology
-            .sort_key_for_table(&node.destination_table)
-            .unwrap_or(&node.sort_key);
-        let prefixed = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
-        statements.push(build_deletion_insert(
-            &node.destination_table,
-            &prefixed,
-            sort_key,
-            &node.immutable_columns(),
-            extra_predicate,
-        ));
-    }
-
-    for edge_table in ontology.edge_tables() {
-        let config = ontology
-            .edge_table_config(edge_table)
-            .expect("edge_tables() only returns keys present in edge_table_configs");
-        let prefixed = prefixed_table_name(edge_table, *SCHEMA_VERSION);
-        statements.push(build_deletion_insert(
-            edge_table,
-            &prefixed,
-            &config.sort_key,
-            &[],
-            extra_predicate,
-        ));
-    }
-
-    statements
+    deletion_tables(catalog)
+        .into_iter()
+        .map(|table| {
+            build_deletion_insert(
+                table.table,
+                &prefixed_table_name(table.table, *SCHEMA_VERSION),
+                table.sort_key,
+                &table.carried,
+                extra_predicate,
+            )
+        })
+        .collect()
 }
 
 fn build_deletion_insert(
@@ -124,8 +157,14 @@ fn build_deletion_insert(
 mod tests {
     use super::*;
 
-    fn load_ontology() -> ontology::Ontology {
-        ontology::Ontology::load_embedded().expect("should load ontology")
+    fn catalog() -> Catalog<ClickHouse> {
+        Catalog::<ClickHouse>::embedded().expect("embedded catalog")
+    }
+
+    fn edge_tables() -> Vec<String> {
+        let catalog = catalog();
+        let relationships: Vec<_> = catalog.graph().relationships().map(|r| r.id).collect();
+        catalog.edge_tables(&relationships)
     }
 
     fn find_statement<'a>(
@@ -140,15 +179,16 @@ mod tests {
 
     #[test]
     fn covers_every_namespaced_node_table_plus_edge_table() {
-        let ontology = load_ontology();
-        let statements = build_deletion_statements(&ontology);
+        let catalog = catalog();
+        let statements = build_deletion_statements(&catalog);
 
         let generated_tables: Vec<&str> = statements.iter().map(|s| s.table.as_str()).collect();
 
-        let expected_namespaced: Vec<&str> = ontology
-            .nodes()
-            .filter(|node| node.has_traversal_path)
-            .map(|node| node.destination_table.as_str())
+        let expected_namespaced: Vec<&str> = catalog
+            .graph()
+            .entities()
+            .filter(|entity| catalog.has_path_column(entity.id))
+            .filter_map(|entity| catalog.table_of(entity.id))
             .collect();
 
         for table in &expected_namespaced {
@@ -158,14 +198,14 @@ mod tests {
             );
         }
 
-        for edge_table in ontology.edge_tables() {
+        for edge_table in edge_tables() {
             assert!(
-                generated_tables.contains(&edge_table),
+                generated_tables.contains(&edge_table.as_str()),
                 "missing edge table {edge_table}: {generated_tables:?}"
             );
         }
 
-        let edge_table_count = ontology.edge_tables().len();
+        let edge_table_count = edge_tables().len();
         let expected_count = expected_namespaced.len() + edge_table_count;
         assert_eq!(
             statements.len(),
@@ -176,15 +216,16 @@ mod tests {
 
     #[test]
     fn excludes_nodes_without_traversal_path() {
-        let ontology = load_ontology();
-        let statements = build_deletion_statements(&ontology);
+        let catalog = catalog();
+        let statements = build_deletion_statements(&catalog);
 
         let generated_tables: Vec<&str> = statements.iter().map(|s| s.table.as_str()).collect();
 
-        let non_traversal_tables: Vec<&str> = ontology
-            .nodes()
-            .filter(|node| !node.has_traversal_path)
-            .map(|node| node.destination_table.as_str())
+        let non_traversal_tables: Vec<&str> = catalog
+            .graph()
+            .entities()
+            .filter(|entity| !catalog.has_path_column(entity.id))
+            .filter_map(|entity| catalog.table_of(entity.id))
             .collect();
 
         for table in &non_traversal_tables {
@@ -197,8 +238,8 @@ mod tests {
 
     #[test]
     fn every_statement_has_required_sql_structure() {
-        let ontology = load_ontology();
-        let statements = build_deletion_statements(&ontology);
+        let catalog = catalog();
+        let statements = build_deletion_statements(&catalog);
 
         for statement in &statements {
             let sql = &statement.sql;
@@ -230,8 +271,8 @@ mod tests {
 
     #[test]
     fn node_statement_selects_sort_key_columns() {
-        let ontology = load_ontology();
-        let statements = build_deletion_statements(&ontology);
+        let catalog = catalog();
+        let statements = build_deletion_statements(&catalog);
         let statement = find_statement(&statements, "gl_project");
 
         assert!(
@@ -248,13 +289,15 @@ mod tests {
 
     #[test]
     fn node_statements_carry_the_unchanging_columns() {
-        let ontology = load_ontology();
-        let statements = build_deletion_statements(&ontology);
-        let node = ontology
-            .nodes()
-            .find(|node| node.destination_table == "gl_file")
-            .expect("gl_file node");
-        let carried = node.immutable_columns();
+        let catalog = catalog();
+        let statements = build_deletion_statements(&catalog);
+        let tables = deletion_tables(&catalog);
+        let carried = tables
+            .iter()
+            .find(|table| table.table == "gl_file")
+            .expect("gl_file table")
+            .carried
+            .clone();
         assert!(carried.contains(&"path"), "{carried:?}");
         let statement = find_statement(&statements, "gl_file");
         for column in carried {
@@ -269,16 +312,15 @@ mod tests {
 
     #[test]
     fn edge_statements_select_sort_key_columns_for_all_tables() {
-        let ontology = load_ontology();
-        let statements = build_deletion_statements(&ontology);
+        let catalog = catalog();
+        let statements = build_deletion_statements(&catalog);
 
-        for edge_table in ontology.edge_tables() {
-            let config = ontology
-                .edge_table_config(edge_table)
-                .expect("edge table config must exist");
+        let schema = catalog.schema().expect("schema");
+        for edge_table in edge_tables() {
+            let table = schema.table(&edge_table).expect("edge table must exist");
 
-            let statement = find_statement(&statements, edge_table);
-            for column in &config.sort_key {
+            let statement = find_statement(&statements, &edge_table);
+            for column in &table.order_by {
                 assert!(
                     statement.sql.contains(column.as_str()),
                     "{edge_table} deletion should include sort key column {column}: {}",
@@ -290,12 +332,12 @@ mod tests {
 
     #[test]
     fn reconcile_covers_the_same_tables_as_deletion() {
-        let ontology = load_ontology();
-        let deletion: Vec<String> = build_deletion_statements(&ontology)
+        let catalog = catalog();
+        let deletion: Vec<String> = build_deletion_statements(&catalog)
             .into_iter()
             .map(|s| s.table)
             .collect();
-        let reconcile = build_reconcile_statements(&ontology);
+        let reconcile = build_reconcile_statements(&catalog);
 
         assert_eq!(deletion.len(), reconcile.len());
         for statement in &reconcile {
@@ -305,8 +347,7 @@ mod tests {
 
     #[test]
     fn reconcile_tombstones_only_the_stale_paths_it_reads() {
-        let ontology = load_ontology();
-        let statements = build_reconcile_statements(&ontology);
+        let statements = build_reconcile_statements(&catalog());
         let statement = statements
             .iter()
             .find(|s| s.tombstone.table == "gl_project")

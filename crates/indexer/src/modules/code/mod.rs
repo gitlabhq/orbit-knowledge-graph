@@ -56,6 +56,7 @@ pub async fn register_handlers(
     config: &IndexerConfig,
     clients: &ClickHouseClients,
     ontology: &ontology::Ontology,
+    catalog: &query_data_model::Catalog<query_data_model::ClickHouse>,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
     gitlab_client: Option<Arc<GitlabClient>>,
@@ -69,7 +70,7 @@ pub async fn register_handlers(
     let code_indexing_task_config = config.engine.handlers.code_indexing_task.clone();
 
     let table_names =
-        Arc::new(CodeTableNames::from_ontology(ontology).map_err(HandlerInitError::new)?);
+        Arc::new(CodeTableNames::from_catalog(catalog).map_err(HandlerInitError::new)?);
 
     let client = Arc::new(clients.graph.clone());
 

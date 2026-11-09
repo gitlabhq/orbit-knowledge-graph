@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use ontology::{Ontology, OntologyError};
+use query_data_model::{Catalog, ClickHouse, DataModelError};
 
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
@@ -17,51 +17,63 @@ pub struct CodeTableNames {
 }
 
 impl CodeTableNames {
-    pub fn from_ontology(ontology: &Ontology) -> Result<Self, OntologyError> {
-        let code_node_types: HashSet<&str> = ontology
-            .nodes()
-            .filter(|node| node.domain == CODE_DOMAIN)
-            .map(|node| node.name.as_str())
+    pub fn from_catalog(catalog: &Catalog<ClickHouse>) -> Result<Self, DataModelError> {
+        let graph = catalog.graph();
+        let schema = catalog.schema()?;
+        let code_entities: Vec<_> = graph
+            .entities()
+            .filter(|entity| entity.domain.as_deref() == Some(CODE_DOMAIN))
             .collect();
+        let code_ids: HashSet<_> = code_entities.iter().map(|entity| entity.id).collect();
 
-        let node_columns = ontology
-            .nodes()
-            .filter(|node| node.domain == CODE_DOMAIN)
-            .map(|node| {
-                (
-                    prefixed_table_name(&node.destination_table, *SCHEMA_VERSION),
-                    node.immutable_columns()
-                        .into_iter()
-                        .map(str::to_string)
-                        .collect(),
-                )
-            })
-            .collect();
-        let mut edge_tables: HashMap<String, Vec<(String, String, String)>> = HashMap::new();
-        for edge in ontology.edges() {
-            let involves_code_node = code_node_types.contains(edge.source_kind.as_str())
-                || code_node_types.contains(edge.target_kind.as_str());
-            if involves_code_node {
-                edge_tables
-                    .entry(edge.relationship_kind.clone())
-                    .or_default()
-                    .push((
-                        edge.source_kind.clone(),
-                        edge.target_kind.clone(),
-                        prefixed_table_name(&edge.destination_table, *SCHEMA_VERSION),
-                    ));
-            }
+        let mut node_columns = HashMap::new();
+        for entity in &code_entities {
+            let Some(table) = catalog.table_of(entity.id) else {
+                continue;
+            };
+            let sort_key = schema.table(table).map_or(&[][..], |table| &table.order_by);
+            let carried = entity
+                .properties
+                .iter()
+                .map(|property| graph.property(*property))
+                .filter(|property| !property.mutable && catalog.column(property.id).is_some())
+                .map(|property| property.name.clone())
+                .filter(|name| !sort_key.contains(name))
+                .collect();
+            node_columns.insert(prefixed_table_name(table, *SCHEMA_VERSION), carried);
         }
 
+        let mut edge_tables: HashMap<String, Vec<(String, String, String)>> = HashMap::new();
+        for variant in graph.variants() {
+            if !code_ids.contains(&variant.source) && !code_ids.contains(&variant.target) {
+                continue;
+            }
+            let Some(table) = catalog.edge_table(variant.id) else {
+                continue;
+            };
+            edge_tables
+                .entry(graph.relationship(variant.relationship).name.clone())
+                .or_default()
+                .push((
+                    graph.entity(variant.source).name.clone(),
+                    graph.entity(variant.target).name.clone(),
+                    prefixed_table_name(table, *SCHEMA_VERSION),
+                ));
+        }
+
+        let table = |name: &str| -> Result<String, DataModelError> {
+            graph
+                .entity_id(name)
+                .and_then(|entity| catalog.table_of(entity))
+                .map(|table| prefixed_table_name(table, *SCHEMA_VERSION))
+                .ok_or_else(|| DataModelError::Invalid(format!("{name} has no graph table")))
+        };
         Ok(Self {
-            branch: prefixed_table_name(ontology.table_name("Branch")?, *SCHEMA_VERSION),
-            directory: prefixed_table_name(ontology.table_name("Directory")?, *SCHEMA_VERSION),
-            file: prefixed_table_name(ontology.table_name("File")?, *SCHEMA_VERSION),
-            definition: prefixed_table_name(ontology.table_name("Definition")?, *SCHEMA_VERSION),
-            imported_symbol: prefixed_table_name(
-                ontology.table_name("ImportedSymbol")?,
-                *SCHEMA_VERSION,
-            ),
+            branch: table("Branch")?,
+            directory: table("Directory")?,
+            file: table("File")?,
+            definition: table("Definition")?,
+            imported_symbol: table("ImportedSymbol")?,
             edge_tables,
             node_columns,
         })
@@ -77,7 +89,7 @@ impl CodeTableNames {
         relationship_kind: &str,
         source_kind: &str,
         target_kind: &str,
-    ) -> Result<&str, OntologyError> {
+    ) -> Result<&str, DataModelError> {
         self.edge_tables
             .get(relationship_kind)
             .and_then(|routes| {
@@ -89,7 +101,7 @@ impl CodeTableNames {
             })
             .map(|(_, _, table)| table.as_str())
             .ok_or_else(|| {
-                OntologyError::Validation(format!(
+                DataModelError::Invalid(format!(
                     "code indexer emitted undeclared {source_kind} -[{relationship_kind}]-> {target_kind} variant"
                 ))
             })
@@ -138,12 +150,13 @@ mod tests {
 
     #[test]
     fn resolves_split_relationship_routes_by_variant() {
-        let ontology = Ontology::load_embedded_with_overlay(concat!(
+        let ontology = ontology::Ontology::load_embedded_with_overlay(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../config/seeds/overlays/variant_routes"
         ))
         .unwrap();
-        let names = CodeTableNames::from_ontology(&ontology).unwrap();
+        let catalog = query_data_model::from_ontology::clickhouse(&ontology).unwrap();
+        let names = CodeTableNames::from_catalog(&catalog).unwrap();
         assert!(
             names
                 .edge_table_for("CALLS", "Definition", "Definition")
@@ -160,8 +173,8 @@ mod tests {
 
     #[test]
     fn edge_tables_only_contain_code_relevant_tables() {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
+        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let names = CodeTableNames::from_catalog(&catalog).expect("code tables must resolve");
 
         let edge_tables: HashSet<&str> = names.edge_table_names().into_iter().collect();
         let gl_edge = prefixed_table_name("gl_edge", *SCHEMA_VERSION);

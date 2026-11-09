@@ -181,6 +181,7 @@ pub async fn run(
             config,
             &clients,
             &ontology,
+            &catalog,
             writer.clone(),
             analytics.clone(),
             gitlab_client,
@@ -196,7 +197,7 @@ pub async fn run(
         .is_module_enabled(IndexerModule::NamespaceDeletion)
     {
         info!("initializing Namespace Deletion handler");
-        modules::namespace_deletion::register_handlers(&registry, config, &clients, &ontology)?;
+        modules::namespace_deletion::register_handlers(&registry, config, &clients, &catalog)?;
     } else {
         info!("Namespace Deletion handler disabled by engine.modules");
     }
@@ -236,8 +237,10 @@ pub async fn run_dispatcher(
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
-    let candidate = release.load_ontology()?;
-    let code_tables = modules::code::config::CodeTableNames::from_ontology(&candidate)?;
+    let candidate = query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(
+        &release.packages().load()?,
+    )?;
+    let code_tables = modules::code::config::CodeTableNames::from_catalog(&candidate)?;
     let clients = ClickHouseClients::new(&config.graph, &config.datalake);
 
     let services = orchestrator::scheduled::connect(&config.nats).await?;
@@ -337,7 +340,7 @@ pub async fn run_dispatcher(
         Arc::new(ClickHouseNamespaceDeletionStore::new(
             deletion_datalake,
             Arc::clone(&deletion_graph),
-            &ontology,
+            &candidate,
         ));
     let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
 
@@ -366,7 +369,7 @@ pub async fn run_dispatcher(
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
             campaign.clone(),
-            &ontology,
+            candidate.model().sources(),
         )),
         Box::new(CodeBackfillSweep::new(
             backfill.clone(),
@@ -393,7 +396,7 @@ pub async fn run_dispatcher(
         )),
         Box::new(StaleEdgeReconciliation::new(
             clients.graph.clone(),
-            &ontology,
+            &candidate,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
                 clients.graph.clone(),
             ))),

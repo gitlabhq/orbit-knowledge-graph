@@ -20,7 +20,12 @@ impl IndexFixture {
     fn new() -> Self {
         let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
         Self {
-            tables: Arc::new(CodeTableNames::from_ontology(&ontology).unwrap()),
+            tables: Arc::new(
+                CodeTableNames::from_catalog(
+                    &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+                )
+                .unwrap(),
+            ),
             ontology,
             version: chrono::Utc::now(),
         }
