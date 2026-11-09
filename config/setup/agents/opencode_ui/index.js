@@ -880,6 +880,17 @@ function parseResponse(text) {
   const raw = text.trim().startsWith("{") ? tryJson(text) : null;
   if (raw) {
     const r = raw["result"] ?? raw;
+    if (r.query_type === "aggregation") {
+      out.kind = "aggregation";
+      out.grouped = Array.isArray(r.group_columns) && r.group_columns.length > 0;
+      const rows = Array.isArray(r.rows) ? r.rows : [];
+      out.counted = plainCounts(Array.isArray(r.columns) ? r.columns : []).map(({ name = "", target = "" }) => ({
+        target,
+        total: s(rows, (row) => typeof row[name] === "number" ? row[name] : 0)
+      }));
+      out.aggregated = Math.max(0, ...out.counted.map((count) => count.total));
+      return out;
+    }
     const nodes = Array.isArray(r.nodes) ? r.nodes : [];
     out.byEntity = f(nodes, (node) => String(node.type));
     out.nodes = nodes.length;
@@ -891,7 +902,7 @@ function parseResponse(text) {
   if (/^query_type:\s*aggregation/m.test(text)) {
     out.kind = "aggregation";
     out.grouped = /^group_columns\[[1-9]\d*\]/m.test(text);
-    const counts = plainCounts(text);
+    const counts = plainCounts(columnFields(text));
     const header = text.match(/^rows\[\d+\]\{([^}]*)\}:\s*$/m);
     if (!header || header.index === undefined || counts.length === 0)
       return out;
@@ -931,8 +942,8 @@ function columnFields(text) {
   }
   return body.split(/^\s+- /m).slice(1).map((item) => Object.fromEntries([...item.matchAll(/^\s*(?:- )?(\w+):\s*(.*)$/gm)].map((m) => [m[1] ?? "", m[2]?.trim()])));
 }
-function plainCounts(text) {
-  return columnFields(text).filter(({ function: fn, name, target = "", property }) => fn === "count" && name && (!property || name === `count_${target}_${property}`));
+function plainCounts(columns) {
+  return columns.filter(({ function: fn, name, target = "", property }) => fn === "count" && name && (!property || name === `count_${target}_${property}`));
 }
 var COUNTABLE_LISTS = new Set(["MergeRequest", "WorkItem", "Pipeline", "Job", "Runner", "Project", "Group", "Label", "Note", "Package", "User", "Vulnerability"]);
 function tryJson(text) {
