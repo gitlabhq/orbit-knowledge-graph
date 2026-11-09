@@ -23,9 +23,9 @@ pub use implementations::clickhouse::facts::{
     MaterializedJoin, MaterializedNode, MaterializedRelationship, TraversalPathLookup,
 };
 pub use implementations::relational::PathColumn;
+pub use implementations::relational::RelationshipRoute;
 pub use models::orbit::{
-    ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, PropertyRealization, RelationshipRoute,
-    VariantRoute,
+    ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, PropertyRealization,
 };
 pub use packages::Packages;
 pub use query_model::{QueryFacts, QueryModel};

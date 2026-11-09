@@ -12,7 +12,6 @@ use crate::logical::{Leaf, Literals, Query};
 type Condition = (Vec<String>, bool);
 
 pub(super) struct Narrowed {
-    pub names: Vec<String>,
     pub ids: Vec<RelationshipId>,
 }
 
@@ -23,7 +22,7 @@ impl Narrowed {
             .map(|name| query.model.relationship(name))
             .collect::<std::result::Result<_, _>>()
             .map_err(PlanError::from)?;
-        Ok(Self { names, ids })
+        Ok(Self { ids })
     }
 }
 

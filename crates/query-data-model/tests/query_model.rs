@@ -44,10 +44,16 @@ fn catalog_routes_preserve_variant_endpoints_on_each_backend() {
         ("Definition", "ImportedSymbol", "gl_code_edge"),
         ("File", "ImportedSymbol", "gl_edge"),
     ] {
-        let route = remote.variant_route("CALLS", source, target).unwrap();
-        assert_eq!(route.table, table);
-        let route = local.variant_route("CALLS", source, target).unwrap();
-        assert_eq!(route.table, local.default_edge_table());
+        let variant = remote
+            .graph()
+            .variant_named("CALLS", source, target)
+            .unwrap()
+            .id;
+        assert_eq!(remote.catalog().edge_table(variant), Some(table));
+        assert_eq!(
+            local.catalog().edge_table(variant),
+            local.catalog().default_edge_table()
+        );
     }
 }
 
@@ -153,8 +159,9 @@ fn loads_remote_and_local_models_from_the_same_packages() {
         local.catalog().table_of(definition).unwrap(),
         "gl_definition"
     );
-    assert_eq!(remote.relationship_table("CONTAINS"), None);
-    assert_eq!(local.relationship_table("CONTAINS"), Some("gl_edge"));
+    let contains = remote.graph().relationship_id("CONTAINS").unwrap();
+    assert!(remote.catalog().edge_tables(&[contains]).len() > 1);
+    assert_eq!(local.catalog().edge_tables(&[contains]), ["gl_edge"]);
 }
 
 #[test]
@@ -178,7 +185,8 @@ fn resolves_relationship_variants_and_foreign_keys_to_ids() {
     let target = graph.entity_id("Project").unwrap();
     assert!(graph.variant_id(relationship, source, target).is_some());
     let foreign_key = model
-        .foreign_key(&["IN_PROJECT".to_string()], "Vulnerability", "Project")
+        .catalog()
+        .shared_foreign_key(&[relationship], source, target)
         .unwrap();
 
     assert_eq!(graph.property(foreign_key.property).name, "project_id");
@@ -252,29 +260,38 @@ fn foreign_keys_identify_the_endpoint_and_referenced_key() {
             "auto_canceled_by_id",
         ),
     ] {
+        let graph = model.graph();
+        let ids = [graph.relationship_id(relationship).unwrap()];
+        let (source, target) = (
+            graph.entity_id(source).unwrap(),
+            graph.entity_id(target).unwrap(),
+        );
         let key = model
-            .foreign_key(&[relationship.into()], source, target)
+            .catalog()
+            .shared_foreign_key(&ids, source, target)
             .unwrap();
         assert_eq!(key.holder, holder, "{relationship}");
         assert_eq!(model.graph().property(key.property).name, property);
-        let referenced_entity = match holder {
-            Endpoint::Source => target,
-            Endpoint::Target => source,
-        };
         let referenced = model.graph().property(key.referenced_key);
         assert_eq!(referenced.name, "id");
         assert_eq!(
             referenced.entity,
-            model.graph().entity_id(referenced_entity).unwrap()
+            match holder {
+                Endpoint::Source => target,
+                Endpoint::Target => source,
+            }
         );
     }
+    let graph = model.graph();
+    let both = ["AUTHORED", "APPROVED"].map(|name| graph.relationship_id(name).unwrap());
+    let (user, request) = (
+        graph.entity_id("User").unwrap(),
+        graph.entity_id("MergeRequest").unwrap(),
+    );
     assert!(
         model
-            .foreign_key(
-                &["AUTHORED".into(), "APPROVED".into()],
-                "User",
-                "MergeRequest",
-            )
+            .catalog()
+            .shared_foreign_key(&both, user, request)
             .is_none()
     );
 }

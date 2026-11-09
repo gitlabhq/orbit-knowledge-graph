@@ -72,7 +72,7 @@ impl<'p> PathFinding<'p> {
             start,
             end,
             max_depth,
-            tables: model.edge_tables(relationships),
+            tables: model.catalog().edge_tables(relationships),
             kinds,
             limit: u32::try_from(rows).unwrap_or(u32::MAX),
         })

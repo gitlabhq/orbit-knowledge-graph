@@ -101,7 +101,7 @@ impl<'p> Neighbors<'p> {
             .collect();
         let routes: Vec<_> = relationships
             .iter()
-            .map(|relationship| (*relationship, model.routes(*relationship)))
+            .map(|relationship| (*relationship, model.catalog().edge_routes(*relationship)))
             .collect();
         let touches = |routes: &[query_data_model::RelationshipRoute<'_>], source: bool| {
             routes.iter().any(|route| match source {
@@ -153,7 +153,8 @@ impl<'p> Neighbors<'p> {
                 let mut found = false;
                 let mut carries = true;
                 for variant in model
-                    .routes(*relationship)
+                    .catalog()
+                    .edge_routes(*relationship)
                     .iter()
                     .flat_map(|route| route.variants())
                     .filter(|variant| match center_is_target {
@@ -215,15 +216,21 @@ impl<'p> Neighbors<'p> {
             touching.is_empty()
                 || tag.is_some_and(|tag| {
                     touching.iter().all(|(relationship, _)| {
-                        model.routes(*relationship).iter().any(|route| {
-                            route.source_entities().any(|source| {
-                                route.target_entities().any(|target| {
-                                    tag.facts
-                                        .variants
-                                        .contains(&(*relationship, source, target))
+                        model
+                            .catalog()
+                            .edge_routes(*relationship)
+                            .iter()
+                            .any(|route| {
+                                route.source_entities().any(|source| {
+                                    route.target_entities().any(|target| {
+                                        tag.facts.variants.contains(&(
+                                            *relationship,
+                                            source,
+                                            target,
+                                        ))
+                                    })
                                 })
                             })
-                        })
                     })
                 })
         };
@@ -233,7 +240,7 @@ impl<'p> Neighbors<'p> {
                     || (direction != Direction::Outgoing
                         && !covered(filter.target.as_ref(), &incoming))
             });
-        let all_tables = model.edge_tables(relationships);
+        let all_tables = model.catalog().edge_tables(relationships);
         let tables_for = |source: bool| -> Vec<String> {
             let mut tables: Vec<String> = routes
                 .iter()

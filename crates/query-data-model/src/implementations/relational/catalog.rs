@@ -1,8 +1,41 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use ontology::{EdgeVariantScope, RequiredRole};
 
 use super::RelationalFacts;
 use crate::catalog::{Catalog, Lookup, Redaction, StorageBackend};
-use crate::{EntityId, PropertyId, RelationshipVariantId};
+use crate::{
+    EntityId, ForeignKey, PropertyId, RelationshipId, RelationshipVariant, RelationshipVariantId,
+};
+
+/// One edge table of a relationship, with the variants it stores.
+#[derive(Debug)]
+pub struct RelationshipRoute<'a> {
+    pub table: &'a str,
+    variants: Vec<&'a RelationshipVariant>,
+}
+
+impl RelationshipRoute<'_> {
+    pub fn variants(&self) -> impl Iterator<Item = &RelationshipVariant> + '_ {
+        self.variants.iter().copied()
+    }
+
+    pub fn source_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
+        self.variants.iter().map(|variant| variant.source)
+    }
+
+    pub fn target_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
+        self.variants.iter().map(|variant| variant.target)
+    }
+
+    pub fn has_source(&self, entity: EntityId) -> bool {
+        self.source_entities().any(|source| source == entity)
+    }
+
+    pub fn has_target(&self, entity: EntityId) -> bool {
+        self.target_entities().any(|target| target == entity)
+    }
+}
 
 impl<B: StorageBackend> Catalog<B>
 where
@@ -82,5 +115,78 @@ where
                     .find_map(|route| route.foreign_key)?;
                 Some((key.key.property, variant.target))
             })
+    }
+
+    pub fn edge_table(&self, variant: RelationshipVariantId) -> Option<&str> {
+        self.routes(variant)
+            .find_map(|route| Some(route.edge?.table))
+    }
+
+    pub fn foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey> {
+        self.routes(variant)
+            .find_map(|route| Some(route.foreign_key?.key))
+    }
+
+    /// The foreign key every variant of `relationships` from `source` to `target` shares.
+    pub fn shared_foreign_key(
+        &self,
+        relationships: &[RelationshipId],
+        source: EntityId,
+        target: EntityId,
+    ) -> Option<ForeignKey> {
+        let graph = self.graph();
+        let mut keys = relationships.iter().map(|relationship| {
+            self.foreign_key(graph.variant_id(*relationship, source, target)?)
+        });
+        let first = keys.next()??;
+        keys.all(|key| key == Some(first)).then_some(first)
+    }
+
+    /// The edge tables of a relationship, each with the variants it stores.
+    pub fn edge_routes(&self, relationship: RelationshipId) -> Vec<RelationshipRoute<'_>> {
+        let graph = self.graph();
+        let mut routes = BTreeMap::<&str, Vec<&RelationshipVariant>>::new();
+        for variant in &graph.relationship(relationship).variants {
+            if let Some(table) = self.edge_table(*variant) {
+                routes
+                    .entry(table)
+                    .or_default()
+                    .push(graph.variant(*variant));
+            }
+        }
+        routes
+            .into_iter()
+            .map(|(table, variants)| RelationshipRoute { table, variants })
+            .collect()
+    }
+
+    /// The edge tables storing any variant of `relationships`; of every relationship when none is named.
+    pub fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String> {
+        let graph = self.graph();
+        let all: Vec<RelationshipId>;
+        let relationships = match relationships {
+            [] => {
+                all = graph
+                    .relationships()
+                    .map(|relationship| relationship.id)
+                    .collect();
+                &all
+            }
+            named => named,
+        };
+        relationships
+            .iter()
+            .flat_map(|relationship| &graph.relationship(*relationship).variants)
+            .filter_map(|variant| self.edge_table(*variant))
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    pub fn default_edge_table(&self) -> Option<&str> {
+        self.stores()
+            .find_map(|(_, facts)| facts.relational().default_edge_table())
+            .map(|table| table.name.as_str())
     }
 }

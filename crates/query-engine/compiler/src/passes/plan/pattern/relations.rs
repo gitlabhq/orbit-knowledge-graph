@@ -10,7 +10,7 @@ use ontology::constants::{
 };
 use query_data_model::plan::logical::{EdgeField, Expr as Logical};
 use query_data_model::plan::tracking::Ref;
-use query_data_model::{Direction, EntityId, ForeignKey, RelationshipId};
+use query_data_model::{Direction, EntityId, RelationshipId};
 
 use super::{EdgeRelation, Fk, NodePlan};
 use crate::constants::{EDGE_PATH_NODES_SUFFIX, edge_column_prefix, edge_relation_alias};
@@ -28,7 +28,7 @@ fn tables_between(
     source: EntityId,
     target: EntityId,
 ) -> Vec<String> {
-    let graph = model.graph();
+    let graph = model.catalog().graph();
     let any: Vec<RelationshipId>;
     let relationships = match relationships {
         [] => {
@@ -42,7 +42,7 @@ fn tables_between(
     };
     relationships
         .iter()
-        .flat_map(|relationship| model.routes(*relationship))
+        .flat_map(|relationship| model.catalog().edge_routes(*relationship))
         .filter(|route| {
             route
                 .variants()
@@ -52,21 +52,6 @@ fn tables_between(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
-}
-
-/// The foreign key every variant of `relationships` from `source` to `target` shares.
-fn shared_foreign_key(
-    model: &impl RelationalModel,
-    relationships: &[RelationshipId],
-    source: EntityId,
-    target: EntityId,
-) -> Option<ForeignKey> {
-    let graph = model.graph();
-    let mut keys = relationships.iter().map(|relationship| {
-        model.variant_foreign_key(graph.variant_id(*relationship, source, target)?)
-    });
-    let first = keys.next()??;
-    keys.all(|key| key == Some(first)).then_some(first)
 }
 
 pub(super) fn edge_columns(direction: Direction) -> (&'static str, &'static str) {
@@ -193,7 +178,7 @@ where
                 };
             let max_hops = step.range.max;
             let mut edge_tables = if max_hops > 1 {
-                model.edge_tables(relationships)
+                model.catalog().edge_tables(relationships)
             } else {
                 let mut tables = between(source, target);
                 if direction == Direction::Both {
@@ -204,10 +189,10 @@ where
                 tables
             };
             if edge_tables.is_empty() {
-                edge_tables = model.edge_tables(relationships);
+                edge_tables = model.catalog().edge_tables(relationships);
             }
             if edge_tables.is_empty() {
-                edge_tables.push(model.default_edge_table().to_string());
+                edge_tables.extend(model.catalog().default_edge_table().map(str::to_string));
             }
             let (start, end) = edge_columns(direction);
             let pinned: Vec<&str> = [(from, start), (to, end)]
@@ -223,7 +208,10 @@ where
                 .any(|leaf| leaf.binding() == step.edge && !leaf.edge_kind());
             let fk = (max_hops == 1 && !tested && direction != Direction::Both)
                 .then(|| {
-                    let foreign_key = shared_foreign_key(model, relationships, source?, target?)?;
+                    let foreign_key =
+                        model
+                            .catalog()
+                            .shared_foreign_key(relationships, source?, target?)?;
                     let column = model.catalog().column(foreign_key.property)?.to_string();
                     model.catalog().column(foreign_key.referenced_key)?;
                     let node = match foreign_key.holder {

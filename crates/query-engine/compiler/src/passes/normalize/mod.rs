@@ -57,23 +57,29 @@ fn shared_keys(
         selected || query.ordered().contains(&kind(edge))
     };
     for step in query.steps() {
-        let names = match narrowed.get(&step.edge) {
-            Some(narrowed) => narrowed.names.clone(),
-            None => step
-                .relationships
-                .iter()
-                .map(|id| query.model.graph().relationship(*id).name.clone())
-                .collect(),
+        let relationships = match narrowed.get(&step.edge) {
+            Some(narrowed) => &narrowed.ids,
+            None => step.relationships,
         };
-        let (Some(near), Some(far)) = (query.entity_name(step.from), query.entity_name(step.to))
-        else {
+        let (Some(near), Some(far)) = (query.entity(step.from), query.entity(step.to)) else {
             continue;
         };
         let (from, to) = match step.direction {
             Direction::Incoming => (far, near),
             _ => (near, far),
         };
-        if names.len() > 1 && returned(step.edge) && data.foreign_key(&names, from, to).is_some() {
+        let shared = || {
+            data.catalog()
+                .shared_foreign_key(relationships, from, to)
+                .is_some()
+        };
+        if relationships.len() > 1 && returned(step.edge) && shared() {
+            let graph = query.model.graph();
+            let names: Vec<&str> = relationships
+                .iter()
+                .map(|id| graph.relationship(*id).name.as_str())
+                .collect();
+            let (from, to) = (&graph.entity(from).name, &graph.entity(to).name);
             return Err(QueryError::Validation(format!(
                 "{} share one foreign key between {from} and {to}, so type() and a returned relationship cannot tell them apart; match one relationship type, such as -[r:{}]->",
                 names.join("|"),

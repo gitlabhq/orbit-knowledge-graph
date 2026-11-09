@@ -4,9 +4,8 @@ use std::sync::Arc;
 use crate::implementations::clickhouse::ClickHouse;
 use crate::implementations::duckdb::DuckDb;
 use crate::{
-    DataModelError, DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, MaterializedJoin,
-    Model, Packages, PropertyId, QueryModel, RelationshipId, RelationshipVariant,
-    RelationshipVariantId,
+    DataModelError, DenormalizedCatalog, EntityId, GraphCatalog, MaterializedJoin, Model, Packages,
+    PropertyId, QueryModel,
 };
 
 pub type ClickHouseDataModel = QueryModel<ClickHouse>;
@@ -43,43 +42,9 @@ impl DuckDbDataModel {
 }
 
 #[derive(Debug, Clone)]
-pub struct VariantRoute {
-    pub table: String,
-    pub foreign_key: Option<ForeignKey>,
-}
-
-#[derive(Debug, Clone)]
 pub enum PropertyRealization {
     Stored { column: String },
     Virtual(ontology::VirtualSource),
-}
-
-#[derive(Debug)]
-pub struct RelationshipRoute<'a> {
-    pub table: &'a str,
-    pub(crate) variants: Vec<&'a RelationshipVariant>,
-}
-
-impl RelationshipRoute<'_> {
-    pub fn variants(&self) -> impl Iterator<Item = &RelationshipVariant> + '_ {
-        self.variants.iter().copied()
-    }
-
-    pub fn source_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
-        self.variants.iter().map(|variant| variant.source)
-    }
-
-    pub fn target_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
-        self.variants.iter().map(|variant| variant.target)
-    }
-
-    pub fn has_source(&self, entity: EntityId) -> bool {
-        self.source_entities().any(|source| source == entity)
-    }
-
-    pub fn has_target(&self, entity: EntityId) -> bool {
-        self.target_entities().any(|target| target == entity)
-    }
 }
 
 pub trait OrbitQueryModel {
@@ -93,33 +58,7 @@ pub trait OrbitQueryModel {
     fn equivalent_layouts(&self, table: &str) -> Vec<&str>;
     fn in_sort_key(&self, table: &str, column: &str) -> bool;
     fn has_text_index(&self, property: PropertyId) -> bool;
-    fn relationship_table(&self, relationship: &str) -> Option<&str>;
-    fn default_edge_table(&self) -> &str;
     fn denormalized(&self) -> &DenormalizedCatalog;
-    fn relationship_tables(&self, relationships: &[String]) -> Vec<String>;
-    fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String>;
-    fn routes(&self, relationship: RelationshipId) -> Vec<RelationshipRoute<'_>>;
-    fn variant_foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey>;
-    fn relationship_tables_between(
-        &self,
-        relationships: &[String],
-        source: &str,
-        target: &str,
-    ) -> Vec<String>;
-    fn relationship_route(&self, relationship: &str) -> Option<RelationshipRoute<'_>>;
-    fn variant_route(
-        &self,
-        relationship: &str,
-        source: &str,
-        target: &str,
-    ) -> Option<&VariantRoute>;
-    fn relationship_routes(&self, relationship: &str) -> Vec<RelationshipRoute<'_>>;
-    fn foreign_key(
-        &self,
-        relationships: &[String],
-        source: &str,
-        target: &str,
-    ) -> Option<ForeignKey>;
     fn traversal_path_lookup(
         &self,
         entity: &str,

@@ -15,6 +15,7 @@ pub mod render;
 mod tables;
 
 pub use capabilities::{Capabilities, CurrentRows, RelationalBackend};
+pub use catalog::RelationshipRoute;
 pub use tables::{ColumnSchema, TableSchema};
 
 #[derive(Debug, Clone)]

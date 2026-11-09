@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
 use ontology::TraversalPathKind;
@@ -6,9 +6,8 @@ use ontology::TraversalPathKind;
 use crate::catalog::{Catalog, Model, StorageBackend};
 use crate::implementations::relational::RelationalFacts;
 use crate::{
-    DataModelError, DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, MaterializedJoin,
-    OrbitQueryModel, PropertyId, PropertyRealization, RelationshipId, RelationshipRoute,
-    RelationshipVariant, RelationshipVariantId, TraversalPathLookup, VariantRoute,
+    DataModelError, DenormalizedCatalog, EntityId, GraphCatalog, MaterializedJoin, OrbitQueryModel,
+    PropertyId, PropertyRealization, TraversalPathLookup,
 };
 
 pub trait QueryFacts: RelationalFacts + std::fmt::Debug + Send + Sync {
@@ -32,11 +31,7 @@ where
 {
     catalog: Catalog<B>,
     homes: Vec<Option<usize>>,
-    routes: Vec<Option<VariantRoute>>,
     realizations: Vec<Option<PropertyRealization>>,
-    relationship_tables: Vec<Vec<String>>,
-    edge_tables: Vec<String>,
-    default_edge_table: String,
 }
 
 impl<B: StorageBackend> Bindings<B>
@@ -55,21 +50,6 @@ where
                     .position(|(store, _)| store.source(entity.id).is_some())
             })
             .collect();
-        let routes = graph
-            .variants()
-            .map(|variant| {
-                let table = stores
-                    .iter()
-                    .find_map(|(_, facts)| facts.relational().edge_table(variant.id))?;
-                let foreign_key = stores
-                    .iter()
-                    .find_map(|(store, _)| store.foreign_key(variant.id));
-                Some(VariantRoute {
-                    table: table.to_string(),
-                    foreign_key,
-                })
-            })
-            .collect::<Vec<_>>();
         let realizations = graph
             .properties()
             .map(|property| {
@@ -95,38 +75,10 @@ where
                 })
             })
             .collect();
-        let relationship_tables = graph
-            .relationships()
-            .map(|relationship| {
-                relationship
-                    .variants
-                    .iter()
-                    .filter_map(|variant| Some(routes[variant.index()].as_ref()?.table.clone()))
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .collect()
-            })
-            .collect::<Vec<Vec<String>>>();
-        let edge_tables = relationship_tables
-            .iter()
-            .flatten()
-            .cloned()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let default_edge_table = stores
-            .iter()
-            .find_map(|(_, facts)| facts.relational().default_edge_table())
-            .map(|table| table.name.clone())
-            .unwrap_or_default();
         Ok(Self {
             catalog,
             homes,
-            routes,
             realizations,
-            relationship_tables,
-            edge_tables,
-            default_edge_table,
         })
     }
 
@@ -157,10 +109,6 @@ impl<B: StorageBackend> Bindings<B>
 where
     B::Store: QueryFacts,
 {
-    pub(crate) fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
-        self.routes[variant.index()].as_ref()
-    }
-
     pub(crate) fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
         self.catalog
             .stores()
@@ -219,48 +167,6 @@ where
     pub(crate) fn null_as_epoch(&self, property: PropertyId) -> bool {
         self.facts_of(property)
             .is_some_and(|facts| facts.null_as_epoch(property))
-    }
-
-    pub(crate) fn default_edge_table(&self) -> &str {
-        &self.default_edge_table
-    }
-
-    pub(crate) fn relationship_table(&self, relationship: RelationshipId) -> Option<&str> {
-        match self.relationship_tables[relationship.index()].as_slice() {
-            [table] => Some(table),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String> {
-        if relationships.is_empty() {
-            return self.edge_tables.clone();
-        }
-        relationships
-            .iter()
-            .flat_map(|relationship| {
-                self.relationship_tables[relationship.index()]
-                    .iter()
-                    .cloned()
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    }
-
-    pub(crate) fn foreign_key(
-        &self,
-        graph: &GraphCatalog,
-        relationships: &[RelationshipId],
-        source: EntityId,
-        target: EntityId,
-    ) -> Option<ForeignKey> {
-        let mut keys = relationships.iter().map(|relationship| {
-            let variant = graph.variant_id(*relationship, source, target)?;
-            self.variant_route(variant)?.foreign_key
-        });
-        let first = keys.next()??;
-        keys.all(|key| key == Some(first)).then_some(first)
     }
 
     pub(crate) fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
@@ -373,114 +279,8 @@ where
         self.bindings.has_text_index(property)
     }
 
-    fn relationship_table(&self, relationship: &str) -> Option<&str> {
-        let relationship = self.graph().relationship_id(relationship)?;
-        self.bindings.relationship_table(relationship)
-    }
-
-    fn default_edge_table(&self) -> &str {
-        self.bindings.default_edge_table()
-    }
-
     fn denormalized(&self) -> &DenormalizedCatalog {
         self.bindings.denormalized()
-    }
-
-    fn relationship_tables(&self, relationships: &[String]) -> Vec<String> {
-        let relationships: Vec<_> = relationships
-            .iter()
-            .filter_map(|relationship| self.graph().relationship_id(relationship))
-            .collect();
-        self.bindings.edge_tables(&relationships)
-    }
-
-    fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String> {
-        self.bindings.edge_tables(relationships)
-    }
-
-    fn relationship_tables_between(
-        &self,
-        relationships: &[String],
-        source: &str,
-        target: &str,
-    ) -> Vec<String> {
-        let graph = self.graph();
-        let (Some(source), Some(target)) = (graph.entity_id(source), graph.entity_id(target))
-        else {
-            return Vec::new();
-        };
-        let any = relationships.is_empty() || relationships.iter().any(|kind| kind == "*");
-        graph
-            .hops(source, crate::Direction::Outgoing)
-            .filter(|hop| {
-                hop.to == target
-                    && (any || relationships.contains(&graph.relationship(hop.relationship).name))
-            })
-            .filter_map(|hop| self.bindings.variant_route(hop.variant))
-            .map(|route| route.table.clone())
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    }
-
-    fn relationship_route(&self, relationship: &str) -> Option<RelationshipRoute<'_>> {
-        let mut routes = self.relationship_routes(relationship);
-        (routes.len() == 1).then(|| routes.remove(0))
-    }
-
-    fn variant_route(
-        &self,
-        relationship: &str,
-        source: &str,
-        target: &str,
-    ) -> Option<&VariantRoute> {
-        let relationship = self.graph().relationship_id(relationship)?;
-        let source = self.graph().entity_id(source)?;
-        let target = self.graph().entity_id(target)?;
-        self.bindings
-            .variant_route(self.graph().variant_id(relationship, source, target)?)
-    }
-
-    fn relationship_routes(&self, relationship: &str) -> Vec<RelationshipRoute<'_>> {
-        self.graph()
-            .relationship_id(relationship)
-            .map_or_else(Vec::new, |relationship| self.routes(relationship))
-    }
-
-    fn routes(&self, relationship: RelationshipId) -> Vec<RelationshipRoute<'_>> {
-        let mut routes = std::collections::BTreeMap::<&str, Vec<&RelationshipVariant>>::new();
-        for id in &self.graph().relationship(relationship).variants {
-            if let Some(route) = self.bindings.variant_route(*id) {
-                routes
-                    .entry(&route.table)
-                    .or_default()
-                    .push(self.graph().variant(*id));
-            }
-        }
-        routes
-            .into_iter()
-            .map(|(table, variants)| RelationshipRoute { table, variants })
-            .collect()
-    }
-
-    fn foreign_key(
-        &self,
-        relationships: &[String],
-        source: &str,
-        target: &str,
-    ) -> Option<ForeignKey> {
-        let relationships: Vec<_> = relationships
-            .iter()
-            .filter_map(|relationship| self.graph().relationship_id(relationship))
-            .collect();
-        let source = self.graph().entity_id(source)?;
-        let target = self.graph().entity_id(target)?;
-        self.bindings
-            .foreign_key(self.graph(), &relationships, source, target)
-    }
-
-    fn variant_foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey> {
-        self.bindings.variant_route(variant)?.foreign_key
     }
 
     fn traversal_path_lookup(

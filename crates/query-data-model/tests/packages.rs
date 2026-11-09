@@ -72,7 +72,12 @@ fn versioned_packages_match_the_prefixed_ontology() {
 
 fn routing_facts(model: &ClickHouseDataModel) -> Vec<String> {
     let graph = model.graph();
-    let mut tables = vec![model.default_edge_table().to_string()];
+    let catalog = model.catalog();
+    let mut tables: Vec<String> = catalog
+        .default_edge_table()
+        .map(str::to_string)
+        .into_iter()
+        .collect();
     let mut facts = Vec::new();
     for entity in graph.entities() {
         let table = model.catalog().table_of(entity.id).map(str::to_string);
@@ -84,7 +89,7 @@ fn routing_facts(model: &ClickHouseDataModel) -> Vec<String> {
         }
     }
     for relationship in graph.relationships() {
-        let routed = model.relationship_tables(std::slice::from_ref(&relationship.name));
+        let routed = catalog.edge_tables(&[relationship.id]);
         tables.extend(routed.clone());
         facts.push(format!("{} tables {routed:?}", relationship.name));
         for variant in &relationship.variants {
@@ -93,9 +98,7 @@ fn routing_facts(model: &ClickHouseDataModel) -> Vec<String> {
                 &graph.entity(variant.source).name,
                 &graph.entity(variant.target).name,
             );
-            let route = model
-                .variant_route(&relationship.name, source, target)
-                .map(|route| &route.table);
+            let route = catalog.edge_table(variant.id);
             facts.push(format!(
                 "{} {source}->{target} {route:?}",
                 relationship.name
