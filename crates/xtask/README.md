@@ -4,7 +4,7 @@ Development task runner for GitLab Orbit.
 
 ## Features
 
-- **Synthetic data generation**: generates fake SDLC graph data to Parquet files from ontology definitions.
+- **Synthetic data generation**: generates fake SDLC graph data to Parquet files from the data model.
 - **Schema generation**: generates JSON Schema for the server configuration.
 
 ## Quick start

@@ -1,15 +1,13 @@
 use super::fake_data::{FakeDataPools, FakeValue, FakeValueGenerator, FieldKind};
+use crate::synth::model::{Field, Node};
 use arrow::array::*;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
-use ontology::constants::TRAVERSAL_PATH_COLUMN;
-use ontology::{DataType, Field, NodeEntity};
-use std::collections::HashSet;
+use query_data_model::{DEFAULT_PRIMARY_KEY, DataType, TRAVERSAL_PATH_COLUMN};
 use std::sync::Arc;
 
 /// Accumulates rows and flushes to batches when `batch_size` is reached.
 pub struct BatchBuilder {
-    primary_keys: HashSet<String>,
     batch_size: usize,
     schema: Arc<Schema>,
     fake_gen: FakeValueGenerator,
@@ -21,7 +19,7 @@ pub struct BatchBuilder {
 struct ColumnData {
     field: Field,
     kind: FieldKind,
-    /// Enum keys are i64 per ontology.
+    /// Enum keys are i64 per the data model.
     enum_values: Option<std::collections::BTreeMap<i64, String>>,
     values: ColumnValues,
 }
@@ -36,7 +34,7 @@ enum ColumnValues {
 
 impl BatchBuilder {
     pub fn new(
-        node: &NodeEntity,
+        node: &Node,
         schema: Arc<Schema>,
         batch_size: usize,
         pools: &'static FakeDataPools,
@@ -45,7 +43,7 @@ impl BatchBuilder {
     }
 
     pub fn with_seed(
-        node: &NodeEntity,
+        node: &Node,
         schema: Arc<Schema>,
         batch_size: usize,
         seed: Option<u64>,
@@ -65,15 +63,12 @@ impl BatchBuilder {
             })
             .collect();
 
-        let primary_keys: HashSet<String> = node.primary_keys.iter().cloned().collect();
-
         let fake_gen = match seed {
             Some(s) => FakeValueGenerator::fast_with_seed(s, pools),
             None => FakeValueGenerator::new_fast(pools),
         };
 
         Self {
-            primary_keys,
             batch_size,
             schema,
             fake_gen,
@@ -87,7 +82,7 @@ impl BatchBuilder {
         self.traversal_paths.push(traversal_path);
 
         for col_data in &mut self.columns {
-            if self.primary_keys.contains(&col_data.field.name) {
+            if col_data.field.name == DEFAULT_PRIMARY_KEY {
                 col_data.values.push_int64(Some(id));
             } else {
                 let value = self.fake_gen.generate_with_kind(
@@ -202,41 +197,27 @@ impl ColumnValues {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::FieldSource;
 
     fn fake_data_path() -> String {
         crate::synth::fixture_path(crate::synth::constants::DEFAULT_FAKE_DATA_PATH)
     }
 
-    fn test_node() -> NodeEntity {
-        NodeEntity {
+    fn test_node() -> Node {
+        let field = |name: &str, data_type, nullable| Field {
+            name: name.to_string(),
+            data_type,
+            nullable,
+            enum_values: None,
+        };
+        Node {
             name: "TestNode".to_string(),
-            domain: "core".to_string(),
-            description: "Test node entity".to_string(),
-            label: "name".to_string(),
+            table: "gl_test_nodes".to_string(),
             fields: vec![
-                Field {
-                    name: "id".to_string(),
-                    source: FieldSource::DatabaseColumn("id".to_string()),
-                    data_type: DataType::Int,
-                    ..Default::default()
-                },
-                Field {
-                    name: "name".to_string(),
-                    source: FieldSource::DatabaseColumn("name".to_string()),
-                    data_type: DataType::String,
-                    nullable: true,
-                    ..Default::default()
-                },
-                Field {
-                    name: "active".to_string(),
-                    source: FieldSource::DatabaseColumn("active".to_string()),
-                    data_type: DataType::Bool,
-                    ..Default::default()
-                },
+                field("id", DataType::Int, false),
+                field("name", DataType::String, true),
+                field("active", DataType::Bool, false),
             ],
-            destination_table: "gl_test_nodes".to_string(),
-            ..Default::default()
+            sort_key: vec![],
         }
     }
 

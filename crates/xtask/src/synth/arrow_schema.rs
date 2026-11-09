@@ -1,13 +1,15 @@
 use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
-use ontology::constants::TRAVERSAL_PATH_COLUMN;
-use ontology::{DataType, Field, NodeEntity};
+use query_data_model::{DataType, TRAVERSAL_PATH_COLUMN};
+
+use crate::synth::constants::EDGE_COLUMNS;
+use crate::synth::model::{Field, Node};
 
 pub trait ToArrowSchema {
     /// Prepends traversal_path as the first field.
     fn to_arrow_schema(&self) -> Schema;
 }
 
-impl ToArrowSchema for NodeEntity {
+impl ToArrowSchema for Node {
     fn to_arrow_schema(&self) -> Schema {
         let mut fields = vec![ArrowField::new(
             TRAVERSAL_PATH_COLUMN,
@@ -16,7 +18,6 @@ impl ToArrowSchema for NodeEntity {
         )];
 
         for field in &self.fields {
-            // traversal_path is prepended unconditionally above; drop any ontology copy.
             if field.name == TRAVERSAL_PATH_COLUMN {
                 continue;
             }
@@ -55,17 +56,23 @@ impl ToArrowType for DataType {
     }
 }
 
-pub fn edge_schema(ontology: &ontology::Ontology) -> Schema {
-    Schema::new(
-        ontology
-            .edge_columns()
-            .iter()
-            .map(|col| {
-                let arrow_type = col.data_type.to_arrow_type();
-                ArrowField::new(&col.name, arrow_type, false)
-            })
-            .collect::<Vec<_>>(),
-    )
+pub fn edge_schema() -> Schema {
+    let [
+        traversal_path,
+        relationship_kind,
+        source_id,
+        source_kind,
+        target_id,
+        target_kind,
+    ] = EDGE_COLUMNS;
+    Schema::new(vec![
+        ArrowField::new(traversal_path, ArrowDataType::Utf8, false),
+        ArrowField::new(relationship_kind, ArrowDataType::Utf8, false),
+        ArrowField::new(source_id, ArrowDataType::Int64, false),
+        ArrowField::new(source_kind, ArrowDataType::Utf8, false),
+        ArrowField::new(target_id, ArrowDataType::Int64, false),
+        ArrowField::new(target_kind, ArrowDataType::Utf8, false),
+    ])
 }
 
 pub fn to_clickhouse_ddl(table_name: &str, schema: &Schema, order_by: &[&str]) -> String {
@@ -120,38 +127,25 @@ pub(crate) fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: boo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::FieldSource;
+    use query_data_model::{Catalog, ClickHouse};
 
     #[test]
     fn test_node_to_arrow_schema() {
-        let node = NodeEntity {
+        let field = |name: &str, data_type, nullable| Field {
+            name: name.to_string(),
+            data_type,
+            nullable,
+            enum_values: None,
+        };
+        let node = Node {
             name: "User".to_string(),
-            domain: "core".to_string(),
-            description: "Test user entity".to_string(),
-            label: "username".to_string(),
+            table: "gl_user".to_string(),
             fields: vec![
-                Field {
-                    name: "id".to_string(),
-                    source: FieldSource::DatabaseColumn("id".to_string()),
-                    data_type: DataType::Int,
-                    ..Default::default()
-                },
-                Field {
-                    name: "username".to_string(),
-                    source: FieldSource::DatabaseColumn("username".to_string()),
-                    data_type: DataType::String,
-                    ..Default::default()
-                },
-                Field {
-                    name: "email".to_string(),
-                    source: FieldSource::DatabaseColumn("email".to_string()),
-                    data_type: DataType::String,
-                    nullable: true,
-                    ..Default::default()
-                },
+                field("id", DataType::Int, false),
+                field("username", DataType::String, false),
+                field("email", DataType::String, true),
             ],
-            destination_table: "gl_user".to_string(),
-            ..Default::default()
+            sort_key: vec![],
         };
 
         let schema = node.to_arrow_schema();
@@ -169,8 +163,7 @@ mod tests {
 
     #[test]
     fn test_edge_schema() {
-        let ontology = ontology::Ontology::load_embedded().expect("must load");
-        let schema = edge_schema(&ontology);
+        let schema = edge_schema();
         assert_eq!(schema.fields().len(), 6);
 
         let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
@@ -188,16 +181,16 @@ mod tests {
     }
 
     #[test]
-    fn test_edge_schema_matches_ontology_constants() {
-        let ontology = ontology::Ontology::load_embedded().expect("must load");
-        let schema = edge_schema(&ontology);
-        let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-
-        assert_eq!(
-            field_names,
-            ontology::constants::EDGE_RESERVED_COLUMNS,
-            "edge_schema() columns must match ontology::constants::EDGE_RESERVED_COLUMNS"
-        );
+    fn edge_columns_exist_in_the_model_edge_table() {
+        let catalog = Catalog::<ClickHouse>::embedded().expect("must load");
+        let edge_table = catalog.default_edge_table().expect("default edge table");
+        let table = catalog.schema().unwrap().table(edge_table).unwrap();
+        for column in EDGE_COLUMNS {
+            assert!(
+                table.columns.iter().any(|c| c.name == column),
+                "{edge_table} has no {column} column"
+            );
+        }
     }
 
     #[test]
@@ -223,8 +216,7 @@ mod tests {
 
     #[test]
     fn test_to_clickhouse_ddl() {
-        let ontology = ontology::Ontology::load_embedded().expect("must load");
-        let schema = edge_schema(&ontology);
+        let schema = edge_schema();
         let ddl = to_clickhouse_ddl(
             "gl_edge",
             &schema,

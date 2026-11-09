@@ -1,8 +1,8 @@
 use super::{ExecutionResult, QueryExecutor, Report, ReportFormat, RunConfig, RunMetadata};
 use crate::synth::clickhouse::check_clickhouse_health;
 use crate::synth::config::Config;
+use crate::synth::model::{Graph, load_catalog};
 use anyhow::Result;
-use ontology::Ontology;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -50,10 +50,11 @@ pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
     config.evaluation.validate()?;
 
     orbit_log_fields::info!(
-        expanded(LOCAL_PATH) = %config.generation.ontology_path,
-        "loading ontology"
+        expanded(LOCAL_PATH) = %config.generation.model_path,
+        "loading data model"
     );
-    let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
+    let data_model = load_catalog(&config.generation.model_path)?;
+    let graph = Graph::from_catalog(&data_model)?;
 
     orbit_log_fields::info!(
         expanded(LOCAL_PATH) = %config.evaluation.queries_path,
@@ -91,8 +92,8 @@ pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
 
     let mut executor = QueryExecutor::new(
         client,
-        ontology,
-        query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()?,
+        graph,
+        data_model,
         config.evaluation.sample_size,
         &config.evaluation.settings,
     );

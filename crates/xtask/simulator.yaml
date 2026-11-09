@@ -19,10 +19,7 @@ clickhouse:
     engine: MergeTree
     index_granularity: 8192
 
-    # Use per-node sort_key from ontology YAML (matches graph.sql).
-    # gl_user: ORDER BY (id), code tables: ORDER BY (traversal_path, project_id, branch, id),
-    # most SDLC nodes: ORDER BY (traversal_path, id).
-    use_ontology_sort_keys: true
+    use_model_sort_keys: true
 
     # Edge table schema matches graph.sql exactly.
     edge_primary_key: [traversal_path, relationship_kind]
@@ -112,7 +109,7 @@ clickhouse:
         order_by: [source_id, relationship_kind]
 
 generation:
-  ontology_path: config/ontology
+  model_path: config/model
   output_dir: gl_synthetic_data
   skip_if_present: false
   parallel: false

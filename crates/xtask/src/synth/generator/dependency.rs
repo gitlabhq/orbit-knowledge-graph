@@ -1,7 +1,7 @@
 use crate::synth::config::{EdgeRatio, GenerationConfig, RelationshipConfig};
 use crate::synth::constants::{PARENT_TO_CHILD_EDGE, PARENT_TO_CHILD_PREFIX};
+use crate::synth::model::Graph;
 use anyhow::{Result, bail};
-use ontology::Ontology;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 /// Separator between entity type and depth level in epsilon node names.
@@ -29,7 +29,7 @@ pub struct DependencyGraph {
 }
 
 impl DependencyGraph {
-    pub fn build(config: &GenerationConfig, ontology: &Ontology) -> Result<Self> {
+    pub fn build(config: &GenerationConfig, graph: &Graph) -> Result<Self> {
         let mut parent_edges: BTreeMap<String, Vec<ParentEdge>> = BTreeMap::new();
         let mut roots: HashSet<String> = HashSet::new();
         let mut all_nodes: BTreeSet<String> = BTreeSet::new();
@@ -87,7 +87,7 @@ impl DependencyGraph {
                     );
                 }
 
-                Self::validate_edge(ontology, edge_type, &source, &target)?;
+                Self::validate_edge(graph, edge_type, &source, &target)?;
 
                 let parent_to_child = Self::is_parent_to_child(edge_type);
 
@@ -144,7 +144,7 @@ impl DependencyGraph {
                     );
                 }
 
-                Self::validate_edge(ontology, edge_type, &source, &target)?;
+                Self::validate_edge(graph, edge_type, &source, &target)?;
 
                 let parent_to_child = Self::is_parent_to_child(edge_type);
                 let (parent_kind, child_kind) = if parent_to_child {
@@ -228,30 +228,21 @@ impl DependencyGraph {
         self.parent_types.contains(node_type)
     }
 
-    pub fn validate_node(ontology: &Ontology, node_type: &str) -> Result<()> {
-        if ontology.get_node(node_type).is_none() {
+    pub fn validate_node(graph: &Graph, node_type: &str) -> Result<()> {
+        if graph.node(node_type).is_none() {
             bail!(
-                "Node type '{}' not found in ontology. Available: {:?}",
+                "Node type '{}' not found in the data model. Available: {:?}",
                 node_type,
-                ontology.nodes().map(|n| &n.name).collect::<Vec<_>>()
+                graph.nodes().map(|n| &n.name).collect::<Vec<_>>()
             );
         }
         Ok(())
     }
 
-    pub fn validate_edge(
-        ontology: &Ontology,
-        edge_type: &str,
-        source: &str,
-        target: &str,
-    ) -> Result<()> {
-        let found = ontology.edges().any(|e| {
-            e.relationship_kind == edge_type && e.source_kind == source && e.target_kind == target
-        });
-
-        if !found {
+    pub fn validate_edge(graph: &Graph, edge_type: &str, source: &str, target: &str) -> Result<()> {
+        if !graph.has_edge(edge_type, source, target) {
             bail!(
-                "Edge '{}' with variant '{} -> {}' not found in ontology.",
+                "Edge '{}' with variant '{} -> {}' not found in the data model.",
                 edge_type,
                 source,
                 target
@@ -261,7 +252,7 @@ impl DependencyGraph {
         Ok(())
     }
 
-    /// Edge directionality from the ontology naming convention:
+    /// Edge directionality from the relationship naming convention:
     /// Parent-to-child (source is parent): `CONTAINS`, `HAS_*`.
     /// Child-to-parent (source is child): `IN_*`.
     /// All other edges are associations and must not appear in the relationship config.
@@ -468,7 +459,7 @@ mod tests {
     fn test_epsilon_node_expansion() {
         use crate::synth::config::{GenerationConfig, RelationshipConfig};
 
-        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let model = Graph::embedded().unwrap();
 
         let mut roots = BTreeMap::new();
         roots.insert("Group".to_string(), 2);
@@ -491,7 +482,7 @@ mod tests {
             ..Default::default()
         };
 
-        let graph = DependencyGraph::build(&config, &ontology).unwrap();
+        let graph = DependencyGraph::build(&config, &model).unwrap();
 
         assert!(graph.is_epsilon("Group@1"));
         assert!(graph.is_epsilon("Group@2"));

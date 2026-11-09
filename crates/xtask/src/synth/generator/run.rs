@@ -5,10 +5,10 @@ use super::parquet_writer::{ParquetWriter, StreamingEdgeWriter};
 use super::traversal::{EntityContext, EntityRegistry};
 use crate::synth::arrow_schema::ToArrowSchema;
 use crate::synth::config::{Config, EdgeRatio};
+use crate::synth::model::{Graph, Node};
 
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use ontology::{NodeEntity, Ontology};
 use rand::rngs::Xoshiro256PlusPlus;
 use rand::{Rng, RngExt, SeedableRng};
 use std::collections::HashMap;
@@ -88,7 +88,7 @@ impl StringInterner {
 }
 
 pub struct Generator {
-    ontology: Ontology,
+    graph: Graph,
     config: Config,
     dependency_graph: DependencyGraph,
     global_entity_counter: AtomicI64,
@@ -107,11 +107,11 @@ impl std::fmt::Debug for Generator {
 }
 
 impl Generator {
-    pub fn new(ontology: Ontology, config: Config) -> Result<Self> {
+    pub fn new(graph: Graph, config: Config) -> Result<Self> {
         use crate::synth::config::FakeDataConfig;
 
-        Self::validate_config(&config, &ontology)?;
-        let dependency_graph = DependencyGraph::build(&config.generation, &ontology)?;
+        Self::validate_config(&config, &graph)?;
+        let dependency_graph = DependencyGraph::build(&config.generation, &graph)?;
 
         let fake_data_config = FakeDataConfig::load(&config.generation.fake_data_path)?;
         let pools = FakeDataPools::intern(fake_data_config);
@@ -122,7 +122,7 @@ impl Generator {
             .unwrap_or_else(|| rand::rng().random());
 
         Ok(Self {
-            ontology,
+            graph,
             config,
             dependency_graph,
             global_entity_counter: AtomicI64::new(1),
@@ -148,7 +148,7 @@ impl Generator {
             .map(|_| self.stream_seed(org_id, stream))
     }
 
-    fn validate_config(config: &Config, ontology: &Ontology) -> Result<()> {
+    fn validate_config(config: &Config, graph: &Graph) -> Result<()> {
         let generation = &config.generation;
 
         if generation.organizations == 0 {
@@ -159,11 +159,11 @@ impl Generator {
         }
 
         for node_type in generation.roots.keys() {
-            DependencyGraph::validate_node(ontology, node_type)
+            DependencyGraph::validate_node(graph, node_type)
                 .map_err(|e| anyhow::anyhow!("roots: {}", e))?;
         }
 
-        DependencyGraph::validate_node(ontology, &generation.namespace_entity)
+        DependencyGraph::validate_node(graph, &generation.namespace_entity)
             .map_err(|e| anyhow::anyhow!("namespace_entity: {}", e))?;
 
         for (edge_type, variants) in &generation.relationships.edges {
@@ -178,11 +178,11 @@ impl Generator {
                                 edge_type
                             )
                         })?;
-                DependencyGraph::validate_node(ontology, &source)
+                DependencyGraph::validate_node(graph, &source)
                     .map_err(|e| anyhow::anyhow!("relationships.{}: {}", edge_type, e))?;
-                DependencyGraph::validate_node(ontology, &target)
+                DependencyGraph::validate_node(graph, &target)
                     .map_err(|e| anyhow::anyhow!("relationships.{}: {}", edge_type, e))?;
-                DependencyGraph::validate_edge(ontology, edge_type, &source, &target)
+                DependencyGraph::validate_edge(graph, edge_type, &source, &target)
                     .map_err(|e| anyhow::anyhow!("relationships: {}", e))?;
             }
         }
@@ -199,37 +199,31 @@ impl Generator {
                                 edge_type
                             )
                         })?;
-                DependencyGraph::validate_node(ontology, &source)
+                DependencyGraph::validate_node(graph, &source)
                     .map_err(|e| anyhow::anyhow!("associations.{}: {}", edge_type, e))?;
-                DependencyGraph::validate_node(ontology, &target)
+                DependencyGraph::validate_node(graph, &target)
                     .map_err(|e| anyhow::anyhow!("associations.{}: {}", edge_type, e))?;
-                DependencyGraph::validate_edge(ontology, edge_type, &source, &target)
+                DependencyGraph::validate_edge(graph, edge_type, &source, &target)
                     .map_err(|e| anyhow::anyhow!("associations: {}", e))?;
             }
         }
 
-        Self::validate_schema_config(&config.clickhouse.schema, ontology)?;
+        Self::validate_schema_config(&config.clickhouse.schema, graph)?;
 
         Ok(())
     }
 
     fn validate_schema_config(
         schema: &crate::synth::config::SchemaConfig,
-        ontology: &Ontology,
+        graph: &Graph,
     ) -> Result<()> {
-        use ontology::constants::EDGE_RESERVED_COLUMNS;
+        use crate::synth::constants::EDGE_COLUMNS;
+        use query_data_model::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 
-        let universal_node_columns: std::collections::HashSet<&str> = {
-            let mut cols: std::collections::HashSet<&str> =
-                std::iter::once(ontology::constants::TRAVERSAL_PATH_COLUMN).collect();
-            for col in ontology::constants::NODE_RESERVED_COLUMNS {
-                cols.insert(col);
-            }
-            cols
-        };
+        let universal_node_columns: std::collections::HashSet<&str> =
+            [TRAVERSAL_PATH_COLUMN, DEFAULT_PRIMARY_KEY].into();
 
-        let edge_columns: std::collections::HashSet<&str> =
-            EDGE_RESERVED_COLUMNS.iter().copied().collect();
+        let edge_columns: std::collections::HashSet<&str> = EDGE_COLUMNS.into();
 
         for col in &schema.node_order_by {
             if !universal_node_columns.contains(col.as_str()) {
@@ -259,7 +253,7 @@ impl Generator {
                     "schema.edge_order_by: column '{}' is not a valid edge column. \
                      Valid columns: {:?}",
                     col,
-                    EDGE_RESERVED_COLUMNS
+                    EDGE_COLUMNS
                 );
             }
         }
@@ -270,7 +264,7 @@ impl Generator {
                     "schema.edge_primary_key: column '{}' is not a valid edge column. \
                      Valid columns: {:?}",
                     col,
-                    EDGE_RESERVED_COLUMNS
+                    EDGE_COLUMNS
                 );
             }
         }
@@ -278,7 +272,7 @@ impl Generator {
         for idx in &schema.indexes {
             let valid_columns = Self::resolve_valid_columns(
                 &idx.table,
-                ontology,
+                graph,
                 &universal_node_columns,
                 &edge_columns,
             )?;
@@ -297,7 +291,7 @@ impl Generator {
         for proj in &schema.projections {
             let valid_columns = Self::resolve_valid_columns(
                 &proj.table,
-                ontology,
+                graph,
                 &universal_node_columns,
                 &edge_columns,
             )?;
@@ -332,7 +326,7 @@ impl Generator {
 
     fn resolve_valid_columns<'a>(
         table_pattern: &str,
-        ontology: &'a Ontology,
+        graph: &'a Graph,
         universal_node_columns: &std::collections::HashSet<&'a str>,
         edge_columns: &std::collections::HashSet<&'a str>,
     ) -> Result<std::collections::HashSet<&'a str>> {
@@ -341,18 +335,14 @@ impl Generator {
             TABLE_PATTERN_EDGES => Ok(edge_columns.clone()),
             TABLE_PATTERN_ALL_NODES => Ok(universal_node_columns.clone()),
             specific => {
-                if let Some(node) = ontology
-                    .nodes()
-                    .find(|n| ontology.table_name(&n.name).is_ok_and(|t| t == specific))
-                {
+                if let Some(node) = graph.nodes().find(|n| n.table == specific) {
                     let mut cols: std::collections::HashSet<&str> =
                         universal_node_columns.iter().copied().collect();
-                    cols.insert(ontology::constants::TRAVERSAL_PATH_COLUMN);
                     for field in &node.fields {
                         cols.insert(&field.name);
                     }
                     Ok(cols)
-                } else if specific == ontology::constants::EDGE_TABLE {
+                } else if specific == graph.edge_table() {
                     Ok(edge_columns.clone())
                 } else {
                     anyhow::bail!(
@@ -369,8 +359,8 @@ impl Generator {
         self.interner.lock().unwrap().intern(s)
     }
 
-    pub fn ontology(&self) -> &ontology::Ontology {
-        &self.ontology
+    pub fn graph(&self) -> &Graph {
+        &self.graph
     }
 
     pub fn next_entity_id(&self) -> i64 {
@@ -384,13 +374,9 @@ impl Generator {
         for node_type in self.dependency_graph.generation_order() {
             let mut rng = self.stream_rng(org_id, &format!("structure:{node_type}"));
             let real_type = self.dependency_graph.resolve_type(node_type);
-            let node = self
-                .ontology
-                .nodes()
-                .find(|n| n.name == real_type)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Node type '{}' not found in ontology", real_type)
-                })?;
+            let node = self.graph.node(real_type).ok_or_else(|| {
+                anyhow::anyhow!("Node type '{}' not found in the data model", real_type)
+            })?;
 
             if self.dependency_graph.is_root(node_type) {
                 let count = self
@@ -447,13 +433,9 @@ impl Generator {
         for node_type in self.dependency_graph.generation_order() {
             let mut rng = self.stream_rng(org_id, &format!("structure:{node_type}"));
             let real_type = self.dependency_graph.resolve_type(node_type);
-            let node = self
-                .ontology
-                .nodes()
-                .find(|n| n.name == real_type)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Node type '{}' not found in ontology", real_type)
-                })?;
+            let node = self.graph.node(real_type).ok_or_else(|| {
+                anyhow::anyhow!("Node type '{}' not found in the data model", real_type)
+            })?;
 
             if self.dependency_graph.is_root(node_type) {
                 let count = self
@@ -498,7 +480,7 @@ impl Generator {
 
     fn generate_root_entities(
         &self,
-        node: &NodeEntity,
+        node: &Node,
         org_id: u32,
         count: usize,
         registry: &mut EntityRegistry,
@@ -531,7 +513,7 @@ impl Generator {
 
     fn generate_child_entities(
         &self,
-        node: &NodeEntity,
+        node: &Node,
         registry_key: &str,
         parent_edges: &[ParentEdge],
         registry: &mut EntityRegistry,
@@ -674,7 +656,7 @@ impl Generator {
 
     fn generate_root_entities_streaming(
         &self,
-        node: &NodeEntity,
+        node: &Node,
         org_id: u32,
         count: usize,
         registry: &mut EntityRegistry,
@@ -706,7 +688,7 @@ impl Generator {
 
     fn generate_child_entities_streaming(
         &self,
-        node: &NodeEntity,
+        node: &Node,
         registry_key: &str,
         parent_edges: &[ParentEdge],
         registry: &mut EntityRegistry,
@@ -964,17 +946,17 @@ pub fn run(config_path: &Path, dry_run: bool, force: bool) -> Result<()> {
     }
 
     println!(
-        "Loading ontology from {:?}...",
-        config.generation.ontology_path
+        "Loading data model from {:?}...",
+        config.generation.model_path
     );
-    let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
+    let graph = Graph::load(&config.generation.model_path)?;
     println!(
         "Loaded {} node types and {} edge types\n",
-        ontology.node_count(),
-        ontology.edge_count()
+        graph.nodes().count(),
+        graph.edge_type_count()
     );
 
-    let generator = Generator::new(ontology.clone(), config.clone())?;
+    let generator = Generator::new(graph, config.clone())?;
     if let Some(seed) = config.generation.seed {
         println!("Seed: {seed}\n");
     }
@@ -1002,7 +984,7 @@ pub fn run(config_path: &Path, dry_run: bool, force: bool) -> Result<()> {
             org_id, config.generation.organizations
         );
 
-        let mut edge_writer = writer.create_edge_writer(org_id, generator.ontology())?;
+        let mut edge_writer = writer.create_edge_writer(org_id)?;
 
         let gen_start = std::time::Instant::now();
         let org_nodes = generator.generate_organization_streaming(org_id, &mut edge_writer)?;
@@ -1030,7 +1012,7 @@ pub fn run(config_path: &Path, dry_run: bool, force: bool) -> Result<()> {
         println!("  Written to Parquet ({:.1}s)\n", write_elapsed);
     }
 
-    writer.write_manifest(&ontology, config.generation.organizations)?;
+    writer.write_manifest(generator.graph(), config.generation.organizations)?;
 
     println!(
         "Done! Total time: {:.1}s",
@@ -1076,8 +1058,8 @@ mod tests {
         ids
     }
 
-    fn test_config_and_ontology() -> (Config, Ontology) {
-        let ontology = Ontology::load_embedded().expect("should load embedded ontology");
+    fn test_config_and_graph() -> (Config, Graph) {
+        let graph = Graph::embedded().expect("should load embedded model");
 
         let mut roots = BTreeMap::new();
         roots.insert("User".to_string(), 5);
@@ -1121,13 +1103,13 @@ mod tests {
             ..Default::default()
         };
 
-        (config, ontology)
+        (config, graph)
     }
 
     #[test]
     fn test_generator_produces_nodes_and_edges() {
-        let (config, ontology) = test_config_and_ontology();
-        let generator = Generator::new(ontology, config).unwrap();
+        let (config, graph) = test_config_and_graph();
+        let generator = Generator::new(graph, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
         assert!(data.nodes.contains_key("User"));
@@ -1148,8 +1130,8 @@ mod tests {
 
     #[test]
     fn test_generator_unique_entity_ids_per_type() {
-        let (config, ontology) = test_config_and_ontology();
-        let generator = Generator::new(ontology, config).unwrap();
+        let (config, graph) = test_config_and_graph();
+        let generator = Generator::new(graph, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
         for (node_type, batches) in &data.nodes {
@@ -1161,8 +1143,8 @@ mod tests {
 
     #[test]
     fn test_generator_edge_references_valid_ids() {
-        let (config, ontology) = test_config_and_ontology();
-        let generator = Generator::new(ontology, config).unwrap();
+        let (config, graph) = test_config_and_graph();
+        let generator = Generator::new(graph, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
         let all_ids: HashSet<i64> = data.nodes.values().flat_map(|b| extract_ids(b)).collect();
@@ -1185,8 +1167,8 @@ mod tests {
 
     #[test]
     fn test_generator_association_edges_use_source_traversal_path() {
-        let (config, ontology) = test_config_and_ontology();
-        let generator = Generator::new(ontology, config).unwrap();
+        let (config, graph) = test_config_and_graph();
+        let generator = Generator::new(graph, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
         let authored: Vec<_> = data
@@ -1208,8 +1190,8 @@ mod tests {
 
     #[test]
     fn test_generator_namespace_entity_extends_traversal_paths() {
-        let (config, ontology) = test_config_and_ontology();
-        let generator = Generator::new(ontology, config).unwrap();
+        let (config, graph) = test_config_and_graph();
+        let generator = Generator::new(graph, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
         for batch in &data.nodes["Group"] {
@@ -1248,9 +1230,9 @@ mod tests {
 
     #[test]
     fn test_generator_recursive_hierarchy_edges() {
-        let (config, ontology) = test_config_and_ontology();
+        let (config, graph) = test_config_and_graph();
         let ns_entity = config.generation.namespace_entity.clone();
-        let generator = Generator::new(ontology, config).unwrap();
+        let generator = Generator::new(graph, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
         let hierarchy_edges: Vec<_> = data
@@ -1303,9 +1285,9 @@ mod tests {
     }
 
     fn generate_with_seed(seed: u64) -> OrganizationData {
-        let (mut config, ontology) = test_config_and_ontology();
+        let (mut config, graph) = test_config_and_graph();
         config.generation.seed = Some(seed);
-        Generator::new(ontology, config)
+        Generator::new(graph, config)
             .unwrap()
             .generate_organization(1)
             .unwrap()
@@ -1346,10 +1328,10 @@ mod tests {
     #[test]
     fn test_streaming_parquet_output_is_byte_identical() {
         let write = |dir: &Path| -> Vec<(String, Vec<u8>)> {
-            let (config, ontology) = test_config_and_ontology();
-            let generator = Generator::new(ontology, config).unwrap();
+            let (config, graph) = test_config_and_graph();
+            let generator = Generator::new(graph, config).unwrap();
             let writer = ParquetWriter::new(dir);
-            let mut edges = writer.create_edge_writer(1, generator.ontology()).unwrap();
+            let mut edges = writer.create_edge_writer(1).unwrap();
             let nodes = generator
                 .generate_organization_streaming(1, &mut edges)
                 .unwrap();
@@ -1377,8 +1359,8 @@ mod tests {
 
     #[test]
     fn test_generator_global_entity_counter_across_orgs() {
-        let (config, ontology) = test_config_and_ontology();
-        let generator = Generator::new(ontology, config).unwrap();
+        let (config, graph) = test_config_and_graph();
+        let generator = Generator::new(graph, config).unwrap();
 
         let data1 = generator.generate_organization(1).unwrap();
         let data2 = generator.generate_organization(2).unwrap();
@@ -1403,22 +1385,22 @@ mod tests {
 
     #[test]
     fn test_validation_rejects_unknown_root_entity() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("FakeEntity".to_string(), 10);
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(err.to_string().contains("roots:") && err.to_string().contains("FakeEntity"));
     }
 
     #[test]
     fn test_validation_rejects_unknown_namespace_entity() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.generation.namespace_entity = "FakeNamespace".to_string();
         config.generation.roots.insert("User".to_string(), 1);
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("namespace_entity:")
                 && err.to_string().contains("FakeNamespace")
@@ -1427,7 +1409,7 @@ mod tests {
 
     #[test]
     fn test_validation_rejects_self_referential_without_recursive() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("Group".to_string(), 1);
@@ -1438,7 +1420,7 @@ mod tests {
             .relationships
             .edges
             .insert("CONTAINS".to_string(), contains);
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("Self-referential")
                 && err.to_string().contains("count, max_depth")
@@ -1447,7 +1429,7 @@ mod tests {
 
     #[test]
     fn test_validation_rejects_recursive_on_non_self_referential() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("Group".to_string(), 1);
@@ -1464,14 +1446,14 @@ mod tests {
             .relationships
             .edges
             .insert("CONTAINS".to_string(), contains);
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(err.to_string().contains("only valid for self-referential"));
     }
 
     #[test]
     fn test_validation_rejects_unknown_association_edge() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let (mut config, _) = test_config_and_ontology();
+        let graph = Graph::embedded().unwrap();
+        let (mut config, _) = test_config_and_graph();
         let mut fake_variants = BTreeMap::new();
         fake_variants.insert(
             "User -> Project".to_string(),
@@ -1482,7 +1464,7 @@ mod tests {
             .associations
             .edges
             .insert("NONEXISTENT_EDGE".to_string(), fake_variants);
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("associations:")
                 && err.to_string().contains("NONEXISTENT_EDGE")
@@ -1491,8 +1473,8 @@ mod tests {
 
     #[test]
     fn test_validation_rejects_unknown_association_node() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let (mut config, _) = test_config_and_ontology();
+        let graph = Graph::embedded().unwrap();
+        let (mut config, _) = test_config_and_graph();
         let mut fake_variants = BTreeMap::new();
         fake_variants.insert(
             "FakeNode -> User".to_string(),
@@ -1503,7 +1485,7 @@ mod tests {
             .associations
             .edges
             .insert("AUTHORED".to_string(), fake_variants);
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("associations.AUTHORED:")
                 && err.to_string().contains("FakeNode")
@@ -1512,27 +1494,27 @@ mod tests {
 
     #[test]
     fn test_validation_rejects_zero_organizations() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.generation.organizations = 0;
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(err.to_string().contains("organizations must be > 0"));
     }
 
     #[test]
     fn test_validation_rejects_zero_batch_size() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.generation.batch_size = 0;
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(err.to_string().contains("batch_size must be > 0"));
     }
 
     #[test]
     fn test_validation_rejects_unknown_relationship_edge() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("User".to_string(), 1);
@@ -1544,7 +1526,7 @@ mod tests {
             .relationships
             .edges
             .insert("BOGUS_EDGE".to_string(), fake_variants);
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("relationships:") && err.to_string().contains("BOGUS_EDGE")
         );
@@ -1552,7 +1534,7 @@ mod tests {
 
     #[test]
     fn test_validation_rejects_unknown_relationship_node() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("Group".to_string(), 1);
@@ -1563,7 +1545,7 @@ mod tests {
             .relationships
             .edges
             .insert("CONTAINS".to_string(), variants);
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("relationships.CONTAINS:")
                 && err.to_string().contains("FakeChild")
@@ -1572,12 +1554,12 @@ mod tests {
 
     #[test]
     fn test_validation_rejects_invalid_edge_order_by_column() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.edge_order_by =
             vec!["traversal_path".to_string(), "bogus_column".to_string()];
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("edge_order_by") && err.to_string().contains("bogus_column")
         );
@@ -1585,11 +1567,11 @@ mod tests {
 
     #[test]
     fn test_validation_rejects_invalid_edge_primary_key_column() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.edge_primary_key = vec!["not_a_column".to_string()];
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("edge_primary_key")
                 && err.to_string().contains("not_a_column")
@@ -1598,22 +1580,22 @@ mod tests {
 
     #[test]
     fn test_validation_rejects_invalid_node_order_by_column() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.node_order_by =
             vec!["traversal_path".to_string(), "username".to_string()];
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(err.to_string().contains("node_order_by") && err.to_string().contains("username"));
     }
 
     #[test]
     fn test_validation_rejects_invalid_node_primary_key_column() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.node_primary_key = vec!["nonexistent".to_string()];
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("node_primary_key") && err.to_string().contains("nonexistent")
         );
@@ -1621,7 +1603,7 @@ mod tests {
 
     #[test]
     fn test_validation_accepts_valid_schema_columns() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.node_order_by =
@@ -1642,12 +1624,12 @@ mod tests {
             "target_id".into(),
             "target_kind".into(),
         ];
-        Generator::new(ontology, config).unwrap();
+        Generator::new(graph, config).unwrap();
     }
 
     #[test]
     fn test_validation_rejects_invalid_index_expression() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.indexes = vec![crate::synth::config::IndexConfig {
@@ -1657,7 +1639,7 @@ mod tests {
             index_type: "bloom_filter".into(),
             granularity: 4,
         }];
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("indexes[idx_bad]")
                 && err.to_string().contains("nonexistent_col")
@@ -1666,7 +1648,7 @@ mod tests {
 
     #[test]
     fn test_validation_rejects_invalid_index_table() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.indexes = vec![crate::synth::config::IndexConfig {
@@ -1676,7 +1658,7 @@ mod tests {
             index_type: "minmax".into(),
             granularity: 4,
         }];
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("unknown table") && err.to_string().contains("fake_table")
         );
@@ -1684,7 +1666,7 @@ mod tests {
 
     #[test]
     fn test_validation_accepts_valid_index_on_edges() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.indexes = vec![crate::synth::config::IndexConfig {
@@ -1694,12 +1676,12 @@ mod tests {
             index_type: "bloom_filter".into(),
             granularity: 4,
         }];
-        Generator::new(ontology, config).unwrap();
+        Generator::new(graph, config).unwrap();
     }
 
     #[test]
     fn test_validation_rejects_invalid_projection_column() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.projections = vec![crate::synth::config::ProjectionConfig {
@@ -1708,7 +1690,7 @@ mod tests {
             columns: vec!["source_kind".into(), "fake_col".into()],
             order_by: vec!["target_id".into()],
         }];
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("projections[proj_bad]")
                 && err.to_string().contains("fake_col")
@@ -1717,7 +1699,7 @@ mod tests {
 
     #[test]
     fn test_validation_rejects_invalid_projection_order_by() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.projections = vec![crate::synth::config::ProjectionConfig {
@@ -1726,7 +1708,7 @@ mod tests {
             columns: vec!["source_kind".into()],
             order_by: vec!["bad_order_col".into()],
         }];
-        let err = Generator::new(ontology, config).unwrap_err();
+        let err = Generator::new(graph, config).unwrap_err();
         assert!(
             err.to_string().contains("projections[proj_bad]")
                 && err.to_string().contains("bad_order_col")
@@ -1735,7 +1717,7 @@ mod tests {
 
     #[test]
     fn test_validation_accepts_valid_projection() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.projections = vec![crate::synth::config::ProjectionConfig {
@@ -1754,20 +1736,20 @@ mod tests {
                 "relationship_kind".into(),
             ],
         }];
-        Generator::new(ontology, config).unwrap();
+        Generator::new(graph, config).unwrap();
     }
 
     #[test]
     fn test_validation_accepts_yaml_configs() {
-        let ontology = Ontology::load_embedded().unwrap();
+        let graph = Graph::embedded().unwrap();
 
         let mut config = Config::load(crate::synth::fixture_path("simulator.yaml")).unwrap();
         config.generation.fake_data_path = fake_data_path();
-        Generator::new(ontology.clone(), config).unwrap();
+        Generator::new(graph.clone(), config).unwrap();
 
         let mut config_slim =
             Config::load(crate::synth::fixture_path("simulator-slim.yaml")).unwrap();
         config_slim.generation.fake_data_path = fake_data_path();
-        Generator::new(ontology, config_slim).unwrap();
+        Generator::new(graph, config_slim).unwrap();
     }
 }

@@ -104,7 +104,7 @@ enum Command {
         check: bool,
     },
     /// Regenerate the auto-derived tables in the query language reference doc
-    /// from the ontology (currently the text-indexed properties table).
+    /// from the data model (currently the text-indexed properties table).
     QueryDocs {
         /// Path to the doc to update instead of the default.
         #[arg(short, long)]

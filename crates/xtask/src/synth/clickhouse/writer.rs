@@ -1,10 +1,10 @@
 use super::schema::SchemaGenerator;
 use crate::synth::config::ClickHouseConfig;
+use crate::synth::constants::RELATIONSHIP_KIND_COLUMN;
+use crate::synth::model::Graph;
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
-use ontology::Ontology;
-use ontology::constants::EDGE_TABLE;
 use std::path::Path;
 use std::process::Command;
 
@@ -91,12 +91,8 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    pub async fn create_schemas(
-        &self,
-        ontology: &Ontology,
-        config: &ClickHouseConfig,
-    ) -> Result<()> {
-        let generator = SchemaGenerator::new(ontology, &config.schema);
+    pub async fn create_schemas(&self, graph: &Graph, config: &ClickHouseConfig) -> Result<()> {
+        let generator = SchemaGenerator::new(graph, &config.schema);
 
         println!("Dropping existing tables...");
         for drop_sql in generator.generate_drop_tables() {
@@ -112,8 +108,8 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    pub async fn add_indexes(&self, ontology: &Ontology, config: &ClickHouseConfig) -> Result<()> {
-        let generator = SchemaGenerator::new(ontology, &config.schema);
+    pub async fn add_indexes(&self, graph: &Graph, config: &ClickHouseConfig) -> Result<()> {
+        let generator = SchemaGenerator::new(graph, &config.schema);
 
         let add_statements = generator.generate_add_indexes();
         if add_statements.is_empty() {
@@ -137,12 +133,8 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    pub async fn add_projections(
-        &self,
-        ontology: &Ontology,
-        config: &ClickHouseConfig,
-    ) -> Result<()> {
-        let generator = SchemaGenerator::new(ontology, &config.schema);
+    pub async fn add_projections(&self, graph: &Graph, config: &ClickHouseConfig) -> Result<()> {
+        let generator = SchemaGenerator::new(graph, &config.schema);
 
         let add_statements = generator.generate_add_projections();
         if add_statements.is_empty() {
@@ -173,11 +165,11 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    pub async fn print_statistics(&self, ontology: &Ontology) -> Result<()> {
+    pub async fn print_statistics(&self, graph: &Graph) -> Result<()> {
         println!("\n=== Database Statistics ===");
 
-        for node in ontology.nodes() {
-            let tbl_name = ontology.table_name(&node.name)?;
+        for node in graph.nodes() {
+            let tbl_name = &node.table;
             let count: u64 = self
                 .client
                 .inner()
@@ -191,17 +183,18 @@ impl ClickHouseWriter {
             println!("{:30} {:>12} rows", tbl_name, count);
         }
 
+        let edge_table = graph.edge_table();
         let edge_count: u64 = self
             .client
             .inner()
-            .query(&format!("SELECT count() FROM {}", EDGE_TABLE))
+            .query(&format!("SELECT count() FROM {}", edge_table))
             .fetch_one()
             .await
             .unwrap_or_else(|e| {
-                eprintln!("Warning: Failed to query table {}: {}", EDGE_TABLE, e);
+                eprintln!("Warning: Failed to query table {}: {}", edge_table, e);
                 0
             });
-        println!("{:30} {:>12} rows", EDGE_TABLE, edge_count);
+        println!("{:30} {:>12} rows", edge_table, edge_count);
 
         println!("\n=== Edge Types ===");
         let edge_types: Vec<(String, u64)> = self
@@ -209,8 +202,8 @@ impl ClickHouseWriter {
             .inner()
             .query(&format!(
                 "SELECT {rk}, count() FROM {} GROUP BY {rk} ORDER BY count() DESC LIMIT 10",
-                EDGE_TABLE,
-                rk = ontology::constants::EDGE_RESERVED_COLUMNS[1]
+                edge_table,
+                rk = RELATIONSHIP_KIND_COLUMN
             ))
             .fetch_all()
             .await

@@ -1,9 +1,4 @@
 # Fake data configuration for the simulator.
-#
-# Controls string pools, boolean probabilities, integer ranges, AND the
-# classification rules that decide which generator strategy applies to each
-# ontology field. Edit this file to change generated values or add new
-# field-specific behaviour without recompilation.
 
 strings:
   pools:

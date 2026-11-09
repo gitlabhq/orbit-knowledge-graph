@@ -1,10 +1,10 @@
 use super::error::{ErrorCategory, ParsedError};
 use super::metadata::{ErrorInfo, QueryMetadata, QueryMetadataBuilder, QueryPlan, SampleData};
 use super::{ParameterSampler, QueryEntry};
+use crate::synth::model::Graph;
 use anyhow::Result;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::stream::{self, StreamExt};
-use ontology::Ontology;
 use query_data_model::{Catalog, ClickHouse};
 use query_engine::compiler::{Frontend, ParamValue, SecurityContext, compile};
 use rand::RngExt;
@@ -161,7 +161,7 @@ impl ExecutionResult {
 
 pub struct QueryExecutor {
     client: ArrowClickHouseClient,
-    ontology: Arc<Ontology>,
+    graph: Arc<Graph>,
     data_model: Arc<Catalog<ClickHouse>>,
     sampler: ParameterSampler,
     security_contexts: Vec<(i64, String)>,
@@ -171,7 +171,7 @@ pub struct QueryExecutor {
 impl QueryExecutor {
     pub fn new(
         client: ArrowClickHouseClient,
-        ontology: Ontology,
+        graph: Graph,
         data_model: Catalog<ClickHouse>,
         sample_size: usize,
         user_settings: &std::collections::HashMap<String, String>,
@@ -180,7 +180,7 @@ impl QueryExecutor {
         let query_settings = Self::build_settings(user_settings);
         Self {
             client,
-            ontology: Arc::new(ontology),
+            graph: Arc::new(graph),
             data_model: Arc::new(data_model),
             sampler,
             security_contexts: Vec::new(),
@@ -217,10 +217,10 @@ impl QueryExecutor {
     /// `namespace_entity` specifies which entity type defines the namespace
     /// hierarchy (typically "Group") — used to sample traversal paths.
     pub async fn warm_cache(&mut self, namespace_entity: &str) -> Result<()> {
-        self.sampler.warm_cache(&self.ontology).await?;
+        self.sampler.warm_cache(&self.graph).await?;
         self.security_contexts = self
             .sampler
-            .sample_traversal_paths(namespace_entity, &self.ontology)
+            .sample_traversal_paths(namespace_entity, &self.graph)
             .await?;
         Ok(())
     }
@@ -305,12 +305,12 @@ impl QueryExecutor {
         let mut sampled_ids = if let Some(path) = traversal_path {
             let ids = self
                 .sampler
-                .random_ids_in_path(entity, count, path, &self.ontology)
+                .random_ids_in_path(entity, count, path, &self.graph)
                 .await?;
             if ids.is_empty() {
                 sampling_info.global_fallback_count += 1;
                 self.sampler
-                    .random_ids_in_org(entity, count, security_ctx.org_id, &self.ontology)
+                    .random_ids_in_org(entity, count, security_ctx.org_id, &self.graph)
                     .await?
             } else {
                 sampling_info.path_scoped_count += 1;
@@ -319,7 +319,7 @@ impl QueryExecutor {
         } else {
             sampling_info.global_fallback_count += 1;
             self.sampler
-                .random_ids_in_org(entity, count, security_ctx.org_id, &self.ontology)
+                .random_ids_in_org(entity, count, security_ctx.org_id, &self.graph)
                 .await?
         };
 
@@ -330,11 +330,11 @@ impl QueryExecutor {
             if sampled_ids.is_empty() {
                 let extra_ids = if let Some(path) = traversal_path {
                     self.sampler
-                        .random_ids_in_path(entity, count * 2, path, &self.ontology)
+                        .random_ids_in_path(entity, count * 2, path, &self.graph)
                         .await?
                 } else {
                     self.sampler
-                        .random_ids_in_org(entity, count * 2, security_ctx.org_id, &self.ontology)
+                        .random_ids_in_org(entity, count * 2, security_ctx.org_id, &self.graph)
                         .await?
                 };
                 sampled_ids = extra_ids

@@ -1,10 +1,10 @@
 use super::run::{EdgeRecord, OrganizationNodes};
 use crate::synth::arrow_schema::edge_schema;
 use crate::synth::constants::DEFAULT_EDGE_FLUSH_THRESHOLD;
+use crate::synth::model::Graph;
 use anyhow::{Context, Result};
 use arrow::array::{Int64Array, RecordBatch, StringArray};
 use arrow::datatypes::Schema;
-use ontology::Ontology;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -22,12 +22,8 @@ pub struct StreamingEdgeWriter {
 }
 
 impl StreamingEdgeWriter {
-    pub fn new(
-        path: &Path,
-        flush_threshold: Option<usize>,
-        ontology: &ontology::Ontology,
-    ) -> Result<Self> {
-        let schema = Arc::new(edge_schema(ontology));
+    pub fn new(path: &Path, flush_threshold: Option<usize>) -> Result<Self> {
+        let schema = Arc::new(edge_schema());
         let props = WriterProperties::builder()
             .set_compression(Compression::ZSTD(Default::default()))
             .build();
@@ -138,15 +134,11 @@ impl ParquetWriter {
         self.output_dir.exists() && self.output_dir.join("edges.parquet").exists()
     }
 
-    pub fn create_edge_writer(
-        &self,
-        org_id: u32,
-        ontology: &ontology::Ontology,
-    ) -> Result<StreamingEdgeWriter> {
+    pub fn create_edge_writer(&self, org_id: u32) -> Result<StreamingEdgeWriter> {
         let org_dir = self.output_dir.join(format!("org_{}", org_id));
         fs::create_dir_all(&org_dir)?;
         let edge_path = org_dir.join("edges.parquet");
-        StreamingEdgeWriter::new(&edge_path, None, ontology)
+        StreamingEdgeWriter::new(&edge_path, None)
     }
 
     /// Writes nodes only; edges are written separately via the streaming writer.
@@ -180,9 +172,9 @@ impl ParquetWriter {
         Ok(())
     }
 
-    pub fn write_manifest(&self, ontology: &Ontology, num_orgs: u32) -> Result<()> {
+    pub fn write_manifest(&self, graph: &Graph, num_orgs: u32) -> Result<()> {
         let manifest = Manifest {
-            node_types: ontology.nodes().map(|n| n.name.clone()).collect(),
+            node_types: graph.nodes().map(|n| n.name.clone()).collect(),
             organizations: num_orgs,
         };
 

@@ -1,7 +1,8 @@
 use crate::synth::config::{FakeDataConfig, StringKind};
 use crate::synth::constants::SEEDED_BASE_TIME_MILLIS;
+use crate::synth::model::Field;
 use chrono::Utc;
-use ontology::{DataType, Field};
+use query_data_model::DataType;
 use rand::rngs::Xoshiro256PlusPlus;
 use rand::{RngExt, SeedableRng};
 use std::borrow::Cow;
@@ -454,7 +455,6 @@ impl FakeValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::{DataType, FieldSource};
     use std::collections::BTreeMap;
 
     fn fake_data_path() -> String {
@@ -474,12 +474,9 @@ mod tests {
 
         let field = Field {
             name: "status".to_string(),
-            source: FieldSource::DatabaseColumn("status".to_string()),
             data_type: DataType::String,
             nullable: true,
             enum_values: Some(enum_vals),
-            enum_type: ontology::EnumType::default(),
-            ..Default::default()
         };
 
         assert_eq!(FieldKind::classify(&field, pools), FieldKind::Enum);
@@ -490,12 +487,9 @@ mod tests {
         let pools = test_pools();
         let make = |name: &str, dt: DataType| Field {
             name: name.to_string(),
-            source: FieldSource::DatabaseColumn(name.to_string()),
             data_type: dt,
             nullable: false,
             enum_values: None,
-            enum_type: ontology::EnumType::default(),
-            ..Default::default()
         };
 
         assert_eq!(
@@ -517,13 +511,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "audit helper: run manually to check string heuristic coverage on ontology fields"]
-    fn test_classify_ontology_fields_no_generic_string() {
+    #[ignore = "audit helper: run manually to check string heuristic coverage on model fields"]
+    fn test_classify_model_fields_no_generic_string() {
         let pools = test_pools();
-        let ontology = ontology::Ontology::load_embedded().expect("should load embedded ontology");
+        let graph = crate::synth::model::Graph::embedded().expect("should load embedded model");
 
         let mut generic_fields = Vec::new();
-        for node in ontology.nodes() {
+        for node in graph.nodes() {
             for field in &node.fields {
                 let kind = FieldKind::classify(field, pools);
                 if kind == FieldKind::GenericString {
@@ -544,12 +538,9 @@ mod tests {
     fn test_generate_produces_non_null_for_non_nullable() {
         let field = Field {
             name: "name".to_string(),
-            source: FieldSource::DatabaseColumn("name".to_string()),
             data_type: DataType::String,
             nullable: false,
             enum_values: None,
-            enum_type: ontology::EnumType::default(),
-            ..Default::default()
         };
 
         let mut fvg = FakeValueGenerator::with_seed(42, test_pools());
@@ -571,12 +562,9 @@ mod tests {
 
         let field = Field {
             name: "category".to_string(),
-            source: FieldSource::DatabaseColumn("category".to_string()),
             data_type: DataType::Enum,
             nullable: false,
             enum_values: Some(enum_vals),
-            enum_type: ontology::EnumType::default(),
-            ..Default::default()
         };
 
         let mut fvg = FakeValueGenerator::with_seed(42, test_pools());
@@ -600,12 +588,9 @@ mod tests {
     fn test_generate_deterministic_with_seed() {
         let field = Field {
             name: "name".to_string(),
-            source: FieldSource::DatabaseColumn("name".to_string()),
             data_type: DataType::String,
             nullable: false,
             enum_values: None,
-            enum_type: ontology::EnumType::default(),
-            ..Default::default()
         };
 
         let pools = test_pools();

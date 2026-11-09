@@ -14,7 +14,7 @@ clickhouse:
   schema:
     engine: MergeTree
     index_granularity: 2048
-    use_ontology_sort_keys: true
+    use_model_sort_keys: true
     edge_primary_key: [traversal_path, relationship_kind]
     edge_order_by: [traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind]
 
@@ -51,7 +51,7 @@ clickhouse:
         order_by: [source_id, relationship_kind]
 
 generation:
-  ontology_path: config/ontology
+  model_path: config/model
   output_dir: gl_synthetic_data_small
   skip_if_present: false
   parallel: false

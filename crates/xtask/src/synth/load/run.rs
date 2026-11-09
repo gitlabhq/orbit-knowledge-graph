@@ -1,9 +1,8 @@
 use super::ParquetReader;
 use crate::synth::clickhouse::{ClickHouseWriter, check_clickhouse_health};
 use crate::synth::config::Config;
+use crate::synth::model::Graph;
 use anyhow::Result;
-use ontology::Ontology;
-use ontology::constants::EDGE_TABLE;
 use std::path::Path;
 
 pub async fn run(
@@ -21,10 +20,10 @@ pub async fn run(
     let config = Config::load(config_path)?;
 
     println!(
-        "Loading ontology from {:?}...",
-        config.generation.ontology_path
+        "Loading data model from {:?}...",
+        config.generation.model_path
     );
-    let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
+    let graph = Graph::load(&config.generation.model_path)?;
 
     println!(
         "Checking ClickHouse connection at {}...",
@@ -36,7 +35,7 @@ pub async fn run(
 
     if !no_schema {
         println!("\n=== Schema Setup ===");
-        writer.create_schemas(&ontology, &config.clickhouse).await?;
+        writer.create_schemas(&graph, &config.clickhouse).await?;
     }
 
     if !no_data {
@@ -67,13 +66,13 @@ pub async fn run(
         for org_id in &orgs {
             println!("\nOrganization {}:", org_id);
 
-            for node in ontology.nodes() {
+            for node in graph.nodes() {
                 let file_path = reader.file_path(*org_id, &node.name);
                 if !file_path.exists() {
                     continue;
                 }
 
-                let tbl_name = ontology.table_name(&node.name)?;
+                let tbl_name = node.table.as_str();
                 print!("  {}... ", node.name);
                 std::io::Write::flush(&mut std::io::stdout()).ok();
 
@@ -97,10 +96,12 @@ pub async fn run(
                 let start = std::time::Instant::now();
 
                 if use_cli {
-                    writer.load_parquet_file(EDGE_TABLE, &edges_path)?;
+                    writer.load_parquet_file(graph.edge_table(), &edges_path)?;
                 } else {
                     let edge_batches = reader.read_edges(*org_id)?;
-                    writer.write_batches(EDGE_TABLE, &edge_batches).await?;
+                    writer
+                        .write_batches(graph.edge_table(), &edge_batches)
+                        .await?;
                 }
 
                 println!("{:.1}s", start.elapsed().as_secs_f64());
@@ -116,19 +117,17 @@ pub async fn run(
     // Build indexes after the data load so the writes aren't slowed by index maintenance.
     if !no_indexes && !config.clickhouse.schema.indexes.is_empty() {
         println!("\n=== Indexes ===");
-        writer.add_indexes(&ontology, &config.clickhouse).await?;
+        writer.add_indexes(&graph, &config.clickhouse).await?;
     }
 
     // Build projections after the data load so the writes aren't slowed by projection maintenance.
     if !no_projections && !config.clickhouse.schema.projections.is_empty() {
         println!("\n=== Projections ===");
-        writer
-            .add_projections(&ontology, &config.clickhouse)
-            .await?;
+        writer.add_projections(&graph, &config.clickhouse).await?;
     }
 
     println!();
-    writer.print_statistics(&ontology).await?;
+    writer.print_statistics(&graph).await?;
 
     Ok(())
 }

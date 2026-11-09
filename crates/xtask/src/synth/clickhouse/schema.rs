@@ -1,29 +1,28 @@
 use crate::synth::arrow_schema::{ToArrowSchema, arrow_to_clickhouse_type, edge_schema};
 use crate::synth::config::SchemaConfig;
 use crate::synth::constants::{TABLE_PATTERN_ALL_NODES, TABLE_PATTERN_EDGES};
+use crate::synth::model::Graph;
 use arrow::datatypes::Schema;
-use ontology::Ontology;
-use ontology::constants::EDGE_TABLE;
 
 pub struct SchemaGenerator<'a> {
-    ontology: &'a Ontology,
+    graph: &'a Graph,
     config: &'a SchemaConfig,
 }
 
 impl<'a> SchemaGenerator<'a> {
-    pub fn new(ontology: &'a Ontology, config: &'a SchemaConfig) -> Self {
-        Self { ontology, config }
+    pub fn new(graph: &'a Graph, config: &'a SchemaConfig) -> Self {
+        Self { graph, config }
     }
 
     pub fn generate_create_tables(&self) -> Vec<(String, String)> {
         let mut statements = Vec::new();
 
-        for node in self.ontology.nodes() {
-            let tbl_name = self.ontology.table_name(&node.name).unwrap();
+        for node in self.graph.nodes() {
+            let tbl_name = node.table.as_str();
             let schema = node.to_arrow_schema();
 
             let (primary_key, order_by): (Vec<&str>, Vec<&str>) =
-                if self.config.use_ontology_sort_keys && !node.sort_key.is_empty() {
+                if self.config.use_model_sort_keys && !node.sort_key.is_empty() {
                     // Matches graph.sql where each table has its own ORDER BY/PK.
                     let sort_key: Vec<&str> = node.sort_key.iter().map(|s| s.as_str()).collect();
                     (sort_key.clone(), sort_key)
@@ -46,7 +45,8 @@ impl<'a> SchemaGenerator<'a> {
             statements.push((tbl_name.to_owned(), ddl));
         }
 
-        let edge_schema = edge_schema(self.ontology);
+        let edge_table = self.graph.edge_table();
+        let edge_schema = edge_schema();
         let primary_key: Vec<&str> = self
             .config
             .edge_primary_key
@@ -59,8 +59,8 @@ impl<'a> SchemaGenerator<'a> {
             .iter()
             .map(|s| s.as_str())
             .collect();
-        let ddl = self.schema_to_ddl(EDGE_TABLE, &edge_schema, &primary_key, &order_by);
-        statements.push((EDGE_TABLE.to_string(), ddl));
+        let ddl = self.schema_to_ddl(edge_table, &edge_schema, &primary_key, &order_by);
+        statements.push((edge_table.to_string(), ddl));
 
         statements
     }
@@ -68,12 +68,14 @@ impl<'a> SchemaGenerator<'a> {
     pub fn generate_drop_tables(&self) -> Vec<String> {
         let mut drops = Vec::new();
 
-        for node in self.ontology.nodes() {
-            let tbl_name = self.ontology.table_name(&node.name).unwrap();
-            drops.push(format!("DROP TABLE IF EXISTS {} SYNC", tbl_name));
+        for node in self.graph.nodes() {
+            drops.push(format!("DROP TABLE IF EXISTS {} SYNC", node.table));
         }
 
-        drops.push(format!("DROP TABLE IF EXISTS {} SYNC", EDGE_TABLE));
+        drops.push(format!(
+            "DROP TABLE IF EXISTS {} SYNC",
+            self.graph.edge_table()
+        ));
         drops
     }
 
@@ -151,12 +153,8 @@ impl<'a> SchemaGenerator<'a> {
     /// Resolve table pattern ("*" = all node tables, "edges" = edge table).
     fn resolve_table_pattern(&self, pattern: &str) -> Vec<String> {
         match pattern {
-            TABLE_PATTERN_ALL_NODES => self
-                .ontology
-                .nodes()
-                .map(|n| self.ontology.table_name(&n.name).unwrap().to_owned())
-                .collect(),
-            TABLE_PATTERN_EDGES => vec![EDGE_TABLE.to_string()],
+            TABLE_PATTERN_ALL_NODES => self.graph.nodes().map(|n| n.table.clone()).collect(),
+            TABLE_PATTERN_EDGES => vec![self.graph.edge_table().to_string()],
             _ => vec![pattern.to_string()],
         }
     }
@@ -209,7 +207,25 @@ impl<'a> SchemaGenerator<'a> {
 mod tests {
     use super::*;
     use crate::synth::config::IndexConfig;
-    use ontology::DataType;
+    use crate::synth::model::{Field, Node};
+    use query_data_model::DataType;
+
+    fn node(name: &str, table: &str, fields: &[(&str, DataType)]) -> Node {
+        Node {
+            name: name.to_string(),
+            table: table.to_string(),
+            fields: fields
+                .iter()
+                .map(|(name, data_type)| Field {
+                    name: name.to_string(),
+                    data_type: *data_type,
+                    nullable: false,
+                    enum_values: None,
+                })
+                .collect(),
+            sort_key: vec![],
+        }
+    }
 
     fn test_config() -> SchemaConfig {
         SchemaConfig::default()
@@ -217,19 +233,24 @@ mod tests {
 
     #[test]
     fn test_generate_create_tables() {
-        let ontology = Ontology::new()
-            .with_nodes(["User", "Project"])
-            .with_fields(
-                "User",
-                [("id", DataType::Int), ("username", DataType::String)],
-            )
-            .with_fields(
-                "Project",
-                [("id", DataType::Int), ("name", DataType::String)],
-            );
+        let graph = Graph::new(
+            vec![
+                node(
+                    "Project",
+                    "gl_project",
+                    &[("id", DataType::Int), ("name", DataType::String)],
+                ),
+                node(
+                    "User",
+                    "gl_user",
+                    &[("id", DataType::Int), ("username", DataType::String)],
+                ),
+            ],
+            "gl_edge",
+        );
 
         let config = test_config();
-        let generator = SchemaGenerator::new(&ontology, &config);
+        let generator = SchemaGenerator::new(&graph, &config);
         let statements = generator.generate_create_tables();
 
         assert_eq!(statements.len(), 3);
@@ -242,7 +263,7 @@ mod tests {
 
     #[test]
     fn test_generate_indexes() {
-        let ontology = Ontology::new().with_nodes(["User"]);
+        let graph = Graph::new(vec![node("User", "gl_user", &[])], "gl_edge");
 
         let config = SchemaConfig {
             indexes: vec![IndexConfig {
@@ -255,7 +276,7 @@ mod tests {
             ..Default::default()
         };
 
-        let generator = SchemaGenerator::new(&ontology, &config);
+        let generator = SchemaGenerator::new(&graph, &config);
         let statements = generator.generate_add_indexes();
 
         assert_eq!(statements.len(), 1);

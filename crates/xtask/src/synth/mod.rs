@@ -11,6 +11,7 @@ pub mod evaluation;
 pub mod generator;
 #[allow(dead_code)]
 pub mod load;
+pub mod model;
 
 #[cfg(test)]
 pub(crate) fn fixture_path(relative: &str) -> String {

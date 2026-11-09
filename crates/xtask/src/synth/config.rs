@@ -122,15 +122,15 @@ impl Default for ClientConfig {
 pub struct SchemaConfig {
     #[serde(default = "default_engine_type")]
     pub engine: String,
-    /// When true, each node table gets its own ORDER BY from the ontology
+    /// When true, each node table gets its own ORDER BY from the data model
     /// (e.g. gl_user uses [id], code tables use [traversal_path, project_id, branch, id]).
     /// When false (default), all node tables share node_order_by.
     #[serde(default)]
-    pub use_ontology_sort_keys: bool,
-    /// If empty, defaults to ORDER BY columns. Ignored when use_ontology_sort_keys is true.
+    pub use_model_sort_keys: bool,
+    /// If empty, defaults to ORDER BY columns. Ignored when use_model_sort_keys is true.
     #[serde(default)]
     pub node_primary_key: Vec<String>,
-    /// Ignored when use_ontology_sort_keys is true.
+    /// Ignored when use_model_sort_keys is true.
     #[serde(default = "default_node_order_by")]
     pub node_order_by: Vec<String>,
     /// If empty, defaults to ORDER BY columns.
@@ -160,7 +160,7 @@ fn default_engine_type() -> String {
 }
 
 fn default_node_order_by() -> Vec<String> {
-    use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+    use query_data_model::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
     vec![
         TRAVERSAL_PATH_COLUMN.to_string(),
         DEFAULT_PRIMARY_KEY.to_string(),
@@ -168,13 +168,13 @@ fn default_node_order_by() -> Vec<String> {
 }
 
 fn default_edge_order_by() -> Vec<String> {
-    use ontology::constants::{EDGE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN};
-    // Subset of EDGE_RESERVED_COLUMNS in query-optimal order; validated against EDGE_RESERVED_COLUMNS at startup.
+    use super::constants::{RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN};
+    use query_data_model::TRAVERSAL_PATH_COLUMN;
     vec![
         TRAVERSAL_PATH_COLUMN.to_string(),
-        EDGE_RESERVED_COLUMNS[2].to_string(), // source_id
-        EDGE_RESERVED_COLUMNS[3].to_string(), // source_kind
-        EDGE_RESERVED_COLUMNS[1].to_string(), // relationship_kind
+        SOURCE_ID_COLUMN.to_string(),
+        SOURCE_KIND_COLUMN.to_string(),
+        RELATIONSHIP_KIND_COLUMN.to_string(),
     ]
 }
 
@@ -186,7 +186,7 @@ impl Default for SchemaConfig {
     fn default() -> Self {
         Self {
             engine: default_engine_type(),
-            use_ontology_sort_keys: false,
+            use_model_sort_keys: false,
             node_primary_key: vec![],
             node_order_by: default_node_order_by(),
             edge_primary_key: vec![],
@@ -228,8 +228,9 @@ pub struct ProjectionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenerationConfig {
-    #[serde(default = "default_ontology_path")]
-    pub ontology_path: String,
+    /// Directory of data model packages, read like `config/model`.
+    #[serde(default = "default_model_path")]
+    pub model_path: String,
     #[serde(default = "default_output_dir")]
     pub output_dir: String,
     #[serde(default)]
@@ -270,8 +271,8 @@ fn default_output_dir() -> String {
     "data".to_string()
 }
 
-fn default_ontology_path() -> String {
-    env!("ONTOLOGY_DIR").to_string()
+fn default_model_path() -> String {
+    concat!(env!("ORBIT_CONFIG_DIR"), "/model").to_string()
 }
 
 fn default_organizations() -> u32 {
@@ -293,7 +294,7 @@ fn default_batch_size() -> usize {
 impl Default for GenerationConfig {
     fn default() -> Self {
         Self {
-            ontology_path: default_ontology_path(),
+            model_path: default_model_path(),
             output_dir: default_output_dir(),
             skip_if_present: false,
             organizations: default_organizations(),
@@ -387,7 +388,7 @@ pub struct EdgeVariantConfig {
 
 /// Relationship-based generation configuration.
 ///
-/// Maps ontology edge types to their generation ratios.
+/// Maps relationship types to their generation ratios.
 /// Example:
 /// ```yaml
 /// relationships:

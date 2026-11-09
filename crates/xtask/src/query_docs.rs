@@ -1,10 +1,10 @@
 //! Regenerates the auto-derivable tables in the query language reference docs
-//! from the ontology.
+//! from the data model.
 //!
 //! Currently this owns the **text-indexed properties** table: the set of
 //! `(entity, property)` pairs that accept the `token_match`, `all_tokens`, and
 //! `any_tokens` operators. That set is the columns carrying the `text`
-//! storage index in the ontology YAML — the same signal the compiler's
+//! storage index in the data model — the same signal the compiler's
 //! token-operator validation enforces — so the table is fully derivable and
 //! must never be hand-edited.
 //!
@@ -27,7 +27,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
-use ontology::Ontology;
+use query_data_model::{Catalog, ClickHouse};
 
 /// Paths are relative to the workspace root.
 const DEFAULT_DOCS: &[&str] = &["docs/docs-gitlab-com/queries/query-language.md"];
@@ -35,13 +35,13 @@ const DEFAULT_DOCS: &[&str] = &["docs/docs-gitlab-com/queries/query-language.md"
 const BEGIN_MARKER: &str = "<!-- BEGIN GENERATED: text-indexed-properties -->";
 const END_MARKER: &str = "<!-- END GENERATED: text-indexed-properties -->";
 
-/// Sanity floor so an accidental ontology-loading regression (or an empty
-/// embedded ontology) fails the check rather than silently wiping the table.
+/// Sanity floor so an accidental model-loading regression (or an empty
+/// embedded model) fails the check rather than silently wiping the table.
 const MIN_ENTITIES: usize = 10;
 
 pub fn run(doc: Option<PathBuf>, check: bool) -> Result<()> {
-    let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
-    let table = render_table(&ontology)?;
+    let catalog = Catalog::<ClickHouse>::embedded().context("failed to load embedded model")?;
+    let table = render_table(&text_indexed(&catalog))?;
 
     let paths: Vec<PathBuf> = match doc {
         Some(p) => vec![p],
@@ -95,28 +95,35 @@ fn process_doc(path: &Path, table: &str, check: bool) -> Result<bool> {
     Ok(false)
 }
 
-/// Renders the markdown table body (without the surrounding marker comments).
-fn render_table(ontology: &Ontology) -> Result<String> {
+/// Each entity with a text-indexed property, sorted, with its sorted property names.
+fn text_indexed(catalog: &Catalog<ClickHouse>) -> Vec<(&str, Vec<&str>)> {
     // Node-only by design: the validator's token-op gate keys off
     // `text_indexed_columns`, which is itself node-only, and no edge YAML
     // carries a `text` index. If an edge ever gains one, extend both this
     // iteration and the validator lookup together so the docs can't omit it.
-    let mut rows: Vec<(&str, Vec<&str>)> = ontology
-        .nodes()
-        .filter_map(|node| {
-            let columns = ontology.text_indexed_columns(&node.name);
-            if columns.is_empty() {
-                None
-            } else {
-                Some((node.name.as_str(), columns))
-            }
+    let graph = catalog.graph();
+    let mut rows: Vec<(&str, Vec<&str>)> = graph
+        .entities()
+        .filter_map(|entity| {
+            let mut properties: Vec<&str> = entity
+                .properties
+                .iter()
+                .filter(|property| catalog.text_index(**property))
+                .map(|property| graph.property(*property).name.as_str())
+                .collect();
+            properties.sort_unstable();
+            (!properties.is_empty()).then_some((entity.name.as_str(), properties))
         })
         .collect();
     rows.sort_by(|a, b| a.0.cmp(b.0));
+    rows
+}
 
+/// Renders the markdown table body (without the surrounding marker comments).
+fn render_table(rows: &[(&str, Vec<&str>)]) -> Result<String> {
     if rows.len() < MIN_ENTITIES {
         bail!(
-            "only {} entities carry a text index (minimum {}); did the ontology fail to load?",
+            "only {} entities carry a text index (minimum {}); did the model fail to load?",
             rows.len(),
             MIN_ENTITIES
         );
@@ -201,9 +208,9 @@ mod tests {
 
     #[test]
     fn render_table_is_deterministic_and_sorted() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let first = render_table(&ontology).unwrap();
-        let second = render_table(&ontology).unwrap();
+        let catalog = Catalog::<ClickHouse>::embedded().unwrap();
+        let first = render_table(&text_indexed(&catalog)).unwrap();
+        let second = render_table(&text_indexed(&catalog)).unwrap();
         assert_eq!(first, second);
 
         let entities: Vec<&str> = first
@@ -266,10 +273,9 @@ mod tests {
 
     #[test]
     fn render_table_bails_below_min_entities() {
-        let empty = Ontology::new();
         assert!(
-            render_table(&empty).is_err(),
-            "an ontology with no text-indexed entities must trip the MIN_ENTITIES floor"
+            render_table(&[]).is_err(),
+            "a model with no text-indexed entities must trip the MIN_ENTITIES floor"
         );
     }
 }

@@ -1,8 +1,8 @@
+use crate::synth::model::Graph;
 use anyhow::Result;
 use clickhouse::Row;
 use clickhouse_client::ArrowClickHouseClient;
-use ontology::Ontology;
-use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+use query_data_model::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use rand::RngExt;
 use rand::seq::IndexedRandom;
 use serde::Deserialize;
@@ -33,12 +33,12 @@ impl ParameterSampler {
         }
     }
 
-    pub async fn sample_ids(&mut self, entity: &str, ontology: &Ontology) -> Result<Vec<i64>> {
+    pub async fn sample_ids(&mut self, entity: &str, graph: &Graph) -> Result<Vec<i64>> {
         if let Some(ids) = self.cache.get(entity) {
             return Ok(ids.clone());
         }
 
-        let table_name = ontology.table_name(entity)?;
+        let table_name = graph.table_name(entity)?;
 
         let query = format!(
             "SELECT {pk} FROM {} ORDER BY cityHash64(rand()) LIMIT {}",
@@ -61,8 +61,8 @@ impl ParameterSampler {
         Ok(ids)
     }
 
-    pub async fn random_id(&mut self, entity: &str, ontology: &Ontology) -> Result<Option<i64>> {
-        let ids = self.sample_ids(entity, ontology).await?;
+    pub async fn random_id(&mut self, entity: &str, graph: &Graph) -> Result<Option<i64>> {
+        let ids = self.sample_ids(entity, graph).await?;
         if ids.is_empty() {
             return Ok(None);
         }
@@ -75,9 +75,9 @@ impl ParameterSampler {
         &mut self,
         entity: &str,
         count: usize,
-        ontology: &Ontology,
+        graph: &Graph,
     ) -> Result<Vec<i64>> {
-        let ids = self.sample_ids(entity, ontology).await?;
+        let ids = self.sample_ids(entity, graph).await?;
         if ids.is_empty() {
             return Ok(vec![]);
         }
@@ -95,9 +95,9 @@ impl ParameterSampler {
         entity: &str,
         count: usize,
         traversal_path: &str,
-        ontology: &Ontology,
+        graph: &Graph,
     ) -> Result<Vec<i64>> {
-        let table_name = ontology.table_name(entity)?;
+        let table_name = graph.table_name(entity)?;
 
         let escaped = traversal_path.replace('\'', "''");
         let query = format!(
@@ -130,9 +130,9 @@ impl ParameterSampler {
         entity: &str,
         count: usize,
         org_id: i64,
-        ontology: &Ontology,
+        graph: &Graph,
     ) -> Result<Vec<i64>> {
-        let table_name = ontology.table_name(entity)?;
+        let table_name = graph.table_name(entity)?;
 
         let query = format!(
             "SELECT {pk} FROM {} WHERE startsWith({tp}, '{}/') \
@@ -161,9 +161,9 @@ impl ParameterSampler {
         &mut self,
         entity: &str,
         field: &str,
-        ontology: &Ontology,
+        graph: &Graph,
     ) -> Result<Vec<String>> {
-        let table_name = ontology.table_name(entity)?;
+        let table_name = graph.table_name(entity)?;
 
         let query = format!("SELECT DISTINCT {} FROM {} LIMIT 100", field, table_name);
 
@@ -192,9 +192,9 @@ impl ParameterSampler {
     pub async fn sample_traversal_paths(
         &self,
         namespace_entity: &str,
-        ontology: &Ontology,
+        graph: &Graph,
     ) -> Result<Vec<(i64, String)>> {
-        let table_name = ontology.table_name(namespace_entity)?;
+        let table_name = graph.table_name(namespace_entity)?;
         let query = format!(
             "SELECT {tp} FROM {} \
              WHERE {tp} != '' \
@@ -228,9 +228,9 @@ impl ParameterSampler {
         Ok(rows)
     }
 
-    pub async fn warm_cache(&mut self, ontology: &Ontology) -> Result<()> {
-        for node in ontology.nodes() {
-            if let Err(e) = self.sample_ids(&node.name, ontology).await {
+    pub async fn warm_cache(&mut self, graph: &Graph) -> Result<()> {
+        for node in graph.nodes() {
+            if let Err(e) = self.sample_ids(&node.name, graph).await {
                 orbit_log_fields::warn!(
                     safe(ENTITY) = node.name.as_str(),
                     safe(ERROR_TYPE) = "sample_ids",
