@@ -60,6 +60,7 @@ RETURN u.username, mr.title LIMIT 10
 
 ```plantuml
 @startuml
+set separator none
 skinparam componentStyle rectangle
 skinparam shadowing false
 
@@ -120,6 +121,7 @@ The data model is infrastructure and makes no planning decisions: the compiler p
 
 ```plantuml
 @startuml
+set separator none
 skinparam shadowing false
 skinparam classAttributeIconSize 0
 hide empty members
@@ -170,6 +172,7 @@ Packages compose under four rules: a package cannot redeclare an entity another 
 
 ```plantuml
 @startuml
+set separator none
 skinparam shadowing false
 start
 :Read the fragments of every package;
@@ -203,6 +206,7 @@ Every plan carries the `ModelId` it was built against, so no plan is ever checke
 
 ```plantuml
 @startuml
+set separator none
 skinparam shadowing false
 actor Author
 participant "Package registry" as R
@@ -241,6 +245,7 @@ The query engine never sees a model whose tables are not built yet, and the inde
 
 ```plantuml
 @startuml
+set separator none
 skinparam shadowing false
 skinparam componentStyle rectangle
 
@@ -282,6 +287,7 @@ One compile targets one connection, and one query can read every store on it.
 
 ```plantuml
 @startuml
+set separator none
 skinparam shadowing false
 participant Caller
 participant "GQL surface" as S
@@ -325,6 +331,7 @@ A final check proves every read carries its guard before anything leaves the que
 
 ```plantuml
 @startuml
+set separator none
 skinparam shadowing false
 left to right direction
 rectangle "Logical plan" as LP
