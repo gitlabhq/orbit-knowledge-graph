@@ -1,6 +1,6 @@
 ---
 key_path: orbit.counts.count_distinct_root_namespace_id_from_gkg_query_executed_monthly
-description: Monthly count of unique top-level groups an Orbit query ran against, across every entry point
+description: Monthly count of unique top-level groups that Orbit queries are billed to, across every entry point. Always 0 on self-managed until the query event carries the namespace
 product_group: context_systems
 product_categories:
 - knowledge_graph
