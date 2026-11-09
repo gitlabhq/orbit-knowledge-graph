@@ -11,7 +11,7 @@ use gitlab_client::GitlabClient;
 use orbit_analytics::{
     AnalyticsTracker, ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker,
 };
-use orbit_log_fields::warn;
+use orbit_log_fields::{info, warn};
 use orbit_server_config::{
     AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind,
 };
@@ -103,12 +103,22 @@ fn build_tracker(
     }
     if config.collector_url.trim().is_empty() {
         if config.enabled == Some(true) {
-            warn!(
-                "analytics.enabled=true but analytics.collector_url is empty; indexing analytics disabled"
-            );
+            if config.local_collector().is_some() {
+                warn!(
+                    "analytics.enabled=true but analytics.collector_url is empty; indexing analytics go to analytics.local_collector_url only"
+                );
+            } else {
+                warn!(
+                    "analytics.enabled=true but analytics.collector_url is empty; indexing analytics disabled"
+                );
+            }
         }
         return Ok(None);
     }
+    info!(
+        expanded(URL) = %config.collector_url,
+        "initializing indexing analytics event tracker"
+    );
     SnowplowAnalyticsTracker::from_config(config).map(Some)
 }
 
