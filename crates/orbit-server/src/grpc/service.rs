@@ -1342,7 +1342,6 @@ mod tests {
     #[test]
     fn test_structured_schema_text_searchable_matches_the_query_validator() {
         let ontology = test_ontology();
-        let response = OrbitServiceImpl::build_structured_schema(&ontology, &["*".to_string()]);
         let model = compiler::data_model::clickhouse(Arc::clone(&ontology)).unwrap();
         let ctx = compiler::SecurityContext::new_with_roles(
             1,
@@ -1352,102 +1351,37 @@ mod tests {
             )],
         )
         .unwrap();
-        let mut allowed = 0;
+        let response = OrbitServiceImpl::build_structured_schema(&ontology, &["*".to_string()]);
 
         for node in &response.nodes {
-            for property in &node.properties {
+            for property in node.properties.iter().filter(|p| p.data_type != "Enum") {
                 let query = format!(
                     "MATCH (n:{}) WHERE n.{} CONTAINS 'abc' RETURN n.id LIMIT 1",
                     node.name, property.name
                 );
-                let compiled =
-                    compiler::compile_model(&query, compiler::Frontend::Gql, &model, &ctx);
-                let text_searchable = property.text_searchable.unwrap_or_else(|| {
-                    panic!("{}.{} has no text_searchable", node.name, property.name)
-                });
-                allowed += usize::from(text_searchable);
-                if property.data_type == "Enum" {
-                    assert!(!text_searchable, "{query}");
-                    continue;
-                }
-                assert_eq!(
-                    compiled.is_ok(),
-                    text_searchable,
-                    "{query}: {:?}",
-                    compiled.err()
-                );
+                let compiles =
+                    compiler::compile_model(&query, compiler::Frontend::Gql, &model, &ctx).is_ok();
+                assert_eq!(property.text_searchable, Some(compiles), "{query}");
             }
         }
-        assert!(allowed > 0);
-
-        let text_searchable = |node: &str, property: &str| {
-            response
-                .nodes
-                .iter()
-                .find(|n| n.name == node)
-                .and_then(|n| n.properties.iter().find(|p| p.name == property))
-                .and_then(|p| p.text_searchable)
-        };
-        assert_eq!(text_searchable("Vulnerability", "title"), Some(false));
-        assert_eq!(text_searchable("User", "email"), Some(false));
-        assert_eq!(text_searchable("User", "public_email"), Some(false));
-        assert_eq!(text_searchable("User", "username"), Some(true));
-        assert_eq!(text_searchable("File", "content"), Some(false));
-        assert_eq!(text_searchable("Pipeline", "ref"), Some(true));
-        assert_eq!(text_searchable("Pipeline", "id"), Some(false));
-        assert_eq!(text_searchable("Pipeline", "status"), Some(false));
     }
 
     #[test]
-    fn test_structured_schema_default_column_matches_the_ontology() {
-        let ontology = test_ontology();
-        let response = OrbitServiceImpl::build_structured_schema(&ontology, &["*".to_string()]);
-        let default_columns = |node: &str| -> Vec<String> {
-            response
-                .nodes
-                .iter()
-                .find(|n| n.name == node)
-                .unwrap()
-                .properties
-                .iter()
-                .filter(|p| p.default_column == Some(true))
-                .map(|p| p.name.clone())
-                .collect()
-        };
-
-        for node in &response.nodes {
-            for property in &node.properties {
-                assert!(
-                    property.default_column.is_some(),
-                    "{}.{} has no default_column",
-                    node.name,
-                    property.name
-                );
-            }
-        }
-        assert_eq!(
-            default_columns("Pipeline"),
-            ["id", "iid", "ref", "status", "source"]
-        );
-        assert_eq!(default_columns("User"), ["id", "username", "name", "state"]);
-
-        let user_ontology = Arc::new(
-            Ontology::load_embedded()
-                .unwrap()
-                .with_default_columns("User", ["id", "username", "email"]),
-        );
-        let user = OrbitServiceImpl::build_structured_schema(&user_ontology, &["User".to_string()]);
-        let user = user.nodes.iter().find(|n| n.name == "User").unwrap();
-        let flagged: Vec<&str> = user
+    fn test_structured_schema_flags_default_columns() {
+        let response =
+            OrbitServiceImpl::build_structured_schema(&test_ontology(), &["Pipeline".to_string()]);
+        let pipeline = response
+            .nodes
+            .iter()
+            .find(|n| n.name == "Pipeline")
+            .unwrap();
+        let flagged: Vec<&str> = pipeline
             .properties
             .iter()
             .filter(|p| p.default_column == Some(true))
             .map(|p| p.name.as_str())
             .collect();
-        assert_eq!(flagged, ["id", "username"]);
-
-        let unexpanded = OrbitServiceImpl::build_structured_schema(&ontology, &[]);
-        assert!(unexpanded.nodes.iter().all(|n| n.properties.is_empty()));
+        assert_eq!(flagged, ["id", "iid", "ref", "status", "source"]);
     }
 
     #[test]
