@@ -10,6 +10,11 @@ template_files:
       project: .pi/extensions/orbit.ts
       global: "~/.pi/agent/extensions/orbit.ts"
     template: pi_extension.ts
+  - path:
+      project: .pi/extensions/orbit-ui/index.js
+      global: "~/.pi/agent/extensions/orbit-ui/index.js"
+    template: agents/pi_ui/index.js
+    ui: true
 feature_dir:
   project: .pi/extensions
   global: "~/.pi/agent/extensions"
