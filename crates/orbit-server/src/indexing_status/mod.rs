@@ -9,10 +9,9 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use clickhouse_client::ArrowClickHouseClient;
-use ontology::EtlScope;
-use ontology::pipelines::PipelineDescriptor;
 use orbit_log_fields::warn;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor};
 
 pub use self::domains::{DomainStatus, EntityStatus};
 pub use self::phase::Phase;
@@ -62,7 +61,7 @@ impl IndexingStatusService {
 
         let (checkpoints, coverage) = tokio::join!(
             checkpoints::read_plan_checkpoints(&self.client, schema, &roots),
-            projects::read_project_coverage(&self.client, &schema.ontology, scopes),
+            projects::read_project_coverage(&self.client, &schema.data_model, scopes),
         );
         let checkpoints = checkpoints
             .inspect_err(|error| {
@@ -84,9 +83,10 @@ impl IndexingStatusService {
             .ok();
 
         let now = Utc::now();
-        let plans: Vec<PipelineDescriptor> = schema
-            .ontology
-            .pipeline_descriptors()
+        let model = schema.data_model.model();
+        let plans: Vec<PipelineDescriptor> = model
+            .sources()
+            .descriptors(model.graph())
             .into_iter()
             .filter(|plan| plan.scope == EtlScope::Namespaced)
             .collect();
@@ -144,7 +144,7 @@ fn build_scope_status(
     };
 
     let domains = domains::get_domain_statuses(
-        &schema.ontology,
+        &schema.data_model,
         &plan_phases,
         &source_unavailable,
         code_phase,

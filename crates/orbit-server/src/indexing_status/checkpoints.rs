@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use chrono::{DateTime, TimeDelta, Utc};
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use indexer::checkpoint::NAMESPACE_KEY_PREFIX;
-use ontology::pipelines::PipelineDescriptor;
 use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_migrations::version::prefixed_table_name;
+use query_data_model::catalog::sources::PipelineDescriptor;
 use tonic::Status;
 
 use super::phase::Phase;

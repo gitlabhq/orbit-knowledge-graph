@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS;
-use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::{Catalog, ClickHouse};
 use tonic::Status;
 
 use super::phase::Phase;
@@ -71,10 +71,10 @@ impl ProjectCoverage {
 
 pub async fn read_project_coverage(
     client: &ArrowClickHouseClient,
-    ontology: &Ontology,
+    catalog: &Catalog<ClickHouse>,
     scopes: &[TraversalPath],
 ) -> Result<HashMap<String, ProjectCoverage>, Status> {
-    let (project_table, code_checkpoint_table) = find_coverage_tables(ontology)?;
+    let (project_table, code_checkpoint_table) = find_coverage_tables(catalog)?;
     let in_scopes = build_prefix_match_condition("traversal_path", "scope", scopes.len());
     let sql = PROJECT_COVERAGE_SQL.replace("{in_scopes}", &in_scopes);
     let scopes: Vec<&str> = scopes.iter().map(TraversalPath::as_str).collect();
@@ -107,20 +107,23 @@ pub async fn read_project_coverage(
         .collect())
 }
 
-fn find_coverage_tables(ontology: &Ontology) -> Result<(&str, &str), Status> {
-    let project_table = &ontology
-        .get_node(PROJECT_NODE)
-        .ok_or_else(|| Status::internal(format!("ontology missing required node: {PROJECT_NODE}")))?
-        .destination_table;
-    let code_checkpoint_table = &ontology
+fn find_coverage_tables(catalog: &Catalog<ClickHouse>) -> Result<(&str, &str), Status> {
+    let project_table = catalog
+        .graph()
+        .entity_id(PROJECT_NODE)
+        .and_then(|entity| catalog.table_of(entity))
+        .ok_or_else(|| Status::internal(format!("model missing required node: {PROJECT_NODE}")))?;
+    let code_checkpoint_table = catalog
+        .schema()
+        .map_err(|error| Status::internal(error.to_string()))?
         .auxiliary_tables()
         .iter()
-        .find(|table| table.name.ends_with(CODE_CHECKPOINT_TABLE_SUFFIX))
+        .map(|table| table.table.name.as_str())
+        .find(|name| name.ends_with(CODE_CHECKPOINT_TABLE_SUFFIX))
         .ok_or_else(|| {
             Status::internal(format!(
-                "ontology missing auxiliary table ending with: {CODE_CHECKPOINT_TABLE_SUFFIX}"
+                "model missing auxiliary table ending with: {CODE_CHECKPOINT_TABLE_SUFFIX}"
             ))
-        })?
-        .name;
+        })?;
     Ok((project_table, code_checkpoint_table))
 }
