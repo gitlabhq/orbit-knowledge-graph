@@ -4,8 +4,10 @@ migrations:
   scope: none
   note: >-
     Declares relationship attributes over existing edge columns, the DuckDB local
-    store routes only the variants it holds, and the indexer reads ETL from source
-    fragments in the packages; DDL, extract SQL and indexed rows unchanged
+    store routes only the variants it holds and declares its column defaults, entities
+    carry UI style and graph fragments domain descriptions, and the indexer reads
+    ETL from source fragments in the packages; DDL, extract SQL and indexed rows
+    unchanged
 - version: 118
   scope: "*"
   note: >-

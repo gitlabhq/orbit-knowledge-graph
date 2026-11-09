@@ -225,7 +225,7 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use query_data_model::spec::Fragment;
+    use query_data_model::spec::{Fragment, PropertySpec};
     use std::sync::LazyLock;
 
     static MODEL: LazyLock<Arc<Catalog<ClickHouse>>> =
@@ -353,12 +353,28 @@ mod tests {
 
     #[test]
     fn compile_uses_supplied_model_for_scoped_user_table() {
-        let scoped_user = Ontology::load_embedded()
-            .expect("ontology must load")
-            .with_path_scopable_nodes(["User"]);
-        let mut fragments = query_data_model::from_ontology::from_ontology(&scoped_user)
-            .expect("scoped ontology must convert");
-        fragments.retain(|fragment| !matches!(fragment, Fragment::Source(_)));
+        let mut fragments = embedded_fragments();
+        for fragment in &mut fragments {
+            match fragment {
+                Fragment::Graph(graph) => {
+                    if let Some(user) = graph.entities.get_mut("User") {
+                        user.properties
+                            .insert("traversal_path".into(), PropertySpec::Type("string".into()));
+                    }
+                }
+                Fragment::Storage(storage) if storage.store == "graph" => {
+                    if let Some(user) = storage.entities.get_mut("User") {
+                        user.path_column = None;
+                    }
+                }
+                Fragment::Authorization(access) => {
+                    if let Some(user) = access.entities.get_mut("User") {
+                        user.scope = "namespace".into();
+                    }
+                }
+                _ => {}
+            }
+        }
         let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}"#;
 
         for (model, expected_table) in [

@@ -16,23 +16,8 @@ pub const LEDGER_FILE: &str = "schema-migrations.yaml";
 const EMBEDDED_LEDGER: &str =
     include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/schema-migrations.yaml"));
 
-const LEDGER_HEADER: &str = "\
-# yaml-language-server: $schema=schemas/schema-migrations.schema.json
-#
-# One entry per SCHEMA_VERSION bump, newest first (prepended by `mise schema:bump`).
-# Each entry declares how much of the graph a given version invalidates:
-#   scope: \"*\"    full rebuild (fail-safe; the default for anything unmapped)
-#   scope: sdlc   SDLC-sourced tables; optional `entities:` narrows to a subset
-#   scope: code   the code-graph tables (Definition, File, Directory, Branch,
-#                 ImportedSymbol) and their edge table
-#   scope: none   re-index nothing; no table changes its layout or contents
-#
-# `mise schema:bump` derives the scope by diffing the physical catalogs of the
-# previous and new model archives. Humans may WIDEN an entry (scope or entities),
-# for example for an indexer code change the model cannot show, never narrow it
-# below the derived scope; CI enforces this. A version with no entry is treated
-# as \"*\", which also makes pruning old entries safe.
-";
+const LEDGER_HEADER: &str =
+    "# yaml-language-server: $schema=schemas/schema-migrations.schema.json\n";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

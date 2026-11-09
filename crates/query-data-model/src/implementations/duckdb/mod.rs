@@ -4,6 +4,8 @@ pub mod render;
 
 use std::sync::Arc;
 
+use backend::DuckDbTable;
+
 use super::relational::{Capabilities, CurrentRows, RelationalBackend};
 use crate::{Catalog, DataModelError, Model, Packages};
 
@@ -30,5 +32,13 @@ impl Catalog<DuckDb> {
 
     pub fn embedded() -> Result<Self, DataModelError> {
         Self::from_model(&Packages::embedded().load()?)
+    }
+
+    /// The tables the connection creates, entity tables before edge tables.
+    pub fn tables(&self) -> impl Iterator<Item = &DuckDbTable> {
+        let layouts = || self.stores().flat_map(|(_, facts)| &facts.layouts);
+        layouts()
+            .filter(|table| table.entity.is_some())
+            .chain(layouts().filter(|table| table.entity.is_none()))
     }
 }

@@ -380,37 +380,67 @@ fn request(column: &str, lookup: &Lookup) -> VirtualColumnRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::{DataType, FieldSource, Ontology, VirtualSource};
-    use query_data_model::{Catalog, ClickHouse};
+    use std::sync::Arc;
+
+    use query_data_model::{Catalog, ClickHouse, Model};
+
+    /// `entity` is the storage entry, e.g. `"User: {}"`.
+    fn catalog(entity: &str, graph: &str, rest: &[&str]) -> Catalog<ClickHouse> {
+        let storage = format!(
+            r#"
+kind: storage
+package: test
+store: graph
+engine:
+  kind: clickhouse
+  connection: main
+  table: "gl_{{entity}}"
+  backend: {{version_column: _version, deleted_column: _deleted, sort_key: [id]}}
+entities:
+  {entity}
+"#
+        );
+        let sources = [("graph.yaml", graph), ("storage.yaml", storage.as_str())]
+            .into_iter()
+            .chain(rest.iter().map(|yaml| ("extra.yaml", *yaml)));
+        let model = Arc::new(Model::from_yaml(sources).unwrap());
+        Catalog::<ClickHouse>::from_model(&model).unwrap()
+    }
 
     fn model(dependencies: &[&str], disabled: bool) -> Catalog<ClickHouse> {
-        let ontology = Ontology::new()
-            .with_nodes(["TestNode"])
-            .with_fields(
-                "TestNode",
-                ["id", "name", "project_id", "branch", "path"].map(|name| (name, DataType::String)),
-            )
-            .modify_field("TestNode", "name", |field| {
-                field.source = FieldSource::Virtual(VirtualSource {
-                    service: "gitaly".into(),
-                    lookup: "blob_content".into(),
-                    disabled,
-                    depends_on: dependencies.iter().map(ToString::to_string).collect(),
-                    allowed_ops: VirtualSource::DEFAULT_ALLOWED_OPS
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect(),
-                });
-            })
-            .unwrap();
-        query_data_model::from_ontology::clickhouse(&ontology).unwrap()
+        stored_model("TestNode: {}", dependencies, disabled)
+    }
+
+    fn stored_model(entity: &str, dependencies: &[&str], disabled: bool) -> Catalog<ClickHouse> {
+        let graph = r#"
+kind: graph
+package: test
+entities:
+  TestNode:
+    properties: {id: int64, name: string, project_id: string, branch: string, path: string}
+"#;
+        let service = format!(
+            r#"
+kind: service
+package: test
+service: gitaly
+lookups:
+  blob_content:
+    entity: TestNode
+    provides: [name]
+    keys: [{}]
+    disabled: {disabled}
+"#,
+            dependencies.join(", ")
+        );
+        let access = "{kind: authorization, package: test, entities: {TestNode: {scope: global}}}";
+        catalog(entity, graph, &[&service, access])
     }
 
     fn entity(model: &Catalog<ClickHouse>) -> query_data_model::EntityId {
         model.catalog().graph().entity_id("TestNode").unwrap()
     }
 
-    #[ignore = "fixture ontology fails the data model load checks"]
     #[test]
     fn inject_adds_missing_dependencies() {
         let model = model(&["project_id", "branch", "path"], false);
@@ -430,7 +460,6 @@ mod tests {
         assert_eq!(injected, vec!["project_id", "branch", "path"]);
     }
 
-    #[ignore = "fixture ontology fails the data model load checks"]
     #[test]
     fn inject_does_not_duplicate_existing_columns() {
         let model = model(&["project_id", "branch"], false);
@@ -450,7 +479,6 @@ mod tests {
         assert_eq!(injected, vec!["branch"]);
     }
 
-    #[ignore = "fixture ontology fails the data model load checks"]
     #[test]
     fn inject_noop_when_no_virtual_columns() {
         let model = model(&[], false);
@@ -468,20 +496,18 @@ mod tests {
         assert!(injected.is_empty());
     }
 
-    #[ignore = "fixture ontology fails the data model load checks"]
     #[test]
-    fn inject_skips_deps_not_in_ontology() {
-        let model = model(&["branch", "nonexistent"], false);
+    fn inject_skips_keys_the_store_does_not_hold() {
+        let model = stored_model("TestNode: {exclude: [path]}", &["branch", "path"], false);
         let virtual_columns = vec![virtual_request(&model, entity(&model), "name").unwrap()];
         let mut columns = vec![];
 
         inject_model_virtual_dependencies(&mut columns, &virtual_columns, &model, entity(&model));
 
         assert!(columns.contains(&"branch".to_string()));
-        assert!(!columns.contains(&"nonexistent".to_string()));
+        assert!(!columns.contains(&"path".to_string()));
     }
 
-    #[ignore = "fixture ontology fails the data model load checks"]
     #[test]
     fn split_columns_separates_db_and_virtual() {
         let model = model(&[], false);
@@ -495,7 +521,6 @@ mod tests {
         assert_eq!(virtual_columns[0].service, "gitaly");
     }
 
-    #[ignore = "fixture ontology fails the data model load checks"]
     #[test]
     fn split_columns_excludes_disabled_virtual() {
         let model = model(&[], true);
@@ -515,34 +540,37 @@ mod tests {
 
     use crate::logical::DynamicColumnMode;
 
-    fn user_ontology() -> Ontology {
-        Ontology::new()
-            .with_nodes(["User"])
-            .with_fields(
-                "User",
-                [
-                    ("username", DataType::String),
-                    ("state", DataType::String),
-                    ("is_admin", DataType::Bool),
-                    ("is_auditor", DataType::Bool),
-                ],
-            )
-            .modify_field("User", "is_admin", |f| f.admin_only = true)
-            .unwrap()
-            .modify_field("User", "is_auditor", |f| f.admin_only = true)
-            .unwrap()
+    fn user_model(defaults: &[&str]) -> Catalog<ClickHouse> {
+        let graph = format!(
+            r#"
+kind: graph
+package: test
+entities:
+  User:
+    defaults: [{}]
+    properties: {{id: int64, username: string, state: string, is_admin: bool, is_auditor: bool}}
+"#,
+            defaults.join(", ")
+        );
+        let access = r#"
+kind: authorization
+package: test
+entities: {User: {scope: global}}
+properties:
+  User.is_admin: {admin_only: true}
+  User.is_auditor: {admin_only: true}
+"#;
+        catalog("User: {}", &graph, &[access])
     }
 
     use crate::testkit::{admin_ctx, non_admin_ctx};
 
-    #[ignore = "fixture ontology fails the data model load checks"]
     #[test]
     fn dynamic_wildcard_strips_admin_only_for_non_admin() {
-        let ont = user_ontology();
+        let model = user_model(&[]);
         let ctx = non_admin_ctx();
         let mode = DynamicColumnMode::All;
 
-        let model = query_data_model::from_ontology::clickhouse(&ont).unwrap();
         let specs = build_dynamic_specs(mode, &model, &ctx);
         let user = specs
             .iter()
@@ -563,14 +591,12 @@ mod tests {
         assert!(user.columns.iter().any(|c| c == "state"));
     }
 
-    #[ignore = "fixture ontology fails the data model load checks"]
     #[test]
     fn dynamic_wildcard_preserves_admin_only_for_admin() {
-        let ont = user_ontology();
+        let model = user_model(&[]);
         let ctx = admin_ctx();
         let mode = DynamicColumnMode::All;
 
-        let model = query_data_model::from_ontology::clickhouse(&ont).unwrap();
         let specs = build_dynamic_specs(mode, &model, &ctx);
         let user = specs
             .iter()
@@ -589,17 +615,15 @@ mod tests {
         );
     }
 
-    #[ignore = "fixture ontology fails the data model load checks"]
     #[test]
     fn dynamic_default_strips_admin_only_for_non_admin() {
         // Defense-in-depth: even if a developer misconfigures
         // `default_columns` to include an admin_only field, the runtime
         // filter must still strip it for non-admins.
-        let ont = user_ontology().with_default_columns("User", ["username", "is_admin"]);
+        let model = user_model(&["username", "is_admin"]);
         let ctx = non_admin_ctx();
         let mode = DynamicColumnMode::Default;
 
-        let model = query_data_model::from_ontology::clickhouse(&ont).unwrap();
         let specs = build_dynamic_specs(mode, &model, &ctx);
         let user = specs
             .iter()

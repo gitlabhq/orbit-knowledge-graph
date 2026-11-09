@@ -60,17 +60,13 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
-    /// Generate graph DDL from the ontology.
+    /// Generate graph DDL from the data model.
     Ddl {
         /// Target database dialect.
         #[arg(long, short, default_value = "remote")]
         target: DdlTarget,
 
-        /// Path to ontology directory for the local target (default: embedded).
-        #[arg(long, short)]
-        ontology: Option<std::path::PathBuf>,
-
-        /// Path to model package directory for remote targets (default: embedded).
+        /// Path to model package directory (default: embedded).
         #[arg(long, short)]
         model: Option<std::path::PathBuf>,
 
@@ -359,7 +355,6 @@ async fn main() -> Result<()> {
         },
         Command::Ddl {
             target,
-            ontology,
             model,
             prefix,
             diff,
@@ -377,7 +372,7 @@ async fn main() -> Result<()> {
                         "--prefix is only supported for --target remote; --diff is supported for --target remote and --target remote-persistent"
                     );
                 }
-                ddl::run_local(ontology)
+                ddl::run_local(model)
             }
         },
         Command::Schema { output } => schema::run(output),

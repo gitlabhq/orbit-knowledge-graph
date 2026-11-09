@@ -14,7 +14,7 @@ use ontology::{
 use serde::Serialize;
 
 use crate::implementations::clickhouse::schema::Schema;
-use crate::implementations::duckdb::backend::DuckDbSource;
+use crate::implementations::duckdb::backend::{DuckDbColumnSpec, DuckDbSource};
 use crate::implementations::relational::{EdgeTableSpec, RelationalOptions};
 use crate::spec::{
     AttributeSpec, AuthorizationFragment, BackendOptions, EngineSpec, EntityAccessSpec, EntitySpec,
@@ -507,6 +507,19 @@ fn local_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
                         .is_some_and(|kept| !kept.iter().any(|k| k.name == field.name))
                 })
                 .map(|field| field.name.clone())
+                .collect::<Vec<_>>();
+            let defaults = node
+                .storage
+                .columns
+                .iter()
+                .filter(|column| !exclude.contains(&column.name))
+                .filter_map(|column| {
+                    let default = column.default.clone()?;
+                    let spec = DuckDbColumnSpec {
+                        default: Some(default),
+                    };
+                    Some((column.name.clone(), spec))
+                })
                 .collect();
             let columns = node
                 .fields
@@ -530,6 +543,7 @@ fn local_store(ontology: &Ontology) -> Result<StorageFragment, DataModelError> {
                 exclude,
                 backend: options(DuckDbSource {
                     sort_key: node.sort_key.clone(),
+                    columns: defaults,
                 })?,
                 ..SourceSpec::default()
             };

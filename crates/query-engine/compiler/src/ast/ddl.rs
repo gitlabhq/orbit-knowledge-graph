@@ -25,6 +25,7 @@ pub enum ColumnType {
     Int64,
     UInt64,
     UInt32,
+    Float64,
     Bool,
     String,
     Date32,

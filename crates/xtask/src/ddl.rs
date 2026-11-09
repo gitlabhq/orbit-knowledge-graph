@@ -1,17 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use ontology::Ontology;
 use orbit_migrations::schema::{DictionaryCredentials, GraphSchema, Schema};
-use query_data_model::Packages;
-
-fn load_ontology(path: Option<&PathBuf>) -> Result<Ontology> {
-    match path {
-        Some(path) => Ontology::load_from_dir(path).context("failed to load ontology"),
-        None => Ontology::load_embedded().context("failed to load embedded ontology"),
-    }
-}
+use query_data_model::{Catalog, DuckDb, Model, Packages};
 
 fn local_dictionary_credentials() -> DictionaryCredentials {
     DictionaryCredentials {
@@ -21,13 +14,17 @@ fn local_dictionary_credentials() -> DictionaryCredentials {
     }
 }
 
-fn load_schema(model_path: Option<&PathBuf>) -> Result<GraphSchema> {
+fn load_model(model_path: Option<&PathBuf>) -> Result<Arc<Model>> {
     let packages = match model_path {
         Some(path) => Packages::read_dir(path).context("failed to read model packages")?,
         None => Packages::embedded(),
     };
+    Ok(packages.load()?)
+}
+
+fn load_schema(model_path: Option<&PathBuf>) -> Result<GraphSchema> {
     Ok(GraphSchema::new(
-        Schema::from_model(&packages.load()?)?,
+        Schema::from_model(&load_model(model_path)?)?,
         false,
     ))
 }
@@ -88,11 +85,11 @@ CREATE TABLE IF NOT EXISTS _orbit_meta (
 CREATE OR REPLACE MACRO def_name(fqn) AS
     regexp_replace(fqn, '^.*[:.#/]', '');";
 
-pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
-    let ontology = load_ontology(ontology_path.as_ref())?;
+pub fn run_local(model_path: Option<PathBuf>) -> Result<()> {
+    let catalog = Catalog::<DuckDb>::from_model(&load_model(model_path.as_ref())?)?;
     print!(
         "{}",
-        query_engine::compiler::generate_local_ddl(&ontology, LOCAL_DDL)
+        query_engine::compiler::generate_local_ddl(&catalog, LOCAL_DDL)
     );
     Ok(())
 }
@@ -303,8 +300,8 @@ mod tests {
 
     #[test]
     fn local_ddl_contains_graph_tables_without_manifest() {
-        let ontology = ontology::Ontology::load_embedded().unwrap();
-        let ddl = query_engine::compiler::generate_local_ddl(&ontology, LOCAL_DDL);
+        let catalog = Catalog::<DuckDb>::embedded().unwrap();
+        let ddl = query_engine::compiler::generate_local_ddl(&catalog, LOCAL_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(!ddl.contains("_orbit_manifest"));
         assert!(ddl.contains("_orbit_meta"));

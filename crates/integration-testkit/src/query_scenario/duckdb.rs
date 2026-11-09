@@ -19,7 +19,6 @@ use crate::scenario::{Seed, discover};
 
 pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
     let root = Path::new(root);
-    let ontology = crate::load_unprefixed_ontology();
     let data_model = crate::load_local_data_model();
     let base = seed_preset(Path::new(presets), seed);
     let mut files = Vec::new();
@@ -34,7 +33,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
         let database = DuckDbClient::open(&directory.path().join("scenario.duckdb"))
             .unwrap_or_else(|e| panic!("{name}: open DuckDB: {e}"));
         database
-            .initialize_schema(&generate_local_ddl(&ontology, ""))
+            .initialize_schema(&generate_local_ddl(&data_model, ""))
             .unwrap_or_else(|e| panic!("{name}: local DDL: {e}"));
         let (config, steps) = scenario.into_steps();
         seed_local(&database, [&base, &config.extra_seed], &name);

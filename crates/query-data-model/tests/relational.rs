@@ -382,3 +382,33 @@ fn a_detached_operation_reattaches_onto_rewritten_inputs() {
         RelationalError::Rejected(Rejected::NotDetachable)
     );
 }
+
+#[test]
+fn duckdb_tables_list_entity_tables_before_edges_with_declared_defaults() {
+    let model = duckdb();
+    let tables: Vec<&str> = model.tables().map(|table| table.name.as_str()).collect();
+    assert_eq!(
+        tables,
+        [
+            "gl_definition",
+            "gl_directory",
+            "gl_file",
+            "gl_imported_symbol",
+            "gl_edge"
+        ]
+    );
+    let file = model
+        .tables()
+        .find(|table| table.name == "gl_file")
+        .unwrap();
+    let defaults: Vec<(&str, &str)> = file
+        .columns
+        .iter()
+        .filter_map(|column| Some((column.name.as_str(), column.default.as_deref()?)))
+        .collect();
+    assert_eq!(
+        defaults,
+        [("commit_sha", "''"), ("size_bytes", "0"), ("reason", "''")]
+    );
+    assert!(!file.columns.iter().any(|column| column.name == "content"));
+}

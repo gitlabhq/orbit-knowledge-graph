@@ -96,13 +96,12 @@ fn cycles_are_rejected() {
 
 #[test]
 fn local_starts_with_folds_unicode_case() {
-    let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
     let local = embedded_local_model();
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("folding.duckdb")).unwrap();
     database
-        .initialize_schema(&compiler::generate_local_ddl(&ontology, ""))
+        .initialize_schema(&compiler::generate_local_ddl(&local, ""))
         .unwrap();
     database
         .execute(

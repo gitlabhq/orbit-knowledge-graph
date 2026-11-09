@@ -127,16 +127,17 @@ fn has_valid_path_filter(expr: &Expr, column: Ref, eligible: &[&TraversalPath]) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::LazyLock;
+    use std::sync::{Arc, LazyLock};
 
-    use ontology::constants::EDGE_TABLE;
     use orbit_utils::query_types::SqlType;
-    use query_data_model::Catalog;
+    use query_data_model::implementations::clickhouse::spec::ClickHouseOptions;
     use query_data_model::implementations::relational::plan::{
         AggregateFunction, JoinKind, Measure, Order, ReadMode, Relation, RelationalBuilder,
         RelationalError, UnaryOp,
     };
     use query_data_model::plan::tracking::Declare;
+    use query_data_model::spec::{Fragment, decode_options, encode_options};
+    use query_data_model::{Catalog, Model, Packages};
 
     use crate::constants::TRAVERSAL_PATH_COLUMN;
 
@@ -151,8 +152,64 @@ mod tests {
         &MODEL
     }
 
-    fn derive_model(ontology: ontology::Ontology) -> Catalog<ClickHouse> {
-        query_data_model::from_ontology::clickhouse(&ontology).unwrap()
+    const REVIEWER_PROJECT: &str = r#"
+sort_key: [traversal_path, t2_id, t0_id, t3_id]
+sources:
+- table: gl_user
+  columns: {id: t0_id}
+- table: gl_edge
+  path_column: traversal_path
+  columns:
+    relationship_kind: t1_relationship_kind
+    source_id: t1_source_id
+    source_kind: t1_source_kind
+    target_id: t1_target_id
+    target_kind: t1_target_kind
+    traversal_path: traversal_path
+  "on": {previous: id, column: source_id}
+  filter: {relationship_kind: REVIEWER, source_kind: User, target_kind: MergeRequest}
+- table: gl_merge_request
+  path_column: t2_traversal_path
+  columns: {id: t2_id, project_id: t2_project_id, traversal_path: t2_traversal_path}
+  "on": {previous: target_id, column: id}
+- table: gl_project
+  path_column: t3_traversal_path
+  columns: {id: t3_id, traversal_path: t3_traversal_path}
+  "on": {previous: project_id, column: id}
+nodes:
+- {entity: User, source: 0, key: t0_id}
+- {entity: MergeRequest, source: 2, key: t2_id}
+- {entity: Project, source: 3, key: t3_id}
+relationships:
+- {relationship: REVIEWER, source: 0, target: 1, edge: 1}
+- {relationship: IN_PROJECT, source: 1, target: 2}
+"#;
+
+    /// The embedded model with security-manager merge requests and a reviewer-to-project join.
+    fn reviewer_project_model() -> Catalog<ClickHouse> {
+        let mut fragments = Packages::embedded().fragments().unwrap();
+        for fragment in &mut fragments {
+            match fragment {
+                Fragment::Authorization(access) => {
+                    if let Some(merge_request) = access.entities.get_mut("MergeRequest") {
+                        merge_request.role = Some("security_manager".into());
+                    }
+                }
+                Fragment::Storage(storage) if storage.store == "graph" => {
+                    let Some(engine) = &mut storage.engine else {
+                        continue;
+                    };
+                    let mut options: ClickHouseOptions = decode_options(&engine.backend).unwrap();
+                    options.joins.insert(
+                        "gl_denorm_reviewer_project".into(),
+                        orbit_utils::yaml::from_str(REVIEWER_PROJECT).unwrap(),
+                    );
+                    engine.backend = encode_options(options).unwrap();
+                }
+                _ => {}
+            }
+        }
+        Catalog::<ClickHouse>::from_model(&Arc::new(Model::load(&fragments).unwrap())).unwrap()
     }
 
     fn build(
@@ -363,38 +420,20 @@ mod tests {
         assert!(check(&plan, &ctx, model()).is_ok());
     }
 
-    #[ignore = "fixture ontology fails the data model load checks"]
     #[test]
     fn rejects_reporter_path_for_security_manager_table() {
         let context = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
-        let model = derive_model(
-            ontology::Ontology::new()
-                .with_nodes(["Vulnerability"])
-                .with_redaction("Vulnerability", "vulnerability", "id")
-                .with_redaction_role("Vulnerability", ontology::RequiredRole::SecurityManager),
-        );
-        let plan = build(&model, |q| {
+        let plan = build(model(), |q| {
             table(q, "gl_vulnerability", "v", |v| Some(path(v, "v", "1/100/")))
         });
-        let error = check(&plan, &context, &model).unwrap_err();
+        let error = check(&plan, &context, model()).unwrap_err();
         assert!(error.to_string().contains("access level 25"));
     }
 
     #[test]
     fn validates_role_floor_for_denormalized_join() {
         let context = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
-        let model = derive_model(
-            ontology::Ontology::load_embedded()
-                .unwrap()
-                .with_redaction_role("MergeRequest", ontology::RequiredRole::SecurityManager)
-                .with_denormalized_join(
-                    "reviewer_project",
-                    &[
-                        ("REVIEWER", "User", "MergeRequest", false),
-                        ("IN_PROJECT", "MergeRequest", "Project", true),
-                    ],
-                ),
-        );
+        let model = reviewer_project_model();
         let plan = build(&model, |q| {
             let rows = scan(q, "gl_denorm_reviewer_project", "d")?;
             let predicate = path(&rows, "d", "1/100/");
@@ -714,7 +753,7 @@ mod tests {
     ) -> ClickHousePlan {
         let (table_name, alias, column) = arm;
         build(model(), |q| {
-            let edges = scan(q, EDGE_TABLE, "e")?;
+            let edges = scan(q, "gl_edge", "e")?;
             let body = q.subquery("arms", |q| {
                 let rows = scan(q, table_name, alias)?;
                 let predicate = prefix.map(|prefix| path(&rows, alias, prefix));
@@ -741,7 +780,7 @@ mod tests {
             model(),
         ));
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let plan = edge_union((EDGE_TABLE, "e1", "source_id"), Some("42/43/"));
+        let plan = edge_union(("gl_edge", "e1", "source_id"), Some("42/43/"));
         assert!(check(&plan, &ctx, model()).is_ok());
     }
 }
