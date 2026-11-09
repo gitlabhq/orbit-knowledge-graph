@@ -376,6 +376,7 @@ Plan tests assert three checked stages of every query: the logical plan, the phy
 - The loader is strict. A fragment cannot carry unknown fields for later use.
 - Every namespaced entity needs a guard, so its package must declare a path column, an anchor foreign key or a redaction rule.
 - A change to storage goes live only after its backfill. A change that only adds query metadata takes effect on the next load.
+- The derived scope covers what the packages describe: storage layout and source fragments. A change in indexer code that alters the rows it writes is outside every package, so the ledger keeps a hand-written widening for it.
 - The server holds each model snapshot until the compiles that use it finish, and caches keyed by the model hash evict old snapshots.
 - A new backend brings its own plan language and renderer, but it reuses the surfaces, the shared tracking and the phases.
 
