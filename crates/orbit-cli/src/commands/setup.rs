@@ -290,14 +290,33 @@ fn ask_install_agent_plugins(ui_agents: &[&str], plugin_instructions: &[&str]) -
         },
     ];
     let chosen = tui::select(
-        &format!(
-            "Agent plugins for {} show each Orbit call, and Pi also cuts large tool output. Install them?",
-            ui_agents.join(" and ")
-        ),
+        &agent_plugins_question(ui_agents),
         &choices,
         INSTALL_AGENT_PLUGINS,
     )?;
     Ok(chosen == INSTALL_AGENT_PLUGINS)
+}
+
+const PI_TITLE: &str = "Pi";
+
+fn agent_plugins_question(ui_agents: &[&str]) -> String {
+    let showing_calls: Vec<&str> = ui_agents
+        .iter()
+        .copied()
+        .filter(|title| *title != PI_TITLE)
+        .collect();
+    let mut clauses = Vec::new();
+    if !showing_calls.is_empty() {
+        clauses.push(format!(
+            "Agent plugins for {} show each Orbit call.",
+            showing_calls.join(" and ")
+        ));
+    }
+    if showing_calls.len() < ui_agents.len() {
+        clauses.push("The Pi plugin cuts large tool output.".to_string());
+    }
+    clauses.push("Install them?".to_string());
+    clauses.join(" ")
 }
 
 fn apply_and_report(
@@ -2345,6 +2364,22 @@ mod tests {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect()
+    }
+
+    #[test]
+    fn the_plugin_question_names_only_what_each_selected_agent_does() {
+        assert_eq!(
+            agent_plugins_question(&["Claude Code", "OpenCode"]),
+            "Agent plugins for Claude Code and OpenCode show each Orbit call. Install them?"
+        );
+        assert_eq!(
+            agent_plugins_question(&["Pi"]),
+            "The Pi plugin cuts large tool output. Install them?"
+        );
+        assert_eq!(
+            agent_plugins_question(&["Claude Code", "Pi"]),
+            "Agent plugins for Claude Code show each Orbit call. The Pi plugin cuts large tool output. Install them?"
+        );
     }
 
     #[test]
