@@ -1,3 +1,6 @@
+[extend]
+path = "/gitleaks.toml"
+
 [[rules]]
 id = "password-env-in-command"
 description = "Password set inline as an environment variable, such as CLICKHOUSE_PASSWORD or PGPASSWORD"

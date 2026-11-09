@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_NAME=$(basename "$0")
 HOOK_TYPE="${1:-}"
-GITLEAKS_CONFIG_TOML="$(printf '[extend]\nuseDefault = true\n\n'; cat "$(git rev-parse --show-toplevel)/.gitlab/gitleaks-rules.toml")"
+GITLEAKS_CONFIG_TOML="$(sed 's#^path = "/gitleaks.toml"$#useDefault = true#' "$(git rev-parse --show-toplevel)/.gitlab/gitleaks-rules.toml")"
 export GITLEAKS_CONFIG_TOML
 
 if [ -z "$HOOK_TYPE" ]; then
