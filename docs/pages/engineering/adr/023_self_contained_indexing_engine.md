@@ -39,7 +39,7 @@ They also need new ontology versions at runtime, with no deploy.
 ![The indexing engine in one picture](../../../assets/adr/023-indexing-engine.svg)
 
 [The indexing engine](../architecture/indexing/indexing-engine.md) explains how it works.
-[Adding a flow to the indexing engine](../development/adding-a-flow.md) shows the API.
+[Extending the indexing engine](../development/extending-the-indexing-engine.md) shows the API.
 
 1. **One library runs all indexing work.** It has no domain terms: no project, namespace, Gitaly or ontology. A CI check enforces it.
 2. **A flow is a planner and a worker.** The planner decides which inputs run now, and in which lane. The worker runs one input. A planner never calls a source. A worker never knows its lane.
@@ -84,7 +84,7 @@ Numbered steps work on any SQL backend. A SQLite file restored from S3 knows its
 ## References
 
 - [The indexing engine](../architecture/indexing/indexing-engine.md)
-- [Adding a flow to the indexing engine](../development/adding-a-flow.md)
+- [Extending the indexing engine](../development/extending-the-indexing-engine.md)
 - [Orbit Engine v2 epic](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/21)
 - [Orbit Code Indexing v2 with Object Store](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/16)
 - [Support third-party data sources in Orbit](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/20)

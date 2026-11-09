@@ -1,4 +1,4 @@
-# Adding a flow to the indexing engine
+# Extending the indexing engine
 
 The engine is being built in [epic 21](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/21).
 This guide shows its API, and it changes with the code.
