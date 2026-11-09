@@ -10,7 +10,9 @@ pub use versioned::versioned;
 use std::sync::Arc;
 
 use super::relational::{Capabilities, CurrentRows, RelationalBackend};
-use crate::{Catalog, DataModelError, Model, Packages};
+use facts::{DenormalizedKey, DenormalizedProperty};
+
+use crate::{Catalog, DataModelError, Model, Packages, RelationshipId};
 
 #[derive(Debug, Clone)]
 pub struct ClickHouse;
@@ -40,5 +42,12 @@ impl Catalog<ClickHouse> {
     pub fn versioned(packages: &Packages, table_prefix: &str) -> Result<Self, DataModelError> {
         let fragments = versioned(packages.fragments()?, table_prefix)?;
         Self::from_model(&Arc::new(Model::load(&fragments)?))
+    }
+
+    pub fn denormalized_properties(
+        &self,
+    ) -> impl Iterator<Item = (RelationshipId, DenormalizedKey, &DenormalizedProperty)> {
+        self.stores()
+            .flat_map(|(_, store)| store.denormalized.declared())
     }
 }

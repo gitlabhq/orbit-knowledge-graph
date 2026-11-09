@@ -5,7 +5,8 @@ use arrow::record_batch::RecordBatch;
 use orbit_log_fields::{debug, warn};
 use serde_json::Value;
 
-use ontology::{Extract, Ontology};
+use query_data_model::catalog::Sources;
+use query_data_model::catalog::sources::Writer;
 
 use crate::handler::HandlerError;
 
@@ -47,20 +48,20 @@ pub(in crate::modules::sdlc) struct PartitionStrategy {
 }
 
 pub(in crate::modules::sdlc) fn build_strategies(
-    ontology: &Ontology,
+    sources: &Sources,
     min_rows: u64,
 ) -> HashMap<String, PartitionStrategy> {
-    ontology
-        .nodes()
-        .flat_map(|node| node.pipelines.iter())
+    sources
+        .pipelines()
+        .iter()
+        .filter(|pipeline| matches!(pipeline.writer, Writer::Entity(_)))
         .filter_map(|pipeline| {
-            let Extract::ClickHouse(extract) = &pipeline.extract;
-            let count = extract.partition_count?;
+            let count = pipeline.partition_count?;
             if count <= 1 {
                 return None;
             }
-            let key_columns = partition_key_columns(&extract.order_by)?;
-            let base_table = extract.tables.first()?.clone();
+            let key_columns = partition_key_columns(&pipeline.order_by)?;
+            let base_table = pipeline.tables.first()?.clone();
             Some((
                 pipeline.name.clone(),
                 PartitionStrategy {
@@ -501,10 +502,12 @@ mod tests {
     }
 
     #[test]
-    fn build_strategies_resolves_composite_key_from_ontology_partition_count() {
-        let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
+    fn build_strategies_resolves_composite_key_from_source_partition_count() {
+        let model = query_data_model::Packages::embedded()
+            .load()
+            .expect("should load model");
 
-        let strategies = build_strategies(&ontology, PARTITION_MIN_ROWS);
+        let strategies = build_strategies(model.sources(), PARTITION_MIN_ROWS);
         let job = strategies.get("Job").expect("Job declares partition_count");
         assert_eq!(job.count, 5);
         assert_eq!(job.key_columns, keys(&["traversal_path", "id"]));

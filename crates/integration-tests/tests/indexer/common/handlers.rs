@@ -14,6 +14,8 @@ use indexer::testkit::{
 use indexer::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use indexer::types::{Envelope, Event, Subscription};
 use integration_testkit::TestContext;
+use query_data_model::spec::Fragment;
+use query_data_model::{Catalog, ClickHouse, Model, Packages};
 
 pub fn handler_context() -> HandlerContext {
     let mock_nats = Arc::new(MockNatsServices::new());
@@ -68,13 +70,13 @@ async fn build_fan_out(
         ctx.config.clone().build_client("graph"),
         Arc::new(EngineMetrics::default()),
     ));
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog must load");
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,
         &config,
         &indexer::clickhouse::ClickHouseClients::new(&config.graph, &config.datalake),
-        &ontology,
+        &catalog,
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
         indexer::modules::sdlc::PARTITION_MIN_ROWS,
@@ -139,15 +141,13 @@ async fn entity_handler_for_config(
         ctx.config.clone().build_client("graph"),
         Arc::new(EngineMetrics::default()),
     ));
-    let ontology = ontology::Ontology::load_embedded()
-        .expect("ontology must load")
-        .with_partition_count(entity_name, partitions);
+    let catalog = catalog_with_partition_count(entity_name, partitions);
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,
         &config,
         &indexer::clickhouse::ClickHouseClients::new(&config.graph, &config.datalake),
-        &ontology,
+        &catalog,
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
         0,
@@ -160,6 +160,21 @@ async fn entity_handler_for_config(
     registry
         .find_by_name(&handler_name)
         .unwrap_or_else(|| panic!("handler not found: {handler_name}"))
+}
+
+fn catalog_with_partition_count(entity_name: &str, partitions: u32) -> Catalog<ClickHouse> {
+    let mut fragments = Packages::embedded()
+        .fragments()
+        .expect("embedded packages must parse");
+    for fragment in &mut fragments {
+        if let Fragment::Source(source) = fragment
+            && let Some(entity) = source.entities.get_mut(entity_name)
+        {
+            entity.partition_count = Some(partitions);
+        }
+    }
+    let model = Model::load(&fragments).expect("model must load");
+    Catalog::<ClickHouse>::from_model(&Arc::new(model)).expect("catalog must load")
 }
 
 pub fn default_test_watermark() -> DateTime<Utc> {

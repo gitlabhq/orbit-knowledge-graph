@@ -8,6 +8,7 @@ license = "MIT"
 chrono = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 jsonschema = { workspace = true }
+minijinja = { workspace = true }
 ontology = { path = "../ontology" }
 orbit-utils = { path = "../utils" }
 pest = { workspace = true }

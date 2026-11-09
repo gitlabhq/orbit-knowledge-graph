@@ -1,7 +1,7 @@
 //! Generated-extract SQL rendering; all `DataType` → ClickHouse dialect rendering lives here.
 
-use ontology::sql_template;
-use ontology::{DataType, EtlScope, constants::TRAVERSAL_PATH_COLUMN};
+use query_data_model::catalog::sources::EtlScope;
+use query_data_model::{DataType, TRAVERSAL_PATH_COLUMN, sql_template};
 
 use super::super::build::PlanError;
 use super::lookup::PointLookupJoin;

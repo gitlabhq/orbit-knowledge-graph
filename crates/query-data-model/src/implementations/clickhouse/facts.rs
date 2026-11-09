@@ -31,15 +31,31 @@ pub struct DenormalizedProperty {
 #[derive(Debug, Clone, Default)]
 pub struct DenormalizedCatalog {
     properties: HashMap<DenormalizedKey, DenormalizedProperty>,
+    declared: Vec<(RelationshipId, DenormalizedKey)>,
 }
 
 impl DenormalizedCatalog {
-    pub fn new(properties: HashMap<DenormalizedKey, DenormalizedProperty>) -> Self {
-        Self { properties }
+    pub fn new(
+        properties: HashMap<DenormalizedKey, DenormalizedProperty>,
+        declared: Vec<(RelationshipId, DenormalizedKey)>,
+    ) -> Self {
+        Self {
+            properties,
+            declared,
+        }
     }
 
     pub fn property(&self, key: DenormalizedKey) -> Option<&DenormalizedProperty> {
         self.properties.get(&key)
+    }
+
+    /// Each denormalized relationship property in declaration order.
+    pub fn declared(
+        &self,
+    ) -> impl Iterator<Item = (RelationshipId, DenormalizedKey, &DenormalizedProperty)> {
+        self.declared
+            .iter()
+            .map(|(relationship, key)| (*relationship, *key, &self.properties[key]))
     }
 }
 

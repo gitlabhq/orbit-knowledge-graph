@@ -125,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
                 indexer::run(
                     &indexer_config,
                     ontology,
+                    query_data_model::Packages::embedded().load()?,
                     serving,
                     shutdown,
                     indexer_datafusion::sql_transform(),

@@ -1,6 +1,5 @@
 use super::super::build::PlanError;
-use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
-use ontology::sql_template;
+use query_data_model::{DELETED_COLUMN, VERSION_COLUMN, sql_template};
 
 use super::{
     BATCH_SIZE_MARKER, ClickHouseExtractDeclaration, ExtractSpec, ExtractTemplate, FILTERS_MARKER,
@@ -73,7 +72,7 @@ fn qualified_sibling_column(expression: &str, column: &str, sibling: &str) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::EtlScope;
+    use query_data_model::catalog::sources::{EtlScope, ExtractQuery};
 
     fn group_decl() -> ClickHouseExtractDeclaration {
         ClickHouseExtractDeclaration {
@@ -85,7 +84,7 @@ mod tests {
             watermark: "_siphon_watermark".to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
-            query: ontology::ExtractQuery::Sql(String::new()),
+            query: ExtractQuery::Template(String::new()),
             lookup_joins: vec![],
         }
     }

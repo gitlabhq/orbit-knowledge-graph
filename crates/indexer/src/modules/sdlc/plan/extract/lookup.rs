@@ -1,4 +1,4 @@
-use ontology::{ClickHouseExtract, EtlScope};
+use query_data_model::catalog::sources::{EtlScope, Pipeline};
 
 const LOOKUP_ALIAS_PREFIX: &str = "_e";
 const LOOKUP_SOURCE_ID_COLUMN: &str = "id";
@@ -21,30 +21,26 @@ pub(in crate::modules::sdlc) struct PointLookupJoin {
 
 impl PointLookupJoin {
     pub(in crate::modules::sdlc) fn get_from_extract_declaration(
-        extract: &ClickHouseExtract,
-        pipeline_scope: EtlScope,
+        pipeline: &Pipeline,
     ) -> Vec<PointLookupJoin> {
-        extract
+        pipeline
             .lookups
             .iter()
             .enumerate()
-            .filter_map(|(index, lookup)| {
-                let source = lookup.resolved_source.as_ref()?;
-                Some(PointLookupJoin {
-                    internal_alias: format!("{LOOKUP_ALIAS_PREFIX}{index}"),
-                    source_table: source.table.clone(),
-                    source_id_column: LOOKUP_SOURCE_ID_COLUMN.to_string(),
-                    batch_id_column: lookup.batch_id_column.clone(),
-                    output_fields: lookup
-                        .output_fields
-                        .iter()
-                        .map(|(source_column, output_field)| PointLookupOutputField {
-                            source_column: source_column.clone(),
-                            output_field: output_field.clone(),
-                        })
-                        .collect(),
-                    has_traversal_path: pipeline_scope == EtlScope::Namespaced && source.namespaced,
-                })
+            .map(|(index, lookup)| PointLookupJoin {
+                internal_alias: format!("{LOOKUP_ALIAS_PREFIX}{index}"),
+                source_table: lookup.table.clone(),
+                source_id_column: LOOKUP_SOURCE_ID_COLUMN.to_string(),
+                batch_id_column: lookup.id_column.clone(),
+                output_fields: lookup
+                    .fields
+                    .iter()
+                    .map(|(source_column, output_field)| PointLookupOutputField {
+                        source_column: source_column.clone(),
+                        output_field: output_field.clone(),
+                    })
+                    .collect(),
+                has_traversal_path: pipeline.scope == EtlScope::Namespaced && lookup.namespaced,
             })
             .collect()
     }

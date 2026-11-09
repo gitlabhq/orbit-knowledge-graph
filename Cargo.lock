@@ -7495,6 +7495,7 @@ dependencies = [
  "chrono",
  "indexmap 2.14.2",
  "jsonschema",
+ "minijinja",
  "ontology",
  "orbit-utils",
  "pest",

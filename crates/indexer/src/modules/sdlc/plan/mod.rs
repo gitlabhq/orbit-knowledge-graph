@@ -16,9 +16,9 @@ use arrow::datatypes::{
 };
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use ontology::EtlScope;
-use ontology::sql_template;
 use orbit_arrow::ArrowUtils;
+use query_data_model::catalog::sources::EtlScope;
+use query_data_model::sql_template;
 use serde_json::Value;
 
 use super::partitioning::PartitionAssignment;

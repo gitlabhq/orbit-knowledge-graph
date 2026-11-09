@@ -1,21 +1,24 @@
-//! Turns a node's fields (with FK edges) or an edge's mapping into a `TransformSpec`.
+//! Turns an entity's columns (with FK edges) or a relationship's mapping into a `TransformSpec`.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use ontology::{
-    DataType, DenormDirection, EdgeMapping, EnumType, EtlScope, Field, NodeEntity, NodeRef,
-    NodeRefKind, Ontology, StorageColumn,
-    constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, VERSION_COLUMN},
+use query_data_model::catalog::sources::{
+    EdgeMapping, Endpoint, EndpointKind, EtlScope, SourceColumn,
+};
+use query_data_model::implementations::clickhouse::schema::Table;
+use query_data_model::{
+    Catalog, ClickHouse, DEFAULT_PRIMARY_KEY, DELETED_COLUMN, DataType, DenormalizedDirection,
+    DenormalizedKey, EntityId, EnumType, PropertyId, VERSION_COLUMN,
 };
 
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
 use super::SOURCE_DATA_TABLE;
+use super::build::PlanError;
 
 pub(in crate::modules::sdlc) enum TransformDeclaration {
     Node(NodeTransformDeclaration),
     Edge {
-        relationship_kind: String,
         mapping: Box<EdgeMapping>,
         scope: EtlScope,
     },
@@ -23,10 +26,8 @@ pub(in crate::modules::sdlc) enum TransformDeclaration {
 }
 
 pub(in crate::modules::sdlc) struct NodeTransformDeclaration {
-    node_name: String,
-    fields: Vec<Field>,
-    storage_columns: Vec<StorageColumn>,
-    destination_table: String,
+    entity: EntityId,
+    columns: Vec<SourceColumn>,
     global: bool,
     edges: Vec<EdgeMapping>,
 }
@@ -106,16 +107,16 @@ enum EdgeFilter {
 }
 
 impl TransformDeclaration {
-    pub(in crate::modules::sdlc) fn from_node_entity_and_edge_mappings(
-        node: &NodeEntity,
+    pub(in crate::modules::sdlc) fn node(
+        entity: EntityId,
+        columns: &[SourceColumn],
+        scope: EtlScope,
         edges: &[EdgeMapping],
     ) -> TransformDeclaration {
         TransformDeclaration::Node(NodeTransformDeclaration {
-            node_name: node.name.clone(),
-            fields: node.fields.clone(),
-            storage_columns: node.storage.columns.clone(),
-            destination_table: node.destination_table.clone(),
-            global: node.global,
+            entity,
+            columns: columns.to_vec(),
+            global: scope == EtlScope::Global,
             edges: edges.to_vec(),
         })
     }
@@ -123,40 +124,41 @@ impl TransformDeclaration {
 
 pub(super) fn compile_transform_spec(
     transform_declaration: TransformDeclaration,
-    ontology: &Ontology,
-) -> Result<TransformSpec, ontology::OntologyError> {
+    catalog: &Catalog<ClickHouse>,
+) -> Result<TransformSpec, PlanError> {
     match transform_declaration {
         TransformDeclaration::Node(node_transform) => {
-            build_node_transform(&node_transform, ontology)
+            build_node_transform(&node_transform, catalog)
         }
-        TransformDeclaration::Edge {
-            relationship_kind,
-            mapping,
-            scope,
-        } => edge_transform(&relationship_kind, &mapping, scope, ontology),
+        TransformDeclaration::Edge { mapping, scope } => edge_transform(&mapping, scope, catalog),
         TransformDeclaration::Rust(name) => Ok(TransformSpec::Rust(name)),
     }
 }
 
 fn build_node_transform(
     transform_declaration: &NodeTransformDeclaration,
-    ontology: &Ontology,
-) -> Result<TransformSpec, ontology::OntologyError> {
+    catalog: &Catalog<ClickHouse>,
+) -> Result<TransformSpec, PlanError> {
+    let entity = transform_declaration.entity;
+    let table = catalog.table_of(entity).ok_or_else(|| {
+        PlanError::Invalid(format!(
+            "{} has no graph table",
+            catalog.graph().entity(entity).name
+        ))
+    })?;
     let namespaced = !transform_declaration.global;
-    let node_destination =
-        prefixed_table_name(&transform_declaration.destination_table, *SCHEMA_VERSION);
     let mut transforms = vec![Transformation {
-        sql: node_transform_sql(&node_columns(&transform_declaration.fields)),
-        destination_table: node_destination,
-        dict_encode_columns: low_cardinality_columns(&transform_declaration.storage_columns),
+        sql: node_transform_sql(&node_columns(&transform_declaration.columns, catalog)),
+        destination_table: prefixed_table_name(table, *SCHEMA_VERSION),
+        dict_encode_columns: low_cardinality_columns(schema_table(catalog, table)),
     }];
 
     for mapping in &transform_declaration.edges {
         transforms.extend(fk_edge_transform(
             mapping,
-            &transform_declaration.node_name,
+            transform_declaration,
             namespaced,
-            ontology,
+            catalog,
         )?);
     }
 
@@ -164,86 +166,97 @@ fn build_node_transform(
 }
 
 fn edge_transform(
-    relationship_kind: &str,
     mapping: &EdgeMapping,
     scope: EtlScope,
-    ontology: &Ontology,
-) -> Result<TransformSpec, ontology::OntologyError> {
-    let denormalized = standalone_edge_denormalized_columns(relationship_kind, mapping, ontology);
+    catalog: &Catalog<ClickHouse>,
+) -> Result<TransformSpec, PlanError> {
+    let denormalized = standalone_edge_denormalized_columns(mapping, catalog);
     let filters = vec![
         EdgeFilter::IsNotNull(mapping.source.field.clone()),
         EdgeFilter::IsNotNull(mapping.target.field.clone()),
     ];
     Ok(TransformSpec::DataFusion(edge_transformations(
-        relationship_kind,
         mapping,
         scope == EtlScope::Namespaced,
         filters,
         denormalized,
-        ontology,
+        catalog,
     )?))
 }
 
 fn fk_edge_transform(
     mapping: &EdgeMapping,
-    node_name: &str,
+    node: &NodeTransformDeclaration,
     namespaced: bool,
-    ontology: &Ontology,
-) -> Result<Vec<Transformation>, ontology::OntologyError> {
+    catalog: &Catalog<ClickHouse>,
+) -> Result<Vec<Transformation>, PlanError> {
     let mut filters = Vec::new();
-    for node_ref in [&mapping.source, &mapping.target] {
-        if node_ref.field == DEFAULT_PRIMARY_KEY {
+    for endpoint in [&mapping.source, &mapping.target] {
+        if endpoint.field == DEFAULT_PRIMARY_KEY {
             continue;
         }
         filters.push(if mapping.array_field.is_some() {
-            EdgeFilter::ArrayNotEmpty(node_ref.field.clone())
+            EdgeFilter::ArrayNotEmpty(endpoint.field.clone())
         } else {
-            EdgeFilter::IsNotNull(node_ref.field.clone())
+            EdgeFilter::IsNotNull(endpoint.field.clone())
         });
     }
-    let denormalized = fk_denormalized_columns(mapping, node_name, ontology);
-    edge_transformations(
-        &mapping.label,
-        mapping,
-        namespaced,
-        filters,
-        denormalized,
-        ontology,
-    )
+    let denormalized = fk_denormalized_columns(mapping, node, catalog);
+    edge_transformations(mapping, namespaced, filters, denormalized, catalog)
 }
 
 fn edge_transformations(
-    relationship_kind: &str,
     mapping: &EdgeMapping,
     namespaced: bool,
     mut filters: Vec<EdgeFilter>,
     denormalized: Vec<DenormalizedColumnProjection>,
-    ontology: &Ontology,
-) -> Result<Vec<Transformation>, ontology::OntologyError> {
-    let (source_kind, source_filter) = resolve_node_ref_kind(&mapping.source, || {
-        ontology.get_edge_source_types(relationship_kind)
-    });
-    let (target_kind, target_filter) = resolve_node_ref_kind(&mapping.target, || {
-        ontology.get_edge_all_target_types(relationship_kind)
-    });
+    catalog: &Catalog<ClickHouse>,
+) -> Result<Vec<Transformation>, PlanError> {
+    let graph = catalog.graph();
+    let relationship = graph.relationship(mapping.relationship);
+    let relationship_kind = relationship.name.as_str();
+    let variant_entities = |source: bool| -> Vec<String> {
+        relationship
+            .variants
+            .iter()
+            .map(|variant| {
+                let variant = graph.variant(*variant);
+                let entity = if source {
+                    variant.source
+                } else {
+                    variant.target
+                };
+                graph.entity(entity).name.clone()
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    };
+    let (source_kind, source_filter) =
+        resolve_node_ref_kind(&mapping.source, catalog, || variant_entities(true));
+    let (target_kind, target_filter) =
+        resolve_node_ref_kind(&mapping.target, catalog, || variant_entities(false));
     filters.extend(source_filter);
     filters.extend(target_filter);
 
     let source_kind_sql = edge_kind_sql(&source_kind);
     let target_kind_sql = edge_kind_sql(&target_kind);
-    let routes = ontology.edge_routes_for_mapping(mapping);
-    if routes.is_empty() {
-        return Err(ontology::OntologyError::Validation(format!(
-            "pipeline mapping materializes no declared '{relationship_kind}' variant"
-        )));
-    }
 
     let mut variants_by_table: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
-    for route in &routes {
-        variants_by_table
-            .entry(&route.destination_table)
-            .or_default()
-            .push((route.source_kind.clone(), route.target_kind.clone()));
+    for variant in &mapping.variants {
+        let table = catalog.edge_table(*variant).ok_or_else(|| {
+            PlanError::Invalid(format!("a '{relationship_kind}' variant has no edge table"))
+        })?;
+        let variant = graph.variant(*variant);
+        variants_by_table.entry(table).or_default().push((
+            graph.entity(variant.source).name.clone(),
+            graph.entity(variant.target).name.clone(),
+        ));
+    }
+    if variants_by_table.is_empty() {
+        return Err(PlanError::Invalid(format!(
+            "pipeline mapping materializes no declared '{relationship_kind}' variant"
+        )));
     }
     let split_route = variants_by_table.len() > 1;
 
@@ -258,7 +271,7 @@ fn edge_transformations(
                     variants,
                 });
             }
-            let meta = edge_table_metadata(table, ontology);
+            let schema = schema_table(catalog, table);
             Ok(Transformation {
                 sql: build_edge_transform_sql(
                     &edge_id_sql(&resolve_edge_id(
@@ -275,42 +288,58 @@ fn edge_transformations(
                     namespaced,
                     &denormalized,
                     &filters,
-                    &meta.sort_key,
+                    schema.map_or(&[], |table| table.order_by.as_slice()),
                 ),
                 destination_table: prefixed_table_name(table, *SCHEMA_VERSION),
-                dict_encode_columns: meta.dict_columns,
+                dict_encode_columns: low_cardinality_columns(schema),
             })
         })
         .collect()
 }
 
-fn standalone_edge_denormalized_columns(
-    relationship_kind: &str,
+fn denormalized_projection(
+    catalog: &Catalog<ClickHouse>,
     mapping: &EdgeMapping,
-    ontology: &Ontology,
+    key: DenormalizedKey,
+    source_column: String,
+) -> Option<DenormalizedColumnProjection> {
+    let (_, _, property) =
+        catalog
+            .denormalized_properties()
+            .find(|(relationship, declared, _)| {
+                *relationship == mapping.relationship && *declared == key
+            })?;
+    Some(DenormalizedColumnProjection {
+        source_column,
+        edge_column: property.edge_column.clone(),
+        tag_key: property.tag_key.clone(),
+        enum_mapping: int_enum_values(catalog, key.property),
+    })
+}
+
+fn standalone_edge_denormalized_columns(
+    mapping: &EdgeMapping,
+    catalog: &Catalog<ClickHouse>,
 ) -> Vec<DenormalizedColumnProjection> {
     let mut projections = Vec::new();
-    for (node_ref, direction) in [
-        (&mapping.source, DenormDirection::Source),
-        (&mapping.target, DenormDirection::Target),
+    for (endpoint, direction) in [
+        (&mapping.source, DenormalizedDirection::Source),
+        (&mapping.target, DenormalizedDirection::Target),
     ] {
-        let NodeRefKind::Literal(node_kind) = &node_ref.kind else {
+        if endpoint.kind.entity().is_none() {
             continue;
-        };
-        for (property_name, input_field) in &node_ref.property_inputs {
-            if let Some(property) = ontology.denormalized_properties().iter().find(|property| {
-                property.relationship_kind == relationship_kind
-                    && property.direction == direction
-                    && property.node_kind == *node_kind
-                    && property.property_name == *property_name
-            }) {
-                projections.push(DenormalizedColumnProjection {
-                    source_column: input_field.clone(),
-                    edge_column: property.edge_column.clone(),
-                    tag_key: property.tag_key.clone(),
-                    enum_mapping: property.enum_values.clone(),
-                });
-            }
+        }
+        for (property, input_field) in &endpoint.properties {
+            let key = DenormalizedKey {
+                property: *property,
+                direction,
+            };
+            projections.extend(denormalized_projection(
+                catalog,
+                mapping,
+                key,
+                input_field.clone(),
+            ));
         }
     }
     projections
@@ -318,66 +347,83 @@ fn standalone_edge_denormalized_columns(
 
 fn fk_denormalized_columns(
     mapping: &EdgeMapping,
-    node_name: &str,
-    ontology: &Ontology,
+    node: &NodeTransformDeclaration,
+    catalog: &Catalog<ClickHouse>,
 ) -> Vec<DenormalizedColumnProjection> {
-    ontology
+    let graph = catalog.graph();
+    let Some(direction) = node_ref_direction(mapping, node.entity) else {
+        return Vec::new();
+    };
+    catalog
         .denormalized_properties()
-        .iter()
-        .filter(|dp| {
-            dp.relationship_kind == mapping.label
-                && dp.node_kind == node_name
-                && matches!(
-                    (&dp.direction, node_ref_direction(mapping, node_name)),
-                    (DenormDirection::Source, Some(DenormDirection::Source))
-                        | (DenormDirection::Target, Some(DenormDirection::Target))
-                )
+        .filter(|(relationship, key, _)| {
+            *relationship == mapping.relationship
+                && key.direction == direction
+                && graph.property(key.property).entity == node.entity
         })
-        .map(|dp| {
-            let field = ontology
-                .get_node(&dp.node_kind)
-                .and_then(|n| n.fields.iter().find(|f| f.name == dp.property_name));
-            let source_column = field
-                .and_then(|f| f.column_name())
-                .unwrap_or(&dp.property_name)
-                .to_string();
+        .map(|(_, key, property)| {
+            let source_column = node
+                .columns
+                .iter()
+                .find(|column| column.property == key.property)
+                .map_or_else(
+                    || graph.property(key.property).name.clone(),
+                    |column| column.column.clone(),
+                );
             DenormalizedColumnProjection {
                 source_column,
-                edge_column: dp.edge_column.clone(),
-                tag_key: dp.tag_key.clone(),
-                enum_mapping: dp.enum_values.clone(),
+                edge_column: property.edge_column.clone(),
+                tag_key: property.tag_key.clone(),
+                enum_mapping: int_enum_values(catalog, key.property),
             }
         })
         .collect()
 }
 
-fn node_ref_direction(mapping: &EdgeMapping, node_name: &str) -> Option<DenormDirection> {
-    match (&mapping.source.kind, &mapping.target.kind) {
-        (NodeRefKind::Literal(kind), _) if kind == node_name => Some(DenormDirection::Source),
-        (_, NodeRefKind::Literal(kind)) if kind == node_name => Some(DenormDirection::Target),
-        _ => None,
+fn int_enum_values(
+    catalog: &Catalog<ClickHouse>,
+    property: PropertyId,
+) -> Option<BTreeMap<i64, String>> {
+    let property = catalog.graph().property(property);
+    match property.enum_type {
+        EnumType::Int => property.enum_values.clone(),
+        EnumType::String => None,
     }
 }
 
-fn resolve_edge_id(node_ref: &NodeRef, array_field: Option<&str>) -> EdgeId {
+fn node_ref_direction(mapping: &EdgeMapping, entity: EntityId) -> Option<DenormalizedDirection> {
+    if mapping.source.kind.entity() == Some(entity) {
+        Some(DenormalizedDirection::Source)
+    } else if mapping.target.kind.entity() == Some(entity) {
+        Some(DenormalizedDirection::Target)
+    } else {
+        None
+    }
+}
+
+fn resolve_edge_id(endpoint: &Endpoint, array_field: Option<&str>) -> EdgeId {
     if let Some(field) = array_field
-        && node_ref.field != DEFAULT_PRIMARY_KEY
+        && endpoint.field != DEFAULT_PRIMARY_KEY
     {
         return EdgeId::ArrayElement {
-            column: node_ref.field.clone(),
+            column: endpoint.field.clone(),
             field: field.to_string(),
         };
     }
-    EdgeId::Column(node_ref.field.clone())
+    EdgeId::Column(endpoint.field.clone())
 }
 
 fn resolve_node_ref_kind(
-    node_ref: &NodeRef,
+    endpoint: &Endpoint,
+    catalog: &Catalog<ClickHouse>,
     resolve_allowed_types: impl FnOnce() -> Vec<String>,
 ) -> (EdgeKind, Option<EdgeFilter>) {
-    match &node_ref.kind {
-        NodeRefKind::Literal(node_type) => (EdgeKind::Literal(node_type.clone()), None),
-        NodeRefKind::Derived { column, mapping } => {
+    let graph = catalog.graph();
+    match &endpoint.kind {
+        EndpointKind::Entity(entity) => {
+            (EdgeKind::Literal(graph.entity(*entity).name.clone()), None)
+        }
+        EndpointKind::Column { column, mapping } => {
             let mut filter_types = resolve_allowed_types();
             for raw in mapping.keys() {
                 if !filter_types.iter().any(|t| t == raw) {
@@ -394,37 +440,41 @@ fn resolve_node_ref_kind(
             };
             let kind = EdgeKind::Column {
                 column: column.clone(),
-                mapping: mapping.clone(),
+                mapping: mapping
+                    .iter()
+                    .map(|(raw, entity)| (raw.clone(), graph.entity(*entity).name.clone()))
+                    .collect(),
             };
             (kind, filter)
         }
     }
 }
 
-fn node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
-    fields
+fn node_columns(columns: &[SourceColumn], catalog: &Catalog<ClickHouse>) -> Vec<NodeColumn> {
+    columns
         .iter()
-        .filter_map(|field| {
-            let col = field.column_name()?;
-            if field.data_type == DataType::Enum
-                && field.enum_type == EnumType::Int
-                && let Some(values) = &field.enum_values
+        .map(|column| {
+            let property = catalog.graph().property(column.property);
+            let col = column.column.as_str();
+            if property.data_type == DataType::Enum
+                && property.enum_type == EnumType::Int
+                && let Some(values) = &property.enum_values
             {
-                return Some(NodeColumn::IntEnum {
+                return NodeColumn::IntEnum {
                     source: col.to_string(),
-                    target: field.name.clone(),
+                    target: property.name.clone(),
                     values: values.clone(),
-                    nullable: field.nullable,
-                });
+                    nullable: property.nullable,
+                };
             }
-            Some(if col == field.name {
-                NodeColumn::Identity(field.name.clone())
+            if col == property.name {
+                NodeColumn::Identity(property.name.clone())
             } else {
                 NodeColumn::Rename {
                     source: col.to_string(),
-                    target: field.name.clone(),
+                    target: property.name.clone(),
                 }
-            })
+            }
         })
         .collect()
 }
@@ -463,31 +513,16 @@ fn node_column_sql(column: &NodeColumn) -> String {
     }
 }
 
-struct EdgeTableMetadata {
-    sort_key: Vec<String>,
-    dict_columns: HashSet<String>,
+fn schema_table<'a>(catalog: &'a Catalog<ClickHouse>, table: &str) -> Option<&'a Table> {
+    catalog.schema().ok()?.table(table)
 }
 
-fn edge_table_metadata(table: &str, ontology: &Ontology) -> EdgeTableMetadata {
-    let sort_key = ontology
-        .sort_key_for_table(table)
-        .map(|keys| keys.to_vec())
-        .unwrap_or_default();
-    let dict_columns = ontology
-        .edge_table_config(table)
-        .map(|config| low_cardinality_columns(&config.storage.columns))
-        .unwrap_or_default();
-    EdgeTableMetadata {
-        sort_key,
-        dict_columns,
-    }
-}
-
-fn low_cardinality_columns(columns: &[ontology::StorageColumn]) -> HashSet<String> {
-    columns
-        .iter()
-        .filter(|col| col.ch_type.starts_with("LowCardinality"))
-        .map(|col| col.name.clone())
+fn low_cardinality_columns(table: Option<&Table>) -> HashSet<String> {
+    table
+        .into_iter()
+        .flat_map(|table| &table.columns)
+        .filter(|column| column.storage_type.starts_with("LowCardinality"))
+        .map(|column| column.name.clone())
         .collect()
 }
 
@@ -666,8 +701,71 @@ fn edge_select_list(
 mod tests {
     use super::*;
 
-    fn test_ontology() -> Ontology {
-        Ontology::load_embedded().expect("should load ontology")
+    fn catalog() -> Catalog<ClickHouse> {
+        Catalog::<ClickHouse>::embedded().expect("embedded catalog")
+    }
+
+    fn node(catalog: &Catalog<ClickHouse>, name: &str) -> NodeTransformDeclaration {
+        let entity = catalog.graph().entity_id(name).expect("entity");
+        let pipeline = catalog
+            .model()
+            .sources()
+            .entity_pipelines(entity)
+            .next()
+            .expect("entity pipeline");
+        NodeTransformDeclaration {
+            entity,
+            columns: pipeline.columns.clone(),
+            global: pipeline.scope == EtlScope::Global,
+            edges: Vec::new(),
+        }
+    }
+
+    fn approved(catalog: &Catalog<ClickHouse>) -> EdgeMapping {
+        let pipeline = catalog
+            .model()
+            .sources()
+            .pipeline_named("APPROVED_siphon_approvals_MergeRequest")
+            .expect("APPROVED pipeline");
+        pipeline.transform.edges()[0].clone()
+    }
+
+    fn mapping(
+        catalog: &Catalog<ClickHouse>,
+        label: &str,
+        source: (&str, EndpointKind),
+        target: (&str, EndpointKind),
+        array_field: Option<&str>,
+    ) -> EdgeMapping {
+        let graph = catalog.graph();
+        let relationship = graph.relationship_id(label).expect("relationship");
+        let variants = graph
+            .relationship(relationship)
+            .variants
+            .iter()
+            .copied()
+            .filter(|variant| {
+                let variant = graph.variant(*variant);
+                source.1.matches(variant.source) && target.1.matches(variant.target)
+            })
+            .collect();
+        let endpoint = |(field, kind): (&str, EndpointKind)| Endpoint {
+            field: field.to_string(),
+            kind,
+            properties: indexmap::IndexMap::new(),
+        };
+        EdgeMapping {
+            relationship,
+            source: endpoint(source),
+            target: endpoint(target),
+            array_field: array_field.map(str::to_string),
+            mutable: false,
+            variants,
+        }
+    }
+
+    fn entity(catalog: &Catalog<ClickHouse>, name: &str) -> EndpointKind {
+        EndpointKind::Entity(catalog.graph().entity_id(name).expect("entity"))
     }
 
     #[test]
@@ -716,18 +814,8 @@ mod tests {
 
     #[test]
     fn standalone_edge_property_inputs_select_denormalized_tag_fields() {
-        let ontology = test_ontology();
-        let pipeline = ontology
-            .get_edge_etl("APPROVED")
-            .and_then(|pipelines| pipelines.first())
-            .expect("APPROVED pipeline");
-        let mapping = pipeline
-            .transform
-            .edges()
-            .first()
-            .expect("APPROVED edge mapping");
-
-        let projections = standalone_edge_denormalized_columns("APPROVED", mapping, &ontology);
+        let catalog = catalog();
+        let projections = standalone_edge_denormalized_columns(&approved(&catalog), &catalog);
 
         assert!(projections.iter().any(|projection| {
             projection.source_column == "user_state"
@@ -745,18 +833,8 @@ mod tests {
     // so an ordinal comparison against a string enum fails the cast at runtime.
     #[test]
     fn string_enum_denormalized_tag_never_compares_against_int_ordinals() {
-        let ontology = test_ontology();
-        let pipeline = ontology
-            .get_edge_etl("APPROVED")
-            .and_then(|pipelines| pipelines.first())
-            .expect("APPROVED pipeline");
-        let mapping = pipeline
-            .transform
-            .edges()
-            .first()
-            .expect("APPROVED edge mapping");
-
-        let projections = standalone_edge_denormalized_columns("APPROVED", mapping, &ontology);
+        let catalog = catalog();
+        let projections = standalone_edge_denormalized_columns(&approved(&catalog), &catalog);
         let user_state = projections
             .iter()
             .find(|projection| projection.source_column == "user_state")
@@ -787,8 +865,15 @@ mod tests {
 
     #[test]
     fn fk_edge_transform_outgoing_literal() {
-        let mapping = literal_mapping("owner_id", "User", "id", "Group", "OWNER");
-        let sql = fk_edge_transform(&mapping, "Group", true, &test_ontology())
+        let catalog = catalog();
+        let edge = mapping(
+            &catalog,
+            "OWNER",
+            ("owner_id", entity(&catalog, "User")),
+            ("id", entity(&catalog, "Group")),
+            None,
+        );
+        let sql = fk_edge_transform(&edge, &node(&catalog, "Group"), true, &catalog)
             .unwrap()
             .pop()
             .unwrap()
@@ -803,32 +888,24 @@ mod tests {
 
     #[test]
     fn fk_edge_transform_type_mapping_collapses_raw_values() {
-        let mut mapping = BTreeMap::new();
-        mapping.insert("Issue".to_string(), "WorkItem".to_string());
-        mapping.insert("Epic".to_string(), "WorkItem".to_string());
-
-        let edge = EdgeMapping {
-            source: NodeRef {
-                field: "noteable_id".to_string(),
-                property_inputs: indexmap::IndexMap::new(),
-                enrich: false,
-                kind: NodeRefKind::Derived {
-                    column: "noteable_type".to_string(),
-                    mapping,
-                },
-            },
-            target: NodeRef {
-                field: "id".to_string(),
-                kind: NodeRefKind::Literal("Note".to_string()),
-                property_inputs: indexmap::IndexMap::new(),
-                enrich: false,
-            },
-            label: "HAS_NOTE".to_string(),
-            array_field: None,
-            mutable: false,
+        let catalog = catalog();
+        let work_item = catalog.graph().entity_id("WorkItem").unwrap();
+        let kind = EndpointKind::Column {
+            column: "noteable_type".to_string(),
+            mapping: BTreeMap::from([
+                ("Issue".to_string(), work_item),
+                ("Epic".to_string(), work_item),
+            ]),
         };
+        let edge = mapping(
+            &catalog,
+            "HAS_NOTE",
+            ("noteable_id", kind),
+            ("id", entity(&catalog, "Note")),
+            None,
+        );
 
-        let sql = fk_edge_transform(&edge, "Note", true, &test_ontology())
+        let sql = fk_edge_transform(&edge, &node(&catalog, "Note"), true, &catalog)
             .unwrap()
             .pop()
             .unwrap()
@@ -842,55 +919,20 @@ mod tests {
 
     #[test]
     fn fk_edge_transform_array_element() {
-        let edge = EdgeMapping {
-            source: NodeRef {
-                field: "assignees".to_string(),
-                kind: NodeRefKind::Literal("User".to_string()),
-                property_inputs: indexmap::IndexMap::new(),
-                enrich: false,
-            },
-            target: NodeRef {
-                field: "id".to_string(),
-                kind: NodeRefKind::Literal("MergeRequest".to_string()),
-                property_inputs: indexmap::IndexMap::new(),
-                enrich: false,
-            },
-            label: "ASSIGNED".to_string(),
-            array_field: Some("user_id".to_string()),
-            mutable: false,
-        };
-        let sql = fk_edge_transform(&edge, "MergeRequest", true, &test_ontology())
+        let catalog = catalog();
+        let edge = mapping(
+            &catalog,
+            "ASSIGNED",
+            ("assignees", entity(&catalog, "User")),
+            ("id", entity(&catalog, "MergeRequest")),
+            Some("user_id"),
+        );
+        let sql = fk_edge_transform(&edge, &node(&catalog, "MergeRequest"), true, &catalog)
             .unwrap()
             .pop()
             .unwrap()
             .sql;
         assert!(sql.contains("unnest(assignees)['user_id']"), "sql: {sql}");
         assert!(sql.contains("(cardinality(assignees) > 0)"), "sql: {sql}");
-    }
-
-    fn literal_mapping(
-        from_field: &str,
-        from_kind: &str,
-        to_field: &str,
-        to_kind: &str,
-        label: &str,
-    ) -> EdgeMapping {
-        EdgeMapping {
-            source: NodeRef {
-                field: from_field.to_string(),
-                kind: NodeRefKind::Literal(from_kind.to_string()),
-                property_inputs: indexmap::IndexMap::new(),
-                enrich: false,
-            },
-            target: NodeRef {
-                field: to_field.to_string(),
-                kind: NodeRefKind::Literal(to_kind.to_string()),
-                property_inputs: indexmap::IndexMap::new(),
-                enrich: false,
-            },
-            label: label.to_string(),
-            array_field: None,
-            mutable: false,
-        }
     }
 }

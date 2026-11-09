@@ -66,6 +66,9 @@ pub enum IndexerError {
 
     #[error("Analytics tracker initialization failed: {0}")]
     Analytics(#[from] labkit_events::Error),
+
+    #[error("Invalid data model: {0}")]
+    DataModel(#[from] query_data_model::DataModelError),
 }
 
 #[derive(Clone, Debug)]

@@ -7,10 +7,10 @@ mod sql;
 use std::collections::HashSet;
 
 use indexmap::IndexSet;
-use ontology::sql_template;
-use ontology::{
-    ClickHouseExtract, DataType, EtlScope, Extract, ExtractQuery, NodeEntity, Pipeline,
-    constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN},
+use query_data_model::catalog::sources::{EtlScope, ExtractQuery, Pipeline, Writer};
+use query_data_model::{
+    Catalog, ClickHouse, DEFAULT_PRIMARY_KEY, DELETED_COLUMN, DataType, TRAVERSAL_PATH_COLUMN,
+    VERSION_COLUMN, sql_template,
 };
 
 use super::build::PlanError;
@@ -56,7 +56,7 @@ pub(super) fn compile_extract_spec(
         ExtractQuery::Generated { filter } => {
             generated::compile_generated_extract(declaration, filter.as_deref())
         }
-        ExtractQuery::Sql(raw) => sql::compile_authored_extract(declaration, raw),
+        ExtractQuery::Template(raw) => sql::compile_authored_extract(declaration, raw),
     }
 }
 
@@ -99,19 +99,6 @@ impl ExtractTemplate {
 }
 
 impl SourceColumn {
-    pub(super) fn from_node(node: &NodeEntity) -> Vec<SourceColumn> {
-        node.fields
-            .iter()
-            .filter_map(|field| {
-                field.column_name().map(|name| SourceColumn {
-                    name: name.to_string(),
-                    data_type: field.data_type,
-                    binary: field.binary,
-                })
-            })
-            .collect()
-    }
-
     fn from_field_names(fields: impl IntoIterator<Item = String>) -> Vec<SourceColumn> {
         fields
             .into_iter()
@@ -125,44 +112,38 @@ impl SourceColumn {
 }
 
 impl ClickHouseExtractDeclaration {
-    pub(super) fn from_node_pipeline(node: &NodeEntity, pipeline: &Pipeline) -> Self {
-        let Extract::ClickHouse(extract) = &pipeline.extract;
-        Self::from_pipeline_and_source_columns(
-            pipeline,
-            extract,
-            SourceColumn::from_node(node),
-            Vec::new(),
-        )
-    }
-
-    pub(super) fn from_edge_pipeline(pipeline: &Pipeline) -> Self {
-        let Extract::ClickHouse(extract) = &pipeline.extract;
-        let lookup_joins = PointLookupJoin::get_from_extract_declaration(extract, pipeline.scope);
-        let source_columns = get_edge_source_columns(extract, lookup_joins.is_empty());
-        Self::from_pipeline_and_source_columns(pipeline, extract, source_columns, lookup_joins)
-    }
-
-    pub(super) fn from_derived_pipeline(pipeline: &Pipeline) -> Self {
-        let Extract::ClickHouse(extract) = &pipeline.extract;
-        Self::from_pipeline_and_source_columns(pipeline, extract, Vec::new(), Vec::new())
-    }
-
-    fn from_pipeline_and_source_columns(
-        pipeline: &Pipeline,
-        extract: &ClickHouseExtract,
-        source_columns: Vec<SourceColumn>,
-        lookup_joins: Vec<PointLookupJoin>,
-    ) -> Self {
+    pub(super) fn from_pipeline(catalog: &Catalog<ClickHouse>, pipeline: &Pipeline) -> Self {
+        let source = catalog.model().sources().data_source(pipeline);
+        let (source_columns, lookup_joins) = match pipeline.writer {
+            Writer::Entity(_) => (
+                pipeline
+                    .columns
+                    .iter()
+                    .map(|column| SourceColumn {
+                        name: column.column.clone(),
+                        data_type: catalog.graph().property(column.property).data_type,
+                        binary: column.binary,
+                    })
+                    .collect(),
+                Vec::new(),
+            ),
+            Writer::Relationship(_) => {
+                let lookup_joins = PointLookupJoin::get_from_extract_declaration(pipeline);
+                let source_columns = get_edge_source_columns(pipeline, lookup_joins.is_empty());
+                (source_columns, lookup_joins)
+            }
+            Writer::Derived(_) => (Vec::new(), Vec::new()),
+        };
         Self {
             entity: pipeline.name.clone(),
             scope: pipeline.scope,
-            table: extract.tables.first().cloned().unwrap_or_default(),
+            table: pipeline.tables.first().cloned().unwrap_or_default(),
             source_columns,
-            version: extract.version.clone(),
-            watermark: extract.watermark.clone(),
-            deleted: extract.deleted.clone(),
-            order_by: extract.order_by.clone(),
-            query: extract.query.clone(),
+            version: source.version.clone(),
+            watermark: source.watermark.clone(),
+            deleted: source.deleted.clone(),
+            order_by: pipeline.order_by.clone(),
+            query: pipeline.query.clone(),
             lookup_joins,
         }
     }
@@ -177,15 +158,15 @@ impl ClickHouseExtractDeclaration {
 }
 
 fn get_edge_source_columns(
-    extract: &ClickHouseExtract,
+    pipeline: &Pipeline,
     uses_single_table_query: bool,
 ) -> Vec<SourceColumn> {
-    let mut source_columns: IndexSet<String> = extract.fields.iter().cloned().collect();
+    let mut source_columns: IndexSet<String> = pipeline.fields.iter().cloned().collect();
     if uses_single_table_query {
         source_columns.insert(TRAVERSAL_PATH_COLUMN.to_string());
         source_columns.insert(DEFAULT_PRIMARY_KEY.to_string());
     } else {
-        source_columns.extend(extract.order_by.iter().cloned());
+        source_columns.extend(pipeline.order_by.iter().cloned());
         source_columns.insert(TRAVERSAL_PATH_COLUMN.to_string());
     }
     SourceColumn::from_field_names(source_columns)

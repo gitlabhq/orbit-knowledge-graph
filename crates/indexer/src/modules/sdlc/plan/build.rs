@@ -1,8 +1,9 @@
-//! Walks the ontology and builds each pipeline as an extract plus a transform.
+//! Walks the model's source pipelines and builds each as an extract plus a transform.
 
 use std::collections::HashMap;
 
-use ontology::{EtlScope, Extract, ExtractQuery, NodeEntity, Ontology, Pipeline, Transform};
+use query_data_model::catalog::sources::{EtlScope, ExtractQuery, Pipeline, Transform, Writer};
+use query_data_model::{Catalog, ClickHouse};
 
 use super::extract::{ClickHouseExtractDeclaration, ExtractSpec, compile_extract_spec};
 use super::transform;
@@ -26,8 +27,8 @@ impl Sizing<'_> {
 
 #[derive(Debug, thiserror::Error)]
 pub(in crate::modules::sdlc) enum PlanError {
-    #[error(transparent)]
-    Ontology(#[from] ontology::OntologyError),
+    #[error("{0}")]
+    Invalid(String),
     #[error(
         "duplicate plan name '{0}': plan names are handler names and checkpoint keys and must be unique"
     )]
@@ -50,46 +51,36 @@ pub(in crate::modules::sdlc) enum PlanError {
 }
 
 pub(in crate::modules::sdlc) fn build_plans(
-    ontology: &Ontology,
+    catalog: &Catalog<ClickHouse>,
     sizing: Sizing<'_>,
 ) -> Result<Plans, PlanError> {
     let mut plans = PlanSet::default();
-
-    for node in ontology.nodes() {
-        for pipeline in &node.pipelines {
-            plans.insert(build_node_plan(node, pipeline, ontology, &sizing)?)?;
-        }
+    for pipeline in catalog.model().sources().pipelines() {
+        let plan = match pipeline.writer {
+            Writer::Entity(entity) => build_node_plan(entity, pipeline, catalog, &sizing)?,
+            Writer::Relationship(_) => build_edge_plan(pipeline, catalog, &sizing)?,
+            Writer::Derived(_) => build_derived_plan(pipeline, catalog, &sizing)?,
+        };
+        plans.insert(plan)?;
     }
-
-    for (relationship_kind, pipeline) in ontology.edge_etl_configs() {
-        plans.insert(build_edge_plan(
-            relationship_kind,
-            pipeline,
-            ontology,
-            &sizing,
-        )?)?;
-    }
-
-    for derived in ontology.derived_entities() {
-        for pipeline in &derived.pipelines {
-            plans.insert(build_derived_plan(pipeline, ontology, &sizing)?)?;
-        }
-    }
-
     Ok(plans.into_plans())
 }
 
 fn build_node_plan(
-    node: &NodeEntity,
+    entity: query_data_model::EntityId,
     pipeline: &Pipeline,
-    ontology: &Ontology,
+    catalog: &Catalog<ClickHouse>,
     sizing: &Sizing<'_>,
 ) -> Result<Plan, PlanError> {
-    let extract_declaration = ClickHouseExtractDeclaration::from_node_pipeline(node, pipeline);
-    let transform_declaration =
-        TransformDeclaration::from_node_entity_and_edge_mappings(node, pipeline.transform.edges());
+    let extract_declaration = ClickHouseExtractDeclaration::from_pipeline(catalog, pipeline);
+    let transform_declaration = TransformDeclaration::node(
+        entity,
+        &pipeline.columns,
+        pipeline.scope,
+        pipeline.transform.edges(),
+    );
     let spec = compile_extract_spec(&extract_declaration)?;
-    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
+    let transform = transform::compile_transform_spec(transform_declaration, catalog)?;
 
     Ok(assemble(
         pipeline,
@@ -101,37 +92,37 @@ fn build_node_plan(
 }
 
 fn build_edge_plan(
-    relationship_kind: &str,
     pipeline: &Pipeline,
-    ontology: &Ontology,
+    catalog: &Catalog<ClickHouse>,
     sizing: &Sizing<'_>,
 ) -> Result<Plan, PlanError> {
-    let Transform::DataFusion { edges } = &pipeline.transform else {
-        return Err(PlanError::UnexpectedTransform {
-            relationship_kind: relationship_kind.to_string(),
-            pipeline: pipeline.name.clone(),
-        });
+    let relationship_kind = catalog
+        .model()
+        .sources()
+        .writer_name(catalog.graph(), pipeline.writer)
+        .to_string();
+    let unexpected = || PlanError::UnexpectedTransform {
+        relationship_kind: relationship_kind.clone(),
+        pipeline: pipeline.name.clone(),
     };
-
+    let Transform::DataFusion(edges) = &pipeline.transform else {
+        return Err(unexpected());
+    };
     let [mapping] = edges.as_slice() else {
-        return Err(PlanError::UnexpectedTransform {
-            relationship_kind: relationship_kind.to_string(),
-            pipeline: pipeline.name.clone(),
-        });
+        return Err(unexpected());
     };
     let transform_declaration = TransformDeclaration::Edge {
-        relationship_kind: relationship_kind.to_string(),
         mapping: Box::new(mapping.clone()),
         scope: pipeline.scope,
     };
 
-    let extract_declaration = ClickHouseExtractDeclaration::from_edge_pipeline(pipeline);
+    let extract_declaration = ClickHouseExtractDeclaration::from_pipeline(catalog, pipeline);
     let spec = compile_extract_spec(&extract_declaration)?;
-    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
+    let transform = transform::compile_transform_spec(transform_declaration, catalog)?;
 
     Ok(assemble(
         pipeline,
-        relationship_kind.to_string(),
+        relationship_kind,
         spec,
         transform,
         sizing,
@@ -140,7 +131,7 @@ fn build_edge_plan(
 
 fn build_derived_plan(
     pipeline: &Pipeline,
-    ontology: &Ontology,
+    catalog: &Catalog<ClickHouse>,
     sizing: &Sizing<'_>,
 ) -> Result<Plan, PlanError> {
     let Transform::Rust(name) = &pipeline.transform else {
@@ -148,15 +139,14 @@ fn build_derived_plan(
             pipeline.name.clone(),
         ));
     };
-    let Extract::ClickHouse(extract) = &pipeline.extract;
-    let ExtractQuery::Sql(_) = &extract.query else {
+    let ExtractQuery::Template(_) = &pipeline.query else {
         return Err(PlanError::DerivedRequiresSql(pipeline.name.clone()));
     };
-    let extract_declaration = ClickHouseExtractDeclaration::from_derived_pipeline(pipeline);
+    let extract_declaration = ClickHouseExtractDeclaration::from_pipeline(catalog, pipeline);
     let spec = compile_extract_spec(&extract_declaration)?;
 
     let transform_declaration = TransformDeclaration::Rust(name.clone());
-    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
+    let transform = transform::compile_transform_spec(transform_declaration, catalog)?;
 
     Ok(assemble(
         pipeline,
@@ -174,7 +164,6 @@ fn assemble(
     transform: TransformSpec,
     sizing: &Sizing<'_>,
 ) -> Plan {
-    let Extract::ClickHouse(extract) = &pipeline.extract;
     Plan {
         name: pipeline.name.clone(),
         target,
@@ -182,7 +171,7 @@ fn assemble(
         extract_template: spec.template,
         watermark_column: spec.watermark,
         deleted_column: spec.deleted,
-        sort_key: extract.order_by.clone(),
+        sort_key: pipeline.order_by.clone(),
         batch_size: sizing.resolve(&pipeline.name, pipeline.scope),
         transform,
     }
@@ -226,19 +215,20 @@ mod tests {
     use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
     use orbit_utils::traversal_path::TraversalPath;
 
-    fn test_ontology() -> Ontology {
-        Ontology::load_embedded().expect("should load ontology")
+    fn catalog() -> Catalog<ClickHouse> {
+        Catalog::<ClickHouse>::embedded().expect("embedded catalog")
     }
 
     #[test]
     fn accepts_split_relationship_routes() {
-        let ontology = Ontology::load_embedded_with_overlay(concat!(
+        let ontology = ontology::Ontology::load_embedded_with_overlay(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../config/seeds/overlays/variant_routes"
         ))
         .unwrap();
+        let catalog = query_data_model::from_ontology::clickhouse(&ontology).unwrap();
         let result = build_plans(
-            &ontology,
+            &catalog,
             Sizing {
                 global_batch_size: 100,
                 namespaced_batch_size: 100,
@@ -248,9 +238,9 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    fn plans(ontology: &Ontology, batch_size: u64) -> Plans {
+    fn plans(catalog: &Catalog<ClickHouse>, batch_size: u64) -> Plans {
         build_plans(
-            ontology,
+            catalog,
             Sizing {
                 global_batch_size: batch_size,
                 namespaced_batch_size: batch_size,
@@ -289,7 +279,7 @@ mod tests {
 
     #[test]
     fn build_plans_partitions_by_scope() {
-        let plans = plans(&test_ontology(), 1_000_000);
+        let plans = plans(&catalog(), 1_000_000);
         let global: Vec<_> = plans.global.iter().map(|p| p.name.as_str()).collect();
         let namespaced: Vec<_> = plans.namespaced.iter().map(|p| p.name.as_str()).collect();
         assert!(global.contains(&"User"));
@@ -299,22 +289,23 @@ mod tests {
 
     #[test]
     fn changing_transform_fields_does_not_change_extract_compilation() {
-        let ontology = test_ontology();
-        let (_, pipeline) = ontology
-            .edge_etl_configs()
-            .find(|(_, pipeline)| pipeline.name == "APPROVED_siphon_approvals_MergeRequest")
+        let catalog = catalog();
+        let pipeline = catalog
+            .model()
+            .sources()
+            .pipeline_named("APPROVED_siphon_approvals_MergeRequest")
             .expect("APPROVED pipeline");
-        let original_declaration = ClickHouseExtractDeclaration::from_edge_pipeline(pipeline);
+        let original_declaration = ClickHouseExtractDeclaration::from_pipeline(&catalog, pipeline);
         let original_extract =
             compile_extract_spec(&original_declaration).expect("original extract");
 
         let mut changed_pipeline = pipeline.clone();
-        let Transform::DataFusion { edges } = &mut changed_pipeline.transform else {
+        let Transform::DataFusion(edges) = &mut changed_pipeline.transform else {
             panic!("APPROVED should use datafusion");
         };
         edges[0].source.field = "different_user_id".to_string();
         let changed_declaration =
-            ClickHouseExtractDeclaration::from_edge_pipeline(&changed_pipeline);
+            ClickHouseExtractDeclaration::from_pipeline(&catalog, &changed_pipeline);
         let changed_extract = compile_extract_spec(&changed_declaration).expect("changed extract");
 
         assert_eq!(
@@ -325,10 +316,11 @@ mod tests {
 
     #[test]
     fn changing_extract_fields_does_not_change_transform_compilation() {
-        let ontology = test_ontology();
-        let (relationship_kind, pipeline) = ontology
-            .edge_etl_configs()
-            .find(|(_, pipeline)| pipeline.name == "APPROVED_siphon_approvals_MergeRequest")
+        let catalog = catalog();
+        let pipeline = catalog
+            .model()
+            .sources()
+            .pipeline_named("APPROVED_siphon_approvals_MergeRequest")
             .expect("APPROVED pipeline");
         let overrides = HashMap::new();
         let sizing = Sizing {
@@ -336,15 +328,14 @@ mod tests {
             namespaced_batch_size: 1_000_000,
             overrides: &overrides,
         };
-        let original_plan = build_edge_plan(relationship_kind, pipeline, &ontology, &sizing)
-            .expect("original plan");
+        let original_plan = build_edge_plan(pipeline, &catalog, &sizing).expect("original plan");
 
         let mut changed_pipeline = pipeline.clone();
-        let Extract::ClickHouse(extract) = &mut changed_pipeline.extract;
-        extract.fields.push("unused_source_field".to_string());
+        changed_pipeline
+            .fields
+            .push("unused_source_field".to_string());
         let changed_plan =
-            build_edge_plan(relationship_kind, &changed_pipeline, &ontology, &sizing)
-                .expect("changed plan");
+            build_edge_plan(&changed_pipeline, &catalog, &sizing).expect("changed plan");
 
         let TransformSpec::DataFusion(original_transforms) = original_plan.transform else {
             panic!("APPROVED should use datafusion");
@@ -362,10 +353,9 @@ mod tests {
 
     #[test]
     fn batch_size_override_applies_to_named_pipeline() {
-        let ontology = test_ontology();
         let overrides = HashMap::from([("WorkItem".to_string(), 50_000u64)]);
         let built = build_plans(
-            &ontology,
+            &catalog(),
             Sizing {
                 global_batch_size: 1_000_000,
                 namespaced_batch_size: 1_000_000,
@@ -390,9 +380,9 @@ mod tests {
     }
 
     #[test]
-    fn embedded_ontology_yields_unique_plan_names() {
+    fn embedded_model_yields_unique_plan_names() {
         // `build_plans` rejects duplicate names, so building without error is the assertion.
-        let _ = plans(&test_ontology(), 1000);
+        let _ = plans(&catalog(), 1000);
     }
 
     #[test]
@@ -422,8 +412,8 @@ mod tests {
 
     #[test]
     fn node_plan_includes_fk_edge_transforms() {
-        let ontology = test_ontology();
-        let built = plans(&ontology, 1_000_000);
+        let catalog = catalog();
+        let built = plans(&catalog, 1_000_000);
 
         let note = built.namespaced.iter().find(|p| p.name == "Note").unwrap();
         let TransformSpec::DataFusion(transforms) = &note.transform else {
@@ -436,13 +426,13 @@ mod tests {
         );
         assert_eq!(
             transforms[1].destination_table,
-            prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION),
+            prefixed_table_name(catalog.default_edge_table().unwrap(), *SCHEMA_VERSION),
         );
     }
 
     #[test]
     fn note_has_note_edge_transform_applies_type_mapping() {
-        let built = plans(&test_ontology(), 1_000_000);
+        let built = plans(&catalog(), 1_000_000);
         let note = built.namespaced.iter().find(|p| p.name == "Note").unwrap();
         let TransformSpec::DataFusion(transforms) = &note.transform else {
             panic!("Note should be a datafusion transform");
@@ -467,7 +457,7 @@ mod tests {
 
     #[test]
     fn milestone_and_work_item_date_columns_are_clamped() {
-        let built = plans(&test_ontology(), 1000);
+        let built = plans(&catalog(), 1000);
         for name in ["WorkItem", "Milestone"] {
             let plan = built.namespaced.iter().find(|p| p.name == name).unwrap();
             let sql = plan.extract_template.as_str();
@@ -484,7 +474,7 @@ mod tests {
 
     #[test]
     fn has_label_standalone_plan_keeps_raw_type_mapping_keys() {
-        let built = plans(&test_ontology(), 1_000_000);
+        let built = plans(&catalog(), 1_000_000);
         let plan = built
             .namespaced
             .iter()
@@ -509,7 +499,7 @@ mod tests {
         // Source of truth: app/models/resource_state_event.rb (`enum :state ... reopened: 5`).
         const REOPENED_STATE: i64 = 5;
 
-        let built = plans(&test_ontology(), 1000);
+        let built = plans(&catalog(), 1000);
         let reopened: Vec<&Plan> = built
             .namespaced
             .iter()
@@ -536,7 +526,7 @@ mod tests {
 
     #[test]
     fn standalone_edge_extract_sql_with_lookups() {
-        let built = plans(&test_ontology(), 1_000_000);
+        let built = plans(&catalog(), 1_000_000);
         let plan = built
             .namespaced
             .iter()
@@ -601,7 +591,7 @@ mod tests {
 
     #[test]
     fn self_edge_enrich_derives_distinct_aliases_from_endpoint_fields() {
-        let built = plans(&test_ontology(), 1_000_000);
+        let built = plans(&catalog(), 1_000_000);
         let plan = built
             .namespaced
             .iter()
@@ -631,7 +621,7 @@ mod tests {
 
     #[test]
     fn system_note_extract_bounds_metadata_join_to_page() {
-        let built = plans(&test_ontology(), 10_000);
+        let built = plans(&catalog(), 10_000);
         let plan = built
             .namespaced
             .iter()
@@ -680,7 +670,7 @@ mod tests {
 
     #[test]
     fn cursor_filter_renders_dnf_in_extract_sql() {
-        let built = plans(&test_ontology(), 1000);
+        let built = plans(&catalog(), 1000);
         let user = built.global.iter().find(|p| p.name == "User").unwrap();
         let mut checkpoint = Checkpoint::new(Utc::now());
         checkpoint.record_page(Utc::now(), None, vec!["42".to_string()]);
@@ -707,7 +697,7 @@ mod tests {
 
     #[test]
     fn every_plan_renders_valid_sql() {
-        let built = plans(&test_ontology(), 1_000_000);
+        let built = plans(&catalog(), 1_000_000);
         let cases = built
             .global
             .iter()
@@ -760,12 +750,12 @@ mod tests {
                 );
             }
         }
-        assert!(count > 0, "ontology produced no plans");
+        assert!(count > 0, "the model produced no plans");
     }
 
     #[test]
     fn every_extract_orders_its_outermost_select() {
-        let plans = plans(&test_ontology(), 1_000_000);
+        let plans = plans(&catalog(), 1_000_000);
         for plan in plans.global.iter().chain(plans.namespaced.iter()) {
             let sql = plan.extract_template.as_str();
             let last_from = sql.rfind("FROM ").expect("extract has a FROM");

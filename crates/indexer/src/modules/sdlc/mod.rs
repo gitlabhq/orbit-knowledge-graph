@@ -16,7 +16,8 @@ pub use transform::{BlockTransform, SqlTransformFactory, TableBatch};
 
 use std::sync::Arc;
 
-use ontology::EtlScope;
+use query_data_model::catalog::sources::EtlScope;
+use query_data_model::{Catalog, ClickHouse};
 
 use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
@@ -55,7 +56,7 @@ pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     clients: &ClickHouseClients,
-    ontology: &ontology::Ontology,
+    catalog: &Catalog<ClickHouse>,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
     partition_min_rows: u64,
@@ -71,9 +72,10 @@ pub async fn register_handlers(
         Arc::new(ClickHouseCheckpointStore::new(graph_client));
     let metrics = SdlcMetrics::new();
 
-    let partition_strategies = partitioning::build_strategies(ontology, partition_min_rows);
+    let partition_strategies =
+        partitioning::build_strategies(catalog.model().sources(), partition_min_rows);
     let plans = plan::build_plans(
-        ontology,
+        catalog,
         plan::Sizing {
             global_batch_size: entity_handler_config.datalake_batch_size(),
             namespaced_batch_size: entity_handler_config.datalake_batch_size(),
@@ -86,7 +88,11 @@ pub async fn register_handlers(
     transform::system_notes::register(
         &mut transform_registry,
         Arc::clone(&datalake),
-        ontology.edge_table(),
+        catalog.default_edge_table().ok_or_else(|| {
+            HandlerInitError::new(std::io::Error::other(
+                "the model declares no default edge table",
+            ))
+        })?,
         entity_handler_config.system_notes_resolve_lookup_batch_size,
     );
     let transform_registry = Arc::new(transform_registry);
@@ -174,11 +180,14 @@ pub(crate) mod test_helpers;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::Ontology;
 
-    fn build_plans(ontology: &Ontology) -> plan::Plans {
+    fn catalog() -> Catalog<ClickHouse> {
+        Catalog::<ClickHouse>::embedded().expect("embedded catalog")
+    }
+
+    fn build_plans(catalog: &Catalog<ClickHouse>) -> plan::Plans {
         plan::build_plans(
-            ontology,
+            catalog,
             plan::Sizing {
                 global_batch_size: 1000,
                 namespaced_batch_size: 1000,
@@ -199,16 +208,14 @@ mod tests {
 
     #[test]
     fn build_plans_returns_global_entities() {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology);
+        let plans = build_plans(&catalog());
         let names: Vec<_> = plans.global.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"User"));
     }
 
     #[test]
     fn build_plans_returns_namespaced_entities() {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology);
+        let plans = build_plans(&catalog());
         let names: Vec<_> = plans.namespaced.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"Group"));
         assert!(names.contains(&"Project"));
@@ -216,8 +223,7 @@ mod tests {
 
     #[test]
     fn build_plans_wires_system_note_derived_entity_as_extract_only_plan() {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology);
+        let plans = build_plans(&catalog());
 
         let system_note = plans
             .namespaced
@@ -268,16 +274,18 @@ mod tests {
 
     #[test]
     fn every_reindex_target_maps_to_a_dispatch_plan() {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology);
+        let catalog = catalog();
+        let plans = build_plans(&catalog);
 
         let dispatch_targets: std::collections::BTreeSet<&str> =
             plans.namespaced.iter().map(|p| p.target.as_str()).collect();
 
-        let orphans: Vec<String> = ontology
-            .reindex_sources()
-            .into_iter()
-            .map(|source| source.target)
+        let orphans: Vec<String> = catalog
+            .model()
+            .sources()
+            .reindex_triggers()
+            .iter()
+            .map(|source| source.target.clone())
             .filter(|target| !dispatch_targets.contains(target.as_str()))
             .collect();
 

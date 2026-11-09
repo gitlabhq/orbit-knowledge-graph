@@ -2,8 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use ontology::EtlScope;
 use orbit_log_fields::{debug, info, info_span, safe, warn};
+use query_data_model::catalog::sources::EtlScope;
 use tokio::task::JoinSet;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -495,8 +495,8 @@ mod tests {
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
     use crate::types::Event;
-    use ontology::Ontology;
     use orbit_server_config::AppConfig;
+    use query_data_model::{Catalog, ClickHouse};
 
     fn handler_context() -> HandlerContext {
         let mock_nats = Arc::new(MockNatsServices::new());
@@ -516,9 +516,9 @@ mod tests {
         scope: EtlScope,
         checkpoint_store: Arc<dyn CheckpointStore>,
     ) -> EntityHandler {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
         let plans = build_plans(
-            &ontology,
+            &catalog,
             crate::modules::sdlc::plan::Sizing {
                 global_batch_size: 1000,
                 namespaced_batch_size: 1000,

@@ -532,7 +532,7 @@ mod tests {
         Plan {
             name: name.to_string(),
             target: name.to_string(),
-            scope: ontology::EtlScope::Namespaced,
+            scope: query_data_model::catalog::sources::EtlScope::Namespaced,
             extract_template: crate::modules::sdlc::plan::ExtractTemplate::new(
                 "SELECT id, name, _siphon_replicated_at AS _version, \
                  _siphon_deleted AS _deleted \

@@ -7,6 +7,7 @@ pub mod implementations;
 pub mod packages;
 pub mod plan;
 pub mod spec;
+pub mod sql_template;
 pub mod surface;
 
 pub use catalog::{Catalog, Model, StorageBackend};
@@ -24,4 +25,8 @@ pub use implementations::clickhouse::facts::{
 pub use implementations::duckdb::DuckDb;
 pub use implementations::relational::PathColumn;
 pub use implementations::relational::RelationshipRoute;
+pub use ontology::constants::{
+    DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
+};
+pub use ontology::{DataType, EnumType};
 pub use packages::Packages;

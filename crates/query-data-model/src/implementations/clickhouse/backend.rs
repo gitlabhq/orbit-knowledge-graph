@@ -357,6 +357,7 @@ impl ClickHouseStore {
         let graph = input.graph;
         let package = &input.store.package;
         let mut properties = HashMap::new();
+        let mut declared = Vec::new();
         for spec in &input.options.denormalized {
             let Some(entity) = diagnostics.require(graph.entity_id(&spec.entity), package, || {
                 format!("denormalized property names unknown entity {}", spec.entity)
@@ -380,6 +381,11 @@ impl ClickHouseStore {
                     continue;
                 }
             };
+            let key = DenormalizedKey {
+                property,
+                direction,
+            };
+            declared.push((relationship, key));
             let variants: HashSet<_> = graph
                 .relationship(relationship)
                 .variants
@@ -392,10 +398,7 @@ impl ClickHouseStore {
                 .map(|variant| (relationship, variant.source, variant.target))
                 .collect();
             properties
-                .entry(DenormalizedKey {
-                    property,
-                    direction,
-                })
+                .entry(key)
                 .and_modify(|existing: &mut DenormalizedProperty| {
                     existing.variants.extend(&variants)
                 })
@@ -406,7 +409,7 @@ impl ClickHouseStore {
                     nullable: spec.nullable,
                 });
         }
-        self.denormalized = DenormalizedCatalog::new(properties);
+        self.denormalized = DenormalizedCatalog::new(properties, declared);
     }
 
     fn resolve_joins(&mut self, input: &StoreInput<'_, ClickHouse>, diagnostics: &mut Diagnostics) {

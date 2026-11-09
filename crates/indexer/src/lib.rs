@@ -78,6 +78,7 @@ use tokio_util::sync::CancellationToken;
 pub async fn run(
     config: &IndexerConfig,
     ontology: Arc<ontology::Ontology>,
+    model: Arc<query_data_model::Model>,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
     sql_transform: modules::sdlc::SqlTransformFactory,
@@ -154,13 +155,15 @@ pub async fn run(
         analytics.watch_gitlab_instance(Arc::clone(client));
     }
 
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&model)?;
+
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
         info!("initializing SDLC handlers");
         modules::sdlc::register_handlers(
             &registry,
             config,
             &clients,
-            &ontology,
+            &catalog,
             writer.clone(),
             analytics.clone(),
             modules::sdlc::PARTITION_MIN_ROWS,
