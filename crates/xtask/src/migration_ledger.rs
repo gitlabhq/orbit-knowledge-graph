@@ -1,51 +1,34 @@
 //! `cargo xtask migration-ledger {bump,check}`: maintain and verify the schema
-//! migration ledger and its fingerprint snapshot.
+//! migration ledger against the scope derived from the model archives.
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail};
-use ontology::Ontology;
 use ontology::archive::OntologyArchive;
-use ontology::migrations::{
-    self, EdgeRows, Fingerprints, LedgerScope, MigrationEntry, MigrationLedger, MigrationScope,
-    derive_edge_rows, derive_scope,
-};
+use ontology::migrations::embedded_sources;
 use orbit_migrations::archive::{ModelArchive, Release};
-use orbit_migrations::snapshot_check::{VerifiedSnapshot, verify_committed_snapshot};
-use query_data_model::Packages;
+use orbit_migrations::diff::derive_scope;
+use orbit_migrations::ledger::{
+    LEDGER_FILE, MigrationEntry, MigrationLedger, verify_committed,
+    verify_entry_covers_derived_scope,
+};
+use orbit_migrations::scope::{EdgeRows, MigrationScope};
+use query_data_model::{Catalog, ClickHouse, Model, Packages};
 
 const DEFAULT_BASE: &str = "origin/main";
 
-const FINGERPRINT_REPO_PATH: &str = "config/schema-migrations.fingerprint.yaml";
 const VERSIONS_REPO_PATH: &str = "config/versions.yaml";
-
-const REMEDIATION: &str = "Run `mise schema:bump` to record the change and re-snapshot.";
 
 fn config_dir() -> PathBuf {
     PathBuf::from(env!("ORBIT_CONFIG_DIR"))
 }
 
 fn ledger_path() -> PathBuf {
-    config_dir().join(migrations::LEDGER_FILE)
-}
-
-fn fingerprint_path() -> PathBuf {
-    config_dir().join(migrations::FINGERPRINT_FILE)
-}
-
-fn read_committed_fingerprints() -> Result<Option<Fingerprints>> {
-    let path = fingerprint_path();
-    if !path.exists() {
-        return Ok(None);
-    }
-    let content =
-        fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    Fingerprints::parse(&content)
-        .map(Some)
-        .map_err(|e| anyhow!(e))
+    config_dir().join(LEDGER_FILE)
 }
 
 fn read_ledger() -> Result<MigrationLedger> {
@@ -75,23 +58,37 @@ struct SchemaVersion {
 }
 
 fn schema_version_at(base: &str) -> Option<u32> {
+    let content = String::from_utf8(git_show(base, VERSIONS_REPO_PATH)?).ok()?;
     Some(
-        orbit_utils::yaml::from_str::<SchemaVersion>(&git_show(base, VERSIONS_REPO_PATH)?)
+        orbit_utils::yaml::from_str::<SchemaVersion>(&content)
             .ok()?
             .schema,
     )
 }
 
-fn git_show(base: &str, repo_path: &str) -> Option<String> {
+fn git_show(base: &str, repo_path: &str) -> Option<Vec<u8>> {
     let output = Command::new("git")
         .args(["show", &format!("{base}:{repo_path}")])
         .output()
         .ok()?;
-    if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        None
-    }
+    output.status.success().then_some(output.stdout)
+}
+
+fn model_archive_repo_path(version: u32) -> String {
+    format!("config/model-archives/v{version}.tar.gz")
+}
+
+fn read_model_archive(version: u32) -> Result<ModelArchive> {
+    let path = ModelArchive::path(&config_dir(), version);
+    let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(ModelArchive::from_bytes(version, &bytes)?)
+}
+
+fn load(archive: &ModelArchive) -> Result<Arc<Model>> {
+    archive
+        .packages()
+        .load()
+        .with_context(|| format!("loading the v{} model archive", archive.schema_version()))
 }
 
 fn parse_explicit_scope(
@@ -105,14 +102,6 @@ fn parse_explicit_scope(
         return Ok(None);
     };
 
-    let scope = match scope.as_str() {
-        "*" => LedgerScope::All,
-        "sdlc" => LedgerScope::Sdlc,
-        "code" => LedgerScope::Code,
-        "none" => LedgerScope::None,
-        other => bail!("unknown scope '{other}'; expected '*', 'sdlc', 'code', or 'none'"),
-    };
-
     let entities: BTreeSet<String> = entities
         .map(|s| {
             s.split(',')
@@ -122,54 +111,44 @@ fn parse_explicit_scope(
         })
         .unwrap_or_default();
 
-    if !entities.is_empty() && scope != LedgerScope::Sdlc {
+    let scope = match scope.as_str() {
+        "sdlc" => {
+            return Ok(Some(MigrationScope::Sdlc {
+                entities,
+                edge_rows: EdgeRows::Changed,
+            }));
+        }
+        "*" => MigrationScope::Full,
+        "code" => MigrationScope::Code,
+        "none" => MigrationScope::None,
+        other => bail!("unknown scope '{other}'; expected '*', 'sdlc', 'code', or 'none'"),
+    };
+    if !entities.is_empty() {
         bail!("--entities is only valid with --scope sdlc");
     }
-
-    Ok(Some(match scope {
-        LedgerScope::All => MigrationScope::Full,
-        LedgerScope::Code => MigrationScope::Code,
-        LedgerScope::Sdlc => MigrationScope::Sdlc(entities),
-        LedgerScope::None => MigrationScope::None,
-    }))
+    Ok(Some(scope))
 }
 
-fn widen_amended_entry_scope(
-    existing: &MigrationScope,
-    declared: &MigrationScope,
+/// The declared scope: the derived one, or an explicit one that covers it.
+fn declared_scope(
+    derived: &MigrationScope,
+    explicit: Option<MigrationScope>,
 ) -> Result<MigrationScope> {
-    if matches!(declared, MigrationScope::None) && !matches!(existing, MigrationScope::None) {
-        bail!(
-            "--scope none cannot amend an entry with {existing}: the wider scope already covers \
-             this version's drift, so drop --scope none; hand-edit the ledger YAML only if the \
-             entire version span is output-neutral"
-        );
-    }
-    Ok(existing.widened_with(declared))
-}
-
-/// Lowers a [`MigrationScope`] into the wire `scope:`, `entities:` and `edge_rows:` fields of a ledger entry.
-fn split_scope_into_ledger_fields(
-    scope: MigrationScope,
-    edge_rows: EdgeRows,
-) -> (LedgerScope, BTreeSet<String>, EdgeRows) {
-    match scope {
-        MigrationScope::Full => (LedgerScope::All, BTreeSet::new(), EdgeRows::Changed),
-        MigrationScope::Code => (LedgerScope::Code, BTreeSet::new(), EdgeRows::Changed),
-        MigrationScope::Sdlc(entities) => (LedgerScope::Sdlc, entities, edge_rows),
-        MigrationScope::None => (LedgerScope::None, BTreeSet::new(), EdgeRows::Changed),
+    match explicit {
+        None => Ok(derived.clone()),
+        Some(explicit) if explicit.covers(derived) => Ok(explicit),
+        Some(explicit) => bail!(
+            "--scope declares {explicit}, narrower than the derived {derived}; flags may only widen it"
+        ),
     }
 }
 
 pub fn check(base: Option<String>) -> Result<()> {
-    let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
     let schema_version = orbit_versions::VERSIONS.schema;
-    let VerifiedSnapshot { committed, ledger } =
-        verify_committed_snapshot(&ontology, &config_dir(), schema_version)
-            .map_err(|e| anyhow!(e))?;
+    let ledger = verify_committed(&config_dir(), schema_version).map_err(|e| anyhow!(e))?;
 
     if let Some(base) = base {
-        check_under_declaration(&ontology, &committed, &ledger, schema_version, &base)?;
+        check_against_base(&ledger, schema_version, &base)?;
     }
 
     println!(
@@ -179,72 +158,32 @@ pub fn check(base: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// Enforce that a fingerprint change in this MR carries a `base + 1` bump and a
-/// ledger entry covering the derived drift.
-fn check_under_declaration(
-    ontology: &Ontology,
-    committed: &Fingerprints,
-    ledger: &MigrationLedger,
-    schema_version: u32,
-    base: &str,
-) -> Result<()> {
-    let Some(base_content) = git_show(base, FINGERPRINT_REPO_PATH) else {
-        return Ok(());
-    };
-    let base_fps = Fingerprints::parse(&base_content).map_err(|e| anyhow!(e))?;
-    if committed.has_same_versioned_fingerprints_as(&base_fps) {
+/// A changed model needs exactly a `base + 1` bump whose entry covers the scope derived from the base version's archive.
+fn check_against_base(ledger: &MigrationLedger, schema_version: u32, base: &str) -> Result<()> {
+    let base_version = schema_version_at(base)
+        .ok_or_else(|| anyhow!("could not read {base}:{VERSIONS_REPO_PATH}"))?;
+    if schema_version == base_version {
+        if let Some(bytes) = git_show(base, &model_archive_repo_path(base_version))
+            && !ModelArchive::from_bytes(base_version, &bytes)?.matches(&Packages::embedded())
+        {
+            bail!(
+                "the packages differ from the v{base_version} model archive on {base}. \
+                 Run `mise schema:bump` to record the change."
+            );
+        }
         return Ok(());
     }
-
-    let base_version: u32 = schema_version_at(base)
-        .ok_or_else(|| anyhow!("could not read {base}:{VERSIONS_REPO_PATH}"))?;
     // A gap would leave an entry-less version, which the migration path treats
     // as a full rebuild; one MR bumps exactly one version.
     if schema_version != base_version + 1 {
         bail!(
-            "fingerprint snapshot changed, so SCHEMA_VERSION must be exactly base + 1 \
-             (base {base_version}, expected {}, got {schema_version}). {REMEDIATION}",
+            "SCHEMA_VERSION must be exactly base + 1 (base {base_version}, expected {}, got \
+             {schema_version}). Run `mise schema:bump` to record the change.",
             base_version + 1
         );
     }
-
-    let entry = ledger
-        .migrations
-        .iter()
-        .find(|e| e.version == schema_version)
-        .ok_or_else(|| {
-            anyhow!("no ledger entry for the bumped version {schema_version}. {REMEDIATION}")
-        })?;
-
-    // A `none` entry may under-declare drift; its gate is the note check in `MigrationLedger::validate`.
-    if entry.scope == LedgerScope::None {
-        return Ok(());
-    }
-
-    let (changed_sources, changed_tables) = committed.get_versioned_diff_keys_between(&base_fps);
-    let source_contents = migrations::embedded_sources();
-    if let Some(required) = derive_scope(
-        ontology,
-        &source_contents,
-        &changed_sources,
-        &changed_tables,
-    ) && !entry.migration_scope().covers_scope_of(&required)
-    {
-        bail!(
-            "ledger entry for version {schema_version} under-declares the change: \
-             detected {required} but the entry does not cover it. Widen the entry (or run `mise schema:bump`)."
-        );
-    }
-
-    if !entry.edge_rows.is_changed()
-        && derive_edge_rows(ontology, committed, &base_fps).is_changed()
-    {
-        bail!(
-            "ledger entry for version {schema_version} declares `edge_rows: unchanged`, \
-             but the change alters edge rows. Drop `edge_rows: unchanged` (or run `mise schema:bump`)."
-        );
-    }
-
+    let previous = load(&read_model_archive(base_version)?)?;
+    verify_entry_covers_derived_scope(ledger, &previous, schema_version).map_err(|e| anyhow!(e))?;
     Ok(())
 }
 
@@ -259,207 +198,87 @@ pub fn bump(
     if amend && new {
         bail!("--amend and --new are mutually exclusive");
     }
-
-    let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
-    let current = orbit_migrations::fingerprint::current_fingerprints()?;
-
-    let Some(committed) = read_committed_fingerprints()? else {
-        return write_initial_snapshot(&ontology, &current);
-    };
-
     let explicit = parse_explicit_scope(scope, entities)?;
-    let (changed_sources, changed_tables) = current.get_versioned_diff_keys_between(&committed);
-    let source_contents = migrations::embedded_sources();
-    let derived = derive_scope(
-        &ontology,
-        &source_contents,
-        &changed_sources,
-        &changed_tables,
-    );
-    let entry_edge_rows = if explicit.is_some() {
-        EdgeRows::Changed
-    } else {
-        derive_edge_rows(&ontology, &current, &committed)
-    };
-
-    let entry_declaration = if matches!(explicit, Some(MigrationScope::None)) {
-        if note.as_ref().is_none_or(|n| n.trim().is_empty()) {
-            bail!(
-                "--scope none requires --note certifying the source change is output-neutral \
-                 (produces byte-identical output)"
-            );
-        }
-        MigrationScope::None
-    } else {
-        match (derived, explicit) {
-            (None, None) => bail!(
-                "no ontology drift detected. Pass --scope for a lowering-code-only change \
-                 (e.g. `--scope sdlc --entities Note`)."
-            ),
-            (None, Some(explicit)) => explicit,
-            (Some(derived), None) => derived,
-            (Some(derived), Some(explicit)) => {
-                if !explicit.covers_scope_of(&derived) {
-                    bail!(
-                        "--scope narrows below the detected drift ({derived}); flags may only widen it"
-                    );
-                }
-                derived.widened_with(&explicit)
-            }
-        }
-    };
 
     let working_version = orbit_versions::VERSIONS.schema;
     let base_ref = base.unwrap_or_else(|| DEFAULT_BASE.to_string());
-    let base_version = schema_version_at(&base_ref);
-
-    let is_new = match base_version {
-        Some(bv) => working_version == bv,
-        None => {
-            if amend {
-                false
-            } else if new {
-                true
-            } else {
-                bail!(
-                    "could not read {base_ref}:{VERSIONS_REPO_PATH} to decide bump vs amend; \
-                     pass --new or --amend"
-                );
-            }
-        }
+    let is_new = match schema_version_at(&base_ref) {
+        Some(base_version) => working_version == base_version,
+        None if amend => false,
+        None if new => true,
+        None => bail!(
+            "could not read {base_ref}:{VERSIONS_REPO_PATH} to decide bump vs amend; \
+             pass --new or --amend"
+        ),
+    };
+    let final_version = if is_new {
+        working_version + 1
+    } else {
+        working_version
     };
 
-    let mut ledger = read_ledger()?;
-    let final_version = if is_new {
-        let new_version = working_version + 1;
-        if ledger.migrations.iter().any(|e| e.version == new_version) {
-            bail!("ledger already has an entry for version {new_version}");
-        }
-        let (scope, entities, edge_rows) =
-            split_scope_into_ledger_fields(entry_declaration, entry_edge_rows);
-        ledger.migrations.insert(
-            0,
-            MigrationEntry {
-                version: new_version,
-                scope,
-                entities,
-                edge_rows,
-                note,
-            },
+    let previous = read_model_archive(final_version - 1)?;
+    let packages = Packages::embedded();
+    if is_new
+        && explicit.is_none()
+        && previous.matches(&packages)
+        && read_ontology_archive(working_version)?.matches_sources(&embedded_sources())
+    {
+        bail!(
+            "nothing changed since the v{working_version} archives. Pass --scope to re-index \
+             for a change the model cannot show, such as indexer code."
         );
-        new_version
+    }
+    let derived = derive_scope(&load(&previous)?, &packages.load()?)?;
+    let declared = declared_scope(&derived.scope, explicit)?;
+
+    let mut ledger = read_ledger()?;
+    if is_new {
+        if ledger.migrations.iter().any(|e| e.version == final_version) {
+            bail!("ledger already has an entry for version {final_version}");
+        }
+        ledger
+            .migrations
+            .insert(0, MigrationEntry::new(final_version, &declared, note));
     } else {
         let latest = ledger
             .migrations
             .first_mut()
             .ok_or_else(|| anyhow!("cannot amend: the ledger has no entries"))?;
-        let widened = widen_amended_entry_scope(&latest.migration_scope(), &entry_declaration)?;
-        let (scope, entities, edge_rows) =
-            split_scope_into_ledger_fields(widened, latest.edge_rows.widened_with(entry_edge_rows));
-        latest.scope = scope;
-        latest.entities = entities;
-        latest.edge_rows = edge_rows;
-        if note.is_some() {
-            latest.note = note;
-        }
-        latest.version
-    };
+        let widened = latest.to_migration_scope().merged_with(&declared);
+        *latest = MigrationEntry::new(final_version, &widened, note.or(latest.note.take()));
+    }
 
+    let catalog = Catalog::<ClickHouse>::from_model(&packages.load()?)?;
     ledger
-        .validate(&ontology, final_version)
+        .validate(&catalog, final_version)
         .map_err(|e| anyhow!(e))?;
 
     write_release(&embedded_release(final_version)?, !is_new)?;
-
     if is_new {
         write_schema_version(final_version)?;
     }
-    fs::write(ledger_path(), ledger.render()).context("writing ledger")?;
-    fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
+    fs::write(ledger_path(), ledger.render_as_yaml()).context("writing ledger")?;
 
-    let entry = ledger.latest().expect("just validated non-empty");
+    let entry = ledger.latest_entry().expect("just validated non-empty");
     println!(
-        "{} version {final_version}: {}",
+        "{} version {final_version}: {}; changed tables {:?}",
         if is_new { "bumped to" } else { "amended" },
-        entry.migration_scope(),
+        entry.to_migration_scope(),
+        derived.tables,
     );
     Ok(())
 }
 
-pub fn snapshot() -> Result<()> {
-    let current = orbit_migrations::fingerprint::current_fingerprints()?;
-    let committed = read_committed_fingerprints()?.ok_or_else(|| {
-        anyhow!(
-            "fingerprint snapshot {} is missing. Run `mise schema:bump` to create it.",
-            fingerprint_path().display()
-        )
-    })?;
-    if !current.has_same_versioned_fingerprints_as(&committed) {
-        let (changed_sources, changed_tables) = current.get_versioned_diff_keys_between(&committed);
-        bail!(
-            "schema:snapshot cannot record versioned schema drift.\n  changed sources: {}\n  changed tables: {}\nRun `mise schema:bump` instead.",
-            format_set(&changed_sources),
-            format_set(&changed_tables),
-        );
-    }
-    write_release(&embedded_release(orbit_versions::VERSIONS.schema)?, false)?;
-    fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
-    println!(
-        "regenerated fingerprint snapshot at {}",
-        fingerprint_path().display()
-    );
-    Ok(())
-}
-
-fn format_set(values: &BTreeSet<String>) -> String {
-    if values.is_empty() {
-        "(none)".to_string()
-    } else {
-        values.iter().cloned().collect::<Vec<_>>().join(", ")
-    }
-}
-
-/// First-time snapshot: write the fingerprint file without bumping.
-fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result<()> {
-    let version = orbit_versions::VERSIONS.schema;
-    let ledger = read_ledger()?;
-    ledger.validate(ontology, version).map_err(|e| anyhow!(e))?;
-    write_release(&embedded_release(version)?, true)?;
-    fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
-    println!("wrote initial fingerprint snapshot for version {version}");
-    Ok(())
-}
-
-pub fn legacy_model_archives() -> Result<()> {
-    let current = orbit_versions::VERSIONS.schema;
-    for version in OntologyArchive::bundled_versions()? {
-        let packages = if version == current {
-            Packages::embedded()
-        } else {
-            let archive = OntologyArchive::bundled(version)?
-                .ok_or_else(|| anyhow!("v{version} ontology archive is not bundled"))?;
-            query_data_model::from_ontology::packages(&archive.load_ontology()?)?
-        };
-        packages
-            .load()
-            .with_context(|| format!("v{version} packages do not load"))?;
-        let archive = ModelArchive::from_packages(version, &packages)?;
-        write_archive(
-            &ModelArchive::path(&config_dir(), version),
-            archive.bytes(),
-            false,
-        )?;
-    }
-    println!(
-        "model archives cover every bundled schema version under {}",
-        config_dir().display()
-    );
-    Ok(())
+fn read_ontology_archive(version: u32) -> Result<OntologyArchive> {
+    let path = OntologyArchive::path(&config_dir(), version);
+    let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(OntologyArchive::from_bytes(version, &bytes)?)
 }
 
 fn embedded_release(version: u32) -> Result<Release> {
     let release = Release::new(
-        OntologyArchive::from_sources(version, &migrations::embedded_sources())?,
+        OntologyArchive::from_sources(version, &embedded_sources())?,
         ModelArchive::from_packages(version, &Packages::embedded())?,
     )?;
     release.load()?;
@@ -480,7 +299,7 @@ fn write_release(release: &Release, replace: bool) -> Result<()> {
     )
 }
 
-fn write_archive(path: &std::path::Path, bytes: &[u8], replace: bool) -> Result<()> {
+fn write_archive(path: &Path, bytes: &[u8], replace: bool) -> Result<()> {
     if path.exists() {
         let existing = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
         if existing == bytes {
@@ -499,6 +318,13 @@ fn write_archive(path: &std::path::Path, bytes: &[u8], replace: bool) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sdlc(entities: &[&str]) -> MigrationScope {
+        MigrationScope::Sdlc {
+            entities: entities.iter().map(|e| e.to_string()).collect(),
+            edge_rows: EdgeRows::Changed,
+        }
+    }
 
     #[test]
     fn schema_version_ignores_unrelated_pins() {
@@ -520,48 +346,45 @@ mod tests {
     }
 
     #[test]
-    fn parse_explicit_scope_accepts_none() {
-        let scope = parse_explicit_scope(Some("none".to_string()), None).unwrap();
-        assert_eq!(scope, Some(MigrationScope::None));
-    }
-
-    #[test]
-    fn parse_explicit_scope_none_rejects_entities() {
-        let err =
-            parse_explicit_scope(Some("none".to_string()), Some("Note".to_string())).unwrap_err();
+    fn parse_explicit_scope_reads_every_scope() {
+        let parse = |scope: &str, entities: Option<&str>| {
+            parse_explicit_scope(Some(scope.to_string()), entities.map(str::to_string))
+        };
+        assert_eq!(parse("none", None).unwrap(), Some(MigrationScope::None));
+        assert_eq!(parse("*", None).unwrap(), Some(MigrationScope::Full));
+        assert_eq!(
+            parse("sdlc", Some("Note, Issue")).unwrap(),
+            Some(sdlc(&["Issue", "Note"]))
+        );
+        let err = parse("none", Some("Note")).unwrap_err();
         assert!(
             err.to_string().contains("--entities is only valid"),
             "{err}"
         );
-    }
-
-    #[test]
-    fn parse_explicit_scope_rejects_unknown() {
-        let err = parse_explicit_scope(Some("bogus".to_string()), None).unwrap_err();
+        let err = parse("bogus", None).unwrap_err();
         assert!(err.to_string().contains("unknown scope"), "{err}");
     }
 
     #[test]
-    fn amend_rejects_scope_none_over_wider_entry() {
-        for existing in [
-            MigrationScope::Full,
-            MigrationScope::Code,
-            MigrationScope::Sdlc(BTreeSet::new()),
-        ] {
-            let err = widen_amended_entry_scope(&existing, &MigrationScope::None).unwrap_err();
-            assert!(err.to_string().contains("cannot amend"), "{err}");
-        }
-    }
-
-    #[test]
-    fn amend_widens_none_entry_to_declared_scope() {
+    fn explicit_scope_may_only_widen_the_derived_scope() {
         assert_eq!(
-            widen_amended_entry_scope(&MigrationScope::None, &MigrationScope::Code).unwrap(),
-            MigrationScope::Code
+            declared_scope(&sdlc(&["Note"]), None).unwrap(),
+            sdlc(&["Note"])
         );
         assert_eq!(
-            widen_amended_entry_scope(&MigrationScope::None, &MigrationScope::None).unwrap(),
+            declared_scope(&sdlc(&["Note"]), Some(MigrationScope::Full)).unwrap(),
+            MigrationScope::Full
+        );
+        assert_eq!(
+            declared_scope(&MigrationScope::None, Some(MigrationScope::None)).unwrap(),
             MigrationScope::None
         );
+        for narrower in [MigrationScope::None, MigrationScope::Code, sdlc(&["Issue"])] {
+            let err = declared_scope(&sdlc(&["Note"]), Some(narrower)).unwrap_err();
+            assert!(
+                err.to_string().contains("narrower than the derived"),
+                "{err}"
+            );
+        }
     }
 }

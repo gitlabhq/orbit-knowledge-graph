@@ -15,7 +15,7 @@ fn export_current_archive_paths() {
         let current_path = directory.join(format!("v{}.tar.gz", orbit_versions::VERSIONS.schema));
         let resolved = current_path.canonicalize().unwrap_or_else(|_| {
             panic!(
-                "{} is missing; run `mise schema:snapshot` to seed the current archive.",
+                "{} is missing; run `mise schema:bump` to write the current archive.",
                 current_path.display()
             )
         });

@@ -33,7 +33,7 @@ the direct upgrade. Never relabel the current ontology as a historical version.
 
 Every ontology archive has a model archive with the same name in
 `config/model-archives/`. It holds the data model packages (`config/model/`) of
-that schema version, and the server loads queries from it. Bumps and snapshots
-write both. Versions before the packages were checked in were converted once with
-`cargo xtask migration-ledger legacy-model-archives`; run it again after adding a
-legacy ontology archive.
+that schema version, and the server loads queries from it. Bumps write both.
+Versions before the packages were checked in (v93 through v118) were converted
+from their ontology archives, and their source fragments were added in a second
+conversion that left every other package file and the generated DDL unchanged.

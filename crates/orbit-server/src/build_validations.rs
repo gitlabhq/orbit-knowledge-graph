@@ -1,18 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ontology::Ontology;
 use ontology::archive::OntologyArchive;
 
 fn config_directory() -> &'static Path {
     Path::new(env!("ORBIT_CONFIG_DIR"))
-}
-
-fn embedded_ontology() -> Arc<Ontology> {
-    Arc::new(
-        Ontology::load_embedded()
-            .unwrap_or_else(|error| panic!("embedded ontology failed to load: {error}")),
-    )
 }
 
 #[test]
@@ -64,16 +56,11 @@ fn named_queries_render_and_compile() {
     }
 }
 
-/// Fails on ontology/DDL drift from the fingerprint snapshot, a malformed
-/// ledger or a stale current archive.
+/// Fails on a malformed ledger or a current archive that no longer matches the packages.
 #[test]
-fn migration_ledger_matches_fingerprint_snapshot() {
-    orbit_migrations::snapshot_check::verify_committed_snapshot(
-        &embedded_ontology(),
-        config_directory(),
-        orbit_versions::VERSIONS.schema,
-    )
-    .unwrap_or_else(|error| panic!("{error}"));
+fn migration_ledger_and_current_archives_are_committed() {
+    orbit_migrations::ledger::verify_committed(config_directory(), orbit_versions::VERSIONS.schema)
+        .unwrap_or_else(|error| panic!("{error}"));
 }
 
 #[test]
@@ -82,7 +69,7 @@ fn current_ontology_archive_is_bundled() {
     let versions = OntologyArchive::bundled_versions().unwrap_or_else(|error| panic!("{error}"));
     assert!(
         versions.contains(&current_version),
-        "{} is missing; run `mise schema:snapshot` to seed the current archive.",
+        "{} is missing; run `mise schema:bump` to write the current archive.",
         OntologyArchive::path(config_directory(), current_version).display()
     );
 }

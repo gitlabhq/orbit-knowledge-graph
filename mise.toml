@@ -430,15 +430,11 @@ description = "Fail if rust-toolchain.toml is out of sync with mise.toml"
 
 [tasks."schema:bump"]
 run = "cargo xtask migration-ledger bump"
-description = "Bump the schema pin in config/versions.yaml, append a migration ledger entry, and re-snapshot fingerprints"
-
-[tasks."schema:snapshot"]
-run = "cargo xtask migration-ledger snapshot"
-description = "Snapshot auxiliary tables and refreshable views without bumping the schema pin or the ledger"
+description = "Bump the schema pin in config/versions.yaml, write its archives, and append a ledger entry with the derived scope"
 
 [tasks."schema:ledger:check"]
 run = "cargo xtask migration-ledger check"
-description = "Fail if the migration ledger or fingerprint snapshot drifted from the ontology"
+description = "Fail if the migration ledger or the current archives drifted from the packages"
 
 [tasks."rails-contract:check"]
 run = "test -s \"${RAILS_CONTRACT_SNAPSHOT:?run mise run rails-contract:export first}\" && cargo test -p ontology --test rails_contract"

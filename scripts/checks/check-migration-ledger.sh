@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Verify the migration ledger and fingerprint snapshot are in sync with the
-# ontology, and that a bumped fingerprint carries a scope-covering ledger entry.
-# The orbit-server unit test (build_validations) enforces drift + ledger shape without a
-# base ref; this adds the git-diff under-declaration guard on merge requests.
 set -euo pipefail
 
 BASE_REF="${1:-origin/main}"

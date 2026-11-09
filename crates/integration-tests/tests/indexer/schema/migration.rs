@@ -15,9 +15,9 @@ use indexer::schema::version::{
 };
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
-use ontology::migrations::EdgeRows;
 use orbit_migrations::garbage_collection::find_droppable_entities;
 use orbit_migrations::schema::{DictionaryCredentials, GraphSchema};
+use orbit_migrations::scope::EdgeRows;
 use orbit_migrations::scope::MigrationScope;
 use orbit_migrations::version::{
     STATUS_ACTIVE, STATUS_RETIRED, promote_version, read_all_versions,

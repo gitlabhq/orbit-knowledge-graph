@@ -1,12 +1,34 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::schema::Schema;
-use ontology::migrations::EdgeRows;
 use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor, Writer};
 use query_data_model::{Catalog, ClickHouse, RelationshipId};
 use serde::{Deserialize, Serialize};
 
 pub const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeRows {
+    #[default]
+    Changed,
+    Unchanged,
+}
+
+impl EdgeRows {
+    pub fn is_changed(&self) -> bool {
+        *self == Self::Changed
+    }
+
+    #[must_use]
+    pub fn widened_with(self, other: Self) -> Self {
+        if self.is_changed() || other.is_changed() {
+            Self::Changed
+        } else {
+            Self::Unchanged
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LedgerScope {
@@ -58,6 +80,28 @@ impl MigrationScope {
                 ..
             }
         )
+    }
+
+    /// Whether migrating with `self` rebuilds at least everything `required` rebuilds.
+    pub fn covers(&self, required: &Self) -> bool {
+        match (self, required) {
+            (Self::Full, _) | (_, Self::None) => true,
+            (Self::Code, Self::Code) => true,
+            (
+                Self::Sdlc {
+                    entities: covering,
+                    edge_rows: covering_edge_rows,
+                },
+                Self::Sdlc {
+                    entities: required,
+                    edge_rows: required_edge_rows,
+                },
+            ) => {
+                (covering.is_empty() || (!required.is_empty() && required.is_subset(covering)))
+                    && (covering_edge_rows.is_changed() || !required_edge_rows.is_changed())
+            }
+            _ => false,
+        }
     }
 
     #[must_use]
@@ -159,7 +203,7 @@ pub fn code_entity_names(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
     names
 }
 
-fn relationship_tables(
+pub(crate) fn relationship_tables(
     catalog: &Catalog<ClickHouse>,
     relationship: RelationshipId,
 ) -> BTreeSet<String> {
@@ -178,7 +222,7 @@ fn relationship_tables(
         .collect()
 }
 
-fn code_domain_tables(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
+pub(crate) fn code_domain_tables(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
     let sources = catalog.model().sources();
     catalog
         .graph()
@@ -190,7 +234,7 @@ fn code_domain_tables(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
         .collect()
 }
 
-fn edge_tables(catalog: &Catalog<ClickHouse>) -> Vec<String> {
+pub(crate) fn edge_tables(catalog: &Catalog<ClickHouse>) -> Vec<String> {
     let mut tables = catalog.edge_tables(&[]);
     tables.extend(catalog.default_edge_table().map(str::to_string));
     tables.sort();
