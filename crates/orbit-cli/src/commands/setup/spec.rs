@@ -917,15 +917,16 @@ mod tests {
     }
 
     #[test]
-    fn stable_claude_code_gets_no_output_guard() {
+    fn the_stable_channel_ships_no_output_guard_and_pi_shows_orbit_calls() {
         assert!(claude_feature_paths(&FEATURES, false).is_empty());
         assert!(claude_hooks(&FEATURES, false).get("hooks").is_none());
-        assert!(!claude_feature_paths(&FEATURES, true).is_empty());
-        assert!(claude_hooks(&FEATURES, true)["hooks"].is_object());
         let pi = agent_named("pi").unwrap();
+        let stable: Vec<_> = pi.ui_files_with(&FEATURES, true, false).collect();
+        assert!(stable.iter().all(|file| file.feature.is_none()));
         assert!(
-            pi.ui_files_with(&FEATURES, true, false)
-                .any(|file| file.feature.is_some())
+            stable
+                .iter()
+                .any(|file| file.path.project == ".pi/extensions/orbit-ui/index.js")
         );
     }
 
