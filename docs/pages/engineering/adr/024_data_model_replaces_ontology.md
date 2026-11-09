@@ -35,20 +35,6 @@ Agent memory needs custom node types for one tenant.
 
 **A data model of versioned packages replaces the ontology. A loader checks the packages once, and every compiler pipeline builds, rewrites and renders its plans through the model's checked catalogs.**
 
-```mermaid
-flowchart LR
-    accTitle: The data model in one picture
-    accDescr: The registry loads packages into a checked model. A surface turns query text into a logical plan. The planner builds a physical plan through the catalog of one connection. The catalog renders the plan into the backend's request.
-    R[(Registry)] --> M[Model]
-    M --> S[Surface]
-    S --> P[Planner]
-    P --> C[Catalog]
-    C --> B[(Backend)]
-```
-
-[Packages and catalogs](../architecture/packages-and-catalogs.md) explains how it works.
-[Extending the data model](../development/extending-the-data-model.md) shows the packages and the APIs.
-
 1. **Packages replace the ontology.** A package is a set of fragments of five kinds: graph, authorization, storage, source and service. Every fragment refers to the graph, and the graph knows nothing about tables. The platform, each integration and each tenant overlay ship their own packages.
 2. **The loader does the work once.** It resolves every name to an ID, checks every rule, and fails once with every error and its package. It precomputes the guard of every read from graph reachability. A hash of the packages identifies the model, and every plan carries it.
 3. **Packages load at runtime from a registry keyed by package.** Each package has its own version line. A tenant's model is the active version of every package that applies to it. A new version needs no rebuild and no deploy.
@@ -59,6 +45,313 @@ flowchart LR
 8. **Security reads guards in its own phase.** It applies the guard of every read as ordinary plan operations, as a filter or as a precondition on the request. A final check proves that every read carries its guard.
 9. **The catalog renders its own plans.** The catalog that builds a plan renders it, into SQL with parameters or into the backend's native request.
 10. **Plans are tested in three stages.** Plan tests assert the logical plan, the physical plan right after planning, and the physical plan after every phase.
+
+## How it works
+
+This section describes how a new version of the `gitlab.code_review` package goes live, and how the following query then runs against it.
+
+```plaintext
+MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+WHERE mr.state = 'opened'
+RETURN u.username, mr.title LIMIT 10
+```
+
+### The system
+
+```plantuml
+@startuml
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+package "Package registry" {
+  [gitlab.*] as P1
+  [integration.jira] as P2
+  [integration.slack] as P3
+  [tenant.agent_memory] as P4
+}
+
+package "query-data-model" {
+  [Loader] as L
+  [Model\n(graph, access, sources,\nstores, guards, ModelId)] as M
+  [Logical catalog] as LC
+  [Physical catalogs\n(one per connection)] as PC
+  [Surfaces\n(GQL)] as S
+  [Shared tracking] as T
+}
+
+package "Query engine" {
+  [Compiler phases] as E
+}
+
+package "Indexing engine (ADR 023)" {
+  [Planners and workers] as IX
+}
+
+database "ClickHouse\ngraph store" as CH
+database "DuckDB\nlocal store" as DD
+node "Orbit Next\ncode service" as ON
+node "Data Extraction\nService" as DES
+
+P1 --> L
+P2 --> L
+P3 --> L
+P4 --> L
+L --> M : checked once
+M --> LC
+M --> PC
+S --> LC : builds logical plans
+E --> PC : builds and rewrites\nphysical plans
+LC ..> T
+PC ..> T
+PC --> CH : SQL
+PC --> DD : SQL
+PC --> ON : gRPC request
+PC --> DES : live API call
+IX --> M : reads sources\nand storage
+IX --> CH : writes rows
+@enduml
+```
+
+The model is the only description of the graph.
+The query engine and the indexing engine read the same model, so they always agree on what exists and where it lives.
+The data model is infrastructure and makes no planning decisions: the compiler phases decide, and express every decision through a catalog.
+
+### 1. Packages describe what exists
+
+```plantuml
+@startuml
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+hide empty members
+
+package "gitlab.code_review" {
+  class "graph" as G {
+    MergeRequest
+    properties, enums, defaults
+    AUTHORED (User -> MergeRequest)
+  }
+  class "authorization" as A {
+    scope: namespace
+    role: reporter
+    redaction: read_merge_request
+  }
+  class "storage" as ST {
+    store: graph
+    columns, codecs, sort key
+  }
+  class "source" as SO {
+    source: siphon
+    tables, query, column map
+  }
+}
+
+package "gitlab.ci" {
+  class "service" as SV {
+    lookups for virtual
+    properties
+  }
+}
+
+A --> G : refers to
+ST --> G : binds
+SO --> G : feeds
+SV --> G : provides
+note right of G : The graph knows\nnothing about tables,\nsources or access.
+@enduml
+```
+
+A package is a set of fragments of five kinds.
+Every fragment refers to the graph and to nothing else, so a new store, a new source or a new access rule never edits the graph.
+A relationship that a foreign key already carries, such as `AUTHORED` through `author_id`, needs no source entry.
+
+Packages compose under four rules: a package cannot redeclare an entity another package owns, cannot add a second authorization entry, can add variants to a platform relationship, and can bind its own entities to a store another package declares.
+
+### 2. The loader checks every package once
+
+```plantuml
+@startuml
+skinparam shadowing false
+start
+:Read the fragments of every package;
+:Resolve every name to an ID;
+:Check every rule\n(names, duplicates, foreign keys, connections);
+:Compute the guard of every read;
+note right
+  Guard rule, per source:
+  1. its own path column
+  2. else the nearest anchor through
+     a foreign key on the same connection
+  3. else redaction alone
+  4. else the load fails
+end note
+if (Any errors?) then (yes)
+  :Fail once, with every error\nand the package that caused it;
+  stop
+else (no)
+  :Hash the packages into a ModelId;
+  :Publish the checked Model;
+  stop
+endif
+@enduml
+```
+
+Later stages read facts by ID and never search by name.
+`MergeRequest` carries its own `traversal_path`, so its guard filters on it. `User` is global, so its guard is a role floor alone.
+Every plan carries the `ModelId` it was built against, so no plan is ever checked against a different model.
+
+### 3. A new version goes live after its backfill
+
+```plantuml
+@startuml
+skinparam shadowing false
+actor Author
+participant "Package registry" as R
+participant Loader as L
+participant "Indexing engine\n(ADR 023)" as IX
+database "ClickHouse" as CH
+participant "Query engine" as Q
+
+Author -> R : publish gitlab.code_review v2
+R -> L : load candidate model
+alt load fails
+  L --> R : every error, with its package
+  R --> Author : rejected; v1 stays active
+else load passes
+  L --> R : candidate model
+  R -> R : diff candidate catalogs\nagainst the active ones
+  alt empty scope (query metadata only)
+    R -> Q : promote v2
+  else tables in scope
+    R -> IX : create tables, start campaign
+    IX -> CH : create new tables from\nthe candidate catalog
+    IX -> CH : backfill the tables in scope;\nlive work writes v1 and v2
+    IX --> R : campaign done
+    R -> Q : promote v2
+  end
+  Q -> Q : swap models atomically;\nin-flight compiles finish on v1
+end
+@enduml
+```
+
+The registry keeps one version line per package, and a tenant's model is the active version of every package that applies to it.
+The migration scope is the diff of the physical catalogs, so nobody declares it by hand.
+The query engine never sees a model whose tables are not built yet, and the indexer and the query engine always agree on one package version.
+
+### 4. Catalogs give each connection a typed view
+
+```plantuml
+@startuml
+skinparam shadowing false
+skinparam componentStyle rectangle
+
+component "Shared tracking" as T {
+  [handles, owners, outputs, scopes]
+  [rewrite contract]
+}
+
+component "Logical catalog" as L {
+  [entities, follow, filter,\naggregate, paths, neighbors]
+}
+component "Relational catalog\n(ClickHouse, DuckDB)" as RC {
+  [scan, read, join, filter,\nlatest, share, limit]
+}
+component "Code catalog\n(Orbit Next)" as CC {
+  [repositories, languages,\nprefilter, structural, top]
+}
+component "Live catalog\n(Data Extraction Service)" as LV {
+  [call, push-down filters,\nwindow, page, limit]
+}
+
+L ..> T
+RC ..> T
+CC ..> T
+LV ..> T
+note bottom of T
+  Every catalog implements Catalog, Construct and Render.
+  Tracking proves structure; each language proves its own rules.
+end note
+@enduml
+```
+
+A catalog is the set of declarations for one model and one plan language, plus the API that builds plans in that language.
+The model exposes one logical catalog and one physical catalog per connection.
+Each backend implements `StorageBackend`, owns its physical schema and renderer, and declares capabilities as facts; shared code never checks a backend name.
+One compile targets one connection, and one query can read every store on it.
+
+### 5. A query becomes a request
+
+```plantuml
+@startuml
+skinparam shadowing false
+participant Caller
+participant "GQL surface" as S
+participant "Logical catalog" as LC
+participant "Compiler phases" as E
+participant "ClickHouse catalog" as C
+database ClickHouse as CH
+
+Caller -> S : query text
+S -> LC : build logical plan
+note right of LC : name, type and connectivity\nerrors are construction errors
+LC --> S : logical plan
+S -> E : logical plan
+E -> E : normalize, restrict, admit, tp_bounds
+E -> C : plan: decide and build in one step
+note right of C
+  FK author_id instead of the edge table,
+  current row of each merge request,
+  username left to hydration
+end note
+E -> C : rewrite: paginate, result contract,\nmaterialize shared reads, settings
+E -> C : security: add each read's guard
+E -> E : security check: every read has its guard
+E -> C : render
+C --> E : SQL and parameters
+E -> CH : execute
+CH --> Caller : rows
+@enduml
+```
+
+The surface records what the caller asked for and makes no planning decisions.
+The planning phase decides and builds in one step, with no intermediate plan description, and every later phase rewrites through the same builder.
+The rewrite contract is fixed: inputs before consumers, each shared body once, no revisiting inserted operations, and explicit reconnection when outputs change.
+A phase therefore cannot produce a plan the builder would reject.
+
+Security is its own phase.
+It adds the guard of every read as ordinary plan operations, so the `MergeRequest` read gets its path filter and the `User` read its role floor.
+A final check proves every read carries its guard before anything leaves the query engine.
+
+### 6. The same path for every backend
+
+```plantuml
+@startuml
+skinparam shadowing false
+left to right direction
+rectangle "Logical plan" as LP
+rectangle "Planning phase" as P
+rectangle "Relational plan" as RP
+rectangle "Code plan" as CP
+rectangle "Live plan" as VP
+rectangle "SQL + parameters" as SQL
+rectangle "gRPC structural\nsearch request" as GRPC
+rectangle "Data Extraction\nService call" as CALL
+
+LP --> P
+P --> RP : ClickHouse, DuckDB
+P --> CP : Orbit Next
+P --> VP : Slack
+RP --> SQL : render
+CP --> GRPC : render
+VP --> CALL : render
+@enduml
+```
+
+The planner chooses the target connection from where the requested data lives.
+Each physical language has its own planning decisions: a foreign key over an edge table in a relational plan, a trigram prefilter before an ast-grep pass in a code plan, a push-down filter in a live call.
+The guard takes the form each backend understands: a path filter in SQL, a repository restriction for Orbit Next, and a namespace precondition on a Slack call, whose results Slack then filters again through the caller's own sign-in.
+Plan tests assert three checked stages of every query: the logical plan, the physical plan right after planning, and the physical plan after every phase.
+
+[Extending the data model](../development/extending-the-data-model.md) documents each extension with its packages and code: a GitLab entity, Jira, Slack, Orbit Next, agent memory and a new query language.
 
 ## Consequences
 
@@ -95,7 +388,6 @@ The ontology would stay the source of truth, with the same mixed concerns and th
 
 ## References
 
-- [Packages and catalogs](../architecture/packages-and-catalogs.md)
 - [Extending the data model](../development/extending-the-data-model.md)
 - [MR !1967: ontology graph and reachability](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1967)
 - [ADR 000: ClickHouse graph storage](000_clickhouse_graph_storage.md)
