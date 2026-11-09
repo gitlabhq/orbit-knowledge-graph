@@ -97,6 +97,9 @@ impl TestContext {
             self.clickhouse.create_client(),
             Arc::new(indexer::testkit::MockLockService::new()),
             self.ontology.clone(),
+            Arc::new(
+                query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+            ),
             integration_testkit::embedded_schema(),
             orbit_server_config::AppConfig::embedded_defaults().schema,
             orbit_server_config::AppConfig::embedded_defaults()
@@ -128,7 +131,7 @@ impl TestContext {
 
     async fn complete_required_pipelines_except(&self, namespace_ids: &[i64], left_out: &[&str]) {
         let invalidated = orbit_migrations::scope::find_invalidated_pipelines(
-            &self.ontology,
+            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
             &orbit_migrations::scope::MigrationScope::Full,
         );
         let global_keys = invalidated

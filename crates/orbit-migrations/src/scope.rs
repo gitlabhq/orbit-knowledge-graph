@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::schema::Schema;
 use ontology::migrations::EdgeRows;
-use ontology::pipelines::PipelineDescriptor;
-use ontology::{EtlScope, Ontology};
+use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor, Writer};
+use query_data_model::{Catalog, ClickHouse, RelationshipId};
 use serde::{Deserialize, Serialize};
 
 pub const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
@@ -119,51 +119,87 @@ pub struct InvalidatedPipelines {
 }
 
 #[must_use]
-pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
+pub fn sdlc_entity_names(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
+    let sources = catalog.model().sources();
+    let graph = catalog.graph();
+    let code_tables = code_domain_tables(catalog);
     let mut names = BTreeSet::new();
-    for node in ontology.nodes() {
-        if !node.pipelines.is_empty() {
-            names.insert(node.name.clone());
+    for pipeline in sources.pipelines() {
+        if matches!(pipeline.writer, Writer::Entity(_) | Writer::Derived(_)) {
+            names.insert(sources.writer_name(graph, pipeline.writer).to_string());
         }
     }
-    for derived in ontology.derived_entities() {
-        names.insert(derived.name.clone());
-    }
-    for kind in ontology.edge_names() {
-        if ontology
-            .edge_tables_for_relationship(kind)
+    for relationship in graph.relationships() {
+        if relationship_tables(catalog, relationship.id)
             .iter()
-            .any(|table| !is_code_domain_table(ontology, table))
+            .any(|table| !code_tables.contains(table))
         {
-            names.insert(kind.to_string());
+            names.insert(relationship.name.clone());
         }
     }
     names
 }
 
 #[must_use]
-pub fn code_entity_names(ontology: &Ontology) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    for node in ontology.nodes() {
-        if node.pipelines.is_empty() {
-            names.insert(node.name.clone());
-        }
-    }
-    for kind in ontology.edge_names() {
-        let tables = ontology.edge_tables_for_relationship(kind);
-        if !tables.is_empty()
-            && tables
-                .iter()
-                .all(|table| is_code_domain_table(ontology, table))
-        {
-            names.insert(kind.to_string());
+pub fn code_entity_names(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
+    let sources = catalog.model().sources();
+    let graph = catalog.graph();
+    let code_tables = code_domain_tables(catalog);
+    let mut names: BTreeSet<String> = graph
+        .entities()
+        .filter(|entity| sources.entity_pipelines(entity.id).next().is_none())
+        .map(|entity| entity.name.clone())
+        .collect();
+    for relationship in graph.relationships() {
+        let tables = relationship_tables(catalog, relationship.id);
+        if !tables.is_empty() && tables.iter().all(|table| code_tables.contains(table)) {
+            names.insert(relationship.name.clone());
         }
     }
     names
 }
 
+fn relationship_tables(
+    catalog: &Catalog<ClickHouse>,
+    relationship: RelationshipId,
+) -> BTreeSet<String> {
+    let variants = &catalog.graph().relationship(relationship).variants;
+    if variants.is_empty() {
+        return catalog
+            .default_edge_table()
+            .map(str::to_string)
+            .into_iter()
+            .collect();
+    }
+    variants
+        .iter()
+        .filter_map(|variant| catalog.edge_table(*variant))
+        .map(str::to_string)
+        .collect()
+}
+
+fn code_domain_tables(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
+    let sources = catalog.model().sources();
+    catalog
+        .graph()
+        .entities()
+        .filter(|entity| sources.entity_pipelines(entity.id).next().is_none())
+        .filter_map(|entity| catalog.table_of(entity.id))
+        .map(str::to_string)
+        .chain(std::iter::once("gl_code_edge".to_string()))
+        .collect()
+}
+
+fn edge_tables(catalog: &Catalog<ClickHouse>) -> Vec<String> {
+    let mut tables = catalog.edge_tables(&[]);
+    tables.extend(catalog.default_edge_table().map(str::to_string));
+    tables.sort();
+    tables.dedup();
+    tables
+}
+
 pub fn widen_scope_for_shared_table_writers(
-    ontology: &Ontology,
+    catalog: &Catalog<ClickHouse>,
     schema: &Schema,
     requested_scope: &MigrationScope,
 ) -> MigrationScope {
@@ -171,7 +207,7 @@ pub fn widen_scope_for_shared_table_writers(
         return MigrationScope::Full;
     }
 
-    let invalidated = invalidated_entities(ontology, requested_scope);
+    let invalidated = invalidated_entities(catalog, requested_scope);
 
     if schema.join_sources().any(|table| {
         schema
@@ -181,12 +217,15 @@ pub fn widen_scope_for_shared_table_writers(
         return MigrationScope::Full;
     }
 
-    let edge_tables = ontology.edge_tables();
+    let edge_tables = edge_tables(catalog);
+    let default_edge_table = catalog.default_edge_table();
     for table in schema.versioned_tables().map(|table| &table.name) {
-        if matches!(requested_scope, MigrationScope::Code) && table == ontology.edge_table() {
+        if matches!(requested_scope, MigrationScope::Code)
+            && Some(table.as_str()) == default_edge_table
+        {
             continue;
         }
-        if requested_scope.keeps_edge_rows() && edge_tables.contains(&table.as_str()) {
+        if requested_scope.keeps_edge_rows() && edge_tables.contains(table) {
             continue;
         }
 
@@ -196,7 +235,7 @@ pub fn widen_scope_for_shared_table_writers(
         let scope_writes_to_table = writers.iter().any(|writer| invalidated.contains(writer));
         let has_writer_outside_scope = writers.iter().any(|writer| !invalidated.contains(writer));
 
-        if table == ontology.edge_table() && scope_writes_to_table {
+        if Some(table.as_str()) == default_edge_table && scope_writes_to_table {
             return MigrationScope::Full;
         }
         if scope_writes_to_table && has_writer_outside_scope {
@@ -208,12 +247,12 @@ pub fn widen_scope_for_shared_table_writers(
 }
 
 pub fn classify_tables_for_scope(
-    ontology: &Ontology,
+    catalog: &Catalog<ClickHouse>,
     schema: &Schema,
     scope: &MigrationScope,
 ) -> BTreeMap<String, TableMigrationAction> {
-    let invalidated = invalidated_entities(ontology, scope);
-    let edge_tables = ontology.edge_tables();
+    let invalidated = invalidated_entities(catalog, scope);
+    let edge_tables = edge_tables(catalog);
 
     let mut actions: BTreeMap<_, _> = schema
         .versioned_tables()
@@ -244,13 +283,13 @@ pub fn classify_tables_for_scope(
 }
 
 pub fn find_invalidated_pipelines(
-    ontology: &Ontology,
+    catalog: &Catalog<ClickHouse>,
     scope: &MigrationScope,
 ) -> InvalidatedPipelines {
-    let invalidated = invalidated_entities(ontology, scope);
-    let descriptors = ontology.pipeline_descriptors();
+    let invalidated = invalidated_entities(catalog, scope);
+    let descriptors = catalog.model().sources().descriptors(catalog.graph());
 
-    for entity in orphaned_sdlc_entities(ontology, &invalidated, &descriptors) {
+    for entity in orphaned_sdlc_entities(catalog, &invalidated, &descriptors) {
         orbit_log_fields::warn!(
             safe(ENTITY) = entity.as_str(),
             "invalidated SDLC entity is emitted by no pipeline — orphan, excluded from seeding and gating"
@@ -273,11 +312,11 @@ pub fn find_invalidated_pipelines(
 }
 
 fn orphaned_sdlc_entities(
-    ontology: &Ontology,
+    catalog: &Catalog<ClickHouse>,
     invalidated: &BTreeSet<String>,
     descriptors: &[PipelineDescriptor],
 ) -> BTreeSet<String> {
-    let code = code_entity_names(ontology);
+    let code = code_entity_names(catalog);
     invalidated
         .iter()
         .filter(|entity| !code.contains(*entity))
@@ -290,23 +329,23 @@ fn orphaned_sdlc_entities(
         .collect()
 }
 
-fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet<String> {
+fn invalidated_entities(catalog: &Catalog<ClickHouse>, scope: &MigrationScope) -> BTreeSet<String> {
     match scope {
-        MigrationScope::Full => sdlc_entity_names(ontology)
+        MigrationScope::Full => sdlc_entity_names(catalog)
             .into_iter()
-            .chain(code_entity_names(ontology))
+            .chain(code_entity_names(catalog))
             .collect(),
-        MigrationScope::Sdlc { entities, .. } if entities.is_empty() => sdlc_entity_names(ontology),
+        MigrationScope::Sdlc { entities, .. } if entities.is_empty() => sdlc_entity_names(catalog),
         MigrationScope::Sdlc { entities, .. } => {
             let mut invalidated = entities.clone();
-            for descriptor in ontology.pipeline_descriptors() {
+            for descriptor in catalog.model().sources().descriptors(catalog.graph()) {
                 if !descriptor.reindex_targets.is_disjoint(entities) {
                     invalidated.insert(descriptor.entity);
                 }
             }
             invalidated
         }
-        MigrationScope::Code => code_entity_names(ontology),
+        MigrationScope::Code => code_entity_names(catalog),
         MigrationScope::None => BTreeSet::new(),
     }
 }
@@ -316,9 +355,9 @@ fn migration_action_for_table(
     table: &str,
     scope: &MigrationScope,
     invalidated: &BTreeSet<String>,
-    edge_tables: &[&str],
+    edge_tables: &[String],
 ) -> TableMigrationAction {
-    if scope.keeps_edge_rows() && edge_tables.contains(&table) {
+    if scope.keeps_edge_rows() && edge_tables.iter().any(|edge_table| edge_table == table) {
         return TableMigrationAction::CloneFromActive;
     }
 
@@ -339,13 +378,6 @@ fn migration_action_for_table(
     }
 }
 
-fn is_code_domain_table(ontology: &Ontology, table: &str) -> bool {
-    ontology
-        .nodes()
-        .any(|node| node.pipelines.is_empty() && node.destination_table == table)
-        || table == "gl_code_edge"
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,8 +391,8 @@ mod tests {
     }
 
     fn classify(scope: MigrationScope) -> BTreeMap<String, TableMigrationAction> {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        classify_tables_for_scope(&ontology, &embedded_schema(), &scope)
+        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        classify_tables_for_scope(&catalog, &embedded_schema(), &scope)
     }
 
     fn embedded_schema() -> Schema {
@@ -374,27 +406,27 @@ mod tests {
 
     #[test]
     fn shared_edge_writers_force_scope_widening() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
         let layout = embedded_schema();
 
         assert_eq!(
-            widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&["User"])),
+            widen_scope_for_shared_table_writers(&catalog, &layout, &sdlc_scope(&["User"])),
             sdlc_scope(&["User"]),
         );
         assert_eq!(
-            widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&["SystemNote"])),
+            widen_scope_for_shared_table_writers(&catalog, &layout, &sdlc_scope(&["SystemNote"])),
             MigrationScope::Full,
         );
         assert_eq!(
-            widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&["HAS_NOTE"])),
+            widen_scope_for_shared_table_writers(&catalog, &layout, &sdlc_scope(&["HAS_NOTE"])),
             MigrationScope::Full,
         );
         assert_eq!(
-            widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&[])),
+            widen_scope_for_shared_table_writers(&catalog, &layout, &sdlc_scope(&[])),
             MigrationScope::Full,
         );
         assert_eq!(
-            widen_scope_for_shared_table_writers(&ontology, &layout, &MigrationScope::Code),
+            widen_scope_for_shared_table_writers(&catalog, &layout, &MigrationScope::Code),
             MigrationScope::Code,
         );
     }
@@ -491,7 +523,7 @@ mod tests {
 
     #[test]
     fn none_scope_clones_everything_and_invalidates_nothing() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
 
         let map = classify(MigrationScope::None);
         for (table, table_action) in &map {
@@ -502,7 +534,7 @@ mod tests {
             );
         }
 
-        let pipelines = find_invalidated_pipelines(&ontology, &MigrationScope::None);
+        let pipelines = find_invalidated_pipelines(&catalog, &MigrationScope::None);
         assert!(
             pipelines.namespaced.is_empty(),
             "{:?}",
@@ -513,8 +545,8 @@ mod tests {
 
     #[test]
     fn fk_edge_kind_invalidates_its_emitting_pipeline() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let pipelines = find_invalidated_pipelines(&ontology, &sdlc_scope(&["HAS_NOTE"]));
+        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let pipelines = find_invalidated_pipelines(&catalog, &sdlc_scope(&["HAS_NOTE"]));
         assert!(
             pipelines.namespaced.contains(&"Note".to_string()),
             "HAS_NOTE must match the Note pipeline: {:?}",
@@ -524,12 +556,12 @@ mod tests {
 
     #[test]
     fn full_scope_has_no_orphans_and_skips_code_entities() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let descriptors = ontology.pipeline_descriptors();
-        let invalidated = invalidated_entities(&ontology, &MigrationScope::Full);
-        assert!(!code_entity_names(&ontology).is_empty());
+        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let descriptors = catalog.model().sources().descriptors(catalog.graph());
+        let invalidated = invalidated_entities(&catalog, &MigrationScope::Full);
+        assert!(!code_entity_names(&catalog).is_empty());
         assert_eq!(
-            orphaned_sdlc_entities(&ontology, &invalidated, &descriptors),
+            orphaned_sdlc_entities(&catalog, &invalidated, &descriptors),
             BTreeSet::new()
         );
     }

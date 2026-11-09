@@ -12,6 +12,7 @@ use orbit_migrations::version::{
 };
 use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use orbit_utils::traversal_path::{TopLevelSplit, TraversalPath};
+use query_data_model::{Catalog, ClickHouse};
 
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
@@ -55,6 +56,7 @@ pub struct MigrationCompletionChecker {
     datalake: ArrowClickHouseClient,
     lock_service: Arc<dyn LockService>,
     ontology: Arc<ontology::Ontology>,
+    data_model: Arc<Catalog<ClickHouse>>,
     physical: Schema,
     schema_config: SchemaConfig,
     config: MigrationCompletionConfig,
@@ -75,6 +77,7 @@ impl MigrationCompletionChecker {
         datalake: ArrowClickHouseClient,
         lock_service: Arc<dyn LockService>,
         ontology: Arc<ontology::Ontology>,
+        data_model: Arc<Catalog<ClickHouse>>,
         physical: Schema,
         schema_config: SchemaConfig,
         config: MigrationCompletionConfig,
@@ -88,6 +91,7 @@ impl MigrationCompletionChecker {
             datalake,
             lock_service,
             ontology,
+            data_model,
             physical,
             schema_config,
             config,
@@ -287,7 +291,7 @@ impl MigrationCompletionChecker {
         let scope = self.resolve_migration_scope(version).await?;
         let sdlc_progress = orbit_migrations::completion::check_sdlc_reindex_progress(
             &self.graph,
-            &self.ontology,
+            &self.data_model,
             &scope,
             version,
             &enabled_namespaces.ids,
@@ -333,7 +337,7 @@ impl MigrationCompletionChecker {
     ) -> Result<MigrationScope, String> {
         orbit_migrations::completion::resolve_migration_scope(
             &self.graph,
-            &self.ontology,
+            &self.data_model,
             &self.physical,
             migrating_version,
         )

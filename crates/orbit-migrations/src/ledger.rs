@@ -112,7 +112,7 @@ impl MigrationLedger {
 
     pub fn validate(
         &self,
-        ontology: &ontology::Ontology,
+        catalog: &query_data_model::Catalog<query_data_model::ClickHouse>,
         schema_version: u32,
     ) -> Result<(), String> {
         if self.migrations.is_empty() {
@@ -158,7 +158,7 @@ impl MigrationLedger {
             ));
         }
 
-        let names = sdlc_entity_names(ontology);
+        let names = sdlc_entity_names(catalog);
         for entry in &self.migrations {
             for entity in &entry.entities {
                 if !names.contains(entity) {
@@ -262,14 +262,15 @@ mod tests {
 
     #[test]
     fn validation_rejects_malformed_ledgers() {
-        let ontology = ontology::Ontology::new();
+        let catalog =
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap();
 
         let dup = ledger(vec![
             entry(5, LedgerScope::All, &[]),
             entry(5, LedgerScope::All, &[]),
         ]);
         assert!(
-            dup.validate(&ontology, 5)
+            dup.validate(&catalog, 5)
                 .unwrap_err()
                 .contains("strictly decrease")
         );
@@ -277,7 +278,7 @@ mod tests {
         let wrong_scope = ledger(vec![entry(1, LedgerScope::Code, &["Note"])]);
         assert!(
             wrong_scope
-                .validate(&ontology, 1)
+                .validate(&catalog, 1)
                 .unwrap_err()
                 .contains("only valid with")
         );
@@ -291,7 +292,7 @@ mod tests {
         }]);
         assert!(
             no_note
-                .validate(&ontology, 1)
+                .validate(&catalog, 1)
                 .unwrap_err()
                 .contains("requires a non-empty")
         );
@@ -299,7 +300,7 @@ mod tests {
         let wrong_ver = ledger(vec![entry(5, LedgerScope::All, &[])]);
         assert!(
             wrong_ver
-                .validate(&ontology, 6)
+                .validate(&catalog, 6)
                 .unwrap_err()
                 .contains("must equal")
         );
@@ -307,7 +308,7 @@ mod tests {
         let ghost = ledger(vec![entry(1, LedgerScope::Sdlc, &["Ghost"])]);
         assert!(
             ghost
-                .validate(&ontology, 1)
+                .validate(&catalog, 1)
                 .unwrap_err()
                 .contains("is not an SDLC entity")
         );

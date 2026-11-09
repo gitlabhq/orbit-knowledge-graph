@@ -67,14 +67,14 @@ pub async fn create_all_versioned_tables(
 
 pub async fn create_tables_with_selective_cloning(
     graph: &ArrowClickHouseClient,
-    ontology: &ontology::Ontology,
+    catalog: &query_data_model::Catalog<query_data_model::ClickHouse>,
     schema: &GraphSchema,
     credentials: &DictionaryCredentials,
     requested_scope: &MigrationScope,
     active_version: u32,
     target_version: u32,
 ) -> Result<(), MigrationError> {
-    let scope = widen_scope_for_shared_table_writers(ontology, &schema.physical, requested_scope);
+    let scope = widen_scope_for_shared_table_writers(catalog, &schema.physical, requested_scope);
     if &scope != requested_scope {
         orbit_log_fields::warn!(
             safe(REQUESTED_MIGRATION_SCOPE) = requested_scope.as_str(),
@@ -91,10 +91,10 @@ pub async fn create_tables_with_selective_cloning(
     }
 
     let active_prefix = table_prefix(active_version);
-    let table_actions = classify_tables_for_scope(ontology, &schema.physical, &scope);
+    let table_actions = classify_tables_for_scope(catalog, &schema.physical, &scope);
     let active_entities = existing_entity_names(graph, active_version).await?;
     let target_entities = existing_entity_names(graph, target_version).await?;
-    let seed = checkpoint_seed(ontology, &scope);
+    let seed = checkpoint_seed(catalog, &scope);
 
     let mut cloned = 0;
     let mut rebuilt = 0;
@@ -331,13 +331,13 @@ async fn clone_from_active(
 }
 
 fn checkpoint_seed(
-    ontology: &ontology::Ontology,
+    catalog: &query_data_model::Catalog<query_data_model::ClickHouse>,
     scope: &MigrationScope,
 ) -> Option<CheckpointSeed> {
     match scope {
         MigrationScope::Sdlc { .. } => Some(CheckpointSeed {
             excluded_key_prefix: DISPATCH_CURSOR_PREFIX,
-            pipelines: find_invalidated_pipelines(ontology, scope),
+            pipelines: find_invalidated_pipelines(catalog, scope),
         }),
         MigrationScope::Code => Some(CheckpointSeed {
             excluded_key_prefix: CODE_STALE_SWEEP_GATE_PREFIX,

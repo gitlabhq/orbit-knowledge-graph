@@ -73,7 +73,7 @@ pub struct SdlcReindexProgress {
 
 pub async fn resolve_migration_scope(
     graph: &ArrowClickHouseClient,
-    ontology: &ontology::Ontology,
+    catalog: &query_data_model::Catalog<query_data_model::ClickHouse>,
     physical: &crate::schema::Schema,
     migrating_version: u32,
 ) -> Result<MigrationScope, MigrationError> {
@@ -81,7 +81,7 @@ pub async fn resolve_migration_scope(
     let ledger = MigrationLedger::load_embedded().map_err(MigrationError::Ledger)?;
     let requested_scope = ledger.resolve_scope_between(active, migrating_version);
     Ok(widen_scope_for_shared_table_writers(
-        ontology,
+        catalog,
         physical,
         &requested_scope,
     ))
@@ -135,14 +135,14 @@ pub async fn fetch_enabled_top_level_namespaces(
 
 pub async fn check_sdlc_reindex_progress(
     graph: &ArrowClickHouseClient,
-    ontology: &ontology::Ontology,
+    catalog: &query_data_model::Catalog<query_data_model::ClickHouse>,
     scope: &MigrationScope,
     version: u32,
     enabled_namespace_ids: &[i64],
 ) -> Result<SdlcReindexProgress, MigrationError> {
     let prefix = table_prefix(version);
     let checkpoint_table = format!("{prefix}{CHECKPOINT_TABLE}");
-    let pipelines = find_invalidated_pipelines(ontology, scope);
+    let pipelines = find_invalidated_pipelines(catalog, scope);
 
     let completed_namespace_ids =
         namespace_ids_with_completed_plans(graph, &checkpoint_table, &pipelines.namespaced).await?;

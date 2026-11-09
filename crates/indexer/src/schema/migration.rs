@@ -4,6 +4,7 @@ use std::time::Duration;
 use orbit_log_fields::{info, warn};
 use orbit_migrations::execute::{self, MigrationError};
 use orbit_migrations::schema::{DictionaryCredentials, GraphSchema, Schema};
+use query_data_model::{Catalog, ClickHouse};
 use thiserror::Error;
 
 use super::metrics::MigrationMetrics;
@@ -42,7 +43,7 @@ pub async fn run_if_needed(
     graph: &ArrowClickHouseClient,
     credentials: &DictionaryCredentials,
     lock_service: &Arc<dyn LockService>,
-    ontology: &ontology::Ontology,
+    catalog: &Catalog<ClickHouse>,
     physical: &Schema,
     metrics: &MigrationMetrics,
     campaign: &CampaignState,
@@ -54,7 +55,7 @@ pub async fn run_if_needed(
         None => {
             info!(
                 safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
-                "fresh install — creating tables from ontology and recording initial schema version"
+                "fresh install — creating tables from the model and recording initial schema version"
             );
             let prefix = table_prefix(*SCHEMA_VERSION);
             execute::create_all_versioned_tables(graph, &schema, credentials, &prefix).await?;
@@ -80,7 +81,7 @@ pub async fn run_if_needed(
                 run_rollback(
                     graph,
                     credentials,
-                    ontology,
+                    catalog,
                     &schema,
                     metrics,
                     campaign,
@@ -96,7 +97,7 @@ pub async fn run_if_needed(
                 run_forward_migration(
                     graph,
                     credentials,
-                    ontology,
+                    catalog,
                     &schema,
                     metrics,
                     campaign,
@@ -115,7 +116,7 @@ pub async fn run_if_needed(
 async fn run_forward_migration(
     graph: &ArrowClickHouseClient,
     credentials: &DictionaryCredentials,
-    ontology: &ontology::Ontology,
+    catalog: &Catalog<ClickHouse>,
     schema: &GraphSchema,
     metrics: &MigrationMetrics,
     campaign: &CampaignState,
@@ -141,7 +142,7 @@ async fn run_forward_migration(
     );
     execute::create_tables_with_selective_cloning(
         graph,
-        ontology,
+        catalog,
         schema,
         credentials,
         &requested_scope,
@@ -174,7 +175,7 @@ async fn run_forward_migration(
 async fn run_rollback(
     graph: &ArrowClickHouseClient,
     credentials: &DictionaryCredentials,
-    ontology: &ontology::Ontology,
+    catalog: &Catalog<ClickHouse>,
     schema: &GraphSchema,
     metrics: &MigrationMetrics,
     campaign: &CampaignState,
@@ -218,7 +219,7 @@ async fn run_rollback(
     run_forward_migration(
         graph,
         credentials,
-        ontology,
+        catalog,
         schema,
         metrics,
         campaign,
