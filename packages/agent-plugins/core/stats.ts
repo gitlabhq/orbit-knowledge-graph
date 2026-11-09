@@ -15,7 +15,18 @@ export function parseResponse(text: string): ResponseCounts {
   const out: ResponseCounts = { nodes: 0, edges: 0, byEntity: {}, aggregated: 0, kind: 'other', grouped: false, counted: [] }
   const raw = text.trim().startsWith('{') ? tryJson(text) : null
   if (raw) {
-    const r = (raw['result'] ?? raw) as { nodes?: unknown; edges?: unknown }
+    const r = (raw['result'] ?? raw) as { query_type?: unknown; nodes?: unknown; edges?: unknown; columns?: unknown; group_columns?: unknown; rows?: unknown }
+    if (r.query_type === 'aggregation') {
+      out.kind = 'aggregation'
+      out.grouped = Array.isArray(r.group_columns) && r.group_columns.length > 0
+      const rows = Array.isArray(r.rows) ? (r.rows as Record<string, unknown>[]) : []
+      out.counted = plainCounts(Array.isArray(r.columns) ? (r.columns as ColumnFields[]) : []).map(({ name = '', target = '' }) => ({
+        target,
+        total: sumBy(rows, (row) => (typeof row[name] === 'number' ? row[name] : 0)),
+      }))
+      out.aggregated = Math.max(0, ...out.counted.map((count) => count.total))
+      return out
+    }
     const nodes = Array.isArray(r.nodes) ? (r.nodes as { type?: unknown }[]) : []
     out.byEntity = countBy(nodes, (node) => String(node.type))
     out.nodes = nodes.length
@@ -26,7 +37,7 @@ export function parseResponse(text: string): ResponseCounts {
   if (/^query_type:\s*aggregation/m.test(text)) {
     out.kind = 'aggregation'
     out.grouped = /^group_columns\[[1-9]\d*\]/m.test(text)
-    const counts = plainCounts(text)
+    const counts = plainCounts(columnFields(text))
     const header = text.match(/^rows\[\d+\]\{([^}]*)\}:\s*$/m)
     if (!header || header.index === undefined || counts.length === 0) return out
     const names = (header[1] ?? '').split(',')
@@ -70,8 +81,8 @@ function columnFields(text: string): ColumnFields[] {
 }
 
 // The response has no DISTINCT flag: a property count is plain only under its derived name; any other name reads as DISTINCT.
-function plainCounts(text: string): ColumnFields[] {
-  return columnFields(text).filter(
+function plainCounts(columns: ColumnFields[]): ColumnFields[] {
+  return columns.filter(
     ({ function: fn, name, target = '', property }) => fn === 'count' && name && (!property || name === `count_${target}_${property}`),
   )
 }
