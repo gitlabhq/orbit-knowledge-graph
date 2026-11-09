@@ -9,538 +9,97 @@ toc_hide: true
 
 Proposed. This ADR replaces the ontology as the source of truth for the query engine, the schema migrations and the indexer.
 [ADR 000](000_clickhouse_graph_storage.md) is unchanged: ClickHouse remains the graph store.
+It works with [ADR 023](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3333), whose indexing engine backfills a new package version before it goes live.
 
 ## Date
 
 2026-11-08
 
-## Context
+## Context and problem
 
-The ontology is a single YAML tree that describes the graph, its ClickHouse tables and its access rules at once.
-The compiler, the migrations and the indexer each read it in their own way, and each has grown its own helpers around it.
+The ontology is one YAML tree that describes the graph, its ClickHouse tables, its access rules and its ETL pipelines at once.
+The compiler, the migrations and the indexer each read it in their own way.
 
-That shape has three costs.
+This shape causes three problems:
 
-**The ontology mixes concerns.**
-One entity file holds graph properties, ClickHouse column types and codecs, the role floor and the redaction ability.
-Adding a storage target or an access rule means editing the same file as the graph definition, and a third party cannot add an entity without touching platform files.
+- **The ontology mixes concerns.** One entity file holds graph properties, column codecs, the role floor, the redaction ability and the pipeline. A new store, source or access rule edits the same file, and a third party cannot add an entity without touching platform files.
+- **Facts are found late, by name.** The compiler asks for facts through about 60 accessors, about 150 times per compile, and every phase re-checks the names it uses. A typo in a YAML file fails a query in production instead of failing a load. The security pass derives each table's guard from its name on every query.
+- **Every pipeline builds plans its own way.** A query passes through `Input`, a `QueryPlan` with a relation graph, a SQL AST and then SQL. Passes edit AST fields directly, nothing checks the result, and each backend carries its own emitter.
 
-**The compiler finds facts late, by name.**
-It asks the ontology for facts through roughly 60 accessors, about 150 times per compile, and every phase re-checks the names it uses.
-A typo in a YAML file surfaces as a failed query in production rather than a failed load at startup.
-Security is the sharpest case: the security pass derives each table's path filter and role floor from the table name on every query.
-
-**Every pipeline builds plans its own way.**
-A query passes through `Input`, then `QueryPlan` and a relation graph, then a SQL AST, then SQL.
-Each representation has its own invariants, passes mutate AST fields directly, and nothing verifies that a rewritten query is still valid.
-ClickHouse and DuckDB each carry a hand-written emitter, so a new query type, backend or query language repeats the same plumbing.
-
-The next projects make this worse.
-[Orbit Next](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/16) and [third-party data](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/20) need new entities and sources without compiler changes, and agent memory needs custom node types scoped to a single tenant.
+The next projects make these problems larger.
+[Orbit Next](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/16) needs a code backend that is not SQL.
+[Third-party data](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/20) needs new entities without compiler changes, some indexed and some fetched at query time.
+Agent memory needs custom node types for one tenant.
 
 ## Decision
 
-**A data model in `query-data-model` replaces the ontology.**
-The ontology is split into packages of independent fragments that a loader checks once.
-Every compiler pipeline builds and rewrites plans through the model's checked builders, and each backend is an implementation of one trait that renders those plans.
-
-The rest of this section follows one query from the YAML to the SQL:
-
-```plaintext
-MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
-WHERE mr.state = 'opened'
-RETURN u.username, mr.title LIMIT 10
-```
+**A data model of versioned packages replaces the ontology. A loader checks the packages once, and every compiler pipeline builds, rewrites and renders its plans through the model's checked catalogs.**
 
 ```mermaid
 flowchart LR
-    accTitle: The data model and the compiler
-    accDescr: Packages load once into a checked model. A catalog gives the typed view of one connection. A surface turns query text into a logical plan. The compiler phases plan it into a physical plan for the target backend through the catalog and rewrite it. The backend renders the result. Migrations read their schema from the same catalog.
-    P[Packages] -->|load once| M[Model]
-    M -->|physical B connection| C[Catalog]
+    accTitle: The data model in one picture
+    accDescr: The registry loads packages into a checked model. A surface turns query text into a logical plan. The planner builds a physical plan through the catalog of one connection. The catalog renders the plan into the backend's request.
+    R[(Registry)] --> M[Model]
     M --> S[Surface]
-    S -->|logical plan| E[Compiler phases]
-    C --> E
-    E -->|physical plan| R[Render]
-    C --> D[Migrations and indexer]
+    S --> P[Planner]
+    P --> C[Catalog]
+    C --> B[(Backend)]
 ```
 
-The data model is infrastructure and makes no planning decisions.
-Planning stays in the compiler phases, which express every decision through the model's builders.
-
-### Packages replace the ontology
-
-The ontology splits into five kinds of fragment, each a single YAML document:
-
-| Kind | Holds | Lived in the ontology as |
-|---|---|---|
-| `graph` | Entities, typed properties and relationships | Node and edge files |
-| `authorization` | Scope, role floor and redaction for each entity | Fields mixed into node files |
-| `storage` | One store's tables, columns, routes and backend layout | Fields mixed into node files, plus the DDL generator |
-| `service` | Lookups that return properties from an external service | Virtual property fields |
-| `source` | Where indexed data comes from: source tables, extraction queries, field mappings and reindex triggers | The `indexer:` and `pipelines:` blocks |
-
-A package is a directory of fragments.
-The platform ships the `gitlab.*` packages, an integration ships one package with every kind it needs, and a tenant overlay ships a package that loads for one tenant.
-
-Each layer depends only on the one above it: storage binds to the graph, and authorization refers to the graph.
-The graph itself knows nothing about tables.
-
-```yaml
-kind: graph
-package: gitlab.code_review
-entities:
-  MergeRequest:
-    label: title
-    defaults: [id, iid, title, state, source_branch, target_branch]
-    properties:
-      id: {type: int64, immutable: true}
-      title: {type: string}
-      state: {type: enum, values: {1: opened, 2: closed, 3: merged, 4: locked}}
-```
-
-```yaml
-kind: authorization
-package: gitlab.code_review
-entities:
-  MergeRequest: {scope: namespace, role: reporter}
-```
-
-```yaml
-kind: storage
-package: gitlab.code_review
-store: graph
-entities:
-  MergeRequest:
-    backend:
-      primary_key: [traversal_path, id]
-      columns:
-        title: {default: "''", codec: [ZSTD(1)]}
-```
-
-```yaml
-kind: source
-package: gitlab.core
-source: siphon
-connection: datalake
-entities:
-  Group:
-    tables: [namespace_traversal_paths, siphon_namespaces, siphon_namespace_details, siphon_routes]
-    order_by: [traversal_path, id]
-    query: group.sql.j2
-    reindex_on: [siphon_namespaces, siphon_namespace_details, siphon_routes]
-relationships:
-  CONTAINS:
-    "WorkItem -> WorkItem":
-      table: siphon_work_item_parent_links
-      from: work_item_parent_id
-      to: work_item_id
-```
-
-Shared storage fields cover what every backend understands; the `backend` block holds what only that backend understands, and it is validated by that backend.
-
-A source fragment describes how indexed data is produced, and it points at the graph and storage of the same package version.
-An indexing worker from [ADR 023](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3333) loads the source fragments of the version in its input, so the indexer writes exactly the tables that the query engine plans against.
-A relationship that a foreign key already carries needs no source entry: the graph reference and the storage route are enough.
-
-Packages compose under four rules: a package cannot redeclare an entity another package owns, cannot add a second authorization entry for the same entity, property or relationship, can add variants to a platform relationship, and can bind additional entities to a store another package declares.
-
-### The model is loaded at runtime
-
-Packages are data, not code.
-The server reads them at runtime from a package source, such as the platform packages bundled with the binary, an integration's package in object storage, or a tenant overlay, and composes them into a single `Model`:
-
-```rust
-let model = Packages::from_source(&source).await?.load()?;
-```
-
-A new or changed package does not need a rebuild or a deploy.
-The loader validates the candidate packages in full, and only a model that passes every check replaces the active one.
-The swap is atomic: compiles already in flight keep the snapshot they started with, through an `Arc<Model>`, and new compiles pick up the new one.
-A package that fails validation is rejected with its errors, and the previous model stays active.
-
-#### The package registry
-
-The package source is a registry keyed by package.
-Each package has its own version line, so `gitlab.ci`, `integration.linear` and a tenant's `tenant.agent_memory` move independently.
-A tenant's model is the composition of the active version of every package that applies to it.
-
-A new package version reaches queries as follows, with the indexing engine of [ADR 023](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3333) owning the backfill:
-
-1. The registry loads the candidate model and diffs its physical catalogs against the active model's. The diff is the migration scope: the tables whose layout or contents change. Nobody declares the scope by hand.
-2. If the scope is empty, as it is for a change that only adds query metadata, the version is promoted at once.
-3. Otherwise the indexing engine creates the new tables from the candidate catalog and runs a backfill campaign for the tables in scope. Live indexing writes both versions until the campaign is done.
-4. The registry promotes the version, and the query engine swaps to the new model.
-
-The query engine therefore never sees a model whose tables are not built yet, and the indexer and the query engine always agree on one package version.
-
-Work that the compiler used to repeat on every query moves into this load:
-
-- Every name resolves to an ID. Later stages read facts by ID and never search by name.
-- Every rule is checked, and all errors are collected with the package that caused each one before the load fails.
-- Each read gets a precomputed security guard: its path filter, role floor and redaction flag. The guard comes from graph reachability. The source's own path column is used if it has one, otherwise the nearest anchor reachable through a foreign key on the same connection. The security phase reads the guard instead of deriving it.
-- The packages hash into a `ModelId` that keys caches and is carried by every plan built against the model.
-
-A namespaced entity with no guard, an unknown field or a duplicate entity fails the load.
-
-### Backends implement one trait
-
-```rust
-pub trait StorageBackend: Sized {
-    const KIND: &'static str;
-    type Options: DeserializeOwned;
-    type SourceOptions: DeserializeOwned;
-    type RouteOptions: DeserializeOwned;
-    type Store: Debug;
-
-    fn resolve(store: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
-}
-```
-
-A physical catalog is the typed view of one connection, with all of its stores and the facts of its backend.
-
-Each backend owns its query facts, its physical schema and its renderer.
-The ClickHouse backend owns tables, codecs, engines, sort keys, skip indexes and projections, and the migrations read them from the catalog.
-The generated DDL is byte-identical to the ontology's DDL for every bundled schema version.
-
-Backends declare capabilities as facts, such as current-row reads or materialized CTEs, and shared code branches on capabilities rather than backend names.
-A compile targets one connection, and one query can read any store on that connection.
-
-### Catalogs build every plan
-
-A catalog is the set of declarations for one model and one plan language, plus the API that builds plans in that language.
-The model exposes one logical catalog and one physical catalog per connection:
-
-```rust
-let logical = model.logical();
-let clickhouse = model.physical::<ClickHouse>("main")?;
-```
-
-Each catalog has its own vocabulary.
-The logical catalog speaks in entities and relationships; a relational catalog speaks in tables and relational operations; the Orbit Next code catalog speaks in repositories and structural matches; a live connector's catalog speaks in API calls.
-They share one construction discipline, not one operation set:
-
-```plaintext
-                          query-data-model
-               shared tracking: identities and connections
-                                  |
-           +----------------------+----------------------+
-           |                      |                      |
-    Logical builder        Relational builder      Code builder
-    entities, follow       scan, join, latest      repositories, prefilter
-    filter, aggregate      filter, share, limit    structural, top
-           |                      |                      |
-      Logical plan          Relational plan          Code plan
-```
-
-Nothing builds a plan by hand.
-Surfaces build logical plans, the compiler's `plan` phase builds physical plans, and every later phase rewrites through the same builder.
-
-#### Shared tracking owns identities and connections
-
-Three small public traits describe the boundary that every catalog implements:
-
-```rust
-pub trait Catalog: Sized {
-    type Operation;
-    type ValueType;
-    type Error;
-
-    fn identity(&self) -> ModelId;
-}
-
-pub trait Construct: Catalog {
-    type Builder<'catalog>
-    where
-        Self: 'catalog;
-
-    fn builder(&self) -> Self::Builder<'_>;
-}
-
-pub trait Render: Catalog {
-    type Executable;
-
-    fn render(&self, plan: &Plan<Self>) -> Result<Self::Executable, Self::Error>;
-}
-```
-
-The associated types keep engine details local: the logical catalog's operations are graph operations, ClickHouse's are relational operations with SQL types, Orbit Next's are code search operations, and a live connector's are API calls.
-Each catalog chooses its own builder methods through `Construct`, and a logical catalog does not implement `Render` at all.
-Underneath, the tracking layer is generic over the operation language and holds the concrete plan, node, output and scope identities.
-
-Declarations stay owned by the catalog.
-A plan owns its occurrences of them: scanning `gl_user` twice gives two occurrences of one declaration, so an author and a reviewer join without ambiguity.
-Names are lookup conveniences, not identity.
-Each plan also carries the `ModelId` it was built against, so a plan can never be checked against a different snapshot.
-
-Each builder call runs two kinds of checks.
-Tracking proves the structural facts: the handle belongs to this plan, the input is visible in this scope, the referenced output still exists, and a replacement keeps the outputs its consumers need.
-The language supplies the rest: a relational join condition is boolean, an aggregate does not nest another aggregate, a search index supports the requested match mode.
-SQL notions such as cardinality or nullability live in the relational language and are never forced on a search backend.
-
-#### Rewrites use the same builder
-
-A phase changes a plan by building replacements through the same API the planner used:
-
-```rust
-let plan = catalog.rewrite(plan, |q, root| {
-    let rows = q.detach(root)?;
-    let rows = q.limit(rows, Some(fetch_limit), None)?;
-    q.reattach(rows)
-})?;
-```
-
-The rewrite contract is fixed: inputs are visited before their consumers, each shared body is visited once, operations inserted during the pass are not revisited, and a replacement that changes outputs must reconnect its consumers explicitly.
-A phase therefore cannot produce a plan the builder would reject.
-Checked construction proves structure, not meaning: a rewrite can still be wrong, but it cannot be malformed.
-
-#### Planning stays in the compiler
-
-The query engine translates logical plans into physical plans.
-A surface parses text into a logical plan, with name, type and connectivity errors raised as construction errors, so there is no separate validation pass:
-
-```rust
-let statement = surface::gql::parse(text, model.logical())?;
-```
-
-The compiler phases then decide how the query runs:
-
-| Phase | Reads | Produces |
-|---|---|---|
-| `gql_parse` | Query text | Logical plan |
-| `normalize`, `restrict`, `admit`, `tp_bounds` | Logical plan | Logical plan, or a rejection |
-| `plan` | Logical plan | Physical plan for the target backend |
-| `response_policy`, `result_contract`, `paginate`, `materialize`, `settings` | Physical plan | Physical plan |
-| `security`, `security_check` | Physical plan | Physical plan, or a rejection |
-| `codegen` | Physical plan | The backend's executable request |
-
-The `plan` phase decides and builds in one step.
-Its helpers return builder values, such as rows, expressions or shared bodies, never an intermediate plan description that a later helper interprets.
-For the example query, it takes the `author_id` foreign key from the catalog instead of reading the edge table, reads only the current row of each merge request, and leaves `u.username` to hydration:
-
-```rust
-let plan = clickhouse.build(|q| {
-    let requests = q.filter(q.scan(merge_requests, "mr")?, state.eq("opened"))?;
-    let joined = q.join(q.scan(users, "u")?, requests, author_id.eq(user_id))?;
-    q.select(q.limit(joined, Some(10), None)?, [username, title])
-})?;
-```
-
-Security remains its own phase: it inserts ordinary operations through the builder, and a final policy check verifies that every read carries its guard.
-No other phase adds or removes a scope filter.
-
-#### Rendering belongs to the catalog
-
-The catalog that builds a plan also renders it, because the builder and the renderer must agree on what each operation means:
-
-```rust
-let request = clickhouse.render(&plan);
-```
-
-The executable stays backend-specific.
-ClickHouse and DuckDB return SQL with parameters and settings, sharing one relational renderer with a small dialect each.
-Orbit Next and live connectors return their native request objects.
-A backend whose operations need lowering, such as expanding a latest-row read into sort and first-row-per-key, lowers inside its own render path; a catalog whose operations map directly to a native request renders the plan as is.
-
-#### Orbit Next: a structural code query over the wire
-
-Orbit Next keeps repositories in object storage and serves code queries from its code indexing web servers.
-Its catalog speaks in repositories, languages, trigram prefilters and structural matches, and it renders to a request that is sent over gRPC rather than to SQL.
-
-A storage fragment binds `File` to a store on the code indexing connection and declares how each field can be searched:
-
-```yaml
-kind: storage
-package: gitlab.source_code
-store: code
-engine:
-  kind: orbit_code
-  connection: code_indexing
-entities:
-  File:
-    backend:
-      search: {content: [trigram, structural], path: [trigram]}
-```
-
-A caller asks for every call to `compile` in the Rust files of a project:
-
-```plaintext
-MATCH (f:File)
-WHERE f.project_id = 42 AND f.content MATCHES ast('compile($$$ARGS)', 'rust')
-RETURN f.path, match.line, match.ARGS LIMIT 50
-```
-
-The `plan` phase targets the code connection, because that is where `File.content` is searchable, and builds a code plan:
-
-```rust
-let code = model.physical::<OrbitCode>("code_indexing")?;
-let plan = code.build(|q| {
-    let files = q.repositories(code.index("code", "File")?, [project])?;
-    let files = q.languages(files, [Language::Rust])?;
-    let files = q.prefilter(files, Trigrams::of(["compile"]))?;
-    let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)"))?;
-    let hits = q.top(hits, 50)?;
-    q.select(hits, [hits.field("path")?, hits.field("line")?, hits.capture("ARGS")?])
-})?;
-let request = code.render(&plan);
-```
-
-The trigram prefilter is a planning decision: the planner takes the pattern's literal atoms and narrows the candidate files before the structural pass, exactly as it chooses a foreign key over an edge table in a relational plan.
-The rendered request carries the repository set, the prefilter, the ast-grep pattern and the limit. The code indexing web servers read the matching objects, run the pattern and stream back paths, lines and captures.
-
-`File` is namespaced, so the loader gives its code store a guard like any other.
-The security phase turns it into a repository restriction: the request only names repositories in projects whose traversal path the caller can read.
-If the tracking layer ever needed a SQL table or a join to express this plan, it would be too specific.
-
-#### A third-party entity fetched at query time: Slack
-
-A third-party entity does not have to be indexed.
-A Slack message is declared like any other entity, but its store holds no rows: the data is fetched when a query asks for it.
-
-```yaml
-kind: graph
-package: integration.slack
-entities:
-  SlackMessage:
-    label: text
-    properties:
-      id: {type: string, immutable: true}
-      channel: {type: string}
-      author: {type: string}
-      text: {type: string}
-      sent_at: {type: timestamp}
-```
-
-```yaml
-kind: authorization
-package: integration.slack
-entities:
-  SlackMessage: {scope: namespace, role: reporter, delegated: true}
-```
-
-```yaml
-kind: storage
-package: integration.slack
-store: slack
-engine:
-  kind: live
-  connection: data_extraction
-  path_column: traversal_path
-entities:
-  SlackMessage:
-    backend:
-      operation: search.messages
-      filters: [channel, author, sent_at]
-      text: text
-```
-
-The live catalog's plan language is API calls: an operation, the filters that operation can push down, a time window, paging and a limit.
-A filter the operation cannot push down, such as a regular expression on `author`, is a construction error.
-
-```plaintext
-MATCH (m:SlackMessage)
-WHERE m.channel = 'orbit-dev' AND m.text CONTAINS 'deploy'
-RETURN m.author, m.text LIMIT 20
-```
-
-```rust
-let live = model.physical::<Live>("data_extraction")?;
-let plan = live.build(|q| {
-    let messages = q.call(live.operation("slack", "SlackMessage")?)?;
-    let messages = q.filter(messages, channel.eq("orbit-dev").and(text.contains("deploy")))?;
-    q.select(q.limit(messages, 20)?, [author, text])
-})?;
-let request = live.render(&plan);
-```
-
-The request goes to the Data Extraction Service, which holds the integration's credentials and runs the call with the caller's own Slack sign-in. Tokens never leave the service.
-Access is checked twice.
-The connection maps each Slack workspace to the namespace that installed it, so every message carries that namespace's traversal path, and the security phase only sends the request for workspaces in namespaces the caller can read.
-`delegated: true` records that Slack then applies its own visibility through the caller's sign-in, so a message the caller cannot see in Slack never reaches Orbit.
-
-Because the entity is declared in the graph, the rest of the system treats it normally: surfaces resolve its properties, plan tests assert its logical and physical plans, and a relationship such as `SlackMessage -> MergeRequest` can be declared like any other.
-An indexed third-party source, such as Jira, uses the same graph and authorization fragments with a `source` fragment and a ClickHouse store instead of a live one.
-
-#### Crossing connections
-
-One compile targets one connection.
-A query that needs both Slack messages and graph data reads its keys from one connection and fetches the rest through a lookup, as virtual columns do.
-General cross-engine execution needs separate orchestration and is out of scope.
-
-### What a new pipeline needs
-
-| To add | Write | Leave untouched |
-|---|---|---|
-| An entity or tenant overlay | A package | The compiler |
-| A data source to index | A `source` fragment | The indexing engine |
-| A query language | A surface that builds logical plans | The planner |
-| A query type | A planner branch that builds through the target catalog's builder | The surfaces and the renderer |
-| A backend | A `StorageBackend` implementation, its plan language and its renderer | Shared compiler code |
-
-Every pipeline shares the same model, builders and test harness.
-End-to-end plan tests assert three checked stages of each query: the `logical` plan from the surface, the `planned` relational plan straight out of `plan`, and the `emitted` plan after every phase.
+[Packages and catalogs](../architecture/packages-and-catalogs.md) explains how it works.
+[Extending the data model](../development/extending-the-data-model.md) shows the packages and the APIs.
+
+1. **Packages replace the ontology.** A package is a set of fragments of five kinds: graph, authorization, storage, source and service. Every fragment refers to the graph, and the graph knows nothing about tables. The platform, each integration and each tenant overlay ship their own packages.
+2. **The loader does the work once.** It resolves every name to an ID, checks every rule, and fails once with every error and its package. It precomputes the guard of every read from graph reachability. A hash of the packages identifies the model, and every plan carries it.
+3. **Packages load at runtime from a registry keyed by package.** Each package has its own version line. A tenant's model is the active version of every package that applies to it. A new version needs no rebuild and no deploy.
+4. **A version goes live after its backfill.** The migration scope is the diff between the new version's storage and the active one's. The indexing engine of ADR 023 backfills the tables in scope, then the registry promotes the version and the query engine swaps models atomically.
+5. **A backend implements one trait.** A catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. Shared code reads capabilities and never checks a backend name. One compile targets one connection.
+6. **Every plan is built through a checked catalog builder.** There is one logical plan language and one physical plan language per kind of backend. Shared tracking checks every connection as it is made, and rewrites use the same builder, so no phase can leave an invalid plan.
+7. **Surfaces parse, and the compiler plans.** A surface turns text into a logical plan, and construction errors replace the validation pass. The planning phase reads the logical plan and builds the physical plan in one step, with no intermediate plan description.
+8. **Security reads guards in its own phase.** It applies the guard of every read as ordinary plan operations, as a filter or as a precondition on the request. A final check proves that every read carries its guard.
+9. **The catalog renders its own plans.** The catalog that builds a plan renders it, into SQL with parameters or into the backend's native request.
+10. **Plans are tested in three stages.** Plan tests assert the logical plan, the physical plan right after planning, and the physical plan after every phase.
 
 ## Consequences
 
-### Benefits
+- A package that fails its load checks is rejected, and the previous model keeps serving. Publishing must run the same checks, so authors see the errors first.
+- The loader is strict. A fragment cannot carry unknown fields for later use.
+- Every namespaced entity needs a guard, so its package must declare a path column, an anchor foreign key or a redaction rule.
+- A change to storage goes live only after its backfill. A change that only adds query metadata takes effect on the next load.
+- The server holds each model snapshot until the compiles that use it finish, and caches keyed by the model hash evict old snapshots.
+- A new backend brings its own plan language and renderer, but it reuses the surfaces, the shared tracking and the phases.
 
-The ontology's concerns separate, so graph, storage, access and services evolve independently, and a new entity, source or tenant overlay is a package loaded at runtime rather than a compiler change or a deploy.
+These items are out of scope:
 
-Validation happens once per load: a bad package is rejected with every error reported before it can serve a query, and the compiler reads facts by ID instead of searching by name.
-
-Plan construction is consistent across pipelines.
-Each pass is a checked rewrite and cannot leave an invalid plan behind.
-The compiler keeps one representation per layer, and `Input`, `QueryPlan`, the relation graph, the SQL AST and both dialect emitters go away.
-
-Backends are pluggable, and planning reads capabilities rather than backend names, so one pipeline serves relational backends such as ClickHouse and DuckDB, the Orbit Next code service and live third-party connectors.
-
-### Costs and constraints
-
-- A package that fails its load checks is rejected and the previous model keeps serving. Package publishing needs the same validation up front, so authors see the errors before the server does.
-- The loader is strict: a fragment cannot carry unknown fields for later use.
-- Every namespaced entity needs a guard, which means its package must declare a path column, an anchor foreign key or a redaction rule.
-- A package change that alters physical storage needs a new schema version, which the migration path builds before the new model goes live. A change that only adds query metadata takes effect on the next load.
-- The server must hold every active model snapshot until the compiles that use it finish, and caches keyed by `ModelId` must evict old snapshots.
-
-### Out of scope
-
-- The indexing engine (ADR 023, [!3333](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3333))
+- The indexing engine, which ADR 023 covers
 - Connectors for third-party data
+- Execution across connections, beyond lookups
 - Cost-based join ordering ([ADR 016](016_column_statistics_for_join_ordering.md))
 
-## Alternatives considered
+## Why not the alternatives
 
 ### Keep the ontology and add accessors
 
-Each new source would add accessors and name checks to each compiler phase, storage and access would stay mixed into the graph files, and a third party still could not add an entity without editing platform files.
+Each new source would add accessors and name checks to each compiler phase.
+Storage, sources and access would stay mixed into the graph files, and a third party still could not add an entity without editing platform files.
 
-### Keep a single SQL AST for every pass
+### Keep one SQL AST for every pass
 
-Passes would keep mutating AST fields without any validation, each backend would keep its own emitter, and a non-SQL target would have nothing to compile to.
-Every new pipeline would repeat the same plumbing.
+Passes would keep editing AST fields that nothing checks, and each backend would keep its own emitter.
+A backend that is not SQL, such as Orbit Next, would have nothing to compile to.
 
 ### Derive the new model from the ontology at runtime
 
-A converter could build the model from the ontology files, but the ontology would remain the source of truth, with the same mixed concerns and the same late, name-based checks.
-
-## What it enables
-
-The model makes a number of smaller features cheap:
-
-- **Relationship attributes.** A relationship can declare typed attributes, such as the branch on a `CALLS` edge, that queries filter and select like properties.
-- **Tenant overlays.** Agent memory adds custom node types as a package scoped to one tenant, with its own authorization entries.
-- **Service lookups.** A service fragment declares properties served by an external service, such as a diff from Gitaly. The engine reads the keys from the graph and then calls the service.
-- **Structural code search.** Orbit Next answers ast-grep queries over the wire through its own plan language on the same tracking layer.
-- **Live third-party entities.** A connector such as Slack declares entities that are fetched at query time under the caller's own sign-in, with no indexing.
-- **Shared reads.** The planner marks a read that several parts of a query use, and one backend-generic rule decides whether it becomes a CTE or stays inline.
-- **Better errors.** Unknown names list the valid candidates and reversed arrows get a hint. Both come from the builder, so every surface gets them for free.
-- **Layered plan tests.** Tests assert the logical and relational plans separately, before any SQL is rendered.
+A converter could build the model from the ontology files.
+The ontology would stay the source of truth, with the same mixed concerns and the same late, name-based checks.
 
 ## References
 
-- [Query data model crate](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/crates/query-data-model)
+- [Packages and catalogs](../architecture/packages-and-catalogs.md)
+- [Extending the data model](../development/extending-the-data-model.md)
 - [MR !1967: ontology graph and reachability](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1967)
 - [ADR 000: ClickHouse graph storage](000_clickhouse_graph_storage.md)
 - [ADR 017: Clone-based non-blocking schema migrations](017_clone_based_non_blocking_migrations.md)
+- [ADR 023: A self-contained engine for indexing work](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3333)
 - [Orbit Code Indexing v2 with Object Store](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/16)
 - [Support third-party data sources in Orbit](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/20)

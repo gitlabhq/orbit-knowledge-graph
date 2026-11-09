@@ -58,6 +58,8 @@ covers the setup.
 
 ## More pages
 
+- [Packages and catalogs](packages-and-catalogs.md) describes how packages
+  define the graph and how every query plan is built.
 - [Orbit CLI](orbit-cli.md) brings Orbit to your terminal and to your AI agents.
 - [Testing](../testing/README.md) shows how we prove a change works before it
   ships.
