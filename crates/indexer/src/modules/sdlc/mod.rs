@@ -33,6 +33,7 @@ use datalake::{Datalake, DatalakeQuery};
 use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
 use orbit_log_fields::info;
+use orbit_migrations::completion::SIPHON_SOURCE;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use pipeline::Pipeline;
 
@@ -88,6 +89,15 @@ pub async fn register_handlers(
     transform::system_notes::register(
         &mut transform_registry,
         Arc::clone(&datalake),
+        catalog
+            .model()
+            .sources()
+            .source_named(SIPHON_SOURCE)
+            .ok_or_else(|| {
+                HandlerInitError::new(std::io::Error::other(format!(
+                    "the model declares no {SIPHON_SOURCE} source"
+                )))
+            })?,
         catalog.default_edge_table().ok_or_else(|| {
             HandlerInitError::new(std::io::Error::other(
                 "the model declares no default edge table",

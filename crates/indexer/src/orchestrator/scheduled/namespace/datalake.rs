@@ -9,6 +9,7 @@ use futures::StreamExt;
 use orbit_log_fields::{error, warn};
 use orbit_utils::traversal_path::{TOP_LEVEL_PREFIX_REGEX, TraversalPath};
 use query_data_model::catalog::Sources;
+use query_data_model::catalog::sources::DataSource;
 use query_data_model::catalog::sources::{PathResolution, ReindexTrigger};
 
 use crate::clickhouse::{ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT};
@@ -56,11 +57,12 @@ impl DatalakeChangeDetector {
     pub(super) fn new(
         datalake: ArrowClickHouseClient,
         sources: &Sources,
+        siphon: &DataSource,
         metrics: ScheduledTaskMetrics,
     ) -> Self {
         Self {
             datalake: Arc::new(datalake),
-            query: NamespaceChangeQuery::from_sources(sources),
+            query: NamespaceChangeQuery::new(sources.reindex_triggers().iter().cloned(), siphon),
             metrics,
         }
     }
@@ -229,22 +231,22 @@ struct NamespaceChangeQuery {
 }
 
 impl NamespaceChangeQuery {
-    fn from_sources(sources: &Sources) -> Self {
-        Self::new(sources.reindex_triggers().iter().cloned())
-    }
-
-    fn new(reindex_sources: impl IntoIterator<Item = ReindexTrigger>) -> Self {
+    fn new(reindex_sources: impl IntoIterator<Item = ReindexTrigger>, siphon: &DataSource) -> Self {
         let sources: BTreeSet<ReindexTrigger> = reindex_sources.into_iter().collect();
         let branches = sources
             .iter()
             .map(|source| BranchQuery {
                 table: source.table.clone(),
                 target: source.target.clone(),
-                sql: render_change_query(CHANGE_QUERY_SQL, &BTreeSet::from([source.clone()])),
+                sql: render_change_query(
+                    CHANGE_QUERY_SQL,
+                    &BTreeSet::from([source.clone()]),
+                    siphon,
+                ),
             })
             .collect();
         Self {
-            combined_sql: render_change_query(CHANGE_QUERY_SQL, &sources),
+            combined_sql: render_change_query(CHANGE_QUERY_SQL, &sources, siphon),
             branches,
         }
     }
@@ -254,6 +256,7 @@ impl NamespaceChangeQuery {
 pub(super) fn render_change_query(
     select: &str,
     reindex_sources: &BTreeSet<ReindexTrigger>,
+    siphon: &DataSource,
 ) -> String {
     let branches = reindex_sources
         .iter()
@@ -262,7 +265,10 @@ pub(super) fn render_change_query(
         .join("\nUNION ALL\n");
 
     format!("{CHANGES_CTE_SQL}{select}")
-        .replace("{{enabled_namespaces}}", resolved_enabled_namespaces_sql())
+        .replace(
+            "{{enabled_namespaces}}",
+            &resolved_enabled_namespaces_sql(siphon),
+        )
         .replace("{{branches}}", &branches)
 }
 
@@ -301,11 +307,15 @@ pub(super) trait EnabledNamespaceReader: Send + Sync {
 
 pub(super) struct DatalakeEnabledNamespaceReader {
     datalake: ArrowClickHouseClient,
+    sql: String,
 }
 
 impl DatalakeEnabledNamespaceReader {
-    pub(super) fn new(datalake: ArrowClickHouseClient) -> Self {
-        Self { datalake }
+    pub(super) fn new(datalake: ArrowClickHouseClient, siphon: &DataSource) -> Self {
+        Self {
+            datalake,
+            sql: resolved_enabled_namespaces_sql(siphon),
+        }
     }
 }
 
@@ -314,7 +324,7 @@ impl EnabledNamespaceReader for DatalakeEnabledNamespaceReader {
     async fn enabled_namespaces(&self) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
         let batches = self
             .datalake
-            .query(resolved_enabled_namespaces_sql())
+            .query(&self.sql)
             .fetch_arrow()
             .await
             .map_err(TaskError::new)?;
@@ -347,6 +357,7 @@ mod tests {
 
     use super::*;
     use crate::orchestrator::dispatch::enabled_namespaces::ENABLED_NAMESPACE_TABLE;
+    use crate::testkit::siphon_source;
 
     fn column_source(table: &str) -> ReindexTrigger {
         ReindexTrigger {
@@ -436,7 +447,7 @@ mod tests {
     ) -> DatalakeChangeDetector {
         DatalakeChangeDetector {
             datalake: client,
-            query: NamespaceChangeQuery::new(sources),
+            query: NamespaceChangeQuery::new(sources, &siphon_source()),
             metrics: ScheduledTaskMetrics::new(),
         }
     }
@@ -515,7 +526,7 @@ mod tests {
 
     #[test]
     fn change_query_filters_enabled_namespaces() {
-        let query = NamespaceChangeQuery::new([column_source("work_items")]);
+        let query = NamespaceChangeQuery::new([column_source("work_items")], &siphon_source());
         assert!(query.combined_sql.contains("INNER JOIN enabled"));
         assert!(
             query
@@ -526,7 +537,7 @@ mod tests {
 
     #[test]
     fn change_query_uses_watermark_bounds() {
-        let query = NamespaceChangeQuery::new([column_source("work_items")]);
+        let query = NamespaceChangeQuery::new([column_source("work_items")], &siphon_source());
         assert!(
             query
                 .combined_sql
@@ -541,7 +552,7 @@ mod tests {
 
     #[test]
     fn change_query_extracts_root_path() {
-        let query = NamespaceChangeQuery::new([column_source("work_items")]);
+        let query = NamespaceChangeQuery::new([column_source("work_items")], &siphon_source());
         assert!(
             query
                 .combined_sql
@@ -557,7 +568,7 @@ mod tests {
 
     #[test]
     fn change_query_renders_expected_sql_shape() {
-        let query = NamespaceChangeQuery::new([column_source("work_items")]);
+        let query = NamespaceChangeQuery::new([column_source("work_items")], &siphon_source());
 
         let expected = format!(
             r#"WITH
@@ -574,22 +585,25 @@ mod tests {
 SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
 FROM changed
 INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#,
-            enabled = resolved_enabled_namespaces_sql()
+            enabled = resolved_enabled_namespaces_sql(&siphon_source())
         );
         assert_eq!(query.combined_sql, expected);
     }
 
     #[test]
     fn change_query_renders_dictionary_lookup() {
-        let query = NamespaceChangeQuery::new([ReindexTrigger {
-            table: "siphon_projects".to_string(),
-            target: "Project".to_string(),
-            traversal_path: PathResolution::Dictionary {
-                dictionary: "project_traversal_paths_dict".to_string(),
-                key_column: "id".to_string(),
-            },
-            watermark: "_siphon_watermark".to_string(),
-        }]);
+        let query = NamespaceChangeQuery::new(
+            [ReindexTrigger {
+                table: "siphon_projects".to_string(),
+                target: "Project".to_string(),
+                traversal_path: PathResolution::Dictionary {
+                    dictionary: "project_traversal_paths_dict".to_string(),
+                    key_column: "id".to_string(),
+                },
+                watermark: "_siphon_watermark".to_string(),
+            }],
+            &siphon_source(),
+        );
         assert!(query.combined_sql.contains(
             "dictGetOrDefault('project_traversal_paths_dict', 'traversal_path', toUInt64(id), '0/')"
         ));
@@ -597,15 +611,19 @@ INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#,
 
     #[test]
     fn change_query_combines_sources_with_union_all() {
-        let query =
-            NamespaceChangeQuery::new([column_source("work_items"), column_source("siphon_notes")]);
+        let query = NamespaceChangeQuery::new(
+            [column_source("work_items"), column_source("siphon_notes")],
+            &siphon_source(),
+        );
         assert!(query.combined_sql.contains("UNION ALL"));
     }
 
     #[test]
     fn each_branch_query_covers_exactly_one_source() {
-        let query =
-            NamespaceChangeQuery::new([column_source("work_items"), column_source("siphon_notes")]);
+        let query = NamespaceChangeQuery::new(
+            [column_source("work_items"), column_source("siphon_notes")],
+            &siphon_source(),
+        );
         assert_eq!(query.branches.len(), 2);
         for branch in &query.branches {
             assert!(!branch.sql.contains("UNION ALL"));
@@ -616,8 +634,10 @@ INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#,
 
     #[test]
     fn duplicate_reindex_sources_render_once() {
-        let query =
-            NamespaceChangeQuery::new([column_source("work_items"), column_source("work_items")]);
+        let query = NamespaceChangeQuery::new(
+            [column_source("work_items"), column_source("work_items")],
+            &siphon_source(),
+        );
         assert_eq!(query.combined_sql.matches("FROM work_items").count(), 1);
         assert_eq!(query.branches.len(), 1);
     }

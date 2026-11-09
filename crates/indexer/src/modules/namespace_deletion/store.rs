@@ -13,37 +13,11 @@ use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
 
-use std::sync::LazyLock;
-
+use query_data_model::catalog::sources::DataSource;
 use query_data_model::{Catalog, ClickHouse};
 
 use super::lower::{self, DeletionStatement, ReconcileStatement};
 use crate::checkpoint::namespace_position_key;
-
-static IS_NAMESPACE_STILL_DELETED: LazyLock<String> = LazyLock::new(|| {
-    let (version, del) = (
-        ontology::siphon_version_column(),
-        ontology::siphon_deleted_column(),
-    );
-    format!(
-        "SELECT argMax({del}, {version}) AS is_deleted \
-         FROM siphon_knowledge_graph_enabled_namespaces \
-         WHERE root_namespace_id = {{namespace_id:Int64}}"
-    )
-});
-
-static ENABLED_NAMESPACE_ROOTS_QUERY: LazyLock<String> = LazyLock::new(|| {
-    let (version, del) = (
-        ontology::siphon_version_column(),
-        ontology::siphon_deleted_column(),
-    );
-    format!(
-        "SELECT argMax(traversal_path, {version}) AS traversal_path \
-         FROM siphon_knowledge_graph_enabled_namespaces \
-         GROUP BY root_namespace_id, id \
-         HAVING argMax({del}, {version}) = false AND traversal_path != ''"
-    )
-});
 
 const CURRENT_ROUTES_UNDER_ROOT: &str = r#"
 SELECT DISTINCT traversal_path FROM project_namespace_traversal_paths FINAL
@@ -53,14 +27,29 @@ SELECT DISTINCT traversal_path FROM namespace_traversal_paths FINAL
 WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
-static DELETED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
-    let (version, watermark, del) = (
-        ontology::siphon_version_column(),
-        ontology::siphon_watermark_column(),
-        ontology::siphon_deleted_column(),
-    );
-    format!(
-        r#"
+struct SiphonQueries {
+    still_deleted: String,
+    enabled_roots: String,
+    deleted_namespaces: String,
+}
+
+impl SiphonQueries {
+    fn new(source: &DataSource) -> Self {
+        let (version, watermark, del) = (&source.version, &source.watermark, &source.deleted);
+        Self {
+            still_deleted: format!(
+                "SELECT argMax({del}, {version}) AS is_deleted \
+                 FROM siphon_knowledge_graph_enabled_namespaces \
+                 WHERE root_namespace_id = {{namespace_id:Int64}}"
+            ),
+            enabled_roots: format!(
+                "SELECT argMax(traversal_path, {version}) AS traversal_path \
+                 FROM siphon_knowledge_graph_enabled_namespaces \
+                 GROUP BY root_namespace_id, id \
+                 HAVING argMax({del}, {version}) = false AND traversal_path != ''"
+            ),
+            deleted_namespaces: format!(
+                r#"
 SELECT
     namespaces.root_namespace_id AS namespace_id,
     argMax(namespaces.traversal_path, namespaces.{version}) AS traversal_path,
@@ -72,8 +61,10 @@ GROUP BY namespaces.root_namespace_id, namespaces.id
 HAVING argMax(namespaces.{del}, namespaces.{version}) = true
    AND argMax(namespaces.traversal_path, namespaces.{version}) != ''
 "#
-    )
-});
+            ),
+        }
+    }
+}
 
 fn mark_deletion_complete_sql() -> String {
     let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);
@@ -253,6 +244,7 @@ pub struct ClickHouseNamespaceDeletionStore {
     graph: Arc<ArrowClickHouseClient>,
     deletion_statements: Vec<DeletionStatement>,
     reconcile_statements: Vec<ReconcileStatement>,
+    siphon: SiphonQueries,
 }
 
 impl ClickHouseNamespaceDeletionStore {
@@ -260,12 +252,14 @@ impl ClickHouseNamespaceDeletionStore {
         datalake: Arc<ArrowClickHouseClient>,
         graph: Arc<ArrowClickHouseClient>,
         catalog: &Catalog<ClickHouse>,
+        siphon: &DataSource,
     ) -> Self {
         Self {
             datalake,
             graph,
             deletion_statements: lower::build_deletion_statements(catalog),
             reconcile_statements: lower::build_reconcile_statements(catalog),
+            siphon: SiphonQueries::new(siphon),
         }
     }
 
@@ -342,7 +336,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
     ) -> Result<bool, NamespaceDeletionStoreError> {
         let batches = self
             .datalake
-            .query(&IS_NAMESPACE_STILL_DELETED)
+            .query(&self.siphon.still_deleted)
             .param("namespace_id", namespace_id)
             .fetch_arrow()
             .await
@@ -389,7 +383,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
     ) -> Result<Vec<TraversalPath>, NamespaceDeletionStoreError> {
         let batches = self
             .datalake
-            .query(&ENABLED_NAMESPACE_ROOTS_QUERY)
+            .query(&self.siphon.enabled_roots)
             .fetch_arrow()
             .await
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
@@ -470,7 +464,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
     ) -> Result<Vec<DeletedNamespaceEntry>, NamespaceDeletionStoreError> {
         let batches = self
             .datalake
-            .query(&DELETED_NAMESPACES_QUERY)
+            .query(&self.siphon.deleted_namespaces)
             .param("last_watermark", last_watermark)
             .param("watermark", watermark)
             .fetch_arrow()
@@ -561,22 +555,17 @@ mod sql_tests {
 
     #[test]
     fn siphon_state_uses_version_and_windows_use_watermark() {
-        assert!(
-            IS_NAMESPACE_STILL_DELETED.contains("argMax(_siphon_deleted, _siphon_replicated_at)")
-        );
-        assert!(DELETED_NAMESPACES_QUERY.contains(
+        let queries = SiphonQueries::new(&crate::testkit::siphon_source());
+        let (still_deleted, deleted) = (&queries.still_deleted, &queries.deleted_namespaces);
+        assert!(still_deleted.contains("argMax(_siphon_deleted, _siphon_replicated_at)"));
+        assert!(deleted.contains(
             "argMax(namespaces.traversal_path, namespaces._siphon_replicated_at) AS traversal_path"
         ));
-        assert!(DELETED_NAMESPACES_QUERY.contains(
+        assert!(deleted.contains(
             "HAVING argMax(namespaces._siphon_deleted, namespaces._siphon_replicated_at) = true"
         ));
-        assert!(
-            DELETED_NAMESPACES_QUERY
-                .contains("namespaces._siphon_watermark > {last_watermark:String}")
-        );
-        assert!(
-            DELETED_NAMESPACES_QUERY.contains("namespaces._siphon_watermark <= {watermark:String}")
-        );
+        assert!(deleted.contains("namespaces._siphon_watermark > {last_watermark:String}"));
+        assert!(deleted.contains("namespaces._siphon_watermark <= {watermark:String}"));
     }
 }
 

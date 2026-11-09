@@ -241,6 +241,14 @@ pub async fn run_dispatcher(
         &release.packages().load()?,
     )?;
     let code_tables = modules::code::config::CodeTableNames::from_catalog(&candidate)?;
+    let siphon = candidate
+        .model()
+        .sources()
+        .source_named(orbit_migrations::completion::SIPHON_SOURCE)
+        .cloned()
+        .ok_or(DispatcherError::MissingSource(
+            orbit_migrations::completion::SIPHON_SOURCE,
+        ))?;
     let clients = ClickHouseClients::new(&config.graph, &config.datalake);
 
     let services = orchestrator::scheduled::connect(&config.nats).await?;
@@ -341,6 +349,7 @@ pub async fn run_dispatcher(
             deletion_datalake,
             Arc::clone(&deletion_graph),
             &candidate,
+            &siphon,
         ));
     let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
 
@@ -351,6 +360,7 @@ pub async fn run_dispatcher(
         metrics.clone(),
         campaign.clone(),
         config.schedule.tasks.code_backfill.publish_window,
+        &siphon,
     ));
 
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
@@ -370,6 +380,7 @@ pub async fn run_dispatcher(
             config.schedule.tasks.namespace.clone(),
             campaign.clone(),
             candidate.model().sources(),
+            &siphon,
         )),
         Box::new(CodeBackfillSweep::new(
             backfill.clone(),

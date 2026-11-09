@@ -84,6 +84,7 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
             .namespace,
         Arc::new(indexer::campaign::CampaignState::new()),
         model.sources(),
+        &indexer::testkit::siphon_source(),
     );
 
     dispatcher.run().await.unwrap();
@@ -129,6 +130,7 @@ async fn dispatch_enabled_namespace_cdc(
             .tasks
             .code_backfill
             .publish_window,
+        &indexer::testkit::siphon_source(),
     ));
     let route = EnabledNamespacesRoute::new(
         NamespaceIndexingDispatch::new(services.nats),

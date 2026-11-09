@@ -15,24 +15,35 @@
 //! Both queries are parameterized with named placeholders (`{name:Type}`) so
 //! they can be bound via [`ArrowQuery::param`] without string interpolation.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
-
 use super::parse::{RefKind, Reference};
 use orbit_utils::traversal_path::TraversalPath;
-
-fn version() -> &'static str {
-    ontology::siphon_version_column()
-}
-
-fn del() -> &'static str {
-    ontology::siphon_deleted_column()
-}
+use query_data_model::catalog::sources::DataSource;
+use std::collections::{HashMap, HashSet};
 
 /// The clickhouse crate serializes params into the URL query string, so these
 /// lookup arrays must stay bounded independently of Arrow block size.
 pub(super) fn lookup_chunks<T>(items: &[T], batch_size: usize) -> impl Iterator<Item = &[T]> {
     items.chunks(batch_size.max(1))
+}
+
+/// The hand-written lookups, rendered once for the datalake source's replication columns.
+pub struct ResolveSql {
+    pub routes: String,
+    pub project_paths: String,
+    pub merge_requests: String,
+    pub work_items: String,
+}
+
+impl ResolveSql {
+    pub fn new(source: &DataSource) -> Self {
+        let (version, del) = (source.version.as_str(), source.deleted.as_str());
+        Self {
+            routes: routes_sql(version, del),
+            project_paths: project_paths_sql(version, del),
+            merge_requests: merge_requests_sql(version, del),
+            work_items: work_items_sql(version, del),
+        }
+    }
 }
 
 /// Batch path -> route lookup. Params: `{paths:Array(String)}`. Returns
@@ -43,8 +54,7 @@ pub(super) fn lookup_chunks<T>(items: &[T], batch_size: usize) -> impl Iterator<
 /// top-level namespace (the leading sort-key column) so it's a range scan, not
 /// a full datalake scan. v1 therefore resolves only same-top-level references;
 /// cross-top-level is deferred to the dictionary lever (ADR 013).
-pub static ROUTES_SQL: LazyLock<String> = LazyLock::new(|| {
-    let (version, del) = (version(), del());
+fn routes_sql(version: &str, del: &str) -> String {
     format!(
         "SELECT source_id, path, traversal_path \
          FROM (SELECT id, source_id, path, \
@@ -57,15 +67,14 @@ pub static ROUTES_SQL: LazyLock<String> = LazyLock::new(|| {
          GROUP BY id, source_id, path) \
          WHERE {del} = false"
     )
-});
+}
 
 /// Reverse routes lookup (project `source_id` -> path), to give each note a
 /// default project path for its unqualified refs. Keyed on `source_id` so it
-/// complements [`ROUTES_SQL`]; same `argMax` dedup and `root_prefix` bounding.
+/// complements [`ResolveSql::routes`]; same `argMax` dedup and `root_prefix` bounding.
 /// Params: `{root_prefix:String}`, `{source_ids:Array(Int64)}`. Returns
 /// `(source_id, path)`.
-pub static PROJECT_PATHS_SQL: LazyLock<String> = LazyLock::new(|| {
-    let (version, del) = (version(), del());
+fn project_paths_sql(version: &str, del: &str) -> String {
     format!(
         "SELECT source_id, path \
          FROM (SELECT id, source_id, path, \
@@ -77,17 +86,16 @@ pub static PROJECT_PATHS_SQL: LazyLock<String> = LazyLock::new(|| {
          GROUP BY id, source_id, path) \
          WHERE {del} = false"
     )
-});
+}
 
 /// Batch `(target_project_id, iid)` -> MR id lookup. Same `argMax` dedup and
-/// `root_prefix` bounding as [`ROUTES_SQL`].
+/// `root_prefix` bounding as [`ResolveSql::routes`].
 ///
 /// `{project_ids:Array(Int64)}` and `{iids:Array(Int64)}` are passed as two
 /// index-aligned flat arrays and `arrayZip`-ed server-side, because the JSON
 /// param channel serializes a tuple as `[200,5]`, which ClickHouse rejects for
 /// `Array(Tuple(Int64, Int64))`. Returns `(id, target_project_id, iid)`.
-pub static MERGE_REQUESTS_SQL: LazyLock<String> = LazyLock::new(|| {
-    let (version, del) = (version(), del());
+fn merge_requests_sql(version: &str, del: &str) -> String {
     format!(
         "SELECT id, target_project_id, iid \
          FROM (SELECT id, target_project_id, iid, \
@@ -98,12 +106,11 @@ pub static MERGE_REQUESTS_SQL: LazyLock<String> = LazyLock::new(|| {
          GROUP BY id, target_project_id, iid) \
          WHERE {del} = false"
     )
-});
+}
 
-/// Like [`MERGE_REQUESTS_SQL`] but keyed on `project_id`. Returns
+/// Like [`ResolveSql::merge_requests`] but keyed on `project_id`. Returns
 /// `(id, project_id, iid)`.
-pub static WORK_ITEMS_SQL: LazyLock<String> = LazyLock::new(|| {
-    let (version, del) = (version(), del());
+fn work_items_sql(version: &str, del: &str) -> String {
     format!(
         "SELECT id, project_id, iid \
          FROM (SELECT id, project_id, iid, \
@@ -114,7 +121,7 @@ pub static WORK_ITEMS_SQL: LazyLock<String> = LazyLock::new(|| {
          GROUP BY id, project_id, iid) \
          WHERE {del} = false"
     )
-});
+}
 
 /// `ROUTES_SQL` filters `source_type = 'Project'`, so every row here is a
 /// project route.
@@ -265,14 +272,18 @@ impl ResolvedIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::LazyLock;
+
+    static SQL: LazyLock<ResolveSql> =
+        LazyLock::new(|| ResolveSql::new(&crate::testkit::siphon_source()));
     use crate::modules::sdlc::transform::system_notes::parse::{Action, extract};
 
     const TEST_RESOLVE_LOOKUP_BATCH_SIZE: usize = 1_000;
 
     #[test]
     fn routes_sql_uses_named_parameters() {
-        assert!(ROUTES_SQL.contains("{paths:Array(String)}"));
-        assert!(ROUTES_SQL.contains("path IN"));
+        assert!(SQL.routes.contains("{paths:Array(String)}"));
+        assert!(SQL.routes.contains("path IN"));
     }
 
     #[test]
@@ -301,27 +312,27 @@ mod tests {
 
     #[test]
     fn resolver_sql_is_bounded_to_source_top_level_namespace() {
-        for sql in [&*PROJECT_PATHS_SQL, &*MERGE_REQUESTS_SQL, &*WORK_ITEMS_SQL] {
+        for sql in [&SQL.project_paths, &SQL.merge_requests, &SQL.work_items] {
             assert!(
                 sql.contains("startsWith(traversal_path, {root_prefix:String})"),
                 "resolver query must be bounded by the source top-level prefix: {sql}"
             );
         }
         assert!(
-            ROUTES_SQL.contains("startsWith(siphon_routes.traversal_path, {root_prefix:String})"),
+            SQL.routes
+                .contains("startsWith(siphon_routes.traversal_path, {root_prefix:String})"),
             "routes query must bound on the raw column: {}",
-            *ROUTES_SQL
+            SQL.routes
         );
     }
 
     #[test]
     fn resolver_sql_dedups_replacing_merge_tree_by_pg_pkey() {
-        // Regression guard for the cross-project `0/` bug (see ROUTES_SQL docs).
         for sql in [
-            &*ROUTES_SQL,
-            &*PROJECT_PATHS_SQL,
-            &*MERGE_REQUESTS_SQL,
-            &*WORK_ITEMS_SQL,
+            &SQL.routes,
+            &SQL.project_paths,
+            &SQL.merge_requests,
+            &SQL.work_items,
         ] {
             assert!(sql.contains("GROUP BY id"), "missing GROUP BY id in: {sql}");
             assert!(
@@ -334,32 +345,36 @@ mod tests {
             );
         }
         assert!(
-            ROUTES_SQL.contains("argMax(traversal_path, _siphon_replicated_at)"),
+            SQL.routes
+                .contains("argMax(traversal_path, _siphon_replicated_at)"),
             "routes must take the latest traversal_path so a stale 0/ can't win"
         );
     }
 
     #[test]
     fn merge_requests_sql_uses_tuple_in_list() {
-        assert!(MERGE_REQUESTS_SQL.contains("{project_ids:Array(Int64)}"));
-        assert!(MERGE_REQUESTS_SQL.contains("{iids:Array(Int64)}"));
-        assert!(MERGE_REQUESTS_SQL.contains("(target_project_id, iid) IN arrayZip("));
+        assert!(SQL.merge_requests.contains("{project_ids:Array(Int64)}"));
+        assert!(SQL.merge_requests.contains("{iids:Array(Int64)}"));
+        assert!(
+            SQL.merge_requests
+                .contains("(target_project_id, iid) IN arrayZip(")
+        );
     }
 
     #[test]
     fn routes_sql_filters_to_project_routes_at_query_time() {
-        assert!(ROUTES_SQL.contains("source_type = 'Project'"));
+        assert!(SQL.routes.contains("source_type = 'Project'"));
         assert!(
-            !ROUTES_SQL.contains("'Namespace'"),
+            !SQL.routes.contains("'Namespace'"),
             "non-project routes must not be fetched"
         );
     }
 
     #[test]
     fn work_items_sql_uses_project_id() {
-        assert!(WORK_ITEMS_SQL.contains("{project_ids:Array(Int64)}"));
-        assert!(WORK_ITEMS_SQL.contains("{iids:Array(Int64)}"));
-        assert!(WORK_ITEMS_SQL.contains("(project_id, iid) IN arrayZip("));
+        assert!(SQL.work_items.contains("{project_ids:Array(Int64)}"));
+        assert!(SQL.work_items.contains("{iids:Array(Int64)}"));
+        assert!(SQL.work_items.contains("(project_id, iid) IN arrayZip("));
     }
 
     #[test]

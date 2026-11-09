@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use orbit_arrow::ArrowUtils;
 use orbit_log_fields::{info, warn};
 use orbit_migrations::catalog::OntologyCatalog;
+use orbit_migrations::completion::SIPHON_SOURCE;
 use orbit_migrations::schema::Schema;
 use orbit_migrations::scope::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
 use orbit_migrations::version::{
@@ -12,6 +13,7 @@ use orbit_migrations::version::{
 };
 use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use orbit_utils::traversal_path::{TopLevelSplit, TraversalPath};
+use query_data_model::catalog::sources::DataSource;
 use query_data_model::{Catalog, ClickHouse};
 
 use crate::campaign::CampaignState;
@@ -23,8 +25,8 @@ use crate::schema::metrics::CompletionMetrics;
 const MIGRATION_LOCK_KEY: &str = "schema_migration";
 const LOCK_TTL: std::time::Duration = std::time::Duration::from_secs(120);
 
-static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
-    let del = ontology::siphon_deleted_column();
+fn count_code_eligible_projects_sql(source: &DataSource) -> String {
+    let del = &source.deleted;
     let top = orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
     format!(
         "SELECT count(DISTINCT p.id) AS ns_count \
@@ -34,7 +36,7 @@ static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
                SELECT traversal_path FROM siphon_knowledge_graph_enabled_namespaces \
                WHERE {del} = false AND match(traversal_path, '{top}$'))"
     )
-});
+}
 
 static COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED: LazyLock<String> = LazyLock::new(|| {
     let top = orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
@@ -383,16 +385,27 @@ impl MigrationCompletionChecker {
         Ok((eligible_projects, indexed_projects, coverage))
     }
 
+    fn siphon(&self) -> Result<&DataSource, String> {
+        self.data_model
+            .model()
+            .sources()
+            .source_named(SIPHON_SOURCE)
+            .ok_or_else(|| format!("the model declares no {SIPHON_SOURCE} source"))
+    }
+
     async fn fetch_enabled_top_level_namespaces(&self) -> Result<TopLevelSplit, String> {
-        orbit_migrations::completion::fetch_enabled_top_level_namespaces(&self.datalake)
-            .await
-            .map_err(|e| format!("fetch enabled namespaces: {e}"))
+        orbit_migrations::completion::fetch_enabled_top_level_namespaces(
+            &self.datalake,
+            self.siphon()?,
+        )
+        .await
+        .map_err(|e| format!("fetch enabled namespaces: {e}"))
     }
 
     async fn count_eligible_projects(&self) -> Result<u64, String> {
         let batches = self
             .datalake
-            .query(&COUNT_CODE_ELIGIBLE_PROJECTS)
+            .query(&count_code_eligible_projects_sql(self.siphon()?))
             .fetch_arrow()
             .await
             .map_err(|e| e.to_string())?;

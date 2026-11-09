@@ -16,9 +16,12 @@ async fn migration_gate_skips_a_disabled_namespace_before_the_delete_merges() {
     let context = TestContext::new(&[SIPHON_SCHEMA_SQL]).await;
     disable_one_of_two_namespaces(&context).await;
 
-    let split = fetch_enabled_top_level_namespaces(&context.create_client())
-        .await
-        .unwrap();
+    let split = fetch_enabled_top_level_namespaces(
+        &context.create_client(),
+        &indexer::testkit::siphon_source(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(split.ids, [ENABLED]);
 }
@@ -33,6 +36,7 @@ async fn moved_entity_reconcile_skips_a_disabled_namespace_before_the_delete_mer
         Arc::new(context.create_client()),
         Arc::new(context.create_client()),
         &catalog,
+        &indexer::testkit::siphon_source(),
     );
 
     let roots = store.enabled_namespace_roots().await.unwrap();

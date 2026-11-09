@@ -40,6 +40,7 @@ use crate::modules::sdlc::transform::{
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::catalog::sources::DataSource;
 
 /// Registry key for this transform; also the `etl.transform` value in
 /// `config/ontology/derived/core/system_note.yaml`.
@@ -48,8 +49,7 @@ pub(in crate::modules::sdlc) const TRANSFORM_NAME: &str = "system_notes";
 use emit::{EmittedEdge, NoteRow, NoteableKind, build_edges};
 use parse::{Action, Reference, extract as parse_body};
 use resolve::{
-    EntityRow, MERGE_REQUESTS_SQL, PROJECT_PATHS_SQL, ROUTES_SQL, ResolutionPlan, ResolvedIndex,
-    ResolvedTarget, RouteRow, WORK_ITEMS_SQL, lookup_chunks,
+    EntityRow, ResolutionPlan, ResolveSql, ResolvedIndex, ResolvedTarget, RouteRow, lookup_chunks,
 };
 
 /// The block outlives every stage that reads these, so owning the note bodies would
@@ -68,6 +68,7 @@ type DefaultProjectLookup = HashMap<i64, String>;
 
 pub(in crate::modules::sdlc) struct SystemNotesTransform {
     datalake: Arc<dyn DatalakeQuery>,
+    sql: Arc<ResolveSql>,
     outputs: Vec<String>,
     resolve_lookup_batch_size: usize,
 }
@@ -75,11 +76,13 @@ pub(in crate::modules::sdlc) struct SystemNotesTransform {
 impl SystemNotesTransform {
     fn new(
         datalake: Arc<dyn DatalakeQuery>,
+        sql: Arc<ResolveSql>,
         edge_table: String,
         resolve_lookup_batch_size: usize,
     ) -> Self {
         Self {
             datalake,
+            sql,
             outputs: vec![edge_table],
             resolve_lookup_batch_size,
         }
@@ -112,6 +115,7 @@ impl BlockTransform for SystemNotesTransform {
 
         let edges = resolve_and_emit(
             &*self.datalake,
+            &self.sql,
             &notes,
             &root_prefix,
             self.resolve_lookup_batch_size,
@@ -133,6 +137,7 @@ impl BlockTransform for SystemNotesTransform {
 pub(in crate::modules::sdlc) fn register(
     registry: &mut TransformRegistry,
     datalake: Arc<dyn DatalakeQuery>,
+    source: &DataSource,
     edge_table: &str,
     resolve_lookup_batch_size: usize,
 ) {
@@ -141,9 +146,11 @@ pub(in crate::modules::sdlc) fn register(
     // lowered DataFusion plans do (`lower.rs`); a bare `gl_edge` writes to the
     // wrong (unprefixed) table.
     let edge_table = prefixed_table_name(edge_table, *SCHEMA_VERSION);
+    let sql = Arc::new(ResolveSql::new(source));
     let factory: TransformFactory = Box::new(move |_plan| {
         Arc::new(SystemNotesTransform::new(
             Arc::clone(&datalake),
+            Arc::clone(&sql),
             edge_table.clone(),
             resolve_lookup_batch_size,
         ))
@@ -195,14 +202,16 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote<'_>>, Handler
 
 async fn resolve_and_emit<'a>(
     datalake: &dyn DatalakeQuery,
+    sql: &ResolveSql,
     notes: &[ExtractedNote<'a>],
     root_prefix: &TraversalPath,
     resolve_lookup_batch_size: usize,
 ) -> Result<Vec<EmittedEdge<'a>>, HandlerError> {
     let default_projects =
-        resolve_default_projects(datalake, notes, root_prefix, resolve_lookup_batch_size).await?;
+        resolve_default_projects(datalake, sql, notes, root_prefix, resolve_lookup_batch_size)
+            .await?;
     let plan = plan_for_batch(notes, &default_projects);
-    let index = resolve_plan(datalake, &plan, root_prefix, resolve_lookup_batch_size).await?;
+    let index = resolve_plan(datalake, sql, &plan, root_prefix, resolve_lookup_batch_size).await?;
 
     let edges = process_batch(notes, &default_projects, |r, default_project| {
         index.resolve(r, default_project)
@@ -288,6 +297,7 @@ fn plan_for_batch(
 
 async fn resolve_default_projects(
     datalake: &dyn DatalakeQuery,
+    sql: &ResolveSql,
     notes: &[ExtractedNote<'_>],
     root_prefix: &TraversalPath,
     resolve_lookup_batch_size: usize,
@@ -307,7 +317,7 @@ async fn resolve_default_projects(
     for source_ids in lookup_chunks(&project_ids, resolve_lookup_batch_size) {
         let params = json!({ "root_prefix": root_prefix.as_str(), "source_ids": source_ids });
         let batches = datalake
-            .query_batches(&PROJECT_PATHS_SQL, params, None)
+            .query_batches(&sql.project_paths, params, None)
             .await
             .map_err(|e| HandlerError::from(e).prefix_message_with("project paths query failed"))?;
 
@@ -324,6 +334,7 @@ async fn resolve_default_projects(
 
 async fn resolve_plan(
     datalake: &dyn DatalakeQuery,
+    sql: &ResolveSql,
     plan: &ResolutionPlan,
     root_prefix: &TraversalPath,
     resolve_lookup_batch_size: usize,
@@ -333,7 +344,7 @@ async fn resolve_plan(
     }
 
     let paths: Vec<&str> = plan.paths.iter().map(String::as_str).collect();
-    let routes = query_routes(datalake, &paths, root_prefix).await?;
+    let routes = query_routes(datalake, sql, &paths, root_prefix).await?;
 
     let mr_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.mr_pairs, &routes);
     let wi_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.issue_pairs, &routes);
@@ -341,14 +352,14 @@ async fn resolve_plan(
     let (mr_entities, wi_entities) = tokio::try_join!(
         query_entities(
             datalake,
-            &MERGE_REQUESTS_SQL,
+            &sql.merge_requests,
             &mr_pairs,
             root_prefix,
             resolve_lookup_batch_size
         ),
         query_entities(
             datalake,
-            &WORK_ITEMS_SQL,
+            &sql.work_items,
             &wi_pairs,
             root_prefix,
             resolve_lookup_batch_size
@@ -374,6 +385,7 @@ fn pairs_with_project_id(
 
 async fn query_routes(
     datalake: &dyn DatalakeQuery,
+    sql: &ResolveSql,
     paths: &[&str],
     root_prefix: &TraversalPath,
 ) -> Result<Vec<RouteRow>, HandlerError> {
@@ -382,7 +394,7 @@ async fn query_routes(
     for paths in lookup_chunks(paths, strings_per_array_param(paths)) {
         let params = json!({ "root_prefix": root_prefix.as_str(), "paths": paths });
         let batches = datalake
-            .query_batches(&ROUTES_SQL, params, None)
+            .query_batches(&sql.routes, params, None)
             .await
             .map_err(|e| HandlerError::from(e).prefix_message_with("routes query failed"))?;
 
@@ -525,6 +537,9 @@ mod tests {
     const TEST_RESOLVE_LOOKUP_BATCH_SIZE: usize = 1_000;
     const TEST_ENTITY_ID_PROJECT_FACTOR: i64 = 1_000_000;
 
+    static SQL: std::sync::LazyLock<ResolveSql> =
+        std::sync::LazyLock::new(|| ResolveSql::new(&crate::testkit::siphon_source()));
+
     fn make_note<'a>(
         action: &'a str,
         body: &'a str,
@@ -576,13 +591,13 @@ mod tests {
             _max_block_size: Option<u64>,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
             self.queries.lock().unwrap().push(params.clone());
-            if sql == *ROUTES_SQL {
+            if sql == SQL.routes {
                 route_batch_from_params(&params).map(|batch| vec![batch])
-            } else if sql == *PROJECT_PATHS_SQL {
+            } else if sql == SQL.project_paths {
                 project_paths_batch_from_params(&params).map(|batch| vec![batch])
-            } else if sql == *MERGE_REQUESTS_SQL {
+            } else if sql == SQL.merge_requests {
                 entity_batch_from_params(&params, "target_project_id").map(|batch| vec![batch])
-            } else if sql == *WORK_ITEMS_SQL {
+            } else if sql == SQL.work_items {
                 entity_batch_from_params(&params, "project_id").map(|batch| vec![batch])
             } else {
                 Ok(Vec::new())
@@ -780,6 +795,7 @@ mod tests {
 
         let lookup = resolve_default_projects(
             &datalake,
+            &SQL,
             &notes,
             &TraversalPath::new_unchecked("1/"),
             TEST_RESOLVE_LOOKUP_BATCH_SIZE,
@@ -807,9 +823,14 @@ mod tests {
         let paths: Vec<_> = (0..3_000).map(|i| format!("group/project-{i}")).collect();
         let path_refs: Vec<_> = paths.iter().map(String::as_str).collect();
 
-        let routes = query_routes(&datalake, &path_refs, &TraversalPath::new_unchecked("1/"))
-            .await
-            .unwrap();
+        let routes = query_routes(
+            &datalake,
+            &SQL,
+            &path_refs,
+            &TraversalPath::new_unchecked("1/"),
+        )
+        .await
+        .unwrap();
 
         assert!(
             datalake.queries().len() > 1,
@@ -829,7 +850,7 @@ mod tests {
 
         let entities = query_entities(
             &datalake,
-            &WORK_ITEMS_SQL,
+            &SQL.work_items,
             &pairs,
             &TraversalPath::new_unchecked("1/"),
             TEST_RESOLVE_LOOKUP_BATCH_SIZE,
@@ -868,6 +889,7 @@ mod tests {
 
         let index = resolve_plan(
             &datalake,
+            &SQL,
             &plan,
             &TraversalPath::new_unchecked("1/"),
             TEST_RESOLVE_LOOKUP_BATCH_SIZE,
@@ -900,6 +922,7 @@ mod tests {
         let datalake = RecordingDatalake::new();
         let index = resolve_plan(
             &datalake,
+            &SQL,
             &ResolutionPlan::default(),
             &TraversalPath::new_unchecked("1/"),
             TEST_RESOLVE_LOOKUP_BATCH_SIZE,
@@ -932,6 +955,7 @@ mod tests {
 
             let index = resolve_plan(
                 &datalake,
+                &SQL,
                 &plan,
                 &TraversalPath::new_unchecked("1/"),
                 TEST_RESOLVE_LOOKUP_BATCH_SIZE,

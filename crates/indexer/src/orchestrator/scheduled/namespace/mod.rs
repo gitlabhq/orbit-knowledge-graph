@@ -48,6 +48,10 @@ pub struct NamespaceDispatcher {
 }
 
 impl NamespaceDispatcher {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "dispatcher wiring takes each collaborator explicitly"
+    )]
     pub fn new(
         nats: Arc<dyn NatsServices>,
         datalake: ArrowClickHouseClient,
@@ -56,14 +60,16 @@ impl NamespaceDispatcher {
         config: NamespaceDispatcherConfig,
         campaign: Arc<CampaignState>,
         sources: &query_data_model::catalog::Sources,
+        siphon: &query_data_model::catalog::sources::DataSource,
     ) -> Self {
         Self {
             detector: Arc::new(DatalakeChangeDetector::new(
                 datalake.clone(),
                 sources,
+                siphon,
                 metrics.clone(),
             )),
-            reader: Arc::new(DatalakeEnabledNamespaceReader::new(datalake)),
+            reader: Arc::new(DatalakeEnabledNamespaceReader::new(datalake, siphon)),
             publisher: NamespaceIndexingDispatch::new(nats),
             campaign,
             checkpoint_store,

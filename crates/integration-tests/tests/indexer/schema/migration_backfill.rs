@@ -373,6 +373,7 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
             .tasks
             .code_backfill
             .publish_window,
+        &indexer::testkit::siphon_source(),
     );
 
     backfill
@@ -449,6 +450,7 @@ async fn backfill_dispatches_only_projects_that_are_due() {
             .tasks
             .code_backfill
             .publish_window,
+        &indexer::testkit::siphon_source(),
     );
 
     backfill

@@ -131,7 +131,10 @@ async fn run_deletion_handler(
     let graph = Arc::new(context.config.build_client("graph"));
     let datalake = Arc::new(context.config.build_client("graph"));
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
-        datalake, graph, catalog,
+        datalake,
+        graph,
+        catalog,
+        &indexer::testkit::siphon_source(),
     ));
     let handler = NamespaceDeletionHandler::new(
         store,
@@ -448,6 +451,7 @@ async fn run_namespace_deletion_scheduler(context: &TestContext) {
         Arc::new(context.config.build_client("graph")),
         graph.clone(),
         &catalog,
+        &indexer::testkit::siphon_source(),
     ));
     NamespaceDeletionScheduler::new(
         store,
@@ -561,7 +565,10 @@ async fn reconcile_root(
     let graph = Arc::new(context.config.build_client("graph"));
     let datalake = Arc::new(context.config.build_client("graph"));
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
-        datalake, graph, catalog,
+        datalake,
+        graph,
+        catalog,
+        &indexer::testkit::siphon_source(),
     ));
 
     let outcomes = store

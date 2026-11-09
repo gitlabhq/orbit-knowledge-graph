@@ -5,6 +5,7 @@ use arrow::datatypes::UInt64Type;
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use orbit_arrow::ArrowUtils;
 use orbit_utils::traversal_path::TopLevelSplit;
+use query_data_model::catalog::sources::DataSource;
 
 use crate::execute::{CHECKPOINT_TABLE, MigrationError};
 use crate::ledger::MigrationLedger;
@@ -13,9 +14,11 @@ use crate::scope::{
 };
 use crate::version::{read_active_version, table_prefix};
 
-static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
-    let version = ontology::siphon_version_column();
-    let deleted = ontology::siphon_deleted_column();
+/// The datalake source whose replication columns the hand-written siphon queries read.
+pub const SIPHON_SOURCE: &str = "siphon";
+
+fn fetch_enabled_namespaces_sql(source: &DataSource) -> String {
+    let (version, deleted) = (&source.version, &source.deleted);
     format!(
         "SELECT DISTINCT root_namespace_id, traversal_path \
          FROM (SELECT root_namespace_id, argMax(traversal_path, {version}) AS traversal_path \
@@ -23,7 +26,7 @@ static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
                GROUP BY root_namespace_id, id \
                HAVING argMax({deleted}, {version}) = false)"
     )
-});
+}
 
 // Not `FINAL`: until a merge, a completed row still counts after an overlapping run's late page write.
 fn completed_checkpoint_keys_sql(key_filter: &str) -> String {
@@ -89,9 +92,10 @@ pub async fn resolve_migration_scope(
 
 pub async fn fetch_enabled_top_level_namespaces(
     datalake: &ArrowClickHouseClient,
+    source: &DataSource,
 ) -> Result<TopLevelSplit, MigrationError> {
     let batches = datalake
-        .query(&FETCH_ENABLED_NAMESPACES)
+        .query(&fetch_enabled_namespaces_sql(source))
         .fetch_arrow()
         .await
         .map_err(|error| MigrationError::Ddl {

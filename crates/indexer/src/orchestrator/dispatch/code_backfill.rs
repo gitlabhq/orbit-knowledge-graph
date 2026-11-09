@@ -23,6 +23,7 @@ use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::catalog::sources::DataSource;
 
 pub const METRIC_NAME: &str = "dispatch.code_backfill";
 
@@ -62,6 +63,7 @@ pub struct CodeBackfill {
     campaign: Arc<CampaignState>,
     publish_window: usize,
     namespaces_with_pending: AtomicUsize,
+    enabled_namespaces_sql: String,
 }
 
 impl CodeBackfill {
@@ -72,6 +74,7 @@ impl CodeBackfill {
         metrics: ScheduledTaskMetrics,
         campaign: Arc<CampaignState>,
         publish_window: usize,
+        source: &DataSource,
     ) -> Self {
         Self {
             nats,
@@ -81,6 +84,7 @@ impl CodeBackfill {
             campaign,
             publish_window,
             namespaces_with_pending: AtomicUsize::new(0),
+            enabled_namespaces_sql: resolved_enabled_namespaces_sql(source),
         }
     }
 
@@ -192,7 +196,7 @@ impl CodeBackfill {
     pub async fn fetch_enabled_namespaces(&self) -> Result<Vec<(i64, TraversalPath)>, TaskError> {
         let batches = self
             .datalake
-            .query(resolved_enabled_namespaces_sql())
+            .query(&self.enabled_namespaces_sql)
             .fetch_arrow()
             .await
             .map_err(|error| {
@@ -389,6 +393,7 @@ mod tests {
             test_metrics(),
             Arc::new(CampaignState::new()),
             TEST_PUBLISH_WINDOW,
+            &crate::testkit::siphon_source(),
         )
     }
 

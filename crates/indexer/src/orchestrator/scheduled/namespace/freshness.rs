@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -8,12 +8,13 @@ use clickhouse_client::FromArrowColumn;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Histogram, ObservableGauge};
 use orbit_migrations::catalog::OntologyCatalog;
+use orbit_migrations::completion::SIPHON_SOURCE;
 use orbit_migrations::version::read_active_version;
 use orbit_observability::indexer::sdlc;
 use orbit_server_config::{NamespaceFreshnessConfig, ScheduleConfiguration};
 use parking_lot::Mutex;
 use query_data_model::Model;
-use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor};
+use query_data_model::catalog::sources::{DataSource, EtlScope, PipelineDescriptor};
 
 use super::datalake::render_change_query;
 use crate::checkpoint::{
@@ -34,16 +35,16 @@ FROM changed
 WHERE root_path IN (SELECT traversal_path FROM enabled)
 GROUP BY root_path, target"#;
 
-static ENABLED_ROOTS_SQL: LazyLock<String> = LazyLock::new(|| {
+fn enabled_roots_sql(siphon: &DataSource) -> String {
     format!(
         "SELECT enabled.root_namespace_id, enabled.traversal_path, enrolled.enabled_at \
 FROM ({}) AS enabled \
 INNER JOIN (SELECT root_namespace_id, max(created_at) AS enabled_at \
 FROM {ENABLED_NAMESPACE_TABLE} GROUP BY root_namespace_id) AS enrolled \
 ON enabled.root_namespace_id = enrolled.root_namespace_id",
-        resolved_enabled_namespaces_sql()
+        resolved_enabled_namespaces_sql(siphon)
     )
-});
+}
 
 pub struct NamespaceFreshness {
     graph: ArrowClickHouseClient,
@@ -109,10 +110,10 @@ impl NamespaceFreshness {
         }
     }
 
-    async fn enabled_roots(&self) -> Result<Vec<Root>, TaskError> {
+    async fn enabled_roots(&self, siphon: &DataSource) -> Result<Vec<Root>, TaskError> {
         let batches = self
             .datalake
-            .query(&ENABLED_ROOTS_SQL)
+            .query(&enabled_roots_sql(siphon))
             .fetch_arrow()
             .await
             .map_err(TaskError::new)?;
@@ -135,6 +136,7 @@ impl NamespaceFreshness {
     async fn latest_changes(
         &self,
         model: &Model,
+        siphon: &DataSource,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<LatestChanges, TaskError> {
@@ -143,6 +145,7 @@ impl NamespaceFreshness {
             .query(&render_change_query(
                 FRESHNESS_QUERY_SQL,
                 model.sources().reindex_triggers(),
+                siphon,
             ))
             .param("lower", from.format(TIMESTAMP_FORMAT).to_string())
             .param("upper", to.format(TIMESTAMP_FORMAT).to_string())
@@ -197,6 +200,9 @@ impl NamespaceFreshness {
             .packages()
             .load()
             .map_err(TaskError::new)?;
+        let siphon = model.sources().source_named(SIPHON_SOURCE).ok_or_else(|| {
+            TaskError::new(format!("the model declares no {SIPHON_SOURCE} source"))
+        })?;
         let checkpoint_store =
             ClickHouseCheckpointStore::for_version(Arc::new(self.graph.clone()), version);
         let global_prefix = format!("{GLOBAL_SCOPE_KEY}.");
@@ -205,8 +211,8 @@ impl NamespaceFreshness {
         let (namespace_checkpoints, global_checkpoints, roots, changes) = tokio::try_join!(
             load_checkpoints(&checkpoint_store, NAMESPACE_KEY_PREFIX),
             load_checkpoints(&checkpoint_store, &global_prefix),
-            self.enabled_roots(),
-            self.latest_changes(&model, scanned_from, now),
+            self.enabled_roots(siphon),
+            self.latest_changes(&model, siphon, scanned_from, now),
         )?;
         let state = SyncState {
             now,
