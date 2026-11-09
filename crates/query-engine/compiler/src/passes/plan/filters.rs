@@ -182,12 +182,15 @@ pub fn bind_filter(
     owner: &FilterOwner<'_>,
     model: &impl RelationalModel,
 ) -> BoundFilter {
+    let catalog = model.catalog();
+    let graph = catalog.graph();
     let (metadata, in_sort_key) = match owner {
         FilterOwner::Entity(entity) => {
-            let table = model.catalog().table_of(*entity);
+            let table = catalog.table_of(*entity);
             (
-                model
-                    .property_for_entity_id(*entity, property)
+                graph
+                    .property_id(*entity, property)
+                    .map(|property| graph.property(property))
                     .map(|property| (Some(property.id), Some(property.data_type))),
                 table.is_some_and(|table| model.in_sort_key(table, property)),
             )
@@ -210,22 +213,22 @@ pub fn bind_filter(
     };
     let (property_id, data_type) = metadata.unwrap_or_default();
     let column = property_id
-        .and_then(|property| model.catalog().column(property))
+        .and_then(|property| catalog.column(property))
         .unwrap_or(property);
     BoundFilter {
         test,
         property: property_id,
         data_type,
         selectivity: property_id
-            .map(|property| model.property_selectivity(property))
+            .map(|property| graph.property(property).selectivity)
             .or_else(|| data_type.map(ontology::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
         namespace_anchor: anchor_keys(model).iter().any(|(name, _)| name == column),
         foreign_key: property_id.is_some_and(|property| model.property_is_foreign_key(property)),
         in_sort_key,
         text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
-        unique: property_id.is_some_and(|property| model.property_unique(property)),
-        immutable: property_id.is_some_and(|property| !model.property_mutable(property)),
+        unique: property_id.is_some_and(|property| graph.property(property).unique),
+        immutable: property_id.is_some_and(|property| !graph.property(property).mutable),
         null_as_epoch: NullAsEpoch {
             column: data_type
                 .filter(|_| property_id.is_some_and(|property| model.null_as_epoch(property))),

@@ -7,6 +7,7 @@ use query_data_model::plan::tracking::Ref;
 use super::{node_property, served};
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
+use crate::logical::columns::free_text;
 use crate::logical::facts::Fact;
 
 fn sides(fact: &Fact<'_>) -> impl Iterator<Item = Expr> {
@@ -41,9 +42,8 @@ pub(super) fn epoch(
         let Some((_, entity, property)) = node_property(query, fact.left) else {
             continue;
         };
-        let epoch_null = model
-            .property(entity, property)
-            .is_some_and(|property| model.null_as_epoch(property.id));
+        let epoch_null =
+            matches!(fact.left, Expr::Property { property, .. } if model.null_as_epoch(property));
         let early = fact.literals().iter().any(|literal| match literal {
             Literal::String(text) | Literal::Temporal(text) => at_or_before_epoch(text),
             _ => false,
@@ -81,10 +81,8 @@ pub(super) fn aggregation_text(
         .filter_map(|group| match group {
             Expr::Node(binding) => Some(*binding),
             Expr::Property { binding, property } => {
-                let entity = query.entity_name(*binding)?;
-                model
-                    .property_is_free_text(entity, query.property_name(*property))
-                    .then_some(*binding)
+                query.entity_name(*binding)?;
+                free_text(model.catalog().graph(), *property).then_some(*binding)
             }
             _ => None,
         })
@@ -102,8 +100,13 @@ pub(super) fn aggregation_text(
             continue;
         }
         for expr in sides(fact) {
-            let (Expr::Property { binding, .. }, Some((alias, entity, property))) =
-                (expr, node_property(query, expr))
+            let (
+                Expr::Property {
+                    binding,
+                    property: id,
+                },
+                Some((alias, entity, property)),
+            ) = (expr, node_property(query, expr))
             else {
                 continue;
             };
@@ -113,10 +116,7 @@ pub(super) fn aggregation_text(
                 .is_some_and(|redaction| {
                     matches!(redaction.resource.as_str(), "project" | "group")
                 });
-            if rows.contains(&binding)
-                || by_namespace
-                || !model.property_is_free_text(entity, property)
-            {
+            if rows.contains(&binding) || by_namespace || !free_text(model.catalog().graph(), id) {
                 continue;
             }
             return Err(QueryError::Validation(format!(

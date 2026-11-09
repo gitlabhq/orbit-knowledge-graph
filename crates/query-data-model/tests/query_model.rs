@@ -161,7 +161,9 @@ fn loads_remote_and_local_models_from_the_same_packages() {
 fn hides_traversal_path_in_remote_and_local_models() {
     let remote = ClickHouseDataModel::embedded().unwrap();
     let local = DuckDbDataModel::embedded().unwrap();
-    let property = remote.property("Definition", "traversal_path").unwrap().id;
+    let graph = remote.graph();
+    let definition = graph.entity_id("Definition").unwrap();
+    let property = graph.property_id(definition, "traversal_path").unwrap();
 
     assert!(remote.catalog().model().access().property(property).hidden);
     assert!(local.catalog().model().access().property(property).hidden);

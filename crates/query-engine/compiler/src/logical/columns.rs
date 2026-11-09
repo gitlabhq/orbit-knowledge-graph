@@ -3,9 +3,10 @@
 use crate::passes::codegen::RelationalModel;
 use std::collections::HashMap;
 
+use ontology::{DataType, FieldSelectivity};
 use query_data_model::plan::logical::{Columns, Expr, LogicalOperation, Projection};
 use query_data_model::plan::tracking::Ref;
-use query_data_model::{Entity, EntityId, PropertyId};
+use query_data_model::{Entity, EntityId, GraphCatalog, PropertyId};
 
 use super::Query;
 
@@ -75,4 +76,14 @@ pub fn redaction_column(model: &impl RelationalModel, entity: EntityId) -> Optio
     let catalog = model.catalog();
     let redaction = catalog.redaction(entity)?;
     Some(&catalog.graph().property(redaction.id).name)
+}
+
+/// Free text: a uuid, or a string not declared low selectivity.
+pub fn free_text(graph: &GraphCatalog, property: PropertyId) -> bool {
+    let property = graph.property(property);
+    match property.data_type {
+        DataType::Uuid => true,
+        DataType::String => property.selectivity != FieldSelectivity::Low,
+        _ => false,
+    }
 }

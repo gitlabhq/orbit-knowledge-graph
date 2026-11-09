@@ -15,6 +15,7 @@ use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
+use crate::logical::columns::free_text;
 use crate::logical::facts::{anchors, facts};
 use crate::logical::{Binding, Kind, Query};
 use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
@@ -418,7 +419,7 @@ fn aggregation_row_nodes<'p>(query: Query<'p>, model: &impl RelationalModel) -> 
             Logical::Property { binding, property }
             | Logical::Truncate {
                 binding, property, ..
-            } if model.property_free_text(*property) => Some(query.name(*binding)),
+            } if free_text(model.catalog().graph(), *property) => Some(query.name(*binding)),
             _ => None,
         })
         .collect()

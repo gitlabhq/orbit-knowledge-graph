@@ -82,9 +82,8 @@ fn filters(
             }
         }
         let tokens = matches!(fact.leaf, Predicate::Text { matching, .. } if matching.tokens());
-        let indexed = model
-            .property(entity, property)
-            .is_some_and(|property| model.has_text_index(property.id));
+        let indexed =
+            matches!(fact.left, Expr::Property { property, .. } if model.has_text_index(property));
         if tokens && !indexed {
             return Err(QueryError::Validation(format!(
                 "filter on \"{property}\" for {entity}: \

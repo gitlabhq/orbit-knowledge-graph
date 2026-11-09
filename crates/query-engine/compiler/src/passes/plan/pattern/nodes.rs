@@ -9,7 +9,7 @@ use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::plan::logical::{Columns, Expr, Measure};
 
 use super::{NodePlan, Pattern};
-use crate::logical::columns::{redaction_column, returned, selections};
+use crate::logical::columns::{free_text, redaction_column, returned, selections};
 use crate::logical::facts::Anchor;
 use crate::logical::{Query, binding};
 use crate::passes::plan::filters::{bind_facts, unindex_if_key_narrowed};
@@ -171,7 +171,7 @@ fn aggregation_row_nodes<'p>(query: Query<'p>, model: &impl RelationalModel) -> 
         .filter(|group| match group {
             Expr::Node(_) => true,
             Expr::Property { property, .. } | Expr::Truncate { property, .. } => {
-                model.property_free_text(*property)
+                free_text(model.catalog().graph(), *property)
             }
             _ => false,
         })

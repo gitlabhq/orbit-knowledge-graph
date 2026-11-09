@@ -4,9 +4,9 @@ use std::sync::Arc;
 use crate::implementations::clickhouse::ClickHouse;
 use crate::implementations::duckdb::DuckDb;
 use crate::{
-    DataModelError, DenormalizedCatalog, Entity, EntityId, ForeignKey, GraphCatalog,
-    MaterializedJoin, Model, Packages, Property, PropertyId, QueryModel, RelationshipId,
-    RelationshipVariant, RelationshipVariantId,
+    DataModelError, DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, MaterializedJoin,
+    Model, Packages, PropertyId, QueryModel, RelationshipId, RelationshipVariant,
+    RelationshipVariantId,
 };
 
 pub type ClickHouseDataModel = QueryModel<ClickHouse>;
@@ -84,25 +84,15 @@ impl RelationshipRoute<'_> {
 
 pub trait OrbitQueryModel {
     fn graph(&self) -> &GraphCatalog;
-    fn entity(&self, name: &str) -> Option<&Entity>;
-    fn property(&self, entity: &str, property: &str) -> Option<&Property>;
-    fn property_is_nullable(&self, entity: &str, property: &str) -> bool;
     fn null_as_epoch(&self, property: PropertyId) -> bool;
     fn null_as_epoch_properties(&self, entity: EntityId) -> HashMap<String, ontology::DataType>;
-    fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property>;
     fn high_fan_out(&self, entity: EntityId) -> bool;
-    fn property_selectivity(&self, property: PropertyId) -> ontology::FieldSelectivity;
-    fn relationship_exists(&self, relationship: &str) -> bool;
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType>;
     fn table_columns(&self, table: &str) -> Option<&HashSet<String>>;
     fn table_sort_key(&self, table: &str) -> Option<&[String]>;
     fn equivalent_layouts(&self, table: &str) -> Vec<&str>;
     fn in_sort_key(&self, table: &str, column: &str) -> bool;
     fn has_text_index(&self, property: PropertyId) -> bool;
-    fn property_unique(&self, property: PropertyId) -> bool;
-    fn property_mutable(&self, property: PropertyId) -> bool;
-    fn property_is_free_text(&self, entity: &str, property: &str) -> bool;
-    fn property_free_text(&self, property: PropertyId) -> bool;
     fn relationship_table(&self, relationship: &str) -> Option<&str>;
     fn default_edge_table(&self) -> &str;
     fn denormalized(&self) -> &DenormalizedCatalog;

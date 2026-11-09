@@ -1,15 +1,14 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
-use ontology::{FieldSelectivity, TraversalPathKind};
+use ontology::TraversalPathKind;
 
 use crate::catalog::{Catalog, Model, StorageBackend};
 use crate::implementations::relational::RelationalFacts;
 use crate::{
-    DataModelError, DenormalizedCatalog, Entity, EntityId, ForeignKey, GraphCatalog,
-    MaterializedJoin, OrbitQueryModel, Property, PropertyId, PropertyRealization, RelationshipId,
-    RelationshipRoute, RelationshipVariant, RelationshipVariantId, TraversalPathLookup,
-    VariantRoute,
+    DataModelError, DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, MaterializedJoin,
+    OrbitQueryModel, PropertyId, PropertyRealization, RelationshipId, RelationshipRoute,
+    RelationshipVariant, RelationshipVariantId, TraversalPathLookup, VariantRoute,
 };
 
 pub trait QueryFacts: RelationalFacts + std::fmt::Debug + Send + Sync {
@@ -204,10 +203,6 @@ where
         self.realizations[property.index()].as_ref()
     }
 
-    pub(crate) fn property_selectivity(&self, property: PropertyId) -> Option<FieldSelectivity> {
-        Some(self.graph_catalog().property(property).selectivity)
-    }
-
     pub(crate) fn table_column_type(
         &self,
         table: &str,
@@ -224,14 +219,6 @@ where
     pub(crate) fn null_as_epoch(&self, property: PropertyId) -> bool {
         self.facts_of(property)
             .is_some_and(|facts| facts.null_as_epoch(property))
-    }
-
-    pub(crate) fn property_unique(&self, property: PropertyId) -> bool {
-        self.graph_catalog().property(property).unique
-    }
-
-    pub(crate) fn property_mutable(&self, property: PropertyId) -> bool {
-        self.graph_catalog().property(property).mutable
     }
 
     pub(crate) fn default_edge_table(&self) -> &str {
@@ -340,19 +327,6 @@ where
         self.bindings.materialized_joins()
     }
 
-    fn entity(&self, name: &str) -> Option<&Entity> {
-        self.graph().entity_named(name)
-    }
-
-    fn property(&self, entity: &str, property: &str) -> Option<&Property> {
-        self.graph().property_named(entity, property)
-    }
-
-    fn property_is_nullable(&self, entity: &str, property: &str) -> bool {
-        self.property(entity, property)
-            .is_some_and(|property| property.nullable)
-    }
-
     fn null_as_epoch(&self, property: PropertyId) -> bool {
         self.bindings.null_as_epoch(property)
     }
@@ -370,24 +344,8 @@ where
             .collect()
     }
 
-    fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property> {
-        self.graph()
-            .property_id(entity, property)
-            .map(|property| self.graph().property(property))
-    }
-
     fn high_fan_out(&self, entity: EntityId) -> bool {
         self.bindings.entity_high_fan_out(entity)
-    }
-
-    fn property_selectivity(&self, property: PropertyId) -> ontology::FieldSelectivity {
-        self.bindings
-            .property_selectivity(property)
-            .unwrap_or_default()
-    }
-
-    fn relationship_exists(&self, relationship: &str) -> bool {
-        self.graph().relationship_id(relationship).is_some()
     }
 
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
@@ -413,29 +371,6 @@ where
 
     fn has_text_index(&self, property: PropertyId) -> bool {
         self.bindings.has_text_index(property)
-    }
-
-    fn property_unique(&self, property: PropertyId) -> bool {
-        self.bindings.property_unique(property)
-    }
-
-    fn property_mutable(&self, property: PropertyId) -> bool {
-        self.bindings.property_mutable(property)
-    }
-
-    fn property_is_free_text(&self, entity: &str, property: &str) -> bool {
-        self.property(entity, property)
-            .is_some_and(|property| self.property_free_text(property.id))
-    }
-
-    fn property_free_text(&self, property: PropertyId) -> bool {
-        match self.graph().property(property).data_type {
-            ontology::DataType::Uuid => true,
-            ontology::DataType::String => {
-                self.property_selectivity(property) != ontology::FieldSelectivity::Low
-            }
-            _ => false,
-        }
     }
 
     fn relationship_table(&self, relationship: &str) -> Option<&str> {
