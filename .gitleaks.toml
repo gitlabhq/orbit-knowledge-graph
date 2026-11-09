@@ -1,0 +1,48 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "pgpassword-in-command"
+description = "Postgres password set inline with PGPASSWORD"
+regex = '''PGPASSWORD=['"]?([^\s'"$<{.][^\s'"]{3,})'''
+secretGroup = 1
+keywords = ["pgpassword"]
+[[rules.allowlists]]
+regexTarget = "line"
+regexes = ['''\s-h\s*(?:localhost|127\.0\.0\.1|[a-z0-9_-]+)(?:\s|$)''']
+
+[[rules]]
+id = "sshpass-in-command"
+description = "SSH password passed to sshpass"
+regex = '''sshpass\s+-p\s*['"]?([^\s'"$<{.-][^\s'"]{3,})'''
+secretGroup = 1
+keywords = ["sshpass"]
+
+[[rules]]
+id = "mysql-password-in-command"
+description = "MySQL password attached to -p"
+regex = '''\bmysql(?:dump|admin)?\b[^\n]*?\s-p['"]?([^\s'"$<{.][^\s'"]{3,})'''
+secretGroup = 1
+keywords = ["mysql"]
+
+[[rules]]
+id = "password-flag-in-command"
+description = "Password passed as --password=value"
+regex = '''--password=['"]?([^\s'"$<{.][^\s'"]{3,})'''
+secretGroup = 1
+keywords = ["--password="]
+
+[[rules]]
+id = "url-userinfo-password"
+description = "Password in a URL to a public host"
+regex = '''(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|amqps?|clickhouse|nats|https?)://[^\s:/@'"]+:([^\s@/'"$<{]{4,})@[^\s/:'"]+'''
+secretGroup = 1
+keywords = ["://"]
+[[rules.allowlists]]
+regexTarget = "match"
+regexes = ['''@(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|host\.docker\.internal|[a-z0-9_-]+|[^\s/:'"]*\.(?:example|test|local|internal|svc|invalid)(?:\.[a-z]+)*)$''']
+
+[[allowlists]]
+description = "Placeholders and test values"
+targetRules = ["pgpassword-in-command", "sshpass-in-command", "mysql-password-in-command", "password-flag-in-command", "url-userinfo-password"]
+stopwords = ["password", "passwd", "pass", "changeme", "secret", "example", "placeholder", "redacted", "xxxx", "test", "dummy", "fake", "default", "token"]
