@@ -9,11 +9,11 @@ secretGroup = 1
 keywords = ["password=", "passwd=", "_pwd="]
 [[rules.allowlists]]
 regexTarget = "line"
-regexes = ['''(?:^|\s)-e\s+[A-Z]''', '''(?:\s-h\s*|--host[= ])(?:localhost|127\.0\.0\.1|[a-z0-9_-]+)(?:[\s:]|$)''']
+regexes = ['''(?:\s-h\s*|--host[= ])(?:localhost|127\.0\.0\.1)(?:[\s:]|$)''']
 
 [[rules]]
 id = "password-flag-in-command"
-description = "Password passed as a --password flag, such as clickhouse-client or nats"
+description = "Password passed after the password flag of clickhouse-client, nats, and other tools"
 regex = '''--password(?:=|\s+)['"]?([^\s'"$<{.-][^\s'"]{3,})'''
 secretGroup = 1
 keywords = ["--password"]
@@ -33,12 +33,12 @@ secretGroup = 1
 keywords = ["://"]
 [[rules.allowlists]]
 regexTarget = "match"
-regexes = ['''@(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|host\.docker\.internal|[a-z0-9_-]+|[^\s/:'"]*\.(?:example|test|local|internal|svc|invalid)(?:\.[a-z]+)*)$''']
+regexes = ['''@(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|host\.docker\.internal|[^\s/:'"]*\.(?:example|test|local|internal|svc|invalid)(?:\.[a-z]+)*)$''']
 
 [[rules]]
 id = "yaml-secret-field"
 description = "Literal secret on an Orbit config key in YAML, such as password or verifying_key"
-regex = '''(?im)^\s*(?:[a-z0-9]+_)*(?:password|passwd|signing_key|verifying_key|api_token|admin_token|access_token|secret_access_key|session_token|service_account_key)\s*:\s*['"]?([^\s'"#$<{~|>][^'"#\n]{3,}?)['"]?\s*(?:#.*)?$'''
+regex = '''(?im)^\s*(?:[a-z0-9]+_)*(?:password|passwd|signing_key|verifying_key|api_token|admin_token|access_token|secret_access_key|session_token|service_account_key)[ \t]*:[ \t]*['"]?([^\s'"#$<{~|>][^'"#\n]{3,}?)['"]?[ \t]*(?:#.*)?$'''
 path = '''\.ya?ml$'''
 secretGroup = 1
 keywords = ["password", "passwd", "_key", "_token"]
@@ -48,4 +48,7 @@ regexes = ['''(?i)^(?:null|none|true|false)$''']
 [[allowlists]]
 description = "Placeholders and test values"
 targetRules = ["password-env-in-command", "password-flag-in-command", "kubectl-literal-secret", "url-userinfo-password", "yaml-secret-field"]
-stopwords = ["password", "passwd", "pass", "changeme", "secret", "example", "placeholder", "redacted", "xxxx", "test", "dummy", "fake", "default", "token"]
+regexes = [
+  '''(?i)^(?:password|passwd|pass|changeme|secret|example|placeholder|redacted|dummy|fake|default|token|test|admin|x{4,}|\*{4,})$''',
+  '''(?i)^(?:e2e|test|dummy|fake|example)-[a-z0-9-]+$''',
+]
