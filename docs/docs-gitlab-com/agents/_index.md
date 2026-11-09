@@ -41,7 +41,7 @@ To set up your agent:
    The plugins are optional. GitLab Orbit works the same without them.
    To install them, keep **Install the agent plugins** selected. To leave them out, select **Skip the agent plugins**.
 
-Setup installs the GitLab Orbit skill for your agents and, unless you skip it, a [plugin that shows GitLab Orbit calls in Claude Code](#show-gitlab-orbit-calls-in-claude-code).
+Setup installs the GitLab Orbit skill for your agents and, unless you skip them, [agent plugins that show GitLab Orbit calls in Claude Code and OpenCode](#show-gitlab-orbit-calls-in-your-agent).
 It then indexes the repository for code search.
 To check that the repository is indexed, run `glab orbit workspace list`.
 To load the skill, start a new session of your agent.
@@ -115,19 +115,24 @@ Setup follows these rules:
 - With `--project` or `--dir`, setup writes files such as `CLAUDE.md` and `AGENTS.md` in the project.
   Teams usually commit these files, so the change can reach your teammates.
 
-## Show GitLab Orbit calls in Claude Code
+## Show GitLab Orbit calls in your agent
 
-`glab orbit setup` can install an optional plugin for Claude Code that marks each GitLab Orbit call in the transcript, for example `◎ Searched code  login`.
-The plugin also shows a summary of the session's calls below the prompt.
+`glab orbit setup` can install optional agent plugins for Claude Code and OpenCode that show each GitLab Orbit call and a summary of the session's calls:
+
+- In Claude Code, the plugin marks each call in the transcript, for example `◎ Searched code  login`, and shows the summary below the prompt.
+- In OpenCode, the plugin shows the latest call above the prompt and the summary in the prompt footer.
 
 Prerequisites:
 
-- Claude Code 2.1.287 or later.
+- For Claude Code, version 2.1.287 or later.
 
-To install the plugin, run `glab orbit setup` and select **Install the agent plugins**.
-Then start a new Claude Code session.
+To install the plugins, run `glab orbit setup` and select **Install the agent plugins**.
+Then start a new session of your agent.
 
-To turn off the plugin, in Claude Code, run `/plugin` and turn off `gitlab-orbit`.
+To turn off the plugin:
+
+- In Claude Code, run `/plugin` and turn off `gitlab-orbit`.
+- In OpenCode, delete the `~/.config/opencode/plugins/orbit-ui/` directory.
 
 ## Remove the setup
 
