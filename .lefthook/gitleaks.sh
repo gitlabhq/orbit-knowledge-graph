@@ -3,8 +3,9 @@ set -euo pipefail
 
 SCRIPT_NAME=$(basename "$0")
 HOOK_TYPE="${1:-}"
-GITLEAKS_CONFIG_TOML="$(sed 's#^path = "/gitleaks.toml"$#useDefault = true#' "$(git rev-parse --show-toplevel)/.gitlab/gitleaks-rules.toml")"
-export GITLEAKS_CONFIG_TOML
+local_config() {
+  sed 's#^path = "/gitleaks.toml"$#useDefault = true#' "$(git rev-parse --show-toplevel)/.gitlab/gitleaks-rules.toml"
+}
 
 if [ -z "$HOOK_TYPE" ]; then
   cat >&2 <<EOF
@@ -15,11 +16,11 @@ EOF
 fi
 
 if [ "$HOOK_TYPE" == "pre-commit" ]; then
-  mise exec -- gitleaks git --pre-commit --staged --no-banner --redact --verbose
+  mise exec -- gitleaks git --config <(local_config) --pre-commit --staged --no-banner --redact --verbose
 elif [ "$HOOK_TYPE" == "pre-push" ]; then
   DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/@@' || echo "origin/main")
   BASE_COMMIT=$(git merge-base "$DEFAULT_BRANCH" HEAD)
-  mise exec -- gitleaks git --log-opts="$BASE_COMMIT..HEAD" --no-banner --redact --verbose
+  mise exec -- gitleaks git --config <(local_config) --log-opts="$BASE_COMMIT..HEAD" --no-banner --redact --verbose
 else
   cat >&2 <<EOF
 ERROR: Unsupported hook type '$HOOK_TYPE'.

@@ -38,7 +38,7 @@ regexes = ['''@(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|host\.docker\.internal
 [[rules]]
 id = "yaml-secret-field"
 description = "Literal secret on an Orbit config key in YAML, such as password or verifying_key"
-regex = '''(?im)^\s*(?:[a-z0-9]+_)*(?:password|passwd|signing_key|verifying_key|api_token|admin_token|access_token|secret_access_key|session_token|service_account_key)[ \t]*:[ \t]*['"]?([^\s'"#$<{~|>][^'"#\n]{3,}?)['"]?[ \t]*(?:#.*)?$'''
+regex = '''(?im)^\s*[a-z0-9_-]*?(?:password|passwd|signing_key|verifying_key|api_token|admin_token|access_token|secret_access_key|session_token|service_account_key)[ \t]*:[ \t]*['"]?([^\s'"#$<{~|>][^'"#\n]{3,}?)['"]?[ \t]*(?:#.*)?$'''
 path = '''\.ya?ml$'''
 secretGroup = 1
 keywords = ["password", "passwd", "_key", "_token"]
@@ -49,6 +49,6 @@ regexes = ['''(?i)^(?:null|none|true|false)$''']
 description = "Placeholders and test values"
 targetRules = ["password-env-in-command", "password-flag-in-command", "kubectl-literal-secret", "url-userinfo-password", "yaml-secret-field"]
 regexes = [
-  '''(?i)^(?:password|passwd|pass|changeme|secret|example|placeholder|redacted|dummy|fake|default|token|test|admin|x{4,}|\*{4,})$''',
+  '''(?i)^(?:password|passwd|pass|changeme|secret|example|placeholder|redacted|dummy|fake|default|token|test|x{4,}|\*{4,})$''',
   '''(?i)^(?:e2e|test|dummy|fake|example)-[a-z0-9-]+$''',
 ]
