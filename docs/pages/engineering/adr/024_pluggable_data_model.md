@@ -1,5 +1,5 @@
 ---
-title: "Orbit ADR 024: A data model that replaces the ontology"
+title: "Orbit ADR 024: A pluggable data model for entities, sources and backends"
 creation-date: "2026-11-08"
 authors: [ "@michaelusa" ]
 toc_hide: true

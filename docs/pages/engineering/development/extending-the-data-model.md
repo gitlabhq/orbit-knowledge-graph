@@ -2,7 +2,7 @@
 
 The data model is being built on the [data model branch](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/michaelusa/data-model-spike).
 This guide shows its packages and APIs, and it changes with the code.
-[ADR 024](../adr/024_data_model_replaces_ontology.md) records the design and explains how it works.
+[ADR 024](../adr/024_pluggable_data_model.md) records the design and explains how it works.
 
 Each extension writes only a package, a surface or a backend:
 
