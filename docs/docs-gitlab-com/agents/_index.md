@@ -40,7 +40,7 @@ To set up your agent:
 1. When setup asks about the agent plugins, keep **Install the agent plugins** selected, then press <kbd>Enter</kbd>.
    To leave them out, select **Skip the agent plugins**.
 
-Setup installs the GitLab Orbit skill for your agents and a [plugin that shows GitLab Orbit calls in Claude Code](#show-gitlab-orbit-calls-in-claude-code).
+Setup installs the GitLab Orbit skill for your agents and, unless you skip it, a [plugin that shows GitLab Orbit calls in Claude Code](#show-gitlab-orbit-calls-in-claude-code).
 It then indexes the repository for code search.
 To check that the repository is indexed, run `glab orbit workspace list`.
 To load the skill, start a new session of your agent.
