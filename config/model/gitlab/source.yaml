@@ -1,0 +1,260 @@
+kind: source
+package: gitlab
+source: siphon
+declare:
+  connection: datalake
+  version: _siphon_replicated_at
+  watermark: _siphon_watermark
+  deleted: _siphon_deleted
+relationships:
+  APPROVED:
+    reindex: [siphon_approvals]
+    pipelines:
+      APPROVED_siphon_approvals_MergeRequest:
+        tables: [siphon_approvals]
+        fields: [user_id, merge_request_id]
+        order_by: [traversal_path, merge_request_id, id]
+        query: generated
+        lookups: [{entity: User, id: user_id}, {entity: MergeRequest, id: merge_request_id}]
+        from: {field: user_id, kind: User, enrich: true}
+        to: {field: merge_request_id, kind: MergeRequest, enrich: true}
+
+  ASSIGNED:
+    reindex: [siphon_issue_assignees, siphon_merge_request_assignees]
+    pipelines:
+      ASSIGNED_siphon_merge_request_assignees_MergeRequest:
+        tables: [siphon_merge_request_assignees]
+        fields: [user_id, merge_request_id]
+        order_by: [traversal_path, merge_request_id, id]
+        query: generated
+        lookups: [{entity: User, id: user_id}, {entity: MergeRequest, id: merge_request_id}]
+        from: {field: user_id, kind: User, enrich: true}
+        to: {field: merge_request_id, kind: MergeRequest, enrich: true}
+      ASSIGNED_siphon_issue_assignees_WorkItem:
+        tables: [siphon_issue_assignees]
+        fields: [user_id, issue_id]
+        order_by: [traversal_path, issue_id, user_id]
+        query: generated
+        lookups: [{entity: User, id: user_id}, {entity: WorkItem, id: issue_id}]
+        from: {field: user_id, kind: User, enrich: true}
+        to: {field: issue_id, kind: WorkItem, enrich: true}
+
+  BUILT_BY:
+    reindex: [siphon_packages_build_infos, siphon_packages_package_file_build_infos]
+    pipelines:
+      BUILT_BY_siphon_packages_build_infos_Pipeline:
+        tables: [siphon_packages_build_infos]
+        fields: [package_id, pipeline_id]
+        order_by: [traversal_path, id]
+        query: generated
+        from: {field: package_id, kind: Package}
+        to: {field: pipeline_id, kind: Pipeline}
+      BUILT_BY_siphon_packages_package_file_build_infos_Pipeline:
+        tables: [siphon_packages_package_file_build_infos]
+        fields: [package_file_id, pipeline_id]
+        order_by: [traversal_path, id]
+        query: generated
+        from: {field: package_file_id, kind: PackageFile}
+        to: {field: pipeline_id, kind: Pipeline}
+
+  CHILD_OF:
+    reindex: [siphon_ci_sources_pipelines]
+    pipelines:
+      CHILD_OF_siphon_ci_sources_pipelines_Pipeline:
+        tables: [siphon_ci_sources_pipelines]
+        fields: [pipeline_id, source_pipeline_id]
+        order_by: [traversal_path, id, partition_id]
+        query: generated
+        lookups: [{entity: Pipeline, id: pipeline_id}, {entity: Pipeline, id: source_pipeline_id}]
+        from: {field: pipeline_id, kind: Pipeline, enrich: true}
+        to: {field: source_pipeline_id, kind: Pipeline, enrich: true}
+
+  CLOSES:
+    reindex: [siphon_merge_requests_closing_issues]
+    pipelines:
+      CLOSES_siphon_merge_requests_closing_issues_WorkItem:
+        tables: [siphon_merge_requests_closing_issues]
+        fields: [merge_request_id, issue_id]
+        order_by: [traversal_path, issue_id, id]
+        query: generated
+        lookups: [{entity: MergeRequest, id: merge_request_id}, {entity: WorkItem, id: issue_id}]
+        from: {field: merge_request_id, kind: MergeRequest, enrich: true}
+        to: {field: issue_id, kind: WorkItem, enrich: true}
+
+  CONTAINS:
+    reindex: [siphon_work_item_parent_links]
+    pipelines:
+      CONTAINS_siphon_work_item_parent_links_WorkItem:
+        tables: [siphon_work_item_parent_links]
+        fields: [work_item_parent_id, work_item_id]
+        order_by: [traversal_path, work_item_parent_id, id]
+        query: generated
+        lookups: [{entity: WorkItem, id: work_item_parent_id}, {entity: WorkItem, id: work_item_id}]
+        from: {field: work_item_parent_id, kind: WorkItem, enrich: true}
+        to: {field: work_item_id, kind: WorkItem, enrich: true}
+
+  CREATED_MR:
+    reindex: [siphon_ai_governance_sessions, siphon_duo_workflows_workflow_merge_requests]
+    pipelines:
+      CREATED_MR_siphon_duo_workflows_workflow_merge_requests:
+        tables: [siphon_duo_workflows_workflow_merge_requests, siphon_ai_governance_sessions]
+        order_by: [traversal_path, workflow_id, id]
+        query: created_mr.sql.j2
+        from: {field: source_id, kind: AgentSession}
+        to: {field: target_id, kind: MergeRequest}
+
+  DECLARES_DEPENDENCY:
+    reindex: [siphon_packages_dependency_links]
+    pipelines:
+      DECLARES_DEPENDENCY_siphon_packages_dependency_links_Dependency:
+        tables: [siphon_packages_dependency_links]
+        fields: [package_id, dependency_id]
+        order_by: [traversal_path, id]
+        query: generated
+        from: {field: package_id, kind: Package}
+        to: {field: dependency_id, kind: Dependency}
+
+  DEPLOYED_TO:
+    reindex: [siphon_deployment_merge_requests]
+    pipelines:
+      DEPLOYED_TO_siphon_deployment_merge_requests_Deployment:
+        tables: [siphon_deployment_merge_requests]
+        fields: [merge_request_id, deployment_id]
+        order_by: [traversal_path, deployment_id, merge_request_id]
+        query: generated
+        lookups:
+        - {entity: MergeRequest, id: merge_request_id}
+        - {entity: Deployment, id: deployment_id}
+        from: {field: merge_request_id, kind: MergeRequest, enrich: true}
+        to: {field: deployment_id, kind: Deployment, enrich: true}
+
+  FIXES:
+    reindex: [siphon_vulnerability_merge_request_links]
+    pipelines:
+      FIXES_siphon_vulnerability_merge_request_links_Vulnerability:
+        tables: [siphon_vulnerability_merge_request_links]
+        fields: [merge_request_id, vulnerability_id]
+        order_by: [traversal_path, id]
+        query: generated
+        lookups:
+        - {entity: MergeRequest, id: merge_request_id}
+        - {entity: Vulnerability, id: vulnerability_id}
+        from: {field: merge_request_id, kind: MergeRequest, enrich: true}
+        to: {field: vulnerability_id, kind: Vulnerability, enrich: true}
+
+  HAS_IDENTIFIER:
+    reindex: [siphon_vulnerability_occurrence_identifiers]
+    pipelines:
+      HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_VulnerabilityIdentifier:
+        tables: [siphon_vulnerability_occurrence_identifiers]
+        fields: [occurrence_id, identifier_id]
+        order_by: [traversal_path, id]
+        query: generated
+        lookups: [{entity: VulnerabilityOccurrence, id: occurrence_id}]
+        from: {field: occurrence_id, kind: VulnerabilityOccurrence, enrich: true}
+        to: {field: identifier_id, kind: VulnerabilityIdentifier}
+
+  HAS_LABEL:
+    reindex: [siphon_label_links]
+    pipelines:
+      HAS_LABEL_siphon_label_links_Label:
+        tables: [siphon_label_links]
+        fields: [target_id, label_id, target_type]
+        order_by: [traversal_path, target_id, id]
+        query: generated
+        from: {field: target_id, kind: {derive: target_type, mapping: {Issue: WorkItem}}}
+        to: {field: label_id, kind: Label}
+
+  HAS_VULNERABILITY:
+    reindex:
+    - siphon_packages_packages
+    - siphon_sbom_component_versions
+    - siphon_sbom_occurrences
+    - siphon_sbom_occurrences_vulnerabilities
+    pipelines:
+      HAS_VULNERABILITY_siphon_sbom_occurrences_vulnerabilities_Vulnerability:
+        tables: [siphon_sbom_occurrences_vulnerabilities]
+        order_by: [traversal_path, id]
+        query: has_vulnerability.sql.j2
+        from: {field: source_id, kind: Package}
+        to: {field: target_id, kind: Vulnerability}
+
+  MEMBER_OF:
+    reindex: [siphon_members]
+    pipelines:
+      MEMBER_OF_siphon_members:
+        tables: [siphon_members]
+        fields: [user_id, source_id, source_type]
+        order_by: [traversal_path, id]
+        query: generated
+        lookups: [{entity: User, id: user_id}]
+        from: {field: user_id, kind: User, enrich: true}
+        to:
+          field: source_id
+          kind: {derive: source_type, mapping: {Namespace: Group, Project: Project}}
+
+  RELATED_TO:
+    reindex: [siphon_issue_links]
+    pipelines:
+      RELATED_TO_siphon_issue_links_WorkItem:
+        tables: [siphon_issue_links]
+        fields: [source_id, target_id]
+        order_by: [traversal_path, source_id, id]
+        query: generated
+        lookups: [{entity: WorkItem, id: source_id}, {entity: WorkItem, id: target_id}]
+        from: {field: source_id, kind: WorkItem, enrich: true}
+        to: {field: target_id, kind: WorkItem, enrich: true}
+
+  REOPENED:
+    reindex: [siphon_resource_state_events]
+    pipelines:
+      REOPENED_siphon_resource_state_events_MergeRequest:
+        tables: [siphon_resource_state_events]
+        fields: [user_id, merge_request_id]
+        order_by: [traversal_path, id]
+        query: generated
+        filter: state = 5
+        lookups: [{entity: User, id: user_id}, {entity: MergeRequest, id: merge_request_id}]
+        from: {field: user_id, kind: User, enrich: true}
+        to: {field: merge_request_id, kind: MergeRequest, enrich: true}
+      REOPENED_siphon_resource_state_events_WorkItem:
+        tables: [siphon_resource_state_events]
+        fields: [user_id, issue_id]
+        order_by: [traversal_path, id]
+        query: generated
+        filter: state = 5
+        lookups: [{entity: User, id: user_id}, {entity: WorkItem, id: issue_id}]
+        from: {field: user_id, kind: User, enrich: true}
+        to: {field: issue_id, kind: WorkItem, enrich: true}
+
+  REVIEWER:
+    reindex: [siphon_merge_request_reviewers]
+    pipelines:
+      REVIEWER_siphon_merge_request_reviewers_MergeRequest:
+        tables: [siphon_merge_request_reviewers]
+        fields: [user_id, merge_request_id]
+        order_by: [traversal_path, merge_request_id, id]
+        query: generated
+        lookups: [{entity: User, id: user_id}, {entity: MergeRequest, id: merge_request_id}]
+        from: {field: user_id, kind: User, enrich: true}
+        to: {field: merge_request_id, kind: MergeRequest, enrich: true}
+
+  TRIGGERS_PIPELINE:
+    reindex: [siphon_ci_sources_pipelines]
+    pipelines:
+      TRIGGERS_PIPELINE_siphon_ci_sources_pipelines_Pipeline:
+        tables: [siphon_ci_sources_pipelines]
+        fields: [source_job_id, pipeline_id]
+        order_by: [traversal_path, id, partition_id]
+        query: generated
+        lookups: [{entity: Job, id: source_job_id}, {entity: Pipeline, id: pipeline_id}]
+        from: {field: source_job_id, kind: Job, enrich: true}
+        to: {field: pipeline_id, kind: Pipeline, enrich: true}
+derived:
+  SystemNote:
+    emits: [MENTIONS]
+    tables: [siphon_notes, siphon_system_note_metadata]
+    order_by: [traversal_path, id]
+    query: system_note.sql.j2
+    transform: system_notes
+    reindex: [siphon_notes, siphon_system_note_metadata]

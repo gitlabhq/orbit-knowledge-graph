@@ -1,0 +1,107 @@
+kind: source
+package: gitlab.ci
+source: siphon
+entities:
+  Deployment:
+    tables: [siphon_deployments]
+    order_by: [traversal_path, id]
+    query: generated
+    enrich: [status, tag, archived]
+    edges:
+    - label: IN_PROJECT
+      from: {field: id, kind: Deployment}
+      to: {field: project_id, kind: Project}
+    - label: IN_ENVIRONMENT
+      from: {field: id, kind: Deployment}
+      to: {field: environment_id, kind: Environment}
+    - label: DEPLOYED_BY
+      from: {field: user_id, kind: User}
+      to: {field: id, kind: Deployment}
+    reindex: [siphon_deployments]
+
+  Environment:
+    tables: [siphon_environments]
+    order_by: [traversal_path, id]
+    query: generated
+    edges:
+    - label: IN_PROJECT
+      from: {field: id, kind: Environment}
+      to: {field: project_id, kind: Project}
+    - label: CREATED_FOR_MR
+      from: {field: id, kind: Environment}
+      to: {field: merge_request_id, kind: MergeRequest}
+    reindex: [siphon_environments]
+
+  Job:
+    tables: [siphon_p_ci_builds]
+    order_by: [traversal_path, id, partition_id]
+    query: job.sql.j2
+    partition_count: 5
+    columns: {pipeline_id: commit_id}
+    enrich:
+    - status
+    - tag
+    - allow_failure
+    - when
+    - retried
+    - failure_reason
+    - type
+    - timeout_source
+    - scheduling_type
+    edges:
+    - label: IN_PROJECT
+      from: {field: id, kind: Job}
+      to: {field: project_id, kind: Project}
+    - label: HAS_JOB
+      from: {field: stage_id, kind: Stage}
+      to: {field: id, kind: Job}
+    - label: TRIGGERED
+      from: {field: user_id, kind: User}
+      to: {field: id, kind: Job}
+    - label: IN_PIPELINE
+      from: {field: id, kind: Job}
+      to: {field: commit_id, kind: Pipeline}
+    - label: HAS_JOB
+      from: {field: commit_id, kind: Pipeline}
+      to: {field: id, kind: Job}
+    - label: RUNS_ON
+      from: {field: id, kind: Job}
+      to: {field: runner_id, kind: Runner}
+    - label: TRIGGERED_BY_PIPELINE
+      from: {field: id, kind: Job}
+      to: {field: upstream_pipeline_id, kind: Pipeline}
+    - label: AUTO_CANCELED_BY
+      from: {field: id, kind: Job}
+      to: {field: auto_canceled_by_id, kind: Pipeline}
+    reindex: [siphon_p_ci_builds]
+
+  Pipeline:
+    tables: [siphon_p_ci_pipelines]
+    order_by: [traversal_path, id, partition_id]
+    query: generated
+    enrich: [status, source, tag, failure_reason, protected]
+    edges:
+    - label: IN_PROJECT
+      from: {field: id, kind: Pipeline}
+      to: {field: project_id, kind: Project}
+    - label: TRIGGERED
+      from: {field: user_id, kind: User}
+      to: {field: id, kind: Pipeline}
+    - label: TRIGGERED
+      from: {field: merge_request_id, kind: MergeRequest}
+      to: {field: id, kind: Pipeline}
+    - label: AUTO_CANCELED_BY
+      from: {field: id, kind: Pipeline}
+      to: {field: auto_canceled_by_id, kind: Pipeline}
+      mutable: true
+    reindex: [siphon_p_ci_pipelines]
+
+  Runner: {global: true, tables: [siphon_ci_runners], order_by: [id, runner_type], query: generated}
+  Stage:
+    tables: [siphon_p_ci_stages]
+    order_by: [traversal_path, id, partition_id]
+    query: generated
+    edges:
+    - {label: IN_PROJECT, from: {field: id, kind: Stage}, to: {field: project_id, kind: Project}}
+    - {label: HAS_STAGE, from: {field: pipeline_id, kind: Pipeline}, to: {field: id, kind: Stage}}
+    reindex: [siphon_p_ci_stages]

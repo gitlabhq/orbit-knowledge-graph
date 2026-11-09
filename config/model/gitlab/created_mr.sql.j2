@@ -1,0 +1,61 @@
+-- Best effort for deletes: a tombstone keeps the sort key (traversal_path,
+-- workflow_id, id) but zeroes merge_request_id and link_type, so _prev recovers
+-- them from the last live version of the row. Once ClickHouse merges the source
+-- parts only the tombstone is left, _prev is empty and the edge is not removed.
+-- This is the generic delete gap tracked in knowledge-graph#1308 (CLOSES shares it).
+WITH
+  _batch AS (SELECT
+    id,
+    workflow_id,
+    merge_request_id,
+    link_type,
+    traversal_path,
+    {{version_column}} AS _version,
+    {{deleted_column}} AS _deleted
+  FROM siphon_duo_workflows_workflow_merge_requests
+  -- Namespace-level sessions have no AgentSession node (project sessions only),
+  -- so their links would dangle. Tombstones carry no project_id and pass through.
+  WHERE startsWith(traversal_path, {traversal_path:String})
+    AND (project_id IS NOT NULL OR {{deleted_column}}) {{filters}}
+  ORDER BY traversal_path, workflow_id, id
+  LIMIT {{batch_size}}),
+  -- Only tombstones need the previous values; bounding by their ids keeps this small.
+  _prev AS (SELECT
+    id,
+    argMax(workflow_id, {{version_column}}) AS prev_workflow_id,
+    argMax(merge_request_id, {{version_column}}) AS prev_merge_request_id,
+    argMax(link_type, {{version_column}}) AS prev_link_type
+  FROM siphon_duo_workflows_workflow_merge_requests
+  WHERE (traversal_path, workflow_id, id) IN (SELECT traversal_path, workflow_id, id FROM _batch WHERE _deleted)
+    AND {{deleted_column}} = false
+  GROUP BY id),
+  -- A link whose session has not replicated yet gets no edge, and the extract does
+  -- not revisit it until the link row changes or the next full rebuild, so sessions
+  -- the governance backfill writes after the link pass wait for a rebuild.
+  -- Both tables carry the workflow's traversal_path, so the join is bounded to it.
+  _sessions AS (SELECT
+    workflow_id,
+    argMax(id, {{version_column}}) AS session_id
+  FROM siphon_ai_governance_sessions
+  WHERE startsWith(traversal_path, {traversal_path:String})
+    AND source = 0
+    AND project_id IS NOT NULL
+    AND {{deleted_column}} = false
+    AND workflow_id IN (SELECT workflow_id FROM _batch)
+  GROUP BY workflow_id)
+SELECT
+  _batch.traversal_path AS traversal_path,
+  _batch.id AS id,
+  _batch.workflow_id AS workflow_id,
+  if(if(_batch._deleted, _prev.prev_link_type, _batch.link_type) = 1,
+     nullIf(_sessions.session_id, 0),
+     NULL) AS source_id,
+  if(if(_batch._deleted, _prev.prev_link_type, _batch.link_type) = 1,
+     nullIf(if(_batch._deleted, _prev.prev_merge_request_id, _batch.merge_request_id), 0),
+     NULL) AS target_id,
+  _batch._version AS _version,
+  _batch._deleted AS _deleted
+FROM _batch
+LEFT JOIN _prev ON _prev.id = _batch.id
+LEFT JOIN _sessions ON _sessions.workflow_id = if(_batch._deleted, _prev.prev_workflow_id, _batch.workflow_id)
+ORDER BY traversal_path, workflow_id, id

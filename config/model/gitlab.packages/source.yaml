@@ -1,0 +1,34 @@
+kind: source
+package: gitlab.packages
+source: siphon
+entities:
+  Dependency:
+    tables: [siphon_packages_dependencies]
+    order_by: [traversal_path, id]
+    query: generated
+    edges:
+    - label: IN_PROJECT
+      from: {field: id, kind: Dependency}
+      to: {field: project_id, kind: Project}
+    reindex: [siphon_packages_dependencies]
+
+  Package:
+    tables: [siphon_packages_packages]
+    order_by: [traversal_path, package_type, id]
+    query: generated
+    edges:
+    - {label: IN_PROJECT, from: {field: id, kind: Package}, to: {field: project_id, kind: Project}}
+    reindex: [siphon_packages_packages]
+
+  PackageFile:
+    tables: [siphon_packages_package_files]
+    order_by: [traversal_path, id]
+    query: package_file.sql.j2
+    edges:
+    - label: IN_PROJECT
+      from: {field: id, kind: PackageFile}
+      to: {field: project_id, kind: Project}
+    - label: HAS_PACKAGE_FILE
+      from: {field: package_id, kind: Package}
+      to: {field: id, kind: PackageFile}
+    reindex: [siphon_packages_package_files]

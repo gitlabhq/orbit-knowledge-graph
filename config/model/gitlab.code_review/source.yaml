@@ -1,0 +1,110 @@
+kind: source
+package: gitlab.code_review
+source: siphon
+entities:
+  MergeRequest:
+    tables:
+    - merge_requests
+    - siphon_merge_request_metrics
+    - siphon_merge_request_reviewers
+    - siphon_approvals
+    order_by: [traversal_path, id]
+    query: merge_request.sql.j2
+    columns:
+      state: state_id
+      project_id: target_project_id
+      latest_build_started_at: metric_latest_build_started_at
+      latest_build_finished_at: metric_latest_build_finished_at
+      first_deployed_to_production_at: metric_first_deployed_to_production_at
+      merged_at: metric_merged_at
+      latest_closed_at: metric_latest_closed_at
+      first_comment_at: metric_first_comment_at
+      first_commit_at: metric_first_commit_at
+      last_commit_at: metric_last_commit_at
+      diff_size: metric_diff_size
+      modified_paths_size: metric_modified_paths_size
+      commits_count: metric_commits_count
+      first_approved_at: metric_first_approved_at
+      first_reassigned_at: metric_first_reassigned_at
+      added_lines: metric_added_lines
+      removed_lines: metric_removed_lines
+      first_contribution: metric_first_contribution
+      reviewer_first_assigned_at: metric_reviewer_first_assigned_at
+      closed_by_id: metric_latest_closed_by_id
+    enrich: [state, merge_status, draft, squash, discussion_locked]
+    edges:
+    - label: IN_PROJECT
+      from: {field: id, kind: MergeRequest}
+      to: {field: target_project_id, kind: Project}
+    - label: SOURCE_PROJECT
+      from: {field: id, kind: MergeRequest}
+      to: {field: source_project_id, kind: Project}
+    - label: HAS_HEAD_PIPELINE
+      from: {field: id, kind: MergeRequest}
+      to: {field: head_pipeline_id, kind: Pipeline}
+      mutable: true
+    - label: HAS_LATEST_DIFF
+      from: {field: id, kind: MergeRequest}
+      to: {field: latest_merge_request_diff_id, kind: MergeRequestDiff}
+      mutable: true
+    - label: AUTHORED
+      from: {field: author_id, kind: User}
+      to: {field: id, kind: MergeRequest}
+    - label: MERGED
+      from: {field: merge_user_id, kind: User}
+      to: {field: id, kind: MergeRequest}
+      mutable: true
+    - label: UPDATED_BY
+      from: {field: updated_by_id, kind: User}
+      to: {field: id, kind: MergeRequest}
+      mutable: true
+    - label: LAST_EDITED_BY
+      from: {field: last_edited_by_id, kind: User}
+      to: {field: id, kind: MergeRequest}
+      mutable: true
+    - label: CLOSED
+      from: {field: metric_latest_closed_by_id, kind: User}
+      to: {field: id, kind: MergeRequest}
+    - label: IN_MILESTONE
+      from: {field: id, kind: MergeRequest}
+      to: {field: milestone_id, kind: Milestone}
+      mutable: true
+    - label: REVIEWER
+      from: {field: reviewers, kind: User}
+      to: {field: id, kind: MergeRequest}
+      array_field: user_id
+    - label: APPROVED
+      from: {field: approvals, kind: User}
+      to: {field: id, kind: MergeRequest}
+      array_field: user_id
+    - label: MERGED_AT_COMMIT
+      from: {field: id, kind: MergeRequest}
+      to: {field: merged_commit_id, kind: Commit}
+    reindex:
+    - merge_requests
+    - siphon_approvals
+    - siphon_merge_request_metrics
+    - siphon_merge_request_reviewers
+
+  MergeRequestDiff:
+    tables: [siphon_merge_request_diffs]
+    order_by: [traversal_path, merge_request_id, id]
+    query: generated
+    edges:
+    - label: HAS_DIFF
+      from: {field: merge_request_id, kind: MergeRequest}
+      to: {field: id, kind: MergeRequestDiff}
+    - label: IN_PROJECT
+      from: {field: id, kind: MergeRequestDiff}
+      to: {field: project_id, kind: Project}
+    reindex: [siphon_merge_request_diffs]
+
+  MergeRequestDiffFile:
+    tables: [siphon_merge_request_diff_files, siphon_merge_request_diffs]
+    order_by: [traversal_path, merge_request_diff_id, relative_order]
+    query: merge_request_diff_file.sql.j2
+    edges:
+    - label: HAS_FILE
+      from: {field: merge_request_diff_id, kind: MergeRequestDiff}
+      to: {field: id, kind: MergeRequestDiffFile}
+    reindex: [siphon_merge_request_diff_files]

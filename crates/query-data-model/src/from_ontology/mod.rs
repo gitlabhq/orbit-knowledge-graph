@@ -1,4 +1,5 @@
 mod clickhouse;
+mod source;
 mod yaml;
 
 use std::collections::{BTreeMap, HashMap};
@@ -42,11 +43,16 @@ pub fn schema(ontology: &Ontology) -> Result<Schema, DataModelError> {
 }
 
 pub fn packages(ontology: &Ontology) -> Result<Packages, DataModelError> {
-    from_ontology(ontology)?
-        .iter()
-        .map(|fragment| Ok((path(fragment), yaml::render(fragment)?)))
-        .collect::<Result<BTreeMap<_, _>, DataModelError>>()
-        .map(Packages::new)
+    let mut sources = BTreeMap::new();
+    for fragment in from_ontology(ontology)? {
+        if let Fragment::Source(source) = &fragment {
+            for (file, template) in &source.templates {
+                sources.insert(format!("{}/{file}", source.package), template.clone());
+            }
+        }
+        sources.insert(path(&fragment), yaml::render(&fragment)?);
+    }
+    Ok(Packages::new(sources))
 }
 
 pub fn from_ontology(ontology: &Ontology) -> Result<Vec<Fragment>, DataModelError> {
@@ -72,6 +78,11 @@ pub fn from_ontology(ontology: &Ontology) -> Result<Vec<Fragment>, DataModelErro
         );
     }
     fragments.extend(services(ontology).into_iter().map(Fragment::Service));
+    fragments.extend(
+        source::sources(ontology)?
+            .into_iter()
+            .map(|source| Fragment::Source(Box::new(source))),
+    );
     fragments.sort_by_cached_key(path);
     Ok(fragments)
 }
@@ -82,6 +93,7 @@ fn path(fragment: &Fragment) -> String {
         Fragment::Authorization(_) => "authorization".to_string(),
         Fragment::Storage(storage) => format!("{}_store", storage.store),
         Fragment::Service(service) => format!("{}_service", service.service),
+        Fragment::Source(_) => "source".to_string(),
     };
     format!("{}/{file}.yaml", fragment.package())
 }

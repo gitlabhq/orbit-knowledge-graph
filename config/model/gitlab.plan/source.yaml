@@ -1,0 +1,52 @@
+kind: source
+package: gitlab.plan
+source: siphon
+entities:
+  Label:
+    tables: [siphon_labels]
+    order_by: [traversal_path, id]
+    query: generated
+    edges:
+    - {label: IN_PROJECT, from: {field: id, kind: Label}, to: {field: project_id, kind: Project}}
+    - {label: IN_GROUP, from: {field: id, kind: Label}, to: {field: group_id, kind: Group}}
+    reindex: [siphon_labels]
+
+  Milestone:
+    tables: [siphon_milestones]
+    order_by: [traversal_path, id]
+    query: generated
+    edges:
+    - label: IN_PROJECT
+      from: {field: id, kind: Milestone}
+      to: {field: project_id, kind: Project}
+    - label: IN_GROUP
+      from: {field: id, kind: Milestone}
+      to: {field: group_id, kind: Group}
+    reindex: [siphon_milestones]
+
+  WorkItem:
+    tables: [work_items]
+    order_by: [traversal_path, id]
+    query: generated
+    columns: {state: state_id, work_item_type: work_item_type_id}
+    enrich: [state, work_item_type, confidential]
+    edges:
+    - label: AUTHORED
+      from: {field: author_id, kind: User}
+      to: {field: id, kind: WorkItem}
+    - label: IN_MILESTONE
+      from: {field: id, kind: WorkItem}
+      to: {field: milestone_id, kind: Milestone}
+      mutable: true
+    - label: IN_GROUP
+      from: {field: id, kind: WorkItem}
+      to: {field: namespace_id, kind: Group}
+      mutable: true
+    - label: IN_PROJECT
+      from: {field: id, kind: WorkItem}
+      to: {field: project_id, kind: Project}
+    - label: CLOSED
+      from: {field: closed_by_id, kind: User}
+      to: {field: id, kind: WorkItem}
+      mutable: true
+    reindex: [work_items]

@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use rust_embed::Embed;
 
-use crate::spec::Fragment;
+use crate::spec::{Fragment, TEMPLATE_EXTENSION};
 use crate::{DataModelError, Model};
 
 #[derive(Embed)]
 #[folder = "$ORBIT_CONFIG_DIR/model"]
 #[include = "*.yaml"]
+#[include = "*.sql.j2"]
 struct Embedded;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,10 +44,8 @@ impl Packages {
             }
             for file in std::fs::read_dir(&package)? {
                 let file = file?.path();
-                if file
-                    .extension()
-                    .is_some_and(|extension| extension == "yaml")
-                {
+                let name = file.to_string_lossy();
+                if name.ends_with(".yaml") || name.ends_with(TEMPLATE_EXTENSION) {
                     let relative = file.strip_prefix(root).map_err(std::io::Error::other)?;
                     let key = relative.to_string_lossy().into_owned();
                     sources.insert(key, std::fs::read_to_string(&file)?);

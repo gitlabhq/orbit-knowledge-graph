@@ -1,0 +1,13 @@
+kind: source
+package: gitlab.container_registry
+source: siphon
+entities:
+  ContainerRepository:
+    tables: [siphon_container_repositories]
+    order_by: [traversal_path, id]
+    query: generated
+    edges:
+    - label: IN_PROJECT
+      from: {field: id, kind: ContainerRepository}
+      to: {field: project_id, kind: Project}
+    reindex: [siphon_container_repositories]

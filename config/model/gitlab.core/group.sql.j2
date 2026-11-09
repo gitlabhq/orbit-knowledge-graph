@@ -1,0 +1,69 @@
+WITH late AS (
+  SELECT id, max({{watermark_column}}) AS watermark
+  FROM (
+    SELECT namespace_id AS id, {{watermark_column}}
+    FROM siphon_namespace_details
+    WHERE startsWith(traversal_path, {traversal_path:String})
+      AND {{watermark_column}} > {last_watermark:String} AND {{watermark_column}} <= {watermark:String}
+    UNION ALL
+    SELECT source_id AS id, {{watermark_column}}
+    FROM siphon_routes
+    WHERE startsWith(traversal_path, {traversal_path:String})
+      AND source_type = 'Namespace'
+      AND {{watermark_column}} > {last_watermark:String} AND {{watermark_column}} <= {watermark:String} )
+  WHERE {is_incremental:Bool}
+  GROUP BY id )
+SELECT
+  namespace.id AS id,
+  namespace.name AS name,
+  ifNull(details.description, '') AS description,
+  namespace.visibility_level AS visibility_level,
+  if(isNotNull(routes.source_id), routes.path, namespace.path) AS full_path,
+  namespace.parent_id AS parent_id,
+  namespace.owner_id AS owner_id,
+  namespace.created_at AS created_at,
+  namespace.updated_at AS updated_at,
+  traversal_paths.current_path AS traversal_path,
+  namespace.{{version_column}} AS _version,
+  (namespace.{{deleted_column}} OR namespace.type != 'Group' OR namespace.state = 2 OR namespace.state = 4) AS _deleted
+FROM (
+  SELECT * FROM siphon_namespaces
+  WHERE id NOT IN (SELECT id FROM late)
+  UNION ALL
+  (SELECT ns.* REPLACE (late.watermark AS {{watermark_column}})
+  FROM siphon_namespaces ns
+  INNER JOIN late ON ns.id = late.id
+  WHERE ns.id IN (SELECT id FROM late)
+  ORDER BY ns.id, ns.{{version_column}} DESC
+  LIMIT 1 BY ns.id) ) namespace
+INNER JOIN (
+  SELECT
+    id,
+    argMax(traversal_path, version) AS current_path
+  FROM namespace_traversal_paths
+  WHERE startsWith(traversal_path, {traversal_path:String})
+  GROUP BY id ) traversal_paths ON namespace.id = traversal_paths.id
+LEFT JOIN (
+  SELECT
+    namespace_id,
+    argMax(description, {{version_column}}) AS description
+  FROM siphon_namespace_details
+  WHERE startsWith(traversal_path, {traversal_path:String})
+  GROUP BY namespace_id
+  HAVING argMax({{deleted_column}}, {{version_column}}) = false ) details ON namespace.id = details.namespace_id
+LEFT JOIN (
+  SELECT
+    toNullable(source_id) AS source_id,
+    argMax(path, {{version_column}}) AS path
+  FROM siphon_routes
+  WHERE startsWith(traversal_path, {traversal_path:String})
+    AND source_type = 'Namespace'
+  GROUP BY source_id
+  HAVING argMax({{deleted_column}}, {{version_column}}) = false ) routes ON namespace.id = routes.source_id
+WHERE startsWith(traversal_paths.current_path, {traversal_path:String})
+  AND (namespace.id IN (SELECT
+      id
+    FROM namespace_traversal_paths
+    WHERE startsWith(traversal_path, {traversal_path:String}))) {{filters}}
+ORDER BY traversal_path, id
+LIMIT {{batch_size}}

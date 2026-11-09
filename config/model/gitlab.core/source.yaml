@@ -1,0 +1,69 @@
+kind: source
+package: gitlab.core
+source: siphon
+entities:
+  Group:
+    tables: [namespace_traversal_paths, siphon_namespaces, siphon_namespace_details, siphon_routes]
+    order_by: [traversal_path, id]
+    query: group.sql.j2
+    edges:
+    - label: OWNER
+      from: {field: owner_id, kind: User}
+      to: {field: id, kind: Group}
+      mutable: true
+    - label: CONTAINS
+      from: {field: parent_id, kind: Group}
+      to: {field: id, kind: Group}
+      mutable: true
+    reindex:
+    - table: siphon_namespace_details
+      traversal_path: {dictionary: namespace_traversal_paths_dict, key_column: namespace_id}
+    - table: siphon_namespaces
+      traversal_path: {dictionary: namespace_traversal_paths_dict, key_column: id}
+    - siphon_routes
+
+  Note:
+    tables: [siphon_notes]
+    order_by: [traversal_path, noteable_type, noteable_id, id]
+    query: generated
+    filter: system = false
+    edges:
+    - label: AUTHORED
+      from: {field: author_id, kind: User}
+      to: {field: id, kind: Note}
+    - label: IN_PROJECT
+      from: {field: id, kind: Note}
+      to: {field: project_id, kind: Project}
+    - label: HAS_NOTE
+      from:
+        field: noteable_id
+        kind: {derive: noteable_type, mapping: {Epic: WorkItem, Issue: WorkItem}}
+      to: {field: id, kind: Note}
+      mutable: true
+    reindex: [siphon_notes]
+
+  Project:
+    tables: [project_namespace_traversal_paths, siphon_projects, siphon_routes]
+    order_by: [traversal_path, id]
+    query: project.sql.j2
+    edges:
+    - label: CREATOR
+      from: {field: creator_id, kind: User}
+      to: {field: id, kind: Project}
+      mutable: true
+    - label: CONTAINS
+      from: {field: namespace_id, kind: Group}
+      to: {field: id, kind: Project}
+      mutable: true
+    reindex:
+    - table: siphon_projects
+      traversal_path: {dictionary: project_traversal_paths_dict, key_column: id}
+    - siphon_routes
+
+  User:
+    global: true
+    tables: [siphon_users]
+    order_by: [id]
+    query: generated
+    columns: {avatar_url: avatar, is_admin: admin, is_auditor: auditor, is_external: external}
+    enrich: [state, private_profile, is_admin, is_auditor, is_external, user_type]

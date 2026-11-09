@@ -3,6 +3,7 @@ mod backend;
 mod diagnostics;
 mod frontend;
 mod lookups;
+pub mod sources;
 mod store;
 
 pub use access::{
@@ -12,6 +13,7 @@ pub use backend::{Catalog, RouteInput, SourceInput, StorageBackend, StoreInput};
 pub use diagnostics::{Diagnostics, SpecError};
 pub use frontend::{Reversed, Unresolved};
 pub use lookups::{Lookup, Lookups};
+pub use sources::Sources;
 pub use store::{DeclaredRoute, Source, Store};
 
 use std::collections::HashSet;
@@ -31,6 +33,7 @@ pub struct Model {
     access: Access,
     lookups: Lookups,
     stores: Vec<Store>,
+    sources: Sources,
 }
 
 impl Model {
@@ -42,14 +45,15 @@ impl Model {
 
     pub fn load(fragments: &[Fragment]) -> Result<Self, DataModelError> {
         let mut diagnostics = Diagnostics::default();
-        let (mut graphs, mut authorizations, mut storages, mut services) =
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut graphs, mut authorizations, mut storages, mut services, mut sources) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for fragment in fragments {
             match fragment {
                 Fragment::Graph(graph) => graphs.push(graph.clone()),
                 Fragment::Authorization(access) => authorizations.push(access),
                 Fragment::Storage(storage) => storages.push(storage.as_ref()),
                 Fragment::Service(service) => services.push(service),
+                Fragment::Source(source) => sources.push(source.as_ref()),
             }
         }
 
@@ -59,6 +63,7 @@ impl Model {
         let served: HashSet<PropertyId> = lookups.served().collect();
         let mut stores = store::resolve(&graph, &storages, &served, &mut diagnostics);
         access.resolve_guards(&graph, &mut stores, &mut diagnostics);
+        let sources = Sources::resolve(&graph, &sources, &served, &mut diagnostics);
         diagnostics.finish()?;
         Ok(Self {
             id: identity(fragments)?,
@@ -66,6 +71,7 @@ impl Model {
             access,
             lookups,
             stores,
+            sources,
         })
     }
 
@@ -92,6 +98,10 @@ impl Model {
     pub fn stores(&self) -> &[Store] {
         &self.stores
     }
+
+    pub fn sources(&self) -> &Sources {
+        &self.sources
+    }
 }
 
 fn identity(fragments: &[Fragment]) -> Result<ModelId, DataModelError> {
@@ -108,5 +118,11 @@ fn identity(fragments: &[Fragment]) -> Result<ModelId, DataModelError> {
     let mut hasher = Sha256::new();
     serde_json::to_writer(Digest(&mut hasher), fragments)
         .map_err(|error| DataModelError::Invalid(error.to_string()))?;
+    for fragment in fragments {
+        if let Fragment::Source(source) = fragment {
+            serde_json::to_writer(Digest(&mut hasher), &source.templates)
+                .map_err(|error| DataModelError::Invalid(error.to_string()))?;
+        }
+    }
     Ok(ModelId(hasher.finalize().into()))
 }

@@ -1,0 +1,13 @@
+kind: source
+package: gitlab.agents
+source: siphon
+entities:
+  AgentSession:
+    tables: [siphon_ai_governance_sessions]
+    order_by: [traversal_path, session_started_at, id]
+    query: agent_session.sql.j2
+    edges:
+    - label: IN_PROJECT
+      from: {field: id, kind: AgentSession}
+      to: {field: project_id, kind: Project}
+    reindex: [siphon_ai_governance_sessions]
