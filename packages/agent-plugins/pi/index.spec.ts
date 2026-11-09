@@ -19,7 +19,7 @@ mock.module('@earendil-works/pi-tui', () => ({
 const { default: extension } = await import('./index.ts')
 
 const theme: Theme = { fg: (_color, text) => text, bold: (text) => text }
-const QUERY = `orbit query '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project"}]}'`
+const QUERY = `orbit query 'MATCH (p:Project) RETURN p LIMIT 5'`
 
 type Resolver = Parameters<NonNullable<ExtensionApi['registerToolRenderer']>>[0]
 
@@ -59,8 +59,8 @@ test('an expanded Orbit call adds the query and shows the raw result, a collapse
   const renderer = load().rendererFor('bash', { renderResult: () => raw })!
   const args = bash(QUERY)
   const expanded = textOf(renderer.renderCall!(args, theme, context({ args, expanded: true })))
-  expect(expanded).toContain('query_type')
-  expect(textOf(renderer.renderCall!(args, theme, context({ args })))).not.toContain('query_type')
+  expect(expanded).toContain('MATCH (p:Project)')
+  expect(textOf(renderer.renderCall!(args, theme, context({ args })))).not.toContain('MATCH (p:Project)')
   expect(renderer.renderResult!({}, { expanded: true, isPartial: false }, theme, context({ args }))).toBe(raw)
   expect(renderer.renderResult!({}, { expanded: false, isPartial: false }, theme, context({ args }))).not.toBe(raw)
 })
