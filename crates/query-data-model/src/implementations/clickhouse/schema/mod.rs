@@ -10,7 +10,7 @@ use std::sync::Arc;
 use super::ClickHouse;
 use crate::{Catalog, DataModelError, Model};
 
-pub use render::DictionaryCredentials;
+pub use render::{DictionaryCredentials, is_reserved_word};
 pub use resolve::default_index_name;
 pub(super) use resolve::{check_indexes, resolve};
 pub use types::{data_type, storage_type};

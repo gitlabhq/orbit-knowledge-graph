@@ -273,9 +273,13 @@ fn order_list(columns: &[String]) -> String {
     }
 }
 
+pub fn is_reserved_word(name: &str) -> bool {
+    RESERVED_WORDS.contains(&name.to_lowercase().as_str())
+}
+
 fn quote_identifier(name: &str) -> String {
     let bare = name.trim_matches('`').replace('`', "``");
-    if RESERVED_WORDS.contains(&bare.to_lowercase().as_str()) {
+    if is_reserved_word(&bare) {
         format!("`{bare}`")
     } else {
         bare
