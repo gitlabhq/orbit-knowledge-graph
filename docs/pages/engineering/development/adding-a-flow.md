@@ -375,6 +375,75 @@ async fn routes_a_big_repository_to_the_big_lane() {
 }
 ```
 
+## Planned: sinks
+
+This API does not exist yet. It shows how a worker writes to a store with one writer for each partition, such as SlateDB.
+
+A sink is a store with fixed partitions. Workers stage records for a partition. One pod owns each partition, keeps its writer open, and writes the records in batches.
+
+```rust
+#[async_trait]
+pub trait Sink: FromResources + Send + Sync + 'static {
+    const NAME: &'static str;
+    type Record: Payload;
+    type Writer: Send;
+
+    async fn open(&self, partition: Partition) -> Result<Self::Writer, SinkError>;
+    async fn write(&self, writer: &mut Self::Writer, records: Vec<Self::Record>) -> Result<(), SinkError>;
+}
+```
+
+The trigram index of Orbit Next is a sink with 16 partitions in SlateDB.
+
+```rust
+impl Sink for TrigramSink {
+    const NAME: &'static str = "trigram";
+    type Record = TrigramShard;
+    type Writer = Db;
+
+    async fn open(&self, partition: Partition) -> Result<Db, SinkError> {
+        Ok(Db::open(partition.path(), Arc::clone(&self.store)).await?)
+    }
+
+    async fn write(&self, db: &mut Db, shards: Vec<TrigramShard>) -> Result<(), SinkError> {
+        db.write(TrigramShard::to_write_batch(&shards)).await?;
+        db.flush().await?;
+        Ok(())
+    }
+}
+```
+
+A worker stages its records with one call. The build task is done when the call returns.
+
+```rust
+let partition = partition_of(&project, self.partitions);
+ctx.stage::<TrigramSink>(partition, shards).await?;
+Ok(Outcome::done(()))
+```
+
+The module registers the sink. Helm says which pods own its partitions.
+
+```rust
+engine.worker::<TrigramBuild>().planner::<TrigramPlanner>().sink::<TrigramSink>()
+```
+
+```yaml
+engine:
+  sinks:
+    trigram:
+      partitions: 16
+      batch: { max_bytes: 64MiB, max_wait: 30s }
+  instances:
+    trigram-build:
+      pods: { min: 1, max: 40 }
+      serve: { trigram.build/default: 8 }
+    trigram-writer:
+      pods: { min: 1, max: 5 }
+      sinks: [trigram]
+```
+
+Records travel through object storage, and NATS carries only a pointer to them. `ctx.stage` returns once the records are durable, so the producer's pod can die safely. The writer pods share the partitions, and a lease makes sure only one pod writes each one. That pod opens its writer once, then calls `write` for each batch. It deletes staged records only after `write` succeeds, so `write` must be idempotent. A DuckLake sink works the same way, with one transaction for each batch.
+
 ## Reference
 
 ### Ledger

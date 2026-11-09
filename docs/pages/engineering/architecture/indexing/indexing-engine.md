@@ -145,7 +145,7 @@ Moving migrations off the startup path means a rollout never waits for a reindex
 - **A failed system migration costs a full reindex.** That is the price of never needing a hotfix. CI runs every step on each supported ClickHouse version to keep it rare.
 - **KEDA scales on the number of tasks, not their cost.** Planners must route work into lanes by size.
 - **The ledger shares the graph cluster.** If it adds too much load there, it moves to its own backend.
-- **Long-lived owners.** Some stores accept a single writer, such as the Orbit Next ranges. Today each task opens the writer again. Pods that own a range for a long time could come later.
+- **Sinks.** SlateDB in Orbit Next wants one writer for each partition. Later, workers can stage records for a sink, and one pod for each partition writes them in batches. Records wait in object storage until then, so a pod's disk never holds the only copy.
 
 ## Decisions
 

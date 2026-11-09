@@ -46,7 +46,7 @@ They also need new ontology versions at runtime, with no deploy.
 3. **Reconcilers keep facts true.** A reconciler runs on a timer and compares the wanted state with the observed state. It never submits a task. It asks a planner to replan or to start a campaign.
 4. **A worker splits only its own work.** Child tasks join the job of their parent. Work for another team starts in that team's planner, when the first task ends.
 5. **Helm owns capacity.** Lanes set timeouts. Instances set pods, slots and pools. KEDA scales each lane on its pending tasks.
-6. **NATS holds no facts.** It holds work in flight, dedupe markers and leases. A lease stores its holder and its expiry, with no NATS TTL. A NATS wipe costs one recovery campaign.
+6. **NATS and pod disks hold no facts.** NATS holds work in flight, dedupe markers and leases. A lease stores its holder and its expiry, with no NATS TTL. A NATS wipe costs one recovery campaign. A pod's disk is a cache. A task is acked only when its data is durable somewhere else.
 7. **ClickHouse records what ran.** The ledger keeps each task and job that did work, so an admin can replay it. Metrics keep the stats.
 8. **Two kinds of schema.** The binary owns the system schema. The engine migrates it at startup, with steps that only change metadata. A failed step rebuilds the store and starts a recovery campaign. The ontology registry owns the indexed data schema. A campaign fills a new version in the background.
 
