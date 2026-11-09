@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
+use ontology::Ontology;
 use ontology::introspection::SchemaResponse;
-use ontology::{DataType, Field, NodeEntity, Ontology};
 use orbit_log_fields::{info, warn};
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use orbit_utils::traversal_path::TraversalPath;
@@ -767,23 +767,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 }
 
 impl OrbitServiceImpl {
-    fn property_is_text_searchable(field: &Field) -> bool {
-        field.like_allowed
-            && field.filterable
-            && !field.is_virtual()
-            && !field.admin_only
-            && matches!(field.data_type, DataType::String | DataType::Uuid)
-    }
-
-    fn property_is_default_column(node: &NodeEntity, field: &Field) -> bool {
-        !field.admin_only
-            && (node.default_columns.is_empty()
-                || node
-                    .default_columns
-                    .iter()
-                    .any(|column| column == &field.name))
-    }
-
     fn build_structured_schema(ontology: &Ontology, expand_nodes: &[String]) -> StructuredSchema {
         let domains: Vec<SchemaDomain> = ontology
             .domains()
@@ -811,8 +794,8 @@ impl OrbitServiceImpl {
                                 .map(|ev| ev.values().cloned().collect())
                                 .unwrap_or_default(),
                             description: f.description.clone().unwrap_or_default(),
-                            text_searchable: Some(Self::property_is_text_searchable(f)),
-                            default_column: Some(Self::property_is_default_column(n, f)),
+                            text_searchable: Some(f.is_text_searchable()),
+                            default_column: Some(n.is_default_column(f)),
                         })
                         .collect()
                 } else {
