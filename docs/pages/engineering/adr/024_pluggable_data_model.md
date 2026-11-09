@@ -63,6 +63,9 @@ RETURN u.username, mr.title LIMIT 10
 set separator none
 skinparam componentStyle rectangle
 skinparam shadowing false
+skinparam nodesep 60
+skinparam ranksep 70
+skinparam linetype polyline
 
 package "Package registry" {
   [gitlab.*] as P1
@@ -74,8 +77,8 @@ package "Package registry" {
 package "query-data-model" {
   [Loader] as L
   [Model\n(graph, access, sources,\nstores, guards, ModelId)] as M
-  [Logical catalog] as LC
   [Physical catalogs\n(one per connection)] as PC
+  [Logical catalog] as LC
   [Surfaces\n(GQL)] as S
   [Shared tracking] as T
 }
@@ -101,7 +104,7 @@ L --> M : checked once
 M --> LC
 M --> PC
 S --> LC : builds logical plans
-E --> PC : builds and rewrites\nphysical plans
+E -down-> PC : builds and rewrites\nphysical plans
 LC ..> T
 PC ..> T
 PC --> CH : SQL
@@ -123,6 +126,8 @@ The data model is infrastructure and makes no planning decisions: the compiler p
 @startuml
 set separator none
 skinparam shadowing false
+skinparam nodesep 60
+skinparam ranksep 70
 skinparam classAttributeIconSize 0
 hide empty members
 
@@ -248,30 +253,33 @@ The query engine never sees a model whose tables are not built yet, and the inde
 set separator none
 skinparam shadowing false
 skinparam componentStyle rectangle
+skinparam nodesep 50
+skinparam ranksep 90
 
-component "Shared tracking" as T {
-  [handles, owners, outputs, scopes]
-  [rewrite contract]
+component "Logical catalog" {
+  [entities, follow, filter,\naggregate, paths, neighbors] as LO
 }
+component "Relational catalog\n(ClickHouse, DuckDB)" {
+  [scan, read, join, filter,\nlatest, share, limit] as RO
+}
+component "Code catalog\n(Orbit Next)" {
+  [repositories, languages,\nprefilter, structural, top] as CO
+}
+component "Live catalog\n(Data Extraction Service)" {
+  [call, push-down filters,\nwindow, page, limit] as VO
+}
+rectangle TH [
+<b>Shared tracking</b>
+----
+handles, owners, outputs, scopes
+rewrite contract
+]
 
-component "Logical catalog" as L {
-  [entities, follow, filter,\naggregate, paths, neighbors]
-}
-component "Relational catalog\n(ClickHouse, DuckDB)" as RC {
-  [scan, read, join, filter,\nlatest, share, limit]
-}
-component "Code catalog\n(Orbit Next)" as CC {
-  [repositories, languages,\nprefilter, structural, top]
-}
-component "Live catalog\n(Data Extraction Service)" as LV {
-  [call, push-down filters,\nwindow, page, limit]
-}
-
-L ..> T
-RC ..> T
-CC ..> T
-LV ..> T
-note bottom of T
+LO .down.> TH
+RO .down.> TH
+CO .down.> TH
+VO .down.> TH
+note right of TH
   Every catalog implements Catalog, Construct and Render.
   Tracking proves structure; each language proves its own rules.
 end note
