@@ -34,7 +34,7 @@ They also need new ontology versions at runtime, with no deploy.
 
 ## Decision
 
-**One library, `orbit-engine`, runs all indexing work. A flow is a planner and a worker. The engine owns lanes, retries, scaling, the ledger and migrations.**
+**One library, `indexing-engine`, runs all indexing work. A flow is a planner and a worker. The engine owns lanes, retries, scaling, the ledger and migrations.**
 
 This section walks through the engine from the top down.
 It follows one push to project 42, from the trigger to the ledger.
@@ -88,8 +88,8 @@ impl Trigger {
 The engine also calls every planner in two more cases.
 The admin API or a reconciler sends `Manual`. A campaign or a NATS recovery sends `Sweep`.
 
-An event is a hint. The source keeps the fact.
-If NATS loses an event, a sweep or a reconciler fixes the result.
+An event only says that something changed. The data stays in its source system, such as GitLab or the Git lake.
+If NATS loses an event, a sweep or a reconciler reads the source again.
 
 ### Planners: what runs, and where
 
@@ -142,23 +142,28 @@ engine:
       backfill: { timeout: 2h }
 ```
 
-An instance is a set of worker pods. It sets the number of pods and the slots of each lane on one pod.
+An instance is a set of worker pods. It sets the number of pods, the slots of each lane on one pod, and the pod pools.
 
 ```yaml
 engine:
+  pools:
+    gitaly_archives: { per_key: 8, unknown_key: 4, max_wait: 60s }
   instances:
     code:
       role: worker
       pods: { min: 1, max: 20 }
-      serve: { code.index/default: 10, code.index/big: 6 }
+      serve: { code.index/default: 16, code.index/big: 6 }
+      pools: { parse: 10, parse_big: 4, insert: 32 }
     backfill:
       role: worker
       pods: { min: 0, max: 40 }
       serve: { code.index/backfill: 2 }
 ```
 
-Each `code` pod runs up to 10 small and 6 big repositories at once.
+Each `code` pod admits up to 16 small and 6 big repositories at once.
 Each lane has its own slots on a pod. A burst of small repositories cannot take the big slots.
+An instance is one Deployment and one KEDA ScaledObject. Helm renders both from `engine.instances`.
+The Deployment sets `ORBIT_INSTANCE` on its pods. A pod serves the lanes in the `serve` list of its instance.
 Every worker has a `default` and a `backfill` lane. One instance serves each lane.
 Each lane is one NATS consumer and one KEDA trigger. KEDA scales the pods of an instance on their pending tasks.
 
@@ -192,6 +197,23 @@ A burst of 50 pushes to project 42 gives one task.
 The marker clears when the task starts. A push during a run queues one more task.
 With `EXCLUSIVE`, the engine takes a lease on the key. Two runs of project 42 never overlap.
 
+A lease is a key in the `orbit_leases` bucket. Its value says who holds it and until when.
+
+```rust
+pub struct Lease {
+    pub holder: PodId,
+    pub expires_at: DateTime<Utc>,
+}
+```
+
+NATS TTLs are not used. Every write is a compare-and-swap on the revision of the key.
+The engine renews the lease every third of `engine.leases.ttl`, which is 60 s by default.
+A failed renewal means another pod holds the key. The engine then drops `run`.
+If a pod dies, its `expires_at` passes. The next pod that pulls the redelivered message takes the lease.
+Until then, that pod defers the task to `expires_at`.
+A pod treats a lease as expired only 5 s after `expires_at`. This margin covers clock skew between pods.
+At the end of `run`, the engine deletes the lease. A dropped `run` also releases it, on a best-effort basis.
+
 The input holds IDs, not data.
 The worker reads the current state when it runs. A pending task always indexes the newest push.
 
@@ -213,20 +235,33 @@ pub trait Worker: FromResources + Send + Sync + 'static {
 ```
 
 The engine builds each worker from its resources.
-The code worker fetches the repository under a cluster-wide pool and writes it.
+The code worker fetches under a cluster pool and parses under a pod pool.
 It frees its slot while ClickHouse confirms the inserts.
 
 ```rust
 async fn run(&self, ctx: &TaskContext, project: ProjectRef) -> Result<Outcome<Indexed>, TaskError> {
     let repository = {
-        let _permit = ctx.pool("gitaly_archives").await?;
+        let _permit = ctx.pool("gitaly_archives").key(&project.storage).await?;
         self.gitaly.fetch(&project).await?
     };
-    let inserts = self.graph.write(repository).await?;
+    let pool = if repository.files > SMALL_REPO_MAX_FILES { "parse_big" } else { "parse" };
+    let inserts = {
+        let _permit = ctx.pool(pool).await?;
+        self.graph.write(repository).await?
+    };
     ctx.detach();
     Ok(Outcome::done(inserts.confirmed().await?))
 }
 ```
+
+A pool limits one stage of a task. The code names the pool. Helm sets its scope and size.
+A pool in `engine.pools` is cluster-wide, with a limit for each key, such as a Gitaly storage.
+`unknown_key` is the limit for inputs with no key.
+A pool in an instance limits a stage inside one pod. Here, 16 tasks fetch ahead while 10 parse.
+The worker picks `parse` or `parse_big` after the fetch, from the real file count.
+A task can hold several permits of one pool, one for each part of its parallel work.
+A task that waits longer than `max_wait` defers. It frees its slot and lease, and uses no attempt.
+A cluster permit is a lease. If the engine loses it, it drops `run`.
 
 `ctx.detach()` frees the slot. The lane pulls the next task.
 The message and the lease stay held until `run` returns.
@@ -443,7 +478,23 @@ pub trait Reconciler: FromResources + Send + Sync + 'static {
 }
 ```
 
-The namespace status is a reconciler.
+A timer is the only trigger of a reconciler. The engine runs it every `EVERY`, on one planner replica.
+
+```rust
+const EVERY: Duration = Duration::from_secs(60);
+```
+
+Each tick checks the full state. A lost event only delays a fact by one period.
+A reconciler never submits a task. It calls `replan` or `campaign` on a planner, so the planner keeps all routing.
+
+| Reconciler | Wanted state | Action |
+|---|---|---|
+| Namespace status | Every enabled namespace is indexed at the active version | Writes `indexed` or `failed`. With no job, it replans the namespace. |
+| Schema migration | The newest ontology version is active | Creates the tables, starts a campaign, then promotes the version |
+| Code freshness | Each checkpoint matches the newest commit of its project | Replans the stale projects. This heals lost push events. |
+| Namespace removal | A disabled namespace has no graph data | Replans the deletion of its data |
+
+Here is the namespace status reconciler.
 A namespace is indexed when its `namespace.enable` job at the active version is done.
 
 ```rust
@@ -458,8 +509,6 @@ for ns in self.status.not_indexed(&version).await? {
     }
 }
 ```
-
-A lost event does not make the fact wrong. The next tick finds the change.
 
 One reconciler writes each table.
 A tick is idempotent and has a 30 s limit.
@@ -525,7 +574,7 @@ NATS holds work in flight, dedupe markers and leases. It holds no fact.
 | `ORBIT_TASKS` | One subject for each worker and lane | The recovery campaign submits the work again. |
 | `ORBIT_TASK_EVENTS` | Task events for the ledger sink and `done` triggers | Running jobs become `lost`. |
 | `orbit_pending` | One dedupe marker for each pending worker and key | Recovery submits the work again. |
-| `orbit_leases` | Key leases, pool permits, trigger and reconciler leases, the generation | Pods restart. The new generation fences old owners. |
+| `orbit_leases` | Key leases with their holder and `expires_at`, pool permits, trigger and reconciler leases, the generation | Pods restart. The new generation fences old owners. |
 
 The provisioner can find a generation in ClickHouse, but no NATS objects.
 Then it writes a new generation and creates the objects.
@@ -585,6 +634,7 @@ A wipe costs one recovery campaign. No fact is lost.
 ## Consequences
 
 - Every write must be idempotent. Tasks run at least once. Recovery repeats work.
+- V2 replaces the V1 concurrency and timeout keys. Both config blocks are accepted until V1 is removed.
 - A planner must handle `Sweep` and `Manual`. Without them, NATS recovery and `replan` cannot reach its work.
 - KEDA scales on message count, not cost. The planner must split work into lanes by size.
 - During a backoff, the backlog grows. KEDA scales up pods that only wait. The `pods.max` of the instance caps the scale-up.
@@ -620,3 +670,33 @@ Numbered steps work on any SQL backend. A SQLite file restored from S3 knows its
 - [Support third-party data sources in Orbit](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/20)
 - [Non-blocking migrations and blue/green deployment](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/7)
 - [ADR 017: Clone-based non-blocking schema migrations](017_clone_based_non_blocking_migrations.md)
+
+## Appendix: NATS load today and with the engine
+
+Production numbers are from the 7 days to 2026-11-09. Siphon streams are not part of the engine.
+
+| | Today | With the engine |
+|---|---|---|
+| Orbit streams | 10: `GKG_INDEXER` and `GKG_DEAD_LETTERS`, with a copy for each release | 2: `ORBIT_TASKS` and `ORBIT_TASK_EVENTS` |
+| Subjects in the task stream | Up to 83,000: one for each project branch or namespace | One for each worker and lane, about 15 |
+| Consumers | 17, up to 21 during a release | One for each worker and lane, plus planner triggers and the ledger sink |
+| Tasks published | 1.9 a second | About the same. Task events add two or three messages for each task. |
+| Tasks pending | Up to 83,000 on the code consumer | At most one for each worker and key, plus `max_pending` for each campaign |
+| Tasks waiting for an ack | Up to 1,660 | At most the slots of all running pods |
+| Lock entries | 940,000 in 6 buckets, one for each schema version | One lease for each running exclusive task. The engine deletes it at the end. |
+| Retired KV data | 669,000 progress entries, no longer written | None |
+| Dead letters | 1,280 messages in 5 streams | `failed` rows in `engine_task` |
+| Siphon | 13 streams, 18.9 M messages, 22 messages a second | No change |
+
+## Appendix: V1 config keys and their V2 equivalents
+
+| V1 key | V2 equivalent |
+|---|---|
+| `topics` | `engine.lanes` |
+| `concurrency_groups` | The slots in `engine.instances.<name>.serve` |
+| `fetch_concurrency` | The lane slots in `serve` |
+| `small_indexing_slots`, `big_indexing_slots` | The pod pools `parse` and `parse_big` |
+| `write_max_concurrent` | The pod pool `insert` |
+| `archive_storage_budget`, `archive_tenant_budget` | `per_key` and `unknown_key` of the cluster pool `gitaly_archives` |
+| `archive_lease_max_wait_secs` | `max_wait` of the pool |
+| `job_timeout_secs` | `timeout` on the lane |
