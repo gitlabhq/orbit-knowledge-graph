@@ -10,12 +10,12 @@ use indexer::orchestrator::scheduled::{NamespaceFreshness, ScheduledTask};
 use indexer::schema::version::{
     SCHEMA_VERSION, ensure_version_table, mark_version_active, prefixed_table_name,
 };
-use ontology::EtlScope;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_server_config::{AppConfig, NatsConfiguration};
+use query_data_model::catalog::sources::EtlScope;
 
 use super::common::siphon::create_namespace;
 use super::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, start_nats};
@@ -115,10 +115,11 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
         ))
         .await;
 
-    let ontology = ontology::Ontology::load_embedded().unwrap();
+    let model = query_data_model::Packages::embedded().load().unwrap();
     let plans_in = |scope: EtlScope| -> Vec<String> {
-        ontology
-            .pipeline_descriptors()
+        model
+            .sources()
+            .descriptors(model.graph())
             .into_iter()
             .filter(|plan| plan.scope == scope)
             .map(|plan| plan.name)

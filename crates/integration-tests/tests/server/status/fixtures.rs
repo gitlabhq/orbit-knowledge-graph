@@ -220,10 +220,15 @@ pub async fn seed_namespaces(ctx: &TestContext) {
 
 pub async fn seed_plans(ctx: &TestContext, root: i64, overrides: &[(&str, CheckpointRow)]) {
     let overridden = |plan: &str| overrides.iter().any(|(key, _)| *key == plan);
-    let completed_plans = load_ontology()
-        .pipeline_descriptors()
+    let model = query_data_model::Packages::embedded().load().unwrap();
+    let completed_plans = model
+        .sources()
+        .descriptors(model.graph())
         .into_iter()
-        .filter(|plan| plan.scope == ontology::EtlScope::Namespaced && !overridden(&plan.name))
+        .filter(|plan| {
+            plan.scope == query_data_model::catalog::sources::EtlScope::Namespaced
+                && !overridden(&plan.name)
+        })
         .map(|plan| (plan.name, COMPLETED));
     let overrides = overrides.iter().map(|(plan, row)| (plan.to_string(), *row));
 
