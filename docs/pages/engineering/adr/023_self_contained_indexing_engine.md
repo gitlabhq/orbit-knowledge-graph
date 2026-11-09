@@ -54,6 +54,7 @@ A flow has up to three pieces of code. Helm configures where they run.
 The engine has no domain terms: no project, namespace, Gitaly or ontology.
 A CI check enforces it.
 Tasks run at least once. Every write is idempotent.
+NATS holds no facts, and every system store can be rebuilt. A failure costs a reindex, never querying.
 
 ### Triggers: what wakes the engine
 
@@ -451,6 +452,18 @@ CREATE TABLE IF NOT EXISTS engine_campaign (
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (tag, planner);
 
+CREATE TABLE IF NOT EXISTS engine_schema_migrations (
+    store LowCardinality(String),
+    version UInt32,
+    name String,
+    checksum FixedString(64),
+    status Enum8('seen' = 1, 'applied' = 2, 'failed' = 3),
+    error String DEFAULT '',
+    binary LowCardinality(String),
+    applied_at DateTime64(6, 'UTC') DEFAULT now64(6)
+) ENGINE = ReplacingMergeTree(applied_at)
+ORDER BY (store, version);
+
 CREATE TABLE IF NOT EXISTS engine_generation (
     generation UInt32,
     binary LowCardinality(String),
@@ -525,26 +538,43 @@ Data has two classes, with opposite migration rules.
 
 **The engine migrates the system schema at startup.**
 `orbit-store` keeps numbered SQL steps, with one folder for each dialect.
+There is one store for now, `engine`. It holds the checkpoints, the namespace status and the ledger.
 
 ```plaintext
 stores/engine/
   clickhouse/
-    001_expand_namespace_status.sql
-    002_contract_drop_legacy_state.sql
+    000_baseline.sql
+    022_expand_parseable_files.sql
   sqlite/
-    001_expand_namespace_status.sql
-    002_contract_drop_legacy_state.sql
+    000_baseline.sql
+    022_expand_parseable_files.sql
 ```
 
 ```rust
 Engine::builder().system_stores(orbit_store::embed!("stores"), clickhouse)
 ```
 
-An `expand` step only adds. Old binaries keep working.
-A `contract` step drops or narrows. It waits one release after the first binary that sees it.
-A `build.rs` embeds the folders. It fails on a missing or duplicate step.
-The engine adds its own store, `ledger`, for its tables.
-No role serves before the system schema matches its binary.
+| Step | What it may do | When it runs |
+|---|---|---|
+| `baseline` | Create every table of the store in its current shape | Only when the store is created or rebuilt |
+| `expand` | Add a table, a column with a default, a TTL or a comment | At startup, before indexing serves |
+| `contract` | Drop a column or a table | One release after the first binary that sees it |
+
+A step may only change metadata. `build.rs` rejects a step that rewrites data, such as a type change or a new sort key.
+Such a change is a new table, filled by a campaign.
+CI runs every step on each supported ClickHouse version. At startup, the engine checks the version against the minimum.
+`engine_schema_migrations` records the state of each step. Its shape never changes.
+
+When a step fails, the engine rebuilds the store:
+
+```plaintext
+for each engine table: create it fresh under a temporary name, in the full current shape
+ → EXCHANGE TABLES with the live table → rename the old copy to <table>_migration_v<step>_backup
+ → mark every step as applied
+ → start one recovery campaign for each planner, in the backfill lanes
+```
+
+Table names never change, and the recovery campaign refills the empty tables. The cost is a full reindex and the ledger history, but graph queries keep working. The engine rebuilds at most once for each release. A second failure, or a failed `CREATE`, stops indexing and alerts the admin. This works because every table can be rebuilt from the source, or can start empty.
 
 **The ontology registry owns the indexed data schema. The engine has no part in it.**
 A new version can come from any team at any time.
@@ -559,6 +589,8 @@ for version in self.registry.migrating().await? {
 }
 ```
 
+A failed `create_tables` or campaign marks the version `failed` in the registry, with its error.
+The reconciler stops retrying it. The active version keeps serving queries. An admin can press Reindex to retry it.
 A campaign calls `plan()` with `Sweep`, one page at a time, in the backfill lanes.
 Every task it starts carries its tag, such as `migration:199`.
 After a restart, it resumes from its saved `next_page`.
@@ -634,6 +666,8 @@ A wipe costs one recovery campaign. No fact is lost.
 ## Consequences
 
 - Every write must be idempotent. Tasks run at least once. Recovery repeats work.
+- A failed migration costs a full reindex and the ledger history, at most once for each release. Graph queries keep working.
+- A step may only change metadata. A change that rewrites data is a new table and a campaign.
 - V2 replaces the V1 concurrency and timeout keys. Both config blocks are accepted until V1 is removed.
 - A planner must handle `Sweep` and `Manual`. Without them, NATS recovery and `replan` cannot reach its work.
 - KEDA scales on message count, not cost. The planner must split work into lanes by size.
