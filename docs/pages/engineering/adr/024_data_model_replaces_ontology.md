@@ -70,7 +70,7 @@ Planning stays in the compiler phases, which express every decision through the 
 
 ### Packages replace the ontology
 
-The ontology splits into four kinds of fragment, each a single YAML document:
+The ontology splits into five kinds of fragment, each a single YAML document:
 
 | Kind | Holds | Lived in the ontology as |
 |---|---|---|
@@ -78,9 +78,10 @@ The ontology splits into four kinds of fragment, each a single YAML document:
 | `authorization` | Scope, role floor and redaction for each entity | Fields mixed into node files |
 | `storage` | One store's tables, columns, routes and backend layout | Fields mixed into node files, plus the DDL generator |
 | `service` | Lookups that return properties from an external service | Virtual property fields |
+| `source` | Where indexed data comes from: source tables, extraction queries, field mappings and reindex triggers | The `indexer:` and `pipelines:` blocks |
 
 A package is a directory of fragments.
-The platform ships the `gitlab.*` packages, an integration ships one package with all four kinds, and a tenant overlay ships a package that loads for one tenant.
+The platform ships the `gitlab.*` packages, an integration ships one package with every kind it needs, and a tenant overlay ships a package that loads for one tenant.
 
 Each layer depends only on the one above it: storage binds to the graph, and authorization refers to the graph.
 The graph itself knows nothing about tables.
@@ -117,7 +118,30 @@ entities:
         title: {default: "''", codec: [ZSTD(1)]}
 ```
 
+```yaml
+kind: source
+package: gitlab.core
+source: siphon
+connection: datalake
+entities:
+  Group:
+    tables: [namespace_traversal_paths, siphon_namespaces, siphon_namespace_details, siphon_routes]
+    order_by: [traversal_path, id]
+    query: group.sql.j2
+    reindex_on: [siphon_namespaces, siphon_namespace_details, siphon_routes]
+relationships:
+  CONTAINS:
+    "WorkItem -> WorkItem":
+      table: siphon_work_item_parent_links
+      from: work_item_parent_id
+      to: work_item_id
+```
+
 Shared storage fields cover what every backend understands; the `backend` block holds what only that backend understands, and it is validated by that backend.
+
+A source fragment describes how indexed data is produced, and it points at the graph and storage of the same package version.
+An indexing worker from [ADR 023](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3333) loads the source fragments of the version in its input, so the indexer writes exactly the tables that the query engine plans against.
+A relationship that a foreign key already carries needs no source entry: the graph reference and the storage route are enough.
 
 Packages compose under four rules: a package cannot redeclare an entity another package owns, cannot add a second authorization entry for the same entity, property or relationship, can add variants to a platform relationship, and can bind additional entities to a store another package declares.
 
@@ -134,6 +158,21 @@ A new or changed package does not need a rebuild or a deploy.
 The loader validates the candidate packages in full, and only a model that passes every check replaces the active one.
 The swap is atomic: compiles already in flight keep the snapshot they started with, through an `Arc<Model>`, and new compiles pick up the new one.
 A package that fails validation is rejected with its errors, and the previous model stays active.
+
+#### The package registry
+
+The package source is a registry keyed by package.
+Each package has its own version line, so `gitlab.ci`, `integration.linear` and a tenant's `tenant.agent_memory` move independently.
+A tenant's model is the composition of the active version of every package that applies to it.
+
+A new package version reaches queries as follows, with the indexing engine of [ADR 023](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3333) owning the backfill:
+
+1. The registry loads the candidate model and diffs its physical catalogs against the active model's. The diff is the migration scope: the tables whose layout or contents change. Nobody declares the scope by hand.
+2. If the scope is empty, as it is for a change that only adds query metadata, the version is promoted at once.
+3. Otherwise the indexing engine creates the new tables from the candidate catalog and runs a backfill campaign for the tables in scope. Live indexing writes both versions until the campaign is done.
+4. The registry promotes the version, and the query engine swaps to the new model.
+
+The query engine therefore never sees a model whose tables are not built yet, and the indexer and the query engine always agree on one package version.
 
 Work that the compiler used to repeat on every query moves into this load:
 
@@ -344,7 +383,8 @@ General cross-engine execution needs separate orchestration and is out of scope.
 
 | To add | Write | Leave untouched |
 |---|---|---|
-| An entity, source or tenant overlay | A package | The compiler |
+| An entity or tenant overlay | A package | The compiler |
+| A data source to index | A `source` fragment | The indexing engine |
 | A query language | A surface that builds logical plans | The planner |
 | A query type | A planner branch that builds through the relational builder | The surfaces and the renderer |
 | A backend | A `StorageBackend` implementation, its plan language and its renderer | Shared compiler code |
