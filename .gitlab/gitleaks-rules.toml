@@ -33,7 +33,7 @@ secretGroup = 1
 keywords = ["://"]
 [[rules.allowlists]]
 regexTarget = "match"
-regexes = ['''@(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|host\.docker\.internal|[^\s/:'"]*\.(?:example|test|local|internal|svc|invalid)(?:\.[a-z]+)*)$''']
+regexes = ['''@(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|host\.docker\.internal|[^\s/:'"]*\.(?:example(?:\.(?:com|org|net))?|test|local|internal|invalid|svc(?:\.cluster\.local)?))$''']
 
 [[rules]]
 id = "yaml-secret-field"
