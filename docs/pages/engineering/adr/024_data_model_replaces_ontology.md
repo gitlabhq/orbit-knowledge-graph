@@ -217,7 +217,7 @@ let clickhouse = model.physical::<ClickHouse>("main")?;
 ```
 
 Each catalog has its own vocabulary.
-The logical catalog speaks in entities and relationships; a relational catalog speaks in tables and relational operations; a search catalog speaks in indexes, matches and ranking.
+The logical catalog speaks in entities and relationships; a relational catalog speaks in tables and relational operations; the Orbit Next code catalog speaks in repositories and structural matches; a live connector's catalog speaks in API calls.
 They share one construction discipline, not one operation set:
 
 ```plaintext
@@ -226,11 +226,11 @@ They share one construction discipline, not one operation set:
                                   |
            +----------------------+----------------------+
            |                      |                      |
-    Logical builder        Relational builder      Search builder
-    entities, follow       scan, join, latest      search, rank, top
-    filter, aggregate      filter, share, limit    select fields
+    Logical builder        Relational builder      Code builder
+    entities, follow       scan, join, latest      repositories, prefilter
+    filter, aggregate      filter, share, limit    structural, top
            |                      |                      |
-      Logical plan          Relational plan          Search plan
+      Logical plan          Relational plan          Code plan
 ```
 
 Nothing builds a plan by hand.
@@ -264,7 +264,7 @@ pub trait Render: Catalog {
 }
 ```
 
-The associated types keep engine details local: the logical catalog's operations are graph operations, ClickHouse's are relational operations with SQL types, and Zoekt's are search operations.
+The associated types keep engine details local: the logical catalog's operations are graph operations, ClickHouse's are relational operations with SQL types, Orbit Next's are code search operations, and a live connector's are API calls.
 Each catalog chooses its own builder methods through `Construct`, and a logical catalog does not implement `Render` at all.
 Underneath, the tracking layer is generic over the operation language and holds the concrete plan, node, output and scope identities.
 
@@ -339,44 +339,132 @@ let request = clickhouse.render(&plan);
 
 The executable stays backend-specific.
 ClickHouse and DuckDB return SQL with parameters and settings, sharing one relational renderer with a small dialect each.
-A search backend returns its native request object.
-A backend whose operations need lowering, such as expanding a latest-row read into sort and first-row-per-key, lowers inside its own render path; a search catalog whose operations map directly to a native request renders the plan as is.
+Orbit Next and live connectors return their native request objects.
+A backend whose operations need lowering, such as expanding a latest-row read into sort and first-row-per-key, lowers inside its own render path; a catalog whose operations map directly to a native request renders the plan as is.
 
-#### A search catalog looks quite different
+#### Orbit Next: a structural code query over the wire
 
-A Zoekt adapter shows that the shared layer is not secretly relational.
-A storage fragment declares a store on a Zoekt connection and binds the searchable fields:
+Orbit Next keeps repositories in object storage and serves code queries from its code indexing web servers.
+Its catalog speaks in repositories, languages, trigram prefilters and structural matches, and it renders to a request that is sent over gRPC rather than to SQL.
+
+A storage fragment binds `File` to a store on the code indexing connection and declares how each field can be searched:
 
 ```yaml
 kind: storage
 package: gitlab.source_code
-store: code_search
+store: code
 engine:
-  kind: zoekt
-  connection: zoekt
+  kind: orbit_code
+  connection: code_indexing
 entities:
   File:
-    text: [content, path]
+    backend:
+      search: {content: [trigram, structural], path: [trigram]}
 ```
 
-The `plan` phase builds a search plan through the search catalog:
+A caller asks for every call to `compile` in the Rust files of a project:
+
+```plaintext
+MATCH (f:File)
+WHERE f.project_id = 42 AND f.content MATCHES ast('compile($$$ARGS)', 'rust')
+RETURN f.path, match.line, match.ARGS LIMIT 50
+```
+
+The `plan` phase targets the code connection, because that is where `File.content` is searchable, and builds a code plan:
 
 ```rust
-let zoekt = model.physical::<Zoekt>("zoekt")?;
-let plan = zoekt.build(|q| {
-    let repositories = q.repositories(zoekt.index("code_search", "File")?, project_ids)?;
-    let matches = q.search(repositories, Search::Literal("fn compile"))?;
-    let matches = q.top(q.rank(matches, Ranking::Relevance)?, 20)?;
-    q.select(matches, [matches.field("path")?, matches.field("snippet")?])
+let code = model.physical::<OrbitCode>("code_indexing")?;
+let plan = code.build(|q| {
+    let files = q.repositories(code.index("code", "File")?, [project])?;
+    let files = q.languages(files, [Language::Rust])?;
+    let files = q.prefilter(files, Trigrams::of(["compile"]))?;
+    let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)"))?;
+    let hits = q.top(hits, 50)?;
+    q.select(hits, [hits.field("path")?, hits.field("line")?, hits.capture("ARGS")?])
 })?;
-let request = zoekt.render(&plan);
+let request = code.render(&plan);
 ```
 
-The loader computes a guard for each searchable source, as for any other store, and the security phase applies it as a restriction the backend understands, here the set of repositories the caller can read.
-If the tracking layer ever needed a SQL table or a join to express this, it would be too specific.
+The trigram prefilter is a planning decision: the planner takes the pattern's literal atoms and narrows the candidate files before the structural pass, exactly as it chooses a foreign key over an edge table in a relational plan.
+The rendered request carries the repository set, the prefilter, the ast-grep pattern and the limit. The code indexing web servers read the matching objects, run the pattern and stream back paths, lines and captures.
+
+`File` is namespaced, so the loader gives its code store a guard like any other.
+The security phase turns it into a repository restriction: the request only names repositories in projects whose traversal path the caller can read.
+If the tracking layer ever needed a SQL table or a join to express this plan, it would be too specific.
+
+#### A third-party entity fetched at query time: Slack
+
+A third-party entity does not have to be indexed.
+A Slack message is declared like any other entity, but its store holds no rows: the data is fetched when a query asks for it.
+
+```yaml
+kind: graph
+package: integration.slack
+entities:
+  SlackMessage:
+    label: text
+    properties:
+      id: {type: string, immutable: true}
+      channel: {type: string}
+      author: {type: string}
+      text: {type: string}
+      sent_at: {type: timestamp}
+```
+
+```yaml
+kind: authorization
+package: integration.slack
+entities:
+  SlackMessage: {scope: namespace, role: reporter, delegated: true}
+```
+
+```yaml
+kind: storage
+package: integration.slack
+store: slack
+engine:
+  kind: live
+  connection: data_extraction
+  path_column: traversal_path
+entities:
+  SlackMessage:
+    backend:
+      operation: search.messages
+      filters: [channel, author, sent_at]
+      text: text
+```
+
+The live catalog's plan language is API calls: an operation, the filters that operation can push down, a time window, paging and a limit.
+A filter the operation cannot push down, such as a regular expression on `author`, is a construction error.
+
+```plaintext
+MATCH (m:SlackMessage)
+WHERE m.channel = 'orbit-dev' AND m.text CONTAINS 'deploy'
+RETURN m.author, m.text LIMIT 20
+```
+
+```rust
+let live = model.physical::<Live>("data_extraction")?;
+let plan = live.build(|q| {
+    let messages = q.call(live.operation("slack", "SlackMessage")?)?;
+    let messages = q.filter(messages, channel.eq("orbit-dev").and(text.contains("deploy")))?;
+    q.select(q.limit(messages, 20)?, [author, text])
+})?;
+let request = live.render(&plan);
+```
+
+The request goes to the Data Extraction Service, which holds the integration's credentials and runs the call with the caller's own Slack sign-in. Tokens never leave the service.
+Access is checked twice.
+The connection maps each Slack workspace to the namespace that installed it, so every message carries that namespace's traversal path, and the security phase only sends the request for workspaces in namespaces the caller can read.
+`delegated: true` records that Slack then applies its own visibility through the caller's sign-in, so a message the caller cannot see in Slack never reaches Orbit.
+
+Because the entity is declared in the graph, the rest of the system treats it normally: surfaces resolve its properties, plan tests assert its logical and physical plans, and a relationship such as `SlackMessage -> MergeRequest` can be declared like any other.
+An indexed third-party source, such as Jira, uses the same graph and authorization fragments with a `source` fragment and a ClickHouse store instead of a live one.
+
+#### Crossing connections
 
 One compile targets one connection.
-A query that needs both code search results and graph data reads its keys from one backend and fetches the rest through a lookup, as virtual columns do.
+A query that needs both Slack messages and graph data reads its keys from one connection and fetches the rest through a lookup, as virtual columns do.
 General cross-engine execution needs separate orchestration and is out of scope.
 
 ### What a new pipeline needs
@@ -386,7 +474,7 @@ General cross-engine execution needs separate orchestration and is out of scope.
 | An entity or tenant overlay | A package | The compiler |
 | A data source to index | A `source` fragment | The indexing engine |
 | A query language | A surface that builds logical plans | The planner |
-| A query type | A planner branch that builds through the relational builder | The surfaces and the renderer |
+| A query type | A planner branch that builds through the target catalog's builder | The surfaces and the renderer |
 | A backend | A `StorageBackend` implementation, its plan language and its renderer | Shared compiler code |
 
 Every pipeline shares the same model, builders and test harness.
@@ -404,7 +492,7 @@ Plan construction is consistent across pipelines.
 Each pass is a checked rewrite and cannot leave an invalid plan behind.
 The compiler keeps one representation per layer, and `Input`, `QueryPlan`, the relation graph, the SQL AST and both dialect emitters go away.
 
-Backends are pluggable, and planning reads capabilities rather than backend names, so one pipeline serves relational backends such as ClickHouse and DuckDB and search backends such as Zoekt.
+Backends are pluggable, and planning reads capabilities rather than backend names, so one pipeline serves relational backends such as ClickHouse and DuckDB, the Orbit Next code service and live third-party connectors.
 
 ### Costs and constraints
 
@@ -442,7 +530,8 @@ The model makes a number of smaller features cheap:
 - **Relationship attributes.** A relationship can declare typed attributes, such as the branch on a `CALLS` edge, that queries filter and select like properties.
 - **Tenant overlays.** Agent memory adds custom node types as a package scoped to one tenant, with its own authorization entries.
 - **Service lookups.** A service fragment declares properties served by an external service, such as a diff from Gitaly. The engine reads the keys from the graph and then calls the service.
-- **Search targets.** Code search through Zoekt, or any text index, is a backend with its own plan language on the same tracking layer.
+- **Structural code search.** Orbit Next answers ast-grep queries over the wire through its own plan language on the same tracking layer.
+- **Live third-party entities.** A connector such as Slack declares entities that are fetched at query time under the caller's own sign-in, with no indexing.
 - **Shared reads.** The planner marks a read that several parts of a query use, and one backend-generic rule decides whether it becomes a CTE or stays inline.
 - **Better errors.** Unknown names list the valid candidates and reversed arrows get a hint. Both come from the builder, so every surface gets them for free.
 - **Layered plan tests.** Tests assert the logical and relational plans separately, before any SQL is rendered.
