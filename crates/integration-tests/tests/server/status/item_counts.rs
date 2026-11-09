@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use integration_testkit::{load_ontology, run_subtests_shared, t};
+use integration_testkit::{load_data_model, run_subtests_shared, t};
 use orbit_server::item_counts::{ItemCountService, ScopeItemCounts};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
@@ -122,10 +122,10 @@ async fn missing_table_fails_the_count_and_zeroes_the_graph_status(ctx: &TestCon
     let scopes = [TraversalPath::new_unchecked("1/100/")];
 
     let failed = service
-        .count_items(&load_ontology(), &admin_context(), &scopes)
+        .count_items(&load_data_model(), &admin_context(), &scopes)
         .await;
     let zeros = service
-        .count_items_or_zeros(&load_ontology(), &admin_context(), &scopes)
+        .count_items_or_zeros(&load_data_model(), &admin_context(), &scopes)
         .await
         .remove(0)
         .counts;
@@ -215,7 +215,7 @@ async fn count_with_dropped_table(
         TraversalPath::new_unchecked("1/101/"),
     ];
     ItemCountService::new(Arc::new(db.create_client()))
-        .count_items(&load_ontology(), security_context, &scopes)
+        .count_items(&load_data_model(), security_context, &scopes)
         .await
 }
 

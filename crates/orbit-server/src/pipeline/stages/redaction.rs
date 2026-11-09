@@ -40,7 +40,6 @@ mod tests {
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use ontology::Ontology;
     use query_engine::compiler::{EntityAuthConfig, Frontend, ResultContext};
     use query_engine::pipeline::NoOpObserver;
     use query_engine::types::{QueryResult, ResourceAuthorization};
@@ -80,7 +79,6 @@ mod tests {
             frontend,
             query_json: String::new(),
             compiled: None,
-            ontology: Arc::new(Ontology::new()),
             security_context: None,
             server_extensions: Default::default(),
             phases: Default::default(),

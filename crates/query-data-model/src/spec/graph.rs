@@ -11,6 +11,8 @@ pub struct GraphFragment {
     pub package: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub domain: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_description: Option<String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub entities: IndexMap<String, EntitySpec>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
@@ -26,7 +28,16 @@ pub struct EntitySpec {
     pub label: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub defaults: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<StyleSpec>,
     pub properties: IndexMap<String, PropertySpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StyleSpec {
+    pub size: i32,
+    pub color: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

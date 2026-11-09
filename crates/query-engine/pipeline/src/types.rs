@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use compiler::{CompiledQueryContext, SecurityContext};
-use ontology::Ontology;
 
 use crate::error::PipelineError;
 
@@ -49,7 +48,6 @@ pub struct QueryPipelineContext {
     pub query_json: String,
     pub frontend: compiler::Frontend,
     pub compiled: Option<Arc<CompiledQueryContext>>,
-    pub ontology: Arc<Ontology>,
     pub security_context: Option<SecurityContext>,
     /// Server-specific infrastructure (ClickHouse client, etc.)
     pub server_extensions: TypeMap,

@@ -20,6 +20,8 @@ pub mod pipeline;
 pub mod probes;
 pub mod proto;
 pub mod redaction;
+#[cfg(test)]
+mod schema_golden;
 pub mod shutdown;
 pub mod skills;
 mod status_query;

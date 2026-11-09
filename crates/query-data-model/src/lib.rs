@@ -4,6 +4,7 @@ mod error;
 pub mod from_ontology;
 pub mod generic;
 pub mod implementations;
+pub mod introspection;
 pub mod packages;
 pub mod plan;
 pub mod spec;
@@ -13,9 +14,9 @@ pub mod surface;
 pub use catalog::{Catalog, Model, StorageBackend};
 pub use error::DataModelError;
 pub use generic::{
-    Attribute, AttributeId, Direction, Endpoint, Entity, EntityId, ForeignKey, GraphCatalog, Hop,
-    Property, PropertyId, Reach, Relationship, RelationshipId, RelationshipVariant,
-    RelationshipVariantId, Walk,
+    Attribute, AttributeId, Direction, Domain, Endpoint, Entity, EntityId, ForeignKey,
+    GraphCatalog, Hop, Property, PropertyId, Reach, Relationship, RelationshipId,
+    RelationshipVariant, RelationshipVariantId, Style, Walk,
 };
 pub use implementations::clickhouse::ClickHouse;
 pub use implementations::clickhouse::facts::{

@@ -5,11 +5,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
-use ontology::Ontology;
-use ontology::introspection::SchemaResponse;
 use orbit_log_fields::{info, warn};
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::introspection::SchemaResponse;
+use query_data_model::{DEFAULT_PRIMARY_KEY, EntityId, GraphCatalog, Model};
 use query_engine::compiler::Frontend;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
@@ -361,7 +361,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 format,
             } => {
                 let schema = self.active_schema.snapshot()?;
-                ToolService::render_graph_schema(&schema.ontology, &expand_nodes, format)
+                ToolService::render_graph_schema(schema.data_model.model(), &expand_nodes, format)
             }
             AgentCommand::QueryLanguage { .. } if frontend == Frontend::Gql => {
                 Err(ExecutorError::NotFound(
@@ -510,13 +510,15 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let schema = self.active_schema.snapshot()?;
 
         let response = if req.format == ResponseFormat::Llm as i32 {
-            let toon_text = ToolService::build_schema_toon(&schema.ontology, &req.expand_nodes)
-                .map_err(command_error_to_status)?;
+            let toon_text =
+                ToolService::build_schema_toon(schema.data_model.model(), &req.expand_nodes)
+                    .map_err(command_error_to_status)?;
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
             }
         } else {
-            let structured = Self::build_structured_schema(&schema.ontology, &req.expand_nodes);
+            let structured =
+                Self::build_structured_schema(schema.data_model.model(), &req.expand_nodes);
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::Structured(structured)),
             }
@@ -756,75 +758,81 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let schema = self.active_schema.snapshot()?;
         let counts = self
             .item_counts
-            .count_items(&schema.ontology, &security_context, &paths)
+            .count_items(&schema.data_model, &security_context, &paths)
             .await?;
         Ok(Response::new(build_item_counts_response(
-            &schema.ontology,
+            schema.data_model.model(),
             req,
             &counts,
         )))
     }
 }
 
+const STRUCTURED_SCHEMA_VERSION: &str = "0.1";
+
 impl OrbitServiceImpl {
-    fn build_structured_schema(ontology: &Ontology, expand_nodes: &[String]) -> StructuredSchema {
-        let domains: Vec<SchemaDomain> = ontology
+    pub(crate) fn build_structured_schema(
+        model: &Model,
+        expand_nodes: &[String],
+    ) -> StructuredSchema {
+        let graph = model.graph();
+        let domains: Vec<SchemaDomain> = graph
             .domains()
-            .map(|d| SchemaDomain {
-                name: d.name.clone(),
-                description: d.description.clone(),
-                node_names: d.node_names.clone(),
+            .map(|domain| SchemaDomain {
+                name: domain.name.clone(),
+                description: domain.description.clone().unwrap_or_default(),
+                node_names: graph
+                    .entities()
+                    .filter(|entity| entity.domain.as_deref() == Some(domain.name.as_str()))
+                    .map(|entity| entity.name.clone())
+                    .collect(),
             })
             .collect();
 
-        let nodes: Vec<SchemaNode> = ontology
-            .nodes()
-            .map(|n| {
-                let should_expand = expand_nodes.iter().any(|e| e == "*" || e == &n.name);
+        let nodes: Vec<SchemaNode> = graph
+            .entities()
+            .map(|entity| {
+                let should_expand = expand_nodes.iter().any(|e| e == "*" || *e == entity.name);
 
                 let properties = if should_expand {
-                    n.listed_fields()
-                        .map(|f| SchemaProperty {
-                            name: f.name.clone(),
-                            data_type: format!("{}", f.data_type),
-                            nullable: f.nullable,
-                            enum_values: f
+                    entity
+                        .properties
+                        .iter()
+                        .filter(|property| !model.access().property(**property).hidden)
+                        .map(|property| graph.property(*property))
+                        .map(|property| SchemaProperty {
+                            name: property.name.clone(),
+                            data_type: property.data_type.to_string(),
+                            nullable: property.nullable,
+                            enum_values: property
                                 .enum_values
                                 .as_ref()
-                                .map(|ev| ev.values().cloned().collect())
+                                .map(|values| values.values().cloned().collect())
                                 .unwrap_or_default(),
-                            description: f.description.clone().unwrap_or_default(),
+                            description: property.description.clone().unwrap_or_default(),
                         })
                         .collect()
                 } else {
                     vec![]
                 };
 
-                let style = if should_expand {
-                    Some(SchemaNodeStyle {
-                        size: n.style.size,
-                        color: n.style.color.clone(),
-                    })
-                } else {
-                    None
-                };
+                let style = should_expand.then(|| SchemaNodeStyle {
+                    size: entity.style.size,
+                    color: entity.style.color.clone(),
+                });
 
                 let (outgoing_edges, incoming_edges) = if should_expand {
-                    Self::get_node_edge_names(ontology, &n.name)
+                    Self::get_node_edge_names(graph, entity.id)
                 } else {
                     (vec![], vec![])
                 };
 
                 SchemaNode {
-                    name: n.name.clone(),
-                    domain: n.domain.clone(),
-                    description: n.description.clone(),
-                    primary_key: n
-                        .primary_keys
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| "id".to_string()),
-                    label_field: n.label.clone(),
+                    name: entity.name.clone(),
+                    domain: entity.domain.clone().unwrap_or_default(),
+                    description: entity.description.clone().unwrap_or_default(),
+                    primary_key: DEFAULT_PRIMARY_KEY.to_string(),
+                    label_field: entity.label.clone(),
                     properties,
                     style,
                     outgoing_edges,
@@ -833,65 +841,52 @@ impl OrbitServiceImpl {
             })
             .collect();
 
-        let edges: Vec<SchemaEdge> = ontology
-            .edge_names()
-            .map(|name| {
-                let variants: Vec<SchemaEdgeVariant> = ontology
-                    .get_edge(name)
-                    .map(|edges| {
-                        edges
-                            .iter()
-                            .map(|e| SchemaEdgeVariant {
-                                source_type: e.source_kind.clone(),
-                                target_type: e.target_kind.clone(),
-                            })
-                            .collect()
+        let mut relationships: Vec<_> = graph.relationships().collect();
+        relationships.sort_by(|left, right| left.name.cmp(&right.name));
+        let edges: Vec<SchemaEdge> = relationships
+            .into_iter()
+            .map(|relationship| SchemaEdge {
+                name: relationship.name.clone(),
+                description: relationship.description.clone().unwrap_or_default(),
+                variants: relationship
+                    .variants
+                    .iter()
+                    .map(|variant| graph.variant(*variant))
+                    .map(|variant| SchemaEdgeVariant {
+                        source_type: graph.entity(variant.source).name.clone(),
+                        target_type: graph.entity(variant.target).name.clone(),
                     })
-                    .unwrap_or_default();
-
-                SchemaEdge {
-                    name: name.to_string(),
-                    description: ontology
-                        .get_edge_description(name)
-                        .unwrap_or_default()
-                        .to_string(),
-                    variants,
-                }
+                    .collect(),
             })
             .collect();
 
         StructuredSchema {
-            schema_version: ontology.schema_version().to_string(),
+            schema_version: STRUCTURED_SCHEMA_VERSION.to_string(),
             domains,
             nodes,
             edges,
         }
     }
 
-    fn get_node_edge_names(ontology: &Ontology, node_name: &str) -> (Vec<String>, Vec<String>) {
+    fn get_node_edge_names(graph: &GraphCatalog, entity: EntityId) -> (Vec<String>, Vec<String>) {
         let mut outgoing = Vec::new();
         let mut incoming = Vec::new();
 
-        for edge_name in ontology.edge_names() {
-            if let Some(edges) = ontology.get_edge(edge_name) {
-                let mut has_outgoing = false;
-                let mut has_incoming = false;
-
-                for edge in edges {
-                    if edge.source_kind == node_name {
-                        has_outgoing = true;
-                    }
-                    if edge.target_kind == node_name {
-                        has_incoming = true;
-                    }
-                }
-
-                if has_outgoing {
-                    outgoing.push(edge_name.to_string());
-                }
-                if has_incoming {
-                    incoming.push(edge_name.to_string());
-                }
+        for relationship in graph.relationships() {
+            let variants = relationship
+                .variants
+                .iter()
+                .map(|variant| graph.variant(*variant));
+            let (mut has_outgoing, mut has_incoming) = (false, false);
+            for variant in variants {
+                has_outgoing |= variant.source == entity;
+                has_incoming |= variant.target == entity;
+            }
+            if has_outgoing {
+                outgoing.push(relationship.name.clone());
+            }
+            if has_incoming {
+                incoming.push(relationship.name.clone());
             }
         }
 
@@ -1002,6 +997,7 @@ mod tests {
     use clickhouse_client::ClickHouseConfigurationExt;
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
     use orbit_server_config::ClickHouseConfiguration;
+    use query_data_model::{Catalog, ClickHouse};
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::metadata::MetadataValue;
 
@@ -1009,8 +1005,8 @@ mod tests {
         JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap()
     }
 
-    fn test_ontology() -> Arc<Ontology> {
-        Arc::new(Ontology::load_embedded().expect("ontology must load"))
+    fn test_model() -> Arc<Catalog<ClickHouse>> {
+        Arc::new(Catalog::<ClickHouse>::embedded().expect("model must load"))
     }
 
     fn test_config() -> ClickHouseConfiguration {
@@ -1032,7 +1028,7 @@ mod tests {
     fn test_service_on(clickhouse: &ClickHouseConfiguration) -> OrbitServiceImpl {
         OrbitServiceImpl::new(
             Arc::new(mock_validator()),
-            ActiveSchema::pinned(test_ontology()),
+            ActiveSchema::pinned(test_model()),
             clickhouse.build_client("graph"),
             ClusterHealthChecker::default().into_arc(),
             &grpc_defaults(),
@@ -1105,8 +1101,8 @@ mod tests {
             Content::ResultJson(raw.to_string())
         );
 
-        let schema = ontology::introspection::build_schema_response(
-            &test_ontology(),
+        let schema = query_data_model::introspection::build_schema_response(
+            test_model().model(),
             Default::default(),
             &[],
         )
@@ -1163,7 +1159,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            ActiveSchema::pinned(test_ontology()),
+            ActiveSchema::pinned(test_model()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
             &grpc_defaults(),
@@ -1171,7 +1167,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.active_schema.snapshot().unwrap().ontology,
+            service.active_schema.snapshot().unwrap().data_model.model(),
             &[],
         );
 
@@ -1196,7 +1192,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            ActiveSchema::pinned(test_ontology()),
+            ActiveSchema::pinned(test_model()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
             &grpc_defaults(),
@@ -1204,7 +1200,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.active_schema.snapshot().unwrap().ontology,
+            service.active_schema.snapshot().unwrap().data_model.model(),
             &["User".to_string()],
         );
 
@@ -1235,17 +1231,17 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            ActiveSchema::pinned(test_ontology()),
+            ActiveSchema::pinned(test_model()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
             &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
-        let (outgoing, incoming) = OrbitServiceImpl::get_node_edge_names(
-            &service.active_schema.snapshot().unwrap().ontology,
-            "User",
-        );
+        let snapshot = service.active_schema.snapshot().unwrap();
+        let graph = snapshot.data_model.graph();
+        let (outgoing, incoming) =
+            OrbitServiceImpl::get_node_edge_names(graph, graph.entity_id("User").unwrap());
 
         assert!(
             !outgoing.is_empty() || !incoming.is_empty(),
@@ -1258,32 +1254,11 @@ mod tests {
     }
 
     #[test]
-    fn test_get_node_edge_names_unknown_node_returns_empty() {
-        let validator = Arc::new(mock_validator());
-        let service = OrbitServiceImpl::new(
-            validator,
-            ActiveSchema::pinned(test_ontology()),
-            test_client(),
-            ClusterHealthChecker::default().into_arc(),
-            &grpc_defaults(),
-            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
-        );
-
-        let (outgoing, incoming) = OrbitServiceImpl::get_node_edge_names(
-            &service.active_schema.snapshot().unwrap().ontology,
-            "NonexistentNode",
-        );
-
-        assert!(outgoing.is_empty());
-        assert!(incoming.is_empty());
-    }
-
-    #[test]
     fn test_expanded_node_has_property_details() {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            ActiveSchema::pinned(test_ontology()),
+            ActiveSchema::pinned(test_model()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
             &grpc_defaults(),
@@ -1291,7 +1266,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.active_schema.snapshot().unwrap().ontology,
+            service.active_schema.snapshot().unwrap().data_model.model(),
             &["User".to_string()],
         );
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
@@ -1315,7 +1290,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            ActiveSchema::pinned(test_ontology()),
+            ActiveSchema::pinned(test_model()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
             &grpc_defaults(),
@@ -1323,7 +1298,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.active_schema.snapshot().unwrap().ontology,
+            service.active_schema.snapshot().unwrap().data_model.model(),
             &[],
         );
 
@@ -1339,8 +1314,10 @@ mod tests {
 
     #[test]
     fn test_structured_schema_leaves_out_hidden_properties() {
-        let response =
-            OrbitServiceImpl::build_structured_schema(&test_ontology(), &["Project".to_string()]);
+        let response = OrbitServiceImpl::build_structured_schema(
+            test_model().model(),
+            &["Project".to_string()],
+        );
         let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
         let names: Vec<&str> = project.properties.iter().map(|p| p.name.as_str()).collect();
 
@@ -1353,7 +1330,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            ActiveSchema::pinned(test_ontology()),
+            ActiveSchema::pinned(test_model()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
             &grpc_defaults(),
@@ -1361,7 +1338,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.active_schema.snapshot().unwrap().ontology,
+            service.active_schema.snapshot().unwrap().data_model.model(),
             &[],
         );
 
@@ -1384,7 +1361,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            ActiveSchema::pinned(test_ontology()),
+            ActiveSchema::pinned(test_model()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
             &grpc_defaults(),
@@ -1392,7 +1369,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.active_schema.snapshot().unwrap().ontology,
+            service.active_schema.snapshot().unwrap().data_model.model(),
             &["User".to_string(), "Project".to_string()],
         );
 
@@ -1553,12 +1530,12 @@ mod tests {
 
     #[test]
     fn test_expand_all_wildcard() {
-        let ontology = test_ontology();
-        let expected_count = ontology.nodes().count();
+        let data_model = test_model();
+        let expected_count = data_model.graph().entities().count();
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            ActiveSchema::pinned(Arc::clone(&ontology)),
+            ActiveSchema::pinned(Arc::clone(&data_model)),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
             &grpc_defaults(),
@@ -1566,14 +1543,14 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.active_schema.snapshot().unwrap().ontology,
+            service.active_schema.snapshot().unwrap().data_model.model(),
             &["*".to_string()],
         );
 
         assert_eq!(
             response.nodes.len(),
             expected_count,
-            "Wildcard should return all ontology nodes"
+            "Wildcard should return all model entities"
         );
 
         for node in &response.nodes {

@@ -7123,7 +7123,6 @@ name = "pipeline"
 version = "0.1.0"
 dependencies = [
  "compiler",
- "ontology",
  "orbit-utils",
  "strum 0.28.0",
  "thiserror 2.0.18",
@@ -7530,7 +7529,6 @@ dependencies = [
  "compiler",
  "formatters",
  "labkit",
- "ontology",
  "orbit-log-fields",
  "orbit-server",
  "orbit-server-config",
@@ -9458,7 +9456,6 @@ dependencies = [
  "async-trait",
  "compiler",
  "futures",
- "ontology",
  "orbit-arrow",
  "orbit-utils",
  "pipeline",

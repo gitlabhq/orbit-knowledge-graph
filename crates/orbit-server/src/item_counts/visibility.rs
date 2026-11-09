@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::{Catalog, ClickHouse};
 use query_engine::compiler::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 
 pub struct Visibility {
@@ -25,20 +25,20 @@ impl Visibility {
 }
 
 pub fn get_visibility(
-    ontology: &Ontology,
+    data_model: &Catalog<ClickHouse>,
     security_context: &SecurityContext,
     scopes: &[&TraversalPath],
 ) -> Visibility {
     let mut scope_groups: Vec<Vec<usize>> = Vec::new();
     let mut group_by_role: HashMap<u32, usize> = HashMap::new();
-    let entities = ontology
-        .nodes()
-        .filter(|node| node.has_traversal_path)
-        .filter_map(|node| {
-            let required_role = node
-                .redaction
-                .as_ref()
-                .map(|redaction| redaction.required_role.as_access_level())
+    let entities = data_model
+        .graph()
+        .entities()
+        .filter(|entity| data_model.has_path_column(entity.id))
+        .filter_map(|entity| {
+            let table = data_model.table_of(entity.id)?;
+            let required_role = data_model
+                .role_floor(entity.id)
                 .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
             let scope_group = *group_by_role.entry(required_role).or_insert_with(|| {
                 let paths_with_role = security_context.paths_at_least(required_role);
@@ -50,8 +50,8 @@ pub fn get_visibility(
                 scope_groups.len() - 1
             });
             (!scope_groups[scope_group].is_empty()).then(|| VisibleEntity {
-                name: node.name.clone(),
-                table: node.destination_table.clone(),
+                name: entity.name.clone(),
+                table: table.to_string(),
                 scope_group,
             })
         })

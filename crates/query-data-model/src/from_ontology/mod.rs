@@ -20,7 +20,7 @@ use crate::spec::{
     AttributeSpec, AuthorizationFragment, BackendOptions, EngineSpec, EntityAccessSpec, EntitySpec,
     Fragment, GraphFragment, LookupSpec, PropertyAccessSpec, PropertyDetail, PropertySpec,
     RedactionSpec, RelationshipSpec, ScopeSpec, ScopeVariants, ServiceFragment, SourceSpec,
-    StorageFragment, encode_options, format_variant,
+    StorageFragment, StyleSpec, encode_options, format_variant,
 };
 use crate::{Catalog, ClickHouse, DataModelError, DuckDb, Model, Packages};
 
@@ -171,6 +171,11 @@ pub(crate) fn graph_fragments(ontology: &Ontology) -> Result<Vec<GraphFragment>,
             .or_insert_with(|| GraphFragment {
                 package: domain_package(&node.domain),
                 domain: Some(node.domain.clone()),
+                domain_description: ontology
+                    .domains()
+                    .find(|domain| domain.name == node.domain)
+                    .map(|domain| domain.description.clone())
+                    .filter(|text| !text.is_empty()),
                 ..GraphFragment::default()
             });
         fragment
@@ -181,6 +186,7 @@ pub(crate) fn graph_fragments(ontology: &Ontology) -> Result<Vec<GraphFragment>,
     fragments.push(GraphFragment {
         package: PLATFORM.to_string(),
         domain: None,
+        domain_description: None,
         entities: IndexMap::new(),
         relationships: ontology
             .edge_names()
@@ -276,6 +282,10 @@ fn entity(
         description: Some(node.description.clone()).filter(|text| !text.is_empty()),
         label: Some(node.label.clone()).filter(|label| !label.is_empty()),
         defaults: node.default_columns.clone(),
+        style: Some(StyleSpec {
+            size: node.style.size,
+            color: node.style.color.clone(),
+        }),
         properties,
     })
 }

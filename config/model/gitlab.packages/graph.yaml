@@ -1,8 +1,10 @@
 kind: graph
 package: gitlab.packages
 domain: packages
+domain_description: Entities related to packages published to the package registry.
 entities:
   Dependency:
+    style: {size: 24, color: "#FCD34D"}
     description: >-
       A dependency declared by a package in the GitLab package registry (name and
       version pattern)
@@ -18,6 +20,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Package:
+    style: {size: 30, color: "#FB923C"}
     description: >-
       A package published to the GitLab package registry (npm, Maven, PyPI, NuGet,
       and other formats)
@@ -62,6 +65,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   PackageFile:
+    style: {size: 20, color: "#FDBA74"}
     description: >-
       A file belonging to a package in the GitLab package registry (the stored
       artifact, for example a .whl, .jar, or .tgz)

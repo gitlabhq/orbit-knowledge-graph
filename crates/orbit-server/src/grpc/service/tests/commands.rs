@@ -372,12 +372,41 @@ async fn test_expand_all_wildcard() {
     assert!(output.contains("username"), "User should be expanded");
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+fn custom_node_model() -> Arc<Catalog<ClickHouse>> {
+    let graph =
+        "kind: graph\npackage: test\nentities:\n  CustomNode:\n    properties: {id: int64}\n";
+    let authorization =
+        "kind: authorization\npackage: test\nentities:\n  CustomNode: {scope: global}\n";
+    let storage = "kind: storage
+package: test
+store: graph
+engine:
+  kind: clickhouse
+  connection: main
+  table: gl_{entity}
+  backend:
+    version_column: _version
+    deleted_column: _deleted
+    sort_key: [id]
+    edge_tables:
+      gl_edge: {default: true, sort_key: [source_id, relationship_kind, target_id]}
+entities:
+  CustomNode: {}
+";
+    let model = query_data_model::Model::from_yaml([
+        ("graph.yaml", graph),
+        ("authorization.yaml", authorization),
+        ("storage.yaml", storage),
+    ])
+    .expect("custom model loads");
+    Arc::new(Catalog::<ClickHouse>::from_model(&Arc::new(model)).expect("custom catalog loads"))
+}
+
 #[tokio::test]
-async fn schema_rpc_and_command_use_the_supplied_ontology() {
+async fn schema_rpc_and_command_use_the_supplied_model() {
     let service = OrbitServiceImpl::new(
         Arc::new(mock_validator()),
-        ActiveSchema::pinned(Arc::new(Ontology::new().with_nodes(["CustomNode"]))),
+        ActiveSchema::pinned(custom_node_model()),
         test_client(),
         ClusterHealthChecker::default().into_arc(),
         &grpc_defaults(),

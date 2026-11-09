@@ -1,8 +1,10 @@
 kind: graph
 package: gitlab.security
 domain: security
+domain_description: Entities related to security vulnerabilities and findings.
 entities:
   Finding:
+    style: {size: 26, color: "#F87171"}
     description: A security scan finding (occurrence) that may be linked to a vulnerability
     label: uuid
     defaults: [id, uuid, name, severity]
@@ -36,6 +38,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   SecurityScan:
+    style: {size: 26, color: "#B91C1C"}
     description: A security scan execution that produces findings within a CI/CD pipeline
     label: id
     defaults: [id, scan_type, status]
@@ -90,6 +93,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Vulnerability:
+    style: {size: 34, color: "#DC2626"}
     description: >-
       A security vulnerability identified in a project, representing a confirmed or
       potential security issue
@@ -148,6 +152,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   VulnerabilityIdentifier:
+    style: {size: 22, color: "#7F1D1D"}
     description: A vulnerability identifier such as a CVE, CWE, or other external reference
     label: name
     defaults: [id, name, external_type, external_id]
@@ -174,6 +179,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   VulnerabilityOccurrence:
+    style: {size: 28, color: "#EF4444"}
     description: A specific occurrence of a vulnerability detected in a project
     label: uuid
     defaults: [id, uuid, name, severity, report_type]
@@ -247,6 +253,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   VulnerabilityScanner:
+    style: {size: 24, color: "#FCA5A5"}
     description: A security scanner that detects vulnerabilities in projects
     label: name
     defaults: [id, name, vendor]

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use clickhouse_client::ClickHouseConfigurationExt;
 use integration_testkit::{
-    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, SeededColumnResolver, TestContext, load_ontology, t,
+    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, SeededColumnResolver, TestContext, load_data_model, t,
 };
 use jsonwebtoken::{EncodingKey, Header, encode};
 use opentelemetry::global;
@@ -262,7 +262,7 @@ impl Server {
         let shutdown = CancellationToken::new();
         let service = OrbitServiceImpl::new(
             Arc::new(JwtValidator::new(SECRET, 0).unwrap()),
-            ActiveSchema::pinned(load_ontology()),
+            ActiveSchema::pinned(load_data_model()),
             graph.config.build_client("graph"),
             ClusterHealthChecker::default().into_arc(),
             &AppConfig::embedded_defaults().grpc,

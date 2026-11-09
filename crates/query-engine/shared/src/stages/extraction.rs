@@ -34,7 +34,6 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
     use compiler::ResultContext;
-    use ontology::Ontology;
     use pipeline::NoOpObserver;
     use std::sync::Arc;
 
@@ -60,7 +59,6 @@ mod tests {
             frontend: compiler::Frontend::JsonDsl,
             query_json: String::new(),
             compiled: None,
-            ontology: Arc::new(Ontology::new()),
             security_context: None,
             server_extensions: Default::default(),
             phases: Default::default(),

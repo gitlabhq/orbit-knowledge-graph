@@ -214,7 +214,7 @@ impl HydrationStage {
             processors: None,
         };
 
-        let props = hydration_helpers::parse_hydration_batches(&batches, &ctx.ontology)?;
+        let props = hydration_helpers::parse_hydration_batches(&batches, data_model.model())?;
         Ok((props, debug, vec![execution]))
     }
 }

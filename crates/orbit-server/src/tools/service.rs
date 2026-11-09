@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use jsonschema::Validator;
-use ontology::Ontology;
-use ontology::introspection::{IntrospectionScope, SchemaResponse, build_schema_response};
+use query_data_model::Model;
+use query_data_model::introspection::{IntrospectionScope, SchemaResponse, build_schema_response};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -176,17 +176,17 @@ impl ToolService {
     }
 
     pub fn build_schema_toon(
-        ontology: &Ontology,
+        model: &Model,
         expand_nodes: &[String],
     ) -> Result<String, ExecutorError> {
-        Self::encode_schema_toon(&Self::schema_response(ontology, expand_nodes)?)
+        Self::encode_schema_toon(&Self::schema_response(model, expand_nodes)?)
     }
 
     fn schema_response(
-        ontology: &Ontology,
+        model: &Model,
         expand_nodes: &[String],
     ) -> Result<SchemaResponse, ExecutorError> {
-        build_schema_response(ontology, IntrospectionScope::All, expand_nodes)
+        build_schema_response(model, IntrospectionScope::All, expand_nodes)
             .map_err(|error| ExecutorError::InvalidArguments(format!("expand_nodes: {error}")))
     }
 
@@ -244,16 +244,14 @@ impl ToolService {
     }
 
     pub fn render_graph_schema(
-        ontology: &Ontology,
+        model: &Model,
         expand_nodes: &[String],
         format: OutputFormat,
     ) -> Result<Value, ExecutorError> {
         match format {
-            OutputFormat::Llm => Self::build_schema_toon(ontology, expand_nodes).map(Value::String),
-            OutputFormat::Raw => {
-                serde_json::to_value(Self::schema_response(ontology, expand_nodes)?)
-                    .map_err(|error| ExecutorError::InvalidArguments(error.to_string()))
-            }
+            OutputFormat::Llm => Self::build_schema_toon(model, expand_nodes).map(Value::String),
+            OutputFormat::Raw => serde_json::to_value(Self::schema_response(model, expand_nodes)?)
+                .map_err(|error| ExecutorError::InvalidArguments(error.to_string())),
         }
     }
 

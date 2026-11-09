@@ -36,7 +36,7 @@ use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Seed};
 use crate::visitor::{NodeExt, Requirement, ResponseView};
-use crate::{SeededColumnResolver, collect_subtest_results, load_data_model, load_ontology};
+use crate::{SeededColumnResolver, collect_subtest_results, load_data_model};
 
 pub use duckdb::run_duckdb_dir;
 pub use format::{
@@ -96,20 +96,11 @@ pub async fn run_query(
     security: &SecurityContext,
     redaction: &MockRedactionService,
 ) -> ResponseView {
-    let ontology = load_ontology();
     let data_model = load_data_model();
-    let compiled = compile_like_server(query, frontend, (&data_model, &ontology), security)
+    let compiled = compile_like_server(query, frontend, &data_model, security)
         .await
         .expect("query should compile");
-    let output = execute_output(
-        ctx,
-        frontend,
-        &compiled,
-        (&data_model, &ontology),
-        security,
-        redaction,
-    )
-    .await;
+    let output = execute_output(ctx, frontend, &compiled, &data_model, security, redaction).await;
     assert_pagination(&output, "run_query");
     let response = validate_response(&compiled.stats, GraphFormatter.format(&output), "run_query");
     ResponseView::for_query(&compiled.stats, response)
@@ -268,14 +259,9 @@ async fn run_case(
         resolve_preset("redaction", &Some(redaction_with_default), presets, name);
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
-    let (ontology, data_model) = match &cfg.ontology_overlay {
-        Some(name) => (
-            Arc::new(
-                crate::load_ontology_overlay(name).with_schema_version_prefix(&crate::TABLE_PREFIX),
-            ),
-            crate::versioned_data_model(crate::overlay_fragments(name)),
-        ),
-        None => (load_ontology(), load_data_model()),
+    let data_model = match &cfg.ontology_overlay {
+        Some(name) => crate::versioned_data_model(crate::overlay_fragments(name)),
+        None => load_data_model(),
     };
 
     for (index, step) in steps.iter().enumerate() {
@@ -300,7 +286,7 @@ async fn run_case(
                 .parse::<Frontend>()
                 .unwrap_or_else(|_| panic!("{name}: unknown query language '{frontend_key}'"));
             run_frontend(
-                (&ctx, &data_model, &ontology),
+                (&ctx, &data_model),
                 (frontend, frontend_key),
                 query_str,
                 &security,
@@ -322,10 +308,9 @@ pub(super) fn step_label(name: &str, index: usize, steps: usize) -> String {
 }
 
 async fn run_frontend(
-    (ctx, data_model, ontology): (
+    (ctx, data_model): (
         &TestContext,
         &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
-        &Arc<ontology::Ontology>,
     ),
     (frontend, frontend_key): (Frontend, &str),
     query: &str,
@@ -337,7 +322,7 @@ async fn run_frontend(
     let label = &format!("{name} [{frontend_key}]");
     expect.validate_pages_exclusive(label);
 
-    let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
+    let compiled = compile_like_server(query, frontend, data_model, security).await;
     let Some(compiled) = assert_compilation(compiled, expect, frontend_key, label) else {
         return;
     };
@@ -359,32 +344,17 @@ async fn run_frontend(
 
     if !expect.pages.is_empty() {
         run_pages(
-            ctx,
-            frontend,
-            query,
-            (data_model, ontology),
-            security,
-            redaction,
-            expect,
-            label,
+            ctx, frontend, query, data_model, security, redaction, expect, label,
         )
         .await;
         return;
     }
 
-    let output = execute_output(
-        ctx,
-        frontend,
-        &compiled,
-        (data_model, ontology),
-        security,
-        redaction,
-    )
-    .await;
+    let output = execute_output(ctx, frontend, &compiled, data_model, security, redaction).await;
     let baseline = assert_output(&output, frontend, expect, label);
     let count = repeat_count(expect, label);
     for run in 2..=count {
-        let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
+        let compiled = compile_like_server(query, frontend, data_model, security).await;
         let compiled = assert_compilation(compiled, expect, frontend_key, label)
             .expect("repeated query should compile");
         if !expect.indexes_used.is_empty() {
@@ -397,15 +367,8 @@ async fn run_frontend(
             )
             .await;
         }
-        let output = execute_output(
-            ctx,
-            frontend,
-            &compiled,
-            (data_model, ontology),
-            security,
-            redaction,
-        )
-        .await;
+        let output =
+            execute_output(ctx, frontend, &compiled, data_model, security, redaction).await;
         let rerun = assert_output(&output, frontend, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
     }
@@ -529,10 +492,7 @@ async fn run_pages(
     ctx: &TestContext,
     frontend: Frontend,
     base_query: &str,
-    (data_model, ontology): (
-        &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
-        &Arc<ontology::Ontology>,
-    ),
+    data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
     expect: &QueryExpect,
@@ -544,19 +504,12 @@ async fn run_pages(
         let page_label = format!("{label} page {}", i + 1);
         let query_str = page_query(frontend, base_query, i);
 
-        let compiled = compile_like_server(&query_str, frontend, (data_model, ontology), security)
+        let compiled = compile_like_server(&query_str, frontend, data_model, security)
             .await
             .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}"));
 
-        let output = execute_output(
-            ctx,
-            frontend,
-            &compiled,
-            (data_model, ontology),
-            security,
-            redaction,
-        )
-        .await;
+        let output =
+            execute_output(ctx, frontend, &compiled, data_model, security, redaction).await;
         let response = assert_output(&output, frontend, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
@@ -567,18 +520,11 @@ async fn run_pages(
         collected.assert_expect(all_pages, label);
         if all_pages.matches_unpaginated {
             let query = unpaginated(frontend, base_query);
-            let compiled = compile_like_server(&query, frontend, (data_model, ontology), security)
+            let compiled = compile_like_server(&query, frontend, data_model, security)
                 .await
                 .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}"));
-            let output = execute_output(
-                ctx,
-                frontend,
-                &compiled,
-                (data_model, ontology),
-                security,
-                redaction,
-            )
-            .await;
+            let output =
+                execute_output(ctx, frontend, &compiled, data_model, security, redaction).await;
             assert_pagination(&output, label);
             let response =
                 validate_response(&compiled.stats, GraphFormatter.format(&output), label);
@@ -590,10 +536,7 @@ async fn run_pages(
 async fn compile_like_server(
     query: &str,
     frontend: Frontend,
-    (data_model, ontology): (
-        &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
-        &Arc<ontology::Ontology>,
-    ),
+    data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     security: &SecurityContext,
 ) -> Result<Arc<CompiledQueryContext>, PipelineError> {
     let mut server_extensions = TypeMap::default();
@@ -603,7 +546,6 @@ async fn compile_like_server(
         frontend,
         query_json: query.to_owned(),
         compiled: None,
-        ontology: Arc::clone(ontology),
         security_context: Some(security.clone()),
         server_extensions,
         phases: TypeMap::default(),
@@ -624,10 +566,7 @@ async fn execute_output(
     ctx: &TestContext,
     frontend: Frontend,
     compiled: &Arc<CompiledQueryContext>,
-    (data_model, ontology): (
-        &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
-        &Arc<ontology::Ontology>,
-    ),
+    data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
 ) -> PipelineOutput {
@@ -649,7 +588,6 @@ async fn execute_output(
         frontend,
         query_json: String::new(),
         compiled: Some(Arc::clone(compiled)),
-        ontology: Arc::clone(ontology),
         security_context: Some(security.clone()),
         server_extensions,
         phases: TypeMap::default(),
@@ -1337,12 +1275,11 @@ mod tests {
     #[tokio::test]
     async fn gql_routes_through_the_server_stages_without_admin() {
         let data_model = load_data_model();
-        let ontology = load_ontology();
         let security = build_security(&None);
         compile_like_server(
             "MATCH (u:User {id: 1}) RETURN u.username LIMIT 5",
             Frontend::Gql,
-            (&data_model, &ontology),
+            &data_model,
             &security,
         )
         .await

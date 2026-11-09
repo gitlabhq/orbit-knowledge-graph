@@ -1,8 +1,10 @@
 kind: graph
 package: gitlab.container_registry
 domain: container_registry
+domain_description: Entities related to container image repositories in the container registry.
 entities:
   ContainerRepository:
+    style: {size: 30, color: "#22D3EE"}
     description: A container image repository in a project's container registry
     label: name
     defaults: [id, name, status]

@@ -662,6 +662,24 @@ fn edit_one(
 }
 
 #[test]
+fn packages_sharing_a_domain_agree_on_its_description() {
+    let errors = spec_errors(load_with(&["gitlab", "linear"], |name, yaml| match name {
+        "gitlab/graph.yaml" => {
+            yaml.replace("domain: core\n", "domain: core\ndomain_description: Core\n")
+        }
+        "linear/graph.yaml" => yaml.replace(
+            "domain: planning\n",
+            "domain: core\ndomain_description: Planning\n",
+        ),
+        _ => yaml,
+    }));
+    assert_eq!(
+        errors,
+        ["integration.linear: domain core already has another description"]
+    );
+}
+
+#[test]
 fn a_misspelled_relationship_key_fails_the_load() {
     let errors = spec_errors(load_with(
         &["gitlab"],

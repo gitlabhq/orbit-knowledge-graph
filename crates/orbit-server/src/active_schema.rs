@@ -6,8 +6,6 @@ use anyhow::anyhow;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::TryStreamExt;
 use named_queries::{Language, NamedQueries, NamedQuery};
-use ontology::Ontology;
-use ontology::introspection::{IntrospectionScope, build_relationship_patterns};
 use opentelemetry::KeyValue;
 use orbit_log_fields::{info, warn};
 use orbit_migrations::archive::Release;
@@ -15,6 +13,7 @@ use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
 use orbit_server_config::AppConfig;
+use query_data_model::introspection::{IntrospectionScope, build_relationship_patterns};
 use query_data_model::{Catalog, ClickHouse};
 use query_engine::compiler::{Frontend, check};
 use tokio::time::sleep;
@@ -51,15 +50,9 @@ impl ActiveSchema {
     }
 
     #[cfg(any(test, feature = "testkit"))]
-    pub fn pinned(ontology: Arc<Ontology>) -> Arc<Self> {
-        let data_model = query_data_model::from_ontology::clickhouse(&ontology)
-            .expect("pinned ontology must produce a data model");
-        let snapshot = SchemaSnapshot::new(
-            *orbit_migrations::version::SCHEMA_VERSION,
-            ontology,
-            Arc::new(data_model),
-        )
-        .expect("pinned schema snapshot must load");
+    pub fn pinned(data_model: Arc<Catalog<ClickHouse>>) -> Arc<Self> {
+        let snapshot = SchemaSnapshot::new(*orbit_migrations::version::SCHEMA_VERSION, data_model)
+            .expect("pinned schema snapshot must load");
         Arc::new(Self {
             installed: RwLock::new(Some(Arc::new(snapshot))),
         })
@@ -147,7 +140,7 @@ impl ActiveSchema {
             }
             Err(error) => {
                 self.install(None);
-                Err(error.context(format!("active ontology v{version} unavailable")))
+                Err(error.context(format!("active schema v{version} unavailable")))
             }
         }
     }
@@ -175,18 +168,13 @@ impl ActiveSchema {
 
 pub struct SchemaSnapshot {
     pub migration_version: u32,
-    pub ontology: Arc<Ontology>,
     pub data_model: Arc<Catalog<ClickHouse>>,
     pub named_queries: Arc<NamedQueries>,
     pub relationship_patterns: String,
 }
 
 impl SchemaSnapshot {
-    fn new(
-        migration_version: u32,
-        ontology: Arc<Ontology>,
-        data_model: Arc<Catalog<ClickHouse>>,
-    ) -> anyhow::Result<Self> {
+    fn new(migration_version: u32, data_model: Arc<Catalog<ClickHouse>>) -> anyhow::Result<Self> {
         let mut named_queries = NamedQueries::load_embedded()?;
         named_queries.retain(|query| match fits_data_model(query, &data_model) {
             Ok(()) => true,
@@ -202,10 +190,9 @@ impl SchemaSnapshot {
             }
         });
         let relationship_patterns =
-            build_relationship_patterns(&ontology, IntrospectionScope::All).join("\n");
+            build_relationship_patterns(data_model.model(), IntrospectionScope::All).join("\n");
         Ok(Self {
             migration_version,
-            ontology,
             data_model,
             named_queries: Arc::new(named_queries),
             relationship_patterns,
@@ -238,7 +225,6 @@ impl SnapshotLoader {
             &catalogued
         };
         let prefix = table_prefix(version);
-        let ontology = Arc::new(release.load_ontology()?.with_schema_version_prefix(&prefix));
         let data_model = Arc::new(Catalog::<ClickHouse>::versioned(
             &release.packages(),
             &prefix,
@@ -252,7 +238,7 @@ impl SnapshotLoader {
         if !version_tables_complete(&self.graph, version, &expected_tables).await? {
             return Err(anyhow!("v{version} tables are incomplete"));
         }
-        SchemaSnapshot::new(version, ontology, data_model).map(Arc::new)
+        SchemaSnapshot::new(version, data_model).map(Arc::new)
     }
 }
 

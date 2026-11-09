@@ -10,7 +10,6 @@ async-trait = { workspace = true }
 futures = { workspace = true }
 orbit-utils = { path = "../../utils" }
 orbit-arrow = { path = "../../utils/arrow" }
-ontology = { path = "../../ontology" }
 pipeline = { path = "../pipeline" }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -19,7 +18,6 @@ compiler = { path = "../compiler" }
 query-data-model = { path = "../../query-data-model" }
 
 [dev-dependencies]
-ontology = { path = "../../ontology" }
 tokio = { workspace = true }
 
 [lints]

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::common::compile;
 use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, TestContext, admin_security_context, load_data_model,
-    load_ontology, run_redaction, test_security_context,
+    run_redaction, test_security_context,
 };
 use integration_testkit::{run_subtests, run_subtests_shared, t};
 use orbit_server::pipeline::HydrationStage;
@@ -202,7 +202,6 @@ pub(super) async fn pipeline_output(
     svc: &MockRedactionService,
     security_ctx: SecurityContext,
 ) -> PipelineOutput {
-    let ontology = load_ontology();
     let data_model = load_data_model();
     let client = Arc::new(ctx.create_client());
     let compiled = Arc::new(
@@ -226,7 +225,6 @@ pub(super) async fn pipeline_output(
         frontend: query_engine::compiler::Frontend::JsonDsl,
         query_json: String::new(),
         compiled: Some(Arc::clone(&compiled)),
-        ontology: Arc::clone(&ontology),
         security_context: Some(security_ctx),
         server_extensions,
         phases: TypeMap::default(),

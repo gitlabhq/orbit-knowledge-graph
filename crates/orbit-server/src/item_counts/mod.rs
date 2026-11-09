@@ -1,14 +1,14 @@
 mod counts;
 mod response;
-mod visibility;
+pub(crate) mod visibility;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use clickhouse_client::ArrowClickHouseClient;
-use ontology::Ontology;
 use orbit_log_fields::warn;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::{Catalog, ClickHouse};
 use query_engine::compiler::SecurityContext;
 use tonic::Status;
 
@@ -32,11 +32,11 @@ impl ItemCountService {
 
     pub async fn count_items(
         &self,
-        ontology: &Ontology,
+        data_model: &Catalog<ClickHouse>,
         security_context: &SecurityContext,
         scopes: &[TraversalPath],
     ) -> Result<Vec<ScopeItemCounts>, Status> {
-        let plan = CountPlan::new(ontology, security_context, scopes);
+        let plan = CountPlan::new(data_model, security_context, scopes);
         let counts = self.read_counts(&plan).await;
         if !counts.is_empty() && counts.values().all(Result::is_err) {
             return Err(Status::internal("item counts could not be read"));
@@ -46,11 +46,11 @@ impl ItemCountService {
 
     pub async fn count_items_or_zeros(
         &self,
-        ontology: &Ontology,
+        data_model: &Catalog<ClickHouse>,
         security_context: &SecurityContext,
         scopes: &[TraversalPath],
     ) -> Vec<ScopeItemCounts> {
-        let plan = CountPlan::new(ontology, security_context, scopes);
+        let plan = CountPlan::new(data_model, security_context, scopes);
         let counts = self
             .read_counts(&plan)
             .await
@@ -84,13 +84,13 @@ struct CountPlan<'a> {
 
 impl<'a> CountPlan<'a> {
     fn new(
-        ontology: &Ontology,
+        data_model: &Catalog<ClickHouse>,
         security_context: &SecurityContext,
         scopes: &'a [TraversalPath],
     ) -> Self {
         let scopes: Vec<&TraversalPath> =
             scopes.iter().collect::<BTreeSet<_>>().into_iter().collect();
-        let visibility = visibility::get_visibility(ontology, security_context, &scopes);
+        let visibility = visibility::get_visibility(data_model, security_context, &scopes);
         Self { scopes, visibility }
     }
 

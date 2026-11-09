@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
-use crate::common::{DummyClaims, GRAPH_SCHEMA_SQL, TestContext, load_data_model, load_ontology};
+use crate::common::{DummyClaims, GRAPH_SCHEMA_SQL, TestContext, load_data_model};
 use compiler::Frontend;
 use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
@@ -427,10 +427,7 @@ async fn run_pipeline(
     db: &TestContext,
     json: &str,
     frontend: Frontend,
-    (data_model, ontology): (
-        &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
-        &Arc<ontology::Ontology>,
-    ),
+    data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     claims: &Claims,
 ) -> (Vec<&'static str>, Result<PipelineOutput, PipelineError>) {
     let mut server_extensions = TypeMap::default();
@@ -445,7 +442,6 @@ async fn run_pipeline(
         frontend,
         query_json: json.to_string(),
         compiled: None,
-        ontology: Arc::clone(ontology),
         security_context: None,
         server_extensions,
         phases: TypeMap::default(),
@@ -498,7 +494,6 @@ async fn corpus_smoke() {
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_if_needed().await;
 
-    let ontology = load_ontology();
     let data_model = load_data_model();
     // Admin claims -> Owner over org root, so access-gated entities are visible
     // and the real SQL runs (not `WHERE false`).
@@ -516,14 +511,8 @@ async fn corpus_smoke() {
     smoke_cases.extend(doc_queries);
 
     for case in smoke_cases {
-        let (stages, outcome) = run_pipeline(
-            &ctx,
-            &case.query,
-            case.frontend,
-            (&data_model, &ontology),
-            &claims,
-        )
-        .await;
+        let (stages, outcome) =
+            run_pipeline(&ctx, &case.query, case.frontend, &data_model, &claims).await;
 
         let ran = stages.join(" > ");
         match (case.expects_error, outcome) {

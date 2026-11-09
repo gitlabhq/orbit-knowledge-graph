@@ -1,8 +1,10 @@
 kind: graph
 package: gitlab.plan
 domain: plan
+domain_description: Entities related to planning, tracking, and organizing work.
 entities:
   Label:
+    style: {size: 22, color: "#A855F7"}
     description: A label for categorizing and filtering work items
     label: title
     defaults: [id, title, color]
@@ -26,6 +28,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Milestone:
+    style: {size: 30, color: "#D946EF"}
     description: A milestone for tracking progress toward a goal within a project or group
     label: title
     defaults: [id, iid, title, state, due_date, start_date]
@@ -52,6 +55,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   WorkItem:
+    style: {size: 32, color: "#EC4899"}
     description: >-
       A work item representing an issue, epic, task, incident, or other trackable
       unit of work

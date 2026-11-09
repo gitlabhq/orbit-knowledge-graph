@@ -81,16 +81,13 @@ fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
 mod tests {
     use super::*;
     use compiler::SecurityContext;
-    use ontology::Ontology;
     use pipeline::QueryPipelineContext;
-    use std::sync::Arc;
 
     fn make_ctx(security_context: Option<SecurityContext>) -> QueryPipelineContext {
         QueryPipelineContext {
             frontend: compiler::Frontend::JsonDsl,
             query_json: String::new(),
             compiled: None,
-            ontology: Arc::new(Ontology::default()),
             security_context,
             server_extensions: Default::default(),
             phases: Default::default(),

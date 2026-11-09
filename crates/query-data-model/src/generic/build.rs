@@ -5,7 +5,7 @@ use ontology::constants::{DEFAULT_PRIMARY_KEY as KEY, EDGE_RESERVED_COLUMNS};
 use ontology::{DataType, EnumType};
 
 use super::catalog::{
-    Attribute, Entity, GraphCatalog, Property, Relationship, RelationshipVariant,
+    Attribute, Domain, Entity, GraphCatalog, Property, Relationship, RelationshipVariant, Style,
 };
 use super::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 use crate::catalog::Diagnostics;
@@ -30,6 +30,14 @@ impl GraphCatalog {
         let mut entities = Vec::new();
         let mut relationships = Vec::new();
         for fragment in fragments {
+            if let Some(domain) = &fragment.domain {
+                graph.declare_domain(
+                    &fragment.package,
+                    domain,
+                    fragment.domain_description.clone(),
+                    diagnostics,
+                );
+            }
             for (name, spec) in fragment.entities {
                 entities.push((
                     fragment.package.clone(),
@@ -50,6 +58,37 @@ impl GraphCatalog {
         }
         graph.index_adjacency();
         graph
+    }
+
+    fn declare_domain(
+        &mut self,
+        package: &str,
+        name: &str,
+        description: Option<String>,
+        diagnostics: &mut Diagnostics,
+    ) {
+        let domain = self
+            .domains
+            .entry(name.to_string())
+            .or_insert_with(|| Domain {
+                name: name.to_string(),
+                description: None,
+            });
+        let Some(description) = description else {
+            return;
+        };
+        if domain
+            .description
+            .as_ref()
+            .is_some_and(|existing| *existing != description)
+        {
+            diagnostics.error(
+                package,
+                format!("domain {name} already has another description"),
+            );
+            return;
+        }
+        domain.description = Some(description);
     }
 
     fn declare_entity(
@@ -116,6 +155,10 @@ impl GraphCatalog {
             domain,
             description: spec.description,
             label: spec.label.unwrap_or_default(),
+            style: spec.style.map_or_else(Style::default, |style| Style {
+                size: style.size,
+                color: style.color,
+            }),
             properties,
             defaults,
         });

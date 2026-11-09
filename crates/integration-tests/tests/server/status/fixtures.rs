@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clickhouse_client::FromArrowColumn;
-use integration_testkit::{load_ontology, t};
+use integration_testkit::{load_data_model, t};
 use orbit_server::active_schema::{ActiveSchema, SchemaSnapshot};
 use orbit_server::item_counts::{ItemCountService, ScopeItemCounts};
 use orbit_server_config::AppConfig;
@@ -128,7 +128,7 @@ pub async fn count_items(
         .map(|scope| TraversalPath::new_unchecked(*scope))
         .collect();
     ItemCountService::new(Arc::new(ctx.create_client()))
-        .count_items(&load_ontology(), security_context, &scopes)
+        .count_items(&load_data_model(), security_context, &scopes)
         .await
         .expect("item counts")
 }
@@ -140,7 +140,7 @@ pub fn admin_context() -> SecurityContext {
 }
 
 pub fn pinned_schema() -> Arc<SchemaSnapshot> {
-    ActiveSchema::pinned(load_ontology())
+    ActiveSchema::pinned(load_data_model())
         .snapshot()
         .expect("pinned schema is installed")
 }

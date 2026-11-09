@@ -1,0 +1,20 @@
+domains[9]:
+  - name: agents
+    nodes[1]: AgentSession
+  - name: ci
+    nodes[6]: Deployment,Environment,Job,Pipeline,Runner,Stage
+  - name: code_review
+    nodes[3]: MergeRequest,MergeRequestDiff,MergeRequestDiffFile
+  - name: container_registry
+    nodes[1]: ContainerRepository
+  - name: core
+    nodes[4]: Group,Note,Project,User
+  - name: packages
+    nodes[3]: Dependency,Package,PackageFile
+  - name: plan
+    nodes[3]: Label,Milestone,WorkItem
+  - name: security
+    nodes[6]: Finding,SecurityScan,Vulnerability,VulnerabilityIdentifier,VulnerabilityOccurrence,VulnerabilityScanner
+  - name: source_code
+    nodes[6]: Branch,Commit,Definition,Directory,File,ImportedSymbol
+edges[60]: APPROVED,ASSIGNED,AUTHORED,AUTO_CANCELED_BY,BUILT_BY,CALLS,CHILD_OF,CLOSED,CLOSES,CONFIRMED_BY,CONTAINS,CREATED_FOR_MR,CREATED_MR,CREATOR,DECLARES_DEPENDENCY,DEFINES,DEPLOYED_BY,DEPLOYED_TO,DETECTED_BY,DISMISSED_BY,EXTENDS,FIXES,HAS_DIFF,HAS_FILE,HAS_FINDING,HAS_HEAD_PIPELINE,HAS_IDENTIFIER,HAS_JOB,HAS_LABEL,HAS_LATEST_DIFF,HAS_NOTE,HAS_PACKAGE_FILE,HAS_STAGE,HAS_VULNERABILITY,IMPORTS,IN_ENVIRONMENT,IN_GROUP,IN_MILESTONE,IN_PIPELINE,IN_PROJECT,LAST_EDITED_BY,MEMBER_OF,MENTIONS,MERGED,MERGED_AT_COMMIT,OCCURRENCE_OF,ON_BRANCH,OWNER,RAN_BY,RELATED_TO,REOPENED,RESOLVED_BY,REVIEWER,RUNS_ON,SCANS,SOURCE_PROJECT,TRIGGERED,TRIGGERED_BY_PIPELINE,TRIGGERS_PIPELINE,UPDATED_BY

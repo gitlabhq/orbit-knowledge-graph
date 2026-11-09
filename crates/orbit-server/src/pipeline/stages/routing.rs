@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ontology::introspection::SchemaResponse;
+use query_data_model::introspection::{IntrospectionScope, SchemaResponse};
 use query_data_model::{Catalog, ClickHouse};
 
 use crate::auth::Claims;
@@ -28,10 +28,9 @@ impl RoutingStage {
         })?;
         Ok(query_engine::compiler::gql::route(
             &ctx.query_json,
-            &ctx.ontology,
             data_model,
             claims.admin,
-            ontology::introspection::IntrospectionScope::All,
+            IntrospectionScope::All,
         )?)
     }
 }

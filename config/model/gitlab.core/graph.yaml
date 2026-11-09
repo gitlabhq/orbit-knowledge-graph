@@ -1,8 +1,10 @@
 kind: graph
 package: gitlab.core
 domain: core
+domain_description: Entities which represent the structure of a GitLab instance.
 entities:
   Group:
+    style: {size: 45, color: "#8B5CF6"}
     description: A GitLab group (top-level group or subgroup)
     label: name
     defaults: [id, name, full_path, visibility_level]
@@ -20,6 +22,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Note:
+    style: {size: 24, color: "#64748B"}
     description: A comment or annotation on a GitLab object (issue, merge request, commit, etc.)
     label: id
     defaults: [id, noteable_type, noteable_id, created_at]
@@ -69,6 +72,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Project:
+    style: {size: 40, color: "#3B82F6"}
     description: A GitLab project/repository
     label: name
     defaults: [id, name, full_path, visibility_level]
@@ -89,6 +93,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   User:
+    style: {size: 32, color: "#10B981"}
     description: A GitLab user account
     label: username
     defaults: [id, username, name, state]

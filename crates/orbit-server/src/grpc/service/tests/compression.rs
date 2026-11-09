@@ -11,7 +11,7 @@ async fn serve_registered_server() -> tonic::transport::Channel {
     let defaults = orbit_server_config::AppConfig::embedded_defaults();
     let server = GrpcServer::new(
         Arc::new(mock_validator()),
-        ActiveSchema::pinned(test_ontology()),
+        ActiveSchema::pinned(test_model()),
         test_client(),
         ClusterHealthChecker::default().into_arc(),
         None,

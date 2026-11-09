@@ -391,10 +391,6 @@ impl NodeEntity {
             .filter(|name| !self.sort_key.iter().any(|key| key == name))
             .collect()
     }
-
-    pub fn listed_fields(&self) -> impl Iterator<Item = &Field> {
-        self.fields.iter().filter(|field| !field.hidden)
-    }
 }
 
 impl fmt::Display for NodeEntity {

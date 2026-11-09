@@ -28,7 +28,7 @@ async fn serve_with_layers() -> OrbitServiceClient<tonic::transport::Channel> {
     let defaults = AppConfig::embedded_defaults();
     let server = GrpcServer::new(
         Arc::new(mock_validator()),
-        ActiveSchema::pinned(test_ontology()),
+        ActiveSchema::pinned(test_model()),
         test_client(),
         ClusterHealthChecker::default().into_arc(),
         None,

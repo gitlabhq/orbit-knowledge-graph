@@ -29,8 +29,30 @@ pub struct Entity {
     pub domain: Option<String>,
     pub description: Option<String>,
     pub label: String,
+    pub style: Style,
     pub properties: Vec<PropertyId>,
     pub defaults: Vec<PropertyId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Style {
+    pub size: i32,
+    pub color: String,
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        Self {
+            size: 30,
+            color: "#6B7280".to_string(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Domain {
+    pub name: String,
+    pub description: Option<String>,
 }
 
 #[derive(Debug)]
@@ -62,6 +84,7 @@ pub struct Attribute {
 
 #[derive(Debug, Default)]
 pub struct GraphCatalog {
+    pub(super) domains: BTreeMap<String, Domain>,
     pub(super) entities: Vec<Entity>,
     pub(super) properties: Vec<Property>,
     pub(super) relationships: Vec<Relationship>,
@@ -81,6 +104,12 @@ impl GraphCatalog {
         Self::default()
     }
 
+    /// Domains in name order.
+    pub fn domains(&self) -> impl Iterator<Item = &Domain> {
+        self.domains.values()
+    }
+
+    /// Entities in name order.
     pub fn entities(&self) -> impl Iterator<Item = &Entity> {
         self.entities.iter()
     }

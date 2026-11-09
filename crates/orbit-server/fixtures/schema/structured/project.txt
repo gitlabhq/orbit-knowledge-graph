@@ -1,0 +1,1396 @@
+StructuredSchema {
+    schema_version: "0.1",
+    domains: [
+        SchemaDomain {
+            name: "agents",
+            description: "Entities related to AI agent sessions.",
+            node_names: [
+                "AgentSession",
+            ],
+        },
+        SchemaDomain {
+            name: "ci",
+            description: "Entities related to CI/CD pipelines, stages, jobs, deployments, environments, and runners.",
+            node_names: [
+                "Deployment",
+                "Environment",
+                "Job",
+                "Pipeline",
+                "Runner",
+                "Stage",
+            ],
+        },
+        SchemaDomain {
+            name: "code_review",
+            description: "Entities related to code review and merge requests.",
+            node_names: [
+                "MergeRequest",
+                "MergeRequestDiff",
+                "MergeRequestDiffFile",
+            ],
+        },
+        SchemaDomain {
+            name: "container_registry",
+            description: "Entities related to container image repositories in the container registry.",
+            node_names: [
+                "ContainerRepository",
+            ],
+        },
+        SchemaDomain {
+            name: "core",
+            description: "Entities which represent the structure of a GitLab instance.",
+            node_names: [
+                "Group",
+                "Note",
+                "Project",
+                "User",
+            ],
+        },
+        SchemaDomain {
+            name: "packages",
+            description: "Entities related to packages published to the package registry.",
+            node_names: [
+                "Dependency",
+                "Package",
+                "PackageFile",
+            ],
+        },
+        SchemaDomain {
+            name: "plan",
+            description: "Entities related to planning, tracking, and organizing work.",
+            node_names: [
+                "Label",
+                "Milestone",
+                "WorkItem",
+            ],
+        },
+        SchemaDomain {
+            name: "security",
+            description: "Entities related to security vulnerabilities and findings.",
+            node_names: [
+                "Finding",
+                "SecurityScan",
+                "Vulnerability",
+                "VulnerabilityIdentifier",
+                "VulnerabilityOccurrence",
+                "VulnerabilityScanner",
+            ],
+        },
+        SchemaDomain {
+            name: "source_code",
+            description: "Entities related to source code structure, definitions, and imports.",
+            node_names: [
+                "Branch",
+                "Commit",
+                "Definition",
+                "Directory",
+                "File",
+                "ImportedSymbol",
+            ],
+        },
+    ],
+    nodes: [
+        SchemaNode {
+            name: "AgentSession",
+            domain: "agents",
+            description: "An AI agent session in a project, recorded in the AI governance sessions table. Existence, source and flow type only, never its content",
+            primary_key: "id",
+            label_field: "flow_type",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Branch",
+            domain: "source_code",
+            description: "A Git branch in a repository",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Commit",
+            domain: "source_code",
+            description: "A Git commit, shared target for commit-related edges",
+            primary_key: "id",
+            label_field: "sha",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "ContainerRepository",
+            domain: "container_registry",
+            description: "A container image repository in a project's container registry",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Definition",
+            domain: "source_code",
+            description: "A code definition such as a class, function, method, or module",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Dependency",
+            domain: "packages",
+            description: "A dependency declared by a package in the GitLab package registry (name and version pattern)",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Deployment",
+            domain: "ci",
+            description: "A deployment of a specific commit to a CI/CD environment",
+            primary_key: "id",
+            label_field: "id",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Directory",
+            domain: "source_code",
+            description: "A directory within a repository's file structure",
+            primary_key: "id",
+            label_field: "path",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Environment",
+            domain: "ci",
+            description: "A CI/CD deployment target (production, staging, review app, etc.)",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "File",
+            domain: "source_code",
+            description: "A source code file within a repository",
+            primary_key: "id",
+            label_field: "path",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Finding",
+            domain: "security",
+            description: "A security scan finding (occurrence) that may be linked to a vulnerability",
+            primary_key: "id",
+            label_field: "uuid",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Group",
+            domain: "core",
+            description: "A GitLab group (top-level group or subgroup)",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "ImportedSymbol",
+            domain: "source_code",
+            description: "An imported symbol or module reference within a source file",
+            primary_key: "id",
+            label_field: "identifier_name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Job",
+            domain: "ci",
+            description: "A CI/CD job that executes scripts within a pipeline stage",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Label",
+            domain: "plan",
+            description: "A label for categorizing and filtering work items",
+            primary_key: "id",
+            label_field: "title",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "MergeRequest",
+            domain: "code_review",
+            description: "A merge request for code review and merging changes into a target branch",
+            primary_key: "id",
+            label_field: "title",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "MergeRequestDiff",
+            domain: "code_review",
+            description: "A snapshot of changes (commits and file diffs) associated with a merge request at a point in time",
+            primary_key: "id",
+            label_field: "id",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "MergeRequestDiffFile",
+            domain: "code_review",
+            description: "A file changed in a merge request diff",
+            primary_key: "id",
+            label_field: "old_path",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Milestone",
+            domain: "plan",
+            description: "A milestone for tracking progress toward a goal within a project or group",
+            primary_key: "id",
+            label_field: "title",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Note",
+            domain: "core",
+            description: "A comment or annotation on a GitLab object (issue, merge request, commit, etc.)",
+            primary_key: "id",
+            label_field: "id",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Package",
+            domain: "packages",
+            description: "A package published to the GitLab package registry (npm, Maven, PyPI, NuGet, and other formats)",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "PackageFile",
+            domain: "packages",
+            description: "A file belonging to a package in the GitLab package registry (the stored artifact, for example a .whl, .jar, or .tgz)",
+            primary_key: "id",
+            label_field: "file_name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Pipeline",
+            domain: "ci",
+            description: "A CI/CD pipeline that runs a series of stages and jobs to build, test, and deploy code",
+            primary_key: "id",
+            label_field: "id",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Project",
+            domain: "core",
+            description: "A GitLab project/repository",
+            primary_key: "id",
+            label_field: "name",
+            properties: [
+                SchemaProperty {
+                    name: "id",
+                    data_type: "Int",
+                    nullable: false,
+                    enum_values: [],
+                    description: "Unique ID.",
+                },
+                SchemaProperty {
+                    name: "full_path",
+                    data_type: "String",
+                    nullable: false,
+                    enum_values: [],
+                    description: "Full path (e.g. gitlab-org/gitlab).",
+                },
+                SchemaProperty {
+                    name: "name",
+                    data_type: "String",
+                    nullable: false,
+                    enum_values: [],
+                    description: "Display name.",
+                },
+                SchemaProperty {
+                    name: "description",
+                    data_type: "String",
+                    nullable: false,
+                    enum_values: [],
+                    description: "Description text.",
+                },
+                SchemaProperty {
+                    name: "created_at",
+                    data_type: "DateTime",
+                    nullable: true,
+                    enum_values: [],
+                    description: "Creation timestamp.",
+                },
+                SchemaProperty {
+                    name: "updated_at",
+                    data_type: "DateTime",
+                    nullable: true,
+                    enum_values: [],
+                    description: "Last update timestamp.",
+                },
+                SchemaProperty {
+                    name: "visibility_level",
+                    data_type: "Enum",
+                    nullable: false,
+                    enum_values: [
+                        "private",
+                        "internal",
+                        "public",
+                    ],
+                    description: "Visibility level.",
+                },
+                SchemaProperty {
+                    name: "archived",
+                    data_type: "Bool",
+                    nullable: false,
+                    enum_values: [],
+                    description: "Archived flag.",
+                },
+                SchemaProperty {
+                    name: "star_count",
+                    data_type: "Int",
+                    nullable: false,
+                    enum_values: [],
+                    description: "Number of stars.",
+                },
+                SchemaProperty {
+                    name: "last_activity_at",
+                    data_type: "DateTime",
+                    nullable: true,
+                    enum_values: [],
+                    description: "Last activity timestamp.",
+                },
+            ],
+            style: Some(
+                SchemaNodeStyle {
+                    size: 40,
+                    color: "#3B82F6",
+                },
+            ),
+            outgoing_edges: [
+                "CONTAINS",
+            ],
+            incoming_edges: [
+                "CONTAINS",
+                "CREATOR",
+                "IN_PROJECT",
+                "MEMBER_OF",
+                "SCANS",
+                "SOURCE_PROJECT",
+            ],
+        },
+        SchemaNode {
+            name: "Runner",
+            domain: "ci",
+            description: "A CI/CD runner that executes jobs",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "SecurityScan",
+            domain: "security",
+            description: "A security scan execution that produces findings within a CI/CD pipeline",
+            primary_key: "id",
+            label_field: "id",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Stage",
+            domain: "ci",
+            description: "A stage within a CI/CD pipeline that groups related jobs (e.g., build, test, deploy)",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "User",
+            domain: "core",
+            description: "A GitLab user account",
+            primary_key: "id",
+            label_field: "username",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "Vulnerability",
+            domain: "security",
+            description: "A security vulnerability identified in a project, representing a confirmed or potential security issue",
+            primary_key: "id",
+            label_field: "title",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "VulnerabilityIdentifier",
+            domain: "security",
+            description: "A vulnerability identifier such as a CVE, CWE, or other external reference",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "VulnerabilityOccurrence",
+            domain: "security",
+            description: "A specific occurrence of a vulnerability detected in a project",
+            primary_key: "id",
+            label_field: "uuid",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "VulnerabilityScanner",
+            domain: "security",
+            description: "A security scanner that detects vulnerabilities in projects",
+            primary_key: "id",
+            label_field: "name",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+        SchemaNode {
+            name: "WorkItem",
+            domain: "plan",
+            description: "A work item representing an issue, epic, task, incident, or other trackable unit of work",
+            primary_key: "id",
+            label_field: "title",
+            properties: [],
+            style: None,
+            outgoing_edges: [],
+            incoming_edges: [],
+        },
+    ],
+    edges: [
+        SchemaEdge {
+            name: "APPROVED",
+            description: "User who approved a merge request",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "MergeRequest",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "ASSIGNED",
+            description: "Assignment relationship between users and entities",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "MergeRequest",
+                },
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "WorkItem",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "AUTHORED",
+            description: "Authorship relationship between users and entities",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Note",
+                },
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "MergeRequest",
+                },
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Vulnerability",
+                },
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "WorkItem",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "AUTO_CANCELED_BY",
+            description: "Entity was auto-canceled by a newer pipeline",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Pipeline",
+                    target_type: "Pipeline",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Job",
+                    target_type: "Pipeline",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "BUILT_BY",
+            description: "Package or package file was built by a CI/CD pipeline",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Package",
+                    target_type: "Pipeline",
+                },
+                SchemaEdgeVariant {
+                    source_type: "PackageFile",
+                    target_type: "Pipeline",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "CALLS",
+            description: "Call relationships in source code representing function/method invocations",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Definition",
+                    target_type: "Definition",
+                },
+                SchemaEdgeVariant {
+                    source_type: "File",
+                    target_type: "Definition",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Definition",
+                    target_type: "ImportedSymbol",
+                },
+                SchemaEdgeVariant {
+                    source_type: "File",
+                    target_type: "ImportedSymbol",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "CHILD_OF",
+            description: "Pipeline was triggered as a child of another pipeline (downstream pipeline relationship)",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Pipeline",
+                    target_type: "Pipeline",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "CLOSED",
+            description: "User who closed a work item",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "WorkItem",
+                },
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "MergeRequest",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "CLOSES",
+            description: "Merge request closes a work item when merged",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "WorkItem",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "CONFIRMED_BY",
+            description: "User who confirmed a vulnerability",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Vulnerability",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "CONTAINS",
+            description: "Container relationship for core entities (hierarchy/ownership)",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Group",
+                    target_type: "Group",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Group",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Project",
+                    target_type: "Branch",
+                },
+                SchemaEdgeVariant {
+                    source_type: "WorkItem",
+                    target_type: "WorkItem",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Branch",
+                    target_type: "Directory",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Branch",
+                    target_type: "File",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Directory",
+                    target_type: "Directory",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Directory",
+                    target_type: "File",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "CREATED_FOR_MR",
+            description: "Environment was first created by a merge request pipeline",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Environment",
+                    target_type: "MergeRequest",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "CREATED_MR",
+            description: "Agent session created a merge request",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "AgentSession",
+                    target_type: "MergeRequest",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "CREATOR",
+            description: "User created project",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Project",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "DECLARES_DEPENDENCY",
+            description: "Package declares a dependency",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Package",
+                    target_type: "Dependency",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "DEFINES",
+            description: "Definition relationships in source code",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "File",
+                    target_type: "Definition",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Definition",
+                    target_type: "Definition",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "DEPLOYED_BY",
+            description: "User who triggered a deployment",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Deployment",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "DEPLOYED_TO",
+            description: "Merge request was deployed as part of a deployment",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "Deployment",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "DETECTED_BY",
+            description: "Finding was detected by a vulnerability scanner",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Finding",
+                    target_type: "VulnerabilityScanner",
+                },
+                SchemaEdgeVariant {
+                    source_type: "VulnerabilityOccurrence",
+                    target_type: "VulnerabilityScanner",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "DISMISSED_BY",
+            description: "User who dismissed a vulnerability",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Vulnerability",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "EXTENDS",
+            description: "Supertype relationships in source code (inheritance, interface implementation, struct embedding, mixin composition)",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Definition",
+                    target_type: "Definition",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "FIXES",
+            description: "Merge request fixes a vulnerability",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "Vulnerability",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_DIFF",
+            description: "Diff snapshots of a merge request",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "MergeRequestDiff",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_FILE",
+            description: "Files changed in a merge request diff",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "MergeRequestDiff",
+                    target_type: "MergeRequestDiffFile",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_FINDING",
+            description: "Entity has associated finding or vulnerability occurrence",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Vulnerability",
+                    target_type: "VulnerabilityOccurrence",
+                },
+                SchemaEdgeVariant {
+                    source_type: "SecurityScan",
+                    target_type: "Finding",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_HEAD_PIPELINE",
+            description: "Merge request's head pipeline (pipeline running against the tip of the source branch)",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "Pipeline",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_IDENTIFIER",
+            description: "Entity has associated vulnerability identifier (CVE, CWE, etc.)",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Finding",
+                    target_type: "VulnerabilityIdentifier",
+                },
+                SchemaEdgeVariant {
+                    source_type: "VulnerabilityOccurrence",
+                    target_type: "VulnerabilityIdentifier",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_JOB",
+            description: "Pipeline or stage contains job relationship",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Stage",
+                    target_type: "Job",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Pipeline",
+                    target_type: "Job",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_LABEL",
+            description: "Entity has a label applied",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "WorkItem",
+                    target_type: "Label",
+                },
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "Label",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_LATEST_DIFF",
+            description: "Merge request's most recent diff snapshot (points to the latest MergeRequestDiff)",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "MergeRequestDiff",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_NOTE",
+            description: "Entity has a note/comment attached",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "Note",
+                },
+                SchemaEdgeVariant {
+                    source_type: "WorkItem",
+                    target_type: "Note",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Vulnerability",
+                    target_type: "Note",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_PACKAGE_FILE",
+            description: "Package contains a package file",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Package",
+                    target_type: "PackageFile",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_STAGE",
+            description: "Pipeline contains stage relationship",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Pipeline",
+                    target_type: "Stage",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "HAS_VULNERABILITY",
+            description: "Registry package is affected by a known security vulnerability",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Package",
+                    target_type: "Vulnerability",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "IMPORTS",
+            description: "Import relationships in source code",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "File",
+                    target_type: "ImportedSymbol",
+                },
+                SchemaEdgeVariant {
+                    source_type: "ImportedSymbol",
+                    target_type: "Definition",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "IN_ENVIRONMENT",
+            description: "Deployment targets an environment",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Deployment",
+                    target_type: "Environment",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "IN_GROUP",
+            description: "Entity belongs to a group",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Milestone",
+                    target_type: "Group",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Label",
+                    target_type: "Group",
+                },
+                SchemaEdgeVariant {
+                    source_type: "WorkItem",
+                    target_type: "Group",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "IN_MILESTONE",
+            description: "Entity belongs to a milestone",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "WorkItem",
+                    target_type: "Milestone",
+                },
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "Milestone",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "IN_PIPELINE",
+            description: "Entity belongs to a pipeline",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "SecurityScan",
+                    target_type: "Pipeline",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Job",
+                    target_type: "Pipeline",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "IN_PROJECT",
+            description: "Project association for entities",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Note",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Pipeline",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Stage",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Job",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Vulnerability",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Finding",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "VulnerabilityIdentifier",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "WorkItem",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Milestone",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Label",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "SecurityScan",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Branch",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Deployment",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Environment",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "MergeRequestDiff",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "MergeRequestDiffFile",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "VulnerabilityScanner",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "VulnerabilityOccurrence",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Package",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "PackageFile",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "ContainerRepository",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "Dependency",
+                    target_type: "Project",
+                },
+                SchemaEdgeVariant {
+                    source_type: "AgentSession",
+                    target_type: "Project",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "LAST_EDITED_BY",
+            description: "User who most recently edited an entity's content (title/description)",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "MergeRequest",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "MEMBER_OF",
+            description: "A user is a member of a group or project",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Group",
+                },
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Project",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "MENTIONS",
+            description: "One merge request or work item references another in its description or a comment, recorded from the cross-reference system note GitLab writes on mention.",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "MergeRequest",
+                },
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "WorkItem",
+                },
+                SchemaEdgeVariant {
+                    source_type: "WorkItem",
+                    target_type: "MergeRequest",
+                },
+                SchemaEdgeVariant {
+                    source_type: "WorkItem",
+                    target_type: "WorkItem",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "MERGED",
+            description: "User who merged a merge request",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "MergeRequest",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "MERGED_AT_COMMIT",
+            description: "The commit a merge request was merged at, sourced from the merge_requests row.",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "Commit",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "OCCURRENCE_OF",
+            description: "Vulnerability occurrence is an occurrence of a vulnerability",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "VulnerabilityOccurrence",
+                    target_type: "Vulnerability",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "ON_BRANCH",
+            description: "Code entities belong to a specific branch",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Directory",
+                    target_type: "Branch",
+                },
+                SchemaEdgeVariant {
+                    source_type: "File",
+                    target_type: "Branch",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "OWNER",
+            description: "Ownership relationship between users and groups/projects",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Group",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "RAN_BY",
+            description: "Security scan was executed by a CI job",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "SecurityScan",
+                    target_type: "Job",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "RELATED_TO",
+            description: "Related or blocking relationship between work items",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "WorkItem",
+                    target_type: "WorkItem",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "REOPENED",
+            description: "User who reopened a merge request or work item (ADR 013)",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "MergeRequest",
+                },
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "WorkItem",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "RESOLVED_BY",
+            description: "User who resolved a vulnerability",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Vulnerability",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "REVIEWER",
+            description: "Review assignment relationship between users and merge requests",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "MergeRequest",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "RUNS_ON",
+            description: "Job executed on a runner",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Job",
+                    target_type: "Runner",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "SCANS",
+            description: "VulnerabilityScanner scans a project for security vulnerabilities",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "VulnerabilityScanner",
+                    target_type: "Project",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "SOURCE_PROJECT",
+            description: "Merge request's source project (differs from target project for fork-based MRs)",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "Project",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "TRIGGERED",
+            description: "Trigger relationship between entities",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Pipeline",
+                },
+                SchemaEdgeVariant {
+                    source_type: "MergeRequest",
+                    target_type: "Pipeline",
+                },
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "Job",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "TRIGGERED_BY_PIPELINE",
+            description: "Job was triggered by an upstream pipeline (child pipeline relationship from the job side)",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Job",
+                    target_type: "Pipeline",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "TRIGGERS_PIPELINE",
+            description: "Bridge job triggered a downstream pipeline",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "Job",
+                    target_type: "Pipeline",
+                },
+            ],
+        },
+        SchemaEdge {
+            name: "UPDATED_BY",
+            description: "User who most recently updated an entity (non-content changes)",
+            variants: [
+                SchemaEdgeVariant {
+                    source_type: "User",
+                    target_type: "MergeRequest",
+                },
+            ],
+        },
+    ],
+}

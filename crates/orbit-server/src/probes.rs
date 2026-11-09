@@ -51,8 +51,9 @@ mod tests {
     use super::*;
 
     fn pinned_schema() -> Arc<ActiveSchema> {
-        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
-        ActiveSchema::pinned(ontology)
+        ActiveSchema::pinned(Arc::new(
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+        ))
     }
 
     fn free_addr() -> SocketAddr {

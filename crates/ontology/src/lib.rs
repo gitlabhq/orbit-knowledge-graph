@@ -22,7 +22,6 @@ pub mod denormalized;
 mod entities;
 pub mod errors;
 pub mod etl;
-pub mod introspection;
 mod loading;
 pub mod migrations;
 pub mod pipelines;

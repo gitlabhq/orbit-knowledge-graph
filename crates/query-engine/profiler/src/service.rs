@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use clickhouse_client::ArrowClickHouseClient;
 use compiler::SecurityContext;
-use ontology::Ontology;
 use pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
     QueryPipelineContext, TypeMap,
@@ -16,22 +15,16 @@ use types::ResourceAuthorization;
 use orbit_server::pipeline::{HydrationStage, RedactionStage};
 
 pub struct ProfilerPipelineService {
-    ontology: Arc<Ontology>,
     data_model: Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     client: Arc<ArrowClickHouseClient>,
 }
 
 impl ProfilerPipelineService {
     pub fn new(
-        ontology: Arc<Ontology>,
         data_model: Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
         client: Arc<ArrowClickHouseClient>,
     ) -> Self {
-        Self {
-            ontology,
-            data_model,
-            client,
-        }
+        Self { data_model, client }
     }
 
     pub async fn run_query(
@@ -50,7 +43,6 @@ impl ProfilerPipelineService {
             frontend,
             query_json: query_json.to_string(),
             compiled: None,
-            ontology: Arc::clone(&self.ontology),
             security_context: Some(security_ctx),
             server_extensions,
             phases: TypeMap::default(),

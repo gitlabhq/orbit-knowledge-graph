@@ -37,7 +37,7 @@ async fn respond(
         },
     };
     let counts = count_items(ctx, security_context, paths).await;
-    build_item_counts_response(&pinned_schema().ontology, &request, &counts)
+    build_item_counts_response(pinned_schema().data_model.model(), &request, &counts)
 }
 
 fn count_of(domains: &[DomainItemCount], domain: &str, entity: &str) -> i64 {

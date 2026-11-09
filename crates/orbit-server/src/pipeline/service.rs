@@ -13,7 +13,7 @@ use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
-use ontology::introspection::SchemaResponse;
+use query_data_model::introspection::SchemaResponse;
 use query_engine::compiler::Frontend;
 use query_engine::pipeline::{
     MultiObserver, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
@@ -122,7 +122,6 @@ impl QueryPipelineService {
             frontend: query.frontend,
             query_json: query.text,
             compiled: None,
-            ontology: Arc::clone(&schema.ontology),
             security_context: None,
             server_extensions,
             phases: TypeMap::default(),

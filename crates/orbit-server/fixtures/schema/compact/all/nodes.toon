@@ -1,0 +1,297 @@
+domains[1]:
+  - name: agents
+    nodes[1]:
+      - name: AgentSession
+        props[5]: "id:int","flow_type:enum (software_development|external_agent|ai_catalog_agent|claude_code_compliance_api|chat|agentic_chat|developer|code_review|deep_code_review|fix_pipeline|convert_to_gl_ci|resolve_sast_vulnerability|sast_fp_detection|secrets_fp_detection|security_review|recommend_reviewers|risk_classification|workplan|readiness_score|slack_assistant|resolve_dependency_bump|bl_security|business_context_security_guidelines|orbit_agent|duo_planner|security_analyst_agent|analytics_agent|ci_expert_agent|duo_permissions_assistant|support_assistant|onboarding_guide|flow_creator|other|ambient|issue_to_merge_request|convert_to_gitlab_ci)","source:enum (gitlab_duo|claude_code_compliance_api|claude_code_glab|mcp)","project_id:int","session_started_at:datetime"
+        out[2]: "CREATED_MR → [MergeRequest]","IN_PROJECT → [Project]"
+        in[0]:
+edges[0]:
+---
+domains[1]:
+  - name: source_code
+    nodes[1]:
+      - name: Branch
+        props[4]: "id:int","project_id:int","name:string","is_default:bool"
+        out[2]: "CONTAINS → [Directory, File]","IN_PROJECT → [Project]"
+        in[2]: "CONTAINS ← [Project]","ON_BRANCH ← [Directory, File]"
+edges[0]:
+---
+domains[1]:
+  - name: source_code
+    nodes[1]:
+      - name: Commit
+        props[3]: "id:int","sha:string","project_id:int"
+        out[0]:
+        in[1]: "MERGED_AT_COMMIT ← [MergeRequest]"
+edges[0]:
+---
+domains[1]:
+  - name: container_registry
+    nodes[1]:
+      - name: ContainerRepository
+        props[6]: "id:int","name:string","status:enum (delete_scheduled|delete_failed|delete_ongoing)","created_at:datetime","updated_at:datetime","project_id:int"
+        out[1]: "IN_PROJECT → [Project]"
+        in[0]:
+edges[0]:
+---
+domains[1]:
+  - name: source_code
+    nodes[1]:
+      - name: Definition
+        props[15]: "id:int","project_id:int","branch:string","commit_sha:string","file_path:string","fqn:string","name:string","definition_type:string","start_line:int","end_line:int","start_byte:int","end_byte:int","start_char:int","end_char:int","content:string?"
+        out[3]: "CALLS → [Definition, ImportedSymbol]","DEFINES → [Definition]","EXTENDS → [Definition]"
+        in[4]: "CALLS ← [Definition, File]","DEFINES ← [Definition, File]","EXTENDS ← [Definition]","IMPORTS ← [ImportedSymbol]"
+edges[0]:
+---
+domains[1]:
+  - name: packages
+    nodes[1]:
+      - name: Dependency
+        props[4]: "id:int","name:string","version_pattern:string","project_id:int"
+        out[1]: "IN_PROJECT → [Project]"
+        in[1]: "DECLARES_DEPENDENCY ← [Package]"
+edges[0]:
+---
+domains[1]:
+  - name: ci
+    nodes[1]:
+      - name: Deployment
+        props[16]: "id:int","iid:int","project_id:int","ref:string","tag:bool","sha:string","status:enum (created|running|success|failed|canceled|skipped|blocked)","deployable_type:string","deployable_id:int?","on_stop:string","archived:bool","created_at:datetime?","finished_at:datetime?","updated_at:datetime?","environment_id:int","user_id:int?"
+        out[2]: "IN_ENVIRONMENT → [Environment]","IN_PROJECT → [Project]"
+        in[2]: "DEPLOYED_BY ← [User]","DEPLOYED_TO ← [MergeRequest]"
+edges[0]:
+---
+domains[1]:
+  - name: source_code
+    nodes[1]:
+      - name: Directory
+        props[6]: "id:int","project_id:int","branch:string","commit_sha:string","path:string","name:string"
+        out[2]: "CONTAINS → [Directory, File]","ON_BRANCH → [Branch]"
+        in[1]: "CONTAINS ← [Branch, Directory]"
+edges[0]:
+---
+domains[1]:
+  - name: ci
+    nodes[1]:
+      - name: Environment
+        props[18]: "id:int","project_id:int","name:string","slug:string","external_url:string","environment_type:string","state:enum (available|stopping|stopped)","tier:enum (production|staging|testing|development|other)","auto_stop_at:datetime?","auto_delete_at:datetime?","auto_stop_setting:enum (always|with_action)","cluster_agent_id:int?","kubernetes_namespace:string","flux_resource_path:string","description:string","created_at:datetime?","updated_at:datetime?","merge_request_id:int?"
+        out[2]: "CREATED_FOR_MR → [MergeRequest]","IN_PROJECT → [Project]"
+        in[1]: "IN_ENVIRONMENT ← [Deployment]"
+edges[0]:
+---
+domains[1]:
+  - name: source_code
+    nodes[1]:
+      - name: File
+        props[11]: "id:int","project_id:int","branch:string","commit_sha:string","path:string","name:string","extension:string","language:string","size_bytes:int","content:string?","reason:string"
+        out[4]: "CALLS → [Definition, ImportedSymbol]","DEFINES → [Definition]","IMPORTS → [ImportedSymbol]","ON_BRANCH → [Branch]"
+        in[1]: "CONTAINS ← [Branch, Directory]"
+edges[0]:
+---
+domains[1]:
+  - name: security
+    nodes[1]:
+      - name: Finding
+        props[11]: "id:int","uuid:uuid","name:string","description:string","solution:string","severity:enum (info|unknown|low|medium|high|critical)","deduplicated:bool","overridden_uuid:uuid","project_id:int","scan_id:int","scanner_id:int"
+        out[3]: "DETECTED_BY → [VulnerabilityScanner]","HAS_IDENTIFIER → [VulnerabilityIdentifier]","IN_PROJECT → [Project]"
+        in[1]: "HAS_FINDING ← [SecurityScan]"
+edges[0]:
+---
+domains[1]:
+  - name: core
+    nodes[1]:
+      - name: Group
+        props[7]: "id:int","full_path:string","name:string","description:string","created_at:datetime?","updated_at:datetime?","visibility_level:enum (private|internal|public)"
+        out[1]: "CONTAINS → [Group, Project]"
+        in[4]: "CONTAINS ← [Group]","IN_GROUP ← [Label, Milestone, WorkItem]","MEMBER_OF ← [User]","OWNER ← [User]"
+edges[0]:
+---
+domains[1]:
+  - name: source_code
+    nodes[1]:
+      - name: ImportedSymbol
+        props[15]: "id:int","project_id:int","branch:string","commit_sha:string","file_path:string","import_type:string","import_path:string","identifier_name:string","identifier_alias:string","start_line:int","end_line:int","start_byte:int","end_byte:int","start_char:int","end_char:int"
+        out[1]: "IMPORTS → [Definition]"
+        in[2]: "CALLS ← [Definition, File]","IMPORTS ← [File]"
+edges[0]:
+---
+domains[1]:
+  - name: ci
+    nodes[1]:
+      - name: Job
+        props[29]: "id:int","name:string","status:enum (created|pending|running|success|failed|canceled|skipped|manual|scheduled|preparing|waiting_for_resource|waiting_for_callback|canceling)","ref:string","tag:bool?","allow_failure:bool","coverage:string","environment:string","when:enum (on_success|on_failure|always|manual|delayed)","retried:bool?","failure_reason:enum (script_failure|api_failure|stuck_or_timeout_failure|runner_system_failure|missing_dependency_failure|runner_unsupported|stale_schedule|job_execution_timeout|archived_failure|unmet_prerequisites|scheduler_failure|data_integrity_failure|forward_deployment_failure|user_blocked|project_deleted|ci_quota_exceeded|pipeline_loop_detected|no_matching_runner|trace_size_exceeded|builds_disabled|environment_creation_failure|deployment_rejected|failed_outdated_deployment_job|job_execution_server_timeout|stuck_pending_with_matching_runners|stuck_pending_no_matching_runners|no_updates_running|no_updates_canceling|server_timeout_running|server_timeout_canceling|protected_environment_failure|insufficient_bridge_permissions|downstream_bridge_project_not_found|invalid_bridge_trigger|upstream_bridge_project_not_found|insufficient_upstream_permissions|bridge_pipeline_is_child_pipeline|downstream_pipeline_creation_failed|secrets_provider_not_found|reached_max_descendant_pipelines_depth|ip_restriction_failure|reached_max_pipeline_hierarchy_size|reached_downstream_pipeline_trigger_rate_limit|duo_workflow_not_allowed|job_router_failure|job_token_expired)","created_at:datetime?","started_at:datetime?","finished_at:datetime?","queued_at:datetime?","duration:int?","queued_duration:int?","type:string","runner_id:int?","timeout:int?","timeout_source:enum (unknown_timeout_source|project_timeout_source|runner_timeout_source|job_timeout_source)","exit_code:int?","scheduling_type:enum (stage|dag)","project_id:int","user_id:int?","upstream_pipeline_id:int?","stage_id:int?","pipeline_id:int?","auto_canceled_by_id:int?"
+        out[6]: "AUTO_CANCELED_BY → [Pipeline]","IN_PIPELINE → [Pipeline]","IN_PROJECT → [Project]","RUNS_ON → [Runner]","TRIGGERED_BY_PIPELINE → [Pipeline]","TRIGGERS_PIPELINE → [Pipeline]"
+        in[3]: "HAS_JOB ← [Pipeline, Stage]","RAN_BY ← [SecurityScan]","TRIGGERED ← [User]"
+edges[0]:
+---
+domains[1]:
+  - name: plan
+    nodes[1]:
+      - name: Label
+        props[8]: "id:int","title:string","description:string","color:string","created_at:datetime?","updated_at:datetime?","project_id:int?","group_id:int?"
+        out[2]: "IN_GROUP → [Group]","IN_PROJECT → [Project]"
+        in[1]: "HAS_LABEL ← [MergeRequest, WorkItem]"
+edges[0]:
+---
+domains[1]:
+  - name: code_review
+    nodes[1]:
+      - name: MergeRequest
+        props[44]: "id:int","iid:int?","title:string","description:string","source_branch:string","target_branch:string","state:enum (opened|closed|merged|locked)","merge_status:string","draft:bool","squash:bool","created_at:datetime?","updated_at:datetime?","merge_commit_sha:string","discussion_locked:bool?","prepared_at:datetime?","project_id:int","merged_commit_id:int?","latest_build_started_at:datetime?","latest_build_finished_at:datetime?","first_deployed_to_production_at:datetime?","merged_at:datetime?","latest_closed_at:datetime?","first_comment_at:datetime?","first_commit_at:datetime?","last_commit_at:datetime?","diff_size:int?","modified_paths_size:int?","commits_count:int?","first_approved_at:datetime?","first_reassigned_at:datetime?","added_lines:int?","removed_lines:int?","first_contribution:bool","reviewer_first_assigned_at:datetime?","author_id:int?","merge_user_id:int?","updated_by_id:int?","last_edited_by_id:int?","closed_by_id:int?","milestone_id:int?","source_project_id:int?","head_pipeline_id:int?","latest_merge_request_diff_id:int?","diff:string?"
+        out[14]: "CLOSES → [WorkItem]","DEPLOYED_TO → [Deployment]","FIXES → [Vulnerability]","HAS_DIFF → [MergeRequestDiff]","HAS_HEAD_PIPELINE → [Pipeline]","HAS_LABEL → [Label]","HAS_LATEST_DIFF → [MergeRequestDiff]","HAS_NOTE → [Note]","IN_MILESTONE → [Milestone]","IN_PROJECT → [Project]","MENTIONS → [MergeRequest, WorkItem]","MERGED_AT_COMMIT → [Commit]","SOURCE_PROJECT → [Project]","TRIGGERED → [Pipeline]"
+        in[12]: "APPROVED ← [User]","ASSIGNED ← [User]","AUTHORED ← [User]","CLOSED ← [User]","CREATED_FOR_MR ← [Environment]","CREATED_MR ← [AgentSession]","LAST_EDITED_BY ← [User]","MENTIONS ← [MergeRequest, WorkItem]","MERGED ← [User]","REOPENED ← [User]","REVIEWER ← [User]","UPDATED_BY ← [User]"
+edges[0]:
+---
+domains[1]:
+  - name: code_review
+    nodes[1]:
+      - name: MergeRequestDiff
+        props[15]: "id:int","merge_request_id:int","state:string","base_commit_sha:string","head_commit_sha:string","start_commit_sha:string","commits_count:int?","files_count:int?","project_id:int","diff_type:enum (regular|merge_head)","real_size:string","stored_externally:bool","created_at:datetime?","updated_at:datetime?","patch:string?"
+        out[2]: "HAS_FILE → [MergeRequestDiffFile]","IN_PROJECT → [Project]"
+        in[2]: "HAS_DIFF ← [MergeRequest]","HAS_LATEST_DIFF ← [MergeRequest]"
+edges[0]:
+---
+domains[1]:
+  - name: code_review
+    nodes[1]:
+      - name: MergeRequestDiffFile
+        props[15]: "id:int","merge_request_id:int","merge_request_diff_id:int","project_id:int","too_large:bool","new_path:string","old_path:string","new_file:bool","renamed_file:bool","deleted_file:bool","binary:bool?","generated:bool?","a_mode:string","b_mode:string","diff:string?"
+        out[1]: "IN_PROJECT → [Project]"
+        in[1]: "HAS_FILE ← [MergeRequestDiff]"
+edges[0]:
+---
+domains[1]:
+  - name: plan
+    nodes[1]:
+      - name: Milestone
+        props[11]: "id:int","iid:int?","title:string","description:string","state:string","due_date:date?","start_date:date?","created_at:datetime?","updated_at:datetime?","project_id:int?","group_id:int?"
+        out[2]: "IN_GROUP → [Group]","IN_PROJECT → [Project]"
+        in[1]: "IN_MILESTONE ← [MergeRequest, WorkItem]"
+edges[0]:
+---
+domains[1]:
+  - name: core
+    nodes[1]:
+      - name: Note
+        props[15]: "id:int","note:string","noteable_type:enum (Issue|MergeRequest|Commit|Snippet|WikiPage::Meta|DesignManagement::Design|AlertManagement::Alert|Vulnerability|AbuseReport|ComplianceManagement::Projects::ComplianceViolation)","noteable_id:int?","line_code:string","created_at:datetime?","updated_at:datetime?","discussion_id:string?","resolved_at:datetime?","internal:bool","confidential:bool?","commit_id:string","st_diff:string","project_id:int?","author_id:int?"
+        out[1]: "IN_PROJECT → [Project]"
+        in[2]: "AUTHORED ← [User]","HAS_NOTE ← [MergeRequest, Vulnerability, WorkItem]"
+edges[0]:
+---
+domains[1]:
+  - name: packages
+    nodes[1]:
+      - name: Package
+        props[8]: "id:int","name:string","version:string?","package_type:enum (maven|npm|conan|nuget|pypi|composer|generic|golang|debian|rubygems|helm|terraform_module|rpm|ml_model|cargo)","status:enum (default|hidden|processing|error|pending_destruction|deprecated)","created_at:datetime?","updated_at:datetime?","project_id:int"
+        out[5]: "BUILT_BY → [Pipeline]","DECLARES_DEPENDENCY → [Dependency]","HAS_PACKAGE_FILE → [PackageFile]","HAS_VULNERABILITY → [Vulnerability]","IN_PROJECT → [Project]"
+        in[0]:
+edges[0]:
+---
+domains[1]:
+  - name: packages
+    nodes[1]:
+      - name: PackageFile
+        props[9]: "id:int","file_name:string","size:int?","file_sha256:string?","status:enum (default|pending_destruction|processing|error)","created_at:datetime?","updated_at:datetime?","project_id:int","package_id:int"
+        out[2]: "BUILT_BY → [Pipeline]","IN_PROJECT → [Project]"
+        in[1]: "HAS_PACKAGE_FILE ← [Package]"
+edges[0]:
+---
+domains[1]:
+  - name: ci
+    nodes[1]:
+      - name: Pipeline
+        props[21]: "id:int","iid:int?","sha:string","ref:string","status:enum (created|pending|running|success|failed|canceled|skipped|manual|scheduled|preparing|waiting_for_resource|waiting_for_callback|canceling)","source:enum (unknown|push|web|trigger|schedule|api|external|pipeline|chat|webide|merge_request_event|external_pull_request_event|parent_pipeline|ondemand_dast_scan|ondemand_dast_validation|security_orchestration_policy|container_registry_push|duo_workflow|pipeline_execution_policy_schedule|dependency_management_security_update)","tag:bool","duration:int?","failure_reason:enum (unknown_failure|config_error|external_validation_failure|user_not_verified|size_limit_exceeded|job_activity_limit_exceeded|deployments_limit_exceeded|project_deleted|filtered_by_rules|filtered_by_workflow_rules|composite_identity_forbidden|pipeline_ref_creation_failure|filtered_by_no_pipeline)","created_at:datetime?","started_at:datetime?","finished_at:datetime?","committed_at:datetime?","updated_at:datetime?","before_sha:string","yaml_errors:string","protected:bool?","project_id:int","user_id:int?","merge_request_id:int?","auto_canceled_by_id:int?"
+        out[5]: "AUTO_CANCELED_BY → [Pipeline]","CHILD_OF → [Pipeline]","HAS_JOB → [Job]","HAS_STAGE → [Stage]","IN_PROJECT → [Project]"
+        in[8]: "AUTO_CANCELED_BY ← [Job, Pipeline]","BUILT_BY ← [Package, PackageFile]","CHILD_OF ← [Pipeline]","HAS_HEAD_PIPELINE ← [MergeRequest]","IN_PIPELINE ← [Job, SecurityScan]","TRIGGERED ← [MergeRequest, User]","TRIGGERED_BY_PIPELINE ← [Job]","TRIGGERS_PIPELINE ← [Job]"
+edges[0]:
+---
+domains[1]:
+  - name: core
+    nodes[1]:
+      - name: Project
+        props[10]: "id:int","full_path:string","name:string","description:string","created_at:datetime?","updated_at:datetime?","visibility_level:enum (private|internal|public)","archived:bool","star_count:int","last_activity_at:datetime?"
+        out[1]: "CONTAINS → [Branch]"
+        in[6]: "CONTAINS ← [Group, User]","CREATOR ← [User]","IN_PROJECT ← [AgentSession, Branch, ContainerRepository, Dependency, Deployment, Environment, Finding, Job, Label, MergeRequest, MergeRequestDiff, MergeRequestDiffFile, Milestone, Note, Package, PackageFile, Pipeline, SecurityScan, Stage, Vulnerability, VulnerabilityIdentifier, VulnerabilityOccurrence, VulnerabilityScanner, WorkItem]","MEMBER_OF ← [User]","SCANS ← [VulnerabilityScanner]","SOURCE_PROJECT ← [MergeRequest]"
+edges[0]:
+---
+domains[1]:
+  - name: ci
+    nodes[1]:
+      - name: Runner
+        props[12]: "id:int","runner_type:enum (instance_type|group_type|project_type)","name:string","description:string","active:bool","locked:bool","run_untagged:bool","access_level:enum (not_protected|ref_protected)","maximum_timeout:int?","organization_id:int?","created_at:datetime?","contacted_at:datetime?"
+        out[0]:
+        in[1]: "RUNS_ON ← [Job]"
+edges[0]:
+---
+domains[1]:
+  - name: security
+    nodes[1]:
+      - name: SecurityScan
+        props[9]: "id:int","scan_type:enum (sast|dependency_scanning|container_scanning|dast|secret_detection|coverage_fuzzing|api_fuzzing|cluster_image_scanning|sarif)","status:enum (created|succeeded|job_failed|report_error|preparing|preparation_failed|purged)","latest:bool","created_at:datetime","updated_at:datetime","project_id:int","pipeline_id:int?","build_id:int"
+        out[4]: "HAS_FINDING → [Finding]","IN_PIPELINE → [Pipeline]","IN_PROJECT → [Project]","RAN_BY → [Job]"
+        in[0]:
+edges[0]:
+---
+domains[1]:
+  - name: ci
+    nodes[1]:
+      - name: Stage
+        props[8]: "id:int","name:string","status:enum (created|pending|running|success|failed|canceled|skipped|manual|scheduled|preparing|waiting_for_resource|waiting_for_callback|canceling)","position:int?","created_at:datetime?","updated_at:datetime?","project_id:int","pipeline_id:int?"
+        out[2]: "HAS_JOB → [Job]","IN_PROJECT → [Project]"
+        in[1]: "HAS_STAGE ← [Pipeline]"
+edges[0]:
+---
+domains[1]:
+  - name: core
+    nodes[1]:
+      - name: User
+        props[18]: "id:int","username:string","email:string","name:string","first_name:string","last_name:string","created_at:datetime?","updated_at:datetime?","state:enum (active|blocked|ldap_blocked|blocked_pending_approval|banned|deactivated)","avatar_url:string?","public_email:string","preferred_language:string","last_activity_on:date?","private_profile:bool","is_admin:bool","is_auditor:bool","is_external:bool","user_type:enum (human|support_bot|alert_bot|visual_review_bot|service_user|ghost|project_bot|security_bot|automation_bot|security_policy_bot|admin_bot|service_account|placeholder|duo_code_review_bot|import_user)"
+        out[18]: "APPROVED → [MergeRequest]","ASSIGNED → [MergeRequest, WorkItem]","AUTHORED → [MergeRequest, Note, Vulnerability, WorkItem]","CLOSED → [MergeRequest, WorkItem]","CONFIRMED_BY → [Vulnerability]","CONTAINS → [Project]","CREATOR → [Project]","DEPLOYED_BY → [Deployment]","DISMISSED_BY → [Vulnerability]","LAST_EDITED_BY → [MergeRequest]","MEMBER_OF → [Group, Project]","MERGED → [MergeRequest]","OWNER → [Group]","REOPENED → [MergeRequest, WorkItem]","RESOLVED_BY → [Vulnerability]","REVIEWER → [MergeRequest]","TRIGGERED → [Job, Pipeline]","UPDATED_BY → [MergeRequest]"
+        in[0]:
+edges[0]:
+---
+domains[1]:
+  - name: security
+    nodes[1]:
+      - name: Vulnerability
+        props[20]: "id:int","title:string","description:string","state:enum (detected|dismissed|resolved|confirmed)","severity:enum (info|unknown|low|medium|high|critical)","report_type:enum (sast|dependency_scanning|container_scanning|dast|secret_detection|coverage_fuzzing|api_fuzzing|cluster_image_scanning|container_scanning_for_registry|sarif|generic)","resolved_on_default_branch:bool","present_on_default_branch:bool","created_at:datetime","updated_at:datetime","detected_at:datetime?","resolved_at:datetime?","confirmed_at:datetime?","dismissed_at:datetime?","project_id:int","finding_id:int","author_id:int","confirmed_by_id:int?","resolved_by_id:int?","dismissed_by_id:int?"
+        out[3]: "HAS_FINDING → [VulnerabilityOccurrence]","HAS_NOTE → [Note]","IN_PROJECT → [Project]"
+        in[7]: "AUTHORED ← [User]","CONFIRMED_BY ← [User]","DISMISSED_BY ← [User]","FIXES ← [MergeRequest]","HAS_VULNERABILITY ← [Package]","OCCURRENCE_OF ← [VulnerabilityOccurrence]","RESOLVED_BY ← [User]"
+edges[0]:
+---
+domains[1]:
+  - name: security
+    nodes[1]:
+      - name: VulnerabilityIdentifier
+        props[8]: "id:int","external_type:string","external_id:string","name:string","url:string","created_at:datetime","updated_at:datetime","project_id:int"
+        out[1]: "IN_PROJECT → [Project]"
+        in[1]: "HAS_IDENTIFIER ← [Finding, VulnerabilityOccurrence]"
+edges[0]:
+---
+domains[1]:
+  - name: security
+    nodes[1]:
+      - name: VulnerabilityOccurrence
+        props[18]: "id:int","uuid:uuid","name:string","description:string","solution:string","cve:string","location:string","location_fingerprint:string","severity:enum (info|unknown|low|medium|high|critical)","report_type:enum (sast|dependency_scanning|container_scanning|dast|secret_detection|coverage_fuzzing|api_fuzzing|cluster_image_scanning|container_scanning_for_registry|sarif|generic)","detection_method:enum (gitlab_security_report|external_security_report|bug_bounty|code_review|security_audit)","created_at:datetime","updated_at:datetime","detected_at:datetime?","project_id:int","scanner_id:int","vulnerability_id:int?","primary_identifier_id:int"
+        out[4]: "DETECTED_BY → [VulnerabilityScanner]","HAS_IDENTIFIER → [VulnerabilityIdentifier]","IN_PROJECT → [Project]","OCCURRENCE_OF → [Vulnerability]"
+        in[1]: "HAS_FINDING ← [Vulnerability]"
+edges[0]:
+---
+domains[1]:
+  - name: security
+    nodes[1]:
+      - name: VulnerabilityScanner
+        props[7]: "id:int","external_id:string","name:string","vendor:string","created_at:datetime","updated_at:datetime","project_id:int"
+        out[2]: "IN_PROJECT → [Project]","SCANS → [Project]"
+        in[1]: "DETECTED_BY ← [Finding, VulnerabilityOccurrence]"
+edges[0]:
+---
+domains[1]:
+  - name: plan
+    nodes[1]:
+      - name: WorkItem
+        props[18]: "id:int","iid:int","title:string","description:string","state:enum (opened|closed)","work_item_type:enum (issue|incident|test_case|requirement|task|objective|key_result|epic|ticket)","confidential:bool","due_date:date?","start_date:date?","weight:int?","created_at:datetime?","updated_at:datetime?","closed_at:datetime?","project_id:int?","author_id:int?","milestone_id:int?","namespace_id:int","closed_by_id:int?"
+        out[8]: "CONTAINS → [WorkItem]","HAS_LABEL → [Label]","HAS_NOTE → [Note]","IN_GROUP → [Group]","IN_MILESTONE → [Milestone]","IN_PROJECT → [Project]","MENTIONS → [MergeRequest, WorkItem]","RELATED_TO → [WorkItem]"
+        in[8]: "ASSIGNED ← [User]","AUTHORED ← [User]","CLOSED ← [User]","CLOSES ← [MergeRequest]","CONTAINS ← [WorkItem]","MENTIONS ← [MergeRequest, WorkItem]","RELATED_TO ← [WorkItem]","REOPENED ← [User]"
+edges[0]:
+---

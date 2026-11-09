@@ -1,8 +1,10 @@
 kind: graph
 package: gitlab.source_code
 domain: source_code
+domain_description: Entities related to source code structure, definitions, and imports.
 entities:
   Branch:
+    style: {size: 28, color: "#14B8A6"}
     description: A Git branch in a repository
     label: name
     defaults: [id, name, is_default]
@@ -24,6 +26,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Commit:
+    style: {size: 24, color: "#8B5CF6"}
     description: A Git commit, shared target for commit-related edges
     label: sha
     defaults: [id, sha, project_id]
@@ -40,6 +43,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Definition:
+    style: {size: 26, color: "#2DD4BF"}
     description: A code definition such as a class, function, method, or module
     label: name
     defaults: [id, name, fqn, definition_type, file_path, commit_sha, start_line, end_line]
@@ -73,6 +77,7 @@ entities:
         description: Source text, resolved from Gitaly via start_byte/end_byte.
 
   Directory:
+    style: {size: 26, color: "#06B6D4"}
     description: A directory within a repository's file structure
     label: path
     defaults: [id, path, name, commit_sha]
@@ -86,6 +91,7 @@ entities:
       name: {type: string, description: Directory name., immutable: true}
 
   File:
+    style: {size: 24, color: "#22D3EE"}
     description: A source code file within a repository
     label: path
     defaults: [id, path, name, language, commit_sha]
@@ -119,6 +125,7 @@ entities:
         selectivity: low
 
   ImportedSymbol:
+    style: {size: 22, color: "#5EEAD4"}
     description: An imported symbol or module reference within a source file
     label: identifier_name
     defaults:

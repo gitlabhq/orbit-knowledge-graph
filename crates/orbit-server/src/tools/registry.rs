@@ -307,8 +307,8 @@ impl CommandRegistry {
 
 #[cfg(test)]
 mod tests {
-    use ontology::Ontology;
-    use ontology::introspection::{IntrospectionScope, build_relationship_patterns};
+    use query_data_model::Packages;
+    use query_data_model::introspection::{IntrospectionScope, build_relationship_patterns};
 
     use super::*;
 
@@ -438,8 +438,8 @@ mod tests {
     }
 
     fn relationship_patterns() -> String {
-        let ontology = Ontology::load_embedded().expect("embedded ontology loads");
-        build_relationship_patterns(&ontology, IntrospectionScope::All).join("\n")
+        let model = Packages::embedded().load().expect("embedded model loads");
+        build_relationship_patterns(&model, IntrospectionScope::All).join("\n")
     }
 
     fn inline_description(frontend: Frontend) -> String {
@@ -454,9 +454,9 @@ mod tests {
             .description
     }
 
-    // Tripping this budget usually means the ontology gained edges. Either
-    // raise the limits after checking the inlined description is still worth
-    // its tokens, or shorten the pattern format in `build_relationship_patterns`.
+    /// Tripping this budget usually means the model gained relationships. Either
+    /// raise the limits after checking the inlined description is still worth
+    /// its tokens, or shorten the pattern format in `build_relationship_patterns`.
     #[test]
     fn inlined_description_stays_under_size_budget() {
         for frontend in [Frontend::JsonDsl, Frontend::Gql] {

@@ -11,11 +11,10 @@ use compiler::constants::{
     traversal_path_column,
 };
 use compiler::{DynamicEntityColumns, FilterOp, HydrationArm, HydrationTemplate, VirtualFilter};
-use ontology::{DataType, Ontology};
 use orbit_arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
 use pipeline::PipelineError;
-use query_data_model::Model;
+use query_data_model::{DataType, Model};
 use types::QueryResult;
 
 pub use crate::content::PropertyMap;
@@ -136,10 +135,10 @@ pub fn hydration_arm(
     })
 }
 
-/// `{alias}_props` arrives as a JSON object of strings, so typed fields are re-typed from the ontology.
+/// `{alias}_props` arrives as a JSON object of strings, so typed fields are re-typed from the model.
 pub fn parse_hydration_batches(
     batches: &[RecordBatch],
-    ontology: &Ontology,
+    model: &Model,
 ) -> Result<PropertyMap, PipelineError> {
     let alias = hydration_node_alias();
     let entity_type_col = format!("{alias}_entity_type");
@@ -169,12 +168,15 @@ pub fn parse_hydration_batches(
             let field_types = field_types_cache
                 .entry(entity_type.clone())
                 .or_insert_with(|| {
-                    ontology
-                        .get_node(&entity_type)
-                        .map(|node| {
-                            node.fields
+                    let graph = model.graph();
+                    graph
+                        .entity_named(&entity_type)
+                        .map(|entity| {
+                            entity
+                                .properties
                                 .iter()
-                                .map(|f| (f.name.clone(), f.data_type))
+                                .map(|property| graph.property(*property))
+                                .map(|property| (property.name.clone(), property.data_type))
                                 .collect()
                         })
                         .unwrap_or_default()
@@ -335,7 +337,7 @@ pub fn hydrate_static(
     Ok(arms)
 }
 
-/// Uses pre-resolved column specs from the compilation plan; no ontology
+/// Uses pre-resolved column specs from the compilation plan; no model
 /// lookups at runtime.
 ///
 /// `traversal_paths` is the authorized scope; `ref_paths` narrows an entity type to the paths

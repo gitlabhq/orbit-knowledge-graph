@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
-use ontology::introspection::{IntrospectionScope, SchemaResponse, build_compact_schema_response};
+use query_data_model::introspection::{
+    IntrospectionScope, SchemaResponse, build_compact_schema_response,
+};
 use query_data_model::surface::Statement;
 use query_data_model::surface::gql::{self, Routed};
-use query_data_model::{Catalog, ClickHouse};
+use query_data_model::{Catalog, ClickHouse, Model};
 
 use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
-use crate::{CompiledQueryContext, Ontology, QueryError, Result, SecurityContext};
+use crate::{CompiledQueryContext, QueryError, Result, SecurityContext};
 
 pub use query_data_model::surface::gql::{GRAMMAR, outline};
 
@@ -31,12 +33,11 @@ pub enum PreparedStatement {
 #[must_use = "the prepared statement should be used"]
 pub fn prepare(
     raw: &str,
-    ontology: &Ontology,
     data_model: &Arc<Catalog<ClickHouse>>,
     security_context: &SecurityContext,
     scope: IntrospectionScope,
 ) -> Result<PreparedStatement> {
-    match route(raw, ontology, data_model, security_context.admin, scope)? {
+    match route(raw, data_model, security_context.admin, scope)? {
         RoutedStatement::Query(query) => compile_query(*query, data_model, security_context)
             .map(|compiled| PreparedStatement::Query(Box::new(compiled))),
         RoutedStatement::Schema(response) => Ok(PreparedStatement::Schema(response)),
@@ -45,7 +46,6 @@ pub fn prepare(
 
 pub fn route(
     raw: &str,
-    ontology: &Ontology,
     data_model: &Catalog<ClickHouse>,
     admin: bool,
     scope: IntrospectionScope,
@@ -56,7 +56,7 @@ pub fn route(
         .count_err()?
     {
         Routed::Query(statement) => Ok(RoutedStatement::Query(Box::new(ParsedQuery { statement }))),
-        Routed::Schema(node) => resolve_schema(node, ontology, scope)
+        Routed::Schema(node) => resolve_schema(node, data_model.model(), scope)
             .count_err()
             .map(RoutedStatement::Schema),
     }
@@ -74,19 +74,15 @@ pub fn compile_query(
 
 fn resolve_schema(
     node: Option<String>,
-    ontology: &Ontology,
+    model: &Model,
     scope: IntrospectionScope,
 ) -> Result<SchemaResponse> {
     if let Some(name) = &node
-        && (name == "*" || !scope.includes(ontology, name))
+        && (name == "*" || !scope.includes(model, name))
     {
         return Err(QueryError::Validation(format!(
             "schema node '{name}' is unknown or unavailable in this scope"
         )));
     }
-    Ok(build_compact_schema_response(
-        ontology,
-        scope,
-        node.as_deref(),
-    ))
+    Ok(build_compact_schema_response(model, scope, node.as_deref()))
 }

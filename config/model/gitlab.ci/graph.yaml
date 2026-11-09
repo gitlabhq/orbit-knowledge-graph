@@ -1,8 +1,10 @@
 kind: graph
 package: gitlab.ci
 domain: ci
+domain_description: Entities related to CI/CD pipelines, stages, jobs, deployments, environments, and runners.
 entities:
   Deployment:
+    style: {size: 26, color: "#14B8A6"}
     description: A deployment of a specific commit to a CI/CD environment
     label: id
     defaults: [id, iid, status, ref, sha]
@@ -42,6 +44,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Environment:
+    style: {size: 22, color: "#0EA5E9"}
     description: A CI/CD deployment target (production, staging, review app, etc.)
     label: name
     defaults: [id, name, state, tier]
@@ -88,6 +91,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Job:
+    style: {size: 24, color: "#8B5CF6"}
     description: A CI/CD job that executes scripts within a pipeline stage
     label: name
     defaults: [id, name, status, ref]
@@ -244,6 +248,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Pipeline:
+    style: {size: 30, color: "#6366F1"}
     description: >-
       A CI/CD pipeline that runs a series of stages and jobs to build, test, and
       deploy code
@@ -350,6 +355,7 @@ entities:
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Runner:
+    style: {size: 22, color: "#A78BFA"}
     description: A CI/CD runner that executes jobs
     label: name
     defaults: [id, runner_type, name, active]
@@ -375,6 +381,7 @@ entities:
       contacted_at: {type: timestamp?, description: Last contact timestamp.}
 
   Stage:
+    style: {size: 26, color: "#818CF8"}
     description: >-
       A stage within a CI/CD pipeline that groups related jobs (e.g., build, test,
       deploy)

@@ -92,7 +92,6 @@ pub async fn resolve_owners(
     compiled: &CompiledQueryContext,
     result: &mut QueryResult,
 ) {
-    let ontology = load_ontology();
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::new(ctx.create_client()));
     server_extensions.insert(load_data_model());
@@ -100,7 +99,6 @@ pub async fn resolve_owners(
         frontend: Frontend::JsonDsl,
         query_json: String::new(),
         compiled: Some(Arc::new(compiled.clone())),
-        ontology,
         security_context: Some(test_security_context()),
         server_extensions,
         phases: TypeMap::default(),

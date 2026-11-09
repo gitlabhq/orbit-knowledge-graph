@@ -54,10 +54,6 @@ pub fn test_ontology() -> Arc<Ontology> {
     )
 }
 
-pub fn embedded_ontology() -> Arc<Ontology> {
-    Arc::new(Ontology::load_embedded().expect("Failed to load embedded ontology"))
-}
-
 pub fn embedded_model() -> Arc<Catalog<ClickHouse>> {
     Arc::new(Catalog::<ClickHouse>::embedded().expect("embedded packages must load"))
 }

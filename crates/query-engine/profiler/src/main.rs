@@ -10,7 +10,6 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use clickhouse_client::ArrowClickHouseClient;
 use compiler::SecurityContext;
-use ontology::Ontology;
 use query_data_model::{Catalog, ClickHouse, Packages};
 use tracing::Instrument;
 use tracing_subscriber::layer::SubscriberExt;
@@ -57,10 +56,6 @@ struct Cli {
     /// a bare path gets the default Reporter level
     #[arg(short = 't', long, required = true)]
     traversal_paths: Vec<String>,
-
-    /// Ontology config directory
-    #[arg(long, default_value = "config/ontology")]
-    ontology: PathBuf,
 
     /// Data model package directory
     #[arg(long, default_value = "config/model")]
@@ -441,11 +436,6 @@ async fn main() -> Result<()> {
         String::new()
     };
     eprintln!("using table prefix: {prefix:?}");
-    let ontology = Arc::new(
-        Ontology::load_from_dir(&cli.ontology)
-            .context("failed to load ontology")?
-            .with_schema_version_prefix(&prefix),
-    );
     let packages = Packages::read_dir(&cli.model).context("failed to read model packages")?;
     let data_model = Arc::new(Catalog::<ClickHouse>::versioned(&packages, &prefix)?);
 
@@ -515,7 +505,7 @@ async fn main() -> Result<()> {
         None
     };
 
-    let service = ProfilerPipelineService::new(ontology, data_model, Arc::clone(&client));
+    let service = ProfilerPipelineService::new(data_model, Arc::clone(&client));
     let run_ctx = RunContext {
         service: &service,
         client: &client,

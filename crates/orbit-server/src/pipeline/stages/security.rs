@@ -31,11 +31,8 @@ impl PipelineStage for SecurityStage {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::auth::claims::TraversalPathClaim;
-    use ontology::Ontology;
     use query_engine::pipeline::{NoOpObserver, TypeMap};
 
     fn make_claims(
@@ -80,7 +77,6 @@ mod tests {
             frontend: query_engine::compiler::Frontend::JsonDsl,
             query_json: String::new(),
             compiled: None,
-            ontology: Arc::new(Ontology::load_embedded().unwrap()),
             security_context: None,
             server_extensions: extensions,
             phases: TypeMap::default(),
@@ -125,7 +121,6 @@ mod tests {
             frontend: query_engine::compiler::Frontend::JsonDsl,
             query_json: String::new(),
             compiled: None,
-            ontology: Arc::new(Ontology::load_embedded().unwrap()),
             security_context: None,
             server_extensions: TypeMap::default(),
             phases: TypeMap::default(),

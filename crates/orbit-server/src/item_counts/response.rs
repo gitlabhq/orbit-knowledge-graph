@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ontology::Ontology;
+use query_data_model::Model;
 
 use super::ScopeItemCounts;
 use crate::proto::{
@@ -9,7 +9,7 @@ use crate::proto::{
 };
 
 pub fn build_item_counts_response(
-    ontology: &Ontology,
+    model: &Model,
     request: &GetItemCountsRequest,
     counts: &[ScopeItemCounts],
 ) -> GetItemCountsResponse {
@@ -17,7 +17,7 @@ pub fn build_item_counts_response(
         .iter()
         .map(|scope_counts| NamespaceItemCounts {
             traversal_path: scope_counts.scope.as_str().to_string(),
-            domains: build_domain_item_counts(ontology, &scope_counts.counts),
+            domains: build_domain_item_counts(model, &scope_counts.counts),
         })
         .collect();
     let domains = match request.traversal_paths.is_empty() {
@@ -30,20 +30,18 @@ pub fn build_item_counts_response(
     }
 }
 
-fn build_domain_item_counts(
-    ontology: &Ontology,
-    counts: &HashMap<String, i64>,
-) -> Vec<DomainItemCount> {
-    ontology
+fn build_domain_item_counts(model: &Model, counts: &HashMap<String, i64>) -> Vec<DomainItemCount> {
+    let graph = model.graph();
+    graph
         .domains()
         .filter_map(|domain| {
-            let entities: Vec<EntityItemCount> = domain
-                .node_names
-                .iter()
-                .filter_map(|name| {
-                    let count = *counts.get(name)?;
+            let entities: Vec<EntityItemCount> = graph
+                .entities()
+                .filter(|entity| entity.domain.as_deref() == Some(domain.name.as_str()))
+                .filter_map(|entity| {
+                    let count = *counts.get(&entity.name)?;
                     Some(EntityItemCount {
-                        name: name.clone(),
+                        name: entity.name.clone(),
                         count,
                     })
                 })

@@ -4,7 +4,7 @@ use crate::compiler::setup::{
 use crate::compiler::utils::has_param_value;
 use compiler::gql::{PreparedStatement, prepare};
 use compiler::{DynamicColumnMode, Frontend, QueryError, compile};
-use ontology::introspection::{
+use query_data_model::introspection::{
     IntrospectionScope::{All, Local},
     build_compact_schema_response,
 };
@@ -858,7 +858,7 @@ fn multi_table_neighbors_scans_all_tables() {
     );
 }
 
-use crate::compiler::setup::{admin_ctx, embedded_ontology};
+use crate::compiler::setup::admin_ctx;
 
 const SCOPED_LOOKUP: &str = "FROM gl_project AS _orbit_scope WHERE";
 
@@ -2018,17 +2018,10 @@ fn orbit_query_reserved_skip_words_need_backticks() {
 
 #[test]
 fn gql_prepares_queries_and_scoped_schema() {
-    let ontology = embedded_ontology();
     let data_model = embedded_model();
     let ctx = test_ctx();
     assert!(matches!(
-        prepare(
-            "MATCH (n:User {id: 1}) RETURN n",
-            &ontology,
-            &data_model,
-            &ctx,
-            All
-        ),
+        prepare("MATCH (n:User {id: 1}) RETURN n", &data_model, &ctx, All),
         Ok(PreparedStatement::Query(_))
     ));
     for (scope, call, node) in [
@@ -2037,8 +2030,7 @@ fn gql_prepares_queries_and_scoped_schema() {
         (All, "CALL db.schema('MergeRequest')", Some("MergeRequest")),
         (Local, "CALL db.schema('File')", Some("File")),
     ] {
-        let PreparedStatement::Schema(response) =
-            prepare(call, &ontology, &data_model, &ctx, scope).unwrap()
+        let PreparedStatement::Schema(response) = prepare(call, &data_model, &ctx, scope).unwrap()
         else {
             panic!("expected schema: {call}");
         };
@@ -2052,8 +2044,12 @@ fn gql_prepares_queries_and_scoped_schema() {
         } else {
             assert_eq!(
                 serde_json::to_value(response).unwrap(),
-                serde_json::to_value(build_compact_schema_response(&ontology, scope, None))
-                    .unwrap(),
+                serde_json::to_value(build_compact_schema_response(
+                    data_model.model(),
+                    scope,
+                    None
+                ))
+                .unwrap(),
             );
         }
     }
@@ -2065,7 +2061,7 @@ fn gql_prepares_queries_and_scoped_schema() {
         (Local, "CALL db.schema('MergeRequest')"),
     ] {
         assert!(
-            prepare(call, &ontology, &data_model, &ctx, scope)
+            prepare(call, &data_model, &ctx, scope)
                 .unwrap_err()
                 .is_client_safe()
         );

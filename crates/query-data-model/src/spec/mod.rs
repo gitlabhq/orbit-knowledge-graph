@@ -10,7 +10,7 @@ pub use authorization::{
 };
 pub use graph::{
     AttributeDetail, AttributeSpec, EntitySpec, GraphFragment, PropertyDetail, PropertySpec,
-    RelationshipSpec,
+    RelationshipSpec, StyleSpec,
 };
 pub use service::{LookupSpec, ServiceFragment};
 pub use source::{

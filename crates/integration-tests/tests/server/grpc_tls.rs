@@ -15,12 +15,14 @@ use super::tls_fixtures::{generate_test_certs, init_crypto_provider};
 fn build_grpc_server(tls_config: Option<ServerTlsConfig>) -> GrpcServer {
     let validator =
         Arc::new(JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap());
-    let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     let clickhouse_config = orbit_server_config::AppConfig::embedded_defaults().graph;
     let cluster_health = ClusterHealthChecker::default().into_arc();
     GrpcServer::new(
         validator,
-        ActiveSchema::pinned(ontology),
+        ActiveSchema::pinned(Arc::new(
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+                .expect("model must load"),
+        )),
         clickhouse_config.build_client("graph"),
         cluster_health,
         tls_config,
