@@ -17,8 +17,8 @@ use gitlab_client::GitlabClient;
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexer,
-    CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService, RepositoryService,
-    config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
+    CodeIndexingTaskHandler, ConverterSpecs, LocalRepositoryCache, RailsRepositoryService,
+    RepositoryService, config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
     repository::RepositoryResolver,
 };
 use indexer::nats::ProgressNotifier;
@@ -30,6 +30,16 @@ use orbit_server_config::{CodeIndexingPipelineConfig, GitlabClientConfiguration}
 use parking_lot::Mutex;
 use serde::Deserialize;
 use std::collections::HashMap;
+
+pub fn embedded_specs() -> ConverterSpecs {
+    ConverterSpecs::new(
+        &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+            .expect("embedded catalog must load"),
+        &query_data_model::Catalog::<query_data_model::DuckDb>::embedded()
+            .expect("embedded local catalog must load"),
+    )
+    .expect("code specs must resolve")
+}
 
 const SIGNING_KEY: &[u8] = b"test-secret-that-is-long-enough!";
 
@@ -59,15 +69,14 @@ impl CodeIndexingDeps {
         clickhouse: &TestContext,
         pipeline_config: CodeIndexingPipelineConfig,
     ) -> Self {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        Self::new_with_ontology(mock, clickhouse, pipeline_config, ontology)
+        Self::new_with_specs(mock, clickhouse, pipeline_config, embedded_specs())
     }
 
-    pub fn new_with_ontology(
+    pub fn new_with_specs(
         mock: &MockGitlabServer,
         clickhouse: &TestContext,
         pipeline_config: CodeIndexingPipelineConfig,
-        ontology: ontology::Ontology,
+        specs: ConverterSpecs,
     ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
         let graph_client = Arc::new(clickhouse.config.build_client("graph"));
@@ -107,7 +116,7 @@ impl CodeIndexingDeps {
             stale_data_cleaner,
             metrics.clone(),
             table_names,
-            Arc::new(ontology),
+            Arc::new(specs),
             pipeline_config.clone(),
         ));
 
@@ -146,7 +155,6 @@ impl CodeIndexingDeps {
         writer: Arc<indexer::clickhouse::ClickHouseWriter>,
         lock_ttl: std::time::Duration,
     ) -> CodeIndexingTaskHandler {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names = Arc::new(
             CodeTableNames::from_catalog(
                 &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
@@ -171,7 +179,7 @@ impl CodeIndexingDeps {
             stale_data_cleaner,
             self.metrics.clone(),
             table_names,
-            Arc::new(ontology),
+            Arc::new(embedded_specs()),
             self.pipeline_config.clone(),
         ));
         CodeIndexingTaskHandler::new(

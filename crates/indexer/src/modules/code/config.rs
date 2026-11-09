@@ -4,7 +4,7 @@ use query_data_model::{Catalog, ClickHouse, DataModelError};
 
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
-const CODE_DOMAIN: &str = "source_code";
+pub(super) const CODE_DOMAIN: &str = "source_code";
 
 pub struct CodeTableNames {
     pub branch: String,
@@ -150,12 +150,7 @@ mod tests {
 
     #[test]
     fn resolves_split_relationship_routes_by_variant() {
-        let ontology = ontology::Ontology::load_embedded_with_overlay(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../config/seeds/overlays/variant_routes"
-        ))
-        .unwrap();
-        let catalog = query_data_model::from_ontology::clickhouse(&ontology).unwrap();
+        let catalog = crate::testkit::variant_routes_catalog();
         let names = CodeTableNames::from_catalog(&catalog).unwrap();
         assert!(
             names

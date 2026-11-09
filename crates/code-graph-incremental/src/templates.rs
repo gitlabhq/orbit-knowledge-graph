@@ -63,7 +63,7 @@ pub fn repository<E: std::fmt::Display>(
     repository: Arc<orbit_utils::vfs::Vfs<()>>,
     options: Options,
     envelope: &Envelope<'_>,
-    ontology: &ontology::Ontology,
+    tables: &crate::export::ExportTables,
     export_config: &crate::export::ExportConfig,
     emit: impl Fn(Vec<(String, RecordBatch)>) -> Result<(), E> + Sync,
 ) -> Result<Report, Error> {
@@ -117,7 +117,7 @@ pub fn repository<E: std::fmt::Display>(
                     crate::tree::Tree::unparsed(&lang, &file.path, file.size, &reason).into()
                 })
                 .collect();
-            let mut plan = crate::export::ExportPlan::from_config(export_config, ontology, &lang)?;
+            let mut plan = crate::export::ExportPlan::from_config(export_config, tables, &lang)?;
             plan.batch_bytes = options.batch_bytes;
             emit(crate::export::export(
                 &trees,
@@ -182,7 +182,7 @@ pub fn repository<E: std::fmt::Display>(
                                 run.check()?;
                                 let mut plan = crate::export::ExportPlan::from_config(
                                     &env.export_config,
-                                    ontology,
+                                    tables,
                                     &env.lang,
                                 )?;
                                 plan.batch_bytes = options.batch_bytes;

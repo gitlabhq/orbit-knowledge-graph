@@ -1,7 +1,11 @@
 use std::{collections::BTreeMap, fs::File as OutputFile, path::PathBuf, sync::Arc, time::Instant};
 
 use arrow::{ipc::writer::FileWriter, record_batch::RecordBatch};
-use code_graph_incremental::{Envelope, Limits, Scalar, export::ExportConfig, templates};
+use code_graph_incremental::{
+    Envelope, Limits, Scalar,
+    export::{ExportConfig, ExportTables},
+    templates,
+};
 use orbit_utils::{
     vfs::{Vfs, sources::Directory},
     vfs_policies::CodePolicy,
@@ -37,7 +41,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let selected_files =
         code_graph_incremental::pipeline::candidates(&repository, options.limits.max_files).count();
-    let ontology = ontology::Ontology::load_embedded()?;
     let written = std::sync::Mutex::new((BTreeMap::<String, usize>::new(), 0));
     let report = templates::repository(
         repository,
@@ -47,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ("branch", Scalar::Str("local")),
             ("commit_sha", Scalar::Str("working-tree")),
         ]),
-        &ontology,
+        ExportTables::embedded(),
         ExportConfig::embedded(),
         |batches: Vec<(String, RecordBatch)>| -> Result<(), Box<dyn std::error::Error>> {
             let mut written = written.lock().map_err(|error| error.to_string())?;

@@ -96,7 +96,6 @@ impl TestContext {
             self.clickhouse.create_client(),
             self.clickhouse.create_client(),
             Arc::new(indexer::testkit::MockLockService::new()),
-            self.ontology.clone(),
             Arc::new(
                 query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
             ),

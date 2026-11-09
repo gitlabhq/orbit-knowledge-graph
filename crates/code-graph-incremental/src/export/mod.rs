@@ -1,7 +1,7 @@
-//! The canonical tree becomes the ontology's local tables, following
+//! The canonical tree becomes the model's local tables, following
 //! `config/export.yaml`. The YAML names every table, column, node kind and
 //! tag; this module knows none of them. It checks the YAML against the
-//! ontology when loaded, then walks the trees.
+//! local tables when loaded, then walks the trees.
 
 use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
@@ -20,9 +20,11 @@ type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
 mod parse;
+mod tables;
 
 use parse::{EntityColumn, EntityPlan, IdPart, On, Position, RowSource, Source, SpanCandidate};
 pub use parse::{ExportConfig, ExportPlan};
+pub use tables::{EntityTable, ExportTables};
 
 /// A value the caller hands in with every export.
 #[derive(Clone, Copy)]
@@ -276,11 +278,11 @@ pub fn export(
 pub fn export_directories(
     paths: &[&str],
     export_config: &ExportConfig,
-    ontology: &ontology::Ontology,
+    tables: &ExportTables,
     envelope: &Envelope,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     let lang = Lang::new();
-    let plan = ExportPlan::from_config(export_config, ontology, &lang)?;
+    let plan = ExportPlan::from_config(export_config, tables, &lang)?;
     let trees: Vec<Tree> = paths
         .iter()
         .map(|path| crate::tree::Tree::unparsed(&lang, path, 0, "").into())
@@ -560,14 +562,13 @@ fn write_edges(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::Ontology;
 
     #[test]
     fn a_missing_envelope_value_is_a_named_error() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology");
         let lang = Lang::new();
-        let plan = ExportPlan::from_config(ExportConfig::embedded(), &ontology, &lang)
-            .expect("export.yaml loads");
+        let plan =
+            ExportPlan::from_config(ExportConfig::embedded(), ExportTables::embedded(), &lang)
+                .expect("export.yaml loads");
         let envelope = Envelope::new([("project_id", Scalar::Int(1))]);
         let message = envelope.check(&plan).unwrap_err().to_string();
         assert!(message.contains("'branch'"), "{message}");
@@ -575,11 +576,11 @@ mod tests {
     }
 
     #[test]
-    fn export_yaml_agrees_with_the_ontology() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology");
+    fn export_yaml_agrees_with_the_local_tables() {
+        let tables = ExportTables::embedded();
         let lang = Lang::new();
-        let plan = ExportPlan::from_config(ExportConfig::embedded(), &ontology, &lang)
+        let plan = ExportPlan::from_config(ExportConfig::embedded(), tables, &lang)
             .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(plan.entities.len(), ontology.local_entity_names().len());
+        assert_eq!(plan.entities.len(), tables.entities.len());
     }
 }

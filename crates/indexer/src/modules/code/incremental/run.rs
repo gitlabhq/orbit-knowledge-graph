@@ -8,7 +8,7 @@ use code_graph_incremental::pipeline::FileStats;
 use code_graph_incremental::{Envelope, Error, Scalar, export::ExportConfig, templates};
 
 use super::super::{
-    arrow_converter::{IndexerEnvelope, route_graph},
+    arrow_converter::{ConverterSpecs, IndexerEnvelope, route_graph},
     config::CodeTableNames,
 };
 use super::{Repository, output::Output};
@@ -17,7 +17,7 @@ pub(in crate::modules::code) fn run(
     repository: Repository,
     options: templates::Options,
     envelope: IndexerEnvelope,
-    ontology: Arc<ontology::Ontology>,
+    specs: Arc<ConverterSpecs>,
     tables: Arc<CodeTableNames>,
     on_batch: Arc<OnBatch>,
 ) -> Result<IndexingReport, SinkError> {
@@ -55,18 +55,17 @@ pub(in crate::modules::code) fn run(
         language_timings: Vec::new(),
         phase_timings: PhaseTimings::default(),
     };
-    let mut output = Output::new(&envelope, &ontology);
+    let mut output = Output::new(&envelope, &specs);
     output.batch_bytes = options.batch_bytes;
     let cancelled = options.cancelled.clone();
     let mut export_config = ExportConfig::embedded().clone();
-    for name in ontology.local_entity_names() {
-        let table = ontology
-            .table_name(name)
-            .map_err(|error| SinkError(error.to_string()))?;
-        export_config.schemas.insert(
-            table.to_owned(),
-            super::super::arrow_converter::entity_specs(&ontology, name),
-        );
+    for entity in &specs.export.entities {
+        let schema = specs
+            .node(&entity.entity)
+            .ok_or_else(|| SinkError(format!("{} is not a code graph entity", entity.entity)))?;
+        export_config
+            .schemas
+            .insert(entity.table.clone(), schema.to_vec());
     }
     let indexed = std::sync::Mutex::new(stats);
     let sink_failed = std::sync::atomic::AtomicBool::new(false);
@@ -84,7 +83,7 @@ pub(in crate::modules::code) fn run(
             ("_version", Scalar::Int(envelope.version_micros)),
             ("_deleted", Scalar::Bool(false)),
         ]),
-        &ontology,
+        &specs.export,
         &export_config,
         |batches| -> Result<(), SinkError> {
             for batches in output.convert(batches)? {

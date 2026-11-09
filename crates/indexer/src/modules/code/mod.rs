@@ -26,6 +26,7 @@ use metrics::CodeMetrics;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use repository::RepositoryResolver;
 
+pub use arrow_converter::ConverterSpecs;
 pub use checkpoint::{ClickHouseCodeCheckpointStore, CodeCheckpoint, CodeCheckpointStore};
 pub use handler::{CodeIndexingTaskHandler, project_lock_key};
 pub use pipeline::{CodeIndexer, IndexError, IndexingRequest};
@@ -55,8 +56,8 @@ pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     clients: &ClickHouseClients,
-    ontology: &ontology::Ontology,
     catalog: &query_data_model::Catalog<query_data_model::ClickHouse>,
+    local: &query_data_model::Catalog<query_data_model::DuckDb>,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
     gitlab_client: Option<Arc<GitlabClient>>,
@@ -71,6 +72,7 @@ pub async fn register_handlers(
 
     let table_names =
         Arc::new(CodeTableNames::from_catalog(catalog).map_err(HandlerInitError::new)?);
+    let specs = Arc::new(ConverterSpecs::new(catalog, local).map_err(HandlerInitError::new)?);
 
     let client = Arc::new(clients.graph.clone());
 
@@ -109,7 +111,7 @@ pub async fn register_handlers(
         stale_data_cleaner,
         metrics.clone(),
         table_names,
-        Arc::new(ontology.clone()),
+        specs,
         pipeline_config,
     ));
 

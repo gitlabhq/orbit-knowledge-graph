@@ -3,12 +3,12 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use code_graph::v2::SinkError;
 use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
-use ontology::DataType as OntDataType;
-use ontology::Ontology;
-use ontology::constants::{RELATIONSHIP_KIND_COLUMN, SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN};
+use code_graph_incremental::export::ExportTables;
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use orbit_utils::traversal_path::TraversalPath;
-use std::collections::{HashMap, HashSet};
+use query_data_model::implementations::clickhouse::schema::{Table, data_type};
+use query_data_model::{Catalog, ClickHouse, DataModelError, DataType, DuckDb};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -53,7 +53,6 @@ impl RowEnvelope for IndexerEnvelope {
     }
 
     fn header_specs(&self) -> Vec<ColumnSpec> {
-        // Not used — specs come from the ontology. Kept for trait compliance.
         vec![]
     }
 }
@@ -124,31 +123,52 @@ fn convert_semantic_graph(
     })
 }
 
-fn low_cardinality_columns(storage_columns: &[ontology::StorageColumn]) -> HashSet<String> {
-    storage_columns
+fn low_cardinality_columns(table: &Table) -> HashSet<&str> {
+    table
+        .columns
         .iter()
-        .filter(|col| col.ch_type.starts_with("LowCardinality"))
-        .map(|col| col.name.clone())
+        .filter(|column| column.storage_type.starts_with("LowCardinality"))
+        .map(|column| column.name.as_str())
         .collect()
 }
 
-#[expect(
-    clippy::panic,
-    reason = "callers pass either a built-in code-graph entity name or a name taken from this same ontology, so the lookup cannot miss"
-)]
-pub(super) fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
-    let node = ontology
-        .get_node(entity_name)
-        .unwrap_or_else(|| panic!("entity '{entity_name}' not in ontology"));
-    let dict_fields = low_cardinality_columns(&node.storage.columns);
-    let mut specs: Vec<ColumnSpec> = node
-        .fields
+fn graph_table<'a>(
+    catalog: &'a Catalog<ClickHouse>,
+    name: &str,
+) -> Result<&'a Table, DataModelError> {
+    catalog
+        .schema()?
+        .table(name)
+        .ok_or_else(|| DataModelError::Invalid(format!("{name} is not a graph table")))
+}
+
+fn entity_specs(
+    catalog: &Catalog<ClickHouse>,
+    entity_name: &str,
+) -> Result<Vec<ColumnSpec>, DataModelError> {
+    let graph = catalog.graph();
+    let entity = graph
+        .entity_id(entity_name)
+        .ok_or_else(|| DataModelError::UnknownReference {
+            kind: "entity",
+            name: entity_name.to_string(),
+        })?;
+    let table = catalog
+        .table_of(entity)
+        .ok_or_else(|| DataModelError::Invalid(format!("{entity_name} has no graph table")))?;
+    let dict_fields = low_cardinality_columns(graph_table(catalog, table)?);
+    let mut specs: Vec<ColumnSpec> = graph
+        .entity(entity)
+        .properties
         .iter()
-        .filter(|f| !f.is_virtual())
-        .map(|f| ColumnSpec {
-            name: f.name.clone(),
-            col_type: column_type_for(&f.name, f.data_type, &dict_fields),
-            nullable: f.nullable,
+        .filter_map(|property| {
+            let column = catalog.column(*property)?;
+            let property = graph.property(*property);
+            Some(ColumnSpec {
+                name: column.to_string(),
+                col_type: column_type_for(column, property.data_type, &dict_fields),
+                nullable: property.nullable,
+            })
         })
         .collect();
     specs.push(ColumnSpec {
@@ -161,22 +181,18 @@ pub(super) fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<Column
         col_type: ColumnType::Bool,
         nullable: false,
     });
-    specs
+    Ok(specs)
 }
 
 /// Constant for every row in a batch, so the wire encoding collapses each to one
-/// key. That is an indexer-side fact, not graph shape, so not in the ontology.
+/// key. That is an indexer-side fact, not graph shape, so not in the model.
 const ENVELOPE_CONSTANT_COLUMNS: [&str; 3] = ["traversal_path", "branch", "commit_sha"];
 
-fn column_type_for(
-    name: &str,
-    data_type: OntDataType,
-    dict_fields: &HashSet<String>,
-) -> ColumnType {
+fn column_type_for(name: &str, data_type: DataType, dict_fields: &HashSet<&str>) -> ColumnType {
     match data_type {
-        OntDataType::Int => ColumnType::Int,
-        OntDataType::Bool => ColumnType::Bool,
-        OntDataType::DateTime => ColumnType::TimestampMicros,
+        DataType::Int => ColumnType::Int,
+        DataType::Bool => ColumnType::Bool,
+        DataType::DateTime => ColumnType::TimestampMicros,
         _ if dict_fields.contains(name) || ENVELOPE_CONSTANT_COLUMNS.contains(&name) => {
             ColumnType::DictStr
         }
@@ -184,63 +200,47 @@ fn column_type_for(
     }
 }
 
-pub(super) fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
-    let dict_fields: HashSet<String> = ontology
-        .edge_tables()
-        .iter()
-        .filter_map(|t| ontology.edge_table_config(t))
-        .flat_map(|c| &c.storage.columns)
-        .filter(|col| col.ch_type.starts_with("LowCardinality"))
-        .map(|col| col.name.clone())
+/// The columns of every edge table code entities write, in DDL order. One batch
+/// holds them all; routing drops the columns a narrower table lacks.
+fn edge_specs(catalog: &Catalog<ClickHouse>) -> Result<Vec<ColumnSpec>, DataModelError> {
+    let graph = catalog.graph();
+    let code = |entity| graph.entity(entity).domain.as_deref() == Some(super::config::CODE_DOMAIN);
+    let tables: BTreeSet<&str> = graph
+        .variants()
+        .filter(|variant| code(variant.source) || code(variant.target))
+        .filter_map(|variant| catalog.edge_table(variant.id))
         .collect();
 
-    // Build the union of logical columns across ALL edge tables so the
-    // batch can hold columns from tables with extra fields (gl_code_edge
-    // has project_id + branch that gl_edge does not).
-    let mut seen_cols = std::collections::HashSet::new();
-    let mut specs: Vec<ColumnSpec> = Vec::new();
-    for table_name in ontology.edge_tables() {
-        if let Some(config) = ontology.edge_table_config(table_name) {
-            for c in &config.columns {
-                if seen_cols.insert(c.name.clone()) {
-                    specs.push(ColumnSpec {
-                        name: c.name.clone(),
-                        col_type: column_type_for(&c.name, c.data_type, &dict_fields),
-                        nullable: false,
-                    });
-                }
+    let mut seen = HashSet::new();
+    let mut specs = Vec::new();
+    for name in tables {
+        let table = graph_table(catalog, name)?;
+        let dict_fields = low_cardinality_columns(table);
+        for column in &table.columns {
+            if !seen.insert(column.name.as_str()) {
+                continue;
             }
+            let col_type = if column.storage_type.starts_with("Array(") {
+                // A handful of tag values repeat across every edge row. Only
+                // the wire encoding changes; the column stays `Array(String)`.
+                ColumnType::DictStrList
+            } else {
+                let data_type = data_type(&column.storage_type).ok_or_else(|| {
+                    DataModelError::Invalid(format!(
+                        "{name}.{} has unsupported type {}",
+                        column.name, column.storage_type
+                    ))
+                })?;
+                column_type_for(&column.name, data_type, &dict_fields)
+            };
+            specs.push(ColumnSpec {
+                name: column.name.clone(),
+                col_type,
+                nullable: column.storage_type.starts_with("Nullable"),
+            });
         }
     }
-
-    let mut seen = std::collections::HashSet::new();
-    for table_name in ontology.edge_tables() {
-        if let Some(config) = ontology.edge_table_config(table_name) {
-            for col in &config.storage.denormalized_columns {
-                if seen.insert(col.name.clone()) {
-                    // A handful of tag values repeat across every edge row. Only
-                    // the wire encoding changes; the column stays `Array(String)`.
-                    specs.push(ColumnSpec {
-                        name: col.name.clone(),
-                        col_type: ColumnType::DictStrList,
-                        nullable: false,
-                    });
-                }
-            }
-        }
-    }
-
-    specs.push(ColumnSpec {
-        name: "_version".into(),
-        col_type: ColumnType::TimestampMicros,
-        nullable: false,
-    });
-    specs.push(ColumnSpec {
-        name: "_deleted".into(),
-        col_type: ColumnType::Bool,
-        nullable: false,
-    });
-    specs
+    Ok(specs)
 }
 
 fn convert_entity<'a, R: AsRecordBatch<IndexerEnvelope>>(
@@ -618,45 +618,66 @@ pub(super) fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
 }
 
 /// Per-node-kind list of `(tag_key, property_name)` pairs derived from
-/// the ontology's denormalization declarations. Deduplicated because the
-/// ontology expands one declaration per edge relationship, but the tag
+/// the model's denormalization declarations. Deduplicated because the
+/// model declares one per edge relationship, but the tag
 /// values are the same regardless of which edge the node appears in.
 type TagProperties = std::collections::HashMap<String, Vec<(String, String)>>;
 
-pub(super) fn build_tag_properties(ontology: &Ontology) -> TagProperties {
+fn build_tag_properties(catalog: &Catalog<ClickHouse>) -> TagProperties {
+    let graph = catalog.graph();
     let mut map: TagProperties = std::collections::HashMap::new();
-    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
-    for dp in ontology.denormalized_properties() {
-        let key = (dp.node_kind.clone(), dp.property_name.clone());
-        if seen.insert(key) {
-            map.entry(dp.node_kind.clone())
+    let mut seen = HashSet::new();
+    for (_, key, denormalized) in catalog.denormalized_properties() {
+        let property = graph.property(key.property);
+        let kind = &graph.entity(property.entity).name;
+        if seen.insert((kind, &property.name)) {
+            map.entry(kind.clone())
                 .or_default()
-                .push((dp.tag_key.clone(), dp.property_name.clone()));
+                .push((denormalized.tag_key.clone(), property.name.clone()));
         }
     }
     map
 }
 
+/// The Arrow write contract of every code table, and the local tables the
+/// incremental export writes before they are converted to it.
 pub struct ConverterSpecs {
-    branch: Vec<ColumnSpec>,
+    pub(super) branch: Vec<ColumnSpec>,
     directory: Vec<ColumnSpec>,
     file: Vec<ColumnSpec>,
     definition: Vec<ColumnSpec>,
     imported_symbol: Vec<ColumnSpec>,
-    edge: Vec<ColumnSpec>,
-    tag_properties: TagProperties,
+    pub(super) edge: Vec<ColumnSpec>,
+    pub(super) tag_properties: TagProperties,
+    pub(super) export: ExportTables,
 }
 
 impl ConverterSpecs {
-    pub fn from_ontology(ontology: &Ontology) -> Self {
-        Self {
-            branch: entity_specs(ontology, "Branch"),
-            directory: entity_specs(ontology, "Directory"),
-            file: entity_specs(ontology, "File"),
-            definition: entity_specs(ontology, "Definition"),
-            imported_symbol: entity_specs(ontology, "ImportedSymbol"),
-            edge: edge_specs(ontology),
-            tag_properties: build_tag_properties(ontology),
+    pub fn new(
+        catalog: &Catalog<ClickHouse>,
+        local: &Catalog<DuckDb>,
+    ) -> Result<Self, DataModelError> {
+        Ok(Self {
+            branch: entity_specs(catalog, "Branch")?,
+            directory: entity_specs(catalog, "Directory")?,
+            file: entity_specs(catalog, "File")?,
+            definition: entity_specs(catalog, "Definition")?,
+            imported_symbol: entity_specs(catalog, "ImportedSymbol")?,
+            edge: edge_specs(catalog)?,
+            tag_properties: build_tag_properties(catalog),
+            export: ExportTables::from_catalog(local)
+                .map_err(|error| DataModelError::Invalid(error.to_string()))?,
+        })
+    }
+
+    pub(super) fn node(&self, kind: &str) -> Option<&[ColumnSpec]> {
+        match kind {
+            "Branch" => Some(&self.branch),
+            "Directory" => Some(&self.directory),
+            "File" => Some(&self.file),
+            "Definition" => Some(&self.definition),
+            "ImportedSymbol" => Some(&self.imported_symbol),
+            _ => None,
         }
     }
 }
@@ -664,19 +685,19 @@ impl ConverterSpecs {
 pub struct IndexerConverter {
     pub envelope: IndexerEnvelope,
     pub table_names: Arc<super::config::CodeTableNames>,
-    specs: ConverterSpecs,
+    specs: Arc<ConverterSpecs>,
 }
 
 impl IndexerConverter {
     pub fn new(
         envelope: IndexerEnvelope,
-        ontology: &Ontology,
+        specs: Arc<ConverterSpecs>,
         table_names: Arc<super::config::CodeTableNames>,
     ) -> Self {
         Self {
             envelope,
             table_names,
-            specs: ConverterSpecs::from_ontology(ontology),
+            specs,
         }
     }
 }
@@ -756,31 +777,26 @@ impl<'a> EdgeRouting<'a> {
         use arrow::array::{Array, AsArray};
         use arrow::datatypes::Int32Type;
 
-        let strings = [
-            RELATIONSHIP_KIND_COLUMN,
-            SOURCE_KIND_COLUMN,
-            TARGET_KIND_COLUMN,
-        ]
-        .map(|name| {
-            let column = edges
-                .column_by_name(name)
-                .ok_or_else(|| SinkError(format!("edges batch missing {name} column")))?;
-            if column.null_count() > 0 {
-                return Err(SinkError(format!(
-                    "{name} contains nulls, which edge routing cannot resolve"
-                )));
-            }
-            let dictionary = column
-                .as_dictionary_opt::<Int32Type>()
-                .ok_or_else(|| SinkError(format!("{name} is not dictionary encoded")))?;
-            let values = dictionary
-                .values()
-                .as_string_opt::<i32>()
-                .ok_or_else(|| SinkError(format!("{name} dictionary values are not strings")))?;
-            Ok((dictionary.keys().values().as_ref(), values))
-        })
-        .into_iter()
-        .collect::<Result<Vec<_>, SinkError>>()?;
+        let strings = ["relationship_kind", "source_kind", "target_kind"]
+            .map(|name| {
+                let column = edges
+                    .column_by_name(name)
+                    .ok_or_else(|| SinkError(format!("edges batch missing {name} column")))?;
+                if column.null_count() > 0 {
+                    return Err(SinkError(format!(
+                        "{name} contains nulls, which edge routing cannot resolve"
+                    )));
+                }
+                let dictionary = column
+                    .as_dictionary_opt::<Int32Type>()
+                    .ok_or_else(|| SinkError(format!("{name} is not dictionary encoded")))?;
+                let values = dictionary.values().as_string_opt::<i32>().ok_or_else(|| {
+                    SinkError(format!("{name} dictionary values are not strings"))
+                })?;
+                Ok((dictionary.keys().values().as_ref(), values))
+            })
+            .into_iter()
+            .collect::<Result<Vec<_>, SinkError>>()?;
 
         let [relationship, source, target] = strings.as_slice() else {
             return Err(SinkError("edge route columns did not resolve".into()));
@@ -881,6 +897,82 @@ mod tests {
                 id >= 0,
                 "compute_branch_id({project_id}, {branch:?}) returned {id}"
             );
+        }
+    }
+
+    fn render_schema(out: &mut String, title: &str, batch: &RecordBatch) {
+        use std::fmt::Write;
+        writeln!(out, "{title}").unwrap();
+        for field in batch.schema().fields() {
+            let (name, data_type) = (field.name(), field.data_type());
+            writeln!(out, "  {name} {data_type:?} {}", field.is_nullable()).unwrap();
+        }
+    }
+
+    fn render(specs: &ConverterSpecs) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        for kind in CodeTableNames::NODE_KINDS {
+            let batch = BatchBuilder::new(specs.node(kind).unwrap(), 0)
+                .unwrap()
+                .finish()
+                .unwrap();
+            render_schema(&mut out, &format!("node {kind}"), &batch);
+        }
+        let edges = BatchBuilder::new(&specs.edge, 0).unwrap().finish().unwrap();
+        render_schema(&mut out, "edge gl_code_edge", &edges);
+        render_schema(
+            &mut out,
+            "edge gl_edge",
+            &drop_columns(&edges, &["project_id", "branch"]),
+        );
+        let mut kinds: Vec<_> = specs.tag_properties.iter().collect();
+        kinds.sort();
+        for (kind, tags) in kinds {
+            writeln!(out, "tags {kind} {tags:?}").unwrap();
+        }
+        for entity in &specs.export.entities {
+            writeln!(out, "export {} {}", entity.entity, entity.table).unwrap();
+            for (name, data_type, nullable) in &entity.columns {
+                writeln!(out, "  {name} {data_type:?} {nullable}").unwrap();
+            }
+        }
+        writeln!(out, "export edges {}", specs.export.edge_table).unwrap();
+        for (name, data_type) in &specs.export.edge_columns {
+            writeln!(out, "  {name} {data_type:?} false").unwrap();
+        }
+        out
+    }
+
+    use super::super::config::CodeTableNames;
+
+    #[test]
+    fn code_table_arrow_schemas_match_the_golden_file() {
+        let specs = super::super::test_helpers::embedded_specs();
+        assert_eq!(
+            render(&specs),
+            include_str!("testdata/code_arrow_schemas.txt")
+        );
+    }
+
+    #[test]
+    fn edge_batches_follow_their_table_column_order() {
+        let catalog = Catalog::<ClickHouse>::embedded().unwrap();
+        let specs = super::super::test_helpers::embedded_specs();
+        let edges = BatchBuilder::new(&specs.edge, 0).unwrap().finish().unwrap();
+        for (table, batch) in [
+            ("gl_code_edge", edges.clone()),
+            ("gl_edge", drop_columns(&edges, &["project_id", "branch"])),
+        ] {
+            let ddl: Vec<_> = graph_table(&catalog, table)
+                .unwrap()
+                .columns
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect();
+            let schema = batch.schema();
+            let arrow: Vec<_> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+            assert_eq!(arrow, ddl, "{table}");
         }
     }
 }

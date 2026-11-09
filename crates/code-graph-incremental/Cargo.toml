@@ -57,7 +57,7 @@ tree-sitter-typescript = "0.23.2"
 tree-sitter-zig = "1.1.2"
 tree-sitter-haskell = "0.23.1"
 tree-sitter-ocaml = "0.25.0"
-ontology = { path = "../ontology" }
+query-data-model = { path = "../query-data-model" }
 orbit-utils = { path = "../utils" }
 orbit-arrow = { path = "../utils/arrow" }
 

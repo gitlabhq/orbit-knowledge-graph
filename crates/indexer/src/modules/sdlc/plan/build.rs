@@ -221,12 +221,7 @@ mod tests {
 
     #[test]
     fn accepts_split_relationship_routes() {
-        let ontology = ontology::Ontology::load_embedded_with_overlay(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../config/seeds/overlays/variant_routes"
-        ))
-        .unwrap();
-        let catalog = query_data_model::from_ontology::clickhouse(&ontology).unwrap();
+        let catalog = crate::testkit::variant_routes_catalog();
         let result = build_plans(
             &catalog,
             Sizing {

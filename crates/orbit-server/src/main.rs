@@ -124,7 +124,6 @@ async fn main() -> anyhow::Result<()> {
                 let indexer_config = IndexerConfig::from(&config);
                 indexer::run(
                     &indexer_config,
-                    ontology,
                     query_data_model::Packages::embedded().load()?,
                     serving,
                     shutdown,

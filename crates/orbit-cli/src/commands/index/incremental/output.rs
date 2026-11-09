@@ -1,7 +1,7 @@
 use anyhow::Result;
 use arrow::array::{BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
-use code_graph_incremental::export::ExportPlan;
+use code_graph_incremental::export::{ExportPlan, ExportTables};
 use code_graph_incremental::pipeline::{FileStats, Report};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Env, Envelope, Scalar, State};
@@ -42,22 +42,16 @@ struct SlowFile {
 pub(super) struct Exporter<'a> {
     git: &'a GitInfo,
     writer: &'a GraphWriter,
-    ontology: &'a ontology::Ontology,
     directories: FxHashSet<i64>,
     files: FxHashSet<i64>,
     containment: FxHashSet<(i64, i64)>,
 }
 
 impl<'a> Exporter<'a> {
-    pub(super) fn new(
-        git: &'a GitInfo,
-        writer: &'a GraphWriter,
-        ontology: &'a ontology::Ontology,
-    ) -> Self {
+    pub(super) fn new(git: &'a GitInfo, writer: &'a GraphWriter) -> Self {
         Self {
             git,
             writer,
-            ontology,
             directories: FxHashSet::default(),
             files: FxHashSet::default(),
             containment: FxHashSet::default(),
@@ -72,7 +66,8 @@ impl<'a> Exporter<'a> {
         report: &Report,
         stats: bool,
     ) -> Result<FamilyOutput> {
-        let plan = ExportPlan::from_config(&env.export_config, self.ontology, &env.lang)?;
+        let plan =
+            ExportPlan::from_config(&env.export_config, ExportTables::embedded(), &env.lang)?;
         let tables = code_graph_incremental::export::export(
             &state.trees,
             &state.edges,
@@ -191,7 +186,7 @@ pub(super) fn replacement(
     files: &FxHashSet<String>,
 ) -> Result<Replacement> {
     let envelope = envelope(git);
-    let plan = ExportPlan::from_config(&env.export_config, ontology, &env.lang)?;
+    let plan = ExportPlan::from_config(&env.export_config, ExportTables::embedded(), &env.lang)?;
     let edge_table = ontology
         .local_edge_table_name()
         .ok_or_else(|| anyhow::anyhow!("local_db.edge_table.name must be configured"))?;
@@ -271,15 +266,11 @@ fn envelope(git: &GitInfo) -> Envelope<'_> {
 }
 
 /// The directories that hold `paths`, and the edges between them.
-pub(super) fn directory_rows(
-    git: &GitInfo,
-    ontology: &ontology::Ontology,
-    paths: &[&str],
-) -> Result<Vec<(String, RecordBatch)>> {
+pub(super) fn directory_rows(git: &GitInfo, paths: &[&str]) -> Result<Vec<(String, RecordBatch)>> {
     Ok(code_graph_incremental::export::export_directories(
         paths,
         code_graph_incremental::export::ExportConfig::embedded(),
-        ontology,
+        ExportTables::embedded(),
         &envelope(git),
     )?)
 }

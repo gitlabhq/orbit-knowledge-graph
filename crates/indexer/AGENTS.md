@@ -77,10 +77,8 @@ A single SQL query then enumerates all `v<N>_*` objects in `system.tables`. It e
 whose version falls outside a keep-set computed in the same query. The keep-set is active, plus the
 most recently recorded retired versions within `max_retained_versions`, plus all migrating versions.
 Retirement timestamps have second precision;
-higher version numbers win ties. Ontology-known objects are always dropped. Objects not in the ontology
-are also dropped. These are rename-orphans like `v56_gl_edge_v2` and removed entities. One exception
-applies: an object survives if its base name (after stripping the `v<N>_` prefix) matches a
-`gc_preserve_patterns` regex from the ontology settings.
+higher version numbers win ties. Every object of a dead version is dropped, including objects the
+model no longer declares. These are rename-orphans like `v56_gl_edge_v2` and removed entities.
 
 ### Stale FK-edge reconciliation
 
@@ -145,9 +143,9 @@ preventable feedback (see #2772, !1416). Check each of these first:
 - **Arrow extraction:** decode datalake `RecordBatch` rows with the `orbit_arrow` helpers
   (`get_column`, `get_column_string`, `get_string_list`, `extract_row` in
   `crates/utils/src/arrow.rs`), not bespoke `col_i64` / `col_string` functions.
-- **Edge/node `RecordBatch` specs:** derive column specs from the ontology. Use `edge_specs(ontology)`
-  in `modules/code/arrow_converter.rs` (also `crates/duckdb-client/src/converter.rs`). Do not
-  hardcode them; hardcoded specs silently drift from `config/graph.sql`.
+- **Edge/node `RecordBatch` specs:** derive column specs from the model. Use `ConverterSpecs`
+  in `modules/code/arrow_converter.rs`, which reads the ClickHouse catalog and its table schemas. Do
+  not hardcode them; hardcoded specs silently drift from `config/graph.sql`.
 - **Extraction SQL:** declare the source shape in ontology pipelines. Use `query: generated` for
   single-table projections and extracts with point lookups. Generated extracts list only their base
   table; standalone edges put their base projection in `extract.fields`. Lookup tables resolve from

@@ -57,7 +57,6 @@ pub struct MigrationCompletionChecker {
     graph: ArrowClickHouseClient,
     datalake: ArrowClickHouseClient,
     lock_service: Arc<dyn LockService>,
-    ontology: Arc<ontology::Ontology>,
     data_model: Arc<Catalog<ClickHouse>>,
     physical: Schema,
     schema_config: SchemaConfig,
@@ -78,7 +77,6 @@ impl MigrationCompletionChecker {
         graph: ArrowClickHouseClient,
         datalake: ArrowClickHouseClient,
         lock_service: Arc<dyn LockService>,
-        ontology: Arc<ontology::Ontology>,
         data_model: Arc<Catalog<ClickHouse>>,
         physical: Schema,
         schema_config: SchemaConfig,
@@ -92,7 +90,6 @@ impl MigrationCompletionChecker {
             graph,
             datalake,
             lock_service,
-            ontology,
             data_model,
             physical,
             schema_config,
@@ -440,16 +437,9 @@ impl MigrationCompletionChecker {
     }
 
     async fn reconcile_dead_versions(&self) -> Result<(), TaskError> {
-        let schema = orbit_migrations::schema::GraphSchema::new(
-            self.physical.clone(),
-            self.graph.is_replicated(),
-        );
-
         let entities = orbit_migrations::garbage_collection::find_droppable_entities(
             &self.graph,
-            &schema,
             self.schema_config.max_retained_versions,
-            self.ontology.gc_preserve_patterns(),
         )
         .await
         .map_err(|e| TaskError::new(format!("find droppable entities: {e}")))?;

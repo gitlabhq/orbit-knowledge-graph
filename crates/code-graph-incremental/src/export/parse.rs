@@ -1,13 +1,14 @@
-//! `export.yaml` parsed and checked against the ontology. Every table,
+//! `export.yaml` parsed and checked against the local tables. Every table,
 //! column, node kind, tag and transform is named there; the walker in
 //! `mod.rs` only follows the result.
 
-use ontology::{DataType, Ontology};
 use orbit_arrow::{ColumnSpec, ColumnType};
+use query_data_model::DataType;
 
 use crate::dsl::parser::parse_pipeline;
 use crate::dsl::types::{Ctx, Tf};
 use crate::error::LoadError;
+use crate::export::{EntityTable, ExportTables};
 use crate::intern::Lang;
 use crate::tree::EdgeKind;
 
@@ -184,7 +185,7 @@ pub(super) struct GraphEdge {
     pub(super) fallback: bool,
 }
 
-/// `export.yaml` checked against the ontology and interned for one `Lang`.
+/// `export.yaml` checked against the local tables and interned for one `Lang`.
 pub struct ExportPlan {
     pub(super) id_prefix: Vec<String>,
     pub(super) entities: Vec<EntityPlan>,
@@ -199,17 +200,18 @@ pub struct ExportPlan {
 impl ExportPlan {
     pub fn from_config(
         config: &ExportConfig,
-        ontology: &Ontology,
+        tables: &ExportTables,
         lang: &Lang,
     ) -> Result<Self, LoadError> {
         let yaml = config;
         let mut entities = Vec::new();
-        for name in ontology.local_entity_names() {
+        for table in &tables.entities {
+            let name = &table.entity;
             let entity = yaml
                 .entities
                 .get(name)
                 .ok_or_else(|| LoadError::new(format!("export.yaml has no entity '{name}'")))?;
-            let mut entity = compile_entity(name, entity, &yaml.header, ontology, lang)?;
+            let mut entity = compile_entity(table, entity, &yaml.header, lang)?;
             if let Some(specs) = config.schemas.get(&entity.table) {
                 check_schema(&entity.specs, specs)?;
                 entity.specs = specs.clone();
@@ -234,7 +236,7 @@ impl ExportPlan {
         for name in yaml.entities.keys() {
             if !entities.iter().any(|e| e.name == *name) {
                 return Err(LoadError::new(format!(
-                    "export.yaml entity '{name}' is not a local entity of the ontology"
+                    "export.yaml entity '{name}' is not a local entity"
                 )));
             }
         }
@@ -244,10 +246,10 @@ impl ExportPlan {
             })
         };
 
-        let edge_fields: Vec<(String, DataType, bool)> = ontology
-            .local_edge_columns()
+        let edge_fields: Vec<(String, DataType, bool)> = tables
+            .edge_columns
             .iter()
-            .map(|c| (c.name.clone(), c.data_type, false))
+            .map(|(name, data_type)| (name.clone(), *data_type, false))
             .collect();
         let edge_specs = compile_specs(
             "edges",
@@ -297,10 +299,7 @@ impl ExportPlan {
         Ok(Self {
             id_prefix: yaml.ids.prefix.clone(),
             entities,
-            edge_table: ontology
-                .local_edge_table_name()
-                .ok_or_else(|| LoadError::new("ontology has no local edge table"))?
-                .to_string(),
+            edge_table: tables.edge_table.clone(),
             edge_specs,
             edge_columns,
             containment,
@@ -393,25 +392,15 @@ fn compile_specs(
 }
 
 fn compile_entity(
-    name: &str,
+    local: &EntityTable,
     yaml: &EntityYaml,
     header: &[ColumnYaml],
-    ontology: &Ontology,
     lang: &Lang,
 ) -> Result<EntityPlan, LoadError> {
-    let table = ontology
-        .get_node(name)
-        .ok_or_else(|| LoadError::new(format!("ontology has no node '{name}'")))?
-        .destination_table
-        .clone();
-    let fields: Vec<(String, DataType, bool)> = ontology
-        .local_entity_fields(name)
-        .ok_or_else(|| LoadError::new(format!("'{name}' is not a local entity")))?
-        .iter()
-        .map(|f| (f.name.clone(), f.data_type, f.nullable))
-        .collect();
+    let name = local.entity.as_str();
+    let table = local.table.clone();
     let all_columns: Vec<&ColumnYaml> = header.iter().chain(&yaml.columns).collect();
-    let specs = compile_specs(name, &all_columns, &fields)?;
+    let specs = compile_specs(name, &all_columns, &local.columns)?;
 
     let columns = yaml
         .columns

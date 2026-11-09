@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use code_graph_incremental::export::ExportTables;
 use code_graph_incremental::pipeline::{Display, Emit, Export, Resolved};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{
@@ -195,10 +196,14 @@ fn check(
         ("commit_sha", Scalar::Str("test")),
     ]);
     let db = create_test_db().expect("in-memory DuckDB");
+    let tables = ExportTables::from_catalog(data_model).expect("local tables");
     let displayed = graph
         .then(Display)
         .expect("display rules compile")
-        .then(Export { ontology, envelope })
+        .then(Export {
+            tables: &tables,
+            envelope,
+        })
         .expect("export")
         .then(Emit(|table: &str, batch| db.insert_batch(table, &batch)))
         .expect("insert into DuckDB")

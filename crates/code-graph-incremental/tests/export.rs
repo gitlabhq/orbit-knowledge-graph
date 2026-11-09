@@ -5,7 +5,7 @@ use code_graph_incremental::pipeline::{Display, Emit, Export, Exported};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, Envelope, Limits, Scalar, templates};
 mod common;
-use ontology::Ontology;
+use code_graph_incremental::export::ExportTables;
 
 const UTILS: &str = "\
 def helper(x):
@@ -49,20 +49,21 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
     let sources = common::walk(repo.path());
     let mut env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
-    let ontology = Ontology::load_embedded().unwrap();
+    let tables = ExportTables::embedded();
     let mut config = ExportConfig::embedded().clone();
-    let specs = ontology
-        .local_entity_fields("File")
+    let specs = tables
+        .entity("File")
         .unwrap()
+        .columns
         .iter()
-        .map(|field| ColumnSpec {
-            name: field.name.clone(),
-            col_type: if field.data_type == ontology::DataType::Int {
+        .map(|(name, data_type, nullable)| ColumnSpec {
+            name: name.clone(),
+            col_type: if *data_type == query_data_model::DataType::Int {
                 ColumnType::Int
             } else {
                 ColumnType::DictStr
             },
-            nullable: field.nullable,
+            nullable: *nullable,
         })
         .chain([
             ColumnSpec {
@@ -84,7 +85,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
         .then(Display)
         .unwrap()
         .then(Export {
-            ontology: &ontology,
+            tables,
             envelope: envelope(),
         })
         .err()
@@ -106,7 +107,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
             .then(Display)
             .unwrap()
             .then(Export {
-                ontology: &ontology,
+                tables,
                 envelope: Envelope::new(values),
             })
             .unwrap()
@@ -134,7 +135,7 @@ fn each_pipeline_uses_its_own_export_config() {
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
     let sources = common::walk(repo.path());
     let mut env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
-    let ontology = Ontology::load_embedded().unwrap();
+    let tables = ExportTables::embedded();
     for marker in ["first", "second", ""] {
         let yaml = include_str!("../config/export.yaml").replace(
             "name: traversal_path, type: Utf8, const: \"\"",
@@ -146,7 +147,7 @@ fn each_pipeline_uses_its_own_export_config() {
             .then(Display)
             .unwrap()
             .then(Export {
-                ontology: &ontology,
+                tables,
                 envelope: envelope(),
             })
             .unwrap()
@@ -168,11 +169,11 @@ fn each_pipeline_uses_its_own_export_config() {
 }
 
 #[test]
-fn custom_export_configs_still_validate_against_the_ontology() {
+fn custom_export_configs_still_validate_against_the_local_tables() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
     let mut env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
-    let ontology = Ontology::load_embedded().unwrap();
+    let tables = ExportTables::embedded();
     let yaml = include_str!("../config/export.yaml").replace("name: traversal_path", "name: typo");
     env.export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
     let error = templates::index(Context::new(&env, common::walk(repo.path())))
@@ -180,7 +181,7 @@ fn custom_export_configs_still_validate_against_the_ontology() {
         .then(Display)
         .unwrap()
         .then(Export {
-            ontology: &ontology,
+            tables,
             envelope: envelope(),
         })
         .err()
@@ -190,13 +191,13 @@ fn custom_export_configs_still_validate_against_the_ontology() {
 
 fn export_repo(root: &Path) -> Exported {
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
-    let ontology = Ontology::load_embedded().unwrap();
+    let tables = ExportTables::embedded();
     templates::index(Context::new(&env, common::walk(root)))
         .unwrap()
         .then(Display)
         .unwrap()
         .then(Export {
-            ontology: &ontology,
+            tables,
             envelope: envelope(),
         })
         .unwrap()
@@ -260,7 +261,7 @@ fn families_follow_the_worker_budget_and_the_family_cap() {
     use std::sync::{Arc, Condvar, Mutex};
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), FAMILIES);
-    let ontology = Ontology::load_embedded().unwrap();
+    let tables = ExportTables::embedded();
     let main = std::thread::current().id();
     for (worker_threads, small_family_files, cap, pool) in [(3, 0, 1, 3), (8, 1, 2, 2)] {
         let finished = Arc::new(AtomicUsize::new(0));
@@ -296,7 +297,7 @@ fn families_follow_the_worker_budget_and_the_family_cap() {
                 ..options()
             },
             &envelope(),
-            &ontology,
+            tables,
             code_graph_incremental::export::ExportConfig::embedded(),
             |_| -> Result<(), String> {
                 let mut guard = state.lock().unwrap();
@@ -336,7 +337,7 @@ fn families_follow_the_worker_budget_and_the_family_cap() {
 fn a_family_panic_ends_the_run_with_a_typed_error() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), FAMILIES);
-    let ontology = Ontology::load_embedded().unwrap();
+    let tables = ExportTables::embedded();
     let emitted = std::sync::atomic::AtomicUsize::new(0);
     let result = templates::repository(
         common::walk(repo.path()),
@@ -345,7 +346,7 @@ fn a_family_panic_ends_the_run_with_a_typed_error() {
             ..options()
         },
         &envelope(),
-        &ontology,
+        tables,
         code_graph_incremental::export::ExportConfig::embedded(),
         |_| -> Result<(), String> {
             emitted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -366,7 +367,6 @@ fn tables_over_the_batch_byte_budget_split_into_batches() {
         repo.path(),
         &[("utils.py", UTILS.as_bytes()), ("main.py", MAIN.as_bytes())],
     );
-    let ontology = Ontology::load_embedded().unwrap();
     let export = |batch_bytes| {
         let tables = std::sync::Mutex::new(std::collections::BTreeMap::<_, Vec<_>>::new());
         templates::repository(
@@ -376,7 +376,7 @@ fn tables_over_the_batch_byte_budget_split_into_batches() {
                 ..options()
             },
             &envelope(),
-            &ontology,
+            ExportTables::embedded(),
             code_graph_incremental::export::ExportConfig::embedded(),
             |batches| -> Result<(), String> {
                 let mut tables = tables.lock().unwrap();
@@ -428,7 +428,7 @@ fn cross_file_timeout_still_exports_every_family() {
             ("main.ts", b"export function typescriptFunction() {}"),
         ],
     );
-    let ontology = Ontology::load_embedded().unwrap();
+    let tables = ExportTables::embedded();
     let definitions = std::sync::Mutex::new(Vec::new());
     let report = templates::repository(
         common::walk(repo.path()),
@@ -440,7 +440,7 @@ fn cross_file_timeout_still_exports_every_family() {
             ..options()
         },
         &envelope(),
-        &ontology,
+        tables,
         code_graph_incremental::export::ExportConfig::embedded(),
         |batches| -> Result<(), String> {
             for (name, batch) in batches {
@@ -483,13 +483,13 @@ fn definition_coordinates_cover_the_same_span_as_bytes() {
         let repo = tempfile::tempdir().unwrap();
         write_all(repo.path(), &[(path, source.as_bytes())]);
         let env = Env::with_limits(language, Limits::UNLIMITED).unwrap();
-        let ontology = Ontology::load_embedded().unwrap();
+        let tables = ExportTables::embedded();
         let exported = templates::index(Context::new(&env, common::walk(repo.path())))
             .unwrap()
             .then(Display)
             .unwrap()
             .then(Export {
-                ontology: &ontology,
+                tables,
                 envelope: envelope(),
             })
             .unwrap()
@@ -584,7 +584,7 @@ fn every_file_becomes_a_row_with_its_reason() {
 }
 
 #[test]
-fn definitions_imports_and_edges_export_as_ontology_rows() {
+fn definitions_imports_and_edges_export_as_local_rows() {
     let repo = tempfile::tempdir().unwrap();
     write_all(
         repo.path(),
@@ -681,7 +681,7 @@ fn emit_hands_every_table_to_the_sink_and_keeps_the_graph() {
         &[("utils.py", UTILS.as_bytes()), ("main.py", MAIN.as_bytes())],
     );
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
-    let ontology = Ontology::load_embedded().unwrap();
+    let tables = ExportTables::embedded();
     let mut seen: Vec<(String, usize)> = Vec::new();
 
     let displayed = templates::index(Context::new(&env, common::walk(repo.path())))
@@ -689,7 +689,7 @@ fn emit_hands_every_table_to_the_sink_and_keeps_the_graph() {
         .then(Display)
         .unwrap()
         .then(Export {
-            ontology: &ontology,
+            tables,
             envelope: envelope(),
         })
         .unwrap()
@@ -743,7 +743,7 @@ fn exporting_deeply_nested_definitions_grows_linearly() {
         let repo = tempfile::tempdir().unwrap();
         write_all(repo.path(), &[("deep.js", source.as_bytes())]);
         let env = Env::with_limits(SupportLang::JavaScript, Limits::UNLIMITED).unwrap();
-        let ontology = Ontology::load_embedded().unwrap();
+        let tables = ExportTables::embedded();
         let displayed = templates::index(Context::new(&env, common::walk(repo.path())))
             .unwrap()
             .then(Display)
@@ -751,7 +751,7 @@ fn exporting_deeply_nested_definitions_grows_linearly() {
         let started = Instant::now();
         displayed
             .then(Export {
-                ontology: &ontology,
+                tables,
                 envelope: envelope(),
             })
             .unwrap();
@@ -778,10 +778,10 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
         &[("utils.py", UTILS.as_bytes()), ("main.py", MAIN.as_bytes())],
     );
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
-    let ontology = Ontology::load_embedded().unwrap();
+    let tables = ExportTables::embedded();
     let plan = code_graph_incremental::export::ExportPlan::from_config(
         &env.export_config,
-        &ontology,
+        tables,
         &env.lang,
     )
     .unwrap();

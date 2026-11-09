@@ -541,7 +541,6 @@ mod tests {
             let counting_repo = CountingRepositoryService::wrapping(mock_repo.clone());
             let repo_service: Arc<dyn RepositoryService> = counting_repo.clone();
 
-            let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
             let table_names = Arc::new(
                 crate::modules::code::config::CodeTableNames::from_catalog(
                     &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
@@ -566,7 +565,7 @@ mod tests {
                 stale_data_cleaner,
                 metrics.clone(),
                 table_names,
-                Arc::new(ontology),
+                crate::modules::code::test_helpers::embedded_specs(),
                 crate::testkit::builders::test_pipeline_configuration(),
             ));
 

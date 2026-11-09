@@ -1,19 +1,18 @@
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use code_graph::v2::SinkError;
-use ontology::Ontology;
 use orbit_arrow::{ArrowUtils, AsRecordBatch, BatchBuilder};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::super::arrow_converter::{
-    ConvertedGraphData, IndexerEdgeRow, IndexerEnvelope, build_tag_properties, compute_branch_id,
-    convert_branch_row, edge_specs, entity_specs,
+    ConvertedGraphData, ConverterSpecs, IndexerEdgeRow, IndexerEnvelope, compute_branch_id,
+    convert_branch_row,
 };
 
 pub(super) struct Output<'a> {
     envelope: &'a IndexerEnvelope,
-    ontology: &'a Ontology,
+    specs: &'a ConverterSpecs,
     emitted_branch: AtomicBool,
     pub(super) batch_bytes: usize,
 }
@@ -31,10 +30,10 @@ fn id(batch: &RecordBatch, column: &str, row: usize) -> Result<i64, SinkError> {
 }
 
 impl<'a> Output<'a> {
-    pub fn new(envelope: &'a IndexerEnvelope, ontology: &'a Ontology) -> Self {
+    pub fn new(envelope: &'a IndexerEnvelope, specs: &'a ConverterSpecs) -> Self {
         Self {
             envelope,
-            ontology,
+            specs,
             emitted_branch: AtomicBool::new(false),
             batch_bytes: orbit_arrow::BATCH_BYTES,
         }
@@ -53,7 +52,7 @@ impl<'a> Output<'a> {
                 .remove(table)
                 .ok_or_else(|| SinkError(format!("missing {table}")))
         };
-        let properties = build_tag_properties(self.ontology);
+        let properties = &self.specs.tag_properties;
         let branch_id = compute_branch_id(self.envelope.project_id, &self.envelope.branch);
         let branch_tags: Vec<_> = properties
             .get("Branch")
@@ -66,10 +65,11 @@ impl<'a> Output<'a> {
         let mut entities = Vec::new();
         for kind in ["Directory", "File", "Definition", "ImportedSymbol"] {
             let table = self
-                .ontology
-                .table_name(kind)
-                .map_err(|e| SinkError(e.to_string()))?;
-            let batches = take(table)?;
+                .specs
+                .export
+                .entity(kind)
+                .ok_or_else(|| SinkError(format!("{kind} is not a local entity")))?;
+            let batches = take(&table.table)?;
             for batch in &batches {
                 for row in 0..batch.num_rows() {
                     let id = id(batch, "id", row)?;
@@ -89,7 +89,7 @@ impl<'a> Output<'a> {
             }
             entities.push(batches);
         }
-        let mut edges = BatchBuilder::new(&edge_specs(self.ontology), 0)?;
+        let mut edges = BatchBuilder::new(&self.specs.edge, 0)?;
         let mut edge_batches = Vec::new();
         let empty_tags = Vec::new();
         let mut edge =
@@ -119,7 +119,7 @@ impl<'a> Output<'a> {
                 Ok::<_, arrow::error::ArrowError>(())
             };
         let branch = if self.emitted_branch.swap(true, Ordering::Relaxed) {
-            BatchBuilder::new(&entity_specs(self.ontology, "Branch"), 0)?.finish()?
+            BatchBuilder::new(&self.specs.branch, 0)?.finish()?
         } else {
             edge(
                 branch_id,
@@ -135,7 +135,7 @@ impl<'a> Output<'a> {
                 "Project",
                 "Branch",
             )?;
-            convert_branch_row(self.envelope, &entity_specs(self.ontology, "Branch"))?
+            convert_branch_row(self.envelope, &self.specs.branch)?
         };
         for (id, kind, path) in structure {
             edge(id, branch_id, "ON_BRANCH", kind, "Branch")?;
@@ -143,7 +143,7 @@ impl<'a> Output<'a> {
                 edge(branch_id, id, "CONTAINS", "Branch", kind)?;
             }
         }
-        for batch in take(self.ontology.edge_table())? {
+        for batch in take(&self.specs.export.edge_table)? {
             for row in 0..batch.num_rows() {
                 let target = id(&batch, "target_id", row)?;
                 let kind = text(&batch, "relationship_kind", row)?;

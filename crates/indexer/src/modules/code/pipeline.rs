@@ -13,7 +13,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 use tracing::Instrument;
 
-use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
+use super::arrow_converter::{ConverterSpecs, IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
@@ -151,7 +151,7 @@ pub struct CodeIndexer {
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
     table_names: Arc<CodeTableNames>,
-    ontology: Arc<ontology::Ontology>,
+    specs: Arc<ConverterSpecs>,
     pipeline_config: CodeIndexingPipelineConfig,
     fetch_concurrency: usize,
     small_repo_max_files: usize,
@@ -172,7 +172,7 @@ impl CodeIndexer {
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
         table_names: Arc<CodeTableNames>,
-        ontology: Arc<ontology::Ontology>,
+        specs: Arc<ConverterSpecs>,
         pipeline_config: CodeIndexingPipelineConfig,
     ) -> Self {
         let fc = pipeline_config.fetch_concurrency;
@@ -185,7 +185,7 @@ impl CodeIndexer {
             stale_data_cleaner,
             metrics,
             table_names,
-            ontology,
+            specs,
             fetch_concurrency: fc,
             small_repo_max_files: pipeline_config.small_repo_max_files,
             fetch_slots: sem(fc),
@@ -633,7 +633,7 @@ impl CodeIndexer {
 
         let code_graph_start = Instant::now();
         let repository = repository.clone();
-        let ontology = self.ontology.clone();
+        let specs = self.specs.clone();
         let table_names = self.table_names.clone();
         let span = tracing::Span::current();
         let legacy_config = self.build_pipeline_config(context, cancel.clone());
@@ -669,7 +669,7 @@ impl CodeIndexer {
                     repository,
                     options,
                     envelope,
-                    ontology,
+                    specs,
                     table_names,
                     on_batch,
                 ),
@@ -678,7 +678,7 @@ impl CodeIndexer {
                     repository.file_inventory.clone(),
                     legacy_config,
                     tracer,
-                    Arc::new(IndexerConverter::new(envelope, &ontology, table_names)),
+                    Arc::new(IndexerConverter::new(envelope, specs, table_names)),
                     on_batch,
                 )
                 .into()),

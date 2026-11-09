@@ -89,20 +89,6 @@ impl GraphSchema {
             .map(|table| format!("{prefix}{}", table.name))
             .collect()
     }
-
-    pub fn entity_base_names(&self) -> std::collections::HashSet<String> {
-        let mut names = std::collections::HashSet::new();
-        for table in &self.tables {
-            names.insert(table.name.clone());
-        }
-        for view in &self.views {
-            names.insert(view.name.clone());
-        }
-        for dictionary in &self.dictionaries {
-            names.insert(dictionary.name.clone());
-        }
-        names
-    }
 }
 
 pub fn clone_table_sql(source_table: &str, target_table: &str) -> String {

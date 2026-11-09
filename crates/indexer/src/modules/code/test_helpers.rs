@@ -107,3 +107,13 @@ pub fn code_indexing_task_columns(
         .with_string("commit_sha", commit_sha)
         .with_string("traversal_path", traversal_path)
 }
+
+pub fn embedded_specs() -> std::sync::Arc<super::ConverterSpecs> {
+    std::sync::Arc::new(
+        super::ConverterSpecs::new(
+            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+            &query_data_model::Catalog::<query_data_model::DuckDb>::embedded().unwrap(),
+        )
+        .unwrap(),
+    )
+}

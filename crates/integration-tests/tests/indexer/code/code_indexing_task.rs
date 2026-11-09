@@ -211,7 +211,7 @@ async fn incremental_flag_counts_listed_entries_dropped_past_the_file_limit() {
 }
 
 #[tokio::test]
-async fn incremental_flag_dead_letters_an_export_the_ontology_cannot_map() {
+async fn incremental_flag_dead_letters_an_export_the_local_tables_cannot_map() {
     enable_incremental("1/2802/");
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
@@ -220,11 +220,19 @@ async fn incremental_flag_dead_letters_an_export_the_ontology_cannot_map() {
     .await;
     let mock = MockGitlabServer::start().await;
     mock.add_project(2802, "main", &[("src/main.py", "def f():\n    pass\n")]);
-    let deps = CodeIndexingDeps::new_with_ontology(
+    let mut sources = query_data_model::Packages::embedded().sources().clone();
+    sources.remove("gitlab.source_code/local_store.yaml");
+    let model = query_data_model::Packages::new(sources).load().unwrap();
+    let specs = indexer::modules::code::ConverterSpecs::new(
+        &query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&model).unwrap(),
+        &query_data_model::Catalog::<query_data_model::DuckDb>::from_model(&model).unwrap(),
+    )
+    .unwrap();
+    let deps = CodeIndexingDeps::new_with_specs(
         &mock,
         &clickhouse,
         indexer::testkit::test_pipeline_configuration(),
-        ontology::Ontology::new(),
+        specs,
     );
     let result = deps
         .code_indexing_task_handler()

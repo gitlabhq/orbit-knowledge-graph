@@ -1601,7 +1601,7 @@ async fn gate_requires_every_invalidated_pipeline_including_global() {
 
 #[tokio::test]
 async fn garbage_collection_keeps_most_recent_retired_version_by_created_at() {
-    let (ctx, ontology, _metrics) = setup().await;
+    let (ctx, _ontology, _metrics) = setup().await;
     let client = ctx.create_client();
 
     ctx.execute(
@@ -1624,10 +1624,7 @@ async fn garbage_collection_keeps_most_recent_retired_version_by_created_at() {
     ))
     .await;
 
-    let schema = test_schema(&ontology);
-    let entities = find_droppable_entities(&client, &schema, 2, &[])
-        .await
-        .unwrap();
+    let entities = find_droppable_entities(&client, 2).await.unwrap();
     let versions: Vec<u32> = entities.iter().map(|entity| entity.version).collect();
 
     assert!(versions.contains(&10));

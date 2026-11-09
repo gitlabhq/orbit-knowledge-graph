@@ -5,7 +5,7 @@ use clickhouse_client::ArrowClickHouseClient;
 use orbit_arrow::ArrowUtils;
 
 use crate::execute::MigrationError;
-use crate::schema::{self, GraphSchema};
+use crate::schema;
 use crate::version::{self, mark_version_dropped};
 
 const LIST_DEAD_VERSION_ENTITIES: &str = "\
@@ -50,9 +50,7 @@ impl DropResult {
 
 pub async fn find_droppable_entities(
     graph: &ArrowClickHouseClient,
-    schema: &GraphSchema,
     max_retained_versions: u32,
-    preserve_pattern_strings: &[String],
 ) -> Result<Vec<DroppableEntity>, MigrationError> {
     let retained_count = max_retained_versions.saturating_sub(1);
 
@@ -67,9 +65,6 @@ pub async fn find_droppable_entities(
             reason: error.to_string(),
         })?;
 
-    let known_names = schema.entity_base_names();
-    let preserve_patterns = compile_preserve_patterns(preserve_pattern_strings);
-
     let mut entities = Vec::new();
     for batch in &batches {
         for row in 0..batch.num_rows() {
@@ -77,21 +72,6 @@ pub async fn find_droppable_entities(
             let engine = ArrowUtils::get_column_string(batch, "engine", row).unwrap_or_default();
             let dead_version =
                 ArrowUtils::get_column::<UInt32Type>(batch, "dead_version", row).unwrap_or(0);
-
-            let base_name = name
-                .strip_prefix(&format!("v{dead_version}_"))
-                .unwrap_or(&name);
-
-            if !known_names.contains(base_name)
-                && matches_preserve_pattern(base_name, &preserve_patterns)
-            {
-                orbit_log_fields::info!(
-                    safe(SCHEMA_VERSION) = dead_version,
-                    safe(TABLE) = name.as_str(),
-                    "GC: preserving (matches preserve pattern)"
-                );
-                continue;
-            }
 
             entities.push(DroppableEntity {
                 version: dead_version,
@@ -158,26 +138,4 @@ pub async fn mark_dropped_versions(graph: &ArrowClickHouseClient, versions: &[u3
         marked.push(version);
     }
     marked
-}
-
-fn matches_preserve_pattern(name: &str, patterns: &[regex::Regex]) -> bool {
-    patterns.iter().any(|pattern| pattern.is_match(name))
-}
-
-fn compile_preserve_patterns(raw_patterns: &[String]) -> Vec<regex::Regex> {
-    raw_patterns
-        .iter()
-        .filter_map(|pattern| {
-            regex::Regex::new(pattern)
-                .inspect_err(|error| {
-                    orbit_log_fields::warn!(
-                        expanded(ADDITIONAL_DETAILS) = pattern.as_str(),
-                        safe(ERROR_TYPE) = "invalid_regex",
-                        expanded(ERROR_MESSAGE) = %error,
-                        "gc_preserve_patterns: invalid regex, skipping"
-                    )
-                })
-                .ok()
-        })
-        .collect()
 }

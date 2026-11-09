@@ -7,7 +7,6 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use arrow::record_batch::RecordBatch;
-use ontology::Ontology;
 
 use super::{
     Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileStats, ItemPhase, Labelled,
@@ -654,9 +653,9 @@ impl Phase<Resolved> for Display {
     }
 }
 
-/// The graph as the ontology's local tables, following `config/export.yaml`.
+/// The graph as the model's local tables, following `config/export.yaml`.
 pub struct Export<'a> {
-    pub ontology: &'a Ontology,
+    pub tables: &'a export::ExportTables,
     pub envelope: Envelope<'a>,
 }
 
@@ -674,7 +673,7 @@ impl Phase<Displayed> for Export<'_> {
             &context.env.lang,
             &export::ExportPlan::from_config(
                 &context.env.export_config,
-                self.ontology,
+                self.tables,
                 &context.env.lang,
             )?,
             &self.envelope,
@@ -780,7 +779,6 @@ mod tests {
         context.run = context.run.with_cancellation(Arc::new(move || {
             counted.load(Ordering::Relaxed) > 0 && counted.fetch_add(1, Ordering::Relaxed) >= after
         }));
-        let ontology = Ontology::load_embedded().unwrap();
         let envelope = Envelope::new([
             ("project_id", export::Scalar::Int(1)),
             ("branch", export::Scalar::Str("main")),
@@ -790,7 +788,7 @@ mod tests {
             .and_then(|graph| graph.then(Display))
             .and_then(|graph| {
                 graph.then(Export {
-                    ontology: &ontology,
+                    tables: export::ExportTables::embedded(),
                     envelope,
                 })
             })

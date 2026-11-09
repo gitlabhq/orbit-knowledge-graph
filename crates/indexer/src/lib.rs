@@ -77,7 +77,6 @@ use tokio_util::sync::CancellationToken;
 
 pub async fn run(
     config: &IndexerConfig,
-    ontology: Arc<ontology::Ontology>,
     model: Arc<query_data_model::Model>,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
@@ -180,8 +179,8 @@ pub async fn run(
             &registry,
             config,
             &clients,
-            &ontology,
             &catalog,
+            &query_data_model::Catalog::<query_data_model::DuckDb>::from_model(&model)?,
             writer.clone(),
             analytics.clone(),
             gitlab_client,
@@ -254,8 +253,7 @@ pub async fn run_dispatcher(
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
     let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
-    let orbit_migrations::archive::LoadedRelease { ontology, model } =
-        catalog.publish(release).await?;
+    let model = catalog.publish(release).await?.model;
     let physical = orbit_migrations::schema::Schema::from_model(&model)?;
 
     let graph = clients.graph.clone();
@@ -425,7 +423,6 @@ pub async fn run_dispatcher(
             clients.graph.clone(),
             clients.datalake.clone(),
             lock_service.clone(),
-            Arc::new(ontology),
             Arc::new(candidate),
             physical,
             config.schema.clone(),

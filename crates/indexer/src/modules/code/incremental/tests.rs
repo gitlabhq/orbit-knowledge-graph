@@ -3,7 +3,9 @@ use super::*;
 use orbit_utils::vfs::Decision;
 
 use super::super::{
-    arrow_converter::IndexerEnvelope, config::CodeTableNames, pipeline::IndexingReport,
+    arrow_converter::{ConverterSpecs, IndexerEnvelope},
+    config::CodeTableNames,
+    pipeline::IndexingReport,
 };
 use arrow::record_batch::RecordBatch;
 use code_graph::v2::{OnBatch, SinkError};
@@ -11,14 +13,13 @@ use orbit_arrow::ArrowUtils;
 use std::sync::Mutex;
 
 struct IndexFixture {
-    ontology: Arc<ontology::Ontology>,
+    specs: Arc<ConverterSpecs>,
     tables: Arc<CodeTableNames>,
     version: chrono::DateTime<chrono::Utc>,
 }
 
 impl IndexFixture {
     fn new() -> Self {
-        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
         Self {
             tables: Arc::new(
                 CodeTableNames::from_catalog(
@@ -26,7 +27,7 @@ impl IndexFixture {
                 )
                 .unwrap(),
             ),
-            ontology,
+            specs: super::super::test_helpers::embedded_specs(),
             version: chrono::Utc::now(),
         }
     }
@@ -58,7 +59,7 @@ impl IndexFixture {
                 "abc123".into(),
                 self.version,
             ),
-            self.ontology.clone(),
+            self.specs.clone(),
             self.tables.clone(),
             sink,
         )
@@ -695,9 +696,18 @@ async fn sink_failure_aborts_the_run() {
 }
 
 #[tokio::test]
-async fn an_ontology_the_export_cannot_map_is_a_fatal_error() {
+async fn local_tables_the_export_cannot_map_are_a_fatal_error() {
+    let mut sources = query_data_model::Packages::embedded().sources().clone();
+    sources.remove("gitlab.source_code/local_store.yaml");
+    let model = query_data_model::Packages::new(sources).load().unwrap();
+    let specs = ConverterSpecs::new(
+        &query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&model).unwrap(),
+        &query_data_model::Catalog::<query_data_model::DuckDb>::from_model(&model).unwrap(),
+    )
+    .unwrap();
+    assert!(specs.export.entities.is_empty());
     let fixture = IndexFixture {
-        ontology: Arc::new(ontology::Ontology::new()),
+        specs: Arc::new(specs),
         ..IndexFixture::new()
     };
     let report = fixture

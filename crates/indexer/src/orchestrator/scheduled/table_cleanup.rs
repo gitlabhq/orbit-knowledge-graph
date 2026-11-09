@@ -139,30 +139,30 @@ fn build_apply_deleted_mask_sql(table: &str) -> String {
 mod tests {
     use super::*;
 
-    fn all_tables() -> Vec<String> {
-        list_graph_tables(
-            &orbit_migrations::schema::Schema::from_model(
-                &query_data_model::Packages::embedded().load().unwrap(),
-            )
-            .unwrap(),
-        )
+    use query_data_model::{Catalog, ClickHouse};
+
+    fn schema() -> Schema {
+        Schema::from_model(&query_data_model::Packages::embedded().load().unwrap()).unwrap()
     }
 
     #[test]
     fn covers_all_node_and_edge_tables() {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let tables = all_tables();
+        let catalog = Catalog::<ClickHouse>::embedded().unwrap();
+        let tables = list_graph_tables(&schema());
 
-        for node in ontology.nodes() {
-            let prefixed = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
+        for entity in catalog.graph().entities() {
+            let Some(table) = catalog.table_of(entity.id) else {
+                continue;
+            };
+            let prefixed = prefixed_table_name(table, *SCHEMA_VERSION);
             assert!(
                 tables.contains(&prefixed),
                 "missing node table {prefixed}: {tables:?}"
             );
         }
 
-        for edge_table in ontology.edge_tables() {
-            let prefixed = prefixed_table_name(edge_table, *SCHEMA_VERSION);
+        for edge_table in catalog.edge_tables(&[]) {
+            let prefixed = prefixed_table_name(&edge_table, *SCHEMA_VERSION);
             assert!(
                 tables.contains(&prefixed),
                 "missing edge table {prefixed}: {tables:?}"
@@ -172,26 +172,31 @@ mod tests {
 
     #[test]
     fn auxiliary_tables_are_not_included() {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let tables = all_tables();
-        for aux in ontology.auxiliary_tables() {
+        let schema = schema();
+        let tables = list_graph_tables(&schema);
+        for aux in schema.auxiliary_tables() {
             assert!(
-                !tables.iter().any(|t| t.ends_with(&aux.name)),
+                !tables.iter().any(|t| t.ends_with(&aux.table.name)),
                 "auxiliary table '{}' must not be swept",
-                aux.name
+                aux.table.name
             );
         }
     }
 
     #[test]
     fn reordered_tables_are_not_included() {
-        let ontology = ontology::Ontology::load_embedded_with_overlay(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../config/seeds/overlays/reordered_edges"
-        ))
-        .unwrap();
-        let tables =
-            list_graph_tables(&query_data_model::from_ontology::schema(&ontology).unwrap());
+        let model = crate::testkit::patched_model(
+            "gitlab/graph_store.yaml",
+            "    tables:\n      namespace_storage_snapshot:\n",
+            "    copies:
+      gl_code_edge_by_target:
+        source: gl_code_edge
+        sort_key: [traversal_path, target_id, relationship_kind, project_id, branch, source_id, source_kind, target_kind]
+    tables:
+      namespace_storage_snapshot:
+",
+        );
+        let tables = list_graph_tables(&Schema::from_model(&model).unwrap());
         assert!(
             !tables
                 .iter()

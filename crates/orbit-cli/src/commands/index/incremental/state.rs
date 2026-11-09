@@ -47,7 +47,7 @@ impl Project<'_> {
         let mut staged = Vec::new();
         let written = self.writer.in_transaction(|| {
             self.writer.clear(self.ontology)?;
-            let mut exporter = Exporter::new(self.git, self.writer, self.ontology);
+            let mut exporter = Exporter::new(self.git, self.writer);
             let mut outputs = Vec::new();
             for (family, paths) in families.into_values() {
                 if self.cancelled() {
@@ -547,6 +547,6 @@ impl Reader<'_> {
         paths.sort_unstable();
         paths.dedup();
         let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
-        output::directory_rows(self.git, self.ontology, &paths)
+        output::directory_rows(self.git, &paths)
     }
 }
