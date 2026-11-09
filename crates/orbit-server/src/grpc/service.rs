@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::introspection::SchemaResponse;
-use ontology::{DataType, Field, Ontology};
+use ontology::{DataType, Field, NodeEntity, Ontology};
 use orbit_log_fields::{info, warn};
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use orbit_utils::traversal_path::TraversalPath;
@@ -775,6 +775,15 @@ impl OrbitServiceImpl {
             && matches!(field.data_type, DataType::String | DataType::Uuid)
     }
 
+    fn property_is_default_column(node: &NodeEntity, field: &Field) -> bool {
+        !field.admin_only
+            && (node.default_columns.is_empty()
+                || node
+                    .default_columns
+                    .iter()
+                    .any(|column| column == &field.name))
+    }
+
     fn build_structured_schema(ontology: &Ontology, expand_nodes: &[String]) -> StructuredSchema {
         let domains: Vec<SchemaDomain> = ontology
             .domains()
@@ -803,6 +812,7 @@ impl OrbitServiceImpl {
                                 .unwrap_or_default(),
                             description: f.description.clone().unwrap_or_default(),
                             text_searchable: Some(Self::property_is_text_searchable(f)),
+                            default_column: Some(Self::property_is_default_column(n, f)),
                         })
                         .collect()
                 } else {
@@ -824,16 +834,6 @@ impl OrbitServiceImpl {
                     (vec![], vec![])
                 };
 
-                let default_columns = if should_expand {
-                    n.default_columns
-                        .iter()
-                        .filter(|column| n.listed_fields().any(|f| &f.name == *column))
-                        .cloned()
-                        .collect()
-                } else {
-                    vec![]
-                };
-
                 SchemaNode {
                     name: n.name.clone(),
                     domain: n.domain.clone(),
@@ -848,7 +848,6 @@ impl OrbitServiceImpl {
                     style,
                     outgoing_edges,
                     incoming_edges,
-                    default_columns,
                 }
             })
             .collect();
@@ -1417,34 +1416,55 @@ mod tests {
     }
 
     #[test]
-    fn test_structured_schema_default_columns_are_listed_properties() {
+    fn test_structured_schema_default_column_matches_the_ontology() {
         let ontology = test_ontology();
         let response = OrbitServiceImpl::build_structured_schema(&ontology, &["*".to_string()]);
-
-        for node in &response.nodes {
-            let names: Vec<&str> = node.properties.iter().map(|p| p.name.as_str()).collect();
-            for column in &node.default_columns {
-                assert!(names.contains(&column.as_str()), "{}.{column}", node.name);
-            }
-        }
-
-        let pipeline = response
-            .nodes
-            .iter()
-            .find(|n| n.name == "Pipeline")
-            .unwrap();
-        assert_eq!(
-            pipeline.default_columns,
-            ["id", "iid", "status", "ref", "source"]
-        );
-
-        let unexpanded = OrbitServiceImpl::build_structured_schema(&ontology, &[]);
-        assert!(
-            unexpanded
+        let default_columns = |node: &str| -> Vec<String> {
+            response
                 .nodes
                 .iter()
-                .all(|n| n.default_columns.is_empty())
+                .find(|n| n.name == node)
+                .unwrap()
+                .properties
+                .iter()
+                .filter(|p| p.default_column == Some(true))
+                .map(|p| p.name.clone())
+                .collect()
+        };
+
+        for node in &response.nodes {
+            for property in &node.properties {
+                assert!(
+                    property.default_column.is_some(),
+                    "{}.{} has no default_column",
+                    node.name,
+                    property.name
+                );
+            }
+        }
+        assert_eq!(
+            default_columns("Pipeline"),
+            ["id", "iid", "ref", "status", "source"]
         );
+        assert_eq!(default_columns("User"), ["id", "username", "name", "state"]);
+
+        let user_ontology = Arc::new(
+            Ontology::load_embedded()
+                .unwrap()
+                .with_default_columns("User", ["id", "username", "email"]),
+        );
+        let user = OrbitServiceImpl::build_structured_schema(&user_ontology, &["User".to_string()]);
+        let user = user.nodes.iter().find(|n| n.name == "User").unwrap();
+        let flagged: Vec<&str> = user
+            .properties
+            .iter()
+            .filter(|p| p.default_column == Some(true))
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(flagged, ["id", "username"]);
+
+        let unexpanded = OrbitServiceImpl::build_structured_schema(&ontology, &[]);
+        assert!(unexpanded.nodes.iter().all(|n| n.properties.is_empty()));
     }
 
     #[test]

@@ -166,9 +166,6 @@ pub struct SchemaNode {
     /// populated when expanded
     #[prost(string, repeated, tag = "9")]
     pub incoming_edges: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// returned in neighbor and path results and when a query selects no columns; populated when expanded
-    #[prost(string, repeated, tag = "10")]
-    pub default_columns: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// A single property on a node type.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -189,6 +186,9 @@ pub struct SchemaProperty {
     /// whether clients may text-search the property with CONTAINS, STARTS WITH, or ENDS WITH; false for enum, virtual, admin_only, non-filterable, non-text, and like_allowed: false properties; populated when expanded
     #[prost(bool, optional, tag = "6")]
     pub text_searchable: ::core::option::Option<bool>,
+    /// returned in neighbor and path results and when a query selects no columns; false for admin_only properties; populated when expanded
+    #[prost(bool, optional, tag = "7")]
+    pub default_column: ::core::option::Option<bool>,
 }
 /// A named relationship type with its valid source/target combinations.
 #[derive(Clone, PartialEq, ::prost::Message)]
