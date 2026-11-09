@@ -356,8 +356,9 @@ mod tests {
         let scoped_user = Ontology::load_embedded()
             .expect("ontology must load")
             .with_path_scopable_nodes(["User"]);
-        let fragments = query_data_model::from_ontology::from_ontology(&scoped_user)
+        let mut fragments = query_data_model::from_ontology::from_ontology(&scoped_user)
             .expect("scoped ontology must convert");
+        fragments.retain(|fragment| !matches!(fragment, Fragment::Source(_)));
         let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}"#;
 
         for (model, expected_table) in [
