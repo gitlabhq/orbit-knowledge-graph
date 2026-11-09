@@ -79,9 +79,7 @@ async fn plan(&self, ctx: &mut PlanContext) -> Result<(), PlanError> {
 }
 ```
 
-- A planner reads only events and Orbit storage. It never calls a source.
-- A split that reads a source is a worker.
-- Every planner handles `Manual` and `Sweep`. The testkit checks it.
+A planner reads only events and Orbit storage, never a source. Work that must read a source to split itself is a worker. Every planner handles `Manual` and `Sweep`, and the testkit checks it.
 
 ## Step 3: Write the worker
 
@@ -110,9 +108,7 @@ fn key(project: &ProjectRef) -> Key {
 }
 ```
 
-- The engine keeps one pending task for each worker and key. The marker clears when the task starts.
-- With `EXCLUSIVE`, the engine takes a lease on the key. Two runs of one key never overlap.
-- The input holds IDs, not data. The worker reads the current state when it runs.
+The engine keeps one pending task for each worker and key, and the marker clears when the task starts. With `EXCLUSIVE`, it also takes a lease on the key, so two runs of one key never overlap. The input holds IDs, and the worker reads the current state when it runs.
 
 A lease is a key in the `orbit_leases` bucket. Its value says who holds it and until when.
 
@@ -123,10 +119,7 @@ pub struct Lease {
 }
 ```
 
-- NATS TTLs are not used. Every write is a compare-and-swap on the revision of the key.
-- The engine renews the lease every third of `engine.leases.ttl`, which is 60 s by default. A failed renewal drops `run`.
-- If a pod dies, the next pod to pull the message waits until `expires_at`. Then it takes the lease.
-- A pod treats a lease as expired only 5 s after `expires_at`. This margin covers clock skew.
+The engine renews the lease every third of `engine.leases.ttl`, which is 60 s by default. If a renewal fails, the engine drops `run`. If a pod dies, the next pod waits until `expires_at`, then takes the lease. NATS TTLs are not used.
 
 ### Pools and `ctx.detach()`
 
@@ -149,12 +142,7 @@ async fn run(&self, ctx: &TaskContext, project: ProjectRef) -> Result<Outcome<In
 }
 ```
 
-- The code names the pool. Helm sets its scope and size.
-- A cluster pool has a limit for each key, such as a Gitaly storage. `unknown_key` is the limit for inputs with no key.
-- A pod pool limits a stage inside one pod. The lane slots admit more tasks than the pool, so fetches run ahead.
-- A task can hold several permits of one pool, one for each part of its parallel work.
-- A task that waits longer than `max_wait` defers. It frees its slot and lease, and uses no attempt.
-- `ctx.detach()` frees the slot. The message and the lease stay held until `run` returns.
+The code names a pool, and Helm sets its scope and size. A cluster pool has a limit for each key, such as a Gitaly storage. A pod pool limits one stage on a pod, so fetches can run ahead of parsing. A task that waits past `max_wait` defers, and uses no attempt. `ctx.detach()` frees the slot, but the message and the lease stay held until `run` returns.
 
 ## Step 4: Return an outcome or an error
 
@@ -259,9 +247,7 @@ for ns in self.status.not_indexed(&version).await? {
 }
 ```
 
-- A reconciler never submits a task. It calls `replan` or `campaign`.
-- One reconciler writes each table.
-- A tick is idempotent and has a 30 s limit. A failed tick has no retry.
+A reconciler never submits a task. It calls `replan` or `campaign` on a planner. One reconciler writes each table. A tick is idempotent and has a 30 s limit, and a failed tick has no retry.
 
 ## Step 7: Configure lanes, instances and pools
 
@@ -284,14 +270,12 @@ engine:
     gitaly_archives: { per_key: 8, unknown_key: 4, max_wait: 60s }
   instances:
     code:
-      role: worker
       pods: { min: 1, max: 20 }
-      serve: { code.index/default: 16, code.index/big: 6 }
+      lanes: { code.index/default: 16, code.index/big: 6 }
       pools: { parse: 10, parse_big: 4, insert: 32 }
     backfill:
-      role: worker
       pods: { min: 0, max: 40 }
-      serve: { code.index/backfill: 2 }
+      lanes: { code.index/backfill: 2 }
 ```
 
 | Task source | Lane |
@@ -302,10 +286,7 @@ engine:
 | A spawned child | The lane of its parent |
 | A lane timeout with `on_timeout` | The `on_timeout` lane |
 
-- An instance is one Deployment and one KEDA ScaledObject. Helm renders both from `engine.instances`.
-- The Deployment sets `ORBIT_INSTANCE`. A pod serves the lanes in the `serve` list of its instance.
-- Every worker has a `default` and a `backfill` lane. One instance serves each lane.
-- `timeout` is the longest time one attempt may run. It includes the time after `ctx.detach()`.
+Helm renders each instance as one Deployment and one KEDA ScaledObject. Its pods pull the lanes in its `lanes` list, with that many slots on each pod. Every worker has a `default` and a `backfill` lane, and one instance serves each lane. `timeout` limits one attempt, including the time after `ctx.detach()`.
 
 ## Step 8: Change a system table
 
@@ -327,19 +308,7 @@ stores/engine/
 | `expand` | Add a table, a column with a default, a TTL or a comment | At startup, before indexing serves |
 | `contract` | Drop a column or a table | One release after the first binary that sees it |
 
-- A step may only change metadata. `build.rs` rejects a step that rewrites data.
-- A change that rewrites data is a new table, filled by a campaign.
-- CI runs every step on each supported ClickHouse version.
-- Every table must be rebuildable from the source, or safe to start empty.
-
-When a step fails, the engine rebuilds the store, at most once for each release:
-
-```plaintext
-for each engine table: create it fresh under a temporary name, in the full current shape
- → EXCHANGE TABLES with the live table → rename the old copy to <table>_migration_v<step>_backup
- → mark every step as applied
- → start one recovery campaign for each planner, in the backfill lanes
-```
+A step may only change metadata, and `build.rs` rejects a step that rewrites data. A change that rewrites data is a new table, filled by a campaign. CI runs every step on each supported ClickHouse version. If a step fails at startup, the engine rebuilds the store and reindexes, at most once for each release. So every table must be rebuildable from the source, or safe to start empty.
 
 ## Step 9: Wire it into the host
 
@@ -357,7 +326,7 @@ Engine::builder()
 | Role | Runs |
 |---|---|
 | `planner` | Two pods: system migrations, triggers, reconcilers, the ledger sink and the admin API |
-| `worker` | The pods of one instance, with the lanes in its `serve` list |
+| `worker` | The pods of one instance, with its `lanes` and `sinks` |
 | `all` | Everything in one process, for local development and tests |
 
 `build()` fails on a duplicate name, a missing resource or a worker without a `default` or `backfill` lane.
@@ -436,11 +405,13 @@ engine:
   instances:
     trigram-build:
       pods: { min: 1, max: 40 }
-      serve: { trigram.build/default: 8 }
+      lanes: { trigram.build/default: 8 }
     trigram-writer:
       pods: { min: 1, max: 5 }
-      sinks: [trigram]
+      sinks: { trigram: 4 }
 ```
+
+A sink is not a worker. Its pods run a pull loop for each partition they own, and call `write` for each batch. `sinks: { trigram: 4 }` lets a pod write four of its partitions at once.
 
 Records travel through object storage, and NATS carries only a pointer to them. `ctx.stage` returns once the records are durable, so the producer's pod can die safely. The writer pods share the partitions, and a lease makes sure only one pod writes each one. That pod opens its writer once, then calls `write` for each batch. It deletes staged records only after `write` succeeds, so `write` must be idempotent. A DuckLake sink works the same way, with one transaction for each batch.
 
@@ -566,8 +537,8 @@ Both config blocks are accepted until V1 is removed.
 | V1 key | V2 equivalent |
 |---|---|
 | `topics` | `engine.lanes` |
-| `concurrency_groups` | The slots in `engine.instances.<name>.serve` |
-| `fetch_concurrency` | The lane slots in `serve` |
+| `concurrency_groups` | The slots in `engine.instances.<name>.lanes` |
+| `fetch_concurrency` | The lane slots in `lanes` |
 | `small_indexing_slots`, `big_indexing_slots` | The pod pools `parse` and `parse_big` |
 | `write_max_concurrent` | The pod pool `insert` |
 | `archive_storage_budget`, `archive_tenant_budget` | `per_key` and `unknown_key` of the cluster pool `gitaly_archives` |

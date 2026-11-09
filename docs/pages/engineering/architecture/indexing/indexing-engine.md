@@ -21,6 +21,15 @@ Here is a simplified view of the engine.
 
 ![The indexing engine in one picture](../../../../assets/adr/023-indexing-engine.svg)
 
+The engine runs four loops. Each loop wakes on something different, and calls one kind of team code.
+
+| Loop | Wakes on | Calls | Runs on |
+|---|---|---|---|
+| Trigger | A schedule, a stream of changes, or the end of another task | A planner | Planner pods |
+| Lane | A task that waits in a lane | A worker, once for each task | Worker pods that pull that lane |
+| Sink (planned) | Records staged for a partition | A sink, once for each batch | Writer pods that own that partition |
+| Reconcile | A timer | A reconciler | Planner pods |
+
 The engine knows nothing about projects, groups or the ontology.
 Those words live only in the planners and workers that teams write.
 
