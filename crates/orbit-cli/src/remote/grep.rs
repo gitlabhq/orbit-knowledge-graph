@@ -540,8 +540,8 @@ async fn inline(client: &OrbitClient, winner: &Winner, home: Option<&str>) -> St
             winner.readable
         );
     }
-    let Ok(body) = super::context::fetch(client.clone(), std::slice::from_ref(&winner.token)).await
-    else {
+    let client = client.clone().without_retries();
+    let Ok(body) = super::context::fetch(client, std::slice::from_ref(&winner.token)).await else {
         return next;
     };
     let text = super::context::tidy(&String::from_utf8_lossy(&body), false);
