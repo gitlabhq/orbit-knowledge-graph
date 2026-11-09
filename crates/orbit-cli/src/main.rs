@@ -647,7 +647,7 @@ enum Commands {
 
         /// Leave a component out (repeatable). By default setup installs hooks, skill, and
         /// agent-plugins, through which each agent loads the Orbit instructions; agent-plugins
-        /// also shows Orbit calls in Claude Code, OpenCode, and Pi. `instructions` removes the
+        /// also shows Orbit calls in Claude Code, OpenCode, and Pi, and in Pi cuts large Bash and `codemode` output (`ORBIT_OUTPUT_GUARD=off` turns that off). `instructions` removes the
         /// instruction block an earlier release wrote to CLAUDE.md or AGENTS.md.
         #[arg(long, value_enum, value_name = "COMPONENT")]
         skip: Vec<commands::setup::Component>,

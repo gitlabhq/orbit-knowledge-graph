@@ -917,6 +917,19 @@ mod tests {
     }
 
     #[test]
+    fn stable_claude_code_gets_no_output_guard() {
+        assert!(claude_feature_paths(&FEATURES, false).is_empty());
+        assert!(claude_hooks(&FEATURES, false).get("hooks").is_none());
+        assert!(!claude_feature_paths(&FEATURES, true).is_empty());
+        assert!(claude_hooks(&FEATURES, true)["hooks"].is_object());
+        let pi = agent_named("pi").unwrap();
+        assert!(
+            pi.ui_files_with(&FEATURES, true, false)
+                .any(|file| file.feature.is_some())
+        );
+    }
+
+    #[test]
     fn the_registry_decides_which_channel_gets_the_pi_extensions() {
         let pi = agent_named("pi").unwrap();
         let installed = |features: &'static Features, nightly: bool| -> Vec<String> {

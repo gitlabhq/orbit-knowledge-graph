@@ -291,7 +291,7 @@ fn ask_install_agent_plugins(ui_agents: &[&str], plugin_instructions: &[&str]) -
     ];
     let chosen = tui::select(
         &format!(
-            "Agent plugins for {} show each Orbit call. Install them?",
+            "Agent plugins for {} show each Orbit call, and Pi also cuts large tool output. Install them?",
             ui_agents.join(" and ")
         ),
         &choices,

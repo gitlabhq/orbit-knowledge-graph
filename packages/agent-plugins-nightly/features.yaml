@@ -1,10 +1,13 @@
 output-guard:
   nightly: true
   stable: true
-  claude:
-    hooks: output-guard/claude-hooks.json
-    files: [output-guard/claude.mjs, output-guard/core.mjs]
   pi:
     files:
       index.js: output-guard/pi.mjs
       core.mjs: output-guard/core.mjs
+output-guard-claude:
+  nightly: true
+  stable: false
+  claude:
+    hooks: output-guard/claude-hooks.json
+    files: [output-guard/claude.mjs, output-guard/core.mjs]
