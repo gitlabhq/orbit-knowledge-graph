@@ -209,7 +209,7 @@ fn node_access<M: RelationalModel>(
         };
         on_node(expr)
             && matches!(expr, Expr::Property { property, .. }
-                if distinct || !count || model.graph().property(*property).nullable)
+                if distinct || !count || model.catalog().graph().property(*property).nullable)
     });
     let ordered = query
         .ordered()

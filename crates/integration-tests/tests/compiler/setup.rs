@@ -1,6 +1,6 @@
 use compiler::{AccessLevel, AuthorizedPath, SecurityContext};
 use ontology::{DataType, Ontology};
-use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
+use query_data_model::{Catalog, ClickHouse, DuckDb};
 use std::sync::Arc;
 
 pub fn test_ctx() -> SecurityContext {
@@ -58,36 +58,36 @@ pub fn embedded_ontology() -> Arc<Ontology> {
     Arc::new(Ontology::load_embedded().expect("Failed to load embedded ontology"))
 }
 
-pub fn embedded_model() -> Arc<ClickHouseDataModel> {
-    Arc::new(ClickHouseDataModel::embedded().expect("embedded packages must load"))
+pub fn embedded_model() -> Arc<Catalog<ClickHouse>> {
+    Arc::new(Catalog::<ClickHouse>::embedded().expect("embedded packages must load"))
 }
 
-pub fn embedded_local_model() -> Arc<DuckDbDataModel> {
-    Arc::new(DuckDbDataModel::embedded().expect("embedded packages must load"))
+pub fn embedded_local_model() -> Arc<Catalog<DuckDb>> {
+    Arc::new(Catalog::<DuckDb>::embedded().expect("embedded packages must load"))
 }
 
-pub fn model(ontology: &Ontology) -> Arc<ClickHouseDataModel> {
+pub fn model(ontology: &Ontology) -> Arc<Catalog<ClickHouse>> {
     Arc::new(
         query_data_model::from_ontology::clickhouse(ontology)
             .expect("fixture ontology must produce a ClickHouse model"),
     )
 }
 
-pub fn local_model(ontology: &Ontology) -> Arc<DuckDbDataModel> {
+pub fn local_model(ontology: &Ontology) -> Arc<Catalog<DuckDb>> {
     Arc::new(
         query_data_model::from_ontology::duckdb(ontology)
             .expect("fixture ontology must produce a DuckDB model"),
     )
 }
 
-pub fn test_model() -> Arc<ClickHouseDataModel> {
+pub fn test_model() -> Arc<Catalog<ClickHouse>> {
     model(&test_ontology())
 }
 
 pub fn compile_pair(
     json: &str,
     orbit_query: &str,
-    data_model: &Arc<ClickHouseDataModel>,
+    data_model: &Arc<Catalog<ClickHouse>>,
     context: &SecurityContext,
 ) -> compiler::Result<compiler::CompiledQueryContext> {
     let json_result = compiler::compile(json, compiler::Frontend::JsonDsl, data_model, context);

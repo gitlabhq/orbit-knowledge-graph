@@ -1,18 +1,18 @@
 use std::sync::LazyLock;
 
-use query_data_model::ClickHouseDataModel;
 use query_data_model::plan::logical::{
     EdgeField, Expr, Literal, LogicalOperation, LogicalPlan, Operand, Predicate,
 };
+use query_data_model::{Catalog, ClickHouse};
 
 use crate::QueryError;
 use crate::surface::{self, Frontend};
 
-static MODEL: LazyLock<ClickHouseDataModel> =
-    LazyLock::new(|| ClickHouseDataModel::embedded().unwrap());
+static MODEL: LazyLock<Catalog<ClickHouse>> =
+    LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
 
 fn normalized(gql: &str) -> Result<LogicalPlan, QueryError> {
-    let model = MODEL.catalog().model();
+    let model = MODEL.model();
     let statement = surface::parse(gql, Frontend::Gql, model.logical().as_admin())?;
     super::normalize(statement.plan, model, &*MODEL)
 }
@@ -40,7 +40,7 @@ fn literals(plan: &LogicalPlan) -> Vec<Literal> {
 }
 
 fn relationships(plan: &LogicalPlan) -> Vec<Vec<String>> {
-    let graph = MODEL.catalog().model().graph();
+    let graph = MODEL.model().graph();
     plan.nodes()
         .filter_map(|node| match plan.operation(node) {
             LogicalOperation::Follow { relationships, .. }

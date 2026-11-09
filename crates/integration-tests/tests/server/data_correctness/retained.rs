@@ -141,7 +141,6 @@ async fn semantic_aggregate_and_nested_cte_codegen_execute() {
     .await;
     let render = |union, argument, distinct| {
         let plan = model
-            .catalog()
             .build(|q| semantic(q, argument, distinct, union))
             .unwrap();
         render(&plan, &*model, Default::default(), Default::default()).render()

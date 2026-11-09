@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ontology::introspection::SchemaResponse;
-use query_data_model::ClickHouseDataModel;
+use query_data_model::{Catalog, ClickHouse};
 
 use crate::auth::Claims;
 use query_engine::compiler::{Frontend, gql::RoutedStatement};
@@ -21,7 +21,7 @@ impl RoutingStage {
     fn route(ctx: &QueryPipelineContext) -> Result<RoutedStatement, PipelineError> {
         let data_model = ctx
             .server_extensions
-            .get::<Arc<ClickHouseDataModel>>()
+            .get::<Arc<Catalog<ClickHouse>>>()
             .ok_or_else(|| PipelineError::custom("query data model missing"))?;
         let claims = ctx.server_extensions.get::<Claims>().ok_or_else(|| {
             PipelineError::Security("Claims not found in server_extensions".into())

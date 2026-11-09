@@ -1,13 +1,13 @@
 use bolero::check;
 use compiler::{Frontend, SecurityContext, compile};
 use orbit_fuzz::generators::FuzzQuery;
-use query_data_model::ClickHouseDataModel;
+use query_data_model::{Catalog, ClickHouse};
 use std::sync::{Arc, OnceLock};
 
-fn data_model() -> &'static Arc<ClickHouseDataModel> {
-    static DATA_MODEL: OnceLock<Arc<ClickHouseDataModel>> = OnceLock::new();
+fn data_model() -> &'static Arc<Catalog<ClickHouse>> {
+    static DATA_MODEL: OnceLock<Arc<Catalog<ClickHouse>>> = OnceLock::new();
     DATA_MODEL
-        .get_or_init(|| Arc::new(ClickHouseDataModel::embedded().expect("load embedded model")))
+        .get_or_init(|| Arc::new(Catalog::<ClickHouse>::embedded().expect("load embedded model")))
 }
 
 fn ctx() -> &'static SecurityContext {

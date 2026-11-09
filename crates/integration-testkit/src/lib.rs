@@ -15,8 +15,8 @@ pub(crate) fn test_stats(json: &str) -> query_engine::compiler::QueryStats {
     use query_engine::compiler::{
         Frontend, QueryStats, logical::Query, passes::normalize, surface,
     };
-    let model = query_data_model::ClickHouseDataModel::embedded().unwrap();
-    let catalog = model.catalog().model().logical().as_admin();
+    let model = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap();
+    let catalog = model.model().logical().as_admin();
     let statement = surface::parse(json, Frontend::JsonDsl, catalog)
         .unwrap_or_else(|error| panic!("{json}: {error}"));
     let plan = normalize::normalize(statement.plan, catalog.model(), &model).unwrap();
@@ -82,13 +82,15 @@ fn load_model(
 
 pub fn versioned_data_model(
     fragments: Vec<query_data_model::spec::Fragment>,
-) -> std::sync::Arc<query_data_model::ClickHouseDataModel> {
+) -> std::sync::Arc<query_data_model::Catalog<query_data_model::ClickHouse>> {
     let fragments =
         query_data_model::implementations::clickhouse::versioned(fragments, &TABLE_PREFIX)
             .expect("test tables should take the schema prefix");
     std::sync::Arc::new(
-        query_data_model::ClickHouseDataModel::from_model(&load_model(&fragments))
-            .expect("test model should bind its ClickHouse connection"),
+        query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&load_model(
+            &fragments,
+        ))
+        .expect("test model should bind its ClickHouse connection"),
     )
 }
 
@@ -109,14 +111,18 @@ pub fn embedded_schema() -> orbit_migrations::schema::Schema {
     .expect("embedded packages should resolve a ClickHouse schema")
 }
 
-pub fn load_data_model() -> std::sync::Arc<query_data_model::ClickHouseDataModel> {
+pub fn load_data_model() -> std::sync::Arc<query_data_model::Catalog<query_data_model::ClickHouse>>
+{
     versioned_data_model(unprefixed_fragments())
 }
 
-pub fn load_local_data_model() -> std::sync::Arc<query_data_model::DuckDbDataModel> {
+pub fn load_local_data_model() -> std::sync::Arc<query_data_model::Catalog<query_data_model::DuckDb>>
+{
     std::sync::Arc::new(
-        query_data_model::DuckDbDataModel::from_model(&load_model(&unprefixed_fragments()))
-            .expect("test model should bind its DuckDB connection"),
+        query_data_model::Catalog::<query_data_model::DuckDb>::from_model(&load_model(
+            &unprefixed_fragments(),
+        ))
+        .expect("test model should bind its DuckDB connection"),
     )
 }
 

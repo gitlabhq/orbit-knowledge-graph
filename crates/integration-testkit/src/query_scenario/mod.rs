@@ -324,7 +324,7 @@ pub(super) fn step_label(name: &str, index: usize, steps: usize) -> String {
 async fn run_frontend(
     (ctx, data_model, ontology): (
         &TestContext,
-        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
         &Arc<ontology::Ontology>,
     ),
     (frontend, frontend_key): (Frontend, &str),
@@ -416,7 +416,7 @@ async fn assert_indexes_used(
     (raw, frontend, data_model, security): (
         &str,
         Frontend,
-        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
         &SecurityContext,
     ),
     compiled: &CompiledQueryContext,
@@ -530,7 +530,7 @@ async fn run_pages(
     frontend: Frontend,
     base_query: &str,
     (data_model, ontology): (
-        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
         &Arc<ontology::Ontology>,
     ),
     security: &SecurityContext,
@@ -591,7 +591,7 @@ async fn compile_like_server(
     query: &str,
     frontend: Frontend,
     (data_model, ontology): (
-        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
         &Arc<ontology::Ontology>,
     ),
     security: &SecurityContext,
@@ -625,7 +625,7 @@ async fn execute_output(
     frontend: Frontend,
     compiled: &Arc<CompiledQueryContext>,
     (data_model, ontology): (
-        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
         &Arc<ontology::Ontology>,
     ),
     security: &SecurityContext,

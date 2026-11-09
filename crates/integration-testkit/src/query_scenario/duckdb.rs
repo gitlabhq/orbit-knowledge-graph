@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use duckdb_client::DuckDbClient;
 use orbit_server::redaction::QueryResult;
-use query_data_model::DuckDbDataModel;
+use query_data_model::{Catalog, DuckDb};
 use query_engine::compiler::{CompiledQueryContext, Frontend, compile_local, generate_local_ddl};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::shared::PipelineOutput;
@@ -54,7 +54,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
 
 fn run_step(
     database: &DuckDbClient,
-    data_model: &Arc<DuckDbDataModel>,
+    data_model: &Arc<Catalog<DuckDb>>,
     (step, skip): (&QueryStep, &BTreeMap<String, String>),
     name: &str,
 ) {

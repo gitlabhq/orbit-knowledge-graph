@@ -142,7 +142,7 @@ pub(super) fn build_relations<M>(
 where
     M: RelationalModel,
 {
-    let graph = model.graph();
+    let graph = model.catalog().graph();
     let leaves = query.leaves();
     query
         .steps()
@@ -271,7 +271,7 @@ where
                 }
                 .to_string(),
                 Logical::Attribute { attribute, .. } => {
-                    model.graph().attribute(attribute).name.clone()
+                    model.catalog().graph().attribute(attribute).name.clone()
                 }
                 _ => return None,
             };

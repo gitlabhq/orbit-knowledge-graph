@@ -21,7 +21,7 @@ use crate::spec::{
     RedactionSpec, RelationshipSpec, ScopeSpec, ScopeVariants, ServiceFragment, SourceSpec,
     StorageFragment, encode_options, format_variant,
 };
-use crate::{ClickHouseDataModel, DataModelError, DuckDbDataModel, Model, Packages};
+use crate::{Catalog, ClickHouse, DataModelError, DuckDb, Model, Packages};
 
 const PLATFORM: &str = "gitlab";
 
@@ -29,12 +29,12 @@ pub fn model(ontology: &Ontology) -> Result<Arc<Model>, DataModelError> {
     Model::load(&from_ontology(ontology)?).map(Arc::new)
 }
 
-pub fn clickhouse(ontology: &Ontology) -> Result<ClickHouseDataModel, DataModelError> {
-    ClickHouseDataModel::from_model(&model(ontology)?)
+pub fn clickhouse(ontology: &Ontology) -> Result<Catalog<ClickHouse>, DataModelError> {
+    Catalog::<ClickHouse>::from_model(&model(ontology)?)
 }
 
-pub fn duckdb(ontology: &Ontology) -> Result<DuckDbDataModel, DataModelError> {
-    DuckDbDataModel::from_model(&model(ontology)?)
+pub fn duckdb(ontology: &Ontology) -> Result<Catalog<DuckDb>, DataModelError> {
+    Catalog::<DuckDb>::from_model(&model(ontology)?)
 }
 
 pub fn schema(ontology: &Ontology) -> Result<Schema, DataModelError> {

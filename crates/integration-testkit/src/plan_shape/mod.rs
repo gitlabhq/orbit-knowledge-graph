@@ -17,7 +17,7 @@ use compiler::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::implementations::relational::plan::RelationalPlan;
 use query_data_model::plan::logical::{Columns, LogicalCatalog, LogicalPlan, Projection};
-use query_data_model::{ClickHouseDataModel, DuckDbDataModel, Model};
+use query_data_model::{Catalog, ClickHouse, DuckDb, Model};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -454,8 +454,8 @@ pub fn run_dir(directory: &Path) {
 }
 
 fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
-    let remote = ClickHouseDataModel::embedded().unwrap();
-    let local = DuckDbDataModel::embedded().unwrap();
+    let remote = Catalog::<ClickHouse>::embedded().unwrap();
+    let local = Catalog::<DuckDb>::embedded().unwrap();
     let mut paths = Vec::new();
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
@@ -483,8 +483,8 @@ fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
         let overlay = scenario.ontology_overlay.as_ref().map(|name| {
             let model = Arc::new(Model::load(&crate::overlay_fragments(name)).unwrap());
             (
-                ClickHouseDataModel::from_model(&model).unwrap(),
-                DuckDbDataModel::from_model(&model).unwrap(),
+                Catalog::<ClickHouse>::from_model(&model).unwrap(),
+                Catalog::<DuckDb>::from_model(&model).unwrap(),
             )
         });
         let (remote, local) = overlay
@@ -871,7 +871,7 @@ reject:
 
 #[test]
 fn hydration_planning_selects_paths_before_sql_rendering() {
-    let model = ClickHouseDataModel::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded().unwrap();
     for (count, dynamic, budget, set, expected_paths) in [
         (256, true, None, false, 256),
         (257, true, None, true, 257),

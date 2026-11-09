@@ -3,13 +3,13 @@ use std::sync::LazyLock;
 use bolero::check;
 use compiler::Frontend;
 use orbit_fuzz::grammar::{Bytes, Grammar};
-use query_data_model::ClickHouseDataModel;
+use query_data_model::{Catalog, ClickHouse};
 
-static MODEL: LazyLock<ClickHouseDataModel> =
-    LazyLock::new(|| ClickHouseDataModel::embedded().expect("embedded packages load"));
+static MODEL: LazyLock<Catalog<ClickHouse>> =
+    LazyLock::new(|| Catalog::<ClickHouse>::embedded().expect("embedded packages load"));
 
 fn main() {
-    let catalog = MODEL.catalog().model().logical();
+    let catalog = MODEL.model().logical();
     check!().for_each(|input: &[u8]| {
         let Some(text) = Grammar::orbit().derive("Query", &mut Bytes(input)) else {
             return;

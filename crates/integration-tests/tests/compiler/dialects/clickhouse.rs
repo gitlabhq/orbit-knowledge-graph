@@ -11,7 +11,7 @@ use ontology::introspection::{
 
 fn gql_statement(query: &str) -> compiler::Result<query_data_model::surface::Statement> {
     let model = embedded_model();
-    let catalog = model.catalog().model().logical().as_admin();
+    let catalog = model.model().logical().as_admin();
     compiler::surface::parse(query, Frontend::Gql, catalog)
 }
 
@@ -1094,8 +1094,7 @@ fn orbit_query_id_list_and_range_promote_independently() {
                     format!("MATCH (u:User) WHERE {conditions} AND u.state = 'active' RETURN u");
                 let statement = gql_statement(&query).unwrap();
                 let embedded = embedded_model();
-                let logical =
-                    compiler::logical::Query::new(&statement.plan, embedded.catalog().model());
+                let logical = compiler::logical::Query::new(&statement.plan, embedded.model());
                 let facts = compiler::logical::facts::facts(logical);
                 let anchor = &compiler::logical::facts::anchors(logical, &facts)[0];
                 assert_eq!(anchor.pinned, [1, 2, 3, 5], "{query}");

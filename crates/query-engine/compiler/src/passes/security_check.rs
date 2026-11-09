@@ -131,7 +131,7 @@ mod tests {
 
     use ontology::constants::EDGE_TABLE;
     use orbit_utils::query_types::SqlType;
-    use query_data_model::ClickHouseDataModel;
+    use query_data_model::Catalog;
     use query_data_model::implementations::relational::plan::{
         AggregateFunction, JoinKind, Measure, Order, ReadMode, Relation, RelationalBuilder,
         RelationalError, UnaryOp,
@@ -144,39 +144,40 @@ mod tests {
     type Predicate = fn(&Relation) -> Expr;
     type Builder<'q, 'c> = &'q mut RelationalBuilder<'c, ClickHouse>;
 
-    fn model() -> &'static ClickHouseDataModel {
-        static MODEL: LazyLock<ClickHouseDataModel> =
-            LazyLock::new(|| query_data_model::ClickHouseDataModel::embedded().unwrap());
+    fn model() -> &'static Catalog<ClickHouse> {
+        static MODEL: LazyLock<Catalog<ClickHouse>> = LazyLock::new(|| {
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap()
+        });
         &MODEL
     }
 
-    fn derive_model(ontology: ontology::Ontology) -> ClickHouseDataModel {
+    fn derive_model(ontology: ontology::Ontology) -> Catalog<ClickHouse> {
         query_data_model::from_ontology::clickhouse(&ontology).unwrap()
     }
 
     fn build(
-        model: &ClickHouseDataModel,
+        model: &Catalog<ClickHouse>,
         construct: impl FnOnce(Builder<'_, '_>) -> Built<Relation>,
     ) -> ClickHousePlan {
-        model.catalog().build(construct).unwrap()
+        model.build(construct).unwrap()
     }
 
     fn secured(
         plan: ClickHousePlan,
         context: &SecurityContext,
-        model: &ClickHouseDataModel,
+        model: &Catalog<ClickHouse>,
     ) -> Result<ClickHousePlan> {
-        let plan = crate::passes::security::apply_security_context(plan, model.catalog(), context)?;
-        verify(&plan, model.catalog(), context)?;
+        let plan = crate::passes::security::apply_security_context(plan, model, context)?;
+        verify(&plan, model, context)?;
         Ok(plan)
     }
 
     fn check(
         plan: &ClickHousePlan,
         context: &SecurityContext,
-        model: &ClickHouseDataModel,
+        model: &Catalog<ClickHouse>,
     ) -> Result<()> {
-        verify(plan, model.catalog(), context)
+        verify(plan, model, context)
     }
 
     fn scan(q: Builder<'_, '_>, table: &str, alias: &str) -> Built<Relation> {
@@ -466,10 +467,7 @@ mod tests {
     #[test]
     fn rejects_unknown_graph_tables() {
         for table in ["gl_unknown", "v42_gl_unknown"] {
-            let error = model()
-                .catalog()
-                .build(|q| scan(q, table, "unknown"))
-                .unwrap_err();
+            let error = model().build(|q| scan(q, table, "unknown")).unwrap_err();
             assert!(error.to_string().contains(table));
         }
     }
@@ -659,7 +657,7 @@ mod tests {
             assert!(check(&plan, &context, model()).is_err(), "{position}");
             let plan = secured(build(model(), |q| nested(q, position)), &context, model())
                 .unwrap_or_else(|error| panic!("{position}: {error}"));
-            let sql = model().catalog().render(&plan).sql;
+            let sql = model().render(&plan).sql;
             assert_eq!(sql.matches("startsWith(").count(), 1, "{position}: {sql}");
             assert!(
                 sql.contains("startsWith(protected.traversal_path, "),

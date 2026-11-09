@@ -428,7 +428,7 @@ async fn run_pipeline(
     json: &str,
     frontend: Frontend,
     (data_model, ontology): (
-        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
         &Arc<ontology::Ontology>,
     ),
     claims: &Claims,

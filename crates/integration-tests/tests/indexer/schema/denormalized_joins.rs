@@ -30,7 +30,6 @@ async fn denormalized_tables_match_their_source_join() {
             join.table
         );
         let binding = model
-            .catalog()
             .joins()
             .iter()
             .find(|binding| binding.table == join.table)

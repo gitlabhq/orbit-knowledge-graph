@@ -23,7 +23,7 @@ impl PipelineStage for CompilationStage {
 
         let compiled = ctx
             .server_extensions
-            .get::<Arc<query_data_model::ClickHouseDataModel>>()
+            .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
             .ok_or_else(|| {
                 compiler::QueryError::PipelineInvariant("no data model in the pipeline".into())
             })

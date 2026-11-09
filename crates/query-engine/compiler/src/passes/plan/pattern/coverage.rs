@@ -143,7 +143,7 @@ impl<M: RelationalModel> Pattern<'_, M> {
         let entity = node
             .entity
             .as_deref()
-            .and_then(|entity| self.model.graph().entity_id(entity));
+            .and_then(|entity| self.model.catalog().graph().entity_id(entity));
         let columns = node
             .table
             .as_deref()

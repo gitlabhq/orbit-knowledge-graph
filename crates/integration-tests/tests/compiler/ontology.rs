@@ -586,14 +586,7 @@ fn hydration_arm_in(
     paths: Vec<TraversalPath>,
 ) -> HydrationArm {
     let columns: Vec<String> = columns.iter().map(|column| column.to_string()).collect();
-    HydrationArm::new(
-        embedded_model().catalog().model(),
-        entity,
-        ids,
-        &columns,
-        paths,
-    )
-    .unwrap()
+    HydrationArm::new(embedded_model().model(), entity, ids, &columns, paths).unwrap()
 }
 
 fn compile_arms(arms: Vec<HydrationArm>, options: HydrationCompileOptions) -> ParameterizedQuery {

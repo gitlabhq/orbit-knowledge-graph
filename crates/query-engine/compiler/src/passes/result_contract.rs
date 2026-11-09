@@ -358,9 +358,10 @@ pub fn apply<M: RelationalModel>(
         && let Some(center) = anchors.first()
         && let [id] = center.pinned.as_slice()
     {
-        let entity = model.graph().entity(center.binding.entity);
+        let entity = model.catalog().graph().entity(center.binding.entity);
         ctx.neighbors_center = Some((entity.name.clone(), *id));
         ctx.labels = model
+            .catalog()
             .graph()
             .entities()
             .map(|entity| (entity.name.clone(), entity.label.clone()))
@@ -374,7 +375,10 @@ pub fn apply<M: RelationalModel>(
     };
     for binding in &bindings {
         if selectable_nodes.contains(binding.name) {
-            ctx.add_node(binding.name, &model.graph().entity(binding.entity).name);
+            ctx.add_node(
+                binding.name,
+                &model.catalog().graph().entity(binding.entity).name,
+            );
         }
     }
     let contract = return_columns(kind, &bindings, &selectable_nodes, &metadata.nodes, model)?;
@@ -446,7 +450,7 @@ fn return_columns(
             continue;
         }
         let entity_id = node.entity;
-        let entity = &model.graph().entity(entity_id).name;
+        let entity = &model.catalog().graph().entity(entity_id).name;
         let binding = bindings.get(node.name).ok_or_else(|| {
             QueryError::PipelineInvariant(format!("node '{}' has no lowered binding", node.name))
         })?;

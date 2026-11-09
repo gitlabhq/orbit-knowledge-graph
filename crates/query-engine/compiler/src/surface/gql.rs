@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use ontology::introspection::{IntrospectionScope, SchemaResponse, build_compact_schema_response};
-use query_data_model::ClickHouseDataModel;
 use query_data_model::surface::Statement;
 use query_data_model::surface::gql::{self, Routed};
+use query_data_model::{Catalog, ClickHouse};
 
 use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
@@ -32,7 +32,7 @@ pub enum PreparedStatement {
 pub fn prepare(
     raw: &str,
     ontology: &Ontology,
-    data_model: &Arc<ClickHouseDataModel>,
+    data_model: &Arc<Catalog<ClickHouse>>,
     security_context: &SecurityContext,
     scope: IntrospectionScope,
 ) -> Result<PreparedStatement> {
@@ -46,11 +46,11 @@ pub fn prepare(
 pub fn route(
     raw: &str,
     ontology: &Ontology,
-    data_model: &ClickHouseDataModel,
+    data_model: &Catalog<ClickHouse>,
     admin: bool,
     scope: IntrospectionScope,
 ) -> Result<RoutedStatement> {
-    let catalog = super::catalog(data_model.catalog(), admin);
+    let catalog = super::catalog(data_model, admin);
     match gql::route(raw, catalog)
         .map_err(QueryError::from)
         .count_err()?
@@ -64,7 +64,7 @@ pub fn route(
 
 pub fn compile_query(
     query: ParsedQuery,
-    data_model: &Arc<ClickHouseDataModel>,
+    data_model: &Arc<Catalog<ClickHouse>>,
     security_context: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let mut ctx = config::ClickhouseGqlCtx::new(security_context.clone(), Arc::clone(data_model));

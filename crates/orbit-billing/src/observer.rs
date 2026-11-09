@@ -334,7 +334,9 @@ mod tests {
 
     #[test]
     fn metadata_is_the_same_for_every_compiled_query_shape() {
-        let model = Arc::new(query_data_model::ClickHouseDataModel::embedded().unwrap());
+        let model = Arc::new(
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+        );
         let ctx = compiler::SecurityContext::new(1, vec!["1/9970/".into()]).unwrap();
         let queries = [
             (

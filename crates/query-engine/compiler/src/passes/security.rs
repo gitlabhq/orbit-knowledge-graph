@@ -188,19 +188,19 @@ fn balanced(op: BinaryOp, mut exprs: Vec<Expr>) -> Option<Expr> {
 mod tests {
     use std::sync::LazyLock;
 
-    use query_data_model::ClickHouseDataModel;
+    use query_data_model::Catalog;
     use query_data_model::implementations::relational::plan::{JoinKind, ReadMode};
 
     use super::*;
 
-    fn model() -> &'static ClickHouseDataModel {
-        static MODEL: LazyLock<ClickHouseDataModel> =
-            LazyLock::new(|| ClickHouseDataModel::embedded().unwrap());
+    fn model() -> &'static Catalog<ClickHouse> {
+        static MODEL: LazyLock<Catalog<ClickHouse>> =
+            LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
         &MODEL
     }
 
     fn scans(tables: &[(&str, &str)], kind: Option<&str>) -> ClickHousePlan {
-        let catalog = model().catalog();
+        let catalog = model();
         catalog
             .build(|q| {
                 let mut rows = None;
@@ -236,8 +236,8 @@ mod tests {
     fn secured(plan: ClickHousePlan, paths: &[&str]) -> String {
         let paths = paths.iter().map(|path| path.to_string()).collect();
         let ctx = SecurityContext::new(1, paths).unwrap();
-        let plan = apply_security_context(plan, model().catalog(), &ctx).unwrap();
-        model().catalog().render(&plan).sql
+        let plan = apply_security_context(plan, model(), &ctx).unwrap();
+        model().render(&plan).sql
     }
 
     #[test]
@@ -245,7 +245,7 @@ mod tests {
         let mut ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         ctx.traversal_paths.clear();
         let plan = scans(&[("gl_project", "p")], None);
-        let error = apply_security_context(plan, model().catalog(), &ctx);
+        let error = apply_security_context(plan, model(), &ctx);
         assert!(matches!(error, Err(QueryError::Security(_))));
     }
 

@@ -17,14 +17,14 @@ use orbit_server::pipeline::{HydrationStage, RedactionStage};
 
 pub struct ProfilerPipelineService {
     ontology: Arc<Ontology>,
-    data_model: Arc<query_data_model::ClickHouseDataModel>,
+    data_model: Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     client: Arc<ArrowClickHouseClient>,
 }
 
 impl ProfilerPipelineService {
     pub fn new(
         ontology: Arc<Ontology>,
-        data_model: Arc<query_data_model::ClickHouseDataModel>,
+        data_model: Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
         client: Arc<ArrowClickHouseClient>,
     ) -> Self {
         Self {

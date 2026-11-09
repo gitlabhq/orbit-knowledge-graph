@@ -149,43 +149,43 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
     pipelines {
         clickhouse_json_dsl {
-            model: query_data_model::ClickHouseDataModel
+            model: query_data_model::Catalog<query_data_model::ClickHouse>
             env: [security_ctx]
             state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
             phases: [json_dsl_parse, normalize, restrict, admit, tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
         clickhouse_gql {
-            model: query_data_model::ClickHouseDataModel
+            model: query_data_model::Catalog<query_data_model::ClickHouse>
             env: [security_ctx]
             state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
             phases: [gql_parse, normalize, restrict, admit, tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
         ch_hydration {
-            model: query_data_model::ClickHouseDataModel
+            model: query_data_model::Catalog<query_data_model::ClickHouse>
             env: [security_ctx]
             state: [tp_bounds, hydration, plan_metadata, query_config, relational, hydration_query]
             phases: [restrict_hydration, plan, settings, security, security_check, render_hydration]
         }
         duckdb_json_dsl {
-            model: query_data_model::DuckDbDataModel
+            model: query_data_model::Catalog<query_data_model::DuckDb>
             env: []
             state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
             phases: [json_dsl_parse_local, normalize, admit_local, plan, result_contract, paginate, materialize, codegen]
         }
         duckdb_gql {
-            model: query_data_model::DuckDbDataModel
+            model: query_data_model::Catalog<query_data_model::DuckDb>
             env: []
             state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
             phases: [gql_parse_local, normalize, admit_local, plan, result_contract, paginate, materialize, codegen]
         }
         check_gql {
-            model: query_data_model::ClickHouseDataModel
+            model: query_data_model::Catalog<query_data_model::ClickHouse>
             env: []
             state: [raw, statement]
             phases: [gql_parse_trusted, normalize, admit]
         }
         check_json_dsl {
-            model: query_data_model::ClickHouseDataModel
+            model: query_data_model::Catalog<query_data_model::ClickHouse>
             env: []
             state: [raw, statement]
             phases: [json_dsl_parse_trusted, normalize, admit]
@@ -331,7 +331,7 @@ fn result_contract(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn security(
-    ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
+    ctx: &mut impl CompilerCtx<Model = query_data_model::Catalog<query_data_model::ClickHouse>>,
 ) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
     let model = ctx.data_model();
@@ -352,7 +352,7 @@ fn paginate(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn security_check(
-    ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
+    ctx: &mut impl CompilerCtx<Model = query_data_model::Catalog<query_data_model::ClickHouse>>,
 ) -> Result<()> {
     let plan = require(ctx.relational().as_ref(), "relational")?;
     let model = ctx.data_model();
@@ -360,7 +360,7 @@ fn security_check(
 }
 
 fn hydrate_plan(
-    ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
+    ctx: &mut impl CompilerCtx<Model = query_data_model::Catalog<query_data_model::ClickHouse>>,
 ) -> Result<()> {
     let model = ctx.data_model();
     let statement = require(ctx.statement().as_ref(), "statement")?;
@@ -376,7 +376,7 @@ fn hydrate_plan(
 }
 
 fn settings(
-    ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
+    ctx: &mut impl CompilerCtx<Model = query_data_model::Catalog<query_data_model::ClickHouse>>,
 ) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
     let (query_type, negation) = match ctx.hydration() {

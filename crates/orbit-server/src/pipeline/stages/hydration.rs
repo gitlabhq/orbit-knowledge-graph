@@ -46,7 +46,7 @@ impl HydrationStage {
         }
         let data_model = ctx
             .server_extensions
-            .get::<Arc<query_data_model::ClickHouseDataModel>>()
+            .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
             .ok_or_else(|| PipelineError::custom("query data model missing"))?;
         let scope: Vec<_> = ctx
             .security_context()?
@@ -70,14 +70,13 @@ impl HydrationStage {
                 ids.truncate(MAX_DYNAMIC_HYDRATION_RESULTS);
             }
             id_columns.insert(entity_type.clone(), auth.auth_id_column.clone());
-            let catalog = data_model.catalog();
-            let scoped = catalog
+            let scoped = data_model
                 .graph()
                 .entity_id(&entity_type)
-                .is_some_and(|entity| catalog.has_path_column(entity));
+                .is_some_and(|entity| data_model.has_path_column(entity));
             let paths = if scoped { scope.clone() } else { Vec::new() };
             arms.push(hydration_helpers::hydration_arm(
-                data_model.catalog().model(),
+                data_model.model(),
                 &entity_type,
                 &ids,
                 std::slice::from_ref(&auth.auth_id_column),
@@ -153,7 +152,7 @@ impl HydrationStage {
 
         let data_model = ctx
             .server_extensions
-            .get::<Arc<query_data_model::ClickHouseDataModel>>()
+            .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
             .ok_or_else(|| PipelineError::custom("query data model missing"))?;
         let compiled = compile_hydration(
             HydrationRequest { arms, options },
@@ -250,15 +249,12 @@ impl PipelineStage for HydrationStage {
             HydrationPlan::Static(templates) => {
                 let data_model = ctx
                     .server_extensions
-                    .get::<Arc<query_data_model::ClickHouseDataModel>>()
+                    .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
                     .ok_or_else(|| PipelineError::custom("query data model missing"))
                     .inspect_err(|e| obs.record_error(e))?;
-                let arms = hydration_helpers::hydrate_static(
-                    data_model.catalog().model(),
-                    templates,
-                    &query_result,
-                )
-                .inspect_err(|e| obs.record_error(e))?;
+                let arms =
+                    hydration_helpers::hydrate_static(data_model.model(), templates, &query_result)
+                        .inspect_err(|e| obs.record_error(e))?;
                 let (property_map, debug, executions) =
                     Self::execute_hydration(ctx, arms, "static")
                         .await
@@ -319,11 +315,11 @@ impl PipelineStage for HydrationStage {
                         hydration_helpers::collect_dynamic_ref_paths(&query_result, &static_nodes);
                     let data_model = ctx
                         .server_extensions
-                        .get::<Arc<query_data_model::ClickHouseDataModel>>()
+                        .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
                         .ok_or_else(|| PipelineError::custom("query data model missing"))
                         .inspect_err(|e| obs.record_error(e))?;
                     let arms = hydration_helpers::hydrate_dynamic(
-                        data_model.catalog().model(),
+                        data_model.model(),
                         entity_specs,
                         &refs,
                         &scope,

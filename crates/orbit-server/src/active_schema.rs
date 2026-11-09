@@ -15,7 +15,7 @@ use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
 use orbit_server_config::AppConfig;
-use query_data_model::ClickHouseDataModel;
+use query_data_model::{Catalog, ClickHouse};
 use query_engine::compiler::{Frontend, check};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -176,7 +176,7 @@ impl ActiveSchema {
 pub struct SchemaSnapshot {
     pub migration_version: u32,
     pub ontology: Arc<Ontology>,
-    pub data_model: Arc<ClickHouseDataModel>,
+    pub data_model: Arc<Catalog<ClickHouse>>,
     pub named_queries: Arc<NamedQueries>,
     pub relationship_patterns: String,
 }
@@ -185,7 +185,7 @@ impl SchemaSnapshot {
     fn new(
         migration_version: u32,
         ontology: Arc<Ontology>,
-        data_model: Arc<ClickHouseDataModel>,
+        data_model: Arc<Catalog<ClickHouse>>,
     ) -> anyhow::Result<Self> {
         let mut named_queries = NamedQueries::load_embedded()?;
         named_queries.retain(|query| match fits_data_model(query, &data_model) {
@@ -239,11 +239,11 @@ impl SnapshotLoader {
         };
         let prefix = table_prefix(version);
         let ontology = Arc::new(release.load_ontology()?.with_schema_version_prefix(&prefix));
-        let data_model = Arc::new(ClickHouseDataModel::versioned(
+        let data_model = Arc::new(Catalog::<ClickHouse>::versioned(
             &release.packages(),
             &prefix,
         )?);
-        let physical = data_model.catalog().schema()?.clone();
+        let physical = data_model.schema()?.clone();
         let expected_tables: Vec<String> = GraphSchema::new(physical, false)
             .table_names()
             .into_iter()
@@ -258,7 +258,7 @@ impl SnapshotLoader {
 
 fn fits_data_model(
     query: &NamedQuery,
-    data_model: &Arc<ClickHouseDataModel>,
+    data_model: &Arc<Catalog<ClickHouse>>,
 ) -> Result<(), String> {
     let json = query
         .render_example_language(Language::Json)

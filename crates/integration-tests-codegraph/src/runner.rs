@@ -11,7 +11,7 @@ use code_graph::v2::{
 };
 use duckdb_client::DuckDbClient;
 
-use query_data_model::DuckDbDataModel;
+use query_data_model::{Catalog, DuckDb};
 
 use super::validator::{load_suite, report, run_suite, write_suite_files};
 
@@ -179,7 +179,7 @@ pub fn run_yaml_suite(yaml: &str) {
     pipeline_ctx.tracer.dump(&suite.name);
 
     let db = client.lock().unwrap();
-    let data_model = Arc::new(DuckDbDataModel::embedded().expect("embedded model"));
+    let data_model = Arc::new(Catalog::<DuckDb>::embedded().expect("embedded model"));
     let failures = run_suite(&suite, &db, &ontology, &data_model, false);
     drop(db);
     report(&suite, &failures);

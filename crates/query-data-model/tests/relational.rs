@@ -5,15 +5,15 @@ use query_data_model::implementations::relational::plan::{
     RelationalError, RelationalPlan, Selection, UnaryOp,
 };
 use query_data_model::plan::tracking::{Declare, Rejected};
-use query_data_model::{Catalog, ClickHouseDataModel, DuckDbDataModel};
+use query_data_model::{Catalog, DuckDb};
 use serde_json::json;
 
-fn clickhouse() -> ClickHouseDataModel {
-    ClickHouseDataModel::embedded().unwrap()
+fn clickhouse() -> Catalog<ClickHouse> {
+    Catalog::<ClickHouse>::embedded().unwrap()
 }
 
-fn duckdb() -> DuckDbDataModel {
-    DuckDbDataModel::embedded().unwrap()
+fn duckdb() -> Catalog<DuckDb> {
+    Catalog::<DuckDb>::embedded().unwrap()
 }
 
 fn eq(left: Expr, right: Expr) -> Expr {
@@ -34,7 +34,7 @@ fn text(value: &str) -> Expr {
 #[test]
 fn a_clickhouse_plan_renders_clauses_in_sql_order_with_bound_parameters() {
     let model = clickhouse();
-    let catalog = model.catalog();
+    let catalog = &model;
     let users = catalog.table("gl_user").unwrap();
     let plan = catalog
         .build(|q| {
@@ -66,7 +66,7 @@ fn a_clickhouse_plan_renders_clauses_in_sql_order_with_bound_parameters() {
 #[test]
 fn shared_bodies_membership_and_latest_rows_render_for_clickhouse() {
     let model = clickhouse();
-    let catalog = model.catalog();
+    let catalog = &model;
     let users = catalog.table("gl_user").unwrap();
     let edges = catalog.table("gl_edge").unwrap();
     let plan = catalog
@@ -103,7 +103,7 @@ fn shared_bodies_membership_and_latest_rows_render_for_clickhouse() {
 #[test]
 fn a_duckdb_plan_uses_positional_parameters_and_native_functions() {
     let model = duckdb();
-    let catalog = model.catalog();
+    let catalog = &model;
     let files = catalog.table("gl_file").unwrap();
     let edges = catalog.table("gl_edge").unwrap();
     let plan = catalog
@@ -144,7 +144,7 @@ fn a_duckdb_plan_uses_positional_parameters_and_native_functions() {
 #[test]
 fn backend_capabilities_and_declarations_are_checked_at_construction() {
     let model = duckdb();
-    let catalog = model.catalog();
+    let catalog = &model;
     assert_eq!(
         catalog.table("gl_user").unwrap_err(),
         RelationalError::UnknownTable("gl_user".into())
@@ -203,7 +203,7 @@ fn handles(catalog: &Catalog<ClickHouse>) -> RelationalPlan<ClickHouse> {
 #[test]
 fn a_relational_rewrite_keeps_unchanged_plans_and_guards_every_scan() {
     let model = clickhouse();
-    let catalog = model.catalog();
+    let catalog = &model;
     let original = catalog.render(&handles(catalog)).sql;
     let same = catalog
         .rewrite(handles(catalog), |_, rows| Ok(rows))
@@ -236,7 +236,7 @@ fn a_relational_rewrite_keeps_unchanged_plans_and_guards_every_scan() {
 #[test]
 fn relational_rewrites_reconnect_changed_outputs() {
     let model = clickhouse();
-    let catalog = model.catalog();
+    let catalog = &model;
     let users = catalog.table("gl_user").unwrap();
     let build = || {
         catalog
@@ -282,7 +282,7 @@ fn relational_rewrites_reconnect_changed_outputs() {
 #[test]
 fn relational_rewrites_expose_outputs_their_result_selects() {
     let model = clickhouse();
-    let catalog = model.catalog();
+    let catalog = &model;
     let users = catalog.table("gl_user").unwrap();
     let build = || {
         catalog
@@ -334,7 +334,7 @@ fn relational_rewrites_expose_outputs_their_result_selects() {
 #[test]
 fn a_detached_operation_reattaches_onto_rewritten_inputs() {
     let model = clickhouse();
-    let catalog = model.catalog();
+    let catalog = &model;
     let users = catalog.table("gl_user").unwrap();
     let build = || {
         catalog

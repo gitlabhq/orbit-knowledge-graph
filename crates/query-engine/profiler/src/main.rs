@@ -11,7 +11,7 @@ use clap::Parser;
 use clickhouse_client::ArrowClickHouseClient;
 use compiler::SecurityContext;
 use ontology::Ontology;
-use query_data_model::{ClickHouseDataModel, Packages};
+use query_data_model::{Catalog, ClickHouse, Packages};
 use tracing::Instrument;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -264,7 +264,7 @@ fn frontend(cli: &Cli) -> compiler::Frontend {
 fn compile_one(
     query_json: &str,
     frontend: compiler::Frontend,
-    data_model: &Arc<ClickHouseDataModel>,
+    data_model: &Arc<Catalog<ClickHouse>>,
     security_ctx: &SecurityContext,
 ) -> Result<compiler::CompiledQueryContext> {
     compiler::compile(query_json, frontend, data_model, security_ctx)
@@ -295,7 +295,7 @@ fn format_hydration(plan: &compiler::HydrationPlan) -> String {
 
 fn run_compile_only(
     query_json: &str,
-    data_model: &Arc<ClickHouseDataModel>,
+    data_model: &Arc<Catalog<ClickHouse>>,
     security_ctx: &SecurityContext,
     show: &CompileShow,
     cli: &Cli,
@@ -447,7 +447,7 @@ async fn main() -> Result<()> {
             .with_schema_version_prefix(&prefix),
     );
     let packages = Packages::read_dir(&cli.model).context("failed to read model packages")?;
-    let data_model = Arc::new(ClickHouseDataModel::versioned(&packages, &prefix)?);
+    let data_model = Arc::new(Catalog::<ClickHouse>::versioned(&packages, &prefix)?);
 
     let authorized_paths = cli
         .traversal_paths

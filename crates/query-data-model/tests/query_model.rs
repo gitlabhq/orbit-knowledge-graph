@@ -1,7 +1,7 @@
 use ontology::FieldSource;
 use query_data_model::from_ontology;
 use query_data_model::implementations::clickhouse::schema::Schema;
-use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, Packages};
+use query_data_model::{Catalog, ClickHouse, DuckDb, Packages};
 
 fn overlay_ontology(name: &str) -> ontology::Ontology {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -14,7 +14,7 @@ fn overlay_ontology(name: &str) -> ontology::Ontology {
 fn reordered_tables_retain_source_columns_and_dependencies() {
     let ontology = overlay_ontology("reordered_edges");
     let model = from_ontology::clickhouse(&ontology).unwrap();
-    let catalog = model.catalog();
+    let catalog = &model;
     assert_eq!(
         catalog.copies_of("gl_code_edge"),
         ["gl_code_edge_by_target"]
@@ -46,11 +46,8 @@ fn catalog_routes_preserve_variant_endpoints_on_each_backend() {
             .variant_named("CALLS", source, target)
             .unwrap()
             .id;
-        assert_eq!(remote.catalog().edge_table(variant), Some(table));
-        assert_eq!(
-            local.catalog().edge_table(variant),
-            local.catalog().default_edge_table()
-        );
+        assert_eq!(remote.edge_table(variant), Some(table));
+        assert_eq!(local.edge_table(variant), local.default_edge_table());
     }
 }
 
@@ -81,7 +78,6 @@ fn writer_catalog_tracks_exact_node_mapping_routes() {
 fn materialized_bindings_resolve_graph_identities_and_source_columns() {
     let model = from_ontology::clickhouse(&overlay_ontology("denorm_approved")).unwrap();
     let approved = model
-        .catalog()
         .joins()
         .iter()
         .find(|binding| binding.table == "gl_denorm_approved")
@@ -93,7 +89,6 @@ fn materialized_bindings_resolve_graph_identities_and_source_columns() {
     let approved_project_model =
         from_ontology::clickhouse(&overlay_ontology("denorm_approved_project")).unwrap();
     let approved_project = approved_project_model
-        .catalog()
         .joins()
         .iter()
         .find(|binding| binding.table == "gl_denorm_approved_project")
@@ -111,8 +106,8 @@ fn materialized_bindings_resolve_graph_identities_and_source_columns() {
         ]
     );
 
-    for binding in model.catalog().joins() {
-        let columns = &model.catalog().table_facts(&binding.table).unwrap().columns;
+    for binding in model.joins() {
+        let columns = &model.table_facts(&binding.table).unwrap().columns;
         let has_column = |name: &str| columns.contains(name);
         for node in &binding.nodes {
             assert!(has_column(&node.identity_column));
@@ -145,46 +140,39 @@ fn materialized_bindings_resolve_graph_identities_and_source_columns() {
 
 #[test]
 fn loads_remote_and_local_models_from_the_same_packages() {
-    let remote = ClickHouseDataModel::embedded().unwrap();
-    let local = DuckDbDataModel::embedded().unwrap();
+    let remote = Catalog::<ClickHouse>::embedded().unwrap();
+    let local = Catalog::<DuckDb>::embedded().unwrap();
 
     let definition = remote.graph().entity_id("Definition").unwrap();
 
-    assert_eq!(
-        remote.catalog().table_of(definition).unwrap(),
-        "gl_definition"
-    );
-    assert_eq!(
-        local.catalog().table_of(definition).unwrap(),
-        "gl_definition"
-    );
+    assert_eq!(remote.table_of(definition).unwrap(), "gl_definition");
+    assert_eq!(local.table_of(definition).unwrap(), "gl_definition");
     let contains = remote.graph().relationship_id("CONTAINS").unwrap();
-    assert!(remote.catalog().edge_tables(&[contains]).len() > 1);
-    assert_eq!(local.catalog().edge_tables(&[contains]), ["gl_edge"]);
+    assert!(remote.edge_tables(&[contains]).len() > 1);
+    assert_eq!(local.edge_tables(&[contains]), ["gl_edge"]);
 }
 
 #[test]
 fn hides_traversal_path_in_remote_and_local_models() {
-    let remote = ClickHouseDataModel::embedded().unwrap();
-    let local = DuckDbDataModel::embedded().unwrap();
+    let remote = Catalog::<ClickHouse>::embedded().unwrap();
+    let local = Catalog::<DuckDb>::embedded().unwrap();
     let graph = remote.graph();
     let definition = graph.entity_id("Definition").unwrap();
     let property = graph.property_id(definition, "traversal_path").unwrap();
 
-    assert!(remote.catalog().model().access().property(property).hidden);
-    assert!(local.catalog().model().access().property(property).hidden);
+    assert!(remote.model().access().property(property).hidden);
+    assert!(local.model().access().property(property).hidden);
 }
 
 #[test]
 fn resolves_relationship_variants_and_foreign_keys_to_ids() {
-    let model = ClickHouseDataModel::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded().unwrap();
     let graph = model.graph();
     let relationship = graph.relationship_id("IN_PROJECT").unwrap();
     let source = graph.entity_id("Vulnerability").unwrap();
     let target = graph.entity_id("Project").unwrap();
     assert!(graph.variant_id(relationship, source, target).is_some());
     let foreign_key = model
-        .catalog()
         .shared_foreign_key(&[relationship], source, target)
         .unwrap();
 
@@ -194,10 +182,10 @@ fn resolves_relationship_variants_and_foreign_keys_to_ids() {
 #[test]
 fn keeps_extraction_sources_separate_from_query_columns() {
     let ontology = ontology::Ontology::load_embedded().unwrap();
-    let model = ClickHouseDataModel::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded().unwrap();
     let entity = model.graph().entity_id("MergeRequest").unwrap();
     let property = model.graph().property_id(entity, "project_id").unwrap();
-    let table = model.catalog().table_of(entity).unwrap();
+    let table = model.table_of(entity).unwrap();
 
     let source = &ontology
         .get_node("MergeRequest")
@@ -208,21 +196,21 @@ fn keeps_extraction_sources_separate_from_query_columns() {
         .unwrap()
         .source;
     assert!(matches!(source, FieldSource::DatabaseColumn(source) if source == "target_project_id"));
-    assert_eq!(model.catalog().column(property), Some("project_id"));
-    let types = &model.catalog().table_facts(table).unwrap().column_types;
+    assert_eq!(model.column(property), Some("project_id"));
+    let types = &model.table_facts(table).unwrap().column_types;
     assert!(types.contains_key("project_id"));
     assert!(!types.contains_key("target_project_id"));
 }
 
 #[test]
 fn exposes_storage_columns_as_query_identifiers() {
-    let model = ClickHouseDataModel::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded().unwrap();
     let entity = model.graph().entity_id("Job").unwrap();
     let property = model.graph().property_id(entity, "when").unwrap();
-    let table = model.catalog().table_of(entity).unwrap();
+    let table = model.table_of(entity).unwrap();
 
-    assert_eq!(model.catalog().column(property), Some("when"));
-    let columns = &model.catalog().table_facts(table).unwrap().columns;
+    assert_eq!(model.column(property), Some("when"));
+    let columns = &model.table_facts(table).unwrap().columns;
     assert!(columns.contains("when"));
     assert!(!columns.contains("`when`"));
 }
@@ -231,7 +219,7 @@ fn exposes_storage_columns_as_query_identifiers() {
 fn foreign_keys_identify_the_endpoint_and_referenced_key() {
     use query_data_model::Endpoint;
 
-    let model = ClickHouseDataModel::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded().unwrap();
     for (relationship, source, target, holder, property) in [
         (
             "AUTHORED",
@@ -261,10 +249,7 @@ fn foreign_keys_identify_the_endpoint_and_referenced_key() {
             graph.entity_id(source).unwrap(),
             graph.entity_id(target).unwrap(),
         );
-        let key = model
-            .catalog()
-            .shared_foreign_key(&ids, source, target)
-            .unwrap();
+        let key = model.shared_foreign_key(&ids, source, target).unwrap();
         assert_eq!(key.holder, holder, "{relationship}");
         assert_eq!(model.graph().property(key.property).name, property);
         let referenced = model.graph().property(key.referenced_key);
@@ -283,27 +268,22 @@ fn foreign_keys_identify_the_endpoint_and_referenced_key() {
         graph.entity_id("User").unwrap(),
         graph.entity_id("MergeRequest").unwrap(),
     );
-    assert!(
-        model
-            .catalog()
-            .shared_foreign_key(&both, user, request)
-            .is_none()
-    );
+    assert!(model.shared_foreign_key(&both, user, request).is_none());
 }
 
 #[test]
 fn property_realization_reports_backend_availability() {
-    let remote = ClickHouseDataModel::embedded().unwrap();
-    let local = DuckDbDataModel::embedded().unwrap();
+    let remote = Catalog::<ClickHouse>::embedded().unwrap();
+    let local = Catalog::<DuckDb>::embedded().unwrap();
     let remote_entity = remote.graph().entity_id("MergeRequest").unwrap();
     let local_entity = local.graph().entity_id("MergeRequest").unwrap();
     let remote_property = remote.graph().property_id(remote_entity, "title").unwrap();
     let local_property = local.graph().property_id(local_entity, "title").unwrap();
-    assert_eq!(remote.catalog().column(remote_property), Some("title"));
-    assert!(!local.catalog().readable(local_property));
+    assert_eq!(remote.column(remote_property), Some("title"));
+    assert!(!local.readable(local_property));
 
     let file = remote.graph().entity_id("File").unwrap();
     let content = remote.graph().property_id(file, "content").unwrap();
-    assert!(remote.catalog().lookup(content).is_some());
-    assert!(remote.catalog().column(content).is_none());
+    assert!(remote.lookup(content).is_some());
+    assert!(remote.column(content).is_none());
 }

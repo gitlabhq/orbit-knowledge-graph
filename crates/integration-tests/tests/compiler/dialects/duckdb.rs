@@ -23,7 +23,7 @@ fn local(
     construct: impl FnOnce(&mut Builder<'_>) -> Result<Relation, RelationalError>,
 ) -> compiler::ParameterizedQuery {
     let model = integration_testkit::load_local_data_model();
-    let plan = model.catalog().build(construct).unwrap();
+    let plan = model.build(construct).unwrap();
     compiler::passes::codegen::render(&plan, &*model, Default::default(), Default::default())
 }
 

@@ -241,7 +241,9 @@ mod tests {
             UserAgent::default(),
             "33".to_string(),
         );
-        let model = Arc::new(query_data_model::ClickHouseDataModel::embedded().unwrap());
+        let model = Arc::new(
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+        );
         let ctx = query_engine::compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let gql = "MATCH (u:User {id: 1}) RETURN u LIMIT 10";
         let compiled = query_engine::compiler::compile(

@@ -381,9 +381,9 @@ fn request(column: &str, lookup: &Lookup) -> VirtualColumnRequest {
 mod tests {
     use super::*;
     use ontology::{DataType, FieldSource, Ontology, VirtualSource};
-    use query_data_model::ClickHouseDataModel;
+    use query_data_model::{Catalog, ClickHouse};
 
-    fn model(dependencies: &[&str], disabled: bool) -> ClickHouseDataModel {
+    fn model(dependencies: &[&str], disabled: bool) -> Catalog<ClickHouse> {
         let ontology = Ontology::new()
             .with_nodes(["TestNode"])
             .with_fields(
@@ -406,7 +406,7 @@ mod tests {
         query_data_model::from_ontology::clickhouse(&ontology).unwrap()
     }
 
-    fn entity(model: &ClickHouseDataModel) -> query_data_model::EntityId {
+    fn entity(model: &Catalog<ClickHouse>) -> query_data_model::EntityId {
         model.catalog().graph().entity_id("TestNode").unwrap()
     }
 

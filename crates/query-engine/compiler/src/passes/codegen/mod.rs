@@ -4,17 +4,13 @@
 pub mod ddl;
 
 use orbit_server_config::QueryConfig;
-use query_data_model::implementations::clickhouse::ClickHouse;
-use query_data_model::implementations::duckdb::DuckDb;
 use query_data_model::implementations::duckdb::render::type_name;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     RelationalError, RelationalPlan, SharePolicy,
 };
 use query_data_model::implementations::relational::render::ParameterizedSql;
-use query_data_model::{
-    Catalog, ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, QueryModel,
-};
+use query_data_model::{Catalog, ClickHouse, DuckDb};
 
 use crate::analytics::QueryStats;
 use crate::error::{QueryError, Result};
@@ -29,7 +25,8 @@ use std::sync::LazyLock;
 pub type ClickHousePlan = RelationalPlan<ClickHouse>;
 pub type PlanOf<M> = RelationalPlan<<M as RelationalModel>::Backend>;
 
-pub trait RelationalModel: OrbitQueryModel {
+/// A relational catalog the compiler plans against and renders through.
+pub trait RelationalModel: Send + Sync {
     type Backend: RelationalBackend;
     const DIALECT: SqlDialect;
 
@@ -37,29 +34,29 @@ pub trait RelationalModel: OrbitQueryModel {
     fn render(&self, plan: &PlanOf<Self>) -> ParameterizedSql;
 }
 
-impl RelationalModel for ClickHouseDataModel {
+impl RelationalModel for Catalog<ClickHouse> {
     type Backend = ClickHouse;
     const DIALECT: SqlDialect = SqlDialect::ClickHouse;
 
     fn catalog(&self) -> &Catalog<ClickHouse> {
-        QueryModel::catalog(self)
+        self
     }
 
     fn render(&self, plan: &ClickHousePlan) -> ParameterizedSql {
-        QueryModel::catalog(self).render(plan)
+        self.render(plan)
     }
 }
 
-impl RelationalModel for DuckDbDataModel {
+impl RelationalModel for Catalog<DuckDb> {
     type Backend = DuckDb;
     const DIALECT: SqlDialect = SqlDialect::DuckDb;
 
     fn catalog(&self) -> &Catalog<DuckDb> {
-        QueryModel::catalog(self)
+        self
     }
 
     fn render(&self, plan: &RelationalPlan<DuckDb>) -> ParameterizedSql {
-        QueryModel::catalog(self).render(plan)
+        self.render(plan)
     }
 }
 

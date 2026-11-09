@@ -2,11 +2,11 @@ use std::sync::{Arc, LazyLock};
 
 use compiler::{AccessLevel, AuthorizedPath, Frontend, SecurityContext};
 use named_queries::{BindingValues, Language, NamedQueries, NamedQuery};
-use query_data_model::ClickHouseDataModel;
+use query_data_model::{Catalog, ClickHouse};
 use serde_json::{Map, Value};
 
-static DATA_MODEL: LazyLock<Arc<ClickHouseDataModel>> =
-    LazyLock::new(|| Arc::new(ClickHouseDataModel::embedded().unwrap()));
+static DATA_MODEL: LazyLock<Arc<Catalog<ClickHouse>>> =
+    LazyLock::new(|| Arc::new(Catalog::<ClickHouse>::embedded().unwrap()));
 
 const BINDINGS: BindingValues = BindingValues {
     current_user_id: 42,

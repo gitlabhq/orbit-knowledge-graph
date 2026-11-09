@@ -13,9 +13,9 @@
 //! ```rust,no_run
 //! use std::sync::Arc;
 //! use compiler::{compile, Frontend, SecurityContext};
-//! use query_data_model::ClickHouseDataModel;
+//! use query_data_model::{Catalog, ClickHouse};
 //!
-//! let data_model = Arc::new(ClickHouseDataModel::embedded().unwrap());
+//! let data_model = Arc::new(Catalog::<ClickHouse>::embedded().unwrap());
 //!
 //! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
 //!
@@ -57,7 +57,7 @@ pub use logical::facts::FilterOp;
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
 pub use query_data_model::Direction;
-use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
+use query_data_model::{Catalog, ClickHouse, DuckDb};
 pub use types::QueryType;
 
 pub use analytics::ExecMetrics;
@@ -101,17 +101,14 @@ fn finish<C: config::CompilerCtx>(
 pub fn subquery_statements(
     raw: &str,
     fe: Frontend,
-    data_model: &Arc<ClickHouseDataModel>,
+    data_model: &Arc<Catalog<ClickHouse>>,
     ctx: &SecurityContext,
 ) -> Result<Vec<passes::codegen::SubqueryStatement>> {
     let shared = |plan: &Option<passes::codegen::ClickHousePlan>| {
         let plan = plan.as_ref().ok_or_else(|| {
             error::QueryError::PipelineInvariant("pipeline did not produce a plan".into())
         })?;
-        Ok(passes::codegen::subquery_statements(
-            plan,
-            data_model.catalog(),
-        ))
+        Ok(passes::codegen::subquery_statements(plan, data_model))
     };
     match fe {
         Frontend::JsonDsl => {
@@ -133,7 +130,7 @@ pub fn subquery_statements(
 pub fn compile(
     raw: &str,
     fe: Frontend,
-    data_model: &Arc<ClickHouseDataModel>,
+    data_model: &Arc<Catalog<ClickHouse>>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     match fe {
@@ -157,7 +154,7 @@ pub fn compile(
 pub fn compile_local(
     raw: &str,
     fe: Frontend,
-    data_model: &Arc<DuckDbDataModel>,
+    data_model: &Arc<Catalog<DuckDb>>,
 ) -> Result<CompiledQueryContext> {
     match fe {
         Frontend::JsonDsl => {
@@ -174,7 +171,7 @@ pub fn compile_local(
 }
 
 /// Parse and admit a query without a caller, as startup checks of shipped queries do.
-pub fn check(raw: &str, fe: Frontend, data_model: &Arc<ClickHouseDataModel>) -> Result<()> {
+pub fn check(raw: &str, fe: Frontend, data_model: &Arc<Catalog<ClickHouse>>) -> Result<()> {
     match fe {
         Frontend::JsonDsl => {
             let mut ctx = config::CheckJsonDslCtx::new(Arc::clone(data_model));
@@ -193,7 +190,7 @@ pub fn check(raw: &str, fe: Frontend, data_model: &Arc<ClickHouseDataModel>) -> 
 /// Compile a hydration request into ClickHouse SQL: restrict, plan, settings, security, render.
 pub fn compile_hydration(
     request: HydrationRequest,
-    data_model: &Arc<ClickHouseDataModel>,
+    data_model: &Arc<Catalog<ClickHouse>>,
     ctx: &SecurityContext,
 ) -> Result<ParameterizedQuery> {
     let mut ctx = config::ChHydrationCtx::new(ctx.clone(), Arc::clone(data_model));
@@ -231,10 +228,10 @@ mod tests {
     use query_data_model::spec::Fragment;
     use std::sync::LazyLock;
 
-    static MODEL: LazyLock<Arc<ClickHouseDataModel>> =
-        LazyLock::new(|| Arc::new(ClickHouseDataModel::embedded().expect("model must load")));
-    static LOCAL: LazyLock<Arc<DuckDbDataModel>> =
-        LazyLock::new(|| Arc::new(DuckDbDataModel::embedded().expect("model must load")));
+    static MODEL: LazyLock<Arc<Catalog<ClickHouse>>> =
+        LazyLock::new(|| Arc::new(Catalog::<ClickHouse>::embedded().expect("model must load")));
+    static LOCAL: LazyLock<Arc<Catalog<DuckDb>>> =
+        LazyLock::new(|| Arc::new(Catalog::<DuckDb>::embedded().expect("model must load")));
 
     fn security_ctx() -> SecurityContext {
         crate::testkit::non_admin_ctx()
@@ -323,9 +320,9 @@ mod tests {
         );
     }
 
-    fn packaged_model(fragments: &[Fragment]) -> Arc<ClickHouseDataModel> {
+    fn packaged_model(fragments: &[Fragment]) -> Arc<Catalog<ClickHouse>> {
         let model = Arc::new(query_data_model::Model::load(fragments).expect("model must load"));
-        Arc::new(ClickHouseDataModel::from_model(&model).expect("model must bind"))
+        Arc::new(Catalog::<ClickHouse>::from_model(&model).expect("model must bind"))
     }
 
     fn versioned(fragments: Vec<Fragment>, prefix: &str) -> Vec<Fragment> {

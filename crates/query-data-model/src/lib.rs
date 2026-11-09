@@ -4,10 +4,8 @@ mod error;
 pub mod from_ontology;
 pub mod generic;
 pub mod implementations;
-pub mod models;
 pub mod packages;
 pub mod plan;
-pub mod query_model;
 pub mod spec;
 pub mod surface;
 
@@ -18,12 +16,12 @@ pub use generic::{
     Property, PropertyId, Reach, Relationship, RelationshipId, RelationshipVariant,
     RelationshipVariantId, Walk,
 };
+pub use implementations::clickhouse::ClickHouse;
 pub use implementations::clickhouse::facts::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
     MaterializedJoin, MaterializedNode, MaterializedRelationship, TraversalPathLookup,
 };
+pub use implementations::duckdb::DuckDb;
 pub use implementations::relational::PathColumn;
 pub use implementations::relational::RelationshipRoute;
-pub use models::orbit::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
 pub use packages::Packages;
-pub use query_model::QueryModel;

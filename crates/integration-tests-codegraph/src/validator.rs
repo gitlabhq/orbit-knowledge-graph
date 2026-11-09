@@ -7,7 +7,7 @@ use compiler::{Frontend, compile_local};
 use duckdb_client::DuckDbClient;
 use ontology::Ontology;
 use orbit_arrow::ArrowUtils;
-use query_data_model::DuckDbDataModel;
+use query_data_model::{Catalog, DuckDb};
 use tabled::{Table, builder::Builder};
 
 use super::assertions::{
@@ -27,7 +27,7 @@ pub fn run_suite(
     suite: &TestSuite,
     client: &DuckDbClient,
     ontology: &Ontology,
-    data_model: &Arc<DuckDbDataModel>,
+    data_model: &Arc<Catalog<DuckDb>>,
     probe_skipped: bool,
 ) -> Vec<Failure> {
     let mut failures = undeclared_edges(client, ontology);
@@ -82,7 +82,7 @@ fn undeclared_edges(client: &DuckDbClient, ontology: &Ontology) -> Vec<Failure> 
 fn run_test(
     test: &TestCase,
     client: &DuckDbClient,
-    data_model: &Arc<DuckDbDataModel>,
+    data_model: &Arc<Catalog<DuckDb>>,
 ) -> Vec<Failure> {
     if test.debug {
         dump_datasets(client, data_model);
@@ -118,7 +118,7 @@ fn run_test(
 fn probe_test(
     test: &TestCase,
     client: &DuckDbClient,
-    data_model: &Arc<DuckDbDataModel>,
+    data_model: &Arc<Catalog<DuckDb>>,
 ) -> Vec<Failure> {
     test.all_queries()
         .iter()
@@ -130,7 +130,7 @@ fn probe_test(
 fn execute_cypher(
     cypher: &str,
     client: &DuckDbClient,
-    data_model: &Arc<DuckDbDataModel>,
+    data_model: &Arc<Catalog<DuckDb>>,
 ) -> anyhow::Result<(RecordBatch, bool)> {
     let (clean_query, aliases) = rewrite_query(cypher);
     if !aliases.is_empty() {
@@ -234,7 +234,7 @@ fn apply_aliases(batch: RecordBatch, aliases: &[(String, String, String)]) -> Re
         .unwrap_or_else(|e| panic!("apply_aliases failed: {e}"))
 }
 
-fn dump_datasets(client: &DuckDbClient, data_model: &Arc<DuckDbDataModel>) {
+fn dump_datasets(client: &DuckDbClient, data_model: &Arc<Catalog<DuckDb>>) {
     let debug_queries = [
         (
             "Definitions",
@@ -262,7 +262,7 @@ fn run_query(
     severity: Severity,
     block: &QueryBlock,
     client: &DuckDbClient,
-    data_model: &Arc<DuckDbDataModel>,
+    data_model: &Arc<Catalog<DuckDb>>,
 ) -> Result<RecordBatch, Vec<Failure>> {
     match execute_cypher(&block.query, client, data_model) {
         Ok((batch, has_more)) if has_more && !has_explicit_limit(&block.query) => {
@@ -290,7 +290,7 @@ fn run_query_block(
     severity: Severity,
     block: &QueryBlock,
     client: &DuckDbClient,
-    data_model: &Arc<DuckDbDataModel>,
+    data_model: &Arc<Catalog<DuckDb>>,
 ) -> Vec<Failure> {
     let batch = match run_query(label, severity, block, client, data_model) {
         Ok(batch) => batch,

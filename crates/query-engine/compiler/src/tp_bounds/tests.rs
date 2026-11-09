@@ -1,19 +1,19 @@
 use std::sync::LazyLock;
 
 use ontology::TraversalPathKind;
-use query_data_model::ClickHouseDataModel;
 use query_data_model::plan::logical::LogicalPlan;
+use query_data_model::{Catalog, ClickHouse};
 
 use super::TpBounds;
 use super::keys::{TpLookupKey, TpLookupValue, keys};
 use crate::logical::Query;
 use crate::surface::{self, Frontend};
 
-static MODEL: LazyLock<ClickHouseDataModel> =
-    LazyLock::new(|| ClickHouseDataModel::embedded().unwrap());
+static MODEL: LazyLock<Catalog<ClickHouse>> =
+    LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
 
 fn plan(gql: &str) -> LogicalPlan {
-    let model = MODEL.catalog().model();
+    let model = MODEL.model();
     surface::parse(gql, Frontend::Gql, model.logical().as_admin())
         .unwrap()
         .plan
@@ -21,7 +21,7 @@ fn plan(gql: &str) -> LogicalPlan {
 
 fn keys_of(gql: &str, alias: &str) -> Vec<TpLookupKey> {
     let plan = plan(gql);
-    let query = Query::new(&plan, MODEL.catalog().model());
+    let query = Query::new(&plan, MODEL.model());
     let anchors = super::anchor_keys(&*MODEL);
     keys(query, query.binding(alias).unwrap().output, &anchors)
 }
@@ -79,7 +79,7 @@ fn full_paths_and_anchor_keys_yield_lookups() {
 fn scope_preserving_edges_carry_the_pinned_bound() {
     let plan =
         plan("MATCH (mr:MergeRequest {id: 1})-[:HAS_DIFF]->(diff:MergeRequestDiff) RETURN diff");
-    let bounds = TpBounds::derive(Query::new(&plan, MODEL.catalog().model()), &*MODEL);
+    let bounds = TpBounds::derive(Query::new(&plan, MODEL.model()), &*MODEL);
     assert!(bounds.nodes.contains_key("diff"));
     assert_eq!(bounds.nodes.get("diff"), bounds.nodes.get("mr"));
 }

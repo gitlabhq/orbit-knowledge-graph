@@ -77,7 +77,7 @@ pub struct QueryStats {
 
 impl QueryStats {
     pub fn new(query: Query<'_>, model: &impl RelationalModel) -> Self {
-        let graph = model.graph();
+        let graph = model.catalog().graph();
         let kind = query.kind();
         let steps = query.steps();
         let node_count = query

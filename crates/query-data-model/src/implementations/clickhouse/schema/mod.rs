@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::ClickHouse;
-use crate::{Catalog, ClickHouseDataModel, DataModelError, Model};
+use crate::{Catalog, DataModelError, Model};
 
 pub use render::DictionaryCredentials;
 pub use resolve::default_index_name;
@@ -141,7 +141,7 @@ pub struct GraphTable {
 impl Schema {
     pub fn from_model(model: &Arc<Model>) -> Result<Self, DataModelError> {
         model
-            .physical::<ClickHouse>(ClickHouseDataModel::CONNECTION)?
+            .physical::<ClickHouse>(Catalog::<ClickHouse>::CONNECTION)?
             .schema()
             .cloned()
     }

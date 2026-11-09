@@ -66,14 +66,14 @@ impl HydrationArm {
 
 #[cfg(test)]
 mod tests {
-    use query_data_model::ClickHouseDataModel;
+    use query_data_model::{Catalog, ClickHouse};
 
     use super::*;
 
     #[test]
     fn every_entity_hydrates_within_the_column_cap() {
-        let model = ClickHouseDataModel::embedded().unwrap();
-        for entity in model.catalog().model().graph().entities() {
+        let model = Catalog::<ClickHouse>::embedded().unwrap();
+        for entity in model.model().graph().entities() {
             assert!(
                 entity.properties.len() <= HYDRATION_LIMITS.columns,
                 "{} has {} properties",

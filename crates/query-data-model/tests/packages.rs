@@ -5,7 +5,7 @@ use query_data_model::catalog::{RowFilter, Scope};
 use query_data_model::from_ontology::{self, from_ontology, packages};
 use query_data_model::implementations::clickhouse::{ClickHouse, versioned};
 use query_data_model::spec::Fragment;
-use query_data_model::{ClickHouseDataModel, Model, OrbitQueryModel, Packages};
+use query_data_model::{Catalog, Model, Packages};
 
 fn fragments(packages: &Packages) -> Vec<Fragment> {
     packages
@@ -63,16 +63,16 @@ fn versioned_packages_match_the_prefixed_ontology() {
     for ontology in ontologies {
         let fragments = versioned(from_ontology(&ontology).unwrap(), PREFIX).unwrap();
         let model = Arc::new(Model::load(&fragments).unwrap());
-        let actual = ClickHouseDataModel::from_model(&model).unwrap();
+        let actual = Catalog::<ClickHouse>::from_model(&model).unwrap();
         let expected =
             from_ontology::clickhouse(&ontology.with_schema_version_prefix(PREFIX)).unwrap();
         assert_eq!(routing_facts(&actual), routing_facts(&expected));
     }
 }
 
-fn routing_facts(model: &ClickHouseDataModel) -> Vec<String> {
+fn routing_facts(model: &Catalog<ClickHouse>) -> Vec<String> {
     let graph = model.graph();
-    let catalog = model.catalog();
+    let catalog = model;
     let mut tables: Vec<String> = catalog
         .default_edge_table()
         .map(str::to_string)
@@ -80,7 +80,7 @@ fn routing_facts(model: &ClickHouseDataModel) -> Vec<String> {
         .collect();
     let mut facts = Vec::new();
     for entity in graph.entities() {
-        let table = model.catalog().table_of(entity.id).map(str::to_string);
+        let table = model.table_of(entity.id).map(str::to_string);
         tables.extend(table.clone());
         facts.push(format!("{} table {table:?}", entity.name));
         for kind in [TraversalPathKind::Id, TraversalPathKind::FullPath] {

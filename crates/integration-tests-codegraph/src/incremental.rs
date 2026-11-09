@@ -10,7 +10,7 @@ use code_graph_incremental::{
     Context, Env, Envelope, Killed, Limits, Pipeline, Scalar, State, templates,
 };
 use ontology::Ontology;
-use query_data_model::DuckDbDataModel;
+use query_data_model::{Catalog, DuckDb};
 
 struct FixturePolicy;
 
@@ -118,7 +118,7 @@ fn index_and_check(yaml: &str) {
         .collect();
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
-    let data_model = Arc::new(DuckDbDataModel::embedded().expect("embedded model"));
+    let data_model = Arc::new(Catalog::<DuckDb>::embedded().expect("embedded model"));
     let env = Env::with_limits(lang_id, suite_limits(&suite)).expect("rules compile");
 
     let repository = Arc::new(
@@ -181,7 +181,7 @@ fn index_and_check(yaml: &str) {
 fn check(
     graph: Pipeline<'_, Resolved>,
     ontology: &Arc<Ontology>,
-    data_model: &Arc<DuckDbDataModel>,
+    data_model: &Arc<Catalog<DuckDb>>,
     tests: &[TestCase],
     skipped: &[SkippedFile],
     limited: &[SkippedFile],

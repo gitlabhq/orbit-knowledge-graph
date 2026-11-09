@@ -5,7 +5,7 @@ use anyhow::Result;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::stream::{self, StreamExt};
 use ontology::Ontology;
-use query_data_model::ClickHouseDataModel;
+use query_data_model::{Catalog, ClickHouse};
 use query_engine::compiler::{Frontend, ParamValue, SecurityContext, compile};
 use rand::RngExt;
 use regex::Regex;
@@ -162,7 +162,7 @@ impl ExecutionResult {
 pub struct QueryExecutor {
     client: ArrowClickHouseClient,
     ontology: Arc<Ontology>,
-    data_model: Arc<ClickHouseDataModel>,
+    data_model: Arc<Catalog<ClickHouse>>,
     sampler: ParameterSampler,
     security_contexts: Vec<(i64, String)>,
     query_settings: String,
@@ -172,7 +172,7 @@ impl QueryExecutor {
     pub fn new(
         client: ArrowClickHouseClient,
         ontology: Ontology,
-        data_model: ClickHouseDataModel,
+        data_model: Catalog<ClickHouse>,
         sample_size: usize,
         user_settings: &std::collections::HashMap<String, String>,
     ) -> Self {

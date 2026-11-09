@@ -283,12 +283,12 @@ mod tests {
     use super::*;
     use crate::passes::codegen::ParamValue;
     use crate::passes::plan::{Request, plan};
-    use query_data_model::ClickHouseDataModel;
+    use query_data_model::{Catalog, ClickHouse};
     use std::collections::HashMap;
     use std::sync::LazyLock;
 
-    static MODEL: LazyLock<ClickHouseDataModel> =
-        LazyLock::new(|| ClickHouseDataModel::embedded().unwrap());
+    static MODEL: LazyLock<Catalog<ClickHouse>> =
+        LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
 
     fn arm(paths: Vec<TraversalPath>) -> HydrationArm {
         let columns = ["title".to_string()];
