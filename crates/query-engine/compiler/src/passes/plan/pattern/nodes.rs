@@ -9,7 +9,7 @@ use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::plan::logical::{Columns, Expr, Measure};
 
 use super::{NodePlan, Pattern};
-use crate::logical::columns::{returned, selections};
+use crate::logical::columns::{redaction_column, returned, selections};
 use crate::logical::facts::Anchor;
 use crate::logical::{Query, binding};
 use crate::passes::plan::filters::{bind_facts, unindex_if_key_narrowed};
@@ -53,8 +53,7 @@ impl NodePlan {
                 (true, false) => ReadScope::Scoped,
                 (true, true) => ReadScope::HighFanOut,
             },
-            redaction_id_column: model
-                .redaction_id_column(entity)
+            redaction_id_column: redaction_column(model, entity)
                 .unwrap_or(DEFAULT_PRIMARY_KEY)
                 .to_string(),
             columns: returned(model, entity, selection)
@@ -215,7 +214,8 @@ fn node_access<M: RelationalModel>(
         !pattern.aggregate() || aggregation_row_nodes(query, model).contains(node.alias.as_str());
     let role_floor = query.binding(&node.alias).is_some_and(|binding| {
         model
-            .required_access_level(binding.entity)
+            .catalog()
+            .role_floor(binding.entity)
             .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
     });
     let authorized_from_table =

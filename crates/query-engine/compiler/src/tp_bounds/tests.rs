@@ -22,10 +22,7 @@ fn plan(gql: &str) -> LogicalPlan {
 fn keys_of(gql: &str, alias: &str) -> Vec<TpLookupKey> {
     let plan = plan(gql);
     let query = Query::new(&plan, MODEL.catalog().model());
-    let anchors: Vec<_> = query_data_model::OrbitQueryModel::anchor_foreign_keys(&*MODEL)
-        .iter()
-        .map(|(column, entity)| (column.clone(), *entity))
-        .collect();
+    let anchors = super::anchor_keys(&*MODEL);
     keys(query, query.binding(alias).unwrap().output, &anchors)
 }
 

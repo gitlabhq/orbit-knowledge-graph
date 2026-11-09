@@ -28,4 +28,4 @@ pub use models::orbit::{
     VariantRoute,
 };
 pub use packages::Packages;
-pub use query_model::{EntityAuthConfig, QueryFacts, QueryModel};
+pub use query_model::{QueryFacts, QueryModel};

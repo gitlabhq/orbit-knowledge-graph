@@ -8,6 +8,7 @@ use query_data_model::implementations::relational::plan::Expr;
 use super::filters::{BoundFilter, bind_facts, unindex_if_key_narrowed};
 use super::predicates::Column;
 use crate::logical::Query;
+use crate::logical::columns::redaction_column;
 use crate::logical::facts::Anchor;
 use crate::passes::codegen::RelationalModel;
 use crate::passes::plan::build::Built;
@@ -40,9 +41,7 @@ impl<'p> Node<'p> {
             alias: binding.name,
             entity: &graph.entity(binding.entity).name,
             table: source.map(|source| source.table.as_str()),
-            redaction: model
-                .redaction_id_column(binding.entity)
-                .unwrap_or(DEFAULT_PRIMARY_KEY),
+            redaction: redaction_column(model, binding.entity).unwrap_or(DEFAULT_PRIMARY_KEY),
             pinned: anchor.pinned,
             range: anchor.range,
             filters,

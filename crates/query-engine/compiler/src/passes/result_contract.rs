@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::Direction;
-use query_data_model::EntityAuthConfig;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     Column, Expr, Operation, Relation, RelationalBuilder, RelationalError, Selection,
@@ -24,6 +23,37 @@ use crate::passes::plan::build::term;
 use crate::passes::plan::predicates::{Column as Named, OutputValue};
 use crate::passes::plan::{NodeBinding, PlanMetadata};
 use crate::types::QueryType;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityAuthConfig {
+    pub resource_type: String,
+    pub ability: String,
+    pub auth_id_column: String,
+    pub owner_entity: Option<String>,
+    pub required_access_level: u32,
+}
+
+/// How the server authorizes each redacted entity, by entity name.
+pub fn entity_auth(model: &impl RelationalModel) -> HashMap<String, EntityAuthConfig> {
+    let catalog = model.catalog();
+    let graph = catalog.graph();
+    graph
+        .entities()
+        .filter_map(|entity| {
+            let redaction = catalog.redaction(entity.id)?;
+            let config = EntityAuthConfig {
+                resource_type: redaction.resource.clone(),
+                ability: redaction.ability.clone(),
+                auth_id_column: graph.property(redaction.id).name.clone(),
+                owner_entity: redaction
+                    .owner
+                    .map(|owner| graph.entity(owner).name.clone()),
+                required_access_level: catalog.role_floor(entity.id)?,
+            };
+            Some((entity.name.clone(), config))
+        })
+        .collect()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactionNode {
@@ -320,7 +350,7 @@ pub fn apply<M: RelationalModel>(
 ) -> Result<(PlanOf<M>, ResultContext)> {
     let kind = query.kind();
     let mut ctx = ResultContext::new().with_query_type(kind.into());
-    ctx.entity_auth.clone_from(model.entity_auth());
+    ctx.entity_auth = entity_auth(model);
     let facts = facts(query);
     let anchors = anchors(query, &facts);
     if kind == Kind::Neighbors
@@ -433,8 +463,7 @@ fn return_columns(
         else {
             continue;
         };
-        let redaction_column = model
-            .redaction_id_column(entity_id)
+        let redaction_column = crate::logical::columns::redaction_column(model, entity_id)
             .unwrap_or(DEFAULT_PRIMARY_KEY);
         let needs_separate_pk = redaction_column != DEFAULT_PRIMARY_KEY;
         let authorization_id = if needs_separate_pk {

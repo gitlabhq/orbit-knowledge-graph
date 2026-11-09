@@ -7,6 +7,36 @@ mod tests;
 use std::collections::{HashMap, HashSet};
 
 use keys::TpLookupValue;
+use query_data_model::{EntityId, RelationshipVariantId};
+
+use crate::passes::codegen::RelationalModel;
+
+/// Each anchor foreign key by property name; a filter on that name on any entity bounds by its anchor.
+pub(crate) fn anchor_keys(model: &impl RelationalModel) -> Vec<(String, EntityId)> {
+    let catalog = model.catalog();
+    let mut anchors: Vec<(String, EntityId)> = Vec::new();
+    for (property, anchor) in catalog.anchor_keys() {
+        let name = &catalog.graph().property(property).name;
+        if !anchors.iter().any(|(known, _)| known == name) {
+            anchors.push((name.clone(), anchor));
+        }
+    }
+    anchors
+}
+
+/// The scope of the `kind` variant between two entities; none for a wildcard or an unknown triple.
+fn variant_scope(
+    model: &impl RelationalModel,
+    kind: &str,
+    source: Option<EntityId>,
+    target: Option<EntityId>,
+) -> Option<ontology::EdgeVariantScope> {
+    let catalog = model.catalog();
+    let graph = catalog.graph();
+    let variant: RelationshipVariantId =
+        graph.variant_id(graph.relationship_id(kind)?, source?, target?)?;
+    catalog.variant_scope(variant)
+}
 
 #[derive(Clone, Default)]
 pub struct TpBounds {

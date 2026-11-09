@@ -107,8 +107,14 @@ pub(super) fn aggregation_text(
             else {
                 continue;
             };
+            let by_namespace = query
+                .entity(binding)
+                .and_then(|entity| model.catalog().redaction(entity))
+                .is_some_and(|redaction| {
+                    matches!(redaction.resource.as_str(), "project" | "group")
+                });
             if rows.contains(&binding)
-                || model.entity_authorized_by_namespace(entity)
+                || by_namespace
                 || !model.property_is_free_text(entity, property)
             {
                 continue;

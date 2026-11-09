@@ -56,8 +56,8 @@ pub use logical::DynamicColumnMode;
 pub use logical::facts::FilterOp;
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
+pub use query_data_model::Direction;
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
-pub use query_data_model::{Direction, EntityAuthConfig};
 pub use types::QueryType;
 
 pub use analytics::ExecMetrics;
@@ -73,8 +73,8 @@ pub use passes::hydrate::{
     VirtualFilter, generate_hydration_plan,
 };
 pub use passes::result_contract::{
-    EdgeMeta, GroupColumn, MeasureColumn, RedactionNode, RelationshipColumn,
-    RelationshipColumnKind, ResultContext, ResultShape,
+    EdgeMeta, EntityAuthConfig, GroupColumn, MeasureColumn, RedactionNode, RelationshipColumn,
+    RelationshipColumnKind, ResultContext, ResultShape, entity_auth,
 };
 pub use surface::{Frontend, gql};
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::passes::codegen::RelationalModel;
+use query_data_model::Direction;
 use query_data_model::plan::tracking::Ref;
-use query_data_model::{Direction, EntityId};
 
 use super::keys::{TpLookupKey, keys};
 use super::{TpBound, TpBounds, TpLookup};
@@ -19,11 +19,7 @@ pub(super) struct Edge {
 
 impl TpBounds {
     pub fn derive(query: Query<'_>, model: &impl RelationalModel) -> Self {
-        let anchors: Vec<(String, EntityId)> = model
-            .anchor_foreign_keys()
-            .iter()
-            .map(|(column, entity)| (column.clone(), *entity))
-            .collect();
+        let anchors = super::anchor_keys(model);
         let edges = edges(query);
         let keys: HashMap<Ref, Vec<TpLookupKey>> = query
             .bindings()
@@ -99,9 +95,9 @@ fn relationship(
     if from_bound == to_bound {
         return from_bound.cloned();
     }
-    let (from, to) = (query.entity_name(edge.from)?, query.entity_name(edge.to)?);
+    let (from, to) = (query.entity(edge.from)?, query.entity(edge.to)?);
     edge.types.iter().find_map(|kind| {
-        match model.variant_scope(kind, from, to) {
+        match super::variant_scope(model, kind, Some(from), Some(to)) {
             Some(ontology::EdgeVariantScope::PruneToSource) => from_bound,
             Some(ontology::EdgeVariantScope::PruneToTarget) => to_bound,
             _ => None,

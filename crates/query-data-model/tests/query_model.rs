@@ -163,8 +163,8 @@ fn hides_traversal_path_in_remote_and_local_models() {
     let local = DuckDbDataModel::embedded().unwrap();
     let property = remote.property("Definition", "traversal_path").unwrap().id;
 
-    assert!(remote.property_is_hidden(property));
-    assert!(local.property_is_hidden(property));
+    assert!(remote.catalog().model().access().property(property).hidden);
+    assert!(local.catalog().model().access().property(property).hidden);
 }
 
 #[test]

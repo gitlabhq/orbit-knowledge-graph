@@ -1,25 +1,16 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
-use ontology::{EdgeVariantScope, FieldSelectivity, TraversalPathKind};
+use ontology::{FieldSelectivity, TraversalPathKind};
 
 use crate::catalog::{Catalog, Model, StorageBackend};
 use crate::implementations::relational::RelationalFacts;
 use crate::{
     DataModelError, DenormalizedCatalog, Entity, EntityId, ForeignKey, GraphCatalog,
-    MaterializedJoin, OrbitQueryModel, PathColumn, Property, PropertyId, PropertyRealization,
-    RelationshipId, RelationshipRoute, RelationshipVariant, RelationshipVariantId,
-    TraversalPathLookup, VariantRoute,
+    MaterializedJoin, OrbitQueryModel, Property, PropertyId, PropertyRealization, RelationshipId,
+    RelationshipRoute, RelationshipVariant, RelationshipVariantId, TraversalPathLookup,
+    VariantRoute,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EntityAuthConfig {
-    pub resource_type: String,
-    pub ability: String,
-    pub auth_id_column: String,
-    pub owner_entity: Option<String>,
-    pub required_access_level: u32,
-}
 
 pub trait QueryFacts: RelationalFacts + std::fmt::Debug + Send + Sync {
     fn text_index(&self, property: PropertyId) -> bool;
@@ -47,9 +38,6 @@ where
     relationship_tables: Vec<Vec<String>>,
     edge_tables: Vec<String>,
     default_edge_table: String,
-    entity_auth: HashMap<String, EntityAuthConfig>,
-    anchor_foreign_keys: HashMap<String, EntityId>,
-    trusted: bool,
 }
 
 impl<B: StorageBackend> Bindings<B>
@@ -68,7 +56,6 @@ where
                     .position(|(store, _)| store.source(entity.id).is_some())
             })
             .collect();
-        let trusted = stores.iter().all(|(store, _)| store.trusted);
         let routes = graph
             .variants()
             .map(|variant| {
@@ -133,46 +120,6 @@ where
             .find_map(|(_, facts)| facts.relational().default_edge_table())
             .map(|table| table.name.clone())
             .unwrap_or_default();
-        let access = model.access();
-        let mut entity_auth = HashMap::new();
-        let mut anchor_foreign_keys = HashMap::new();
-        if !trusted {
-            for entity in graph.entities() {
-                let Some(redaction) = access
-                    .entity(entity.id)
-                    .and_then(|access| access.redaction.as_ref())
-                else {
-                    continue;
-                };
-                let role = access.entity(entity.id).and_then(|access| access.role);
-                entity_auth.insert(
-                    entity.name.clone(),
-                    EntityAuthConfig {
-                        resource_type: redaction.resource.clone(),
-                        ability: redaction.ability.clone(),
-                        auth_id_column: graph.property(redaction.id).name.clone(),
-                        owner_entity: redaction
-                            .owner
-                            .map(|owner| graph.entity(owner).name.clone()),
-                        required_access_level: role
-                            .unwrap_or(ontology::RequiredRole::Reporter)
-                            .as_access_level(),
-                    },
-                );
-            }
-            for variant in graph.variants() {
-                let anchor =
-                    access.variant_scope(variant.id) == Some(EdgeVariantScope::NamespaceAnchor);
-                let key = routes[variant.id.index()]
-                    .as_ref()
-                    .and_then(|route| route.foreign_key);
-                if let (true, Some(key)) = (anchor, key) {
-                    anchor_foreign_keys
-                        .entry(graph.property(key.property).name.clone())
-                        .or_insert(variant.target);
-                }
-            }
-        }
         Ok(Self {
             catalog,
             homes,
@@ -181,9 +128,6 @@ where
             relationship_tables,
             edge_tables,
             default_edge_table,
-            entity_auth,
-            anchor_foreign_keys,
-            trusted,
         })
     }
 
@@ -231,16 +175,6 @@ where
             .map(|(_, facts)| facts.joins())
             .find(|joins| !joins.is_empty())
             .unwrap_or_default()
-    }
-
-    pub(crate) fn entity_is_global(&self, entity: EntityId) -> bool {
-        !self.trusted
-            && self
-                .catalog
-                .model()
-                .access()
-                .entity(entity)
-                .is_some_and(|access| access.scope == crate::catalog::Scope::Global)
     }
 
     pub(crate) fn entity_high_fan_out(&self, entity: EntityId) -> bool {
@@ -298,10 +232,6 @@ where
 
     pub(crate) fn property_mutable(&self, property: PropertyId) -> bool {
         self.graph_catalog().property(property).mutable
-    }
-
-    pub(crate) fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {
-        Some(&self.table(table)?.path_columns)
     }
 
     pub(crate) fn default_edge_table(&self) -> &str {
@@ -371,52 +301,6 @@ where
     }
 }
 
-impl<B: StorageBackend> Bindings<B>
-where
-    B::Store: QueryFacts,
-{
-    pub(crate) fn is_hidden(&self, property: PropertyId) -> bool {
-        self.catalog.model().access().property(property).hidden
-    }
-
-    pub(crate) fn variant_scope(&self, variant: RelationshipVariantId) -> Option<EdgeVariantScope> {
-        if self.trusted {
-            return None;
-        }
-        self.catalog.model().access().variant_scope(variant)
-    }
-
-    pub(crate) fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId> {
-        &self.anchor_foreign_keys
-    }
-
-    pub(crate) fn is_admin_only(&self, property: PropertyId) -> bool {
-        !self.trusted && self.catalog.model().access().property(property).admin_only
-    }
-
-    pub(crate) fn is_filterable(&self, property: PropertyId) -> bool {
-        self.catalog.model().access().property(property).filterable
-    }
-
-    pub(crate) fn is_like_allowed(&self, property: PropertyId) -> bool {
-        self.catalog.model().access().property(property).like
-    }
-
-    pub(crate) fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
-        &self.entity_auth
-    }
-
-    pub(crate) fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
-        let name = &self.graph_catalog().entity(entity).name;
-        Some(&self.entity_auth.get(name)?.auth_id_column)
-    }
-
-    pub(crate) fn required_access_level(&self, entity: EntityId) -> Option<u32> {
-        let name = &self.graph_catalog().entity(entity).name;
-        Some(self.entity_auth.get(name)?.required_access_level)
-    }
-}
-
 #[derive(Debug)]
 pub struct QueryModel<B: StorageBackend>
 where
@@ -452,16 +336,8 @@ where
         self.bindings.property_is_foreign_key(property)
     }
 
-    fn required_access_level(&self, entity: EntityId) -> Option<u32> {
-        self.bindings.required_access_level(entity)
-    }
-
     fn materialized_joins(&self) -> &[MaterializedJoin] {
         self.bindings.materialized_joins()
-    }
-
-    fn property_is_hidden(&self, property: PropertyId) -> bool {
-        self.bindings.is_hidden(property)
     }
 
     fn entity(&self, name: &str) -> Option<&Entity> {
@@ -498,12 +374,6 @@ where
         self.graph()
             .property_id(entity, property)
             .map(|property| self.graph().property(property))
-    }
-
-    fn entity_is_global(&self, entity: &str) -> bool {
-        self.graph()
-            .entity_id(entity)
-            .is_some_and(|entity| self.bindings.entity_is_global(entity))
     }
 
     fn high_fan_out(&self, entity: EntityId) -> bool {
@@ -553,38 +423,6 @@ where
         self.bindings.property_mutable(property)
     }
 
-    fn admin_only(&self, entity: &str, property: &str) -> bool {
-        self.property(entity, property)
-            .is_some_and(|property| self.bindings.is_admin_only(property.id))
-    }
-
-    fn entity_auth(&self) -> &HashMap<String, crate::EntityAuthConfig> {
-        self.bindings.entity_auth()
-    }
-
-    fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId> {
-        self.bindings.anchor_foreign_keys()
-    }
-
-    fn entity_minimum_access_level(&self, entity: &str) -> Option<u32> {
-        let entity = self.graph().entity_id(entity)?;
-        self.bindings.required_access_level(entity)
-    }
-
-    fn property_is_admin_only(&self, property: PropertyId) -> bool {
-        self.bindings.is_admin_only(property)
-    }
-
-    fn property_is_filterable(&self, entity: &str, property: &str) -> bool {
-        self.property(entity, property)
-            .is_some_and(|property| self.bindings.is_filterable(property.id))
-    }
-
-    fn property_allows_like(&self, entity: &str, property: &str) -> bool {
-        self.property(entity, property)
-            .is_some_and(|property| self.bindings.is_like_allowed(property.id))
-    }
-
     fn property_is_free_text(&self, entity: &str, property: &str) -> bool {
         self.property(entity, property)
             .is_some_and(|property| self.property_free_text(property.id))
@@ -598,37 +436,6 @@ where
             }
             _ => false,
         }
-    }
-
-    fn entity_authorized_by_namespace(&self, entity: &str) -> bool {
-        self.entity_auth()
-            .get(entity)
-            .is_some_and(|auth| matches!(auth.resource_type.as_str(), "project" | "group"))
-    }
-
-    fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
-        self.bindings.redaction_id_column(entity)
-    }
-
-    fn table_has_path_columns(&self, table: &str) -> bool {
-        self.bindings
-            .table_path_columns(table)
-            .is_none_or(|columns| !columns.is_empty())
-    }
-
-    fn table_minimum_access_level(&self, table: &str) -> u32 {
-        self.bindings
-            .table_path_columns(table)
-            .into_iter()
-            .flatten()
-            .filter_map(|column| column.entity)
-            .filter_map(|entity| self.bindings.required_access_level(entity))
-            .max()
-            .unwrap_or(ontology::RequiredRole::Reporter.as_access_level())
-    }
-
-    fn table_path_columns(&self, table: &str) -> Option<&[crate::PathColumn]> {
-        self.bindings.table_path_columns(table)
     }
 
     fn relationship_table(&self, relationship: &str) -> Option<&str> {
@@ -679,11 +486,6 @@ where
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect()
-    }
-
-    fn redaction_id_column_named(&self, entity: &str) -> Option<&str> {
-        let entity = self.graph().entity_id(entity)?;
-        self.redaction_id_column(entity)
     }
 
     fn relationship_route(&self, relationship: &str) -> Option<RelationshipRoute<'_>> {
@@ -740,23 +542,6 @@ where
         let target = self.graph().entity_id(target)?;
         self.bindings
             .foreign_key(self.graph(), &relationships, source, target)
-    }
-
-    fn variant_scope(
-        &self,
-        relationship: &str,
-        source: &str,
-        target: &str,
-    ) -> Option<ontology::EdgeVariantScope> {
-        let relationship = self.graph().relationship_id(relationship)?;
-        let source = self.graph().entity_id(source)?;
-        let target = self.graph().entity_id(target)?;
-        let variant = self.graph().variant_id(relationship, source, target)?;
-        self.edge_scope(variant)
-    }
-
-    fn edge_scope(&self, variant: RelationshipVariantId) -> Option<EdgeVariantScope> {
-        self.bindings.variant_scope(variant)
     }
 
     fn variant_foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey> {

@@ -4,6 +4,7 @@
 use crate::passes::codegen::RelationalModel;
 use std::collections::HashMap;
 
+use crate::tp_bounds::anchor_keys;
 use query_data_model::plan::logical::{
     Comparison, Expr as Logical, Literal, Matching, Operand, Predicate as Leaf,
 };
@@ -219,7 +220,7 @@ pub fn bind_filter(
             .map(|property| model.property_selectivity(property))
             .or_else(|| data_type.map(ontology::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
-        namespace_anchor: model.anchor_foreign_keys().contains_key(column),
+        namespace_anchor: anchor_keys(model).iter().any(|(name, _)| name == column),
         foreign_key: property_id.is_some_and(|property| model.property_is_foreign_key(property)),
         in_sort_key,
         text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),

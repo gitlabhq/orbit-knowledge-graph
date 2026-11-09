@@ -59,8 +59,8 @@ where
             properties
                 .into_iter()
                 .filter(|property| catalog.readable(*property))
-                .filter(|property| !model.property_is_hidden(*property))
-                .filter(|property| !model.property_is_admin_only(*property))
+                .filter(|property| !catalog.model().access().property(*property).hidden)
+                .filter(|property| !catalog.admin_only(*property))
                 .collect()
         }
     };
@@ -68,4 +68,11 @@ where
         .into_iter()
         .map(|property| graph.property(property).name.clone())
         .collect()
+}
+
+/// The property that identifies an entity's rows to redaction, when the entity is redacted.
+pub fn redaction_column(model: &impl RelationalModel, entity: EntityId) -> Option<&str> {
+    let catalog = model.catalog();
+    let redaction = catalog.redaction(entity)?;
+    Some(&catalog.graph().property(redaction.id).name)
 }

@@ -250,7 +250,7 @@ fn build_dynamic_specs(
                 entity
                     .properties
                     .iter()
-                    .filter(|property| model.property_is_admin_only(**property))
+                    .filter(|property| catalog.admin_only(**property))
                     .map(|property| graph.property(*property).name.as_str())
                     .collect()
             };
@@ -265,7 +265,7 @@ fn build_dynamic_specs(
                     .map(|property| graph.property(*property))
                     .filter(|property| {
                         catalog.lookup(property.id).is_none()
-                            && !model.property_is_hidden(property.id)
+                            && !catalog.model().access().property(property.id).hidden
                             && property.name != "_version"
                             && property.name != "_deleted"
                     })

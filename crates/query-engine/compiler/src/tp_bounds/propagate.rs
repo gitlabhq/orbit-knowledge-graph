@@ -69,8 +69,8 @@ pub(super) fn propagate(
 
 fn scoped(query: Query<'_>, edge: &Edge, model: &impl RelationalModel) -> Scoped {
     let source = query.entity_name(edge.from).unwrap_or_default();
-    let target = query.entity_name(edge.to).unwrap_or_default();
-    let scope = |kind: &String| model.variant_scope(kind, source, target);
+    let (from, to) = (query.entity(edge.from), query.entity(edge.to));
+    let scope = |kind: &String| super::variant_scope(model, kind, from, to);
     Scoped {
         from: edge.from,
         to: edge.to,

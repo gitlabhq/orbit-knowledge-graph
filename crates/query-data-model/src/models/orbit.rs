@@ -4,9 +4,9 @@ use std::sync::Arc;
 use crate::implementations::clickhouse::ClickHouse;
 use crate::implementations::duckdb::DuckDb;
 use crate::{
-    DataModelError, DenormalizedCatalog, Entity, EntityAuthConfig, EntityId, ForeignKey,
-    GraphCatalog, MaterializedJoin, Model, Packages, PathColumn, Property, PropertyId, QueryModel,
-    RelationshipId, RelationshipVariant, RelationshipVariantId,
+    DataModelError, DenormalizedCatalog, Entity, EntityId, ForeignKey, GraphCatalog,
+    MaterializedJoin, Model, Packages, Property, PropertyId, QueryModel, RelationshipId,
+    RelationshipVariant, RelationshipVariantId,
 };
 
 pub type ClickHouseDataModel = QueryModel<ClickHouse>;
@@ -84,14 +84,12 @@ impl RelationshipRoute<'_> {
 
 pub trait OrbitQueryModel {
     fn graph(&self) -> &GraphCatalog;
-    fn property_is_hidden(&self, property: PropertyId) -> bool;
     fn entity(&self, name: &str) -> Option<&Entity>;
     fn property(&self, entity: &str, property: &str) -> Option<&Property>;
     fn property_is_nullable(&self, entity: &str, property: &str) -> bool;
     fn null_as_epoch(&self, property: PropertyId) -> bool;
     fn null_as_epoch_properties(&self, entity: EntityId) -> HashMap<String, ontology::DataType>;
     fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property>;
-    fn entity_is_global(&self, entity: &str) -> bool;
     fn high_fan_out(&self, entity: EntityId) -> bool;
     fn property_selectivity(&self, property: PropertyId) -> ontology::FieldSelectivity;
     fn relationship_exists(&self, relationship: &str) -> bool;
@@ -103,27 +101,14 @@ pub trait OrbitQueryModel {
     fn has_text_index(&self, property: PropertyId) -> bool;
     fn property_unique(&self, property: PropertyId) -> bool;
     fn property_mutable(&self, property: PropertyId) -> bool;
-    fn admin_only(&self, entity: &str, property: &str) -> bool;
-    fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig>;
-    fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId>;
-    fn entity_minimum_access_level(&self, entity: &str) -> Option<u32>;
-    fn property_is_admin_only(&self, property: PropertyId) -> bool;
-    fn property_is_filterable(&self, entity: &str, property: &str) -> bool;
-    fn property_allows_like(&self, entity: &str, property: &str) -> bool;
     fn property_is_free_text(&self, entity: &str, property: &str) -> bool;
     fn property_free_text(&self, property: PropertyId) -> bool;
-    fn entity_authorized_by_namespace(&self, entity: &str) -> bool;
-    fn redaction_id_column(&self, entity: EntityId) -> Option<&str>;
-    fn table_has_path_columns(&self, table: &str) -> bool;
-    fn table_minimum_access_level(&self, table: &str) -> u32;
-    fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]>;
     fn relationship_table(&self, relationship: &str) -> Option<&str>;
     fn default_edge_table(&self) -> &str;
     fn denormalized(&self) -> &DenormalizedCatalog;
     fn relationship_tables(&self, relationships: &[String]) -> Vec<String>;
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String>;
     fn routes(&self, relationship: RelationshipId) -> Vec<RelationshipRoute<'_>>;
-    fn edge_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope>;
     fn variant_foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey>;
     fn relationship_tables_between(
         &self,
@@ -131,7 +116,6 @@ pub trait OrbitQueryModel {
         source: &str,
         target: &str,
     ) -> Vec<String>;
-    fn redaction_id_column_named(&self, entity: &str) -> Option<&str>;
     fn relationship_route(&self, relationship: &str) -> Option<RelationshipRoute<'_>>;
     fn variant_route(
         &self,
@@ -146,18 +130,11 @@ pub trait OrbitQueryModel {
         source: &str,
         target: &str,
     ) -> Option<ForeignKey>;
-    fn variant_scope(
-        &self,
-        relationship: &str,
-        source: &str,
-        target: &str,
-    ) -> Option<ontology::EdgeVariantScope>;
     fn traversal_path_lookup(
         &self,
         entity: &str,
         kind: ontology::TraversalPathKind,
     ) -> Option<(&str, &str)>;
     fn property_is_foreign_key(&self, property: PropertyId) -> bool;
-    fn required_access_level(&self, entity: EntityId) -> Option<u32>;
     fn materialized_joins(&self) -> &[MaterializedJoin];
 }

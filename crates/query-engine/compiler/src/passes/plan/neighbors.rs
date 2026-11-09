@@ -134,7 +134,8 @@ impl<'p> Neighbors<'p> {
                         continue;
                     }
                     let owned = model
-                        .edge_scope(variant.id)
+                        .catalog()
+                        .variant_scope(variant.id)
                         .is_some_and(|scope| match source {
                             true => scope.edge_path_is_target_path(),
                             false => scope.edge_path_is_source_path(),
@@ -162,16 +163,19 @@ impl<'p> Neighbors<'p> {
                 {
                     found = true;
                     let source = &graph.entity(variant.source).name;
-                    carries &= model.edge_scope(variant.id).is_some_and(|scope| {
-                        match center_is_target {
-                            // The edge row carries the target's path; a source shares it only where the ontology says so.
-                            true => scope.is_scope_preserving(),
-                            false => {
-                                scope.propagates_to_source(name, source)
-                                    || scope.edge_path_is_source_path()
+                    carries &= model
+                        .catalog()
+                        .variant_scope(variant.id)
+                        .is_some_and(|scope| {
+                            match center_is_target {
+                                // The edge row carries the target's path; a source shares it only where the ontology says so.
+                                true => scope.is_scope_preserving(),
+                                false => {
+                                    scope.propagates_to_source(name, source)
+                                        || scope.edge_path_is_source_path()
+                                }
                             }
-                        }
-                    });
+                        });
                 }
                 match found && carries {
                     true => carrying.push(name.to_string()),

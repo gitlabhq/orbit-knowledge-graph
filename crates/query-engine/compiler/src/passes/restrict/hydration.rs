@@ -13,13 +13,14 @@ pub fn restrict_hydration(
     model: &impl RelationalModel,
     security_ctx: &SecurityContext,
 ) -> Result<()> {
-    let graph = model.graph();
+    let catalog = model.catalog();
+    let graph = catalog.graph();
     for arm in &request.arms {
         let query = Query::new(&arm.plan, logical);
         for binding in query.bindings() {
             let entity = graph.entity(binding.entity).name.as_str();
-            if let Some(min_role) = model
-                .entity_minimum_access_level(entity)
+            if let Some(min_role) = catalog
+                .role_floor(binding.entity)
                 .filter(|level| *level > DEFAULT_PATH_ACCESS_LEVEL)
                 && security_ctx.paths_at_least(min_role).is_empty()
             {
@@ -48,8 +49,8 @@ pub fn restrict_hydration(
                 };
                 if let Some(column) = listed
                     .iter()
+                    .find(|property| catalog.admin_only(**property))
                     .map(|property| graph.property(*property).name.as_str())
-                    .find(|column| model.admin_only(entity, column))
                 {
                     return Err(QueryError::Restrict(format!(
                         "column \"{column}\" for {entity}: field requires administrator access"

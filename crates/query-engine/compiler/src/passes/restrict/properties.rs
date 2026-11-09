@@ -13,7 +13,7 @@ pub(super) fn admin_only(query: Query<'_>, model: &impl RelationalModel) -> Resu
         else {
             return Ok(());
         };
-        if !model.property_is_admin_only(property) {
+        if !model.catalog().admin_only(property) {
             return Ok(());
         }
         let entity = query.entity_name(binding).unwrap_or_default();

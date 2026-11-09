@@ -13,7 +13,6 @@ use crate::common::{
 };
 use integration_testkit::{load_data_model, run_subtests, run_subtests_shared, t};
 use orbit_server::redaction::QueryResult;
-use query_data_model::OrbitQueryModel;
 
 fn table_users() -> String {
     t("gl_user")
@@ -1024,7 +1023,7 @@ fn fail_closed_null_id_denies_row() {
     let mut ctx = ResultContext::new();
     ctx.add_node("u", "User");
     ctx.add_node("p", "Project");
-    for (entity, config) in data_model.entity_auth().clone() {
+    for (entity, config) in compiler::entity_auth(&*data_model) {
         ctx.add_entity_auth(entity, config);
     }
 
@@ -2042,7 +2041,7 @@ fn fail_closed_null_type_denies_row() {
 
     let mut ctx = ResultContext::new();
     ctx.add_node("u", "User");
-    for (entity, config) in data_model.entity_auth().clone() {
+    for (entity, config) in compiler::entity_auth(&*data_model) {
         ctx.add_entity_auth(entity, config);
     }
 
