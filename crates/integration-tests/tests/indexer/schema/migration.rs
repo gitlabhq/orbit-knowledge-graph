@@ -1630,3 +1630,60 @@ async fn garbage_collection_keeps_most_recent_retired_version_by_created_at() {
     assert!(versions.contains(&10));
     assert!(!versions.contains(&9));
 }
+
+#[tokio::test]
+async fn garbage_collection_drops_only_objects_of_dead_versions() {
+    let (ctx, _ontology, _metrics) = setup().await;
+    let client = ctx.create_client();
+
+    ctx.execute(
+        "INSERT INTO gkg_schema_version (version, status, created_at) \
+         VALUES \
+         (30, 'active', toDateTime('2024-01-01 00:00:05')), \
+         (31, 'migrating', toDateTime('2024-01-01 00:00:06')), \
+         (29, 'retired', toDateTime('2024-01-01 00:00:04')), \
+         (28, 'retired', toDateTime('2024-01-01 00:00:03')), \
+         (27, 'dropped', toDateTime('2024-01-01 00:00:02'))",
+    )
+    .await;
+
+    let created = [
+        "v31_gl_user",
+        "v30_gl_user",
+        "v29_gl_user",
+        "v28_gl_user",
+        "v28_gl_edge_v2",
+        "v27_gl_user",
+        "v27_removed_entity",
+    ];
+    for name in created {
+        ctx.execute(&format!(
+            "CREATE TABLE {name} (id UInt32) ENGINE = MergeTree ORDER BY id"
+        ))
+        .await;
+    }
+
+    let droppable: std::collections::BTreeSet<String> = find_droppable_entities(&client, 2)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|entity| entity.name)
+        .collect();
+
+    assert!(droppable.iter().all(|name| name.starts_with('v')));
+    let created_droppable: std::collections::BTreeSet<&str> = created
+        .into_iter()
+        .filter(|name| droppable.contains(*name))
+        .collect();
+    assert_eq!(
+        created_droppable,
+        std::collections::BTreeSet::from([
+            "v28_gl_user",
+            "v28_gl_edge_v2",
+            "v27_gl_user",
+            "v27_removed_entity",
+        ]),
+        "active, migrating and the newest retained version keep every object; dead versions lose all, including rename orphans"
+    );
+    assert!(!droppable.contains("gkg_schema_version"));
+}
