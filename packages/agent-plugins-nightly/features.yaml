@@ -1,6 +1,6 @@
 output-guard:
   nightly: true
-  stable: false
+  stable: true
   claude:
     hooks: output-guard/claude-hooks.json
     files: [output-guard/claude.mjs, output-guard/core.mjs]
