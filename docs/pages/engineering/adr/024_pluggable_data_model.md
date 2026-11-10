@@ -97,8 +97,8 @@ flowchart TB
     PC -->|SQL| CH
     IX -->|writes rows| CH
 
-    classDef qdm fill:#E3F2FD,stroke:#1565C0
-    classDef engine fill:#FFF3E0,stroke:#E65100
+    classDef qdm fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
+    classDef engine fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
     class L,M,S,LC,PC,T qdm
     class E,IX engine
 ```
