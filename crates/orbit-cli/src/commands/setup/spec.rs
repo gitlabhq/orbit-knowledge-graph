@@ -248,6 +248,7 @@ impl PluginSpec {
     ) -> Vec<(String, Vec<u8>)> {
         let marketplace = serde_json::json!({
             "name": marketplace,
+            "description": "GitLab Orbit for Claude Code",
             "owner": { "name": "GitLab" },
             "plugins": [{ "name": self.name, "source": format!("./{}", self.name) }],
         });
@@ -852,6 +853,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(marketplace["name"], plugin.marketplace.as_str());
+        assert!(
+            marketplace["description"]
+                .as_str()
+                .is_some_and(|description| !description.is_empty()),
+            "claude plugin validate --strict rejects a marketplace without a description"
+        );
         assert_eq!(marketplace["plugins"][0]["name"], plugin.name.as_str());
         assert!(
             marketplace["plugins"][0]["source"]
