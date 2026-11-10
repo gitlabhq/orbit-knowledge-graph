@@ -92,7 +92,7 @@ test("the next launcher is tried when the first cannot list", async () => {
 
 test("a graph that stays locked is a quiet no-result, not a failure, and the lookup does not wait for it", async () => {
   const busy = stubOrbit({ grepStatus: 75 });
-  assert.deepEqual(await lookupDefinition("parse_widget", busy.repo, { launchers: [[busy.launcher("orbit")]] }), {});
+  assert.deepEqual(await lookupDefinition("parse_widget", busy.repo, { launchers: [[busy.launcher("orbit")]] }), { busy: true });
   assert.ok(busy.calls().length > 0);
   assert.equal(busy.waitLimits().at(-1), "0");
 });
@@ -101,6 +101,6 @@ test("a listing that finds the graph locked adds nothing and does not try the ne
   const stub = stubOrbit();
   writeFileSync(stub.launcher("locked"), "#!/bin/sh\nexit 75\n", { mode: 0o755 });
   const result = await lookupDefinition("parse_widget", stub.repo, { launchers: [[stub.launcher("locked")], [stub.launcher("orbit")]] });
-  assert.deepEqual(result, {});
+  assert.deepEqual(result, { busy: true });
   assert.deepEqual(stub.calls(), []);
 });

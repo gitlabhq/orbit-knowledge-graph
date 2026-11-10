@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll as after, afterEach, beforeAll as before, test } from "bun:test";
@@ -98,4 +98,28 @@ test("state lives in a private per-user directory, and a planted symlink is repl
   assert.equal(readFileSync(victim, "utf8"), "keep");
   assert.ok(lstatSync(state).isFile());
   rmSync(cache, { recursive: true, force: true });
+});
+
+test("a refused state directory writes nothing, not even in the project", async () => {
+  const stub = stubOrbit();
+  process.env.PATH = stub.bin;
+  const elsewhere = mkdtempSync(join(tmpdir(), "search-guard-real-"));
+  const linked = join(elsewhere, "link");
+  symlinkSync(elsewhere, linked);
+  const before = readdirSync(stub.repo).sort();
+  const output = await run(search(stub.repo, "rg parse_widget"), { CLAUDE_PLUGIN_DATA: linked });
+  assert.ok(output);
+  assert.deepEqual(readdirSync(stub.repo).sort(), before);
+  assert.deepEqual(readdirSync(elsewhere), ["link"]);
+  rmSync(elsewhere, { recursive: true, force: true });
+});
+
+test("a busy graph does not mark the term handled", async () => {
+  const stub = stubOrbit({ grepStatus: 75 });
+  process.env.PATH = stub.bin;
+  const input = search(stub.repo, "rg parse_widget");
+  assert.equal(await run(input, env()), null);
+  const first = stub.calls().length;
+  assert.equal(await run(input, env()), null);
+  assert.ok(stub.calls().length > first);
 });

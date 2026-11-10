@@ -16,6 +16,7 @@ const execFileAsync = promisify(execFile);
 const EXIT_NO_MATCH = 1;
 const EXIT_BUSY = 75;
 const FAILED = Symbol("failed");
+const BUSY = Symbol("busy");
 const OVERSIZED = Symbol("oversized");
 
 export function isGuardDisabled(value) {
@@ -116,7 +117,7 @@ async function existingIndex(exec, launchers, cwd) {
     const [command, ...prefix] = launcher;
     const list = await exec(command, [...prefix, "workspace", "list", "--format", "json"], cwd);
     if (list === OVERSIZED) return undefined;
-    if (list !== FAILED && list.status === EXIT_BUSY) return undefined;
+    if (list !== FAILED && list.status === EXIT_BUSY) return BUSY;
     if (list === FAILED || list.status !== 0) continue;
     try {
       const rows = JSON.parse(list.stdout).filter(
@@ -144,6 +145,7 @@ export async function lookupDefinition(term, cwd, { launchers, timeoutMs = DEFAU
   const aborted = () => (signal?.aborted ? {} : { failed: true });
   const index = await existingIndex(exec, launchers, cwd);
   if (index === FAILED) return aborted();
+  if (index === BUSY) return { busy: true };
   if (!index) return {};
   const { launcher, database, top } = index;
   const [command, ...prefix] = launcher;
@@ -153,7 +155,8 @@ export async function lookupDefinition(term, cwd, { launchers, timeoutMs = DEFAU
   if (grep === FAILED) return aborted();
   // No match and a busy graph are normal: nothing to add, and the next search may work. Any other
   // non-zero exit is a failure.
-  if (grep.status === EXIT_NO_MATCH || grep.status === EXIT_BUSY) return {};
+  if (grep.status === EXIT_BUSY) return { busy: true };
+  if (grep.status === EXIT_NO_MATCH) return {};
   if (grep.status !== 0) return aborted();
   const definition = extractDefinition(grep.stdout);
   if (!definition) return {};

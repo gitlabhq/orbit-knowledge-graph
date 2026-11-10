@@ -47,6 +47,7 @@ function readState(env, sessionId) {
 function writeState(env, sessionId, state) {
   try {
     const path = statePath(env, sessionId);
+    if (!path) return;
     const pending = `${path}.${process.pid}.tmp`;
     writeFileSync(pending, JSON.stringify({ terms: [...state.terms], tripped: state.tripped }), { mode: 0o600, flag: "wx" });
     renameSync(pending, path);
@@ -72,11 +73,11 @@ export async function run(input, env = process.env, lookup = lookupDefinition) {
   if (!("term" in verdict)) return null;
   const key = normalizeTerm(verdict.term);
   if (state.terms.has(key)) return null;
-  const { text, failed } = await lookup(verdict.term, cwd, {
+  const { text, failed, busy } = await lookup(verdict.term, cwd, {
     launchers: LAUNCHERS,
     timeoutMs: lookupTimeoutMs(env.ORBIT_SEARCH_GUARD_TIMEOUT_MS),
   });
-  state.terms.add(key);
+  if (!busy) state.terms.add(key);
   if (failed) state.tripped = true;
   writeState(env, sessionId, state);
   if (!text) return null;

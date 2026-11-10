@@ -43,11 +43,12 @@ export function registerSearchGuard(pi, lookup = lookupDefinition) {
       const key = normalizeTerm(verdict.term);
       if (handled.has(key)) return;
       handled.add(key);
-      const { text, failed } = await lookup(verdict.term, ctx.cwd, {
+      const { text, failed, busy } = await lookup(verdict.term, ctx.cwd, {
         launchers: [LAUNCHER],
         timeoutMs: lookupTimeoutMs(process.env.ORBIT_SEARCH_GUARD_TIMEOUT_MS),
         signal: ctx.signal,
       });
+      if (busy) handled.delete(key);
       if (failed) tripped = true;
       if (!text) return;
       return { content: [...event.content, { type: "text", text: `\n\n${text}` }], structuredContent: event.structuredContent };
