@@ -72,8 +72,8 @@ skinparam component {
   BorderColor<<engine>> #E65100
 }
 skinparam rectangle {
-  BackgroundColor<<label>> #FFFFFF
-  BorderColor<<label>> #FFFFFF
+  BackgroundColor<<label>> #EEEEEE
+  BorderColor<<label>> #EEEEEE
   FontSize<<label>> 11
 }
 hide stereotype
@@ -159,8 +159,8 @@ The data model is infrastructure and makes no planning decisions: the compiler p
 @startuml
 allowmixing
 skinparam rectangle {
-  BackgroundColor<<label>> #FFFFFF
-  BorderColor<<label>> #FFFFFF
+  BackgroundColor<<label>> #EEEEEE
+  BorderColor<<label>> #EEEEEE
   FontSize<<label>> 11
 }
 hide <<label>> stereotype
@@ -384,8 +384,8 @@ A final check proves every read carries its guard before anything leaves the que
 ```plantuml
 @startuml
 skinparam rectangle {
-  BackgroundColor<<label>> #FFFFFF
-  BorderColor<<label>> #FFFFFF
+  BackgroundColor<<label>> #EEEEEE
+  BorderColor<<label>> #EEEEEE
   FontSize<<label>> 11
 }
 hide <<label>> stereotype
