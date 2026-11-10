@@ -1,7 +1,8 @@
 //! Relation planning: an `EdgeRelation` per input relationship (edge tables, layout, foreign-key
 //! shortcut), ordered most selective first along a connected chain.
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
+use query_data_model::Catalog;
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -23,12 +24,12 @@ use crate::passes::plan::filters::{
 
 /// The edge tables storing a variant of `relationships` from `source` to `target`; any relationship when none is named.
 fn tables_between(
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
     relationships: &[RelationshipId],
     source: EntityId,
     target: EntityId,
 ) -> Vec<String> {
-    let graph = model.catalog().graph();
+    let graph = model.graph();
     let any: Vec<RelationshipId>;
     let relationships = match relationships {
         [] => {
@@ -42,7 +43,7 @@ fn tables_between(
     };
     relationships
         .iter()
-        .flat_map(|relationship| model.catalog().edge_routes(*relationship))
+        .flat_map(|relationship| model.edge_routes(*relationship))
         .filter(|route| {
             route
                 .variants()
@@ -133,16 +134,16 @@ impl EdgeRelation {
     }
 }
 
-pub(super) fn build_relations<M>(
+pub(super) fn build_relations<B>(
     query: Query<'_>,
     facts: &[Fact<'_>],
-    model: &M,
+    model: &Catalog<B>,
     nodes: &HashMap<String, NodePlan>,
 ) -> Vec<EdgeRelation>
 where
-    M: RelationalModel,
+    B: SqlBackend,
 {
-    let graph = model.catalog().graph();
+    let graph = model.graph();
     let leaves = query.leaves();
     query
         .steps()
@@ -174,7 +175,7 @@ where
                 };
             let max_hops = step.range.max;
             let mut edge_tables = if max_hops > 1 {
-                model.catalog().edge_tables(relationships)
+                model.edge_tables(relationships)
             } else {
                 let mut tables = between(source, target);
                 if direction == Direction::Both {
@@ -185,10 +186,10 @@ where
                 tables
             };
             if edge_tables.is_empty() {
-                edge_tables = model.catalog().edge_tables(relationships);
+                edge_tables = model.edge_tables(relationships);
             }
             if edge_tables.is_empty() {
-                edge_tables.extend(model.catalog().default_edge_table().map(str::to_string));
+                edge_tables.extend(model.default_edge_table().map(str::to_string));
             }
             let (start, end) = edge_columns(direction);
             let pinned: Vec<&str> = [(from, start), (to, end)]
@@ -204,12 +205,9 @@ where
                 .any(|leaf| leaf.binding() == step.edge && !leaf.edge_kind());
             let fk = (max_hops == 1 && !tested && direction != Direction::Both)
                 .then(|| {
-                    let foreign_key =
-                        model
-                            .catalog()
-                            .shared_foreign_key(relationships, source?, target?)?;
-                    let column = model.catalog().column(foreign_key.property)?.to_string();
-                    model.catalog().column(foreign_key.referenced_key)?;
+                    let foreign_key = model.shared_foreign_key(relationships, source?, target?)?;
+                    let column = model.column(foreign_key.property)?.to_string();
+                    model.column(foreign_key.referenced_key)?;
                     let node = match foreign_key.holder {
                         query_data_model::Endpoint::Source => source_node,
                         query_data_model::Endpoint::Target => target_node,
@@ -243,14 +241,14 @@ where
 }
 
 /// The filters attached to an edge, bound to the columns its tables store.
-fn edge_filters<M>(
+fn edge_filters<B>(
     facts: &[Fact<'_>],
     edge: Ref,
     tables: &[String],
-    model: &M,
+    model: &Catalog<B>,
 ) -> Vec<(String, BoundFilter)>
 where
-    M: RelationalModel,
+    B: SqlBackend,
 {
     let owner = FilterOwner::Tables(tables);
     let mut filters: Vec<(String, BoundFilter)> = facts
@@ -267,7 +265,7 @@ where
                 }
                 .to_string(),
                 Logical::Attribute { attribute, .. } => {
-                    model.catalog().graph().attribute(attribute).name.clone()
+                    model.graph().attribute(attribute).name.clone()
                 }
                 _ => return None,
             };
@@ -282,7 +280,7 @@ where
 
 /// Swaps each table for the equivalent layout whose sort key reaches a pinned endpoint column soonest.
 pub(super) fn select_edge_layouts(
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
     tables: &mut [String],
     endpoints: &[&str],
 ) {
@@ -291,12 +289,9 @@ pub(super) fn select_edge_layouts(
     }
     for table in tables {
         let selected = std::iter::once(table.as_str())
-            .chain(model.catalog().copies_of(table))
+            .chain(model.copies_of(table))
             .min_by_key(|layout| {
-                let key = model
-                    .catalog()
-                    .table_facts(layout)
-                    .map(|facts| &facts.sort_key);
+                let key = model.table_facts(layout).map(|facts| &facts.sort_key);
                 key.map_or(usize::MAX, |key| {
                     endpoints
                         .iter()

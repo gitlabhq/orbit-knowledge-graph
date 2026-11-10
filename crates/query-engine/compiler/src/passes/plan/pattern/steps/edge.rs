@@ -1,7 +1,7 @@
 //! Step for a relation stored as edge rows: read the current rows under the relation's predicates,
 //! narrow by known endpoint ids, join to the chain, and expose the edge columns.
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::build::stored;
 use query_data_model::constants::*;
 use query_data_model::implementations::relational::RelationalBackend;
@@ -16,10 +16,9 @@ use crate::passes::plan::predicates::*;
 use crate::passes::plan::rows::{ReadScope, Reads, Rel};
 use crate::passes::plan::sort_key;
 
-impl<M, B> RelationBuilder<'_, '_, '_, M, B>
+impl<B> RelationBuilder<'_, '_, '_, B>
 where
-    M: RelationalModel,
-    B: RelationalBackend,
+    B: SqlBackend,
 {
     pub(super) fn add_edge(&mut self, index: usize, relation: &EdgeRelation) -> Result<()> {
         let pattern = self.pattern;
@@ -221,16 +220,15 @@ where
     }
 }
 
-pub(super) fn current_edge_rows<M, B>(
+pub(super) fn current_edge_rows<B>(
     reads: &mut Reads<'_, '_, B>,
-    pattern: &Pattern<'_, M>,
+    pattern: &Pattern<'_, B>,
     relation: &EdgeRelation,
     alias: &str,
     predicates: Vec<Predicate>,
 ) -> Result<Rel>
 where
-    M: RelationalModel,
-    B: RelationalBackend,
+    B: SqlBackend,
 {
     let model = pattern.model;
     let bound = reads.relationship_bound(relation.input_index);

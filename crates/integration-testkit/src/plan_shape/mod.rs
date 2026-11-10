@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use compiler::logical::facts;
-use compiler::passes::codegen::{self, RelationalModel};
+use compiler::passes::codegen::{self, SqlBackend};
 use compiler::passes::{normalize, page, plan, response_policy};
 use compiler::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 use orbit_utils::traversal_path::TraversalPath;
@@ -250,9 +250,9 @@ impl Assertions {
     }
 }
 
-fn check<M: RelationalModel>(
+fn check<B: SqlBackend>(
     scenario: &Scenario,
-    model: &M,
+    model: &Catalog<B>,
     backend: &str,
     path: &Path,
 ) -> Result<(), Vec<String>> {
@@ -271,7 +271,7 @@ fn check<M: RelationalModel>(
                 continue;
             }
         };
-        let catalog = model.catalog().model().logical().as_admin();
+        let catalog = model.model().logical().as_admin();
         let parsed = compiler::surface::parse(raw, frontend, catalog).and_then(|statement| {
             let plan = normalize::normalize(statement.plan, catalog.model(), model)?;
             Ok(query_data_model::surface::Statement { plan, ..statement })
@@ -313,7 +313,7 @@ fn check<M: RelationalModel>(
         };
         let relational = plan::plan(request, tp_bounds.as_ref(), model)
             .and_then(|planned| {
-                let tree = emitted::tree(&planned.plan, model.catalog());
+                let tree = emitted::tree(&planned.plan, model);
                 Ok((tree, passes(planned, scenario, backend, model, query)?))
             })
             .map_err(|error| error.to_string());
@@ -337,7 +337,7 @@ fn check<M: RelationalModel>(
                 continue;
             }
         };
-        let emitted = emitted::tree(&relational, model.catalog());
+        let emitted = emitted::tree(&relational, model);
         for (phase, assertions, actual) in [
             ("planned", &assertions.planned, planned_tree),
             ("emitted", &assertions.emitted, emitted),
@@ -357,13 +357,13 @@ fn check<M: RelationalModel>(
     }
 }
 
-fn passes<M: RelationalModel>(
-    planned: plan::Planned<RelationalPlan<M::Backend>>,
+fn passes<B: SqlBackend>(
+    planned: plan::Planned<RelationalPlan<B>>,
     scenario: &Scenario,
     backend: &str,
-    model: &M,
+    model: &Catalog<B>,
     query: compiler::logical::Query<'_>,
-) -> compiler::Result<RelationalPlan<M::Backend>> {
+) -> compiler::Result<RelationalPlan<B>> {
     if scenario.hydration.is_some() {
         return Ok(planned.plan);
     }
@@ -881,7 +881,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         let paths = (0..count)
             .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
             .collect();
-        let arm = HydrationArm::new(model.catalog().model(), "File", &[1], &[], paths).unwrap();
+        let arm = HydrationArm::new(model.model(), "File", &[1], &[], paths).unwrap();
         let request = HydrationRequest {
             arms: vec![arm],
             options: HydrationCompileOptions {
@@ -890,7 +890,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             },
         };
         let planned = plan::plan(plan::Request::Hydration(&request), None, &model).unwrap();
-        let rendered = model.catalog().render(&planned.plan);
+        let rendered = model.render(&planned.plan);
         assert_eq!(rendered.sql.contains("arrayExists"), set);
         assert_eq!(
             rendered.sql.matches("startsWith").count(),

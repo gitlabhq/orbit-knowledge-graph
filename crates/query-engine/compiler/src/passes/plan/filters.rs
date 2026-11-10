@@ -1,7 +1,7 @@
 //! Binds a filter test to the backend facts about its property (sort key, text index, selectivity,
 //! uniqueness, mutability). Those facts decide where the planner may apply the filter.
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use std::collections::HashMap;
 
 use crate::tp_bounds::anchor_keys;
@@ -182,40 +182,39 @@ pub fn bind_filter(
     property: &str,
     test: Test,
     owner: &FilterOwner<'_>,
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> BoundFilter {
-    let catalog = model.catalog();
-    let graph = catalog.graph();
+    let graph = model.graph();
     let (metadata, in_sort_key) = match owner {
         FilterOwner::Entity(entity) => {
-            let table = catalog.table_of(*entity);
+            let table = model.table_of(*entity);
             (
                 graph
                     .property_id(*entity, property)
                     .map(|property| graph.property(property))
                     .map(|property| (Some(property.id), Some(property.data_type))),
-                table.is_some_and(|table| in_sort_key(catalog, table, property)),
+                table.is_some_and(|table| in_sort_key(model, table, property)),
             )
         }
         FilterOwner::Tables(tables) => {
             let data_type = tables.first().and_then(|first| {
-                let data_type = column_type(catalog, first, property)?;
+                let data_type = column_type(model, first, property)?;
                 tables[1..]
                     .iter()
-                    .all(|table| column_type(catalog, table, property) == Some(data_type))
+                    .all(|table| column_type(model, table, property) == Some(data_type))
                     .then_some(data_type)
             });
             (
                 Some((None, data_type)),
                 tables
                     .iter()
-                    .all(|table| in_sort_key(catalog, table, property)),
+                    .all(|table| in_sort_key(model, table, property)),
             )
         }
     };
     let (property_id, data_type) = metadata.unwrap_or_default();
     let column = property_id
-        .and_then(|property| catalog.column(property))
+        .and_then(|property| model.column(property))
         .unwrap_or(property);
     BoundFilter {
         test,
@@ -229,12 +228,12 @@ pub fn bind_filter(
         foreign_key: property_id
             .is_some_and(|property| !graph.property(property).references.is_empty()),
         in_sort_key,
-        text_indexed: property_id.is_some_and(|property| catalog.text_index(property)),
+        text_indexed: property_id.is_some_and(|property| model.text_index(property)),
         unique: property_id.is_some_and(|property| graph.property(property).unique),
         immutable: property_id.is_some_and(|property| !graph.property(property).mutable),
         null_as_epoch: NullAsEpoch {
             column: data_type
-                .filter(|_| property_id.is_some_and(|property| catalog.null_as_epoch(property))),
+                .filter(|_| property_id.is_some_and(|property| model.null_as_epoch(property))),
             rhs: None,
         },
     }
@@ -274,7 +273,7 @@ pub fn lowerable_denorm<'a>(
 /// The denormalized facts of every property a filter or condition tests on a binding.
 pub fn denormalized_facts(
     query: Query<'_>,
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> HashMap<DenormalizedKey, DenormalizedProperty> {
     query
         .leaves()
@@ -291,22 +290,18 @@ pub fn denormalized_facts(
                         property,
                         direction,
                     };
-                    model
-                        .catalog()
-                        .denormalized(key)
-                        .cloned()
-                        .map(|facts| (key, facts))
+                    model.denormalized(key).cloned().map(|facts| (key, facts))
                 })
         })
         .collect()
 }
 
 /// The anchor's attached filters, each bound to its property on the binding's entity.
-pub fn bind_facts<M: RelationalModel>(
+pub fn bind_facts<B: SqlBackend>(
     query: Query<'_>,
     anchor: &Anchor<'_>,
     alias: &str,
-    model: &M,
+    model: &Catalog<B>,
 ) -> Vec<(String, BoundFilter)> {
     let graph = query.model.graph();
     let owner = FilterOwner::Entity(anchor.binding.entity);
@@ -328,7 +323,7 @@ pub fn bind_facts<M: RelationalModel>(
             })?;
             let mut bound = bind_filter(name, test, &owner, model);
             bound.null_as_epoch.rhs = rhs
-                .filter(|rhs| model.catalog().null_as_epoch(*rhs))
+                .filter(|rhs| model.null_as_epoch(*rhs))
                 .map(|rhs| graph.property(rhs).data_type);
             Some((name.clone(), bound))
         })

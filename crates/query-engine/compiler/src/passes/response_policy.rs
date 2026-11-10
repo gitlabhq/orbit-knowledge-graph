@@ -1,3 +1,5 @@
+use query_data_model::Catalog;
+use query_data_model::implementations::relational::plan::RelationalPlan;
 use std::collections::{HashMap, HashSet};
 
 use orbit_utils::query_types::SqlType;
@@ -7,17 +9,17 @@ use query_data_model::implementations::relational::plan::{BinaryOp, Expr, Functi
 use crate::error::Result;
 use crate::logical::Query;
 use crate::logical::columns::{returned, selections};
-use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
+use crate::passes::codegen::{SqlBackend, rejected};
 
 const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_UTF8_BYTES_PER_CHAR: u64 = 4;
 const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
 
-pub fn apply_text_excerpts<M: RelationalModel>(
-    plan: PlanOf<M>,
-    model: &M,
+pub fn apply_text_excerpts<B: SqlBackend>(
+    plan: RelationalPlan<B>,
+    model: &Catalog<B>,
     query: Query<'_>,
-) -> Result<PlanOf<M>> {
+) -> Result<RelationalPlan<B>> {
     let max_chars = (WORKHORSE_GRPC_MESSAGE_CAP_BYTES
         / MAX_UTF8_BYTES_PER_CHAR
         / u64::from(query.sorted_rows()?.max(1))) as u32;
@@ -26,8 +28,7 @@ pub fn apply_text_excerpts<M: RelationalModel>(
         .bindings()
         .into_iter()
         .map(|binding| {
-            let catalog = model.catalog();
-            let graph = catalog.graph();
+            let graph = model.graph();
             let entity = graph.entity(binding.entity);
             let selection = selected.get(&binding.output).copied();
             let requested = returned(model, binding.entity, selection);
@@ -36,12 +37,12 @@ pub fn apply_text_excerpts<M: RelationalModel>(
                 .iter()
                 .map(|property| graph.property(*property))
                 .filter(|property| {
-                    catalog.column(property.id).is_some() && property.data_type == DataType::String
+                    model.column(property.id).is_some() && property.data_type == DataType::String
                 })
                 .map(|property| property.name.clone())
                 .collect();
             for property in &entity.properties {
-                if let Some(lookup) = catalog.lookup(*property) {
+                if let Some(lookup) = model.lookup(*property) {
                     for key in &lookup.keys {
                         excerpted.remove(&graph.property(*key).name);
                     }
@@ -61,7 +62,6 @@ pub fn apply_text_excerpts<M: RelationalModel>(
         return Ok(plan);
     };
     model
-        .catalog()
         .rewrite(plan, |q, rows| {
             if q.original() != Some(compute) {
                 return Ok(rows);

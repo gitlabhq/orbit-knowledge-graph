@@ -23,48 +23,37 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 pub type ClickHousePlan = RelationalPlan<ClickHouse>;
-pub type PlanOf<M> = RelationalPlan<<M as RelationalModel>::Backend>;
-
-/// A relational catalog the compiler plans against and renders through.
-pub trait RelationalModel: Send + Sync {
-    type Backend: RelationalBackend;
+/// A relational backend the compiler plans for and renders SQL through.
+pub trait SqlBackend: RelationalBackend + Send + Sync {
     const DIALECT: SqlDialect;
 
-    fn catalog(&self) -> &Catalog<Self::Backend>;
-    fn render(&self, plan: &PlanOf<Self>) -> ParameterizedSql;
+    fn render(catalog: &Catalog<Self>, plan: &RelationalPlan<Self>) -> ParameterizedSql;
 }
 
-impl RelationalModel for Catalog<ClickHouse> {
-    type Backend = ClickHouse;
+impl SqlBackend for ClickHouse {
     const DIALECT: SqlDialect = SqlDialect::ClickHouse;
 
-    fn catalog(&self) -> &Catalog<ClickHouse> {
-        self
-    }
-
-    fn render(&self, plan: &ClickHousePlan) -> ParameterizedSql {
-        self.render(plan)
+    fn render(catalog: &Catalog<Self>, plan: &ClickHousePlan) -> ParameterizedSql {
+        catalog.render(plan)
     }
 }
 
-impl RelationalModel for Catalog<DuckDb> {
-    type Backend = DuckDb;
+impl SqlBackend for DuckDb {
     const DIALECT: SqlDialect = SqlDialect::DuckDb;
 
-    fn catalog(&self) -> &Catalog<DuckDb> {
-        self
-    }
-
-    fn render(&self, plan: &RelationalPlan<DuckDb>) -> ParameterizedSql {
-        self.render(plan)
+    fn render(catalog: &Catalog<Self>, plan: &RelationalPlan<DuckDb>) -> ParameterizedSql {
+        catalog.render(plan)
     }
 }
 
 /// Shares read more than once become `_orbit_relation_N` bodies; the rest inline into their reader.
-pub fn materialize<M: RelationalModel>(plan: PlanOf<M>, model: &M) -> Result<PlanOf<M>> {
+pub fn materialize<B: SqlBackend>(
+    plan: RelationalPlan<B>,
+    model: &Catalog<B>,
+) -> Result<RelationalPlan<B>> {
     let prefix = format!("{}relation_", crate::constants::internal_column_prefix());
-    let policy = SharePolicy::of::<M::Backend>(prefix);
-    model.catalog().materialize(plan, &policy).map_err(rejected)
+    let policy = SharePolicy::of::<B>(prefix);
+    model.materialize(plan, &policy).map_err(rejected)
 }
 
 pub fn configure(
@@ -87,19 +76,19 @@ pub fn configure(
         .map_err(rejected)
 }
 
-pub fn render<M: RelationalModel>(
-    plan: &PlanOf<M>,
-    model: &M,
+pub fn render<B: SqlBackend>(
+    plan: &RelationalPlan<B>,
+    model: &Catalog<B>,
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> ParameterizedQuery {
-    let rendered = model.render(plan);
+    let rendered = B::render(model, plan);
     ParameterizedQuery {
         sql: rendered.sql,
         params: rendered.parameters,
         result_context,
         query_config,
-        dialect: M::DIALECT,
+        dialect: B::DIALECT,
     }
 }
 

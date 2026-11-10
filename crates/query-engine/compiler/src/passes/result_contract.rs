@@ -1,3 +1,5 @@
+use query_data_model::Catalog;
+use query_data_model::implementations::relational::plan::RelationalPlan;
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::Direction;
@@ -18,7 +20,7 @@ use crate::error::{QueryError, Result};
 use crate::logical::columns::free_text;
 use crate::logical::facts::{anchors, facts};
 use crate::logical::{Binding, Kind, Query};
-use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
+use crate::passes::codegen::{SqlBackend, rejected};
 use crate::passes::plan::Term;
 use crate::passes::plan::build::term;
 use crate::passes::plan::predicates::{Column as Named, OutputValue};
@@ -35,13 +37,12 @@ pub struct EntityAuthConfig {
 }
 
 /// How the server authorizes each redacted entity, by entity name.
-pub fn entity_auth(model: &impl RelationalModel) -> HashMap<String, EntityAuthConfig> {
-    let catalog = model.catalog();
-    let graph = catalog.graph();
+pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, EntityAuthConfig> {
+    let graph = model.graph();
     graph
         .entities()
         .filter_map(|entity| {
-            let redaction = catalog.redaction(entity.id)?;
+            let redaction = model.redaction(entity.id)?;
             let config = EntityAuthConfig {
                 resource_type: redaction.resource.clone(),
                 ability: redaction.ability.clone(),
@@ -49,7 +50,7 @@ pub fn entity_auth(model: &impl RelationalModel) -> HashMap<String, EntityAuthCo
                 owner_entity: redaction
                     .owner
                     .map(|owner| graph.entity(owner).name.clone()),
-                required_access_level: catalog.role_floor(entity.id)?,
+                required_access_level: model.role_floor(entity.id)?,
             };
             Some((entity.name.clone(), config))
         })
@@ -343,12 +344,12 @@ impl ResultShape {
     }
 }
 
-pub fn apply<M: RelationalModel>(
-    plan: PlanOf<M>,
+pub fn apply<B: SqlBackend>(
+    plan: RelationalPlan<B>,
     query: Query<'_>,
     metadata: &PlanMetadata,
-    model: &M,
-) -> Result<(PlanOf<M>, ResultContext)> {
+    model: &Catalog<B>,
+) -> Result<(RelationalPlan<B>, ResultContext)> {
     let kind = query.kind();
     let mut ctx = ResultContext::new().with_query_type(kind.into());
     ctx.entity_auth = entity_auth(model);
@@ -358,10 +359,9 @@ pub fn apply<M: RelationalModel>(
         && let Some(center) = anchors.first()
         && let Some([id]) = center.pinned.as_deref()
     {
-        let entity = model.catalog().graph().entity(center.binding.entity);
+        let entity = model.graph().entity(center.binding.entity);
         ctx.neighbors_center = Some((entity.name.clone(), *id));
         ctx.labels = model
-            .catalog()
             .graph()
             .entities()
             .map(|entity| (entity.name.clone(), entity.label.clone()))
@@ -375,10 +375,7 @@ pub fn apply<M: RelationalModel>(
     };
     for binding in &bindings {
         if selectable_nodes.contains(binding.name) {
-            ctx.add_node(
-                binding.name,
-                &model.catalog().graph().entity(binding.entity).name,
-            );
+            ctx.add_node(binding.name, &model.graph().entity(binding.entity).name);
         }
     }
     let contract = return_columns(kind, &bindings, &selectable_nodes, &metadata.nodes, model)?;
@@ -412,7 +409,10 @@ pub fn apply<M: RelationalModel>(
 }
 
 /// The aliases an aggregation returns as rows: node groups and free-text property groups.
-fn aggregation_row_nodes<'p>(query: Query<'p>, model: &impl RelationalModel) -> HashSet<&'p str> {
+fn aggregation_row_nodes<'p>(
+    query: Query<'p>,
+    model: &Catalog<impl SqlBackend>,
+) -> HashSet<&'p str> {
     let Some((groups, _)) = query.aggregate() else {
         return HashSet::new();
     };
@@ -423,7 +423,7 @@ fn aggregation_row_nodes<'p>(query: Query<'p>, model: &impl RelationalModel) -> 
             Logical::Property { binding, property }
             | Logical::Truncate {
                 binding, property, ..
-            } if free_text(model.catalog().graph(), *property) => Some(query.name(*binding)),
+            } if free_text(model.graph(), *property) => Some(query.name(*binding)),
             _ => None,
         })
         .collect()
@@ -439,7 +439,7 @@ fn return_columns(
     nodes: &[Binding<'_>],
     selectable_nodes: &HashSet<&str>,
     bindings: &HashMap<String, NodeBinding>,
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> Result<Contract> {
     let mut contract = Contract {
         outputs: Vec::new(),
@@ -450,7 +450,7 @@ fn return_columns(
             continue;
         }
         let entity_id = node.entity;
-        let entity = &model.catalog().graph().entity(entity_id).name;
+        let entity = &model.graph().entity(entity_id).name;
         let binding = bindings.get(node.name).ok_or_else(|| {
             QueryError::PipelineInvariant(format!("node '{}' has no lowered binding", node.name))
         })?;
@@ -491,7 +491,7 @@ fn return_columns(
         let label = Term::Value(Box::new(OutputValue::Text(entity.clone())));
         contract.set(redaction_type_column(node.name), label);
         if kind != Kind::Aggregation
-            && model.catalog().has_path_column(entity_id)
+            && model.has_path_column(entity_id)
             && let Some(path) = traversal_path
         {
             let path = Term::Column(path.clone());
@@ -520,12 +520,12 @@ impl Contract {
     }
 }
 
-fn enforce<M: RelationalModel>(
-    plan: PlanOf<M>,
-    model: &M,
+fn enforce<B: SqlBackend>(
+    plan: RelationalPlan<B>,
+    model: &Catalog<B>,
     contract: Contract,
     kind: Kind,
-) -> Result<PlanOf<M>> {
+) -> Result<RelationalPlan<B>> {
     let root = plan.plan.root();
     let block = plan.block(root);
     let Some(select) = block.select else {
@@ -566,7 +566,6 @@ fn enforce<M: RelationalModel>(
     }
     let mut added: Vec<Ref> = Vec::new();
     model
-        .catalog()
         .rewrite(plan, |q, rows| {
             let node = q.original();
             if let Some((aggregate, width, outputs)) = &aggregate

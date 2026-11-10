@@ -1,6 +1,7 @@
+use query_data_model::Catalog;
 use std::collections::HashSet;
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use query_data_model::plan::logical::{Comparison, Expr, Literal, Predicate};
 use query_data_model::plan::tracking::Ref;
 
@@ -17,7 +18,7 @@ fn sides(fact: &Fact<'_>) -> impl Iterator<Item = Expr> {
 pub(super) fn negated(
     query: Query<'_>,
     facts: &[Fact<'_>],
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> Result<()> {
     let negated = facts.iter().filter(|fact| fact.negated).flat_map(sides);
     for expr in negated {
@@ -36,13 +37,14 @@ pub(super) fn negated(
 pub(super) fn epoch(
     query: Query<'_>,
     facts: &[Fact<'_>],
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> Result<()> {
     for fact in facts {
         let Some((_, entity, property)) = node_property(query, fact.left) else {
             continue;
         };
-        let epoch_null = matches!(fact.left, Expr::Property { property, .. } if model.catalog().null_as_epoch(property));
+        let epoch_null =
+            matches!(fact.left, Expr::Property { property, .. } if model.null_as_epoch(property));
         let early = fact.literals().iter().any(|literal| match literal {
             Literal::String(text) | Literal::Temporal(text) => at_or_before_epoch(text),
             _ => false,
@@ -70,7 +72,7 @@ fn at_or_before_epoch(value: &str) -> bool {
 pub(super) fn aggregation_text(
     query: Query<'_>,
     facts: &[Fact<'_>],
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> Result<()> {
     let Some((groups, _)) = query.aggregate() else {
         return Ok(());
@@ -81,7 +83,7 @@ pub(super) fn aggregation_text(
             Expr::Node(binding) => Some(*binding),
             Expr::Property { binding, property } => {
                 query.entity_name(*binding)?;
-                free_text(model.catalog().graph(), *property).then_some(*binding)
+                free_text(model.graph(), *property).then_some(*binding)
             }
             _ => None,
         })
@@ -111,11 +113,11 @@ pub(super) fn aggregation_text(
             };
             let by_namespace = query
                 .entity(binding)
-                .and_then(|entity| model.catalog().redaction(entity))
+                .and_then(|entity| model.redaction(entity))
                 .is_some_and(|redaction| {
                     matches!(redaction.resource.as_str(), "project" | "group")
                 });
-            if rows.contains(&binding) || by_namespace || !free_text(model.catalog().graph(), id) {
+            if rows.contains(&binding) || by_namespace || !free_text(model.graph(), id) {
                 continue;
             }
             return Err(QueryError::Validation(format!(
@@ -126,7 +128,7 @@ pub(super) fn aggregation_text(
     Ok(())
 }
 
-pub(super) fn order(query: Query<'_>, model: &impl RelationalModel) -> Result<()> {
+pub(super) fn order(query: Query<'_>, model: &Catalog<impl SqlBackend>) -> Result<()> {
     for key in query.ordered() {
         let Some((alias, _, property)) = node_property(query, key) else {
             continue;

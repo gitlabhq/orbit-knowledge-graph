@@ -7,6 +7,7 @@
 
 use orbit_utils::query_types::SqlType;
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
+use query_data_model::Catalog;
 use query_data_model::constants::*;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
@@ -20,7 +21,7 @@ use crate::error::{QueryError, Result};
 use crate::hydration::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 use crate::logical::Query;
 use crate::logical::facts::{anchors, facts};
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::build::expr::{id_list, live};
 use crate::passes::plan::build::predicates::Lowering;
 use crate::passes::plan::build::{
@@ -46,9 +47,9 @@ enum PathFilter {
     PrefixSet(Vec<TraversalPath>),
 }
 
-pub(crate) fn arms<'p, M: RelationalModel>(
+pub(crate) fn arms<'p, B: SqlBackend>(
     request: &'p HydrationRequest,
-    model: &'p M,
+    model: &'p Catalog<B>,
 ) -> Result<Vec<Arm<'p>>> {
     if request.arms.is_empty() {
         return Err(QueryError::Lowering(
@@ -63,12 +64,12 @@ pub(crate) fn arms<'p, M: RelationalModel>(
 }
 
 impl<'p> Arm<'p> {
-    fn new<M: RelationalModel>(
+    fn new<B: SqlBackend>(
         arm: &'p HydrationArm,
         options: HydrationCompileOptions,
-        model: &'p M,
+        model: &'p Catalog<B>,
     ) -> Result<Self> {
-        let query = Query::new(&arm.plan, model.catalog().model());
+        let query = Query::new(&arm.plan, model.model());
         let facts = facts(query);
         let anchor = anchors(query, &facts)
             .into_iter()
@@ -92,10 +93,7 @@ impl<'p> Arm<'p> {
             .flatten()
             .map(|property| {
                 let declared = graph.property(*property);
-                let epoch = model
-                    .catalog()
-                    .null_as_epoch(*property)
-                    .then_some(declared.data_type);
+                let epoch = model.null_as_epoch(*property).then_some(declared.data_type);
                 (declared.name.as_str(), epoch)
             })
             .collect();
@@ -292,14 +290,7 @@ mod tests {
 
     fn arm(paths: Vec<TraversalPath>) -> HydrationArm {
         let columns = ["title".to_string()];
-        HydrationArm::new(
-            MODEL.catalog().model(),
-            "MergeRequest",
-            &[1],
-            &columns,
-            paths,
-        )
-        .unwrap()
+        HydrationArm::new(MODEL.model(), "MergeRequest", &[1], &columns, paths).unwrap()
     }
 
     fn render(arm: HydrationArm, dynamic: bool) -> (String, HashMap<String, ParamValue>) {
@@ -311,7 +302,7 @@ mod tests {
             },
         };
         let planned = plan(Request::Hydration(&request), None, &*MODEL).unwrap();
-        let rendered = MODEL.catalog().render(&planned.plan);
+        let rendered = MODEL.render(&planned.plan);
         (rendered.sql, rendered.parameters)
     }
 

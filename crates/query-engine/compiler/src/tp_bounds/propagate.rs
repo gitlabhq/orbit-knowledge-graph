@@ -1,6 +1,7 @@
+use query_data_model::Catalog;
 use std::collections::{HashMap, HashSet};
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use query_data_model::plan::tracking::Ref;
 
 use super::TpBound;
@@ -18,7 +19,7 @@ pub(super) fn propagate(
     query: Query<'_>,
     edges: &[Edge],
     seed: &HashMap<Ref, TpBound>,
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> HashMap<Ref, TpBound> {
     if seed.is_empty() {
         return HashMap::new();
@@ -67,7 +68,7 @@ pub(super) fn propagate(
     result
 }
 
-fn scoped(query: Query<'_>, edge: &Edge, model: &impl RelationalModel) -> Scoped {
+fn scoped(query: Query<'_>, edge: &Edge, model: &Catalog<impl SqlBackend>) -> Scoped {
     let source = query.entity_name(edge.from).unwrap_or_default();
     let (from, to) = (query.entity(edge.from), query.entity(edge.to));
     let scope = |kind: &String| super::variant_scope(model, kind, from, to);

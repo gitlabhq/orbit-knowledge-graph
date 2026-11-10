@@ -1,6 +1,7 @@
+use query_data_model::Catalog;
 use std::collections::HashMap;
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use query_data_model::Direction;
 use query_data_model::plan::tracking::Ref;
 
@@ -18,7 +19,7 @@ pub(super) struct Edge {
 }
 
 impl TpBounds {
-    pub fn derive(query: Query<'_>, model: &impl RelationalModel) -> Self {
+    pub fn derive(query: Query<'_>, model: &Catalog<impl SqlBackend>) -> Self {
         let anchors = super::anchor_keys(model);
         let edges = edges(query);
         let keys: HashMap<Ref, Vec<TpLookupKey>> = query
@@ -89,7 +90,7 @@ fn relationship(
     query: Query<'_>,
     edge: &Edge,
     bounds: &HashMap<Ref, TpBound>,
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> Option<TpBound> {
     let (from_bound, to_bound) = (bounds.get(&edge.from), bounds.get(&edge.to));
     if from_bound == to_bound {
@@ -110,7 +111,7 @@ fn nodes(
     query: Query<'_>,
     keys: &HashMap<Ref, Vec<TpLookupKey>>,
     edges: &[Edge],
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> HashMap<Ref, TpBound> {
     let seed: HashMap<Ref, TpBound> = keys
         .iter()
@@ -118,12 +119,11 @@ fn nodes(
             let lookups: Vec<TpLookup> = keys
                 .iter()
                 .filter_map(|key| {
-                    let catalog = model.catalog();
-                    let entity = catalog.graph().entity_id(&key.entity)?;
-                    let lookup = catalog.path_lookup(entity, key.kind)?;
+                    let entity = model.graph().entity_id(&key.entity)?;
+                    let lookup = model.path_lookup(entity, key.kind)?;
                     Some(TpLookup {
                         source_table: lookup.table.clone(),
-                        key_column: catalog.column(lookup.property)?.to_string(),
+                        key_column: model.column(lookup.property)?.to_string(),
                         value: key.value.clone(),
                     })
                 })
@@ -137,7 +137,7 @@ fn nodes(
     bounds.retain(|output, _| {
         query
             .entity(*output)
-            .is_some_and(|entity| model.catalog().has_path_column(entity))
+            .is_some_and(|entity| model.has_path_column(entity))
     });
     bounds
 }

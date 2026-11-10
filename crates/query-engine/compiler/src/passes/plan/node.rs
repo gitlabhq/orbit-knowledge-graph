@@ -1,6 +1,7 @@
 //! A binding as the planner reads it: its source table, pinned ids, id range, and the filters
 //! attached to it, each bound to the storage facts that decide how it lowers.
 
+use query_data_model::Catalog;
 use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::Expr;
@@ -10,7 +11,7 @@ use super::predicates::Column;
 use crate::logical::Query;
 use crate::logical::columns::redaction_column;
 use crate::logical::facts::Anchor;
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::build::Built;
 use crate::passes::plan::build::expr::{self, Filter};
 use crate::passes::plan::build::sources::Scope;
@@ -27,13 +28,10 @@ pub(crate) struct Node<'p> {
 }
 
 impl<'p> Node<'p> {
-    pub fn new<M: RelationalModel>(query: Query<'p>, anchor: Anchor<'p>, model: &'p M) -> Self {
+    pub fn new<B: SqlBackend>(query: Query<'p>, anchor: Anchor<'p>, model: &'p Catalog<B>) -> Self {
         let binding = anchor.binding;
         let graph = query.model.graph();
-        let source = model
-            .catalog()
-            .source(binding.entity)
-            .map(|(_, source)| source);
+        let source = model.source(binding.entity).map(|(_, source)| source);
         let mut filters = bind_facts(query, &anchor, binding.name, model);
         unindex_if_key_narrowed(&mut filters);
         Self {

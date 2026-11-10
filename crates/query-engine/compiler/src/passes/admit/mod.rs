@@ -7,7 +7,8 @@ mod limits;
 mod rules;
 mod selectivity;
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
+use query_data_model::Catalog;
 use query_data_model::plan::logical::{Expr, Predicate, TimeUnit};
 
 use crate::error::{QueryError, Result};
@@ -15,7 +16,7 @@ use crate::logical::Kind;
 use crate::logical::Query;
 use crate::logical::facts::{self, Anchor, Fact};
 
-pub fn admit(query: Query<'_>, model: &impl RelationalModel, selectivity: bool) -> Result<()> {
+pub fn admit(query: Query<'_>, model: &Catalog<impl SqlBackend>, selectivity: bool) -> Result<()> {
     let facts = facts::facts(query);
     let anchors = facts::anchors(query, &facts);
     limits::predicates(&facts)?;
@@ -33,8 +34,8 @@ pub fn admit(query: Query<'_>, model: &impl RelationalModel, selectivity: bool) 
 }
 
 /// Whether a lookup serves the property an expression reads.
-fn served(model: &impl RelationalModel, expr: Expr) -> bool {
-    matches!(expr, Expr::Property { property, .. } if model.catalog().lookup(property).is_some())
+fn served(model: &Catalog<impl SqlBackend>, expr: Expr) -> bool {
+    matches!(expr, Expr::Property { property, .. } if model.lookup(property).is_some())
 }
 
 fn node_property<'p>(query: Query<'p>, expr: Expr) -> Option<(&'p str, &'p str, &'p str)> {
@@ -52,7 +53,7 @@ fn filters(
     query: Query<'_>,
     facts: &[Fact<'_>],
     anchors: &[Anchor<'_>],
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> Result<()> {
     let kind = query.kind();
     for fact in facts {
@@ -82,7 +83,8 @@ fn filters(
             }
         }
         let tokens = matches!(fact.leaf, Predicate::Text { matching, .. } if matching.tokens());
-        let indexed = matches!(fact.left, Expr::Property { property, .. } if model.catalog().text_index(property));
+        let indexed =
+            matches!(fact.left, Expr::Property { property, .. } if model.text_index(property));
         if tokens && !indexed {
             return Err(QueryError::Validation(format!(
                 "filter on \"{property}\" for {entity}: \

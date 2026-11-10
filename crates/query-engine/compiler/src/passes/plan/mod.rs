@@ -19,6 +19,8 @@ pub mod predicates;
 pub mod rows;
 mod traversal;
 
+use query_data_model::Catalog;
+use query_data_model::implementations::relational::plan::RelationalPlan;
 use std::collections::HashMap;
 
 pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
@@ -26,7 +28,7 @@ pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedP
 use crate::error::{QueryError, Result};
 use crate::hydration::HydrationRequest;
 use crate::logical::{Kind, Query};
-use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
+use crate::passes::codegen::{SqlBackend, rejected};
 use crate::tp_bounds::TpBounds;
 
 pub use filters::{BoundFilter, Test};
@@ -44,9 +46,11 @@ pub(crate) fn property_value(
     }
 }
 
-pub(crate) fn sort_key<'m>(model: &'m impl RelationalModel, table: &str) -> Result<&'m [String]> {
+pub(crate) fn sort_key<'m>(
+    model: &'m Catalog<impl SqlBackend>,
+    table: &str,
+) -> Result<&'m [String]> {
     model
-        .catalog()
         .table_facts(table)
         .map(|facts| facts.sort_key.as_slice())
         .filter(|key| !key.is_empty())
@@ -67,17 +71,16 @@ pub enum Request<'a> {
     Hydration(&'a HydrationRequest),
 }
 
-pub fn plan<M: RelationalModel>(
+pub fn plan<B: SqlBackend>(
     request: Request<'_>,
     tp_bounds: Option<&TpBounds>,
-    model: &M,
-) -> Result<Planned<PlanOf<M>>> {
+    model: &Catalog<B>,
+) -> Result<Planned<RelationalPlan<B>>> {
     let query = match request {
         Request::Query(query) => query,
         Request::Hydration(hydration) => {
             let arms = hydration::arms(hydration, model)?;
             let plan = model
-                .catalog()
                 .build(|q| hydration::emit(q, &arms))
                 .map_err(rejected)?;
             return Ok(Planned {
@@ -90,7 +93,6 @@ pub fn plan<M: RelationalModel>(
         Kind::PathFinding => {
             let path = path_finding::PathFinding::new(query, model)?;
             let plan = model
-                .catalog()
                 .build(|q| path_finding::emit(q, &path))
                 .map_err(rejected)?;
             let metadata = PlanMetadata {
@@ -102,7 +104,6 @@ pub fn plan<M: RelationalModel>(
         Kind::Neighbors => {
             let neighbors = neighbors::Neighbors::new(query, model)?;
             let plan = model
-                .catalog()
                 .build(|q| neighbors::emit(q, &neighbors))
                 .map_err(rejected)?;
             let metadata = PlanMetadata {
@@ -117,17 +118,17 @@ pub fn plan<M: RelationalModel>(
 }
 
 /// Traversal and aggregation: the matched pattern, then the result rows built on it.
-fn pattern<M: RelationalModel>(
+fn pattern<B: SqlBackend>(
     query: Query<'_>,
     tp_bounds: Option<&TpBounds>,
-    model: &M,
-) -> Result<Planned<PlanOf<M>>> {
+    model: &Catalog<B>,
+) -> Result<Planned<RelationalPlan<B>>> {
     let limit = query
         .row_limit()
         .ok_or_else(|| QueryError::PipelineInvariant("queries carry a row limit".into()))?;
     let pattern = pattern::Pattern::new(query, model)?;
     let mut planned = None;
-    let plan = rows::build(model.catalog(), |q| {
+    let plan = rows::build(model, |q| {
         let matched = pattern.execution(q, tp_bounds)?;
         let nodes = metadata::bindings(&pattern.nodes, query, &matched.bindings)?;
         let (rows, stable_order) = match query.kind() {

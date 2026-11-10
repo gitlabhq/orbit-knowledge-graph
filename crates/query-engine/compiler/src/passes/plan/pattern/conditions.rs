@@ -1,6 +1,6 @@
 //! Places WHERE conditions: on one node's scan when they only touch that node, else on the joined rows.
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::plan::logical::{EdgeField, Expr};
@@ -141,9 +141,9 @@ pub(super) struct ConditionPlacement {
     pub scans: Vec<Option<String>>,
     pub joined_nodes: HashSet<String>,
 }
-pub(super) fn place_conditions<M>(pattern: &Pattern<'_, M>) -> Result<ConditionPlacement>
+pub(super) fn place_conditions<B>(pattern: &Pattern<'_, B>) -> Result<ConditionPlacement>
 where
-    M: RelationalModel,
+    B: SqlBackend,
 {
     let mut placement = ConditionPlacement::default();
     for root in &pattern.conditions {
@@ -178,12 +178,12 @@ where
     Ok(placement)
 }
 
-pub(super) fn bind_scan_conditions<M>(
-    pattern: &mut Pattern<'_, M>,
+pub(super) fn bind_scan_conditions<B>(
+    pattern: &mut Pattern<'_, B>,
     placement: &ConditionPlacement,
 ) -> Result<()>
 where
-    M: RelationalModel,
+    B: SqlBackend,
 {
     let bound = pattern
         .conditions
@@ -203,13 +203,13 @@ where
     Ok(())
 }
 
-pub(super) fn bind_tree<M>(
-    pattern: &Pattern<'_, M>,
+pub(super) fn bind_tree<B>(
+    pattern: &Pattern<'_, B>,
     root: &Boolean<Condition>,
     bindings: Option<&[BindingSource]>,
 ) -> Result<Predicate>
 where
-    M: RelationalModel,
+    B: SqlBackend,
 {
     let expression = root
         .clone()
@@ -220,13 +220,13 @@ where
     })
 }
 
-fn bind_condition<M>(
-    pattern: &Pattern<'_, M>,
+fn bind_condition<B>(
+    pattern: &Pattern<'_, B>,
     condition: Condition,
     bindings: Option<&[BindingSource]>,
 ) -> Result<Predicate>
 where
-    M: RelationalModel,
+    B: SqlBackend,
 {
     let node = matches!(condition.target, Target::Node(_));
     let (column, mut bound) = bind_leaf(pattern, condition)?;
@@ -257,9 +257,9 @@ where
     Ok(bound.at(column))
 }
 
-fn bind_leaf<M>(pattern: &Pattern<'_, M>, condition: Condition) -> Result<(Column, BoundFilter)>
+fn bind_leaf<B>(pattern: &Pattern<'_, B>, condition: Condition) -> Result<(Column, BoundFilter)>
 where
-    M: RelationalModel,
+    B: SqlBackend,
 {
     let (column, owner) = match &condition.target {
         Target::Node(alias) => {
@@ -295,9 +295,9 @@ where
     ))
 }
 
-fn edge_tag<M>(pattern: &Pattern<'_, M>, node: &str, bound: &BoundFilter) -> Option<Predicate>
+fn edge_tag<B>(pattern: &Pattern<'_, B>, node: &str, bound: &BoundFilter) -> Option<Predicate>
 where
-    M: RelationalModel,
+    B: SqlBackend,
 {
     let (position, facts) = pattern.denorm_hop(node, bound)?;
     let relation = &pattern.relations[position];

@@ -1,9 +1,8 @@
 //! Step for a variable-length relation: expand hop by hop from the pinned end and union the requested
 //! depths, carrying the path so far.
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use query_data_model::constants::*;
-use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::Relation;
 
 use super::super::relations::{edge_columns, select_edge_layouts, stored_order};
@@ -16,10 +15,9 @@ use crate::passes::plan::predicates::*;
 use crate::passes::plan::rows::{Reads, Rel};
 use query_data_model::Direction;
 
-impl<M, B> RelationBuilder<'_, '_, '_, M, B>
+impl<B> RelationBuilder<'_, '_, '_, B>
 where
-    M: RelationalModel,
-    B: RelationalBackend,
+    B: SqlBackend,
 {
     /// Walks a variable-length relation from its pinned end, so the walk reverses when only the target is pinned.
     pub(super) fn multi_hop_source(&mut self, relation: &EdgeRelation) -> Result<Rel> {
@@ -49,14 +47,14 @@ where
     }
 }
 
-struct Walk<'w, 'q, 'c, 'p, M: RelationalModel, B: RelationalBackend> {
+struct Walk<'w, 'q, 'c, 'p, B: SqlBackend> {
     reads: &'w mut Reads<'q, 'c, B>,
-    pattern: &'w Pattern<'p, M>,
+    pattern: &'w Pattern<'p, B>,
     relation: &'w EdgeRelation,
     alias: &'w str,
 }
 
-impl<M: RelationalModel, B: RelationalBackend> Walk<'_, '_, '_, '_, M, B> {
+impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
     fn expand(&mut self, [source_ids, target_ids]: [Option<IdSet>; 2]) -> Result<Rel> {
         let (pattern, relation) = (self.pattern, self.relation);
         let covered = pattern.edge_column_filters(relation);
@@ -71,7 +69,6 @@ impl<M: RelationalModel, B: RelationalBackend> Walk<'_, '_, '_, '_, M, B> {
         let tagged = relation.edge_tables.iter().all(|table| {
             pattern
                 .model
-                .catalog()
                 .table_facts(table)
                 .is_none_or(|facts| facts.columns.contains(SOURCE_TAGS_COLUMN))
         });
@@ -234,9 +231,9 @@ struct Depth<'r> {
     tagged: bool,
 }
 
-fn complete_depth<M: RelationalModel, B: RelationalBackend>(
+fn complete_depth<B: SqlBackend>(
     reads: &mut Reads<'_, '_, B>,
-    pattern: &Pattern<'_, M>,
+    pattern: &Pattern<'_, B>,
     relation: &EdgeRelation,
     alias: &str,
     depth: &Rel,

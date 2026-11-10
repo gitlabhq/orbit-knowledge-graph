@@ -4,23 +4,25 @@
 //! SKIP is present, so consecutive windows of the same statement neither
 //! overlap nor drop rows.
 
+use query_data_model::Catalog;
 use query_data_model::implementations::relational::RelationalBackend;
+use query_data_model::implementations::relational::plan::RelationalPlan;
 use query_data_model::implementations::relational::plan::{
     Expr, Operation, Order, Relation, RelationalBuilder, RelationalError,
 };
 
 use crate::error::Result;
 use crate::logical::Query;
-use crate::passes::codegen::{PlanOf, RelationalModel, rejected};
+use crate::passes::codegen::{SqlBackend, rejected};
 use crate::passes::plan::build::term;
 use crate::passes::plan::{PlanMetadata, Term};
 
-pub fn apply<M: RelationalModel>(
-    plan: PlanOf<M>,
-    model: &M,
+pub fn apply<B: SqlBackend>(
+    plan: RelationalPlan<B>,
+    model: &Catalog<B>,
     query: Query<'_>,
     metadata: &PlanMetadata,
-) -> Result<PlanOf<M>> {
+) -> Result<RelationalPlan<B>> {
     let root = plan.plan.root();
     let block = plan.block(root);
     let skip = query.skip();
@@ -46,13 +48,12 @@ pub fn apply<M: RelationalModel>(
         groups: &groups,
     };
     model
-        .catalog()
         .rewrite(plan, |q, rows| {
             let node = q.original();
             let mut rows = rows;
             if node.is_some() && node == block.order && !keys.is_empty() {
                 let mut detached = q.detach(rows)?;
-                let missing = ties.orders::<M::Backend>(&detached.inputs[0])?;
+                let missing = ties.orders::<B>(&detached.inputs[0])?;
                 if let Operation::Order(orders) = &mut detached.operation {
                     extend(orders, missing);
                 }

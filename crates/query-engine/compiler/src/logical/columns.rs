@@ -1,6 +1,7 @@
 //! The properties each binding returns.
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
+use query_data_model::Catalog;
 use std::collections::HashMap;
 
 use query_data_model::plan::logical::{Columns, Expr, LogicalOperation, Projection};
@@ -42,12 +43,11 @@ pub fn defaults(entity: &Entity) -> impl Iterator<Item = PropertyId> + '_ {
 }
 
 /// The properties a binding returns: the listed ones, else the defaults or every readable property.
-pub fn returned<M>(model: &M, entity: EntityId, selection: Option<&Columns>) -> Vec<String>
+pub fn returned<B>(model: &Catalog<B>, entity: EntityId, selection: Option<&Columns>) -> Vec<String>
 where
-    M: RelationalModel,
+    B: SqlBackend,
 {
-    let catalog = model.catalog();
-    let graph = catalog.graph();
+    let graph = model.graph();
     let properties: Vec<PropertyId> = match selection {
         Some(Columns::Listed(listed)) => listed.clone(),
         selection => {
@@ -59,9 +59,9 @@ where
             };
             properties
                 .into_iter()
-                .filter(|property| catalog.readable(*property))
-                .filter(|property| !catalog.model().access().property(*property).hidden)
-                .filter(|property| !catalog.admin_only(*property))
+                .filter(|property| model.readable(*property))
+                .filter(|property| !model.model().access().property(*property).hidden)
+                .filter(|property| !model.admin_only(*property))
                 .collect()
         }
     };
@@ -72,10 +72,9 @@ where
 }
 
 /// The property that identifies an entity's rows to redaction, when the entity is redacted.
-pub fn redaction_column(model: &impl RelationalModel, entity: EntityId) -> Option<&str> {
-    let catalog = model.catalog();
-    let redaction = catalog.redaction(entity)?;
-    Some(&catalog.graph().property(redaction.id).name)
+pub fn redaction_column(model: &Catalog<impl SqlBackend>, entity: EntityId) -> Option<&str> {
+    let redaction = model.redaction(entity)?;
+    Some(&model.graph().property(redaction.id).name)
 }
 
 /// Free text: a uuid, or a string not declared low selectivity.

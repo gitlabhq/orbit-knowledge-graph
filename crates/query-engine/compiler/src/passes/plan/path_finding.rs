@@ -3,6 +3,7 @@
 //! the filtered endpoints.
 
 use orbit_utils::query_types::SqlType;
+use query_data_model::Catalog;
 use query_data_model::constants::*;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
@@ -15,7 +16,7 @@ use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
 use crate::logical::facts::{anchors, facts};
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::Term;
 use crate::passes::plan::build::expr::{id_list, id_range, ids, relationship_kinds};
 use crate::passes::plan::build::sources::{Scope, columns, dedup, final_edge_scan, select};
@@ -35,7 +36,7 @@ pub(crate) struct PathFinding<'p> {
 }
 
 impl<'p> PathFinding<'p> {
-    pub fn new<M: RelationalModel>(query: Query<'p>, model: &'p M) -> Result<Self> {
+    pub fn new<B: SqlBackend>(query: Query<'p>, model: &'p Catalog<B>) -> Result<Self> {
         let (from, to, relationships, max_depth) = query
             .operations()
             .find_map(|(_, operation)| match operation {
@@ -71,7 +72,7 @@ impl<'p> PathFinding<'p> {
             start,
             end,
             max_depth,
-            tables: model.catalog().edge_tables(relationships),
+            tables: model.edge_tables(relationships),
             kinds,
             limit: u32::try_from(rows).unwrap_or(u32::MAX),
         })

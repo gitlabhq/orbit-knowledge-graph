@@ -10,11 +10,11 @@ mod steps;
 
 pub use steps::Matched;
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::build::stored;
+use query_data_model::Catalog;
 use std::collections::{HashMap, HashSet};
 
-use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::RelationalBuilder;
 
 use super::filters::{BoundFilter, NullAsEpochColumns};
@@ -72,26 +72,22 @@ pub struct Fk {
     pub column: String,
 }
 
-pub(crate) struct Pattern<'a, M: RelationalModel> {
+pub(crate) struct Pattern<'a, B: SqlBackend> {
     pub query: Query<'a>,
     conditions: Vec<Boolean<conditions::Condition>>,
-    pub model: &'a M,
+    pub model: &'a Catalog<B>,
     pub nodes: HashMap<String, NodePlan>,
     pub relations: Vec<EdgeRelation>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     scans: Vec<Option<String>>,
 }
 
-impl<M: RelationalModel> Pattern<'_, M> {
+impl<B: SqlBackend> Pattern<'_, B> {
     fn aggregate(&self) -> bool {
         self.query.kind() == Kind::Aggregation
     }
 
-    fn node_read<B: RelationalBackend>(
-        &self,
-        reads: &mut Reads<'_, '_, B>,
-        node: &NodePlan,
-    ) -> Result<Rel> {
+    fn node_read(&self, reads: &mut Reads<'_, '_, B>, node: &NodePlan) -> Result<Rel> {
         let table = node
             .table
             .as_ref()
@@ -121,8 +117,8 @@ impl<M: RelationalModel> Pattern<'_, M> {
     }
 }
 
-impl<'a, M: RelationalModel> Pattern<'a, M> {
-    pub(crate) fn new(query: Query<'a>, model: &'a M) -> Result<Self> {
+impl<'a, B: SqlBackend> Pattern<'a, B> {
+    pub(crate) fn new(query: Query<'a>, model: &'a Catalog<B>) -> Result<Self> {
         let facts = facts(query);
         let nodes = nodes::build_nodes(query, &anchors(query, &facts), model);
         let mut pattern = Self {
@@ -156,7 +152,7 @@ impl<'a, M: RelationalModel> Pattern<'a, M> {
     }
 
     /// The pattern's joined rows, with the conditions that span nodes applied on top.
-    pub(crate) fn execution<B: RelationalBackend>(
+    pub(crate) fn execution(
         &self,
         q: &mut RelationalBuilder<'_, B>,
         tp_bounds: Option<&crate::tp_bounds::TpBounds>,

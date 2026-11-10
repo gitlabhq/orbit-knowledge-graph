@@ -1,19 +1,17 @@
 //! Step for a relation stored as a column on one node: read the holder table, filter its key column
 //! by the other endpoint, and expose the pair as edge columns.
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use query_data_model::constants::*;
-use query_data_model::implementations::relational::RelationalBackend;
 
 use super::super::{EdgeRelation, Fk};
 use super::RelationBuilder;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::predicates::*;
 
-impl<M, B> RelationBuilder<'_, '_, '_, M, B>
+impl<B> RelationBuilder<'_, '_, '_, B>
 where
-    M: RelationalModel,
-    B: RelationalBackend,
+    B: SqlBackend,
 {
     pub(super) fn add_fk(&mut self, relation: &EdgeRelation, key: &Fk) -> Result<()> {
         let pattern = self.pattern;

@@ -25,7 +25,7 @@ struct PhaseDecl {
 
 struct PipelineDecl {
     name: Ident,
-    model: Type,
+    backend: Type,
     env: Vec<Ident>,
     state: Vec<Ident>,
     run: Vec<Ident>,
@@ -108,14 +108,14 @@ impl Parse for PipelineDecl {
         let content;
         braced!(content in input);
         let mut env = Vec::new();
-        let mut model = None;
+        let mut backend = None;
         let mut state = Vec::new();
         let mut run = Vec::new();
         while !content.is_empty() {
             let key: Ident = content.parse()?;
             content.parse::<Token![:]>()?;
             match key.to_string().as_str() {
-                "model" => model = Some(content.parse::<Type>()?),
+                "backend" => backend = Some(content.parse::<Type>()?),
                 "env" => env = parse_ident_list(&content)?,
                 "state" => state = parse_ident_list(&content)?,
                 "phases" | "run" => run = parse_ident_list(&content)?,
@@ -129,7 +129,7 @@ impl Parse for PipelineDecl {
         }
         Ok(PipelineDecl {
             name,
-            model: model.ok_or_else(|| content.error("pipeline requires `model`"))?,
+            backend: backend.ok_or_else(|| content.error("pipeline requires `backend`"))?,
             env,
             state,
             run,
@@ -197,32 +197,33 @@ fn find_state_ty(fields: &[Field], name: &Ident) -> Type {
         .clone()
 }
 
-fn concrete(ty: Type, model: &Type) -> proc_macro2::TokenStream {
-    substitute(quote! { #ty }, &quote! { #model })
+fn concrete(ty: Type, backend: &Type) -> proc_macro2::TokenStream {
+    substitute(quote! { #ty }, &quote! { #backend })
 }
 
 fn substitute(
     tokens: proc_macro2::TokenStream,
-    model: &proc_macro2::TokenStream,
+    backend: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     use proc_macro2::{Group, TokenTree};
     let tokens: Vec<TokenTree> = tokens.into_iter().collect();
     let mut out = proc_macro2::TokenStream::new();
     let mut index = 0;
     while index < tokens.len() {
-        let names_model = matches!(
+        let names_backend = matches!(
             &tokens[index..],
             [TokenTree::Ident(this), TokenTree::Punct(a), TokenTree::Punct(b), TokenTree::Ident(name), ..]
-                if this == "Self" && a.as_char() == ':' && b.as_char() == ':' && name == "Model"
+                if this == "Self" && a.as_char() == ':' && b.as_char() == ':' && name == "Backend"
         );
-        if names_model {
-            out.extend(model.clone());
+        if names_backend {
+            out.extend(backend.clone());
             index += 4;
             continue;
         }
         match &tokens[index] {
             TokenTree::Group(group) => {
-                let mut replaced = Group::new(group.delimiter(), substitute(group.stream(), model));
+                let mut replaced =
+                    Group::new(group.delimiter(), substitute(group.stream(), backend));
                 replaced.set_span(group.span());
                 out.extend([TokenTree::Group(replaced)]);
             }
@@ -266,8 +267,8 @@ pub fn generate(input: TokenStream) -> TokenStream {
     }
 
     trait_sigs.push(quote! {
-        type Model: crate::passes::codegen::RelationalModel + Send + Sync;
-        fn data_model(&self) -> &Self::Model;
+        type Backend: crate::passes::codegen::SqlBackend;
+        fn data_model(&self) -> &query_data_model::Catalog<Self::Backend>;
         fn current_phase(&self) -> &'static str;
         fn set_current_phase(&mut self, phase: &'static str);
     });
@@ -294,7 +295,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
     for pipeline in &ctx.pipelines {
         let ctx_name = format_ident!("{}Ctx", to_pascal(&pipeline.name.to_string()));
         let run_fn = format_ident!("run_{}", pipeline.name);
-        let model_ty = &pipeline.model;
+        let backend_ty = &pipeline.backend;
 
         let env_fields: Vec<_> = pipeline
             .env
@@ -309,7 +310,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
             .state
             .iter()
             .map(|n| {
-                let ty = concrete(find_state_ty(&ctx.state_fields, n), model_ty);
+                let ty = concrete(find_state_ty(&ctx.state_fields, n), backend_ty);
                 quote! { #n: Option<#ty> }
             })
             .collect();
@@ -322,7 +323,8 @@ pub fn generate(input: TokenStream) -> TokenStream {
                 quote! { #n: #ty }
             })
             .collect();
-        let model_param = quote! { data_model: std::sync::Arc<#model_ty> };
+        let model_param =
+            quote! { data_model: std::sync::Arc<query_data_model::Catalog<#backend_ty>> };
         let env_names: Vec<_> = pipeline.env.iter().collect();
         let state_names: Vec<_> = pipeline.state.iter().collect();
 
@@ -337,9 +339,9 @@ pub fn generate(input: TokenStream) -> TokenStream {
         let model_arms: Vec<_> = model_phases.iter().map(|phase| quote! { #phase }).collect();
         let model_allowed = model_phases.join(", ");
         trait_impls.push(quote! {
-            type Model = #model_ty;
+            type Backend = #backend_ty;
 
-            fn data_model(&self) -> &Self::Model {
+            fn data_model(&self) -> &query_data_model::Catalog<Self::Backend> {
                 if !self.current_phase.is_empty() {
                     assert!(
                         matches!(self.current_phase, #(#model_arms)|*),
@@ -477,7 +479,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
 
         out.extend(quote! {
             pub struct #ctx_name {
-                pub data_model: std::sync::Arc<#model_ty>,
+                pub data_model: std::sync::Arc<query_data_model::Catalog<#backend_ty>>,
                 #(#env_fields,)*
                 #(#state_fields,)*
                 current_phase: &'static str,

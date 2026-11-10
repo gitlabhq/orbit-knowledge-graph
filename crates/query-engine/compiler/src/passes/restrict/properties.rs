@@ -1,10 +1,11 @@
+use query_data_model::Catalog;
 use query_data_model::plan::logical::{Columns, Expr, Measure, Projection};
 
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 
-pub(super) fn admin_only(query: Query<'_>, model: &impl RelationalModel) -> Result<()> {
+pub(super) fn admin_only(query: Query<'_>, model: &Catalog<impl SqlBackend>) -> Result<()> {
     let check = |expr: Expr, what: &str| -> Result<()> {
         let (Expr::Property { binding, property }
         | Expr::Truncate {
@@ -13,7 +14,7 @@ pub(super) fn admin_only(query: Query<'_>, model: &impl RelationalModel) -> Resu
         else {
             return Ok(());
         };
-        if !model.catalog().admin_only(property) {
+        if !model.admin_only(property) {
             return Ok(());
         }
         let entity = query.entity_name(binding).unwrap_or_default();

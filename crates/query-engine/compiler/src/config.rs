@@ -6,7 +6,7 @@ use orbit_server_config::QueryConfig;
 
 use crate::error::{QueryError, Result};
 use crate::hydration::HydrationRequest;
-use crate::passes::codegen::{CompiledQueryContext, ParameterizedQuery, RelationalModel as _};
+use crate::passes::codegen::{CompiledQueryContext, ParameterizedQuery};
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::PlanMetadata;
 use crate::passes::plan::Request;
@@ -38,7 +38,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub result_ctx: ResultContext,
         pub query_config: QueryConfig,
         pub hydration_plan: HydrationPlan,
-        pub relational: crate::passes::codegen::PlanOf<Self::Model>,
+        pub relational: query_data_model::implementations::relational::plan::RelationalPlan<Self::Backend>,
         pub output: CompiledQueryContext,
         pub hydration_query: ParameterizedQuery,
     }
@@ -149,43 +149,43 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
     pipelines {
         clickhouse_json_dsl {
-            model: query_data_model::Catalog<query_data_model::ClickHouse>
+            backend: query_data_model::ClickHouse
             env: [security_ctx]
             state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
             phases: [json_dsl_parse, normalize, restrict, admit, tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
         clickhouse_gql {
-            model: query_data_model::Catalog<query_data_model::ClickHouse>
+            backend: query_data_model::ClickHouse
             env: [security_ctx]
             state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
             phases: [gql_parse, normalize, restrict, admit, tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
         ch_hydration {
-            model: query_data_model::Catalog<query_data_model::ClickHouse>
+            backend: query_data_model::ClickHouse
             env: [security_ctx]
             state: [tp_bounds, hydration, plan_metadata, query_config, relational, hydration_query]
             phases: [restrict_hydration, plan, settings, security, security_check, render_hydration]
         }
         duckdb_json_dsl {
-            model: query_data_model::Catalog<query_data_model::DuckDb>
+            backend: query_data_model::DuckDb
             env: []
             state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
             phases: [json_dsl_parse_local, normalize, admit_local, plan, result_contract, paginate, materialize, codegen]
         }
         duckdb_gql {
-            model: query_data_model::Catalog<query_data_model::DuckDb>
+            backend: query_data_model::DuckDb
             env: []
             state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
             phases: [gql_parse_local, normalize, admit_local, plan, result_contract, paginate, materialize, codegen]
         }
         check_gql {
-            model: query_data_model::Catalog<query_data_model::ClickHouse>
+            backend: query_data_model::ClickHouse
             env: []
             state: [raw, statement]
             phases: [gql_parse_trusted, normalize, admit]
         }
         check_json_dsl {
-            model: query_data_model::Catalog<query_data_model::ClickHouse>
+            backend: query_data_model::ClickHouse
             env: []
             state: [raw, statement]
             phases: [json_dsl_parse_trusted, normalize, admit]
@@ -200,7 +200,7 @@ fn parse<C: CompilerCtx>(
     all_columns: bool,
 ) -> Result<()> {
     if let Some(raw) = ctx.take_raw() {
-        let catalog = surface::catalog(ctx.data_model().catalog(), admin);
+        let catalog = surface::catalog(ctx.data_model(), admin);
         let catalog = match all_columns {
             true => catalog.with_all_columns(),
             false => catalog,
@@ -240,7 +240,7 @@ fn gql_parse_local(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn admit_with(ctx: &mut impl CompilerCtx, selectivity: bool) -> Result<()> {
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let model = ctx.data_model();
-    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+    let query = crate::logical::Query::new(&statement.plan, model.model());
     admit::admit(query, model, selectivity)
 }
 
@@ -255,7 +255,7 @@ fn admit_local(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
     let statement = require(ctx.take_statement(), "statement")?;
     let model = ctx.data_model();
-    let plan = normalize::normalize(statement.plan, model.catalog().model(), model)?;
+    let plan = normalize::normalize(statement.plan, model.model(), model)?;
     ctx.set_statement(Statement { plan, ..statement });
     Ok(())
 }
@@ -263,24 +263,19 @@ fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn restrict(ctx: &mut impl CompilerCtx) -> Result<()> {
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let model = ctx.data_model();
-    restrict::restrict(
-        &statement.plan,
-        model.catalog().model(),
-        model,
-        ctx.security_ctx(),
-    )
+    restrict::restrict(&statement.plan, model.model(), model, ctx.security_ctx())
 }
 
 fn restrict_hydration(ctx: &mut impl CompilerCtx) -> Result<()> {
     let request = require(ctx.hydration().as_ref(), "hydration")?;
     let model = ctx.data_model();
-    restrict::restrict_hydration(request, model.catalog().model(), model, ctx.security_ctx())
+    restrict::restrict_hydration(request, model.model(), model, ctx.security_ctx())
 }
 
 fn tp_bounds(ctx: &mut impl CompilerCtx) -> Result<()> {
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let model = ctx.data_model();
-    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+    let query = crate::logical::Query::new(&statement.plan, model.model());
     ctx.set_tp_bounds(crate::tp_bounds::TpBounds::derive(query, model));
     Ok(())
 }
@@ -291,7 +286,7 @@ fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
         Some(hydration) => Request::Hydration(hydration),
         None => {
             let statement = require(ctx.statement().as_ref(), "statement")?;
-            let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+            let query = crate::logical::Query::new(&statement.plan, model.model());
             Request::Query(query)
         }
     };
@@ -312,7 +307,7 @@ fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
     let model = ctx.data_model();
     let statement = require(ctx.statement().as_ref(), "statement")?;
-    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+    let query = crate::logical::Query::new(&statement.plan, model.model());
     let plan = response_policy::apply_text_excerpts(plan, model, query)?;
     ctx.set_relational(plan);
     Ok(())
@@ -322,7 +317,7 @@ fn result_contract(ctx: &mut impl CompilerCtx) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
     let model = ctx.data_model();
     let statement = require(ctx.statement().as_ref(), "statement")?;
-    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+    let query = crate::logical::Query::new(&statement.plan, model.model());
     let metadata = require(ctx.plan_metadata().as_ref(), "plan_metadata")?;
     let (plan, result_context) = result_contract::apply(plan, query, metadata, model)?;
     ctx.set_relational(plan);
@@ -330,12 +325,10 @@ fn result_contract(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn security(
-    ctx: &mut impl CompilerCtx<Model = query_data_model::Catalog<query_data_model::ClickHouse>>,
-) -> Result<()> {
+fn security(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
     let model = ctx.data_model();
-    let plan = security::apply_security_context(plan, model.catalog(), ctx.security_ctx())?;
+    let plan = security::apply_security_context(plan, model, ctx.security_ctx())?;
     ctx.set_relational(plan);
     Ok(())
 }
@@ -344,7 +337,7 @@ fn paginate(ctx: &mut impl CompilerCtx) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
     let model = ctx.data_model();
     let statement = require(ctx.statement().as_ref(), "statement")?;
-    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+    let query = crate::logical::Query::new(&statement.plan, model.model());
     let metadata = require(ctx.plan_metadata().as_ref(), "plan_metadata")?;
     let plan = page::apply(plan, model, query, metadata)?;
     ctx.set_relational(plan);
@@ -352,19 +345,17 @@ fn paginate(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn security_check(
-    ctx: &mut impl CompilerCtx<Model = query_data_model::Catalog<query_data_model::ClickHouse>>,
+    ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>,
 ) -> Result<()> {
     let plan = require(ctx.relational().as_ref(), "relational")?;
     let model = ctx.data_model();
-    security_check::verify(plan, model.catalog(), ctx.security_ctx())
+    security_check::verify(plan, model, ctx.security_ctx())
 }
 
-fn hydrate_plan(
-    ctx: &mut impl CompilerCtx<Model = query_data_model::Catalog<query_data_model::ClickHouse>>,
-) -> Result<()> {
+fn hydrate_plan(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>) -> Result<()> {
     let model = ctx.data_model();
     let statement = require(ctx.statement().as_ref(), "statement")?;
-    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+    let query = crate::logical::Query::new(&statement.plan, model.model());
     let relational = &require(ctx.relational().as_ref(), "relational")?.plan;
     let projected: Vec<&str> = relational
         .outputs(relational.root())
@@ -375,16 +366,13 @@ fn hydrate_plan(
     Ok(())
 }
 
-fn settings(
-    ctx: &mut impl CompilerCtx<Model = query_data_model::Catalog<query_data_model::ClickHouse>>,
-) -> Result<()> {
+fn settings(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
     let (query_type, negation) = match ctx.hydration() {
         Some(_) => (QueryType::Hydration, false),
         None => {
             let statement = require(ctx.statement().as_ref(), "statement")?;
-            let query =
-                crate::logical::Query::new(&statement.plan, ctx.data_model().catalog().model());
+            let query = crate::logical::Query::new(&statement.plan, ctx.data_model().model());
             let negated = crate::logical::facts::facts(query)
                 .iter()
                 .any(|fact| fact.negated);
@@ -399,7 +387,7 @@ fn settings(
         metadata.edges.len(),
         metadata.point_lookup,
     );
-    let plan = codegen::configure(plan, ctx.data_model().catalog(), &config)?;
+    let plan = codegen::configure(plan, ctx.data_model(), &config)?;
     ctx.set_relational(plan);
     ctx.set_query_config(config);
     Ok(())
@@ -411,7 +399,7 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let model = ctx.data_model();
-    let query = crate::logical::Query::new(&statement.plan, model.catalog().model());
+    let query = crate::logical::Query::new(&statement.plan, model.model());
     let query_type = QueryType::from(query.kind());
     let shape = crate::passes::result_contract::ResultShape::new(query)?;
     let stats = crate::analytics::QueryStats::new(query, model);

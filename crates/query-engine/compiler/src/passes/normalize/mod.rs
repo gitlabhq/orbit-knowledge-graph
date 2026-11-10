@@ -5,7 +5,8 @@
 mod enums;
 mod kinds;
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
+use query_data_model::Catalog;
 use std::collections::HashMap;
 
 use query_data_model::plan::logical::{
@@ -21,7 +22,7 @@ use kinds::Narrowed;
 pub fn normalize(
     plan: LogicalPlan,
     model: &Model,
-    data: &impl RelationalModel,
+    data: &Catalog<impl SqlBackend>,
 ) -> Result<LogicalPlan> {
     let query = Query::new(&plan, model);
     available(query, data)?;
@@ -31,10 +32,10 @@ pub fn normalize(
     Ok(catalog.rewrite(plan, |q, rows| rewrite(q, rows, &narrowed, model))?)
 }
 
-fn available(query: Query<'_>, data: &impl RelationalModel) -> Result<()> {
+fn available(query: Query<'_>, data: &Catalog<impl SqlBackend>) -> Result<()> {
     let entities = query.plan.nodes().flat_map(|node| query.plan.outputs(node));
     for entity in entities.filter_map(|output| query.entity(output)) {
-        if data.catalog().table_of(entity).is_none() {
+        if data.table_of(entity).is_none() {
             let entity = &query.model.graph().entity(entity).name;
             return Err(QueryError::AllowlistRejected(format!(
                 "entity '{entity}' is not available in this data model"
@@ -47,7 +48,7 @@ fn available(query: Query<'_>, data: &impl RelationalModel) -> Result<()> {
 fn shared_keys(
     query: Query<'_>,
     narrowed: &HashMap<Ref, Narrowed>,
-    data: &impl RelationalModel,
+    data: &Catalog<impl SqlBackend>,
 ) -> Result<()> {
     let returned = |edge: Ref| {
         let selected = query.selected().into_iter().any(|item| match item {
@@ -68,11 +69,7 @@ fn shared_keys(
             Direction::Incoming => (far, near),
             _ => (near, far),
         };
-        let shared = || {
-            data.catalog()
-                .shared_foreign_key(relationships, from, to)
-                .is_some()
-        };
+        let shared = || data.shared_foreign_key(relationships, from, to).is_some();
         if relationships.len() > 1 && returned(step.edge) && shared() {
             let graph = query.model.graph();
             let names: Vec<&str> = relationships

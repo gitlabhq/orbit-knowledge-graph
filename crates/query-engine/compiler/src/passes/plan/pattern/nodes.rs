@@ -1,11 +1,11 @@
 //! Node planning: a `NodePlan` per binding, and the decision whether each node joins the result
 //! as a table read or only narrows an edge scan.
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
+use query_data_model::Catalog;
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::constants::DEFAULT_PRIMARY_KEY;
-use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::plan::logical::{Columns, Expr, Measure};
 
 use super::{NodePlan, Pattern};
@@ -19,35 +19,39 @@ use crate::passes::plan::predicates::{
 use crate::passes::plan::rows::ReadScope;
 
 impl NodePlan {
-    fn new<M>(query: Query<'_>, anchor: &Anchor<'_>, selection: Option<&Columns>, model: &M) -> Self
+    fn new<B>(
+        query: Query<'_>,
+        anchor: &Anchor<'_>,
+        selection: Option<&Columns>,
+        model: &Catalog<B>,
+    ) -> Self
     where
-        M: RelationalModel,
+        B: SqlBackend,
     {
         let binding = anchor.binding;
         let entity = binding.entity;
-        let catalog = model.catalog();
-        let graph = catalog.graph();
+        let graph = model.graph();
         let stored = |name: &str| {
             graph
                 .property_id(entity, name)
-                .and_then(|property| catalog.lookup(property))
+                .and_then(|property| model.lookup(property))
                 .is_none()
         };
         let mut filters = bind_facts(query, anchor, binding.name, model);
         filters.retain(|(property, _)| stored(property));
         unindex_if_key_narrowed(&mut filters);
-        let has_traversal_path = catalog.has_path_column(entity);
+        let has_traversal_path = model.has_path_column(entity);
         Self {
             alias: binding.name.to_string(),
             entity: Some(graph.entity(entity).name.clone()),
-            table: catalog.table_of(entity).map(String::from),
+            table: model.table_of(entity).map(String::from),
             joined: false,
             filters,
             predicates: Vec::new(),
             node_ids: anchor.pinned.clone(),
             id_range: anchor.range,
             has_traversal_path,
-            read_scope: match (has_traversal_path, catalog.high_fan_out(entity)) {
+            read_scope: match (has_traversal_path, model.high_fan_out(entity)) {
                 (false, _) => ReadScope::Unscoped,
                 (true, false) => ReadScope::Scoped,
                 (true, true) => ReadScope::HighFanOut,
@@ -64,7 +68,7 @@ impl NodePlan {
                 .entity(entity)
                 .properties
                 .iter()
-                .filter(|property| catalog.null_as_epoch(**property))
+                .filter(|property| model.null_as_epoch(**property))
                 .map(|property| {
                     let property = graph.property(*property);
                     (property.name.clone(), property.data_type)
@@ -128,13 +132,13 @@ impl NodePlan {
     }
 }
 
-pub(super) fn build_nodes<M>(
+pub(super) fn build_nodes<B>(
     query: Query<'_>,
     anchors: &[Anchor<'_>],
-    model: &M,
+    model: &Catalog<B>,
 ) -> HashMap<String, NodePlan>
 where
-    M: RelationalModel,
+    B: SqlBackend,
 {
     let selected = selections(query);
     anchors
@@ -148,9 +152,9 @@ where
 }
 
 /// Decides which nodes join the result as rows and which join only to carry their authorization columns.
-pub(super) fn assign_node_access<M>(pattern: &mut Pattern<'_, M>, condition_nodes: &HashSet<String>)
+pub(super) fn assign_node_access<B>(pattern: &mut Pattern<'_, B>, condition_nodes: &HashSet<String>)
 where
-    M: RelationalModel,
+    B: SqlBackend,
 {
     let access: HashMap<String, (bool, bool)> = pattern
         .nodes
@@ -172,14 +176,17 @@ where
 }
 
 /// The nodes an aggregation returns one row per: node groups, and nodes grouped by free text.
-fn aggregation_row_nodes<'p>(query: Query<'p>, model: &impl RelationalModel) -> HashSet<&'p str> {
+fn aggregation_row_nodes<'p>(
+    query: Query<'p>,
+    model: &Catalog<impl SqlBackend>,
+) -> HashSet<&'p str> {
     let (groups, _) = query.aggregate().unwrap_or_default();
     groups
         .iter()
         .filter(|group| match group {
             Expr::Node(_) => true,
             Expr::Property { property, .. } | Expr::Truncate { property, .. } => {
-                free_text(model.catalog().graph(), *property)
+                free_text(model.graph(), *property)
             }
             _ => false,
         })
@@ -187,8 +194,8 @@ fn aggregation_row_nodes<'p>(query: Query<'p>, model: &impl RelationalModel) -> 
         .collect()
 }
 
-fn node_access<M: RelationalModel>(
-    pattern: &Pattern<'_, M>,
+fn node_access<B: SqlBackend>(
+    pattern: &Pattern<'_, B>,
     node: &NodePlan,
     condition_nodes: &HashSet<String>,
 ) -> (bool, bool) {
@@ -208,7 +215,7 @@ fn node_access<M: RelationalModel>(
         };
         on_node(expr)
             && matches!(expr, Expr::Property { property, .. }
-                if distinct || !count || model.catalog().graph().property(*property).nullable)
+                if distinct || !count || model.graph().property(*property).nullable)
     });
     let ordered = query
         .ordered()
@@ -222,7 +229,6 @@ fn node_access<M: RelationalModel>(
         !pattern.aggregate() || aggregation_row_nodes(query, model).contains(node.alias.as_str());
     let role_floor = query.binding(&node.alias).is_some_and(|binding| {
         model
-            .catalog()
             .role_floor(binding.entity)
             .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
     });
@@ -235,7 +241,7 @@ fn node_access<M: RelationalModel>(
         && !ordered
         && !local_predicate;
     let joined_as_rows = query.steps().is_empty()
-        || !M::Backend::CAPABILITIES.deferred_nodes
+        || !B::CAPABILITIES.deferred_nodes
         || group_target
         || metric_target
         || ordered

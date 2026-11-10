@@ -13,6 +13,7 @@ mod tests;
 
 pub use hydration::restrict_hydration;
 
+use query_data_model::Catalog;
 use std::collections::HashSet;
 
 use query_data_model::plan::logical::{LogicalOperation, LogicalPlan};
@@ -22,13 +23,13 @@ use query_data_model::{EntityId, Model};
 use crate::error::{QueryError, Result};
 use crate::logical::Kind;
 use crate::logical::Query;
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 
 pub fn restrict(
     plan: &LogicalPlan,
     logical: &Model,
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     let query = Query::new(plan, logical);
@@ -56,11 +57,10 @@ fn entities(query: Query<'_>) -> Vec<(Ref, EntityId)> {
 pub(super) fn role_floor(
     query: Query<'_>,
     entity: EntityId,
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     let Some(min_role) = model
-        .catalog()
         .role_floor(entity)
         .filter(|level| *level > DEFAULT_PATH_ACCESS_LEVEL)
     else {
@@ -78,11 +78,11 @@ pub(super) fn role_floor(
 fn aggregation_scope(
     query: Query<'_>,
     entities: &[(Ref, EntityId)],
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> Result<()> {
     let mut reachable: HashSet<Ref> = entities
         .iter()
-        .filter(|(_, entity)| model.catalog().has_path_column(*entity))
+        .filter(|(_, entity)| model.has_path_column(*entity))
         .map(|(output, _)| *output)
         .collect();
     if reachable.is_empty() {

@@ -1,4 +1,5 @@
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
+use query_data_model::Catalog;
 use query_data_model::Model;
 use query_data_model::plan::logical::{Columns, Projection};
 
@@ -10,16 +11,15 @@ use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 pub fn restrict_hydration(
     request: &HydrationRequest,
     logical: &Model,
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
     security_ctx: &SecurityContext,
 ) -> Result<()> {
-    let catalog = model.catalog();
-    let graph = catalog.graph();
+    let graph = model.graph();
     for arm in &request.arms {
         let query = Query::new(&arm.plan, logical);
         for binding in query.bindings() {
             let entity = graph.entity(binding.entity).name.as_str();
-            if let Some(min_role) = catalog
+            if let Some(min_role) = model
                 .role_floor(binding.entity)
                 .filter(|level| *level > DEFAULT_PATH_ACCESS_LEVEL)
                 && security_ctx.paths_at_least(min_role).is_empty()
@@ -49,7 +49,7 @@ pub fn restrict_hydration(
                 };
                 if let Some(column) = listed
                     .iter()
-                    .find(|property| catalog.admin_only(**property))
+                    .find(|property| model.admin_only(**property))
                     .map(|property| graph.property(*property).name.as_str())
                 {
                     return Err(QueryError::Restrict(format!(

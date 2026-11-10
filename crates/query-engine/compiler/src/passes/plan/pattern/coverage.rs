@@ -1,6 +1,6 @@
 //! What an edge row already answers about its endpoint nodes, so the node table need not be read.
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use std::collections::HashSet;
 
 use query_data_model::constants::*;
@@ -10,7 +10,7 @@ use super::{EdgeRelation, NodePlan, Pattern};
 use crate::passes::plan::filters::{BoundFilter, FilterOwner, bind_filter, lowerable_denorm};
 use crate::passes::plan::predicates::{Predicate, property_filter, tag_filter};
 
-impl<M: RelationalModel> Pattern<'_, M> {
+impl<B: SqlBackend> Pattern<'_, B> {
     pub fn denorm_facts(
         &self,
         relation: &EdgeRelation,
@@ -116,7 +116,7 @@ impl<M: RelationalModel> Pattern<'_, M> {
 
     fn edge_columns(&self, relation: &EdgeRelation) -> Option<&HashSet<String>> {
         let table = relation.single_edge_table()?;
-        Some(&self.model.catalog().table_facts(table)?.columns)
+        Some(&self.model.table_facts(table)?.columns)
     }
 
     /// Endpoint filters on properties the edge table stores as columns, each property once.
@@ -143,11 +143,11 @@ impl<M: RelationalModel> Pattern<'_, M> {
         let entity = node
             .entity
             .as_deref()
-            .and_then(|entity| self.model.catalog().graph().entity_id(entity));
+            .and_then(|entity| self.model.graph().entity_id(entity));
         let columns = node
             .table
             .as_deref()
-            .and_then(|table| self.model.catalog().table_facts(table))
+            .and_then(|table| self.model.table_facts(table))
             .map(|facts| &facts.columns);
         let (Some(entity), Some(columns)) = (entity, columns) else {
             return vec![];

@@ -3,6 +3,7 @@
 //! denormalized edge tags where every relationship carries them. Arms emit their own redaction
 //! columns since the center edge column differs per direction.
 
+use query_data_model::Catalog;
 use query_data_model::constants::*;
 use query_data_model::plan::logical::{Expr as Logical, LogicalOperation, Order as Sort};
 use query_data_model::{
@@ -15,7 +16,7 @@ use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
 use crate::logical::facts::{anchors, facts};
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::Term;
 use crate::passes::plan::predicates::{Column, OutputValue};
 
@@ -67,7 +68,7 @@ pub(crate) struct Neighbors<'p> {
 }
 
 impl<'p> Neighbors<'p> {
-    pub fn new<M: RelationalModel>(query: Query<'p>, model: &'p M) -> Result<Self> {
+    pub fn new<B: SqlBackend>(query: Query<'p>, model: &'p Catalog<B>) -> Result<Self> {
         let (from, relationships, requested) = query
             .operations()
             .find_map(|(_, operation)| match operation {
@@ -101,7 +102,7 @@ impl<'p> Neighbors<'p> {
             .collect();
         let routes: Vec<_> = relationships
             .iter()
-            .map(|relationship| (*relationship, model.catalog().edge_routes(*relationship)))
+            .map(|relationship| (*relationship, model.edge_routes(*relationship)))
             .collect();
         let touches = |routes: &[query_data_model::RelationshipRoute<'_>], source: bool| {
             routes.iter().any(|route| match source {
@@ -134,7 +135,6 @@ impl<'p> Neighbors<'p> {
                         continue;
                     }
                     let owned = model
-                        .catalog()
                         .variant_scope(variant.id)
                         .is_some_and(|scope| match source {
                             true => scope.edge_path_is_target_path(),
@@ -153,7 +153,6 @@ impl<'p> Neighbors<'p> {
                 let mut found = false;
                 let mut carries = true;
                 for variant in model
-                    .catalog()
                     .edge_routes(*relationship)
                     .iter()
                     .flat_map(|route| route.variants())
@@ -164,19 +163,16 @@ impl<'p> Neighbors<'p> {
                 {
                     found = true;
                     let source = &graph.entity(variant.source).name;
-                    carries &= model
-                        .catalog()
-                        .variant_scope(variant.id)
-                        .is_some_and(|scope| {
-                            match center_is_target {
-                                // The edge row carries the target's path; a source shares it only where the ontology says so.
-                                true => scope.is_scope_preserving(),
-                                false => {
-                                    scope.propagates_to_source(name, source)
-                                        || scope.edge_path_is_source_path()
-                                }
+                    carries &= model.variant_scope(variant.id).is_some_and(|scope| {
+                        match center_is_target {
+                            // The edge row carries the target's path; a source shares it only where the ontology says so.
+                            true => scope.is_scope_preserving(),
+                            false => {
+                                scope.propagates_to_source(name, source)
+                                    || scope.edge_path_is_source_path()
                             }
-                        });
+                        }
+                    });
                 }
                 match found && carries {
                     true => carrying.push(name.to_string()),
@@ -200,7 +196,7 @@ impl<'p> Neighbors<'p> {
                         property: filter.property?,
                         direction,
                     };
-                    let facts = model.catalog().denormalized(key)?;
+                    let facts = model.denormalized(key)?;
                     let values = filter.test.tags(&facts.tag_key)?;
                     Some(Tag { facts, values })
                 };
@@ -216,21 +212,15 @@ impl<'p> Neighbors<'p> {
             touching.is_empty()
                 || tag.is_some_and(|tag| {
                     touching.iter().all(|(relationship, _)| {
-                        model
-                            .catalog()
-                            .edge_routes(*relationship)
-                            .iter()
-                            .any(|route| {
-                                route.source_entities().any(|source| {
-                                    route.target_entities().any(|target| {
-                                        tag.facts.variants.contains(&(
-                                            *relationship,
-                                            source,
-                                            target,
-                                        ))
-                                    })
+                        model.edge_routes(*relationship).iter().any(|route| {
+                            route.source_entities().any(|source| {
+                                route.target_entities().any(|target| {
+                                    tag.facts
+                                        .variants
+                                        .contains(&(*relationship, source, target))
                                 })
                             })
+                        })
                     })
                 })
         };
@@ -240,7 +230,7 @@ impl<'p> Neighbors<'p> {
                     || (direction != Direction::Outgoing
                         && !covered(filter.target.as_ref(), &incoming))
             });
-        let all_tables = model.catalog().edge_tables(relationships);
+        let all_tables = model.edge_tables(relationships);
         let tables_for = |source: bool| -> Vec<String> {
             let mut tables: Vec<String> = routes
                 .iter()
@@ -289,7 +279,7 @@ impl<'p> Neighbors<'p> {
                 let alias = query.name(binding);
                 let declared = graph.property(property);
                 let column = Column::new(alias, &declared.name);
-                let value = match alias == center.alias && model.catalog().null_as_epoch(property) {
+                let value = match alias == center.alias && model.null_as_epoch(property) {
                     true => OutputValue::EpochAsNull(column, declared.data_type),
                     false => OutputValue::Column(column),
                 };

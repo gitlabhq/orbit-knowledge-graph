@@ -1,6 +1,7 @@
 //! Hydration plan: decides how the server fetches entity properties after
 //! the base query returns IDs.
 
+use query_data_model::Catalog;
 use std::collections::HashSet;
 
 use query_data_model::EntityId;
@@ -9,7 +10,7 @@ use query_data_model::catalog::Lookup;
 use crate::logical::columns::{defaults, returned, selections};
 use crate::logical::facts::{FilterOp, anchors, facts};
 use crate::logical::{DynamicColumnMode, Kind, Query};
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use crate::types::SecurityContext;
 use query_data_model::plan::logical::Expr;
 
@@ -116,7 +117,7 @@ pub struct VirtualColumnRequest {
 pub fn generate_hydration_plan(
     query: Query<'_>,
     projected: &[&str],
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
     security_ctx: &SecurityContext,
 ) -> HydrationPlan {
     match query.kind() {
@@ -145,7 +146,7 @@ pub fn generate_hydration_plan(
 fn build_static_templates(
     query: Query<'_>,
     projected: &[&str],
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
 ) -> Vec<HydrationTemplate> {
     let projected = |alias: &str| projected.contains(&alias);
     let facts = facts(query);
@@ -154,8 +155,7 @@ fn build_static_templates(
         .iter()
         .filter_map(|anchor| {
             let (alias, entity_id) = (anchor.binding.name, anchor.binding.entity);
-            let catalog = model.catalog();
-            let entity = &catalog.graph().entity(entity_id).name;
+            let entity = &model.graph().entity(entity_id).name;
             let selection = selected.get(&anchor.binding.output).copied();
             let requested = returned(model, entity_id, selection);
 
@@ -210,11 +210,11 @@ fn build_static_templates(
             Some(HydrationTemplate {
                 entity_type: entity.clone(),
                 node_alias: alias.to_string(),
-                destination_table: catalog.table_of(entity_id)?.to_string(),
+                destination_table: model.table_of(entity_id)?.to_string(),
                 columns,
                 virtual_columns,
                 injected_columns,
-                has_traversal_path: catalog.has_path_column(entity_id),
+                has_traversal_path: model.has_path_column(entity_id),
                 virtual_filters,
                 filter_injected_columns,
             })
@@ -233,16 +233,15 @@ fn build_static_templates(
 /// rather than from `node.columns` that `RestrictPass` pruned.
 fn build_dynamic_specs(
     mode: DynamicColumnMode,
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
     security_ctx: &SecurityContext,
 ) -> Vec<DynamicEntityColumns> {
-    let catalog = model.catalog();
-    let graph = catalog.graph();
+    let graph = model.graph();
     graph
         .entities()
         .filter_map(|entity| {
             let name = entity.name.as_str();
-            let table = catalog.table_of(entity.id)?;
+            let table = model.table_of(entity.id)?;
 
             let admin_only: HashSet<&str> = if security_ctx.admin {
                 HashSet::new()
@@ -250,7 +249,7 @@ fn build_dynamic_specs(
                 entity
                     .properties
                     .iter()
-                    .filter(|property| catalog.admin_only(**property))
+                    .filter(|property| model.admin_only(**property))
                     .map(|property| graph.property(*property).name.as_str())
                     .collect()
             };
@@ -264,8 +263,8 @@ fn build_dynamic_specs(
                     .iter()
                     .map(|property| graph.property(*property))
                     .filter(|property| {
-                        catalog.lookup(property.id).is_none()
-                            && !catalog.model().access().property(property.id).hidden
+                        model.lookup(property.id).is_none()
+                            && !model.model().access().property(property.id).hidden
                             && property.name != "_version"
                             && property.name != "_deleted"
                     })
@@ -298,7 +297,7 @@ fn build_dynamic_specs(
                 columns,
                 virtual_columns,
                 injected_columns,
-                has_traversal_path: catalog.has_path_column(entity.id),
+                has_traversal_path: model.has_path_column(entity.id),
             })
         })
         .collect()
@@ -306,30 +305,28 @@ fn build_dynamic_specs(
 
 /// The lookup serving an entity's property, by property name.
 fn served<'m>(
-    model: &'m impl RelationalModel,
+    model: &'m Catalog<impl SqlBackend>,
     entity: EntityId,
     property: &str,
 ) -> Option<&'m Lookup> {
-    let catalog = model.catalog();
-    catalog.lookup(catalog.graph().property_id(entity, property)?)
+    model.lookup(model.graph().property_id(entity, property)?)
 }
 
 /// Returns the columns that were injected (not originally requested).
 fn inject_model_virtual_dependencies(
     columns: &mut Vec<String>,
     virtual_columns: &[VirtualColumnRequest],
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
     entity: EntityId,
 ) -> Vec<String> {
-    let catalog = model.catalog();
     let mut injected = Vec::new();
     for vc in virtual_columns {
         let Some(lookup) = served(model, entity, &vc.column_name) else {
             continue;
         };
         for key in &lookup.keys {
-            let dependency = &catalog.graph().property(*key).name;
-            if !columns.contains(dependency) && catalog.column(*key).is_some() {
+            let dependency = &model.graph().property(*key).name;
+            if !columns.contains(dependency) && model.column(*key).is_some() {
                 columns.push(dependency.clone());
                 injected.push(dependency.clone());
             }
@@ -340,7 +337,7 @@ fn inject_model_virtual_dependencies(
 
 fn split_model_columns(
     requested: &[String],
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
     entity: EntityId,
 ) -> (Vec<String>, Vec<VirtualColumnRequest>) {
     let mut columns = Vec::new();
@@ -361,7 +358,7 @@ fn split_model_columns(
 }
 
 fn virtual_request(
-    model: &impl RelationalModel,
+    model: &Catalog<impl SqlBackend>,
     entity: EntityId,
     property: &str,
 ) -> Option<VirtualColumnRequest> {
@@ -438,7 +435,7 @@ lookups:
     }
 
     fn entity(model: &Catalog<ClickHouse>) -> query_data_model::EntityId {
-        model.catalog().graph().entity_id("TestNode").unwrap()
+        model.graph().entity_id("TestNode").unwrap()
     }
 
     #[test]

@@ -5,12 +5,11 @@ mod edge;
 mod fk;
 mod multi_hop;
 
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::build::stored;
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::constants::*;
-use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::Relation;
 
 use super::relations::edge_columns;
@@ -40,8 +39,8 @@ impl Matched {
     }
 }
 
-pub(super) struct RelationBuilder<'a, 'q, 'c, M: RelationalModel, B: RelationalBackend> {
-    pattern: &'a Pattern<'a, M>,
+pub(super) struct RelationBuilder<'a, 'q, 'c, B: SqlBackend> {
+    pattern: &'a Pattern<'a, B>,
     reads: Reads<'q, 'c, B>,
     root: Option<Relation>,
     filters: Vec<Predicate>,
@@ -59,12 +58,11 @@ struct PlannedNode {
     read: Option<Rel>,
 }
 
-impl<'a, 'q, 'c, M, B> RelationBuilder<'a, 'q, 'c, M, B>
+impl<'a, 'q, 'c, B> RelationBuilder<'a, 'q, 'c, B>
 where
-    M: RelationalModel,
-    B: RelationalBackend,
+    B: SqlBackend,
 {
-    pub fn new(pattern: &'a Pattern<'a, M>, reads: Reads<'q, 'c, B>) -> Self {
+    pub fn new(pattern: &'a Pattern<'a, B>, reads: Reads<'q, 'c, B>) -> Self {
         Self {
             pattern,
             reads,

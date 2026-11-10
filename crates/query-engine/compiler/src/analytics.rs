@@ -1,4 +1,5 @@
-use crate::passes::codegen::RelationalModel;
+use crate::passes::codegen::SqlBackend;
+use query_data_model::Catalog;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
@@ -76,8 +77,8 @@ pub struct QueryStats {
 }
 
 impl QueryStats {
-    pub fn new(query: Query<'_>, model: &impl RelationalModel) -> Self {
-        let graph = model.catalog().graph();
+    pub fn new(query: Query<'_>, model: &Catalog<impl SqlBackend>) -> Self {
+        let graph = model.graph();
         let kind = query.kind();
         let steps = query.steps();
         let node_count = query
