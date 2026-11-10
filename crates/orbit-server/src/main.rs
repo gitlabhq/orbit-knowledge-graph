@@ -21,7 +21,7 @@ use orbit_server::grpc::GrpcServer;
 use orbit_server::health_check as health_check_mode;
 use orbit_server::probes;
 use orbit_server::shutdown;
-use orbit_server_config::AppConfig;
+use orbit_server_config::{AppConfig, IndexerModule};
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
@@ -165,31 +165,43 @@ async fn run_webserver(
         config.jwt_clock_skew_secs,
     )?);
 
-    let gitlab_client_config = config.gitlab_client_config().ok_or_else(|| {
-        anyhow::anyhow!(
-            "GitLab client config is required: set gitlab.base_url and provide \
-             the JWT signing key (via config or /etc/secrets/gitlab/jwt/signing_key)"
-        )
-    })?;
-    let gitlab_client = Arc::new(
-        gitlab_client::GitlabClient::new(gitlab_client_config)
-            .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
-    );
+    // The webserver needs GitLab only to serve code or SDLC content. With neither
+    // module enabled it runs with no GitLab client, no Gitaly resolver, and no
+    // GitLab health overlay, so the demo has no GitLab dependency at all.
+    let gitlab_required = config.engine.is_module_enabled(IndexerModule::Sdlc)
+        || config.engine.is_module_enabled(IndexerModule::Code);
+    let gitlab_client = match config.gitlab_client_config() {
+        Some(client_config) => Some(Arc::new(
+            gitlab_client::GitlabClient::new(client_config)
+                .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
+        )),
+        None if gitlab_required => {
+            return Err(anyhow::anyhow!(
+                "GitLab client config is required when the sdlc or code module is enabled: \
+                 set gitlab.base_url and provide the JWT signing key"
+            ));
+        }
+        None => None,
+    };
 
     let graph = config.graph.build_client("graph");
     let cluster_health = ClusterHealthChecker::new(
         config.health_check_url.clone(),
         Some(graph.clone()),
-        Some(gitlab_client.clone()),
+        gitlab_client.clone(),
     )
     .into_arc();
 
     let mut resolver_registry = query_engine::shared::content::ColumnResolverRegistry::new();
-    resolver_registry.register(
-        "gitaly",
-        Arc::new(content::gitaly::GitalyService::new(gitlab_client.clone())),
-    );
-    info!("Content resolution enabled (GitlabClient configured)");
+    if let Some(client) = &gitlab_client {
+        resolver_registry.register(
+            "gitaly",
+            Arc::new(content::gitaly::GitalyService::new(client.clone())),
+        );
+        info!("Content resolution enabled (GitlabClient configured)");
+    } else {
+        info!("Content resolution disabled: no GitLab module enabled");
+    }
 
     info!("initializing NATS connection");
     let nats = Arc::new(
@@ -245,8 +257,11 @@ async fn run_webserver(
             safe(SNOWPLOW_APP_ID) = orbit_billing::constants::APP_ID,
             "initializing billing event tracker"
         );
+        let billing_gitlab_client = gitlab_client.clone().ok_or_else(|| {
+            anyhow::anyhow!("billing.enabled=true requires a GitLab client (set gitlab.base_url)")
+        })?;
         let cc_token_cache = Some(Arc::new(gitlab_client::CloudConnectorTokenCache::new(
-            gitlab_client.clone(),
+            billing_gitlab_client,
         )));
         let tracker = Arc::new(
             SnowplowBillingTracker::from_config(&config.billing, cc_token_cache)
@@ -288,7 +303,12 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("analytics tracker initialization failed: {e}"))?;
         let instance = GitlabInstanceWatch::default();
         if config.analytics.follows_gitlab_setting() {
-            instance.spawn_refresh(gitlab_client.clone());
+            let analytics_gitlab_client = gitlab_client.clone().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "analytics follows the GitLab setting but no GitLab client is configured"
+                )
+            })?;
+            instance.spawn_refresh(analytics_gitlab_client);
         }
         grpc_server = grpc_server.with_analytics(Arc::new(ConsentGate::new(
             Arc::new(tracker.clone()),
