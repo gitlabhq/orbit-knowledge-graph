@@ -5,11 +5,9 @@ use super::schema::{self, Schema};
 use super::spec::{ClickHouseOptions, ClickHouseSource};
 use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
 use crate::implementations::relational::{RelationalFacts, RelationalRoute, RelationalStore};
-use crate::spec::parse_word;
 use crate::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
-    MaterializedJoin, MaterializedNode, MaterializedRelationship, TraversalPathKind,
-    TraversalPathLookup,
+    MaterializedJoin, MaterializedNode, MaterializedRelationship, TraversalPathLookup,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,19 +116,14 @@ fn annotate_sources(
             relational.high_fan_out.insert(entity);
         }
         for (kind, lookup) in &options.path_lookups {
-            let kind_word = diagnostics.require(
-                parse_word::<TraversalPathKind>(kind),
-                source.package,
-                || format!("{name} has unknown path lookup kind `{kind}`"),
-            );
             let property = diagnostics.require(
                 graph.property_id(entity, &lookup.key),
                 source.package,
                 || format!("{name} path lookup key {} is not a property", lookup.key),
             );
-            if let (Some(kind), Some(property)) = (kind_word, property) {
+            if let Some(property) = property {
                 relational.path_lookups.insert(
-                    (entity, kind),
+                    (entity, *kind),
                     TraversalPathLookup {
                         table: lookup.table.clone(),
                         property,

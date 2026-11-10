@@ -395,6 +395,20 @@ fn every_bad_reference_is_reported_in_one_load() {
             "  User: { path_column: null, columns: { usernam: login } }",
         ),
         "gitlab/graph.yaml" => yaml.replace("User -> Note]", "User -> Notes]"),
+        _ => yaml,
+    }));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: AUTHORED variant `User -> Notes` names an unknown entity",
+            "gitlab: store graph names unknown property User.usernam",
+        ]
+    );
+}
+
+#[test]
+fn an_unknown_role_fails_to_parse_and_names_the_roles() {
+    let errors = spec_errors(load_with(&["gitlab"], |name, yaml| match name {
         "gitlab/authorization.yaml" => yaml.replace(
             "role: reporter, redaction: { resource: note",
             "role: viewer, redaction: { resource: note",
@@ -404,9 +418,7 @@ fn every_bad_reference_is_reported_in_one_load() {
     assert_eq!(
         errors,
         [
-            "gitlab: AUTHORED variant `User -> Notes` names an unknown entity",
-            "gitlab: Note has unknown role `viewer`",
-            "gitlab: store graph names unknown property User.usernam",
+            "gitlab/authorization.yaml: unknown variant `viewer`, expected one of guest, reporter, security_manager, developer, maintainer, owner"
         ]
     );
 }

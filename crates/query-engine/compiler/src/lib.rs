@@ -287,7 +287,7 @@ mod tests {
                 }
                 Fragment::Authorization(access) => {
                     if let Some(user) = access.entities.get_mut("User") {
-                        user.scope = "namespace".into();
+                        user.scope = query_data_model::Scope::Namespace;
                     }
                 }
                 _ => {}

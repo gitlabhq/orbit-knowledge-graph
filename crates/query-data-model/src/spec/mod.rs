@@ -5,12 +5,12 @@ mod source;
 mod storage;
 
 pub use authorization::{
-    AuthorizationFragment, EntityAccessSpec, PropertyAccessSpec, RedactionSpec, ScopeSpec,
+    AuthorizationFragment, EntityAccessSpec, PropertyAccess, RedactionSpec, ScopeSpec,
     ScopeVariants,
 };
 pub use graph::{
     AttributeDetail, AttributeSpec, EntitySpec, GraphFragment, PropertyDetail, PropertySpec,
-    RelationshipSpec, StyleSpec,
+    RelationshipSpec,
 };
 pub use service::{LookupSpec, ServiceFragment};
 pub use source::{

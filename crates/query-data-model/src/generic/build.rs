@@ -5,7 +5,7 @@ use crate::{DataType, EnumType};
 use indexmap::IndexMap;
 
 use super::catalog::{
-    Attribute, Domain, Entity, GraphCatalog, Property, Relationship, RelationshipVariant, Style,
+    Attribute, Domain, Entity, GraphCatalog, Property, Relationship, RelationshipVariant,
 };
 use super::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 use crate::catalog::Diagnostics;
@@ -155,10 +155,7 @@ impl GraphCatalog {
             domain,
             description: spec.description,
             label: spec.label.unwrap_or_default(),
-            style: spec.style.map_or_else(Style::default, |style| Style {
-                size: style.size,
-                color: style.color,
-            }),
+            style: spec.style.unwrap_or_default(),
             properties,
             defaults,
         });
@@ -346,14 +343,9 @@ fn declare_property(
     } else {
         EnumType::Int
     };
-    let selectivity = match detail.selectivity.as_deref() {
-        None => crate::FieldSelectivity::from_data_type(data_type),
-        Some(word) => diagnostics
-            .require(parse_word(word), package, || {
-                format!("property {name} has unknown selectivity `{word}`")
-            })
-            .unwrap_or_default(),
-    };
+    let selectivity = detail
+        .selectivity
+        .unwrap_or_else(|| crate::FieldSelectivity::from_data_type(data_type));
     let property = Property {
         id,
         selectivity,

@@ -6,9 +6,8 @@ mod lookups;
 pub mod sources;
 mod store;
 
-pub use access::{
-    Access, EntityAccess, Guard, PathHop, PropertyAccess, Redaction, RowFilter, Scope,
-};
+pub use crate::Scope;
+pub use access::{Access, EntityAccess, Guard, PathHop, PropertyAccess, Redaction, RowFilter};
 pub use backend::{
     Catalog, ExecuteError, Render, RouteInput, Row, SourceInput, StorageBackend, StoreInput,
 };
@@ -16,7 +15,7 @@ pub use diagnostics::{Diagnostics, SpecError};
 pub use frontend::{Reversed, Unresolved};
 pub use lookups::{Lookup, Lookups};
 pub use sources::Sources;
-pub use store::{DeclaredRoute, Source, Store};
+pub use store::{DeclaredRoute, Source, Store, VariantRoute};
 
 use std::collections::HashSet;
 

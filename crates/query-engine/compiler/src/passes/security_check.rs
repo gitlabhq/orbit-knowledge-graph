@@ -190,7 +190,7 @@ relationships:
             match fragment {
                 Fragment::Authorization(access) => {
                     if let Some(merge_request) = access.entities.get_mut("MergeRequest") {
-                        merge_request.role = Some("security_manager".into());
+                        merge_request.role = Some(query_data_model::RequiredRole::SecurityManager);
                     }
                 }
                 Fragment::Storage(storage) if storage.store == "graph" => {

@@ -11,7 +11,7 @@ use crate::spec::{
 };
 use crate::{
     AttributeId, EntityId, ForeignKey, GraphCatalog, PropertyId, RelationshipId,
-    RelationshipVariant, RelationshipVariantId,
+    RelationshipVariantId,
 };
 
 #[derive(Debug, Clone)]
@@ -22,24 +22,26 @@ pub struct Source {
     pub path_column: Option<String>,
 }
 
+/// A store's route for a relationship, with the variants it narrows resolved to ids.
 #[derive(Debug, Clone)]
 pub struct DeclaredRoute {
     pub relationship: RelationshipId,
     pub package: String,
-    pub spec: RouteSpec,
+    pub fk: Option<String>,
+    pub backend: BackendOptions,
+    pub variants: Vec<VariantRoute>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VariantRoute {
+    pub variant: RelationshipVariantId,
+    pub fk: Option<String>,
+    pub backend: BackendOptions,
 }
 
 impl DeclaredRoute {
-    pub fn for_variant(
-        &self,
-        graph: &GraphCatalog,
-        variant: &RelationshipVariant,
-    ) -> Option<&RouteSpec> {
-        let key = format_variant(
-            &graph.entity(variant.source).name,
-            &graph.entity(variant.target).name,
-        );
-        self.spec.variants.get(&key)
+    pub fn variant(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
+        self.variants.iter().find(|route| route.variant == variant)
     }
 }
 
@@ -363,21 +365,32 @@ impl Store {
                     diagnostics.error(package, format!("store {} routes {name} twice", self.name));
                     continue;
                 }
-                for variant in spec.variants.keys() {
+                let mut narrowed = Vec::new();
+                for (variant, narrow) in &spec.variants {
                     let known = parse_variant(variant)
                         .and_then(|(source, target)| graph.variant_named(name, source, target));
-                    diagnostics.require(known, package, || {
+                    let known = diagnostics.require(known, package, || {
                         format!(
                             "store {} routes unknown variant {name}({variant})",
                             self.name
                         )
                     });
+                    narrowed.extend(known.map(|known| (known.id, narrow)));
                 }
-                self.bind_attributes(relationship, spec, graph, package, diagnostics);
+                self.bind_attributes(relationship, spec, &narrowed, graph, package, diagnostics);
                 self.routes.push(DeclaredRoute {
                     relationship,
                     package: package.to_string(),
-                    spec: spec.clone(),
+                    fk: spec.fk.clone(),
+                    backend: spec.backend.clone(),
+                    variants: narrowed
+                        .into_iter()
+                        .map(|(variant, narrow)| VariantRoute {
+                            variant,
+                            fk: narrow.fk.clone(),
+                            backend: narrow.backend.clone(),
+                        })
+                        .collect(),
                 });
             }
         }
@@ -387,6 +400,7 @@ impl Store {
         &mut self,
         relationship: RelationshipId,
         spec: &RouteSpec,
+        narrowed: &[(RelationshipVariantId, &RouteSpec)],
         graph: &GraphCatalog,
         package: &str,
         diagnostics: &mut Diagnostics,
@@ -407,16 +421,10 @@ impl Store {
         };
         let shared = resolve(&spec.columns);
         for id in &graph.relationship(relationship).variants {
-            let variant = graph.variant(*id);
-            let key = format_variant(
-                &graph.entity(variant.source).name,
-                &graph.entity(variant.target).name,
-            );
             let mut bound = shared.clone();
-            for (attribute, column) in spec
-                .variants
-                .get(&key)
-                .map(|narrow| resolve(&narrow.columns))
+            let narrow = narrowed.iter().find(|(variant, _)| variant == id);
+            for (attribute, column) in narrow
+                .map(|(_, narrow)| resolve(&narrow.columns))
                 .unwrap_or_default()
             {
                 bound.retain(|(other, _)| *other != attribute);
@@ -442,9 +450,8 @@ impl Store {
             let mut matched = false;
             for id in &graph.relationship(route.relationship).variants {
                 let variant = graph.variant(*id);
-                let narrow = route.for_variant(graph, variant);
-                let explicit = narrow.and_then(|spec| spec.fk.as_deref());
-                let Some(column) = explicit.or(route.spec.fk.as_deref()) else {
+                let explicit = route.variant(*id).and_then(|narrow| narrow.fk.as_deref());
+                let Some(column) = explicit.or(route.fk.as_deref()) else {
                     continue;
                 };
                 let label = format!(
@@ -492,7 +499,7 @@ impl Store {
                 }
                 keys[id.index()] = Some(key);
             }
-            if let Some(column) = route.spec.fk.as_deref().filter(|_| !matched) {
+            if let Some(column) = route.fk.as_deref().filter(|_| !matched) {
                 diagnostics.error(
                     &route.package,
                     format!(

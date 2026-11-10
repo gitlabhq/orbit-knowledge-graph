@@ -1,19 +1,13 @@
 use std::collections::HashSet;
 
 use crate::constants::DEFAULT_PRIMARY_KEY;
-use crate::{EdgeVariantScope, RequiredRole};
+use crate::{EdgeVariantScope, RequiredRole, Scope};
 
 use super::Diagnostics;
 use super::store::Store;
-use crate::spec::{AuthorizationFragment, ScopeSpec, ScopeVariants, parse_variant, parse_word};
+pub use crate::spec::PropertyAccess;
+use crate::spec::{AuthorizationFragment, ScopeSpec, ScopeVariants, parse_variant};
 use crate::{AttributeId, Endpoint, EntityId, GraphCatalog, Hop, PropertyId};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Scope {
-    Global,
-    Namespace,
-}
 
 #[derive(Debug, Clone)]
 pub struct Redaction {
@@ -32,14 +26,6 @@ pub struct EntityAccess {
     pub anchor: Option<PropertyId>,
     /// The backend applies the caller's own visibility through the caller's sign-in.
     pub delegated: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PropertyAccess {
-    pub hidden: bool,
-    pub admin_only: bool,
-    pub filterable: bool,
-    pub like: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,15 +60,6 @@ pub struct Access {
     properties: Vec<Option<PropertyAccess>>,
     attributes: Vec<Option<PropertyAccess>>,
     variant_scopes: Vec<Option<EdgeVariantScope>>,
-}
-
-impl PropertyAccess {
-    pub const OPEN: Self = Self {
-        hidden: false,
-        admin_only: false,
-        filterable: true,
-        like: true,
-    };
 }
 
 impl Access {
@@ -146,18 +123,6 @@ impl Access {
                 );
                 continue;
             };
-            let Some(scope) = parse_word::<Scope>(&spec.scope) else {
-                diagnostics.error(
-                    package,
-                    format!("{name} has unknown scope `{}`", spec.scope),
-                );
-                continue;
-            };
-            let role = spec.role.as_deref().and_then(|role| {
-                diagnostics.require(parse_word::<RequiredRole>(role), package, || {
-                    format!("{name} has unknown role `{role}`")
-                })
-            });
             let redaction = spec.redaction.as_ref().and_then(|redaction| {
                 let column = redaction.id.as_deref().unwrap_or(DEFAULT_PRIMARY_KEY);
                 let id = graph.property_id(entity, column);
@@ -184,8 +149,8 @@ impl Access {
             });
             if self.entities[entity.index()]
                 .replace(EntityAccess {
-                    scope,
-                    role,
+                    scope: spec.scope,
+                    role: spec.role,
                     redaction,
                     anchor,
                     delegated: spec.delegated,
@@ -217,17 +182,11 @@ impl Access {
                 diagnostics.error(package, format!("{name} has two scope entries"));
                 continue;
             }
-            let parse = |word: &str, diagnostics: &mut Diagnostics| {
-                diagnostics.require(parse_word::<EdgeVariantScope>(word), package, || {
-                    format!("{name} has unknown scope `{word}`")
-                })
-            };
             let (default, variants) = match spec {
-                ScopeSpec::All(scope) => (parse(scope, diagnostics), None),
-                ScopeSpec::PerVariant(ScopeVariants { scope, variants }) => (
-                    scope.as_deref().and_then(|scope| parse(scope, diagnostics)),
-                    Some(variants),
-                ),
+                ScopeSpec::All(scope) => (Some(*scope), None),
+                ScopeSpec::PerVariant(ScopeVariants { scope, variants }) => {
+                    (*scope, Some(variants))
+                }
             };
             for id in &graph.relationship(relationship).variants {
                 self.variant_scopes[id.index()] = default;
@@ -237,7 +196,7 @@ impl Access {
                     .and_then(|(source, target)| graph.variant_named(name, source, target))
                     .map(|variant| variant.id);
                 match id {
-                    Some(id) => self.variant_scopes[id.index()] = parse(scope, diagnostics),
+                    Some(id) => self.variant_scopes[id.index()] = Some(*scope),
                     None => diagnostics.error(
                         package,
                         format!("{name} scopes unknown variant `{variant}`"),
@@ -254,13 +213,7 @@ impl Access {
         diagnostics: &mut Diagnostics,
     ) {
         let package = fragment.package.as_str();
-        for (path, spec) in &fragment.properties {
-            let declared = PropertyAccess {
-                hidden: spec.hidden,
-                admin_only: spec.admin_only,
-                filterable: spec.filterable,
-                like: spec.like,
-            };
+        for (path, declared) in &fragment.properties {
             let Some((owner, name)) = path.split_once('.') else {
                 diagnostics.error(
                     package,
@@ -282,7 +235,7 @@ impl Access {
                 );
                 continue;
             };
-            if slot.replace(declared).is_some() {
+            if slot.replace(*declared).is_some() {
                 diagnostics.error(package, format!("{path} has two access entries"));
             }
         }

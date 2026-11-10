@@ -34,7 +34,8 @@ pub struct Entity {
     pub defaults: Vec<PropertyId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Style {
     pub size: i32,
     pub color: String,

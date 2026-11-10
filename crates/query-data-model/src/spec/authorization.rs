@@ -2,6 +2,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use super::{is_false, is_true, yes};
+use crate::{EdgeVariantScope, RequiredRole, Scope};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -12,15 +13,15 @@ pub struct AuthorizationFragment {
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub relationships: IndexMap<String, ScopeSpec>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub properties: IndexMap<String, PropertyAccessSpec>,
+    pub properties: IndexMap<String, PropertyAccess>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EntityAccessSpec {
-    pub scope: String,
+    pub scope: Scope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<String>,
+    pub role: Option<RequiredRole>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redaction: Option<RedactionSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -41,7 +42,7 @@ pub struct RedactionSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ScopeSpec {
-    All(String),
+    All(EdgeVariantScope),
     PerVariant(ScopeVariants),
 }
 
@@ -49,13 +50,13 @@ pub enum ScopeSpec {
 #[serde(deny_unknown_fields)]
 pub struct ScopeVariants {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<String>,
-    pub variants: IndexMap<String, String>,
+    pub scope: Option<EdgeVariantScope>,
+    pub variants: IndexMap<String, EdgeVariantScope>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PropertyAccessSpec {
+pub struct PropertyAccess {
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -66,13 +67,17 @@ pub struct PropertyAccessSpec {
     pub like: bool,
 }
 
-impl Default for PropertyAccessSpec {
+impl PropertyAccess {
+    pub const OPEN: Self = Self {
+        hidden: false,
+        admin_only: false,
+        filterable: true,
+        like: true,
+    };
+}
+
+impl Default for PropertyAccess {
     fn default() -> Self {
-        Self {
-            hidden: false,
-            admin_only: false,
-            filterable: true,
-            like: true,
-        }
+        Self::OPEN
     }
 }

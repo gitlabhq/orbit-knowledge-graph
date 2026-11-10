@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+use crate::TraversalPathKind;
 use crate::implementations::relational::{EdgeTableSpec, RelationalOptions};
 
 pub type Settings = IndexMap<String, String>;
@@ -183,7 +184,7 @@ pub struct ClickHouseSource {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub epoch_nulls: Vec<String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub path_lookups: IndexMap<String, PathLookupSpec>,
+    pub path_lookups: IndexMap<TraversalPathKind, PathLookupSpec>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

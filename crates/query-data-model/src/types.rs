@@ -1,6 +1,6 @@
 use std::fmt;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DataType {
@@ -75,7 +75,7 @@ pub enum EnumType {
 }
 
 /// Filter selectivity hint for the query planner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldSelectivity {
     /// Few distinct values (enums, booleans). Filtering narrows weakly.
@@ -94,7 +94,7 @@ impl FieldSelectivity {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TraversalPathKind {
     Id,
@@ -106,7 +106,7 @@ pub enum TraversalPathKind {
 /// across the edge; `prune_to_source`/`prune_to_target` only confine the
 /// edge's own scan to the named endpoint's namespace, without propagating, so
 /// the other endpoint may be a global hub (User/Runner/Label).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeVariantScope {
     NamespaceAnchor,
@@ -139,13 +139,20 @@ impl EdgeVariantScope {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Scope {
+    Global,
+    Namespace,
+}
+
 /// GitLab access levels. Discriminants match `Gitlab::Access` in Rails so
 /// that YAML strings, JWT claim integers, and compiler-side comparisons all
 /// agree. `SecurityManager` intentionally sits between `Reporter` and
 /// `Developer` (25) to match the role's hybrid scope: broader than reporter
 /// for security resources, narrower than developer for code changes.
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RequiredRole {
     Guest = 10,
