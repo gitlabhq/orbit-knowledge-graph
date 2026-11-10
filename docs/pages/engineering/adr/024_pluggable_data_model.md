@@ -71,6 +71,11 @@ skinparam component {
   BackgroundColor<<engine>> #FFF3E0
   BorderColor<<engine>> #E65100
 }
+skinparam rectangle {
+  BackgroundColor<<label>> #FFFFFF
+  BorderColor<<label>> #FFFFFF
+  FontSize<<label>> 11
+}
 hide stereotype
 
 package "Package registry" as REG {
@@ -99,21 +104,43 @@ P1 -[hidden]right- P2
 P2 -[hidden]right- P3
 P3 -[hidden]right- P4
 
-REG --> L : package versions
-L --> M : checked once
+rectangle "package versions" <<label>> as LBL1
+REG -- LBL1
+LBL1 --> L
+rectangle "checked once" <<label>> as LBL2
+L -- LBL2
+LBL2 --> M
 M --> LC
 M --> PC
-E --> S : parse
-S --> LC : logical plans
-E --> PC : builds and rewrites\nphysical plans
-IX --> M : reads sources\nand storage
+rectangle "parse" <<label>> as LBL3
+E -- LBL3
+LBL3 --> S
+rectangle "logical plans" <<label>> as LBL4
+S -- LBL4
+LBL4 --> LC
+rectangle "builds and rewrites\nphysical plans" <<label>> as LBL5
+E -- LBL5
+LBL5 --> PC
+rectangle "reads sources\nand storage" <<label>> as LBL6
+IX -- LBL6
+LBL6 --> M
 LC ..> T
 PC ..> T
-PC --> CH : SQL
-PC --> DD : SQL
-PC --> ON : gRPC
-PC --> DES : live call
-IX --> CH : writes rows
+rectangle "SQL" <<label>> as LBL7
+PC -- LBL7
+LBL7 --> CH
+rectangle "SQL" <<label>> as LBL8
+PC -- LBL8
+LBL8 --> DD
+rectangle "gRPC" <<label>> as LBL9
+PC -- LBL9
+LBL9 --> ON
+rectangle "live call" <<label>> as LBL10
+PC -- LBL10
+LBL10 --> DES
+rectangle "writes rows" <<label>> as LBL11
+IX -- LBL11
+LBL11 --> CH
 
 legend right
   |<#E3F2FD> query-data-model |
@@ -130,6 +157,13 @@ The data model is infrastructure and makes no planning decisions: the compiler p
 
 ```plantuml
 @startuml
+allowmixing
+skinparam rectangle {
+  BackgroundColor<<label>> #FFFFFF
+  BorderColor<<label>> #FFFFFF
+  FontSize<<label>> 11
+}
+hide <<label>> stereotype
 set separator none
 skinparam shadowing false
 skinparam nodesep 60
@@ -160,12 +194,20 @@ package "gitlab.code_review" {
     lookups for virtual
     properties
   }
+  rectangle "refers to" <<label>> as LB1
+  rectangle "binds" <<label>> as LB2
+  rectangle "feeds" <<label>> as LB3
+  rectangle "provides" <<label>> as LB4
 }
 
-A --> G : refers to
-ST --> G : binds
-SO --> G : feeds
-SV --> G : provides
+A -- LB1
+LB1 --> G
+ST -- LB2
+LB2 --> G
+SO -- LB3
+LB3 --> G
+SV -- LB4
+LB4 --> G
 @enduml
 ```
 
@@ -341,6 +383,12 @@ A final check proves every read carries its guard before anything leaves the que
 
 ```plantuml
 @startuml
+skinparam rectangle {
+  BackgroundColor<<label>> #FFFFFF
+  BorderColor<<label>> #FFFFFF
+  FontSize<<label>> 11
+}
+hide <<label>> stereotype
 set separator none
 skinparam shadowing false
 left to right direction
@@ -354,12 +402,24 @@ rectangle "gRPC structural\nsearch request" as GRPC
 rectangle "Data Extraction\nService call" as CALL
 
 LP --> P
-P --> RP : ClickHouse, DuckDB
-P --> CP : Orbit Next
-P --> VP : Slack
-RP --> SQL : render
-CP --> GRPC : render
-VP --> CALL : render
+rectangle "ClickHouse, DuckDB" <<label>> as LR1
+P -- LR1
+LR1 --> RP
+rectangle "Orbit Next" <<label>> as LR2
+P -- LR2
+LR2 --> CP
+rectangle "Slack" <<label>> as LR3
+P -- LR3
+LR3 --> VP
+rectangle "render" <<label>> as LR4
+RP -- LR4
+LR4 --> SQL
+rectangle "render" <<label>> as LR5
+CP -- LR5
+LR5 --> GRPC
+rectangle "render" <<label>> as LR6
+VP -- LR6
+LR6 --> CALL
 @enduml
 ```
 
