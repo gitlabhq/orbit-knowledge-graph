@@ -40,7 +40,7 @@ Agent memory needs custom node types for one tenant.
 
 1. **Packages replace the ontology.** A package is a set of fragments of five kinds: graph, authorization, storage, source and service. Every fragment refers to the graph, and the graph knows nothing about tables. The platform, each integration and each tenant overlay ship their own packages.
 2. **The loader does the work once, and infers nothing.** It resolves every name to an ID, checks every rule, and fails once with every error and its package. Every table, column, storage type and immutable column is declared; a property its home store neither stores nor excludes fails the load. It precomputes the guard of every read from graph reachability. A hash of the packages identifies the model, and every plan carries it.
-3. **Packages load at runtime from a registry keyed by package.** Each package has its own version line. A tenant's model is the active version of every package that applies to it. A new version needs no rebuild and no deploy.
+3. **Packages load at runtime from a registry keyed by package.** Each package has its own version line. A tenant's model is the active version of every package that applies to it. A new version needs no rebuild and no deploy. A package's origin bounds what it may declare, and the loader enforces it: platform packages may declare anything, integration packages may declare delegated access but not trusted stores or global scope, and tenant overlays may declare only namespace- or user-scoped entities.
 4. **A version goes live after its backfill.** The migration scope is the diff between the new version's storage and source fragments and the active one's. The indexing engine of ADR 023 backfills the tables in scope, then the registry promotes the version and the query engine swaps models atomically.
 5. **A backend implements one trait.** A catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. Shared code reads capabilities and never checks a backend name.
 6. **Every plan is built through a checked catalog builder.** There is one logical plan language and one physical plan language per kind of backend. Shared tracking checks every connection as it is made, and rewrites use the same builder, so no phase can leave an invalid plan.
@@ -205,7 +205,7 @@ SV --> G : provides
 ```
 
 Every fragment refers to the graph and to nothing else, so a new store, a new source or a new access rule never edits the graph.
-The graph owns what a property means: its type and its default value. Storage owns how it is kept: its table, column, storage type and whether it is immutable. Nothing is inferred, so a forgotten column fails the load instead of a query.
+The graph owns what a property means: its type and its default value. Storage owns how it is kept: its table, column, storage type, whether it is immutable, and how it is queried. A storage fragment states, in backend-neutral terms, which columns are filtered, text-searched or ordered on, and each backend turns that into its own indexes and sort keys; a `backend` block overrides the result only where a platform package needs to. Nothing is inferred, so a forgotten column fails the load instead of a query.
 A relationship that a foreign key already carries, such as `AUTHORED` through `author_id`, needs no source entry.
 
 Packages compose under four rules: a package cannot redeclare an entity another package owns, cannot add a second authorization entry, can add variants to a platform relationship, and can bind its own entities to a store another package declares.
@@ -242,6 +242,7 @@ endif
 
 Later stages read facts by ID and never search by name.
 `MergeRequest` carries its own `traversal_path`, so its guard filters on it. `User` is global, so its guard is a role floor alone.
+A user-scoped entity, such as a todo, names the property that holds its owner, and that property must reference `User`. Its guard is that the owner is the caller.
 Every plan carries the `ModelId` it was built against, so no plan is ever checked against a different model.
 
 ### 3. A new version goes live after its backfill

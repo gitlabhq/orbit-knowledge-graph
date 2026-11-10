@@ -68,9 +68,12 @@ entities:
       state: {backend: {type: LowCardinality(String)}}
       author_id: {backend: {type: Nullable(Int64)}}
       traversal_path: {backend: {type: String}}
+    access: {filter: [state, author_id], text: [title], order: [id]}
     backend:
       primary_key: [traversal_path, id]
 ```
+
+`access` says how the columns are queried, in terms every backend understands. ClickHouse turns it into its skip indexes and sort key, so an integration author never writes ClickHouse details. The `backend` block overrides that only where a platform package needs to.
 
 The entity's home store must list every property of the graph, or exclude it by name with `exclude: [...]`. Another store lists exactly the properties it holds. The loader rejects a property that its home store neither stores nor excludes. It also rejects a column without a storage type and a binding without a table. A forgotten column fails at load, not at query time.
 
@@ -362,6 +365,8 @@ The loader collects every error, names its package, and fails once:
 - An entity or variant declared twice, or a second authorization entry.
 - An entity with no `id`, or no authorization entry.
 - A property that its home store neither stores nor excludes, a stored column without a storage type, or a binding without a table. Nothing is inferred.
+- A declaration above the package's trust tier. Only a platform package may declare a trusted store or global scope. A tenant overlay may not declare delegated access, and its entities must be namespace- or user-scoped.
+- A user-scoped entity whose owner property does not reference `User`.
 - A foreign key on neither endpoint, or one the graph does not mark as a reference.
 - Two backends, or a trusted and an untrusted store, on one connection.
 - A namespaced entity that no guard rule covers.
