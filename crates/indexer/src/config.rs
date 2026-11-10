@@ -1,6 +1,6 @@
 use orbit_server_config::{
     AnalyticsConfig, AppConfig, ClickHouseConfiguration, EngineConfigError, EngineConfiguration,
-    GitlabClientConfiguration, NatsConfiguration, ScheduleConfig, SchemaConfig,
+    ExtensionsConfig, GitlabClientConfiguration, NatsConfiguration, ScheduleConfig, SchemaConfig,
 };
 use thiserror::Error;
 
@@ -74,6 +74,7 @@ pub struct DispatcherConfig {
     pub graph: ClickHouseConfiguration,
     pub datalake: ClickHouseConfiguration,
     pub engine: EngineConfiguration,
+    pub extensions: ExtensionsConfig,
     pub schedule: ScheduleConfig,
     pub schema: SchemaConfig,
 }
@@ -85,6 +86,7 @@ impl From<&AppConfig> for DispatcherConfig {
             graph: config.graph.clone(),
             datalake: config.datalake.clone(),
             engine: config.engine.clone(),
+            extensions: config.extensions.clone(),
             schedule: config.schedule.clone(),
             schema: config.schema.clone(),
         }

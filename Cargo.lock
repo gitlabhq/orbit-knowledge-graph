@@ -3383,6 +3383,7 @@ dependencies = [
  "clickhouse-client",
  "code-graph",
  "code-graph-incremental",
+ "extensions",
  "flate2",
  "futures",
  "gitaly-protos",

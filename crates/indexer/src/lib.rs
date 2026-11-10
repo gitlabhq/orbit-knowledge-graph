@@ -443,6 +443,15 @@ pub async fn run_dispatcher(
         )));
     }
 
+    // The datalake tables whose watermark the extension scope dispatcher polls,
+    // taken from the merged model's extension entities. Empty until provider
+    // packages are merged into the dispatcher's ontology.
+    let extension_source_tables: Vec<String> = ontology
+        .nodes()
+        .filter(|node| node.domain == "extensions")
+        .flat_map(|node| node.reindex_on.iter().map(|source| source.table.clone()))
+        .collect();
+
     tasks.push(Box::new(MigrationCompletionChecker::new(
         clients.graph.clone(),
         clients.datalake.clone(),
@@ -455,6 +464,55 @@ pub async fn run_dispatcher(
         services.nats_connection.clone(),
         catalog,
     )));
+
+    // Each configured provider contributes one scope dispatcher. Its scopes table
+    // comes from the provider manifest, so a new source needs no dispatcher change.
+    // A provider that is unreachable at start is logged and skipped, never fatal.
+    if config.engine.is_module_enabled(IndexerModule::Extensions) {
+        for provider in &config.extensions.providers {
+            let provider_config = extensions::provider::ProviderConfig {
+                name: provider.name.clone(),
+                url: provider.url.clone(),
+                jwt_key_file: provider.jwt_key_file.clone(),
+                refresh_secs: provider.refresh_secs,
+            };
+            let mut client =
+                match extensions::provider::ProviderClient::connect(&provider_config).await {
+                    Ok(client) => client,
+                    Err(error) => {
+                        warn!(
+                            safe(ERROR_TYPE) = "extension_provider_connect",
+                            expanded(ERROR_MESSAGE) = %error,
+                            "extension provider unreachable; scope dispatch skipped"
+                        );
+                        continue;
+                    }
+                };
+            let manifest = match client.get_manifest().await {
+                Ok(manifest) => manifest,
+                Err(error) => {
+                    warn!(
+                        safe(ERROR_TYPE) = "extension_provider_manifest",
+                        expanded(ERROR_MESSAGE) = %error,
+                        "extension provider manifest fetch failed; scope dispatch skipped"
+                    );
+                    continue;
+                }
+            };
+            tasks.push(Box::new(
+                modules::extensions::ExtensionScopeDispatcher::new(
+                    clients.datalake.clone(),
+                    services.nats.clone(),
+                    Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
+                        clients.graph.clone(),
+                    ))),
+                    manifest.scopes_table,
+                    extension_source_tables.clone(),
+                    config.schedule.tasks.namespace.schedule.clone(),
+                ),
+            ));
+        }
+    }
 
     // The Siphon trigger consumes CDC for the enabled source modules only. With
     // neither sdlc nor code, no route exists and the trigger is not started, so

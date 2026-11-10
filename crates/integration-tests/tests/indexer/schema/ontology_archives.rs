@@ -302,6 +302,7 @@ impl TestContext {
             graph: defaults.graph,
             datalake: defaults.datalake,
             engine: defaults.engine,
+            extensions: defaults.extensions,
             schedule: defaults.schedule,
             schema: defaults.schema,
         };
