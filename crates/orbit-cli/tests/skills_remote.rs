@@ -927,11 +927,11 @@ fn hook_instructions(base_url: Option<&str>, args: &[&str]) -> (Output, String) 
 fn assert_local_only(output: &Output, instructions: &str) {
     assert!(output.status.success(), "{}", stderr(output));
     assert!(
-        instructions.contains("grep` searches code"),
+        instructions.contains("grep` must be used for search"),
         "{instructions}"
     );
     assert!(
-        !instructions.contains("query` for counts"),
+        !instructions.contains("query` must be used for counts"),
         "{instructions}"
     );
     assert!(!instructions.contains("Schema for"), "{instructions}");
@@ -940,7 +940,10 @@ fn assert_local_only(output: &Output, instructions: &str) {
 
 fn assert_remote_without_schema(output: &Output, instructions: &str) {
     assert!(output.status.success(), "{}", stderr(output));
-    assert!(instructions.contains("query` for counts"), "{instructions}");
+    assert!(
+        instructions.contains("query` must be used for counts"),
+        "{instructions}"
+    );
     assert!(!instructions.contains("Schema for"), "{instructions}");
     assert!(!instructions.contains("{{"), "{instructions}");
 }
@@ -1100,7 +1103,7 @@ fn setup_instructions_list_the_servers_entities_and_cache_them() {
         );
         assert_eq!(
             instructions.matches("MANDATORY").count(),
-            1,
+            4,
             "{instructions}"
         );
     }
