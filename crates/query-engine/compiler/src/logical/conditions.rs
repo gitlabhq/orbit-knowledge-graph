@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 
 use query_data_model::PropertyId;
+use query_data_model::constants::{
+    SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
+};
 use query_data_model::plan::logical::{
     Comparison, Conjunct, EdgeField, Expr, Literal, LogicalOperation, Operand, Predicate,
 };
@@ -130,6 +133,22 @@ pub fn binding(expr: Expr) -> Ref {
 impl<'p> Query<'p> {
     pub fn property_name(self, property: PropertyId) -> &'p str {
         &self.model.graph().property(property).name
+    }
+
+    /// The stored column an expression reads; an edge's kind is not one.
+    pub fn column_name(self, expr: Expr) -> Option<&'p str> {
+        Some(match expr {
+            Expr::Property { property, .. } => self.property_name(property),
+            Expr::Attribute { attribute, .. } => &self.model.graph().attribute(attribute).name,
+            Expr::Edge { field, .. } => match field {
+                EdgeField::Kind => return None,
+                EdgeField::Source => SOURCE_ID_COLUMN,
+                EdgeField::SourceKind => SOURCE_KIND_COLUMN,
+                EdgeField::Target => TARGET_ID_COLUMN,
+                EdgeField::TargetKind => TARGET_KIND_COLUMN,
+            },
+            Expr::Truncate { .. } | Expr::Node(_) | Expr::Output(_) => return None,
+        })
     }
 
     /// The top-level conjuncts of every filter, polarized.

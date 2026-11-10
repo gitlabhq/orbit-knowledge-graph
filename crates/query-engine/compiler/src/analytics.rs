@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use query_data_model::Direction;
-use query_data_model::plan::logical::{EdgeField, Expr, LogicalOperation, Measure};
+use query_data_model::plan::logical::{Expr, LogicalOperation, Measure};
 use serde::Serialize;
 
 use crate::logical::Leaf;
@@ -93,18 +93,7 @@ impl QueryStats {
         let facts = query.leaves();
         let anchors = query.anchors(&facts);
         let selected = selections(query);
-        let field = |fact: &Leaf<'_>| match fact.left() {
-            Expr::Property { property, .. } => Some(query.property_name(property).to_string()),
-            Expr::Attribute { attribute, .. } => Some(graph.attribute(attribute).name.clone()),
-            Expr::Edge { field, .. } => match field {
-                EdgeField::Kind => None,
-                EdgeField::Source => Some("source_id".into()),
-                EdgeField::SourceKind => Some("source_kind".into()),
-                EdgeField::Target => Some("target_id".into()),
-                EdgeField::TargetKind => Some("target_kind".into()),
-            },
-            _ => None,
-        };
+        let field = |fact: &Leaf<'_>| query.column_name(fact.left()).map(str::to_string);
         let node_filters = anchors.iter().flat_map(|anchor| anchor.filters.iter());
         let edge_filters = facts
             .iter()

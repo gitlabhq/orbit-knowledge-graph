@@ -4,7 +4,7 @@ use crate::passes::codegen::SqlBackend;
 use query_data_model::Catalog;
 use std::collections::{HashMap, HashSet};
 
-use query_data_model::plan::logical::{EdgeField, Expr};
+use query_data_model::plan::logical::Expr;
 use query_data_model::plan::tracking::Ref;
 
 use super::{EdgeRelation, NodePlan, Pattern};
@@ -106,18 +106,8 @@ fn condition<B: SqlBackend>(
             let column = Column::new(alias, &graph.property(property).name);
             (column, FilterOwner::Entity(entity), false)
         }
-        Expr::Edge { binding, field } => {
-            let name = match field {
-                EdgeField::Kind => Condition::KIND,
-                EdgeField::Source => "source_id",
-                EdgeField::SourceKind => "source_kind",
-                EdgeField::Target => "target_id",
-                EdgeField::TargetKind => "target_kind",
-            };
-            on_edge(binding, name)?
-        }
-        Expr::Attribute { binding, attribute } => {
-            on_edge(binding, &graph.attribute(attribute).name)?
+        left @ (Expr::Edge { binding, .. } | Expr::Attribute { binding, .. }) => {
+            on_edge(binding, query.column_name(left).unwrap_or(Condition::KIND))?
         }
         other => {
             return Err(QueryError::PipelineInvariant(format!(

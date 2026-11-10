@@ -6,10 +6,7 @@ use query_data_model::Catalog;
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use query_data_model::constants::{
-    SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
-};
-use query_data_model::plan::logical::{EdgeField, Expr as Logical};
+use query_data_model::constants::{SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use query_data_model::plan::tracking::Ref;
 use query_data_model::{Direction, EntityId, RelationshipId};
 
@@ -219,7 +216,7 @@ where
                     })
                 })
                 .flatten();
-            let filters = edge_filters(facts, step.edge, &edge_tables, model);
+            let filters = edge_filters(query, facts, step.edge, &edge_tables, model);
             EdgeRelation {
                 input_index,
                 rel_types: types,
@@ -242,6 +239,7 @@ where
 
 /// The filters attached to an edge, bound to the columns its tables store.
 fn edge_filters<B>(
+    query: Query<'_>,
     facts: &[Leaf<'_>],
     edge: Ref,
     tables: &[String],
@@ -255,20 +253,7 @@ where
         .iter()
         .filter(|fact| fact.attached() && fact.binding() == edge)
         .filter_map(|fact| {
-            let name = match fact.left() {
-                Logical::Edge { field, .. } => match field {
-                    EdgeField::Kind => return None,
-                    EdgeField::Source => SOURCE_ID_COLUMN,
-                    EdgeField::SourceKind => SOURCE_KIND_COLUMN,
-                    EdgeField::Target => TARGET_ID_COLUMN,
-                    EdgeField::TargetKind => TARGET_KIND_COLUMN,
-                }
-                .to_string(),
-                Logical::Attribute { attribute, .. } => {
-                    model.graph().attribute(attribute).name.clone()
-                }
-                _ => return None,
-            };
+            let name = query.column_name(fact.left())?.to_string();
             if fact.right().is_some() {
                 return None;
             }

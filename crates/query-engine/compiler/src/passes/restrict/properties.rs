@@ -23,8 +23,8 @@ pub(super) fn admin_only(query: Query<'_>, model: &Catalog<impl SqlBackend>) -> 
             "{what} \"{name}\" for {entity}: field requires administrator access"
         )))
     };
-    for conjunct in query.conjuncts() {
-        for expr in conjunct.exprs() {
+    for leaf in query.leaves() {
+        for expr in leaf.predicate.exprs() {
             check(expr, "filter on")?;
         }
     }
