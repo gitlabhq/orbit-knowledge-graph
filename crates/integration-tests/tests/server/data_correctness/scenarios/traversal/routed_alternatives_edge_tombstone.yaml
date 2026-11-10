@@ -1,0 +1,39 @@
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      merge_request: [99330, 99332]
+      project: [1000]
+      ci_pipeline: [99331]
+  extra_seed:
+    gl_pipeline:
+      - { id: 99331, iid: 1, ref: main, status: success, source: push, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+    gl_merge_request:
+      - { id: 99330, iid: 99330, title: Dropped head pipeline, state: opened, source_branch: dropped, target_branch: main, project_id: 1000, author_id: 1, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 99332, iid: 99332, title: Live head pipeline, state: opened, source_branch: live, target_branch: main, project_id: 1000, author_id: 1, head_pipeline_id: 99331, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 99330, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 99332, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
+    gl_ci_edge:
+      - { traversal_path: "1/100/1000/", source_id: 99330, source_kind: MergeRequest, relationship_kind: HAS_HEAD_PIPELINE, target_id: 99331, target_kind: Pipeline, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1000/", source_id: 99330, source_kind: MergeRequest, relationship_kind: HAS_HEAD_PIPELINE, target_id: 99331, target_kind: Pipeline, _version: "2024-06-01 00:00:00", _deleted: true }
+      - { traversal_path: "1/100/1000/", source_id: 99332, source_kind: MergeRequest, relationship_kind: HAS_HEAD_PIPELINE, target_id: 99331, target_kind: Pipeline, _version: "2024-01-01 00:00:00", _deleted: false }
+
+cases:
+  - name: live_alternative_keeps_both_targets
+    description: The same neighbors query returns the project and the pipeline when the head pipeline edge is live
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[99332]}],"neighbors":{"direction":"outgoing","rel_types":["IN_PROJECT","HAS_HEAD_PIPELINE"]}}
+      gql: |
+        MATCH (mr:MergeRequest {id: 99332})-[:IN_PROJECT|HAS_HEAD_PIPELINE]->(t) RETURN mr, t
+    expect:
+      node_count: 3
+      nodes:
+        MergeRequest: { ids: [99332] }
+        Project: { ids: [1000] }
+        Pipeline: { ids: [99331] }
+      edges:
+        IN_PROJECT: [[99332, 1000]]
+        HAS_HEAD_PIPELINE: [[99332, 99331]]
+      total_edge_count: 2

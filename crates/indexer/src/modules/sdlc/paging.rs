@@ -7,6 +7,9 @@ pub(super) const PAGE_BYTE_BUDGET: u64 = 2 << 30;
 /// Floor for a shrunken limit so a page of a few giant rows cannot turn paging into a row-by-row crawl.
 const ADAPTIVE_MIN_ROWS: u64 = 1_000;
 
+/// Row width is unknown before the first page, so it starts small enough for wide rows and grows from there.
+const FIRST_PAGE_ROWS: u64 = 50_000;
+
 /// A few blocks wait in the decode queue while a page fills; 64 MiB keeps that queue small next to the budget.
 const TARGET_BLOCK_BYTES: u64 = 64 << 20;
 
@@ -22,6 +25,10 @@ pub(super) fn block_size_for(rows: u64, bytes: u64, floor: u64) -> Option<u64> {
         return None;
     }
     Some(fit.max(floor))
+}
+
+pub(super) fn first_page_limit(plan_limit: u64) -> u64 {
+    plan_limit.min(FIRST_PAGE_ROWS)
 }
 
 pub(super) fn next_page_limit(
@@ -53,6 +60,16 @@ mod tests {
         assert_eq!(
             next_page_limit(500_000, 500_000, 3, PAGE_BYTE_BUDGET, true),
             ADAPTIVE_MIN_ROWS
+        );
+    }
+
+    #[test]
+    fn first_page_starts_below_the_plan_limit_until_row_width_is_known() {
+        assert_eq!(first_page_limit(500_000), FIRST_PAGE_ROWS);
+        assert_eq!(first_page_limit(1), 1);
+        assert_eq!(
+            next_page_limit(FIRST_PAGE_ROWS, 500_000, FIRST_PAGE_ROWS, 1 << 20, false),
+            2 * FIRST_PAGE_ROWS
         );
     }
 

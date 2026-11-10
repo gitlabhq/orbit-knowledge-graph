@@ -4,15 +4,17 @@ mod pattern;
 mod terms;
 
 use query_engine::compiler;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use compiler::Frontend;
 use compiler::input::Input;
-use compiler::passes::{frontend, lower, normalize, plan};
-use compiler::types::SecurityContext;
+use compiler::passes::{frontend, lower, normalize, page, plan, response_policy};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
 use serde::Deserialize;
+
+use crate::query_scenario::SecurityOverride;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,15 +28,7 @@ struct Scenario {
     logical: Assertions,
     physical: BTreeMap<String, PhysicalAssertions>,
     hydration: Option<HydrationSetup>,
-    #[serde(default)]
-    security: SecuritySetup,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct SecuritySetup {
-    admin: bool,
-    paths: Vec<String>,
+    security: Option<SecurityOverride>,
 }
 
 impl Scenario {
@@ -80,6 +74,40 @@ struct PhysicalAssertions {
     sql: Option<SqlAssertions>,
     indexes: Vec<IndexAssertion>,
     settings: Option<SqlAssertions>,
+    hydration: Option<compiler::HydrationKind>,
+}
+
+impl PhysicalAssertions {
+    fn is_empty(&self) -> bool {
+        self.planned.is_none()
+            && self.emitted.is_none()
+            && self.point_lookup.is_none()
+            && !self.needs_final_output()
+    }
+
+    fn needs_final_output(&self) -> bool {
+        self.final_ast.is_some()
+            || self.sql.is_some()
+            || !self.indexes.is_empty()
+            || self.settings.is_some()
+            || self.hydration.is_some()
+    }
+}
+
+impl SqlAssertions {
+    fn check(&self, sql: &str, label: &str) -> Vec<String> {
+        let missing = self
+            .contains
+            .iter()
+            .filter(|value| !sql.contains(value.as_str()))
+            .map(|value| format!("{label} missing '{value}'\n{sql}"));
+        let present = self
+            .not_contains
+            .iter()
+            .filter(|value| sql.contains(value.as_str()))
+            .map(|value| format!("{label} contains '{value}'\n{sql}"));
+        missing.chain(present).collect()
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -270,13 +298,10 @@ fn check<M: OrbitQueryModel>(
     model: &M,
     backend: &str,
     path: &Path,
-    build: impl Fn(
-        &Input,
-        plan::HydrationCompileOptions,
-        &HashSet<String>,
-    ) -> compiler::Result<plan::QueryPlan>,
-    index_exists: impl Fn(&str, &str) -> bool,
-) {
+    build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
+    final_model: Option<&Arc<ClickHouseDataModel>>,
+) -> Result<(), Vec<String>> {
+    let mut failures = Vec::new();
     for (language, raw) in &scenario.query {
         let label = format!(
             "{}: {} [{language}/{backend}]",
@@ -284,22 +309,28 @@ fn check<M: OrbitQueryModel>(
             scenario.name.as_deref().unwrap_or("unnamed")
         );
         let input = match language.as_str() {
-            "json" => frontend::json_dsl::parse(raw, model).map(|(input, _)| input),
+            "json" => frontend::json_dsl::parse(raw, model),
             "gql" => frontend::gql::parse(raw),
-            _ => panic!("{label}: unknown frontend"),
-        }
-        .unwrap_or_else(|error| panic!("{label}: {error}"));
-        let mut input =
-            normalize::normalize(input, model).unwrap_or_else(|error| panic!("{label}: {error}"));
+            _ => {
+                failures.push(format!("{label}: unknown frontend"));
+                continue;
+            }
+        };
+        let mut input = match input.and_then(|input| normalize::normalize(input, model)) {
+            Ok(input) => input,
+            Err(error) => {
+                failures.push(format!("{label}: {error}"));
+                continue;
+            }
+        };
         let mut options = plan::HydrationCompileOptions::default();
         if let Some(hydration) = &scenario.hydration {
             input.query_type = compiler::input::QueryType::Hydration;
             for (alias, paths) in &hydration.paths {
-                let node = input
-                    .nodes
-                    .iter_mut()
-                    .find(|node| &node.id == alias)
-                    .unwrap_or_else(|| panic!("{label}: unknown hydration node '{alias}'"));
+                let Some(node) = input.nodes.iter_mut().find(|node| &node.id == alias) else {
+                    failures.push(format!("{label}: unknown hydration node '{alias}'"));
+                    continue;
+                };
                 node.traversal_paths = paths
                     .iter()
                     .map(|path| {
@@ -312,230 +343,252 @@ fn check<M: OrbitQueryModel>(
                 path_segment_budget: hydration.path_segment_budget,
             };
         }
-        if !scenario.logical.is_empty() {
-            scenario
+        if !scenario.logical.is_empty()
+            && let Err(error) = scenario
                 .logical
                 .check(&explain::logical(&input), &format!("{label}.logical"))
-                .unwrap_or_else(|error| panic!("{error}"));
+        {
+            failures.push(error);
+            continue;
         }
-        let plan = build(&input, options, &HashSet::new())
-            .unwrap_or_else(|error| panic!("{label}: {error}"));
-        let lowered = lower::emit(&plan, &input).unwrap_or_else(|error| panic!("{label}: {error}"));
+        let plan = match build(&input, options) {
+            Ok(plan) => plan,
+            Err(error) => {
+                failures.push(format!("{label}: {error}"));
+                continue;
+            }
+        };
+        let tp_bounds =
+            (backend == "clickhouse").then(|| compiler::tp_bounds::TpBounds::derive(&input, model));
+        let mut lowered = match lower::emit(&plan, &input, tp_bounds.as_ref()) {
+            Ok(lowered) => lowered,
+            Err(error) => {
+                failures.push(format!("{label}: {error}"));
+                continue;
+            }
+        };
+        if backend == "clickhouse" {
+            response_policy::apply_text_excerpts(&mut lowered.ast, &input, model);
+        }
+        if scenario.hydration.is_none() {
+            page::apply(&mut lowered.ast, &input, &lowered.metadata);
+        }
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
         let assertions = &scenario.physical[backend];
-        assert!(
-            assertions.planned.is_some()
-                || assertions.emitted.is_some()
-                || assertions.final_ast.is_some()
-                || assertions.point_lookup.is_some()
-                || assertions.sql.is_some()
-                || !assertions.indexes.is_empty()
-                || assertions.settings.is_some(),
-            "{label}: missing assertion targets"
-        );
+        if assertions.is_empty() {
+            failures.push(format!("{label}: missing assertion targets"));
+            continue;
+        }
         for (phase, assertions, actual) in [
             ("planned", &assertions.planned, planned),
             ("emitted", &assertions.emitted, emitted),
         ] {
-            if let Some(assertions) = assertions {
-                assertions
-                    .check(&actual, &format!("{label}.physical.{backend}.{phase}"))
-                    .unwrap_or_else(|error| panic!("{error}"));
+            if let Some(assertions) = assertions
+                && let Err(error) =
+                    assertions.check(&actual, &format!("{label}.physical.{backend}.{phase}"))
+            {
+                failures.push(error);
             }
         }
         match backend {
             "clickhouse" => {
-                compiler::emit_simple_query(&lowered.ast).unwrap();
+                if let Err(error) = compiler::emit_simple_query(&lowered.ast) {
+                    failures.push(format!("{label}: {error}"));
+                }
             }
             "duckdb" => {
-                compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default())
-                    .unwrap();
+                if let Err(error) =
+                    compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default())
+                {
+                    failures.push(format!("{label}: {error}"));
+                }
             }
             _ => unreachable!(),
         }
-        if let Some(expected) = assertions.point_lookup {
-            assert_eq!(
-                plan.is_point_lookup(),
-                expected,
-                "{label}: point lookup mismatch"
-            );
-        }
-        if assertions.final_ast.is_some()
-            || assertions.sql.is_some()
-            || !assertions.indexes.is_empty()
-            || assertions.settings.is_some()
+        if let Some(expected) = assertions.point_lookup
+            && plan.is_point_lookup() != expected
         {
-            assert_eq!(
-                backend, "clickhouse",
-                "{label}: final output assertions require ClickHouse"
-            );
-            let mut final_input = input.clone();
-            let security = SecurityContext::new(
-                1,
-                if scenario.security.paths.is_empty() {
-                    vec!["1/".into()]
-                } else {
-                    scenario.security.paths.clone()
-                },
-            )
-            .unwrap()
-            .with_role(scenario.security.admin, None);
-            let proofs = compiler::passes::restrict::restrict(&mut final_input, model, &security)
-                .unwrap_or_else(|error| panic!("{label}: {error}"));
-            let scope = compiler::scope::prepare(&mut final_input, proofs, model);
-            let final_plan = build(&final_input, options, scope.table_scans())
-                .unwrap_or_else(|error| panic!("{label}: {error}"));
-            let mut final_lowered = lower::emit(&final_plan, &final_input)
-                .unwrap_or_else(|error| panic!("{label}: {error}"));
-            compiler::passes::response_policy::apply_text_excerpts(
-                &mut final_lowered.ast,
-                &final_input,
-                model,
-            );
-            compiler::passes::enforce::enforce_role_scans(
-                &mut final_lowered.ast,
-                &final_input,
-                &final_lowered.metadata,
-                model,
-            )
-            .unwrap_or_else(|error| panic!("{label}: {error}"));
-            compiler::passes::enforce::enforce_lowered_return(
-                &mut final_lowered.ast,
-                &final_input,
-                &final_lowered.metadata,
-                model,
-            )
-            .unwrap_or_else(|error| panic!("{label}: {error}"));
-            compiler::scope::apply(&mut final_lowered.ast, &scope, model)
-                .unwrap_or_else(|error| panic!("{label}: {error}"));
-            compiler::passes::security::apply_security_context(
-                &mut final_lowered.ast,
-                &security,
-                model,
-            )
-            .unwrap_or_else(|error| panic!("{label}: {error}"));
-            let mut query_config = orbit_server_config::QueryConfig {
-                use_query_cache: Some(true),
-                query_cache_ttl: Some(10),
-                ..Default::default()
-            };
-            query_config.compiler_derived.null_in_is_unknown = final_input.has_negation();
-            if final_plan.is_point_lookup() {
-                query_config.use_query_cache = Some(false);
-            }
-            if let Some(assertions) = &assertions.final_ast {
-                assertions
-                    .check(
-                        &explain::emitted(&final_lowered.ast),
-                        &format!("{label}.physical.{backend}.final_ast"),
-                    )
-                    .unwrap_or_else(|error| panic!("{error}"));
-            }
-            let sql = compiler::codegen(&final_lowered.ast, Default::default(), query_config)
-                .unwrap_or_else(|error| panic!("{label}: {error}"))
-                .render();
-            if let Some(assertions) = &assertions.sql {
-                for value in &assertions.contains {
-                    assert!(sql.contains(value), "{label}: SQL missing '{value}'\n{sql}");
-                }
-                for value in &assertions.not_contains {
-                    assert!(
-                        !sql.contains(value),
-                        "{label}: SQL contains '{value}'\n{sql}"
-                    );
-                }
-            }
-            for index in &assertions.indexes {
-                assert!(
-                    index_exists(&index.table, &index.name),
-                    "{label}: table {} has no index {}",
-                    index.table,
-                    index.name
-                );
-                assert!(
-                    sql.contains(&index.table),
-                    "{label}: SQL does not read indexed table {}\n{sql}",
-                    index.table
-                );
-            }
-            if let Some(assertions) = &assertions.settings {
-                for value in &assertions.contains {
-                    assert!(
-                        sql.contains(value),
-                        "{label}: SETTINGS missing '{value}'\n{sql}"
-                    );
-                }
-                for value in &assertions.not_contains {
-                    assert!(
-                        !sql.contains(value),
-                        "{label}: SETTINGS contains '{value}'\n{sql}"
-                    );
-                }
+            failures.push(format!("{label}: point lookup is not {expected}"));
+        }
+        if assertions.needs_final_output() {
+            match final_model {
+                Some(model) => failures.extend(check_final_output(
+                    scenario, language, raw, input, options, model, &label,
+                )),
+                None => failures.push(format!(
+                    "{label}: final output assertions require ClickHouse"
+                )),
             }
         }
     }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures)
+    }
+}
+
+fn check_final_output(
+    scenario: &Scenario,
+    language: &str,
+    raw: &str,
+    input: Input,
+    options: plan::HydrationCompileOptions,
+    model: &Arc<ClickHouseDataModel>,
+    label: &str,
+) -> Vec<String> {
+    let security = crate::query_scenario::build_security(&scenario.security);
+    let compiled = if scenario.hydration.is_some() {
+        compiler::compile_input_model(input, options, model, &security)
+    } else {
+        language
+            .parse::<Frontend>()
+            .map_err(|error| compiler::QueryError::PipelineInvariant(error.to_string()))
+            .and_then(|frontend| compiler::compile_model(raw, frontend, model, &security))
+    };
+    let compiled = match compiled {
+        Ok(compiled) => compiled,
+        Err(error) => return vec![format!("{label}: {error}")],
+    };
+    let assertions = &scenario.physical["clickhouse"];
+    let mut failures = Vec::new();
+    if let Some(final_ast) = &assertions.final_ast
+        && let Err(error) = final_ast.check(
+            &explain::emitted(&compiled.ast),
+            &format!("{label}.physical.clickhouse.final_ast"),
+        )
+    {
+        failures.push(error);
+    }
+    if let Some(expected) = assertions.hydration
+        && compiled.hydration.kind() != expected
+    {
+        failures.push(format!(
+            "{label}: hydration is {:?}, expected {expected:?}",
+            compiled.hydration.kind()
+        ));
+    }
+    let sql = compiled.base.render();
+    for (kind, checks) in [("SQL", &assertions.sql), ("SETTINGS", &assertions.settings)] {
+        if let Some(checks) = checks {
+            failures.extend(checks.check(&sql, &format!("{label}: {kind}")));
+        }
+    }
+    for index in &assertions.indexes {
+        let declared = model
+            .layout()
+            .schema()
+            .table(&index.table)
+            .is_some_and(|table| {
+                table
+                    .options
+                    .indexes
+                    .iter()
+                    .any(|item| item.name == index.name)
+            });
+        if !declared {
+            failures.push(format!(
+                "{label}: table {} has no index {}",
+                index.table, index.name
+            ));
+        } else if !sql.contains(&index.table) {
+            failures.push(format!(
+                "{label}: SQL does not read indexed table {}\n{sql}",
+                index.table
+            ));
+        }
+    }
+    failures
 }
 
 pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
-    let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();
+    if let Err(failures) = check_dir(directory, ontology) {
+        panic!(
+            "{} plan fixture failure(s):\n\n{}",
+            failures.len(),
+            failures.join("\n\n")
+        );
+    }
+}
+
+fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
+    let remote = Arc::new(ClickHouseDataModel::derive(ontology.clone()).unwrap());
     let local = DuckDbDataModel::derive(ontology.clone()).unwrap();
     let mut paths = Vec::new();
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
     assert!(!paths.is_empty());
     let mut cases = 0;
+    let mut passed = 0;
+    let mut failures = Vec::new();
     for (path, scenario) in paths.iter().flat_map(|path| {
         crate::scenario::read_cases::<Scenario>(path)
             .into_iter()
             .map(move |(_, scenario)| (path, scenario))
     }) {
         cases += 1;
-        assert!(
-            !scenario.physical.is_empty() && !scenario.query.is_empty(),
-            "{}: missing query arms or backend assertions",
-            path.display()
-        );
-        scenario
-            .validate_frontends()
-            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        if scenario.physical.is_empty() || scenario.query.is_empty() {
+            failures.push(format!(
+                "{}: missing query arms or backend assertions",
+                path.display()
+            ));
+            continue;
+        }
+        if let Err(error) = scenario.validate_frontends() {
+            failures.push(format!("{}: {error}", path.display()));
+            continue;
+        }
         let overlay = scenario.ontology_overlay.as_ref().map(|name| {
             let ontology = Arc::new(crate::load_ontology_overlay(name));
             (
-                ClickHouseDataModel::derive(ontology.clone()).unwrap(),
+                Arc::new(ClickHouseDataModel::derive(ontology.clone()).unwrap()),
                 DuckDbDataModel::derive(ontology.clone()).unwrap(),
             )
         });
         let (remote, local) = overlay
             .as_ref()
             .map_or((&remote, &local), |(remote, local)| (remote, local));
+        let failure_count = failures.len();
         for backend in scenario.physical.keys() {
             match backend.as_str() {
-                "clickhouse" => check(
-                    &scenario,
-                    remote,
-                    backend,
-                    path,
-                    |input, options, scans| plan::plan_clickhouse(input, remote, options, scans),
-                    |table, index| {
-                        remote.layout().schema().table(table).is_some_and(|table| {
-                            table.options.indexes.iter().any(|item| item.name == index)
-                        })
-                    },
-                ),
-                "duckdb" => check(
-                    &scenario,
-                    local,
-                    backend,
-                    path,
-                    |input, options, scans| plan::plan_duckdb(input, local, options, scans),
-                    |_, _| false,
-                ),
-                _ => panic!("unknown backend {backend}"),
+                "clickhouse" => {
+                    if let Err(errors) = check(
+                        &scenario,
+                        remote.as_ref(),
+                        backend,
+                        path,
+                        |input, options| plan::plan_clickhouse(input, remote, options),
+                        Some(remote),
+                    ) {
+                        failures.extend(errors);
+                    }
+                }
+                "duckdb" => {
+                    if let Err(errors) = check(
+                        &scenario,
+                        local,
+                        backend,
+                        path,
+                        |input, options| plan::plan_duckdb(input, local, options),
+                        None,
+                    ) {
+                        failures.extend(errors);
+                    }
+                }
+                _ => failures.push(format!("{}: unknown backend {backend}", path.display())),
             }
         }
-        println!("PASS {}", scenario.name.as_deref().unwrap_or("unnamed"));
+        if failures.len() == failure_count {
+            passed += 1;
+            println!("PASS {}", scenario.name.as_deref().unwrap_or("unnamed"));
+        }
     }
-    println!("{cases} plan fixtures passed");
+    println!("{passed}/{cases} plan fixtures passed");
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures)
+    }
 }
 
 #[test]
@@ -568,6 +621,66 @@ fn yaml_requires_both_frontends_or_an_explicit_exception() {
         let scenario: Scenario = orbit_utils::yaml::from_str(&yaml).unwrap();
         assert_eq!(scenario.validate_frontends().is_ok(), valid, "{yaml}");
     }
+}
+
+#[test]
+fn directory_runner_reports_every_fixture_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("failures.yaml"),
+        r#"
+cases:
+  - name: first failure
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}]}'
+      gql: 'MATCH (u:User {id: 1}) RETURN u'
+    logical:
+      expect: ['(Input neighbors (...))']
+    physical:
+      clickhouse:
+        planned:
+          expect: ['(Scan Table(gl_user) AS u)']
+  - name: second failure
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]}]}'
+      gql: 'MATCH (p:Project {id: 1}) RETURN p'
+    logical:
+      expect: ['(Input neighbors (...))']
+    physical:
+      clickhouse:
+        planned:
+          expect: ['(Scan Table(gl_project) AS p)']
+"#,
+    )
+    .unwrap();
+
+    let failures = check_dir(
+        directory.path(),
+        Arc::new(ontology::Ontology::new().with_nodes(["User", "Project"])),
+    )
+    .unwrap_err();
+
+    assert_eq!(failures.len(), 4);
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.contains("first failure [gql/clickhouse]"))
+    );
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.contains("first failure [json/clickhouse]"))
+    );
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.contains("second failure [gql/clickhouse]"))
+    );
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.contains("second failure [json/clickhouse]"))
+    );
 }
 
 #[test]
@@ -835,7 +948,7 @@ reject:
 #[test]
 fn hydration_planning_selects_paths_before_sql_rendering() {
     use compiler::input::{InputNode, QueryType};
-    use compiler::passes::plan::hydration::HydrationPathFilter;
+    use compiler::passes::plan::query_types::hydration::HydrationPathFilter;
     use orbit_utils::traversal_path::TraversalPath;
 
     let model = ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
@@ -866,7 +979,6 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
                 dynamic,
                 path_segment_budget: budget,
             },
-            &HashSet::new(),
         )
         .unwrap();
         let plan::QueryPlan::Hydration(hydration) = &plan else {
@@ -877,7 +989,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             HydrationPathFilter::PrefixSet(paths) => (true, paths),
         };
         assert_eq!((actual_set, paths.len()), (set, expected_paths));
-        let lowered = lower::emit(&plan, &input).unwrap();
+        let lowered = lower::emit(&plan, &input, None).unwrap();
         let (sql, _) = compiler::emit_simple_query(&lowered.ast).unwrap();
         assert_eq!(sql.contains("arrayExists"), set);
         assert_eq!(

@@ -1,6 +1,6 @@
 use crate::database::{GraphReader, schema};
 use crate::sql_format::{self, Format};
-use crate::workspace;
+use crate::workspace::{self, IndexedRepo};
 use anyhow::{Context, Result};
 use arrow::array::RecordBatch;
 use duckdb_client::{DuckDbClient, sql_lit};
@@ -42,14 +42,17 @@ pub fn run(
         anyhow::bail!("empty SQL query");
     }
 
-    let git = repo
-        .map(|repo| workspace::git_info(&workspace::git_toplevel(&repo)?))
-        .transpose()?;
-    let db = match (db, &git) {
-        (None, Some(git)) => Some(workspace::resolve_db_path(None, git)?),
-        (db, _) => db,
+    let (git, client) = match (repo, db) {
+        (Some(repo), None) => {
+            let IndexedRepo { git, client } = workspace::open_indexed(Some(repo), None)?;
+            (Some(git), client)
+        }
+        (Some(repo), db) => {
+            let git = workspace::git_info(&workspace::git_toplevel(&repo)?)?;
+            (Some(git), GraphReader::open(db)?)
+        }
+        (None, db) => (None, workspace::open_graph_reader(db)?),
     };
-    let client = GraphReader::open(db)?;
     if let Some(git) = git {
         let expected = format!("{}:{}", git.project_id, git.commit_sha);
         anyhow::ensure!(

@@ -33,11 +33,13 @@ impl From<&AppConfig> for IndexerConfig {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum IndexerError {
     #[error("NATS connection failed: {0}")]
     NatsConnection(#[from] crate::nats::NatsError),
 
+    #[strum(serialize = "clickhouse_connection")]
     #[error("ClickHouse connection failed: {0}")]
     ClickHouseConnection(#[from] crate::clickhouse::WriteError),
 
@@ -87,7 +89,8 @@ impl From<&AppConfig> for DispatcherConfig {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum DispatcherError {
     #[error("invalid ontology: {0}")]
     Ontology(#[from] ontology::OntologyError),

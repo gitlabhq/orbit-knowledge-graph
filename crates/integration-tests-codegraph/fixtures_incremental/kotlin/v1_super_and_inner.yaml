@@ -1,5 +1,5 @@
 name: "Kotlin v1 parity — super calls and inner class access"
-fixture_dir: "fixtures/code/kotlin/main/kotlin"
+fixture_tree: kotlin_v1
 
 tests:
   # ── K2: test_kotlin_inheritance_and_super_calls ──

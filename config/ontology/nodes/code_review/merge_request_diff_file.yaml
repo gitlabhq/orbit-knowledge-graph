@@ -23,6 +23,10 @@ properties:
     nullable: false
     mutable: false
     description: "Synthetic identifier: sipHash64(merge_request_diff_id, relative_order)."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_merge_request_diff_file
+      key_column: id
 
   merge_request_id:
     type: int64
@@ -36,6 +40,7 @@ properties:
     source: merge_request_diff_id
     nullable: false
     mutable: false
+    high_fan_out: true
     description: "Parent merge request diff ID."
 
   project_id:
@@ -174,6 +179,7 @@ storage:
     - {name: b_mode, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
+    - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_too_large, column: too_large, type: "minmax", granularity: 1}
     - {name: idx_new_file, column: new_file, type: "minmax", granularity: 1}
     - {name: idx_renamed_file, column: renamed_file, type: "minmax", granularity: 1}

@@ -58,6 +58,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                 table: node.table.clone(),
                 has_traversal_path: node.has_traversal_path,
                 global: node.global,
+                high_fan_out: node.high_fan_out,
                 default_properties,
             });
             tables.insert(
@@ -72,10 +73,6 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                         })
                         .into_iter()
                         .collect(),
-                    node.has_traversal_path
-                        && !node.global
-                        && table.sort_key.first().map(String::as_str)
-                            == Some(ontology::constants::TRAVERSAL_PATH_COLUMN),
                 ),
             );
         }
@@ -101,7 +98,6 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                         name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
                         entity: None,
                     }],
-                    false,
                 ),
             );
         }
@@ -149,6 +145,9 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                             .property_id(referenced, ontology::constants::DEFAULT_PRIMARY_KEY)?,
                     })
                 });
+                if let Some(foreign_key) = foreign_key {
+                    property_facts[foreign_key.property.index()].foreign_key = true;
+                }
                 variant_routes[variant_id.index()] = Some(VariantRoute {
                     table: edge.table.clone(),
                     foreign_key,
@@ -243,12 +242,8 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                     })
                 })
                 .collect();
-            let layout = TableLayout::from_storage(
-                storage.require_table(&join.table)?,
-                None,
-                path_columns,
-                true,
-            );
+            let layout =
+                TableLayout::from_storage(storage.require_table(&join.table)?, None, path_columns);
             tables.insert(join.table.clone(), layout);
         }
 
@@ -266,16 +261,8 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                         name: copy.source.clone(),
                     })?;
             let physical = storage.require_table(&copy.table)?;
-            let layout = TableLayout::from_storage(
-                physical,
-                source.entity,
-                source.path_columns.clone(),
-                source.path_scopable
-                    && physical
-                        .sort_key
-                        .first()
-                        .is_some_and(|column| column == ontology::TRAVERSAL_PATH_COLUMN),
-            );
+            let layout =
+                TableLayout::from_storage(physical, source.entity, source.path_columns.clone());
             tables.insert(layout.name.clone(), layout);
         }
         Ok(ClickHouseBindings {

@@ -6,7 +6,7 @@ use crate::ast::{
     Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
 };
 use crate::error::Result;
-use crate::passes::enforce::ResultContext;
+use crate::passes::result_contract::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -50,10 +50,38 @@ pub fn codegen(
     })
 }
 
+/// A CTE's name, its body as a statement of its own with the other CTEs attached, and its parameters.
+pub type CteStatement = (String, String, HashMap<String, ParamValue>);
+
+/// Each CTE body as a statement tests can EXPLAIN.
+pub fn cte_statements(ast: &Node) -> Result<Vec<CteStatement>> {
+    let Node::Query(query) = ast else {
+        return Ok(Vec::new());
+    };
+    query
+        .ctes
+        .iter()
+        .map(|cte| {
+            let statement = Query {
+                ctes: query
+                    .ctes
+                    .iter()
+                    .filter(|other| other.name != cte.name)
+                    .cloned()
+                    .collect(),
+                ..(*cte.query).clone()
+            };
+            let mut ctx = Context::new();
+            let sql = ctx.emit_query(&statement)?;
+            Ok((cte.name.clone(), sql, ctx.params.into_map()))
+        })
+        .collect()
+}
+
 /// # Trust boundary
 ///
 /// This function bypasses the compiler security pipeline (`apply_security_context`,
-/// `check_ast`, `enforce_return`). It must only be used for trusted, internally
+/// `security_check`, `result_contract`). It must only be used for trusted, internally
 /// constructed ASTs (e.g. schema version management DDL/DML), never for
 /// user-supplied query input.
 pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamValue>)> {
@@ -184,7 +212,10 @@ impl Context {
         // unparenthesized UNION ALL, not the whole union. Wrap so they apply
         // to the combined result.
         if !q.union_all.is_empty()
-            && (q.limit.is_some() || q.limit_by.is_some() || !q.order_by.is_empty())
+            && (q.limit.is_some()
+                || q.offset.is_some()
+                || q.limit_by.is_some()
+                || !q.order_by.is_empty())
         {
             let body = std::mem::take(&mut parts).join(" ");
             parts.push(format!("SELECT * FROM ({body})"));
@@ -209,6 +240,10 @@ impl Context {
 
         if let Some(limit) = q.limit {
             parts.push(format!("LIMIT {limit}"));
+        }
+
+        if let Some(offset) = q.offset {
+            parts.push(format!("OFFSET {offset}"));
         }
 
         Ok(parts.join(" "))
@@ -325,10 +360,10 @@ impl Context {
             Expr::InSubquery {
                 expr,
                 cte_name,
-                column,
+                columns,
             } => {
                 let e = self.emit_expr(expr);
-                format!("{e} IN (SELECT {column} FROM {cte_name})")
+                format!("{e} IN (SELECT {} FROM {cte_name})", columns.join(", "))
             }
             Expr::InSelect { expr, query } => {
                 let e = self.emit_expr(expr);
@@ -443,6 +478,7 @@ pub(crate) fn function_name(function: Function) -> &'static str {
         Function::Object => "map",
         Function::If => "if",
         Function::Coalesce => "coalesce",
+        Function::NullIf => "nullIf",
         Function::ByteLength => "length",
         Function::Substring => "substringUTF8",
         Function::Concat => "concat",
@@ -1207,7 +1243,7 @@ mod tests {
             ..Default::default()
         };
         let mut config = QueryConfig::default();
-        config.compiler_derived.optimize_move_to_prewhere_if_final = true;
+        config.compiler_derived.final_scan = true;
         config
             .compiler_derived
             .use_index_for_in_with_subqueries_max_values = Some(100_000);

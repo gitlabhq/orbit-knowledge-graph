@@ -1,12 +1,11 @@
 use super::{FILES_SIMPLE, run_cmd};
 use integration_testkit::cli::{
-    create_test_repo, git, mcp_roundtrip, mcp_tool_call, mcp_tool_text, orbit_cmd, orbit_index,
-    orbit_sql, rows, rows_where,
+    create_test_repo, git, orbit_cmd, orbit_index, orbit_sql, rows, rows_where,
 };
 use serde_json::{Value, json};
 
 #[test]
-fn checkout_revision_journey_through_cli_and_mcp() {
+fn checkout_revision_journey_through_cli() {
     let data = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
     let first = git(&repo.path, &["rev-parse", "HEAD"]);
@@ -24,7 +23,7 @@ fn checkout_revision_journey_through_cli_and_mcp() {
         );
         String::from_utf8(output.stdout).unwrap()
     };
-    command(&["index", "."]);
+    command(&["workspace", "index", "."]);
     git(&repo.path, &["switch", "-c", "feature"]);
     std::fs::write(
         repo.path.join("feature.py"),
@@ -34,10 +33,11 @@ fn checkout_revision_journey_through_cli_and_mcp() {
     git(&repo.path, &["add", "feature.py"]);
     git(&repo.path, &["commit", "-m", "add feature"]);
     let second = git(&repo.path, &["rev-parse", "HEAD"]);
-    command(&["index", "."]);
-    command(&["index", "."]);
+    command(&["workspace", "index", "."]);
+    command(&["workspace", "index", "."]);
 
-    let listed: Value = serde_json::from_str(&command(&["list", "-F", "json"])).unwrap();
+    let listed: Value =
+        serde_json::from_str(&command(&["workspace", "list", "-F", "json"])).unwrap();
     assert_eq!(rows(&listed).len(), 2);
     for commit in [&first, &second] {
         assert_eq!(
@@ -46,6 +46,7 @@ fn checkout_revision_journey_through_cli_and_mcp() {
         );
     }
     let all: Value = serde_json::from_str(&command(&[
+        "workspace",
         "sql",
         "-F",
         "json",
@@ -60,6 +61,7 @@ fn checkout_revision_journey_through_cli_and_mcp() {
     for (commit, files) in [(&second, 3), (&first, 2)] {
         git(&repo.path, &["checkout", "--detach", commit]);
         let scoped: Value = serde_json::from_str(&command(&[
+            "workspace",
             "sql",
             "--repo",
             ".",
@@ -71,24 +73,60 @@ fn checkout_revision_journey_through_cli_and_mcp() {
         assert_eq!(scoped, json!([{"files": files}]));
         assert!(command(&["grep", "hello"]).contains("src/main.py"));
         assert!(command(&["context", "src/main.py"]).contains("hello"));
-        assert!(command(&["repo-map", "overview"]).contains(commit.as_str()));
     }
-    let responses = mcp_roundtrip(
+}
+
+#[test]
+fn workspace_sql_cannot_escape_the_data_directory() {
+    let data = tempfile::TempDir::new().unwrap();
+    seed_revision(
         data.path(),
-        &[
-            mcp_tool_call(
-                1,
-                "run_sql",
-                json!({"sql": ["SELECT count(*) AS files FROM gl_file"]}),
-            ),
-            mcp_tool_call(2, "get_graph_schema", json!({})),
-        ],
+        "a",
+        "CREATE TABLE gl_probe(id BIGINT); INSERT INTO gl_probe VALUES (7)",
     );
+    let outside = tempfile::TempDir::new().unwrap();
+    let secret = outside.path().join("secret.txt");
+    std::fs::write(&secret, "secret").unwrap();
+    let other = outside.path().join("other.duckdb");
+    duckdb_client::DuckDbClient::open(&other).unwrap();
+
+    std::fs::create_dir(data.path().join("nested")).unwrap();
+    let dotted_root = data.path().join("nested").join("..");
+    let traversal = data
+        .path()
+        .join("..")
+        .join(outside.path().file_name().unwrap())
+        .join("other.duckdb");
+    std::os::unix::fs::symlink(outside.path(), data.path().join("link")).unwrap();
+    let symlinked = data.path().join("link").join("other.duckdb");
+    for root in [data.path(), dotted_root.as_path()] {
+        for sql in [
+            format!("SELECT * FROM read_text('{}')", secret.display()),
+            format!("ATTACH '{}' AS other", other.display()),
+            format!("ATTACH '{}' AS other", traversal.display()),
+            format!("ATTACH '{}' AS other", symlinked.display()),
+            "INSTALL spatial".to_string(),
+            "SET enable_external_access = true".to_string(),
+        ] {
+            let (_, error, ok) = run_cmd(&["workspace", "sql", &sql], root);
+            assert!(!ok, "allowed with root {}: {sql}", root.display());
+            assert!(
+                error.contains("disabled by configuration")
+                    || error.contains("configuration has been locked"),
+                "{sql}: {error}"
+            );
+        }
+    }
+
+    let (output, error, ok) = run_cmd(
+        &["workspace", "sql", "-F", "json", "SELECT id FROM gl_probe"],
+        data.path(),
+    );
+    assert!(ok, "{error}");
     assert_eq!(
-        serde_json::from_str::<Value>(mcp_tool_text(&responses[0])).unwrap(),
-        json!([[{"files": 5}]])
+        serde_json::from_str::<Value>(&output).unwrap(),
+        json!([{"id": 7}])
     );
-    assert!(mcp_tool_text(&responses[1]).contains("gl_file"));
 }
 
 fn seed_revision(data_dir: &std::path::Path, name: &str, ddl: &str) -> std::path::PathBuf {
@@ -100,8 +138,8 @@ fn seed_revision(data_dir: &std::path::Path, name: &str, ddl: &str) -> std::path
         duckdb_client::DuckDbClient::open(&data_dir.join("local/manifest.duckdb")).unwrap();
     manifest
         .initialize_schema(include_str!(concat!(
-            env!("CONFIG_DIR"),
-            "/local/manifest.sql"
+            env!("ORBIT_CONFIG_DIR"),
+            "/orbit_cli/manifest.sql"
         )))
         .unwrap();
     manifest.execute("INSERT INTO _orbit_manifest (repo_path, project_id, commit_sha, database_path, status) VALUES (?1, 1, 'test', ?2, 'indexed')", &[name.into(), path.to_string_lossy().to_string().into()]).unwrap();
@@ -132,7 +170,7 @@ fn workspace_queries_match_columns_by_name_and_include_tables_from_each_revision
         orbit_sql("SELECT * FROM gl_new", data.path()),
         json!([{"id":42}])
     );
-    let (_, error, ok) = run_cmd(&["schema", "--raw"], data.path());
+    let (_, error, ok) = run_cmd(&["workspace", "schema", "--raw"], data.path());
     assert!(ok, "{error}");
 }
 
@@ -180,7 +218,7 @@ fn workspace_queries_skip_abandoned_and_missing_revisions() {
             }
         }
         let (output, error, ok) = run_cmd(
-            &["sql", "-F", "json", "SELECT * FROM gl_probe"],
+            &["workspace", "sql", "-F", "json", "SELECT * FROM gl_probe"],
             data.path(),
         );
         assert!(ok, "{error}");
@@ -190,20 +228,14 @@ fn workspace_queries_skip_abandoned_and_missing_revisions() {
             json!([{"id":42}])
         );
     }
-    let responses = mcp_roundtrip(
-        data.path(),
-        &[
-            mcp_tool_call(1, "run_sql", json!({"sql":["SELECT * FROM gl_probe"]})),
-            mcp_tool_call(2, "get_graph_schema", json!({})),
-        ],
-    );
-    assert_eq!(
-        serde_json::from_str::<Value>(mcp_tool_text(&responses[0])).unwrap(),
-        json!([[{"id":42}]])
-    );
-    assert_ne!(responses[1]["result"]["isError"], true);
     let (_, error, ok) = run_cmd(
-        &["sql", "--db", broken.to_str().unwrap(), "SELECT 1"],
+        &[
+            "workspace",
+            "sql",
+            "--db",
+            broken.to_str().unwrap(),
+            "SELECT 1",
+        ],
         data.path(),
     );
     assert!(!ok, "explicit missing file must fail: {error}");
@@ -223,7 +255,13 @@ fn workspace_queries_skip_abandoned_and_missing_revisions() {
         json!([{"id":42}])
     );
     let (_, error, ok) = run_cmd(
-        &["sql", "--db", missing.to_str().unwrap(), "SELECT 1"],
+        &[
+            "workspace",
+            "sql",
+            "--db",
+            missing.to_str().unwrap(),
+            "SELECT 1",
+        ],
         data.path(),
     );
     assert!(!ok, "explicit missing file must fail: {error}");
@@ -264,7 +302,7 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
     let second_sha = git(&repo.path, &["rev-parse", "HEAD"]);
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let (listed, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir.path());
+    let (listed, stderr, ok) = run_cmd(&["workspace", "list", "-F", "json"], data_dir.path());
     assert!(ok, "{stderr}");
     let listed: Value = serde_json::from_str(&listed).unwrap();
     assert_eq!(rows(&listed).len(), 2);
@@ -281,6 +319,7 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
     let query_commits = |scoped: bool| {
         let mut command = orbit_cmd();
         command.args([
+            "workspace",
             "sql",
             "-F",
             "json",
@@ -306,6 +345,7 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
 
     let mismatch = orbit_cmd()
         .args([
+            "workspace",
             "sql",
             "--repo",
             repo.path.to_str().unwrap(),
@@ -322,9 +362,10 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
         String::from_utf8_lossy(&mismatch.stderr).contains("does not match the checkout revision")
     );
 
-    let manifest_db =
-        duckdb_client::DuckDbClient::open_read_only(&data_dir.path().join("local/manifest.duckdb"))
-            .unwrap();
+    let manifest_db = duckdb_client::DuckDbClient::open(duckdb_client::OpenMode::ReadOnly(
+        &data_dir.path().join("local/manifest.duckdb"),
+    ))
+    .unwrap();
     assert!(manifest_db.query_arrow("SELECT * FROM gl_file").is_err());
     drop(manifest_db);
     let all = orbit_sql("SELECT DISTINCT commit_sha FROM gl_file", data_dir.path());
@@ -347,16 +388,26 @@ fn revision_read_locks_block_writers_and_release_when_reader_exits() {
         .open(format!("{path}.lock"))
         .unwrap();
     let mut reader = orbit_cmd()
-        .args(["sql", "SELECT sum(sin(i)) FROM range(1000000000000) t(i)"])
+        .args([
+            "workspace",
+            "sql",
+            "SELECT sum(sin(i)) FROM range(1000000000000) t(i)",
+        ])
         .env("ORBIT_DATA_DIR", data_dir.path())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
     wait_for_reader(&lock);
-    assert!(!orbit_index(&repo.path, data_dir.path()));
+    let blocked = orbit_cmd()
+        .args(["workspace", "index", "--timeout", "1"])
+        .arg(&repo.path)
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(blocked.status.code(), Some(75));
     assert_eq!(rows(&orbit_sql(FILES_SIMPLE, data_dir.path())).len(), 2);
-    let (_, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir.path());
+    let (_, stderr, ok) = run_cmd(&["workspace", "list", "-F", "json"], data_dir.path());
     assert!(ok, "{stderr}");
     reader.kill().unwrap();
     reader.wait().unwrap();
@@ -387,23 +438,32 @@ fn busy_revision_fails_the_whole_query_and_releases_prior_locks() {
         })
         .collect();
     locks[1].lock().unwrap();
-    let (stdout, stderr, ok) = run_cmd(&["sql", "-F", "json", FILES_SIMPLE], data_dir.path());
-    assert!(!ok);
-    assert!(stdout.is_empty(), "must not return partial rows");
-    assert!(stderr.contains("is busy; retry"), "{stderr}");
+    let out = orbit_cmd()
+        .args(["workspace", "sql", "-F", "json", FILES_SIMPLE])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .env("ORBIT_WAIT_TIMEOUT_MS", "300")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty(), "must not return partial rows");
+    assert!(
+        stderr.contains("gave up waiting for the index of"),
+        "{stderr}"
+    );
     locks[0]
         .try_lock()
         .expect("failed reader releases earlier shared locks");
     locks[0].unlock().unwrap();
     let reader = orbit_cmd()
-        .args(["sql", "-F", "json", FILES_SIMPLE])
+        .args(["workspace", "sql", "-F", "json", FILES_SIMPLE])
         .env("ORBIT_DATA_DIR", data_dir.path())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
     wait_for_reader(&locks[0]);
-    let (_, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir.path());
+    let (_, stderr, ok) = run_cmd(&["workspace", "list", "-F", "json"], data_dir.path());
     assert!(
         ok,
         "waiting for a revision must not hold the manifest lock: {stderr}"
@@ -430,7 +490,7 @@ fn fresh_repositories_index_concurrently_into_separate_databases() {
         .iter()
         .map(|repo| {
             orbit_cmd()
-                .args(["index", repo.path.to_str().unwrap()])
+                .args(["workspace", "index", repo.path.to_str().unwrap()])
                 .env("ORBIT_DATA_DIR", data_dir.path())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())

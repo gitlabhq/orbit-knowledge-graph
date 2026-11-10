@@ -22,4 +22,4 @@ query:
 expect:
   row_count: 1
   row_values:
-    - { total_authored: 6 }
+    - { total_authored: 4 }

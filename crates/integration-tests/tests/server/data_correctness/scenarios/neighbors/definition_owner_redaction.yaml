@@ -1,0 +1,31 @@
+description: A Definition neighbor is authorized by its own project, not the center node's project
+
+config:
+  extra_seed:
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12102, target_kind: Definition }
+  redaction:
+    allow:
+      project: [1000]
+    deny:
+      project: [1001]
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "d", "entity": "Definition", "node_ids": [12001]}],
+      "neighbors": {"direction": "outgoing", "rel_types": ["CALLS"]}
+    }
+  gql: |
+    MATCH (d:Definition {id: 12001})-[:CALLS]->(n) RETURN d, n
+
+expect:
+  referential_integrity: true
+  node_count: 2
+  nodes:
+    Definition:
+      ids: [12001, 12002]
+      absent: [12102]
+  edges:
+    CALLS: [[12001, 12002]]

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use duckdb_client::DuckDbClient;
+use duckdb_client::{DuckDbClient, OpenMode};
 use serde_json::json;
 
 use super::read_lock_database;
@@ -14,7 +14,7 @@ pub fn graph_lacks_commit(db: &Path, commit_sha: &str) -> Result<bool> {
     let Some(_lock) = read_lock_database(db)? else {
         return Ok(true);
     };
-    let client = DuckDbClient::open_read_only(db)?;
+    let client = DuckDbClient::open(OpenMode::ReadOnly(db))?;
     if stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() != Some(CODE_INDEX_REVISION) {
         return Ok(true);
     }
@@ -32,9 +32,9 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
     drop(client);
 
     if had_data {
-        tracing::warn!(
-            "local graph schema or code index changed; rebuilding {} (previously indexed repositories must be re-indexed)",
-            db_path.display()
+        orbit_log_fields::warn!(
+            expanded(LOCAL_PATH) = %db_path.display(),
+            "local graph schema or code index changed; rebuilding (previously indexed repositories must be re-indexed)"
         );
     }
     remove_db_files(db_path)?;
@@ -104,7 +104,7 @@ fn remove_db_files(db_path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+    const LOCAL_DDL: &str = include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/graph_local.sql"));
 
     #[test]
     fn remove_db_files_appends_wal_to_the_full_path() {

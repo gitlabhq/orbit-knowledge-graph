@@ -5,6 +5,19 @@ detect: ["~/.gitlab/duo"]
 instruction_file:
   project: AGENTS.md
   global: "~/.gitlab/duo/AGENTS.md"
+json_merges:
+  - file:
+      project: .gitlab/duo/hooks.json
+      global: "~/.gitlab/duo/hooks.json"
+    path: [hooks, SessionStart]
+    marker: hook-guard instructions
+    review_note:
+      project: GitLab Duo runs project hooks only with --enable-project-hooks or GITLAB_ENABLE_PROJECT_HOOKS=true; without it, Duo gets no Orbit instructions in this project
+    entries:
+      - hooks:
+          - type: command
+            command: "{{orbit}} hook-guard instructions{{hook_gitlab}}"
+            timeout: 10
 skills:
   dir:
     project: .agents/skills

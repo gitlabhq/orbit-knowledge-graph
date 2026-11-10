@@ -15,7 +15,8 @@ pub const ACTIVE_VERSION_KEY: &str = "active_version";
 
 pub type ActiveVersionChanges = BoxStream<'static, Result<Option<u32>, CatalogError>>;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum CatalogError {
     #[error(transparent)]
     Nats(#[from] nats_client::NatsError),
@@ -104,8 +105,8 @@ impl OntologyCatalog {
                 let archive =
                     OntologyArchive::bundled(version)?.ok_or(CatalogError::Missing(version))?;
                 self.publish(&archive).await?;
-                tracing::info!(
-                    schema_version = version,
+                orbit_log_fields::info!(
+                    safe(SCHEMA_VERSION) = version,
                     "bootstrapped missing ontology archive from release bundle"
                 );
                 Ok(())

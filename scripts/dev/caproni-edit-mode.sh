@@ -202,7 +202,7 @@ ERROR: $POD_CONFIG is not readable.
 
 This script runs under \`caproni run\`, where mirrord serves that file from the
 Orbit pod. Start it from your gitlab-caproni checkout with the knowledge-graph
-reloaders enabled in caproni.local.yaml; see docs/dev/local-development.md.
+reloaders enabled in caproni.local.yaml; see docs/pages/engineering/development/local-development.md.
 EOF
     exit 1
   fi

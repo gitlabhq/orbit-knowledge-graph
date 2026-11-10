@@ -1,9 +1,9 @@
 # Simulator configuration - 100M edge scale test
 #
 # Workflow:
-#   1. Generate data:  cargo xtask synth generate
-#   2. Load to CH:     cargo xtask synth load
-#   3. Evaluate:       cargo xtask synth evaluate
+#   1. Generate data:  cargo synth generate
+#   2. Load to CH:     cargo synth load
+#   3. Evaluate:       cargo synth evaluate
 
 clickhouse:
   url: http://localhost:8123

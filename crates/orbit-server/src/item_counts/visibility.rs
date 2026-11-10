@@ -1,19 +1,37 @@
+use std::collections::HashMap;
+
 use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 
+pub struct Visibility {
+    pub scope_groups: Vec<Vec<usize>>,
+    pub entities: Vec<VisibleEntity>,
+}
+
 pub struct VisibleEntity {
     pub name: String,
     pub table: String,
-    pub scopes: Vec<String>,
+    pub scope_group: usize,
 }
 
-pub fn get_visible_entities(
+impl Visibility {
+    pub fn entities_in_scope(&self, index: usize) -> Vec<&VisibleEntity> {
+        self.entities
+            .iter()
+            .filter(|entity| self.scope_groups[entity.scope_group].contains(&index))
+            .collect()
+    }
+}
+
+pub fn get_visibility(
     ontology: &Ontology,
     security_context: &SecurityContext,
-    scopes: &[TraversalPath],
-) -> Vec<VisibleEntity> {
-    ontology
+    scopes: &[&TraversalPath],
+) -> Visibility {
+    let mut scope_groups: Vec<Vec<usize>> = Vec::new();
+    let mut group_by_role: HashMap<u32, usize> = HashMap::new();
+    let entities = ontology
         .nodes()
         .filter(|node| node.has_traversal_path)
         .filter_map(|node| {
@@ -22,21 +40,24 @@ pub fn get_visible_entities(
                 .as_ref()
                 .map(|redaction| redaction.required_role.as_access_level())
                 .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
-            let paths_with_role = security_context.paths_at_least(required_role);
-            let scopes: Vec<String> = scopes
-                .iter()
-                .filter(|scope| scope.is_within_scope(&paths_with_role))
-                .map(|scope| scope.as_str().to_string())
-                .collect();
-            if scopes.is_empty() {
-                return None;
-            }
-
-            Some(VisibleEntity {
+            let scope_group = *group_by_role.entry(required_role).or_insert_with(|| {
+                let paths_with_role = security_context.paths_at_least(required_role);
+                scope_groups.push(
+                    (0..scopes.len())
+                        .filter(|&index| scopes[index].is_within_scope(&paths_with_role))
+                        .collect(),
+                );
+                scope_groups.len() - 1
+            });
+            (!scope_groups[scope_group].is_empty()).then(|| VisibleEntity {
                 name: node.name.clone(),
                 table: node.destination_table.clone(),
-                scopes,
+                scope_group,
             })
         })
-        .collect()
+        .collect();
+    Visibility {
+        scope_groups,
+        entities,
+    }
 }

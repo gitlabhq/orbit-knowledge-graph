@@ -15,18 +15,18 @@ fn labels_cte(definition: &NodeHydrator) -> Result<String> {
         "labels AS (
   SELECT {id} AS id, {fqn} AS label,
          {file} || ':' || CAST({start} AS VARCHAR) AS loc, {file} AS path,
-         'Definition:' || CAST({id} AS VARCHAR) AS reference
+         'Definition:' || CAST({id} AS VARCHAR) AS reference, {kind} AS def_kind
   FROM {table} WHERE {project} = ?1 AND {commit} = ?2
   UNION ALL
-  SELECT id, path, '', path, 'File:' || CAST(id AS VARCHAR)
+  SELECT id, path, '', path, 'File:' || CAST(id AS VARCHAR), ''
   FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2
   UNION ALL
-  SELECT id, path, '', path, '' FROM gl_directory WHERE project_id = ?1 AND commit_sha = ?2
+  SELECT id, path, '', path, '', '' FROM gl_directory WHERE project_id = ?1 AND commit_sha = ?2
   UNION ALL
   SELECT i.id, concat_ws(' from ', NULLIF(i.identifier_name, ''), NULLIF(i.import_path, '')),
          COALESCE(d.{file} || ':' || CAST(d.{start} AS VARCHAR), ''),
          COALESCE(d.{file}, i.file_path),
-         COALESCE('Definition:' || CAST(d.{id} AS VARCHAR), 'external/unresolved')
+         COALESCE('Definition:' || CAST(d.{id} AS VARCHAR), 'external/unresolved'), ''
   FROM gl_imported_symbol i
   LEFT JOIN gl_edge e ON e.source_id = i.id AND e.relationship_kind = 'IMPORTS'
   LEFT JOIN {table} d ON d.{id} = e.target_id AND d.{project} = ?1 AND d.{commit} = ?2
@@ -40,6 +40,7 @@ fn labels_cte(definition: &NodeHydrator) -> Result<String> {
         fqn = definition.column("fqn")?,
         file = definition.column("file_path")?,
         start = definition.column("start_line")?,
+        kind = definition.column("definition_type")?,
         table = definition.table(),
         project = definition.column("project_id")?,
         commit = definition.column("commit_sha")?,
@@ -53,6 +54,7 @@ struct Row {
     label: String,
     reference: String,
     loc: String,
+    def_kind: String,
     via: String,
     hidden: bool,
     direct: bool,
@@ -65,6 +67,7 @@ fn rows_from(batches: &[RecordBatch], direct: bool) -> Vec<Row> {
     let labels = string_column(batches, "label");
     let references = string_column(batches, "reference");
     let locs = string_column(batches, "loc");
+    let def_kinds = string_column(batches, "def_kind");
     let vias = string_column(batches, "via");
     let hidden = bool_column(batches, "hidden");
     (0..kinds.len())
@@ -75,6 +78,7 @@ fn rows_from(batches: &[RecordBatch], direct: bool) -> Vec<Row> {
             label: labels[i].clone(),
             reference: references[i].clone(),
             loc: locs[i].clone(),
+            def_kind: def_kinds[i].clone(),
             via: vias[i].clone(),
             hidden: hidden[i],
             direct,
@@ -119,7 +123,7 @@ pub(crate) fn render(
             "WITH {labels_cte}, targets(ord, target_id, path) AS (VALUES {targets})
 SELECT DISTINCT t.ord, t.target_id, e.relationship_kind AS kind,
        CASE WHEN e.source_id = t.target_id THEN '-->' ELSE '<--' END AS dir,
-       l.label, l.reference, l.loc, '' AS via, {hidden_expr} AS hidden
+       l.label, l.reference, l.loc, l.def_kind, '' AS via, {hidden_expr} AS hidden
 FROM targets t
 JOIN gl_edge e ON e.source_id = t.target_id OR e.target_id = t.target_id
 LEFT JOIN import_files i ON i.id = e.source_id
@@ -144,7 +148,7 @@ members AS (
 )
 SELECT members.target_id, e.relationship_kind AS kind,
        CASE WHEN e.source_id = members.id THEN '-->' ELSE '<--' END AS dir,
-       l.label, l.reference, l.loc,
+       l.label, l.reference, l.loc, l.def_kind,
        string_agg(DISTINCT def_name(m.label), ', ' ORDER BY def_name(m.label)) AS via,
        {hidden_expr} AS hidden
 FROM gl_edge e
@@ -158,7 +162,7 @@ WHERE e.relationship_kind <> 'DEFINES'
   AND l.id NOT IN (
     SELECT own.id FROM members own WHERE own.target_id = members.target_id
   )
-GROUP BY members.ord, members.target_id, kind, dir, l.label, l.reference, l.loc, l.path
+GROUP BY members.ord, members.target_id, kind, dir, l.label, l.reference, l.loc, l.def_kind, l.path
 ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
         ),
         &params,
@@ -180,8 +184,7 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
                 .collect();
             writeln!(
                 out,
-                "File:{}  {}  [{}]  ({} definitions)",
-                node.id,
+                "{}  [{}]  ({} definitions)",
                 path,
                 node.properties["language"].as_str().unwrap_or(""),
                 members.len()
@@ -198,24 +201,25 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
             for member in &members {
                 writeln!(
                     out,
-                    "  Definition:{}  {}  [{}]  L{}-{}",
-                    member.id, member.fqn, member.kind, member.start, member.end
+                    "  {}  [{}]  L{}-{}",
+                    member.fqn, member.kind, member.start, member.end
                 )?;
             }
             if let Some(member) = members.first() {
                 writeln!(
                     out,
-                    "\nFor complete source and definition-specific connections, choose a Definition ID above.\nnext: {} context Definition:{}",
+                    "\nFor a definition's source and connections, read its lines.\nnext: {} context {path}:{}-{}",
                     spec::launcher(),
-                    member.id
+                    member.start,
+                    member.end
                 )?;
             }
         } else {
             let range = context::source_range(node)?;
             writeln!(
                 out,
-                "Definition:{}  {}  [{}]  {}:{}-{}",
-                node.id, range.fqn, range.kind, range.file, range.start, range.end
+                "{}  [{}]  {}:{}-{}",
+                range.fqn, range.kind, range.file, range.start, range.end
             )?;
         }
         let links: Vec<_> = edges
@@ -257,6 +261,11 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
             } else {
                 rows.len()
             };
+            let (rows, fields) = fold_fields(&rows);
+            let limit = limit.min(rows.len());
+            for line in &fields {
+                writeln!(out, "{line}")?;
+            }
             for row in rows.iter().take(limit) {
                 let via = if row.via.is_empty() {
                     String::new()
@@ -272,13 +281,16 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
                         format!("  via {}", row.via)
                     }
                 };
+                let external = match row.reference.as_str() {
+                    "external/unresolved" => "  external",
+                    _ => "",
+                };
                 writeln!(
                     out,
-                    "  {} {}  [{}]  {}{via}{}",
+                    "  {} {}  [{}]{external}{via}{}",
                     row.dir,
                     row.label,
                     row.kind.to_lowercase(),
-                    row.reference,
                     loc_suffix(&row.loc, &mut prev_path)
                 )?;
             }
@@ -288,7 +300,7 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
                 if omitted_rows.iter().any(|row| row.direct) {
                     writeln!(
                         out,
-                        "  … {omitted} connections omitted; list all file edges: {} sql \"SELECT * FROM gl_edge WHERE source_id = {} OR target_id = {}\"",
+                        "  … {omitted} connections omitted; list all file edges: {} workspace sql \"SELECT * FROM gl_edge WHERE source_id = {} OR target_id = {}\"",
                         spec::launcher(),
                         node.id,
                         node.id
@@ -296,19 +308,74 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
                     if omitted_rows.iter().any(|row| !row.direct) {
                         writeln!(
                             out,
-                            "  For omitted definition connections, use a Definition ID from the map for its complete connections."
+                            "  For omitted definition connections, read a definition's lines from the map."
                         )?;
                     }
                 } else {
                     writeln!(
                         out,
-                        "  … {omitted} connections omitted; use a Definition ID from the map for its complete connections."
+                        "  … {omitted} connections omitted; read a definition's lines from the map for its complete connections."
                     )?;
                 }
             }
         }
     }
     Ok(out)
+}
+
+const FIELD_KINDS: &[&str] = &["Field", "Property", "Attribute"];
+const FOLDED_FIELD_NAMES: usize = 4;
+
+fn fold_fields<'a>(rows: &[&'a Row]) -> (Vec<&'a Row>, Vec<String>) {
+    let mut owners: Vec<(String, Vec<&'a Row>)> = Vec::new();
+    let mut kept = Vec::new();
+    for row in rows {
+        let owner = row
+            .label
+            .rsplit_once("::")
+            .or_else(|| row.label.rsplit_once('.'))
+            .map(|(owner, _)| owner.to_string());
+        match (
+            row.dir.as_str(),
+            FIELD_KINDS.contains(&row.def_kind.as_str()),
+            owner,
+        ) {
+            ("-->", true, Some(owner)) => {
+                match owners.iter_mut().find(|(name, _)| *name == owner) {
+                    Some((_, fields)) => fields.push(row),
+                    None => owners.push((owner, vec![row])),
+                }
+            }
+            _ => kept.push(*row),
+        }
+    }
+    let mut lines = Vec::new();
+    for (owner, fields) in owners {
+        if fields.len() == 1 {
+            kept.push(fields[0]);
+            continue;
+        }
+        let names: Vec<&str> = fields
+            .iter()
+            .map(|row| row.label.rsplit(['.', ':']).next().unwrap_or(&row.label))
+            .collect();
+        let more = match names.len().saturating_sub(FOLDED_FIELD_NAMES) {
+            0 => String::new(),
+            more => format!(", +{more}"),
+        };
+        let loc = fields[0].loc.as_str();
+        lines.push(format!(
+            "  --> {owner}: {} fields ({}{more})  [{}]{}",
+            names.len(),
+            names[..names.len().min(FOLDED_FIELD_NAMES)].join(", "),
+            fields[0].kind.to_lowercase(),
+            match loc.is_empty() {
+                true => String::new(),
+                false => format!("  ({loc})"),
+            }
+        ));
+    }
+    (kept, lines)
 }
 
 fn loc_suffix(loc: &str, prev_path: &mut String) -> String {

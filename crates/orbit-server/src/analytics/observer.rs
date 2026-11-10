@@ -8,6 +8,7 @@ use query_engine::compiler::{CompiledQueryContext, ExecMetrics};
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
 use crate::auth::Claims;
+use crate::user_agent::UserAgent;
 
 use orbit_analytics::AnalyticsTracker;
 
@@ -21,7 +22,7 @@ pub(crate) struct AnalyticsObserver {
     config: Arc<AnalyticsConfig>,
     claims: Claims,
     tool_name: String,
-    coding_agent: Option<String>,
+    user_agent: UserAgent,
     schema_version: String,
     emitted: Cell<bool>,
     start: Instant,
@@ -34,7 +35,7 @@ impl AnalyticsObserver {
         config: Arc<AnalyticsConfig>,
         claims: Claims,
         tool_name: impl Into<String>,
-        coding_agent: Option<String>,
+        user_agent: UserAgent,
         schema_version: String,
     ) -> Self {
         Self {
@@ -42,7 +43,7 @@ impl AnalyticsObserver {
             config,
             claims,
             tool_name: tool_name.into(),
-            coding_agent,
+            user_agent,
             schema_version,
             emitted: Cell::new(false),
             start: Instant::now(),
@@ -90,18 +91,25 @@ impl AnalyticsObserver {
         let Some(tracker) = self.tracker.as_ref() else {
             return;
         };
+        if self.claims.host_name.as_deref().is_some_and(is_test_host) {
+            return;
+        }
 
         let common = match build_common(&self.config, &self.claims, &self.schema_version) {
             Ok(c) => c,
             Err(e) => {
-                tracing::warn!(error = %e, "failed to build orbit_common context, skipping analytics event");
+                orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = e.kind(),
+                    expanded(ERROR_MESSAGE) = %e,
+                    "failed to build orbit_common context, skipping analytics event"
+                );
                 return;
             }
         };
         let mut query = match build_query(
             &self.claims,
             &self.tool_name,
-            self.coding_agent.as_deref(),
+            &self.user_agent,
             &self.metrics,
             row_count,
             redacted_count,
@@ -109,7 +117,11 @@ impl AnalyticsObserver {
         ) {
             Ok(q) => q,
             Err(e) => {
-                tracing::warn!(error = %e, "failed to build orbit_query context, skipping analytics event");
+                orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = e.kind(),
+                    expanded(ERROR_MESSAGE) = %e,
+                    "failed to build orbit_query context, skipping analytics event"
+                );
                 return;
             }
         };
@@ -123,9 +135,18 @@ impl AnalyticsObserver {
             .build()
         {
             Ok(event) => tracker.track(event),
-            Err(e) => tracing::warn!(error = %e, "failed to build analytics event"),
+            Err(e) => orbit_log_fields::warn!(
+                safe(ERROR_TYPE) = e.kind(),
+                expanded(ERROR_MESSAGE) = %e,
+                "failed to build analytics event"
+            ),
         }
     }
+}
+
+// RFC 6761 reserves .test for testing, so no real GitLab instance lives there.
+fn is_test_host(host: &str) -> bool {
+    host.to_ascii_lowercase().ends_with(".test")
 }
 
 #[cfg(test)]
@@ -163,6 +184,8 @@ mod tests {
             deployment_type: Some(".com".into()),
             realm: Some("SaaS".into()),
             is_gitlab_team_member: None,
+            user_type: None,
+            token_type: None,
             license_checksum: None,
         }
     }
@@ -175,7 +198,7 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
             test_claims(),
             "query_graph",
-            None,
+            UserAgent::default(),
             "33".to_string(),
         );
         obs.finish(10, 0);
@@ -188,6 +211,26 @@ mod tests {
     }
 
     #[test]
+    fn emits_nothing_for_a_test_host_in_any_case() {
+        for host in ["gitlab.caproni.test", "GitLab.Caproni.Test"] {
+            let tracker = Arc::new(InMemoryAnalyticsTracker::new());
+            let obs = AnalyticsObserver::new(
+                Some(tracker.clone()),
+                Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
+                Claims {
+                    host_name: Some(host.into()),
+                    ..test_claims()
+                },
+                "query_graph",
+                UserAgent::default(),
+                "33".to_string(),
+            );
+            obs.finish(10, 0);
+            assert!(tracker.drain().is_empty(), "{host}");
+        }
+    }
+
+    #[test]
     fn exec_metrics_and_query_info_merged() {
         let tracker = Arc::new(InMemoryAnalyticsTracker::new());
         let mut obs = AnalyticsObserver::new(
@@ -195,15 +238,16 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
             test_claims(),
             "query_graph",
-            None,
+            UserAgent::default(),
             "33".to_string(),
         );
         obs.set_compiled(&CompiledQueryContext {
             query_type: query_engine::compiler::input::QueryType::Traversal,
+            ast: query_engine::compiler::ast::Node::Query(Box::default()),
             base: query_engine::compiler::passes::codegen::ParameterizedQuery {
                 sql: String::new(),
                 params: Default::default(),
-                result_context: query_engine::compiler::passes::enforce::ResultContext::new(),
+                result_context: query_engine::compiler::ResultContext::new(),
                 query_config: Default::default(),
                 dialect: query_engine::compiler::passes::codegen::SqlDialect::ClickHouse,
             },
@@ -215,7 +259,6 @@ mod tests {
                 }],
                 ..Default::default()
             },
-            pagination: Default::default(),
             has_virtual_columns: false,
         });
         obs.compiled(Duration::from_millis(5));
@@ -248,7 +291,7 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
             test_claims(),
             "query_graph",
-            None,
+            UserAgent::default(),
             "33".to_string(),
         );
         obs.query_executed("base", 500, 10000, 4_000_000);
@@ -309,6 +352,14 @@ mod tests {
                 "memory_limit",
             ),
             (
+                PipelineError::Execution(
+                    "Code: 36. DB::Exception: Query tree is too big. Maximum: 500000.".into(),
+                ),
+                "execution_error",
+                "caller_error",
+                "too_complex",
+            ),
+            (
                 PipelineError::Execution("x".into()),
                 "execution_error",
                 "server_error",
@@ -323,7 +374,7 @@ mod tests {
                 Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
                 test_claims(),
                 "query_graph",
-                None,
+                UserAgent::default(),
                 "33".to_string(),
             );
             obs.record_error(&error);
@@ -380,7 +431,7 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
             test_claims(),
             "query_graph",
-            None,
+            UserAgent::default(),
             "33".to_string(),
         );
         obs.finish(1, 0);

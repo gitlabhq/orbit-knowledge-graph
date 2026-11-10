@@ -23,8 +23,6 @@ pub struct ProfilerOutput {
 pub struct PaginationInfo {
     pub has_more: bool,
     pub truncated: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_cursor: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -50,6 +48,7 @@ pub struct CompilationInfo {
 #[derive(Serialize)]
 pub struct RanQuery {
     pub label: String,
+    pub rendered_sql: String,
     pub read_rows: u64,
     pub read_bytes: u64,
     pub result_rows: u64,
@@ -92,6 +91,7 @@ pub fn build_output(
         .iter()
         .map(|e| RanQuery {
             label: e.label.clone(),
+            rendered_sql: e.rendered_sql.clone(),
             read_rows: e.stats.read_rows,
             read_bytes: e.stats.read_bytes,
             result_rows: e.stats.result_rows,
@@ -127,7 +127,6 @@ pub fn build_output(
         pagination: output.pagination.as_ref().map(|p| PaginationInfo {
             has_more: p.has_more,
             truncated: p.truncated,
-            next_cursor: p.next_cursor.clone(),
         }),
         instance_health,
         response,

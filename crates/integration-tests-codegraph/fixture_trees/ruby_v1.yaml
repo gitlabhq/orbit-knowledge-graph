@@ -1,0 +1,126 @@
+- path: main.rb
+  content: |
+    require_relative 'app/models/user'
+    require_relative 'app/models/profile'
+    require_relative 'app/services/email_service'
+    require_relative 'app/services/notification_service'
+    require_relative 'app/controllers/users_controller'
+    require_relative 'services/auth_service'
+
+    class Application
+      def test_user_creation_flow
+        User.create_with_profile({}, {})
+      end
+
+      def test_authentication_flow
+        session = AuthService.create_session(User.new)
+        AuthService.authenticate_token(session.access_token)
+        AuthService.refresh_session(session.refresh_token)
+      end
+    end
+
+- path: services/auth_service.rb
+  content: |
+    class Session
+      attr_reader :access_token, :refresh_token
+    end
+
+    class AuthService
+      def self.create_session(user)
+        Session.new
+      end
+
+      def self.authenticate_token(token)
+        User.new
+      end
+
+      def self.refresh_session(token)
+        Session.new
+      end
+    end
+
+- path: app/controllers/users_controller.rb
+  content: |
+    class UsersController
+      def find_user
+        @user = User.new
+      end
+
+      def show
+        find_user
+        @user.get_profile
+      end
+
+      def create
+        user = User.new
+        user.send_welcome_email
+      end
+
+      def destroy
+        NotificationService.notify(@user, "Account deleted")
+      end
+    end
+
+- path: app/models/profile.rb
+  content: |
+    class Profile
+      def self.find_by_user_id(user_id)
+        new
+      end
+    end
+
+- path: app/models/user.rb
+  content: |
+    class User
+      def self.create_with_profile(user_attrs, profile_attrs)
+        new
+      end
+
+      def get_profile
+        Profile.find_by_user_id(1)
+      end
+
+      def update_profile(attributes)
+        get_profile
+      end
+
+      def send_welcome_email
+        EmailService.send_welcome(self)
+      end
+
+      private
+
+      def send_notification(message)
+        NotificationService.notify(self, message)
+      end
+    end
+
+- path: app/services/email_service.rb
+  content: |
+    class EmailService
+      def self.send_welcome(user); end
+      def self.send_notification(user, message); end
+    end
+
+- path: app/services/notification_service.rb
+  content: |
+    class NotificationService
+      def self.notify(user, message, options = {})
+        notification = build_notification(user, message, options)
+        determine_delivery_method(user, options)
+        log_notification(notification)
+        EmailService.send_notification(user, message)
+      end
+
+      def self.notify_all(users, message)
+        users.each { |user| notify(user, message) }
+      end
+
+      def self.send_batch_notifications(batch)
+        batch.each { |item| notify(User.new, item[:message]) }
+      end
+
+      def self.build_notification(user, message, options); end
+      def self.determine_delivery_method(user, options); end
+      def self.log_notification(notification); end
+    end

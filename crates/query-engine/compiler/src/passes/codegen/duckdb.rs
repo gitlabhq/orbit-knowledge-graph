@@ -17,7 +17,7 @@ use crate::ast::{
     Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
 };
 use crate::error::{QueryError, Result};
-use crate::passes::enforce::ResultContext;
+use crate::passes::result_contract::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -206,6 +206,10 @@ impl Context {
             parts.push(format!("LIMIT {limit}"));
         }
 
+        if include_limit && let Some(offset) = q.offset {
+            parts.push(format!("OFFSET {offset}"));
+        }
+
         Ok(parts.join(" "))
     }
 
@@ -323,10 +327,10 @@ impl Context {
             Expr::InSubquery {
                 expr,
                 cte_name,
-                column,
+                columns,
             } => {
                 let e = self.emit_expr(expr);
-                format!("{e} IN (SELECT {column} FROM {cte_name})")
+                format!("{e} IN (SELECT {} FROM {cte_name})", columns.join(", "))
             }
             Expr::InSelect { expr, query } => {
                 let e = self.emit_expr(expr);
@@ -421,6 +425,7 @@ impl Context {
             Function::Unnest => "unnest",
             Function::TupleElement => "struct_extract_at",
             Function::Coalesce => "coalesce",
+            Function::NullIf => "nullif",
             Function::Concat => "concat",
             Function::ArgMax | Function::ArgMaxOrNull => "arg_max",
             Function::If

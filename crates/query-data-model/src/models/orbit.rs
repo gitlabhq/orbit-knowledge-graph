@@ -50,6 +50,14 @@ pub trait OrbitQueryModel {
     fn query_backend(&self) -> &Self::BackendCatalog;
     fn query_authorization(&self) -> &Self::AuthorizationCatalog;
 
+    fn supports_deferred_node_loading(&self) -> bool {
+        self.query_backend().supports_deferred_node_loading()
+    }
+
+    fn supports_selective_latest_rows(&self) -> bool {
+        self.query_backend().supports_selective_latest_rows()
+    }
+
     fn entity(&self, name: &str) -> Option<&Entity> {
         self.graph().entity_named(name)
     }
@@ -61,6 +69,23 @@ pub trait OrbitQueryModel {
     fn property_is_nullable(&self, entity: &str, property: &str) -> bool {
         self.property(entity, property)
             .is_some_and(|property| property.nullable)
+    }
+
+    fn null_as_epoch(&self, property: PropertyId) -> bool {
+        self.query_backend().null_as_epoch(property)
+    }
+
+    fn null_as_epoch_properties(&self, entity: EntityId) -> HashMap<String, ontology::DataType> {
+        self.graph()
+            .entity(entity)
+            .properties
+            .iter()
+            .filter(|property| self.null_as_epoch(**property))
+            .map(|property| {
+                let property = self.graph().property(*property);
+                (property.name.clone(), property.data_type)
+            })
+            .collect()
     }
 
     fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property> {
@@ -84,6 +109,12 @@ pub trait OrbitQueryModel {
         self.graph()
             .entity_id(entity)
             .is_some_and(|entity| self.query_backend().entity_is_global(entity))
+    }
+
+    fn entity_high_fan_out(&self, entity: &str) -> bool {
+        self.graph()
+            .entity_id(entity)
+            .is_some_and(|entity| self.query_backend().entity_high_fan_out(entity))
     }
 
     fn property_column_named(&self, entity: &str, property: &str) -> Option<&str> {
@@ -151,6 +182,10 @@ pub trait OrbitQueryModel {
         self.query_backend().table_sort_key(table)
     }
 
+    fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
+        self.query_backend().equivalent_layouts(table)
+    }
+
     fn in_sort_key(&self, table: &str, column: &str) -> bool {
         self.table_sort_key(table)
             .is_some_and(|key| key.iter().any(|sort_column| sort_column == column))
@@ -158,6 +193,14 @@ pub trait OrbitQueryModel {
 
     fn has_text_index(&self, property: PropertyId) -> bool {
         self.query_backend().has_text_index(property)
+    }
+
+    fn property_unique(&self, property: PropertyId) -> bool {
+        self.query_backend().property_unique(property)
+    }
+
+    fn property_mutable(&self, property: PropertyId) -> bool {
+        self.query_backend().property_mutable(property)
     }
 
     fn admin_only(&self, entity: &str, property: &str) -> bool {
@@ -211,10 +254,6 @@ pub trait OrbitQueryModel {
 
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
         self.query_authorization().redaction_id_column(entity)
-    }
-
-    fn table_path_scopable(&self, table: &str) -> bool {
-        self.query_backend().table_path_scopable(table)
     }
 
     fn table_has_path_columns(&self, table: &str) -> bool {

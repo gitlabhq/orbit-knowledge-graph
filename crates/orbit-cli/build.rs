@@ -1,52 +1,29 @@
 fn main() {
-    #[cfg(target_os = "macos")]
-    {
-        println!("cargo:rustc-link-arg-bin=orbit=-Wl,-rpath,@loader_path/deps");
-    }
+    link_downloaded_duckdb();
 
     validate_prompts();
     validate_skills();
 
     println!(
         "cargo:rerun-if-changed={}",
-        std::path::Path::new(env!("CONFIG_DIR"))
+        std::path::Path::new(env!("ORBIT_CONFIG_DIR"))
             .join("setup")
             .display()
     );
-
-    // Release jobs run on `vX.Y.Z` tags (.gitlab/ci/release-local.yml), so
-    // CI_COMMIT_TAG is the authoritative release version. `git describe` is a
-    // best-effort convenience for local/dev builds; the static Cargo.toml
-    // version is the last-resort fallback (source-tarball builds with no git).
-    let version = std::env::var("CI_COMMIT_TAG")
-        .ok()
-        .filter(|tag| !tag.is_empty())
-        .or_else(|| {
-            std::process::Command::new("git")
-                // --match pins us to release tags: this repo also has
-                // `clients/orbitpb/vX.Y.Z` tags, and a bare --tags would pick the
-                // nearest of either namespace.
-                .args([
-                    "describe", "--tags", "--always", "--dirty", "--match", "v[0-9]*",
-                ])
-                .output()
-                .ok()
-                .filter(|out| out.status.success())
-                .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-                .filter(|described| !described.is_empty())
-        })
-        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+    println!("cargo:rerun-if-changed=../../packages/agent-plugins");
+    println!("cargo:rerun-if-changed=../../packages/agent-plugins-nightly");
 
     // Publish strips the leading `v` (scripts/release/upload-local-cli-release.sh uses
     // `${CI_COMMIT_TAG#v}`), so the package-registry version glab downloads and
     // compares against in `--update` is a bare semver. Match that here.
-    let version = version.strip_prefix('v').unwrap_or(&version);
-
-    println!("cargo:rustc-env=ORBIT_VERSION={version}");
+    if let Some(tag) = std::env::var("CI_COMMIT_TAG")
+        .ok()
+        .filter(|tag| !tag.is_empty())
+    {
+        let version = tag.strip_prefix('v').unwrap_or(&tag);
+        println!("cargo:rustc-env=ORBIT_RELEASE_VERSION={version}");
+    }
     println!("cargo:rerun-if-env-changed=CI_COMMIT_TAG");
-    // Rebuild when HEAD or refs move so dev builds don't report a stale tag.
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
-    println!("cargo:rerun-if-changed=../../.git/refs");
 }
 
 fn validate_prompts() {
@@ -73,4 +50,24 @@ fn validate_skills() {
             .collect::<Vec<_>>()
             .join(",")
     );
+}
+
+/// libduckdb-sys 2.0 no longer adds an rpath for a downloaded libduckdb, so a debug `orbit` run
+/// outside Cargo finds the library only through this one. libduckdb-sys publishes the download
+/// directory, which holds the headers and the library, as DEP_DUCKDB_INCLUDE. Release builds
+/// compile DuckDB in, so they must not carry a path to the build machine, and Windows linkers
+/// have no rpath.
+fn link_downloaded_duckdb() {
+    println!("cargo:rerun-if-env-changed=DUCKDB_DOWNLOAD_LIB");
+    let downloads = std::env::var("DUCKDB_DOWNLOAD_LIB")
+        .is_ok_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true"));
+    let unix = std::env::var("CARGO_CFG_TARGET_FAMILY")
+        .is_ok_and(|families| families.split(',').any(|family| family == "unix"));
+    let debug = std::env::var("PROFILE").is_ok_and(|profile| profile == "debug");
+    if !(downloads && unix && debug) {
+        return;
+    }
+    if let Ok(lib_dir) = std::env::var("DEP_DUCKDB_INCLUDE") {
+        println!("cargo:rustc-link-arg-bin=orbit=-Wl,-rpath,{lib_dir}");
+    }
 }

@@ -2,12 +2,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_log_fields::info;
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::net::TcpListener;
+use tonic::codec::CompressionEncoding;
 use tonic::transport::Server as TonicServer;
 use tonic::transport::server::{ServerTlsConfig, TcpIncoming};
-use tracing::info;
 
 use crate::active_schema::ActiveSchema;
 use crate::analytics::AnalyticsTracker;
@@ -17,6 +18,14 @@ use crate::proto::orbit_service_server::OrbitServiceServer;
 use orbit_billing::{BillingTracker, QuotaService};
 
 use super::service::OrbitServiceImpl;
+
+fn with_compression<T>(service: OrbitServiceServer<T>) -> OrbitServiceServer<T> {
+    service
+        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Zstd)
+}
 
 pub struct GrpcServer {
     service: OrbitServiceImpl,
@@ -72,7 +81,7 @@ impl GrpcServer {
 
     pub async fn run(self, listener: TcpListener) -> Result<(), tonic::transport::Error> {
         let tls_enabled = self.tls_config.is_some();
-        info!(tls = tls_enabled, "Starting gRPC server");
+        info!(safe(TLS_ENABLED) = tls_enabled, "Starting gRPC server");
 
         let service = Arc::new(self.service);
         let gc = &self.grpc_config;
@@ -109,10 +118,12 @@ impl GrpcServer {
             .layer(tower::util::MapFutureLayer::new(|future| {
                 tracing::Instrument::instrument(future, crate::auth::request_span())
             }))
-            .add_service(OrbitServiceServer::from_arc(Arc::clone(&service)))
-            .add_service(super::legacy::LegacyGkgService::new(
+            .add_service(with_compression(OrbitServiceServer::from_arc(Arc::clone(
+                &service,
+            ))))
+            .add_service(super::legacy::LegacyGkgService::new(with_compression(
                 OrbitServiceServer::from_arc(service),
-            ))
+            )))
             .serve_with_incoming(incoming)
             .await
     }

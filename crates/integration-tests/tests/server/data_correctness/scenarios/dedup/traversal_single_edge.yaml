@@ -1,6 +1,7 @@
 description: Traversal returns single edge for duplicated source node
 
 config:
+  unmerged_seed: true
   extra_seed:
     gl_user:
       - { id: 9003, username: dup_author, name: Old Author, state: active, user_type: human, _version: "2024-01-01 00:00:00", _deleted: false }

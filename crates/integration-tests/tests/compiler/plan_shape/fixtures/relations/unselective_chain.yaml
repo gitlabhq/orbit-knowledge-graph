@@ -1,0 +1,23 @@
+name: Unselective chains join edge reads without id sets or candidate rescans
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition"},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
+  gql: |
+    MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) RETURN a, b, c
+
+logical:
+  expect: ["(EdgeScan CALLS b->c AS e1)"]
+
+physical:
+  clickhouse:
+    planned:
+      ctes:
+        absent: true
+      expect: ["(Join ON _orbit_edge_0.target_id = _orbit_edge_1.source_id (_) (_))"]
+      reject: ["(Filter _orbit_edge_1.source_id IN ?.id (_))"]
+    emitted:
+      ctes:
+        absent: true
+      occurrences:
+        - { pattern: "(Scan Table(gl_code_edge) ...)", count: 2 }

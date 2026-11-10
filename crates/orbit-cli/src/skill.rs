@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -207,7 +207,7 @@ async fn execute(request: Request) -> Result<()> {
 }
 
 fn resolve_named(name: &str, path: &str) -> Result<Request> {
-    ensure_known_skill(name)?;
+    ensure_skill_name(name)?;
     Ok(Request::Print {
         name: name.to_string(),
         path: path.to_string(),
@@ -218,8 +218,10 @@ fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
     let Some(first) = name_or_path else {
         return Ok(Request::List);
     };
+    if first == "list" && path.is_none() {
+        return Ok(Request::List);
+    }
     if is_skill_name(first) {
-        ensure_known_skill(first)?;
         return Ok(Request::Print {
             name: first.to_string(),
             path: path.unwrap_or(MANIFEST).to_string(),
@@ -234,10 +236,10 @@ fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
     })
 }
 
-fn ensure_known_skill(name: &str) -> Result<()> {
-    if name != DEFAULT_SKILL {
+fn ensure_skill_name(name: &str) -> Result<()> {
+    if !is_skill_name(name) {
         bail!(
-            "unknown skill name {name:?}. Known skills:\n  {DEFAULT_SKILL}\n\nUse `{} skills get <name> [path]`.",
+            "invalid skill name {name:?}: use lowercase letters, digits and hyphens.\n\nUse `{} skills get <name> [path]`.",
             crate::commands::setup::spec::launcher()
         );
     }
@@ -253,23 +255,41 @@ fn is_skill_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
-fn skill_client() -> Option<OrbitClient> {
-    match OrbitClient::from_skill_env() {
-        Ok(Some(client)) => Some(client),
-        Ok(None) => {
-            warn("no GitLab credential found; using the embedded local skill");
-            None
-        }
-        Err(error) => {
-            warn(format!("{error}; using the embedded local skill"));
-            None
-        }
+fn skill_client(name: &str) -> Result<Option<OrbitClient>> {
+    match OrbitClient::from_env_in_if_signed_in(std::path::Path::new(".")) {
+        Ok(Some(client)) => Ok(Some(client)),
+        Ok(None) => embedded_fallback(name, "no GitLab credential found"),
+        Err(error) => embedded_fallback(name, error),
     }
 }
 
 async fn list_skills() -> Result<()> {
-    let Some(client) = skill_client() else {
-        return print_local_list();
+    let person_is_watching = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
+    if person_is_watching {
+        crate::tui::intro("Orbit skills")?;
+        warn_inside_setup_frame();
+    }
+    let skills = fetch_skill_listing().await?;
+    if !person_is_watching {
+        for skill in skills {
+            println!("{} — {}", skill.name, one_line(&skill.description));
+        }
+        return Ok(());
+    }
+
+    let rows = skills
+        .iter()
+        .map(|skill| (skill.name.as_str(), first_sentence(&skill.description)));
+    crate::tui::card("Skills", crate::tui::align_columns(rows))?;
+    crate::tui::outro(format!(
+        "`{} skills get <name>` prints a skill.",
+        crate::commands::setup::spec::launcher()
+    ))
+}
+
+async fn fetch_skill_listing() -> Result<Vec<ListedSkill>> {
+    let Some(client) = skill_client(DEFAULT_SKILL)? else {
+        return local_listing();
     };
     match client.list_skills().await {
         Ok(response) if response.status == 200 => {
@@ -278,33 +298,30 @@ async fn list_skills() -> Result<()> {
             if envelope.skills.is_empty() {
                 bail!("Orbit skills listing response is empty");
             }
-            for skill in envelope.skills {
-                println!("{} — {}", skill.name, one_line(&skill.description));
-            }
-            Ok(())
+            Ok(envelope.skills)
         }
         Ok(response) if response.status == 404 => {
             warn(
                 "this GitLab instance does not serve Orbit skills; using the embedded local skill",
             );
-            print_local_list()
+            local_listing()
         }
         Ok(response) if degradation(response.status).is_some() => {
             warn(format!(
                 "{}; using the embedded local skill",
                 degradation_warning(&response)
             ));
-            print_local_list()
+            local_listing()
         }
         Ok(response) => Err(map_http_error(response.status, body_text(&response)).into()),
         Err(error) => {
             warn(format!("{error}; using the embedded local skill"));
-            print_local_list()
+            local_listing()
         }
     }
 }
 
-fn print_local_list() -> Result<()> {
+fn local_listing() -> Result<Vec<ListedSkill>> {
     let manifest = local_tree()
         .remove(MANIFEST)
         .ok_or_else(|| anyhow!("embedded {MANIFEST} missing"))?;
@@ -314,26 +331,63 @@ fn print_local_list() -> Result<()> {
         .map(|(yaml, _)| yaml)
         .ok_or_else(|| anyhow!("embedded {MANIFEST} has invalid frontmatter"))?;
     let frontmatter: LocalFrontmatter = orbit_utils::yaml::from_str(yaml)?;
-    println!("{DEFAULT_SKILL} — {}", one_line(&frontmatter.description));
-    Ok(())
+    Ok(vec![ListedSkill {
+        name: DEFAULT_SKILL.to_string(),
+        description: frontmatter.description,
+    }])
 }
 
 fn one_line(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Descriptions are written for agents to match on; people need only the summary.
+fn first_sentence(description: &str) -> String {
+    let description = one_line(description);
+    match description.find(". ") {
+        Some(end) => description[..=end].to_string(),
+        None => description,
+    }
+}
+
 async fn resolved_view(name: &str) -> Result<BTreeMap<String, String>> {
     let local = local_tree();
-    let Some(client) = skill_client() else {
+    let Some(client) = skill_client(name)? else {
         return Ok(local);
     };
     let Some(remote) = resolve_remote_tree(&client, name).await? else {
         return Ok(local);
     };
-    Ok(compose_tree(remote.files, local.clone()).unwrap_or_else(|error| {
-        warn(format!("could not compose the instance Orbit skill ({error}); using the embedded local skill"));
+    if name != DEFAULT_SKILL {
+        return Ok(remote.files);
+    }
+    let composed = compose_tree(remote.files, local.clone()).unwrap_or_else(|error| {
+        warn(format!(
+            "could not compose the instance Orbit skill ({error}); using the embedded local skill"
+        ));
         local
-    }))
+    });
+    Ok(for_launcher(
+        composed,
+        crate::commands::setup::spec::launcher(),
+    ))
+}
+
+fn for_launcher(mut view: BTreeMap<String, String>, launcher: &str) -> BTreeMap<String, String> {
+    if launcher == crate::commands::setup::spec::GLAB_LAUNCHER {
+        return view;
+    }
+    if let Some(manifest) = view.get_mut(MANIFEST)
+        && let Some(heading) = manifest.find("\n# ")
+        && let Some(end) = manifest[heading + 1..].find('\n')
+    {
+        let at = heading + 1 + end + 1;
+        manifest.insert_str(
+            at,
+            &format!("\nThe Orbit CLI here is `{launcher}`: run each `glab orbit <command>` below as `{launcher} <command>`.\n"),
+        );
+    }
+    view
 }
 
 async fn print_skill_file(name: &str, requested: &str) -> Result<()> {
@@ -363,8 +417,7 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
                 ));
                 return Ok(Some(cached.tree));
             }
-            warn(format!("{error}; using the embedded local skill"));
-            return Ok(None);
+            return embedded_fallback(name, error);
         }
     };
 
@@ -377,8 +430,7 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
                     ));
                     return Ok(Some(cached.tree));
                 }
-                warn("Orbit skill response has no ETag; using the embedded local skill");
-                return Ok(None);
+                return embedded_fallback(name, "Orbit skill response has no ETag");
             };
             let tree = validate_remote_envelope(name, &etag, &response.body)?;
             if let Err(error) = publish_cache(&origin, &tree) {
@@ -395,12 +447,8 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
             // A 304 does not change the tree; rewriting the cache would only alter its timestamp.
             Ok(Some(cached.tree))
         }
-        404 => {
-            warn(
-                "this GitLab instance does not serve Orbit skills; using the embedded local skill",
-            );
-            Ok(None)
-        }
+        404 if name != DEFAULT_SKILL => embedded_fallback(name, degradation_warning(&response)),
+        404 => embedded_fallback(name, "this GitLab instance does not serve Orbit skills"),
         status => match degradation(status) {
             Some(Degradation::Unavailable) if cached.is_some() => {
                 warn(format!(
@@ -409,16 +457,19 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
                 ));
                 Ok(cached.map(|cached| cached.tree))
             }
-            Some(_) => {
-                warn(format!(
-                    "{}; using the embedded local skill",
-                    degradation_warning(&response)
-                ));
-                Ok(None)
-            }
+            Some(_) => embedded_fallback(name, degradation_warning(&response)),
             None => Err(map_http_error(status, body_text(&response)).into()),
         },
     }
+}
+
+/// Only the `orbit` skill has an embedded copy; any other skill comes from the server or fails.
+fn embedded_fallback<T>(name: &str, reason: impl std::fmt::Display) -> Result<Option<T>> {
+    if name != DEFAULT_SKILL {
+        bail!("could not fetch the {name:?} skill: {reason}");
+    }
+    warn(format!("{reason}; using the embedded local skill"));
+    Ok(None)
 }
 
 const BODY_EXCERPT_CHARS: usize = 200;
@@ -451,7 +502,7 @@ fn degradation_warning(response: &SkillHttpResponse) -> String {
     } else {
         format!(" ({excerpt})")
     };
-    format!("Orbit skill request returned HTTP {status}{detail}{hint}")
+    format!("Orbit skills API returned HTTP {status}{detail}{hint}")
 }
 
 fn body_excerpt(body: &str) -> String {
@@ -899,6 +950,21 @@ fn cleanup_stale_temporary_dirs(root: &Path, stale_before: SystemTime) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_standalone_binary_reads_glab_orbit_commands_as_its_own() {
+        let view = BTreeMap::from([(
+            MANIFEST.to_string(),
+            "---\nname: orbit\n---\n\n# Orbit skill\n\nRun `glab orbit query`.\n".to_string(),
+        )]);
+        let manifest = for_launcher(view.clone(), "orbit")
+            .remove(MANIFEST)
+            .unwrap();
+        assert!(manifest.contains(
+            "# Orbit skill\n\nThe Orbit CLI here is `orbit`: run each `glab orbit <command>` below as `orbit <command>`.\n"
+        ));
+        assert_eq!(for_launcher(view.clone(), "glab orbit"), view);
+    }
+
     fn remote_tree(version: &str, manifest: &str) -> ValidatedTree {
         let files = BTreeMap::from([
             (MANIFEST.to_string(), manifest.to_string()),
@@ -934,7 +1000,14 @@ mod tests {
                 path: MANIFEST.to_string(),
             }
         );
-        assert!(resolve_named("unknown", MANIFEST).is_err());
+        assert_eq!(
+            resolve_named("registry", MANIFEST).unwrap(),
+            Request::Print {
+                name: "registry".to_string(),
+                path: MANIFEST.to_string(),
+            }
+        );
+        assert_eq!(resolve(Some("list"), None).unwrap(), Request::List);
         assert!(
             resolve(Some("references/local/sql.md"), Some(MANIFEST))
                 .unwrap_err()

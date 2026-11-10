@@ -5,6 +5,7 @@ description: Merge request closes a work item when merged
 variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: WorkItem, id: id }
+    scope: prune_to_source
     description: "Merge request closes work item."
 
 indexer:

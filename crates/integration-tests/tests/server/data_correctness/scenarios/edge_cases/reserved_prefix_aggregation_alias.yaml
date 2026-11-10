@@ -17,4 +17,4 @@ query:
     MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1000 RETURN p, max(mr.iid) AS _orbit_p_id LIMIT 10
 
 expect:
-  compile_error: 'output column "_orbit_p_id" conflicts with reserved prefix "_orbit_"'
+  compile_error: 'identifier "_orbit_p_id" conflicts with reserved prefix "_orbit_"'

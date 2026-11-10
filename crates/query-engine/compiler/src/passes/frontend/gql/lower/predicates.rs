@@ -19,6 +19,7 @@ impl Lowering {
                 .push(InputFilter {
                     op: Some(FilterOp::Eq),
                     value: Some(entry.value),
+                    from_temporal_literal: entry.from_temporal_literal,
                     ..Default::default()
                 });
         }
@@ -50,7 +51,7 @@ impl Lowering {
                     filter: InputFilter {
                         op: Some(op),
                         value,
-                        rhs_column: None,
+                        ..Default::default()
                     },
                 });
             }
@@ -60,6 +61,7 @@ impl Lowering {
             property,
             op,
             value,
+            from_temporal_literal,
             rhs_property,
         } = *comparison;
         let target = self.predicate_target(&property.node.value, span)?;
@@ -100,6 +102,7 @@ impl Lowering {
                 op: Some(op),
                 value,
                 rhs_column,
+                from_temporal_literal,
             },
         })
     }

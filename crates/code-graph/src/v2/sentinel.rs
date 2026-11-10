@@ -130,7 +130,11 @@ pub fn spawn_sentinel(timeout: Duration) -> Option<(SentinelHandle, std::thread:
     match join {
         Ok(join) => Some((handle, join)),
         Err(e) => {
-            tracing::warn!("failed to spawn sentinel thread: {e}, running without file timeouts");
+            orbit_log_fields::warn!(
+                safe(ERROR_TYPE) = "thread_spawn",
+                expanded(ERROR_MESSAGE) = %e,
+                "failed to spawn sentinel thread, running without file timeouts"
+            );
             None
         }
     }

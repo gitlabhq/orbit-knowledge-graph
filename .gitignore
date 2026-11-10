@@ -31,6 +31,9 @@ config/dev.local.yaml
 tmp/
 *.sql.tmp
 
+# rumdl cache
+.rumdl_cache
+
 # Proto gem build output
 _build/
 
@@ -65,13 +68,37 @@ e2e/diagnostics/
 e2e/output.xml
 e2e/log.html
 e2e/report.html
-.claude/
 
 # Terraform
 **/.terraform/
 *.tfstate
 *.tfstate.backup
 *.tfvars
+.terraform.lock.hcl
 !bench/infra/.terraform.lock.hcl
 image-digests/
 .cargo-cache/
+packages/site/content/
+packages/site/data/
+packages/site/.cache/
+packages/site/public/
+packages/site/src/routeTree.gen.ts
+.tanstack/
+.bun-cache/
+
+# Team dashboard rehearsal output is the whole confidential description
+dashboard-output.md
+dashboard-dry-run.md
+
+# Coding agent state: approved commands, transcripts, and MCP config can hold secrets
+.claude/
+.cursor/
+.gemini/
+.codex/
+.windsurf/
+.specstory/
+.aider*
+.vscode/
+.mcp.json
+CLAUDE.local.md
+AGENTS.local.md

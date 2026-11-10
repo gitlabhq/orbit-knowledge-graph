@@ -26,19 +26,49 @@ OUT_PRODUCER="$E2E_DIR/config/cdc-producer.yaml"
 OUT_CONSUMER="$E2E_DIR/config/cdc-consumer.yaml"
 OUT_RECONCILER="$E2E_DIR/config/cdc-reconciler.yaml"
 
-command -v docker >/dev/null || { echo "docker required"; exit 1; }
 command -v yq >/dev/null || { echo "yq (mikefarah v4+) required"; exit 1; }
 
 SIPHON_IMAGE="$(yq -r '.siphon.image.repository + ":" + .siphon.image.tag' "$VERSIONS")"
-GITLAB_REF="$(yq -r '.gitlab.ref' "$VERSIONS")"
+GITLAB_REF="$(yq -r "$GITLAB_PINS.ref" "$VERSIONS")"
 
 [[ "$SIPHON_IMAGE" == *":null"* || "$SIPHON_IMAGE" == "null:"* ]] \
   && { echo "siphon.image.{repository,tag} missing in $VERSIONS"; exit 1; }
 [[ -z "$GITLAB_REF" || "$GITLAB_REF" == "null" ]] \
-  && { echo "gitlab.ref missing in $VERSIONS"; exit 1; }
+  && { echo "$GITLAB_PINS.ref missing in $VERSIONS"; exit 1; }
 
 log "siphon image: $SIPHON_IMAGE"
 log "gitlab ref:   $GITLAB_REF"
+
+OUTPUTS=("$OUT_PRODUCER" "$OUT_CONSUMER" "$OUT_RECONCILER")
+INPUTS_HASH="$(cat "$LAYOUT" "${BASH_SOURCE[0]}" | git hash-object --stdin | cut -c1-12)"
+VALUES_KEY="${GITLAB_REF}-${SIPHON_IMAGE##*:}-${INPUTS_HASH}"
+VALUES_URL="https://gitlab.com/api/v4/projects/${PKG_PROJECT}/packages/generic/siphon-cdc-values/${VALUES_KEY}"
+
+download_values() {
+  local out
+  for out in "${OUTPUTS[@]}"; do
+    curl -sfL --retry 3 --connect-timeout 15 --max-time 60 -o "$out.download" "$VALUES_URL/$(basename "$out")" \
+      || { rm -f "${OUTPUTS[@]/%/.download}"; return 1; }
+  done
+  for out in "${OUTPUTS[@]}"; do mv "$out.download" "$out"; done
+}
+
+publish_values() {
+  [[ -n "${CI_JOB_TOKEN:-}" ]] || return 0
+  local out
+  for out in "${OUTPUTS[@]}"; do
+    curl -sfL --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$out" "$VALUES_URL/$(basename "$out")" >/dev/null \
+      || { log "could not publish siphon-cdc-values @ $VALUES_KEY"; return 0; }
+  done
+  log "published siphon-cdc-values @ $VALUES_KEY"
+}
+
+if download_values; then
+  log "downloaded siphon-cdc-values @ $VALUES_KEY"
+  exit 0
+fi
+command -v docker >/dev/null \
+  || { echo "no siphon-cdc-values for $VALUES_KEY and no docker to generate them; run the e2e job for this lane once"; exit 1; }
 
 # Tmp dir must live somewhere the docker daemon can volume-mount. Under GitLab
 # CI's docker-in-docker the dind daemon only sees $CI_PROJECT_DIR; on macOS
@@ -158,3 +188,5 @@ log "overrode _without_traversal_path schedules to */10 * * * * *"
 log "wrote $OUT_PRODUCER"
 log "wrote $OUT_CONSUMER"
 log "wrote $OUT_RECONCILER"
+
+publish_values

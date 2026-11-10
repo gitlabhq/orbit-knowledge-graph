@@ -7,6 +7,7 @@ use std::time::Duration;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use ontology::introspection::SchemaResponse;
+use orbit_log_fields::{info, warn};
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::Frontend;
@@ -15,7 +16,7 @@ use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{Instrument, info, warn};
+use tracing::Instrument;
 
 use super::auth::extract_request_context;
 use crate::active_schema::ActiveSchema;
@@ -246,7 +247,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 self.active_schema
                     .snapshot()
                     .inspect_err(|error| {
-                        warn!(error = %error.message(), "Inlining the command catalog without relationship patterns");
+                        warn!(
+                            safe(ERROR_TYPE) = "schema_unavailable",
+                            expanded(ERROR_MESSAGE) = %error.message(),
+                            "Inlining the command catalog without relationship patterns"
+                        );
                     })
                     .ok()
             })
@@ -274,9 +279,9 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let req = request.get_ref();
         let requested = &req.command_names;
         info!(
-            command_count = requested.len(),
-            format = ?req.format,
-            "Listing agent commands for user"
+            safe(COUNT) = requested.len(),
+            safe(RESPONSE_FORMAT) = req.format,
+            "Listing requested agent commands for user"
         );
 
         let all_commands = CommandRegistry::commands_for(
@@ -340,7 +345,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             req.parameters_json.as_str()
         };
 
-        info!(command_name = %req.command_name, "Invoking agent command for user");
+        info!(
+            expanded(REQUESTED_NAME) = %req.command_name,
+            "Invoking agent command for user"
+        );
 
         let command = self
             .tool_service
@@ -432,7 +440,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     }
                 };
 
-                info!(query_len = query.text.len(), "Executing query");
+                info!(safe(SIZE_BYTES) = query.text.len(), "Executing query");
 
                 let render = |output| match output {
                     QueryServiceOutput::Schema(response) => {
@@ -465,7 +473,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 match result {
                     Ok(()) => {}
                     Err(e @ PipelineError::Streaming(_)) if tx.is_closed() => {
-                        info!(error = %e, "Client left before the query result");
+                        info!(
+                            safe(ERROR_TYPE) = e.code(),
+                            expanded(ERROR_MESSAGE) = %e,
+                            "Client left before the query result"
+                        );
                     }
                     Err(e @ PipelineError::Timeout) => {
                         send_query_error(&tx, e).await;
@@ -491,7 +503,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
-        info!(format = ?req.format, "Fetching graph schema for user");
+        info!(
+            safe(RESPONSE_FORMAT) = req.format,
+            "Fetching graph schema for user"
+        );
         let schema = self.active_schema.snapshot()?;
 
         let response = if req.format == ResponseFormat::Llm as i32 {
@@ -517,7 +532,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
-        info!(format = ?req.format, "Fetching query response format for user");
+        info!(
+            safe(RESPONSE_FORMAT) = req.format,
+            "Fetching query response format for user"
+        );
 
         let version = ToolService::build_response_format_version();
         let schema = ToolService::build_response_format_schema().to_string();
@@ -554,7 +572,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 "GQL has no query DSL document; run CALL db.schema() for the graph shape",
             ));
         }
-        info!(format = ?req.format, "Fetching query DSL grammar for user");
+        info!(
+            safe(RESPONSE_FORMAT) = req.format,
+            "Fetching query DSL grammar for user"
+        );
 
         let response = if req.format == ResponseFormat::Llm as i32 {
             let toon =
@@ -593,7 +614,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             })
             .collect();
 
-        info!(count = skills.len(), "Listing embedded skills");
+        info!(safe(COUNT) = skills.len(), "Listing embedded skills");
         Ok(Response::new(ListSkillsResponse {
             skills,
             server_version: orbit_utils::version::get().to_string(),
@@ -608,7 +629,12 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let req = request.get_ref();
         let frontend = query_frontend(req.language).map_err(Status::invalid_argument)?;
-        info!(skill_name = %req.name, metadata_only = req.metadata_only, ?frontend, "Fetching embedded skill");
+        info!(
+            expanded(REQUESTED_NAME) = %req.name,
+            safe(METADATA_ONLY) = req.metadata_only,
+            safe(QUERY_FRONTEND) = <&str>::from(frontend),
+            "Fetching embedded skill"
+        );
 
         let skill = get_skill(&req.name, frontend, req.metadata_only)
             .map_err(|error| Status::not_found(error.to_string()))?;
@@ -647,7 +673,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let queries = named_query_definitions(&schema.named_queries, frontend, &values)
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        info!(count = queries.len(), "Listing named queries");
+        info!(safe(COUNT) = queries.len(), "Listing named queries");
         Ok(Response::new(ListNamedQueriesResponse { queries }))
     }
 
@@ -658,7 +684,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
-        info!(format = ?req.format, "Fetching cluster health for user");
+        info!(
+            safe(RESPONSE_FORMAT) = req.format,
+            "Fetching cluster health for user"
+        );
 
         let response = self.cluster_health.get_cluster_health(req.format).await;
         Ok(Response::new(response))
@@ -677,7 +706,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let security_context =
             build_security_context(&claims).map_err(|e| Status::unauthenticated(e.to_string()))?;
 
-        info!(traversal_path = %traversal_path, format = ?req.format, "Fetching graph status for user");
+        info!(
+            safe(TRAVERSAL_PATH) = traversal_path.as_str(),
+            safe(RESPONSE_FORMAT) = req.format,
+            "Fetching graph status for user"
+        );
         let schema = self.active_schema.snapshot()?;
 
         let response = self
@@ -695,8 +728,8 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let paths = parse_authorized_paths(&ctx.claims, &request.get_ref().traversal_paths)?;
 
         info!(
-            path_count = paths.len(),
-            "Fetching indexing status for user"
+            safe(COUNT) = paths.len(),
+            "Fetching indexing status of traversal paths for user"
         );
         let schema = self.active_schema.snapshot()?;
         let statuses = self
@@ -711,18 +744,23 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         request: Request<GetItemCountsRequest>,
     ) -> Result<Response<GetItemCountsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        let path = parse_authorized_path(&ctx.claims, &request.get_ref().traversal_path)?;
+        let req = request.get_ref();
+        let paths = parse_authorized_paths(&ctx.claims, read_item_count_paths(req)?)?;
         let security_context = build_security_context(&ctx.claims)
             .map_err(|e| Status::unauthenticated(e.to_string()))?;
 
-        info!(traversal_path = %path, "Fetching item counts for user");
+        info!(
+            safe(COUNT) = paths.len(),
+            "Fetching item counts of traversal paths for user"
+        );
         let schema = self.active_schema.snapshot()?;
         let counts = self
             .item_counts
-            .count_items(&schema.ontology, &security_context, slice::from_ref(&path))
-            .await;
+            .count_items(&schema.ontology, &security_context, &paths)
+            .await?;
         Ok(Response::new(build_item_counts_response(
             &schema.ontology,
+            req,
             &counts,
         )))
     }
@@ -756,6 +794,8 @@ impl OrbitServiceImpl {
                                 .map(|ev| ev.values().cloned().collect())
                                 .unwrap_or_default(),
                             description: f.description.clone().unwrap_or_default(),
+                            text_searchable: Some(f.is_text_searchable()),
+                            default_column: Some(n.is_default_column(f)),
                         })
                         .collect()
                 } else {
@@ -891,6 +931,20 @@ fn named_query_definitions(
 
 const MAX_STATUS_PATHS: usize = 100;
 
+#[allow(deprecated)]
+fn read_item_count_paths(req: &GetItemCountsRequest) -> Result<&[String], Status> {
+    match (
+        req.traversal_path.is_empty(),
+        req.traversal_paths.is_empty(),
+    ) {
+        (false, false) => Err(Status::invalid_argument(
+            "set traversal_path or traversal_paths, not both",
+        )),
+        (_, true) => Ok(slice::from_ref(&req.traversal_path)),
+        (true, false) => Ok(req.traversal_paths.as_slice()),
+    }
+}
+
 fn parse_authorized_paths(claims: &Claims, paths: &[String]) -> Result<Vec<TraversalPath>, Status> {
     if paths.is_empty() || paths.len() > MAX_STATUS_PATHS {
         return Err(Status::invalid_argument(format!(
@@ -937,6 +991,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 mod tests {
     mod billing;
     mod commands;
+    mod compression;
     mod query_errors;
     mod quota;
     mod request_span;
@@ -1285,6 +1340,51 @@ mod tests {
     }
 
     #[test]
+    fn test_structured_schema_text_searchable_matches_the_query_validator() {
+        let ontology = test_ontology();
+        let model = compiler::data_model::clickhouse(Arc::clone(&ontology)).unwrap();
+        let ctx = compiler::SecurityContext::new_with_roles(
+            1,
+            vec![compiler::AuthorizedPath::new(
+                "1/",
+                compiler::AccessLevel::Owner as u32,
+            )],
+        )
+        .unwrap();
+        let response = OrbitServiceImpl::build_structured_schema(&ontology, &["*".to_string()]);
+
+        for node in &response.nodes {
+            for property in node.properties.iter().filter(|p| p.data_type != "Enum") {
+                let query = format!(
+                    "MATCH (n:{}) WHERE n.{} CONTAINS 'abc' RETURN n.id LIMIT 1",
+                    node.name, property.name
+                );
+                let compiles =
+                    compiler::compile_model(&query, compiler::Frontend::Gql, &model, &ctx).is_ok();
+                assert_eq!(property.text_searchable, Some(compiles), "{query}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_structured_schema_flags_default_columns() {
+        let response =
+            OrbitServiceImpl::build_structured_schema(&test_ontology(), &["Pipeline".to_string()]);
+        let pipeline = response
+            .nodes
+            .iter()
+            .find(|n| n.name == "Pipeline")
+            .unwrap();
+        let flagged: Vec<&str> = pipeline
+            .properties
+            .iter()
+            .filter(|p| p.default_column == Some(true))
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(flagged, ["id", "iid", "ref", "status", "source"]);
+    }
+
+    #[test]
     fn test_structured_schema_leaves_out_hidden_properties() {
         let response =
             OrbitServiceImpl::build_structured_schema(&test_ontology(), &["Project".to_string()]);
@@ -1444,6 +1544,8 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
+            user_type: None,
+            token_type: None,
             license_checksum: None,
         }
     }

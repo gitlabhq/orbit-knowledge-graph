@@ -1,0 +1,29 @@
+id: error-message-has-type
+language: rust
+severity: error
+message: Log a fixed `safe(ERROR_TYPE)` next to `expanded(ERROR_MESSAGE)`.
+note: |
+  The error message is written only on expanded lines. Without a fixed
+  error type, a line that is not expanded shows no cause. Use a
+  `&'static str` from the error, such as `<&str>::from(&e)`, or a literal.
+rule:
+  any:
+    - matches: tracing-macro
+    - matches: nested-tracing-args
+  has:
+    stopBy: end
+    kind: identifier
+    regex: '^expanded$'
+    precedes:
+      kind: token_tree
+      regex: '^\(\s*ERROR_MESSAGE\s*\)$'
+  not:
+    any:
+      - has:
+          stopBy: end
+          kind: identifier
+          regex: '^safe$'
+          precedes:
+            kind: token_tree
+            regex: '^\(\s*ERROR_TYPE\s*\)$'
+      - matches: test-code

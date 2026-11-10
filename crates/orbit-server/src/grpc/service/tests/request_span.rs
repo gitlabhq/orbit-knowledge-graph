@@ -94,7 +94,7 @@ async fn verbose_logs_flag_expands_the_request() {
 
     assert!(line.contains(r#""expanded_logs_requested":true"#), "{line}");
     assert!(line.contains(r#""log_expanded":true"#), "{line}");
-    assert!(line.contains(r#""user_id":1"#), "{line}");
+    assert!(line.contains(r#""gl_user_id":1"#), "{line}");
 }
 
 #[tokio::test]

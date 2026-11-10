@@ -35,7 +35,7 @@ async fn skips_when_no_virtual_columns() {
     let mut map = file_property_map();
     let original_len = map.values().next().unwrap().len();
 
-    resolve_virtual_columns(&registry, &rctx, &specs, &mut map)
+    resolve_virtual_columns(&registry, &rctx, &specs, &mut map, 100)
         .await
         .unwrap();
 
@@ -54,7 +54,7 @@ async fn merges_results_into_property_map() {
     let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
     let mut map = file_property_map();
 
-    resolve_virtual_columns(&registry, &rctx, &specs, &mut map)
+    resolve_virtual_columns(&registry, &rctx, &specs, &mut map, 100)
         .await
         .unwrap();
 
@@ -78,7 +78,7 @@ async fn errors_for_unknown_service() {
     let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
     let mut map = file_property_map();
 
-    let err = resolve_virtual_columns(&registry, &rctx, &specs, &mut map)
+    let err = resolve_virtual_columns(&registry, &rctx, &specs, &mut map, 100)
         .await
         .unwrap_err();
 
@@ -100,7 +100,7 @@ async fn skips_unmatched_entity_type() {
     let mut map = file_property_map();
     let original_len = map.values().next().unwrap().len();
 
-    resolve_virtual_columns(&registry, &rctx, &specs, &mut map)
+    resolve_virtual_columns(&registry, &rctx, &specs, &mut map, 100)
         .await
         .unwrap();
 
@@ -119,7 +119,7 @@ async fn errors_when_batch_size_exceeded() {
     let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
     let mut map = file_property_map();
 
-    let err = resolve_virtual_columns(&registry, &rctx, &specs, &mut map)
+    let err = resolve_virtual_columns(&registry, &rctx, &specs, &mut map, 1)
         .await
         .unwrap_err();
 

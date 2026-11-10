@@ -17,4 +17,4 @@ physical:
       reject: ["(Scan Table(gl_code_edge) ...)"]
   duckdb:
     planned:
-      expect: ["(Scan Table(gl_edge) AS e0)"]
+      expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]

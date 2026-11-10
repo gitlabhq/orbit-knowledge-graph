@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::constants::DEFAULT_PRIMARY_KEY;
-use crate::etl::{EdgeMapping, NodeRef, Pipeline, ReindexSource};
+use crate::etl::{EdgeMapping, NodeRef, NodeRefKind, Pipeline, ReindexSource};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -367,8 +367,42 @@ impl Default for NodeEntity {
 }
 
 impl NodeEntity {
+    pub fn reference_properties(&self) -> impl Iterator<Item = &str> {
+        self.pipelines
+            .iter()
+            .flat_map(|pipeline| pipeline.transform.edges())
+            .flat_map(|edge| [&edge.source, &edge.target])
+            .filter(|end| !matches!(&end.kind, NodeRefKind::Literal(kind) if *kind == self.name))
+            .filter_map(|end| {
+                self.fields
+                    .iter()
+                    .find(|field| field.column_name() == Some(end.field.as_str()))
+            })
+            .map(|field| field.name.as_str())
+    }
+
+    /// Column-backed fields marked `mutable: false` outside the sort key. A tombstone must carry
+    /// them, or a pre-pick filter on one rejects the tombstone and resurrects an older live row.
+    pub fn immutable_columns(&self) -> Vec<&str> {
+        self.fields
+            .iter()
+            .filter(|field| !field.mutable && field.column_name().is_some())
+            .map(|field| field.name.as_str())
+            .filter(|name| !self.sort_key.iter().any(|key| key == name))
+            .collect()
+    }
+
     pub fn listed_fields(&self) -> impl Iterator<Item = &Field> {
         self.fields.iter().filter(|field| !field.hidden)
+    }
+
+    pub fn is_default_column(&self, field: &Field) -> bool {
+        !field.admin_only
+            && (self.default_columns.is_empty()
+                || self
+                    .default_columns
+                    .iter()
+                    .any(|column| column == &field.name))
     }
 }
 
@@ -568,6 +602,9 @@ pub struct Field {
     /// High-selectivity columns (IDs, paths, names) narrow effectively.
     /// Derived automatically from `data_type` unless overridden in YAML.
     pub selectivity: FieldSelectivity,
+    /// One live row per value within its namespace, so an equality on it is a point lookup.
+    pub unique: bool,
+    pub high_fan_out: bool,
     pub description: Option<String>,
     pub traversal_path_lookup: Option<TraversalPathLookupSpec>,
     pub mutable: bool,
@@ -592,6 +629,8 @@ impl Default for Field {
             admin_only: false,
             hidden: false,
             selectivity: FieldSelectivity::High,
+            unique: false,
+            high_fan_out: false,
             description: None,
             traversal_path_lookup: None,
             mutable: true,
@@ -613,6 +652,14 @@ impl Field {
 
     pub fn is_virtual(&self) -> bool {
         matches!(self.source, FieldSource::Virtual(_))
+    }
+
+    pub fn is_text_searchable(&self) -> bool {
+        self.like_allowed
+            && self.filterable
+            && !self.is_virtual()
+            && !self.admin_only
+            && matches!(self.data_type, DataType::String | DataType::Uuid)
     }
 }
 

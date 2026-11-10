@@ -6,7 +6,7 @@ First-run setup and the common `glab orbit` errors, organised by exit code. See 
 
 Read this when a command fails with "command not found", an auth error, or a feature-flag exit code. A working setup does not need these checks on every call.
 
-1. glab v1.117.0 or later, with the Orbit commands:
+1. glab v1.126.0 or later, with the Orbit commands:
 
    ```sh
    glab --version
@@ -22,19 +22,19 @@ Read this when a command fails with "command not found", an auth error, or a fea
    glab auth login    # if not authenticated
    ```
 
-3. Orbit Remote: the feature flag is on for your namespace:
+3. GitLab Orbit API: GitLab Orbit is on for your group:
 
    ```sh
-   glab orbit graph-status --full-path GROUP_NAMESPACE
+   glab orbit status --full-path GROUP_NAMESPACE
    ```
 
-   Exit 0 means ready to query. Exit 2 means the flag is off; ask your GitLab admin.
+   0: ready. 1: error. 2: no GitLab Orbit. 3: bad token. 4: GitLab Orbit off, or below Reporter. 5: rate limit.
 
-4. Orbit Local: no server needed:
+4. Local graph: no server needed. `grep` and `context` index the checkout on first use:
 
    ```sh
    glab orbit --install --yes
-   glab orbit index /path/to/your/repo
+   glab orbit grep "parse config"
    ```
 
    If `glab orbit` cannot find the managed binary, add `"$HOME/.config/glab-cli/bin/"` to `PATH`.
@@ -81,7 +81,7 @@ Common causes: a malformed `--file` request envelope, an unreachable hostname (c
 
 ## Named-query catalog
 
-The catalog lists parameterless named queries rendered in the caller's active mode. `raw_query` is a JSON query object when the per-user `orbit_gql_queries` flag is off and GQL text when on. There is no language field. Rails supplies the explorer's mode directly; an empty catalog does not reset it to JSON. The catalog binds caller identity and mode, so do not reuse another caller's response or retain it across mode changes. JSON queries reject in GQL mode, and GQL strings reject in JSON mode. There is no client override or parser fallback. Missing entries can require client parameters or depend on entities unavailable in the active schema.
+The catalog lists parameterless named queries. `raw_query` is GQL text. There is no language field. The catalog binds caller identity, so do not reuse another caller's response. Missing entries can require client parameters or depend on entities unavailable in the active schema.
 
 ## Query errors
 

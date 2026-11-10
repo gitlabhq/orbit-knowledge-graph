@@ -44,7 +44,7 @@ mod tests {
     fn reordered_tables_retain_source_columns_and_dependencies() {
         let model = ClickHouseDataModel::derive(overlay_ontology("reordered_edges")).unwrap();
         let layouts = model.backend().equivalent_layouts("gl_code_edge");
-        assert!(layouts.is_empty());
+        assert_eq!(layouts, ["gl_code_edge_by_target"]);
         let storage = model.layout().schema();
         let source = storage.table("gl_code_edge").unwrap();
         let copy = storage.table("gl_code_edge_by_target").unwrap();
@@ -268,14 +268,14 @@ mod tests {
     }
 
     #[test]
-    fn hides_traversal_path_only_in_the_remote_model() {
+    fn hides_traversal_path_in_remote_and_local_models() {
         let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
         let remote = ClickHouseDataModel::derive(Arc::clone(&ontology)).unwrap();
         let local = DuckDbDataModel::derive(ontology).unwrap();
         let property = remote.property("Definition", "traversal_path").unwrap().id;
 
         assert!(remote.property_is_hidden(property));
-        assert!(!local.property_is_hidden(property));
+        assert!(local.property_is_hidden(property));
     }
 
     #[test]

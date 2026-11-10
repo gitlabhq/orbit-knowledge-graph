@@ -1,28 +1,28 @@
-use std::error::Error as StdError;
 use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_log_fields::{error, warn};
 use thiserror::Error;
-use tracing::{error, warn};
 
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
 use crate::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum WriteError {
     #[error("failed to write: {0}")]
-    Write(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
+    Write(String),
 
-    #[error("connection error: {0}")]
-    Connection(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
+    #[error("graph store unavailable: {0}")]
+    Unavailable(String),
 }
 
 impl From<RetryExhausted> for WriteError {
     fn from(e: RetryExhausted) -> Self {
-        WriteError::Write(e.to_string(), None)
+        WriteError::Write(e.to_string())
     }
 }
 
@@ -98,8 +98,9 @@ impl ClickHouseWriter {
                 Err(e) => {
                     self.metrics.record_unmeterable_batch(table);
                     error!(
-                        table,
-                        error = %e,
+                        safe(TABLE) = table,
+                        safe(ERROR_TYPE) = "unsupported_arrow_type",
+                        expanded(ERROR_MESSAGE) = %e,
                         "batch has no logical-byte-size rule; counting 0 bytes and writing anyway"
                     );
                     0
@@ -153,8 +154,15 @@ impl ClickHouseWriter {
             async move {
                 match fut.await {
                     Ok(report) => Step::Done(report),
+                    Err(e @ WriteError::Unavailable(_)) => Step::GiveUp(e),
                     Err(e) => {
-                        warn!(table, attempt = attempt + 1, error = %e, "durable write failed");
+                        warn!(
+                            safe(TABLE) = table,
+                            safe(ATTEMPT) = attempt + 1,
+                            safe(ERROR_TYPE) = <&str>::from(&e),
+                            expanded(ERROR_MESSAGE) = %e,
+                            "durable write failed"
+                        );
                         WRITE_RETRY.retry_or_give_up(attempt, (), e)
                     }
                 }
@@ -172,7 +180,7 @@ impl ClickHouseWriter {
             .query(sql)
             .execute()
             .await
-            .map_err(|e| WriteError::Write(e.to_string(), None))
+            .map_err(WriteError::from)
     }
 }
 

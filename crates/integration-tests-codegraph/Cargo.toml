@@ -25,4 +25,3 @@ orbit-arrow = { path = "../utils/arrow" }
 tabled = { workspace = true }
 anyhow = { workspace = true }
 tempfile = { workspace = true }
-walkdir = { workspace = true }

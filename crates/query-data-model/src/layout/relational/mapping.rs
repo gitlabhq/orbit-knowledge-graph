@@ -105,6 +105,13 @@ impl DenormalizedCatalog {
 }
 
 pub trait RelationalMapping: Send + Sync {
+    fn supports_selective_latest_rows(&self) -> bool {
+        false
+    }
+
+    fn supports_deferred_node_loading(&self) -> bool {
+        true
+    }
     fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute>;
     fn equivalent_layouts(&self, _table: &str) -> Vec<&str> {
         Vec::new()
@@ -115,6 +122,8 @@ pub trait RelationalMapping: Send + Sync {
     fn entity_table(&self, entity: EntityId) -> Option<&str>;
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: EntityId) -> bool;
+    fn entity_high_fan_out(&self, entity: EntityId) -> bool;
+    fn property_is_foreign_key(&self, property: PropertyId) -> bool;
     fn default_properties(&self, entity: EntityId) -> &[PropertyId];
     fn property_column(&self, property: PropertyId) -> Option<&str> {
         match self.property_realization(property)? {
@@ -126,7 +135,9 @@ pub trait RelationalMapping: Send + Sync {
     fn property_selectivity(&self, property: PropertyId) -> Option<ontology::FieldSelectivity>;
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType>;
     fn has_text_index(&self, property: PropertyId) -> bool;
-    fn table_path_scopable(&self, table: &str) -> bool;
+    fn null_as_epoch(&self, property: PropertyId) -> bool;
+    fn property_unique(&self, property: PropertyId) -> bool;
+    fn property_mutable(&self, property: PropertyId) -> bool;
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]>;
     fn default_edge_table(&self) -> &str;
     fn relationship_table(&self, relationship: RelationshipId) -> Option<&str>;

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -9,7 +9,7 @@ use super::{
     write_unless_unchanged,
 };
 use crate::commands::setup::Target;
-use crate::commands::setup::spec::{self, Agent, TemplateFile};
+use crate::commands::setup::spec::{self, Agent, Registration, ScopedPath, TemplateFile};
 
 pub(super) struct Hooks;
 
@@ -19,10 +19,12 @@ impl Installer for Hooks {
             .json_merges
             .iter()
             .map(|merge| &merge.file)
-            .chain(agent.template_files.iter().map(|file| &file.path))
-            .chain(agent.registrations.iter().map(|entry| &entry.file))
+            .chain(agent.ui_files(false).map(|file| &file.path))
+            .chain(agent.ui_registrations(false).map(|entry| &entry.file))
             .map(|scoped| target.resolve(scoped).map(|(_, label)| label))
             .collect::<Result<_>>()?;
+        let mut files = files;
+        files.extend(retired_labels(agent, false, target)?);
         Ok(files.into_iter().collect())
     }
 
@@ -46,7 +48,7 @@ impl Installer for Hooks {
                 .resolve(&merge.file)
                 .is_ok_and(|(path, _)| file_mentions(&path, &merge.marker))
         });
-        let templated = agent.template_files.iter().any(|template_file| {
+        let templated = agent.all_ui_files(false).any(|template_file| {
             target
                 .resolve(&template_file.path)
                 .is_ok_and(|(path, _)| path.exists())
@@ -70,34 +72,24 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
         json::replace_marked_entries(&mut root, &merge.path, &merge.marker, &entries)
             .with_context(|| format!("failed to update {}", path.display()))?;
         let installed = json::render(&root)?;
+        let changed = std::fs::read(&path).map_or(true, |current| current != installed.as_bytes());
         write_unless_unchanged(&path, &label, &installed, "orbit entries installed", report)?;
-    }
-
-    for template_file in &agent.template_files {
-        let (path, label) = target.resolve(&template_file.path)?;
-        let written_by_orbit = std::fs::read_to_string(&path)
-            .is_ok_and(|current| TemplateFile::is_unmodified(&current));
-        if !written_by_orbit {
-            backup_once(&path, &label, report)?;
-        }
-        write_unless_unchanged(&path, &label, &template_file.render(), "written", report)?;
-    }
-
-    for registration in &agent.registrations {
-        let (path, label) = target.resolve(&registration.file)?;
-        let value = target.registration_value(&registration.value)?;
-        let (_, value_label) = target.resolve(&registration.value)?;
-        let mut root = json::read_object(&path)?;
-        if json::append_unique(&mut root, &registration.path, &value)
-            .with_context(|| format!("failed to update {}", path.display()))?
-        {
-            backup_once(&path, &label, report)?;
-            json::write_object(&path, &root)?;
-            report.note(&label, format!("{value_label} registered"));
+        let note = merge.review_note.as_ref().and_then(|note| match target {
+            Target::Project(_) => note.project.as_ref(),
+            Target::Global(_) => note.global.as_ref(),
+        });
+        if let Some(note) = note.filter(|_| changed) {
+            report.note(&label, format!("WARNING: {note}"));
         }
     }
 
-    Ok(())
+    install_files(
+        agent.ui_files(false),
+        agent.ui_registrations(false),
+        target,
+        report,
+    )?;
+    remove_retired(agent, false, target, report)
 }
 
 fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Result<()> {
@@ -112,22 +104,184 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
         }
     }
 
-    for template_file in &agent.template_files {
-        let (path, label) = target.resolve(&template_file.path)?;
-        if !path.exists() {
-            continue;
-        }
-        let current = std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        if !TemplateFile::is_unmodified(&current) {
-            report.note(&label, "kept (edited since install; delete it by hand)");
-            continue;
-        }
-        remove_file_and_empty_parents(&path, target)?;
-        report.note(&label, "removed");
-    }
+    remove_files(
+        agent
+            .ui_files(false)
+            .filter(|file| file.feature.is_none())
+            .map(|file| &file.path),
+        agent.ui_registrations(false),
+        target,
+        report,
+    )?;
+    remove_by_feature(agent.feature_files(false), target, report)?;
+    remove_retired_only(agent, false, target, report)
+}
 
-    for registration in &agent.registrations {
+/// Removes what an earlier release installed. A config file is read only when it names a retired
+/// value, so a config Orbit never wrote to, such as one with comments, is left alone.
+pub(super) fn remove_retired(
+    agent: Agent,
+    ui: bool,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    remove_by_feature(agent.switched_off_files(ui), target, report)?;
+    remove_retired_only(agent, ui, target, report)
+}
+
+pub(super) fn remove_retired_only(
+    agent: Agent,
+    ui: bool,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    for file in agent.retired_files(ui) {
+        remove_file(file, KEPT_RETIRED, target, report)?;
+    }
+    for registration in agent.retired_registrations(ui) {
+        let (path, _) = target.resolve(&registration.file)?;
+        let value = target.registration_value(&registration.value)?;
+        if file_mentions(&path, &value) {
+            remove_files(
+                std::iter::empty(),
+                std::iter::once(registration),
+                target,
+                report,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Removes feature files together or not at all: an edited file kept without its siblings, such
+/// as an extension entry point without the module it imports, would stop working.
+pub(super) fn remove_by_feature<'a>(
+    files: impl Iterator<Item = &'a TemplateFile>,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    let mut by_feature: BTreeMap<&str, Vec<&ScopedPath>> = BTreeMap::new();
+    for file in files {
+        by_feature
+            .entry(file.feature.as_deref().unwrap_or_default())
+            .or_default()
+            .push(&file.path);
+    }
+    for group in by_feature.into_values() {
+        remove_group(group, target, report)?;
+    }
+    Ok(())
+}
+
+fn remove_group(files: Vec<&ScopedPath>, target: &Target, report: &mut Report) -> Result<()> {
+    let mut edited = false;
+    for file in &files {
+        let (path, _) = target.resolve(file)?;
+        if let Ok(current) = std::fs::read_to_string(&path) {
+            edited |= !TemplateFile::is_unmodified(&current);
+        }
+    }
+    for file in files {
+        if edited {
+            let (path, label) = target.resolve(file)?;
+            if path.exists() {
+                report.note(&label, KEPT_FEATURE);
+            }
+        } else {
+            remove_file(file, KEPT_FEATURE, target, report)?;
+        }
+    }
+    Ok(())
+}
+
+/// The labels of the retired files and config files that setup would touch to clean up.
+pub(super) fn retired_labels(agent: Agent, ui: bool, target: &Target) -> Result<Vec<String>> {
+    let mut labels = Vec::new();
+    let switched_off = agent.switched_off_files(ui).map(|file| &file.path);
+    for file in agent.retired_files(ui).chain(switched_off) {
+        let (path, label) = target.resolve(file)?;
+        if path.exists() {
+            labels.push(label);
+        }
+    }
+    for registration in agent.retired_registrations(ui) {
+        let (path, label) = target.resolve(&registration.file)?;
+        let value = target.registration_value(&registration.value)?;
+        if file_mentions(&path, &value) {
+            labels.push(label);
+        }
+    }
+    Ok(labels)
+}
+
+pub(super) fn install_files<'a>(
+    files: impl Iterator<Item = &'a TemplateFile>,
+    registrations: impl Iterator<Item = &'a Registration>,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    for template_file in files {
+        let (path, label) = target.resolve(&template_file.path)?;
+        let written_by_orbit = std::fs::read_to_string(&path)
+            .is_ok_and(|current| TemplateFile::is_unmodified(&current));
+        if !written_by_orbit {
+            backup_once(&path, &label, report)?;
+        }
+        write_unless_unchanged(&path, &label, &template_file.render(), "written", report)?;
+    }
+    for registration in registrations {
+        let (path, label) = target.resolve(&registration.file)?;
+        let value = target.registration_value(&registration.value)?;
+        let (_, value_label) = target.resolve(&registration.value)?;
+        let mut root = json::read_object(&path)?;
+        if json::append_unique(&mut root, &registration.path, &value)
+            .with_context(|| format!("failed to update {}", path.display()))?
+        {
+            backup_once(&path, &label, report)?;
+            json::write_object(&path, &root)?;
+            report.note(&label, format!("{value_label} registered"));
+        }
+    }
+    Ok(())
+}
+
+pub(in crate::commands::setup) const KEPT_RETIRED: &str =
+    "kept (no longer used by Orbit; delete it by hand)";
+pub(in crate::commands::setup) const KEPT_FEATURE: &str =
+    "kept (feature file, edited or next to an edited one; delete it by hand)";
+const KEPT_EDITED: &str = "kept (edited since install; delete it by hand)";
+
+fn remove_file(
+    file: &ScopedPath,
+    kept_note: &str,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    let (path, label) = target.resolve(file)?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let current = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    if !TemplateFile::is_unmodified(&current) {
+        report.note(&label, kept_note);
+        return Ok(());
+    }
+    remove_file_and_empty_parents(&path, target)?;
+    report.note(&label, "removed");
+    Ok(())
+}
+
+pub(super) fn remove_files<'a>(
+    files: impl Iterator<Item = &'a ScopedPath>,
+    registrations: impl Iterator<Item = &'a Registration>,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    for file in files {
+        remove_file(file, KEPT_EDITED, target, report)?;
+    }
+    for registration in registrations {
         let (path, label) = target.resolve(&registration.file)?;
         if !path.exists() {
             continue;
@@ -138,13 +292,19 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
             json::write_or_delete_when_empty(&path, &root, target, &label, report)?;
         }
     }
-
     Ok(())
 }
 
 fn substitute_tokens_in_json(value: &Value) -> Value {
     match value {
-        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher())),
+        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher()).replace(
+            "{{hook_gitlab}}",
+            if spec::reaches_gitlab() {
+                " --gitlab"
+            } else {
+                ""
+            },
+        )),
         Value::Array(items) => Value::Array(items.iter().map(substitute_tokens_in_json).collect()),
         Value::Object(map) => Value::Object(
             map.iter()
@@ -152,5 +312,94 @@ fn substitute_tokens_in_json(value: &Value) -> Value {
                 .collect(),
         ),
         other => other.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_edited_retired_file_is_kept_with_a_note_that_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
+        let retired = dir.path().join(".opencode/plugins/orbit-ui.js");
+        std::fs::create_dir_all(retired.parent().unwrap()).unwrap();
+        std::fs::write(&retired, "// my own plugin\n").unwrap();
+        let mut report = Report::default();
+
+        remove_retired(
+            spec::agent_named("opencode").unwrap(),
+            true,
+            &target,
+            &mut report,
+        )
+        .unwrap();
+
+        assert!(retired.is_file());
+        assert_eq!(report.outcomes.len(), 1);
+        assert_eq!(report.outcomes[0].action, KEPT_RETIRED);
+    }
+
+    #[test]
+    fn review_notes_show_for_their_scope_only_when_the_hook_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
+        let notes = |agent: &str| {
+            let mut report = Report::default();
+            install_for_agent(spec::agent_named(agent).unwrap(), &target, &mut report).unwrap();
+            report
+                .outcomes
+                .iter()
+                .filter(|outcome| outcome.action.starts_with("WARNING: "))
+                .map(|outcome| outcome.action.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let codex = notes("codex");
+        assert_eq!(codex.len(), 1, "{codex:?}");
+        assert!(codex[0].contains("/hooks in Codex"), "{codex:?}");
+        assert!(
+            notes("codex").is_empty(),
+            "an unchanged hook file asks nothing again"
+        );
+        let duo = notes("duo");
+        assert!(duo[0].contains("--enable-project-hooks"), "{duo:?}");
+    }
+
+    #[test]
+    fn an_edited_feature_file_keeps_its_siblings_but_not_other_features() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
+        let file = |feature: &str, name: &str| TemplateFile {
+            path: ScopedPath {
+                project: format!(".pi/extensions/orbit-{feature}/{name}"),
+                global: format!("unused/{feature}/{name}"),
+            },
+            template: "output-guard/core.mjs".to_string(),
+            ui: true,
+            feature: Some(feature.to_string()),
+        };
+        let files = [
+            file("a", "index.js"),
+            file("a", "core.mjs"),
+            file("b", "index.js"),
+        ];
+        for file in &files {
+            let (path, _) = target.resolve(&file.path).unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, file.render()).unwrap();
+        }
+        let (edited, _) = target.resolve(&files[0].path).unwrap();
+        std::fs::write(&edited, "// my own edit\n").unwrap();
+        let mut report = Report::default();
+
+        remove_by_feature(files.iter(), &target, &mut report).unwrap();
+
+        let exists = |file: &TemplateFile| target.resolve(&file.path).unwrap().0.exists();
+        assert!(exists(&files[0]) && exists(&files[1]) && !exists(&files[2]));
+        let kept = report.outcomes.iter().filter(|o| o.action == KEPT_FEATURE);
+        assert_eq!(kept.count(), 2);
+        assert!(!KEPT_FEATURE.contains("ORBIT_NIGHTLY"));
     }
 }

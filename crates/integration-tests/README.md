@@ -33,7 +33,7 @@ The three container-test lanes run each container test one time.
 `integration-test-lane-coverage-check` fails if a test is in no lane or in two lanes.
 
 New correctness tests are YAML suites. See
-[Testing principles](../../docs/design-documents/testing.md#testing-principles).
+[Testing principles](../../docs/pages/engineering/testing/README.md#principles).
 
 ## Running
 
@@ -47,7 +47,7 @@ colima stop gkg
 ```
 
 For the other `mise test:integration:*` tasks, see
-[Container tests](../../docs/design-documents/testing.md#container-tests).
+[Container tests](../../docs/pages/engineering/testing/integration/containers.md).
 
 To run specific suites or tests directly:
 
@@ -102,17 +102,16 @@ See the [integration-testkit README](../integration-testkit/README.md) for the
 
 ### Rust-only data correctness tests
 
-Four tests remain in [retained.rs](tests/server/data_correctness/retained.rs).
+Three tests remain in [retained.rs](tests/server/data_correctness/retained.rs).
 They check internal execution contracts or comparisons that YAML does not express:
 
 | Test | Reason |
 |------|--------|
-| `cursor_after_token_with_sql_metacharacters_is_parameterized` | Uses the current encoder to build an injection token, then checks that the user table remains intact. |
 | `long_node_text_is_excerpted_only_on_wide_pages` | Checks exact narrow-page text and requires the wide-page excerpt to be shorter than the original text. |
 | `path_finding_code_filtered_endpoints_stay_on_same_traversal_path` | Inspects raw path rows before redaction and hydration, and excludes a cross-project decoy. |
 | `semantic_aggregate_and_nested_cte_codegen_execute` | Executes a constructed compiler AST to check conditional counts, nested CTEs, and UNION arms. |
 
-The first three share the seeded `data_correctness` test. The codegen test uses
+The first two share the seeded `data_correctness` test. The codegen test uses
 its own table. Both entrypoints and the YAML scenarios run with
 `mise test:integration:data`.
 

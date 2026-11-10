@@ -56,7 +56,7 @@ pub fn derive_clickhouse_data_model(
         .expect("test ontology should produce a ClickHouse data model")
 }
 
-pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "/siphon.sql"));
+pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("SEEDS_DIR"), "/siphon.sql"));
 
 /// Version 0 -> "" (empty), version N -> "vN_".
 pub static TABLE_PREFIX: std::sync::LazyLock<String> =

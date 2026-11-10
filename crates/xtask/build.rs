@@ -1,4 +1,4 @@
-//! Fails the build when `docs/dev/agents-crate-map.md` drifts from the
+//! Fails the build when `docs/pages/engineering/development/agents-crate-map.md` drifts from the
 //! `[workspace].members` in the root `Cargo.toml`. Name-presence only;
 //! descriptions are not checked. Parsing/diffing lives in
 //! `build_support/crate_map_drift.rs` so the test target can `include!` it.
@@ -10,7 +10,7 @@ include!("build_support/crate_map_drift.rs");
 fn main() {
     let root = workspace_root();
     let manifest = root.join("Cargo.toml");
-    let crate_map = root.join("docs/dev/agents-crate-map.md");
+    let crate_map = root.join("docs/pages/engineering/development/agents-crate-map.md");
 
     println!("cargo:rerun-if-changed={}", manifest.display());
     println!("cargo:rerun-if-changed={}", crate_map.display());

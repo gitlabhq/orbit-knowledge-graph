@@ -21,6 +21,6 @@ physical:
         - (Scan Table(gl_code_edge) AS e0)
     emitted:
       expect:
-        - (Project _orbit_edge_0.relationship_kind AS e0_type, _orbit_edge_0.source_id AS e0_src, ... (_))
+        - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, _orbit_edge_0.source_id AS _orbit_e0_src, ... (_))
       reject:
         - (Scan Table(gl_code_edge) AS e0)

@@ -27,18 +27,16 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::ast::visit::{visit_queries_mut, visit_relations};
-use crate::ast::{Expr, Function, Node, Query, TableRef};
+use crate::ast::{Expr, Function, Node, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
-#[cfg(test)]
-use ontology::Ontology;
 use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 
 static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 
-/// Per-alias role floors come from `ontology.min_access_level_for_table`;
-/// tables without a `redaction` block keep the historical Reporter floor.
+/// Per-alias role floors come from the query data model.
+/// Tables without authorization metadata keep the historical Reporter floor.
 pub fn apply_security_context(
     node: &mut Node,
     ctx: &SecurityContext,
@@ -60,142 +58,104 @@ pub fn apply_security_context(
                 .into(),
         ));
     }
-    match node {
-        Node::Query(q) => visit_queries_mut(q, &mut |query| apply_to_query(query, ctx, model)),
-        Node::Insert(_) => Ok(()),
-    }
-}
-
-fn apply_to_query(
-    q: &mut Query,
-    ctx: &SecurityContext,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Result<()> {
-    let aliased_tables = collect_aliased_tables(&q.from, model);
-    if !aliased_tables.is_empty() {
-        let security_conds = aliased_tables.iter().map(|(alias, table)| {
-            let min_role = model.table_minimum_access_level(table);
-            let eligible = ctx.paths_at_least(min_role);
-            let broad = build_path_filter(alias, &eligible);
-            match ctx.scope_proofs.get(alias) {
-                Some(scope) if model.table_path_scopable(table) => {
-                    Expr::and(broad, crate::scope::scope_predicate(scope, alias))
+    let Node::Query(query) = node else {
+        return Ok(());
+    };
+    visit_queries_mut(query, &mut |query| {
+        let mut aliased_tables = Vec::new();
+        visit_relations(&query.from, &mut |relation| {
+            if let TableRef::Scan { table, alias, .. } = relation {
+                let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
+                    Regex::new(&format!(
+                        r"^(?:v\d+_)?{}.+$",
+                        regex::escape(GL_TABLE_PREFIX)
+                    ))
+                    .expect("valid regex")
+                });
+                if graph_table_pattern.is_match(table) && model.table_has_path_columns(table) {
+                    aliased_tables.push((alias.clone(), table.clone()));
                 }
-                _ => broad,
             }
         });
-        q.where_clause = Expr::and_all(
-            security_conds
+        let security_conditions = aliased_tables.iter().map(|(alias, table)| {
+            let min_role = model.table_minimum_access_level(table);
+            let eligible = ctx.paths_at_least(min_role);
+            build_path_filter(alias, &eligible)
+        });
+        query.where_clause = Expr::and_all(
+            security_conditions
                 .map(Some)
-                .chain(std::iter::once(q.where_clause.take())),
+                .chain(std::iter::once(query.where_clause.take())),
         );
-    }
-
-    Ok(())
+        Ok(())
+    })
 }
 
 fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
+    let starts_with = |path: &str| {
+        Expr::func(
+            Function::StartsWith,
+            vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(path)],
+        )
+    };
     match paths.len() {
         0 => Expr::Literal(Value::Bool(false)),
-        1 => starts_with_expr(alias, paths[0].as_str()),
+        1 => starts_with(paths[0].as_str()),
         _ => {
             let collapsed = TraversalPathTrie::from_paths(paths).to_minimal_prefixes();
-            if collapsed.len() == 1 {
-                return starts_with_expr(alias, collapsed[0].as_str());
+            if let [path] = collapsed.as_slice() {
+                return starts_with(path.as_str());
             }
-            path_or_filter(alias, &collapsed)
+            Expr::or_all(
+                collapsed
+                    .iter()
+                    .map(|path| Some(starts_with(path.as_str()))),
+            )
+            .expect("paths is non-empty")
         }
     }
-}
-
-fn starts_with_expr(alias: &str, path: &str) -> Expr {
-    starts_with_value_expr(alias, Expr::string(path))
-}
-
-fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
-    Expr::func(
-        Function::StartsWith,
-        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path],
-    )
-}
-
-/// OR chain of `startsWith(alias.traversal_path, path)` for each path.
-///
-/// Each `startsWith` is visible to ClickHouse's PK index analyser, enabling
-/// granule pruning per path prefix. This matters inside `dedup_edge_scan`
-/// FINAL subqueries: PK range pruning reduces the scan from the entire LCP
-/// namespace to only the user's authorized paths.
-fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
-    Expr::or_all(
-        paths
-            .iter()
-            .map(|path| Some(starts_with_expr(alias, path.as_str()))),
-    )
-    .expect("paths is non-empty (caller checks)")
-}
-
-/// Collect `(alias, table)` pairs for every scan that should receive a
-/// security filter. Returning the table lets the caller pick a per-entity
-/// minimum role before building the `startsWith(...)` predicate.
-pub(crate) fn collect_aliased_tables(
-    table_ref: &TableRef,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Vec<(String, String)> {
-    let mut aliases = Vec::new();
-    visit_relations(table_ref, &mut |relation| {
-        if let TableRef::Scan { table, alias, .. } = relation
-            && should_apply_security_filter(table, model)
-        {
-            aliases.push((alias.clone(), table.clone()));
-        }
-    });
-    aliases
-}
-
-/// Handles both unprefixed (`gl_user`) and schema-version-prefixed
-/// (`v1_gl_user`) table names. CTEs like `path_cte` are excluded.
-fn should_apply_security_filter(
-    table: &str,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> bool {
-    let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
-        Regex::new(&format!(
-            r"^(?:v\d+_)?{}.+$",
-            regex::escape(GL_TABLE_PREFIX)
-        ))
-        .expect("valid regex")
-    });
-
-    graph_table_pattern.is_match(table) && model.table_has_path_columns(table)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, LazyLock};
+
     use crate::AuthorizedPath;
     use crate::ast::visit::{visit_expressions, visit_queries};
-    use crate::ast::{JoinType, Op, SelectExpr};
-    use crate::scope::ScopeProof;
+    use crate::ast::{JoinType, Op, Query, SelectExpr};
     use ontology::constants::EDGE_TABLE;
     use orbit_utils::traversal_path::TraversalPath;
+    use query_data_model::ClickHouseDataModel;
     use serde_json::Value;
 
-    fn apply(node: &mut Node, context: &SecurityContext, ontology: &Ontology) -> Result<()> {
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        apply_security_context(node, context, model.as_ref())
+    fn model() -> &'static ClickHouseDataModel {
+        static MODEL: LazyLock<ClickHouseDataModel> = LazyLock::new(|| {
+            ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
+                .unwrap()
+        });
+        &MODEL
     }
 
-    fn aliases(table: &TableRef, ontology: &Ontology) -> Vec<String> {
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        collect_aliased_tables(table, model.as_ref())
-            .into_iter()
-            .map(|(alias, _)| alias)
-            .collect()
+    fn security_model() -> &'static ClickHouseDataModel {
+        static MODEL: LazyLock<ClickHouseDataModel> = LazyLock::new(|| {
+            ClickHouseDataModel::derive(Arc::new(
+                ontology::Ontology::new()
+                    .with_nodes(["Project", "Vulnerability"])
+                    .with_redaction("Vulnerability", "vulnerabilities", "id")
+                    .with_redaction_role("Vulnerability", ontology::RequiredRole::SecurityManager),
+            ))
+            .unwrap()
+        });
+        &MODEL
     }
 
-    fn applies(table: &str, ontology: &Ontology) -> bool {
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        should_apply_security_filter(table, model.as_ref())
+    fn apply(
+        node: &mut Node,
+        context: &SecurityContext,
+        model: &ClickHouseDataModel,
+    ) -> Result<()> {
+        apply_security_context(node, context, model)
     }
 
     fn simple_query() -> Node {
@@ -212,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn traversal_path_validation() {
+    fn security_context_validates_paths_and_roles() {
         assert!(SecurityContext::new(1, vec!["1/".into()]).is_ok());
         assert!(SecurityContext::new(1, vec!["1/2/3/".into()]).is_ok());
         assert!(SecurityContext::new(42, vec!["42/100/".into()]).is_ok());
@@ -227,22 +187,41 @@ mod tests {
         assert!(SecurityContext::new(1, vec!["1/abc/2/".into()]).is_err());
         assert!(SecurityContext::new(1, vec!["99999999999999999999999999999/".into()]).is_err());
         assert!(SecurityContext::new(1, vec!["-1/".into()]).is_err());
+
+        let context = SecurityContext::new_with_roles(
+            1,
+            vec![
+                AuthorizedPath::new("1/100/", 20),
+                AuthorizedPath::new("1/101/", 30),
+            ],
+        )
+        .unwrap();
+        assert_eq!(context.paths_at_least(20), vec!["1/100/", "1/101/"]);
+        assert_eq!(context.paths_at_least(30), vec!["1/101/"]);
+        assert!(context.paths_at_least(50).is_empty());
+        assert!(
+            SecurityContext::new_with_roles(
+                1,
+                vec![AuthorizedPath::with_access_levels("1/100/", vec![])]
+            )
+            .is_err()
+        );
     }
 
     #[test]
-    fn single_path_uses_starts_with() {
-        let expr = build_path_filter("u", &[&TraversalPath::from("42/43/")]);
+    fn path_filters_cover_empty_single_multiple_and_large_sets() {
         assert!(matches!(
-            expr,
+            build_path_filter("v", &[]),
+            Expr::Literal(Value::Bool(false))
+        ));
+        assert!(matches!(
+            build_path_filter("u", &[&TraversalPath::from("42/43/")]),
             Expr::FuncCall {
                 name: Function::StartsWith,
                 ..
             }
         ));
-    }
 
-    #[test]
-    fn multiple_paths_use_or_of_starts_with_without_common_prefix() {
         let expr = build_path_filter(
             "u",
             &[
@@ -253,26 +232,17 @@ mod tests {
         assert!(matches!(expr, Expr::BinaryOp { op: Op::Or, .. }));
         let mut paths = starts_with_paths_for_alias(&expr, "u");
         paths.sort();
-        assert_eq!(paths, vec!["1/2/4/".to_string(), "1/2/5/".to_string()]);
-    }
+        assert_eq!(paths, ["1/2/4/", "1/2/5/"]);
 
-    #[test]
-    fn many_paths_uses_or_chain() {
         let paths: Vec<TraversalPath> = (0..1000u64)
             .map(|i| TraversalPath::from(format!("1/{i}/")))
             .collect();
         let refs: Vec<&TraversalPath> = paths.iter().collect();
         let expr = build_path_filter("e", &refs);
-        let dbg = format!("{expr:?}");
-        assert!(
-            !dbg.contains("arrayExists"),
-            "large path sets should use OR chain, not arrayExists: {dbg}"
-        );
-        assert!(
-            dbg.contains("StartsWith"),
-            "should produce startsWith predicates: {dbg}"
-        );
-        assert!(or_depth(&expr) <= 11, "OR tree is too deep: {dbg}");
+        let debug = format!("{expr:?}");
+        assert!(!debug.contains("arrayExists"));
+        assert!(debug.contains("StartsWith"));
+        assert!(or_depth(&expr) <= 11, "OR tree is too deep: {debug}");
     }
 
     fn or_depth(expr: &Expr) -> usize {
@@ -284,48 +254,6 @@ mod tests {
             } => 1 + or_depth(left).max(or_depth(right)),
             _ => 1,
         }
-    }
-
-    #[test]
-    fn empty_paths_produces_false_literal() {
-        let expr = build_path_filter("v", &[]);
-        // Literal false guarantees zero rows for this alias. Using a literal
-        // (not a parameterized Bool) lets ClickHouse constant-fold it at plan
-        // time, avoiding full edge scans on denied entities.
-        assert!(matches!(expr, Expr::Literal(Value::Bool(false))));
-    }
-
-    #[test]
-    fn paths_at_least_keeps_matching_roles() {
-        let sc = SecurityContext::new_with_roles(
-            1,
-            vec![
-                AuthorizedPath::new("1/100/", 20),
-                AuthorizedPath::new("1/101/", 30),
-            ],
-        )
-        .unwrap();
-        assert_eq!(sc.paths_at_least(20), vec!["1/100/", "1/101/"]);
-        assert_eq!(sc.paths_at_least(30), vec!["1/101/"]);
-        assert!(sc.paths_at_least(50).is_empty());
-    }
-
-    #[test]
-    fn empty_access_levels_are_invalid() {
-        assert!(
-            SecurityContext::new_with_roles(
-                1,
-                vec![AuthorizedPath::with_access_levels("1/100/", vec![])]
-            )
-            .is_err()
-        );
-    }
-
-    fn ontology_with_sm_vulnerability() -> Ontology {
-        Ontology::new()
-            .with_nodes(["Project", "Vulnerability"])
-            .with_redaction("Vulnerability", "vulnerabilities", "id")
-            .with_redaction_role("Vulnerability", ontology::RequiredRole::SecurityManager)
     }
 
     fn starts_with_paths_for_alias(expr: &Expr, alias: &str) -> Vec<String> {
@@ -352,10 +280,8 @@ mod tests {
     }
 
     #[test]
-    fn in_select_subquery_in_where_receives_path_filter() {
+    fn injects_security_into_nested_queries() {
         let ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/200/".into()]).unwrap();
-        let ontology = Ontology::new().with_nodes(["Project"]);
-
         let anchor = Query {
             select: vec![SelectExpr::col("e0p", "source_id")],
             from: TableRef::scan(EDGE_TABLE, "e0p"),
@@ -376,7 +302,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, model()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -393,12 +319,72 @@ mod tests {
             paths.contains(&"1/100/".to_string()) && paths.contains(&"1/200/".to_string()),
             "anchor subquery must carry the caller's full path set, got {paths:?}"
         );
+
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("outer_e", "source_id"),
+                alias: None,
+            }],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan(EDGE_TABLE, "outer_e"),
+                TableRef::union_all(
+                    vec![Query {
+                        select: vec![SelectExpr {
+                            expr: Expr::col("e1", "source_id"),
+                            alias: None,
+                        }],
+                        from: TableRef::scan(EDGE_TABLE, "e1"),
+                        ..Default::default()
+                    }],
+                    "hop_e0",
+                ),
+                Expr::lit(true),
+            ),
+            ..Default::default()
+        }));
+        apply(&mut node, &ctx, model()).unwrap();
+        let Node::Query(query) = &node else {
+            unreachable!()
+        };
+        assert!(query.where_clause.is_some());
+        let TableRef::Join { right, .. } = &query.from else {
+            unreachable!()
+        };
+        let TableRef::Union { queries, .. } = right.as_ref() else {
+            unreachable!()
+        };
+        assert!(queries[0].where_clause.is_some());
+        assert!(starts_with_paths_for_alias(query.where_clause.as_ref().unwrap(), "e1").is_empty());
+
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_project", "u"),
+            union_all: vec![Query {
+                select: vec![SelectExpr {
+                    expr: Expr::col("p", "id"),
+                    alias: None,
+                }],
+                from: TableRef::scan("gl_project", "p"),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+        apply(&mut node, &ctx, model()).unwrap();
+        let Node::Query(query) = &node else {
+            unreachable!()
+        };
+        assert!(query.where_clause.is_some());
+        assert!(query.union_all[0].where_clause.is_some());
     }
 
     // Paths tagged at Developer (30) still qualify because 30 >= the
     // Security Manager floor (25).
     #[test]
-    fn per_entity_role_scoping_filters_vulnerability_alias() {
+    fn role_floors_filter_and_collapse_paths() {
         let ctx = SecurityContext::new_with_roles(
             1,
             vec![
@@ -407,8 +393,6 @@ mod tests {
             ],
         )
         .unwrap();
-
-        let ontology = ontology_with_sm_vulnerability();
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -425,7 +409,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, security_model()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -444,19 +428,12 @@ mod tests {
             vec!["1/101/".to_string()],
             "Vulnerability alias 'v' must only keep the higher-role path, got: {where_sql}"
         );
-    }
 
-    // Bool(false) for the protected alias is the predicate that closes the
-    // aggregation-query oracle (see module docs).
-    #[test]
-    fn no_eligible_paths_compile_to_bool_false() {
         let ctx = SecurityContext::new_with_roles(
             1,
             vec![AuthorizedPath::new("1/100/", 20)], // Reporter only
         )
         .unwrap();
-
-        let ontology = ontology_with_sm_vulnerability();
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -468,7 +445,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, security_model()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -482,11 +459,7 @@ mod tests {
             where_sql.contains("Bool") && where_sql.contains("false"),
             "where clause should compile to Bool(false) for empty path set, got: {where_sql}"
         );
-    }
 
-    #[test]
-    fn trie_collapse_after_role_filtering() {
-        use crate::types::AuthorizedPath;
         let ctx = SecurityContext::new_with_roles(
             1,
             vec![
@@ -513,15 +486,12 @@ mod tests {
     }
 
     #[test]
-    fn inject_adds_security_to_simple_query() {
+    fn data_model_controls_security_injection() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = simple_query();
-        apply(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply(&mut node, &ctx, model()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
-    }
 
-    #[test]
-    fn inject_filters_edge_table() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -532,128 +502,57 @@ mod tests {
             ..Default::default()
         }));
 
-        apply(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply(&mut node, &ctx, model()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
-    }
 
-    #[test]
-    fn inject_includes_edge_table() {
-        let ontology = Ontology::new().with_nodes(["Project"]);
         let from = TableRef::join(
             JoinType::Inner,
             TableRef::scan("gl_project", "p"),
             TableRef::scan(EDGE_TABLE, "e"),
             Expr::eq(Expr::col("p", "id"), Expr::col("e", "source")),
         );
-
-        let aliases = aliases(&from, &ontology);
-        assert_eq!(aliases, vec!["p", "e"]);
-    }
-
-    #[test]
-    fn inject_skips_user_table() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let from = TableRef::join(
-            JoinType::Inner,
-            TableRef::scan("gl_user", "u"),
-            TableRef::scan("gl_merge_request", "mr"),
-            Expr::lit(true),
-        );
-
-        let aliases = aliases(&from, &ontology);
-        assert_eq!(aliases, vec!["mr"]);
-    }
-
-    #[test]
-    fn should_apply_security_filter_skips_user() {
-        let ontology = Ontology::load_embedded().unwrap();
-        assert!(!applies("gl_user", &ontology));
-        assert!(applies(EDGE_TABLE, &ontology));
-        assert!(applies("gl_project", &ontology));
-        assert!(applies("gl_merge_request", &ontology));
-    }
-
-    #[test]
-    fn should_apply_security_filter_skips_ctes() {
-        let ontology = Ontology::new();
-        assert!(!applies("path_cte", &ontology));
-        assert!(!applies("some_cte", &ontology));
-        assert!(!applies("nodes", &ontology));
-    }
-
-    #[test]
-    fn union_aliases_are_not_collected() {
-        let from = TableRef::union_all(
-            vec![Query {
-                select: vec![SelectExpr {
-                    expr: Expr::col("e", "source_id"),
-                    alias: None,
-                }],
-                from: TableRef::scan(EDGE_TABLE, "e"),
-                ..Default::default()
-            }],
-            "hop_e0",
-        );
-        let aliases = aliases(&from, &Ontology::new());
-        assert!(aliases.is_empty());
-    }
-
-    #[test]
-    fn inject_recurses_into_union_from_arms() {
-        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let ontology = Ontology::new().with_nodes(["Project"]);
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("outer_e", "source_id"),
-                alias: None,
-            }],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan(EDGE_TABLE, "outer_e"),
-                TableRef::union_all(
-                    vec![Query {
-                        select: vec![SelectExpr {
-                            expr: Expr::col("e1", "source_id"),
-                            alias: None,
-                        }],
-                        from: TableRef::scan(EDGE_TABLE, "e1"),
-                        where_clause: None,
-                        ..Default::default()
-                    }],
-                    "hop_e0",
-                ),
-                Expr::lit(true),
-            ),
-            where_clause: None,
+            select: vec![SelectExpr::col("p", "id")],
+            from,
             ..Default::default()
         }));
-
-        apply(&mut node, &ctx, &ontology).unwrap();
-
-        let Node::Query(q) = &node else {
+        apply(&mut node, &ctx, model()).unwrap();
+        let Node::Query(query) = &node else {
             unreachable!()
         };
-        assert!(
-            q.where_clause.is_some(),
-            "outer query should have security filter on outer_e"
-        );
+        let where_clause = query.where_clause.as_ref().unwrap();
+        assert_eq!(starts_with_paths_for_alias(where_clause, "p"), ["1/"]);
+        assert_eq!(starts_with_paths_for_alias(where_clause, "e"), ["1/"]);
 
-        if let TableRef::Join { right, .. } = &q.from {
-            if let TableRef::Union { queries, .. } = right.as_ref() {
-                assert!(
-                    queries[0].where_clause.is_some(),
-                    "UNION ALL arm should have security filter applied"
-                );
-            } else {
-                panic!("expected Union");
-            }
-        } else {
-            panic!("expected Join");
+        for table in ["gl_user", "path_cte", "some_cte", "nodes"] {
+            let mut node = Node::Query(Box::new(Query {
+                select: vec![SelectExpr::col("x", "id")],
+                from: TableRef::scan(table, "x"),
+                ..Default::default()
+            }));
+            apply(&mut node, &ctx, model()).unwrap();
+            assert!(matches!(node, Node::Query(query) if query.where_clause.is_none()));
         }
-    }
 
-    #[test]
-    fn multi_path_authz_omits_redundant_common_prefix() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::col("u", "id")],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_user", "u"),
+                TableRef::scan("gl_merge_request", "mr"),
+                Expr::lit(true),
+            ),
+            ..Default::default()
+        }));
+        apply(&mut node, &ctx, model()).unwrap();
+        let Node::Query(query) = &node else {
+            unreachable!()
+        };
+        let where_clause = query.where_clause.as_ref().unwrap();
+        assert!(starts_with_paths_for_alias(where_clause, "u").is_empty());
+        assert_eq!(starts_with_paths_for_alias(where_clause, "mr"), ["1/"]);
+
         let ctx = SecurityContext::new(1, vec!["1/9970/".into(), "1/6543/".into()]).unwrap();
 
         let mut node = Node::Query(Box::new(Query {
@@ -666,7 +565,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply(&mut node, &ctx, model()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -677,147 +576,6 @@ mod tests {
             got,
             vec!["1/6543/".to_string(), "1/9970/".to_string()],
             "multi-path authz must be the OR of real prefixes with no redundant broad LCP, got:\n{got:?}"
-        );
-    }
-
-    #[test]
-    fn scope_proof_narrows_scoped_alias_beside_broad_filter() {
-        let mut proofs = std::collections::HashMap::new();
-        proofs.insert("p".to_string(), ScopeProof::literal("1/24/23/"));
-        let mut ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        ctx.scope_proofs = proofs;
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("p", "id"),
-                alias: None,
-            }],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("gl_project", "p"),
-                TableRef::scan("gl_work_item", "wi"),
-                Expr::eq(Expr::col("p", "id"), Expr::col("wi", "project_id")),
-            ),
-            limit: Some(10),
-            ..Default::default()
-        }));
-
-        let ontology = Ontology::new().with_path_scopable_nodes(["Project", "WorkItem"]);
-        apply(&mut node, &ctx, &ontology).unwrap();
-
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
-        let where_clause = q.where_clause.as_ref().unwrap();
-        assert_eq!(
-            starts_with_paths_for_alias(where_clause, "p"),
-            vec!["1/".to_string(), "1/24/23/".to_string()],
-            "scoped alias keeps the broad authz filter and gains the tight prefix"
-        );
-        assert_eq!(
-            starts_with_paths_for_alias(where_clause, "wi"),
-            vec!["1/".to_string()],
-            "unscoped alias gets the broad authz set"
-        );
-    }
-
-    #[test]
-    fn scope_proof_below_role_floor_keeps_broad() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let mut proofs = std::collections::HashMap::new();
-        proofs.insert("v".to_string(), ScopeProof::literal("1/100/200/"));
-        let mut ctx =
-            SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)]).unwrap();
-        ctx.scope_proofs = proofs;
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("v", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("gl_vulnerability", "v"),
-            limit: Some(10),
-            ..Default::default()
-        }));
-        apply(&mut node, &ctx, &ontology).unwrap();
-
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
-        let where_sql = format!("{:?}", q.where_clause);
-        assert!(
-            where_sql.contains("Bool") && where_sql.contains("false"),
-            "a prefix below the entity role floor must keep the role-filtered (dead) broad filter: {where_sql}"
-        );
-    }
-
-    #[test]
-    fn scope_proof_dropped_on_non_path_scopable_alias() {
-        let mut proofs = std::collections::HashMap::new();
-        proofs.insert("g".to_string(), ScopeProof::literal("1/24/23/"));
-        let mut ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        ctx.scope_proofs = proofs;
-
-        let ontology = Ontology::new().with_nodes(["Global"]);
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("g", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("gl_global", "g"),
-            limit: Some(10),
-            ..Default::default()
-        }));
-
-        apply(&mut node, &ctx, &ontology).unwrap();
-
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
-        let where_clause = q.where_clause.as_ref().unwrap();
-        assert_eq!(
-            starts_with_paths_for_alias(where_clause, "g"),
-            vec!["1/".to_string()],
-            "non-path-scopable alias must drop the scope proof and keep broad authz only"
-        );
-    }
-
-    #[test]
-    fn inject_recurses_into_union_all_arms() {
-        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("u", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("gl_project", "u"),
-            where_clause: None,
-            union_all: vec![Query {
-                select: vec![SelectExpr {
-                    expr: Expr::col("p", "id"),
-                    alias: None,
-                }],
-                from: TableRef::scan("gl_project", "p"),
-                where_clause: None,
-                ..Default::default()
-            }],
-            ..Default::default()
-        }));
-
-        apply(&mut node, &ctx, &Ontology::new()).unwrap();
-
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
-        assert!(
-            q.where_clause.is_some(),
-            "base query should have security filter"
-        );
-        assert_eq!(q.union_all.len(), 1);
-        assert!(
-            q.union_all[0].where_clause.is_some(),
-            "UNION ALL arm should have security filter"
         );
     }
 }

@@ -70,7 +70,7 @@ fn drift_report(manifest_src: &str, crate_map_src: &str) -> Option<String> {
     }
 
     let mut report = String::from(
-        "crate-map drift: docs/dev/agents-crate-map.md is out of sync with \
+        "crate-map drift: docs/pages/engineering/development/agents-crate-map.md is out of sync with \
          the [workspace].members in Cargo.toml.\n",
     );
     if !missing.is_empty() {

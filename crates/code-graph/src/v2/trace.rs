@@ -9,7 +9,7 @@ use std::sync::Mutex;
 /// The event expression is not evaluated when tracing is off, avoiding all
 /// allocations (`.to_string()`, `format!()`, `.clone()`).
 #[macro_export]
-macro_rules! trace {
+macro_rules! trace_event {
     ($tracer:expr, $variant:ident { $($field:ident : $val:expr),* $(,)? }) => {
         $tracer.event_if(|| $crate::v2::trace::TraceEvent::$variant { $($field: $val),* })
     };

@@ -45,7 +45,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::migrations::{LedgerScope, MigrationEntry};
+    use crate::migrations::{EdgeRows, LedgerScope, MigrationEntry};
 
     const SCHEMA_VERSION: u32 = 1;
 
@@ -53,6 +53,7 @@ mod tests {
         Fingerprints {
             sources: BTreeMap::from([("schema.yaml".to_string(), "source".to_string())]),
             ddl: BTreeMap::from([("gl_note".to_string(), "table".to_string())]),
+            edge_rows: "edges".to_string(),
             auxiliary_schema: BTreeMap::from([(
                 "materialized_view/v1_refresh".to_string(),
                 "view".to_string(),
@@ -66,6 +67,7 @@ mod tests {
                 version: SCHEMA_VERSION,
                 scope: LedgerScope::All,
                 entities: BTreeSet::new(),
+                edge_rows: EdgeRows::Changed,
                 note: None,
             }],
         }

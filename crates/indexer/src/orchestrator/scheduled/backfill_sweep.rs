@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use tracing::warn;
+use orbit_log_fields::warn;
 use uuid::Uuid;
 
 use crate::orchestrator::dispatch::CodeBackfill;
@@ -67,11 +67,19 @@ impl ScheduledTask for CodeBackfillSweep {
                     .run_for_drained(&outcome.drained_paths)
                     .await
                 {
-                    warn!(%error, "post-backfill stale sweep failed, retrying next tick");
+                    warn!(
+                        safe(ERROR_TYPE) = "stale_sweep",
+                        expanded(ERROR_MESSAGE) = %error,
+                        "post-backfill stale sweep failed, retrying next tick"
+                    );
                 }
             }
             Err(error) => {
-                warn!(%error, "active code backfill sweep failed, retrying next tick");
+                warn!(
+                    safe(ERROR_TYPE) = "backfill_sweep",
+                    expanded(ERROR_MESSAGE) = %error,
+                    "active code backfill sweep failed, retrying next tick"
+                );
             }
         }
         Ok(())

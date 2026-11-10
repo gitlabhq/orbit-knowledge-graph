@@ -1,6 +1,7 @@
 description: Multi-hop aggregation deduplicates versioned edge rows
 
 config:
+  unmerged_seed: true
   extra_seed:
     gl_merge_request:
       - { id: 9210, iid: 210, title: "Multi-hop dedup MR", state: opened, traversal_path: "1/100/1000/", project_id: 1000, _version: "2024-06-01 00:00:00", _deleted: false }

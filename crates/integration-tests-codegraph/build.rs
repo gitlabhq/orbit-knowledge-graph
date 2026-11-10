@@ -1,4 +1,5 @@
 fn main() {
+    println!("cargo::rerun-if-changed=fixture_trees");
     generate("fixtures", "generated_suites.rs", "run_yaml_suite");
     generate(
         "fixtures_incremental",

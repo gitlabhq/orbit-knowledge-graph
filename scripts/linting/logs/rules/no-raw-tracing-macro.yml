@@ -1,0 +1,46 @@
+id: no-raw-tracing-macro
+language: rust
+severity: error
+message: Log through the orbit_log_fields macros, not the tracing ones, and do not rename them.
+note: |
+  The orbit_log_fields macros take the same arguments and name fields with
+  `safe(NAME)` and `expanded(NAME)`. The other rules match the macros by name,
+  so a renamed import hides its calls from them.
+rule:
+  any:
+    - kind: macro_invocation
+      has:
+        field: macro
+        regex: '^(::)?(orbit_log_fields::)?(__)?tracing::((trace|debug|info|warn|error)(_span)?|event|span)$'
+    - kind: identifier
+      regex: '^((trace|debug|info|warn|error)(_span)?|event|span)$'
+      inside:
+        kind: use_list
+        inside:
+          kind: scoped_use_list
+          has:
+            field: path
+            regex: '^(::)?tracing$'
+    - kind: scoped_identifier
+      regex: '^(::)?tracing::((trace|debug|info|warn|error)(_span)?|event|span)$'
+      inside:
+        kind: use_declaration
+    - kind: use_as_clause
+      regex: '^(::)?(tracing|orbit_log_fields)(::((trace|debug|info|warn|error)(_span)?|event|span))?\s+as\b'
+    - kind: use_as_clause
+      regex: '^(self|(trace|debug|info|warn|error)(_span)?|event|span)\s+as\b'
+      inside:
+        kind: use_list
+        inside:
+          kind: scoped_use_list
+          has:
+            field: path
+            regex: '^(::)?(tracing|orbit_log_fields)$'
+    - kind: use_declaration
+      regex: '\b__tracing\b'
+    - kind: use_wildcard
+      regex: '^(::)?tracing::\*$'
+    - kind: extern_crate_declaration
+      regex: '\btracing\s+as\b'
+  not:
+    matches: test-code

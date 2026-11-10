@@ -3,9 +3,9 @@
 # ~50 nodes, ~200 edges. Runs in seconds.
 #
 # Workflow:
-#   1. Generate data:  cargo xtask synth generate -c crates/xtask/simulator-slim.yaml
-#   2. Load to CH:     cargo xtask synth load -c crates/xtask/simulator-slim.yaml
-#   3. Evaluate:       cargo xtask synth evaluate -c crates/xtask/simulator-slim.yaml
+#   1. Generate data:  cargo synth generate -c crates/xtask/simulator-slim.yaml
+#   2. Load to CH:     cargo synth load -c crates/xtask/simulator-slim.yaml
+#   3. Evaluate:       cargo synth evaluate -c crates/xtask/simulator-slim.yaml
 
 clickhouse:
   url: http://localhost:8123

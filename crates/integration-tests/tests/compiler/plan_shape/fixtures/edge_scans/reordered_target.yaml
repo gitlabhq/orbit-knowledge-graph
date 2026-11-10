@@ -1,4 +1,4 @@
-name: A pinned target keeps the source edge scan while reordered tables are metadata only
+name: A target selector uses the target-oriented edge layout
 ontology_overlay: reordered_edges
 
 query:
@@ -13,8 +13,8 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"]
-      reject: ["(Scan Table(gl_code_edge_by_target) ...)"]
+      expect: ["(Scan Table(gl_code_edge_by_target) AS _orbit_edge_0)"]
+      reject: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"]
   duckdb:
     planned:
-      expect: ["(Scan Table(gl_edge) AS e0)"]
+      expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]

@@ -101,7 +101,7 @@ pub struct CompilerDerivedSettings {
     /// enables dynamic-programming join reordering for queries with 3+
     /// JOINs. Experimental in ClickHouse 26.x.
     pub join_order_algorithm: Option<String>,
-    pub optimize_move_to_prewhere_if_final: bool,
+    pub final_scan: bool,
     pub use_index_for_in_with_subqueries_max_values: Option<u64>,
     pub null_in_is_unknown: bool,
 }
@@ -119,8 +119,14 @@ impl CompilerDerivedSettings {
                 format!("'{algo}'"),
             ));
         }
-        if self.optimize_move_to_prewhere_if_final {
-            out.push(("optimize_move_to_prewhere_if_final".into(), "1".into()));
+        if self.final_scan {
+            for setting in [
+                "optimize_move_to_prewhere_if_final",
+                "use_skip_indexes_if_final",
+                "use_skip_indexes_if_final_exact_mode",
+            ] {
+                out.push((setting.into(), "1".into()));
+            }
         }
         if let Some(max) = self.use_index_for_in_with_subqueries_max_values {
             out.push((
@@ -213,16 +219,18 @@ impl QueryConfig {
 ///     max_execution_time: 30
 ///     use_query_cache: true
 ///     query_cache_ttl: 10
-///   aggregation:
-///     max_execution_time: 60
+///   overrides:
+///     aggregation:
+///       max_execution_time: 60
 /// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct QuerySettings {
     pub default: QueryConfig,
 
     /// Per-query-type overrides. Keys must match `QueryType` variant names
     /// in snake_case. Validated at startup by the server.
-    #[serde(flatten)]
+    #[serde(default)]
     pub overrides: HashMap<String, QueryConfig>,
 }
 
@@ -367,7 +375,7 @@ mod tests {
         );
 
         let derived = CompilerDerivedSettings {
-            optimize_move_to_prewhere_if_final: true,
+            final_scan: true,
             use_index_for_in_with_subqueries_max_values: Some(100_000),
             ..Default::default()
         };
@@ -376,6 +384,11 @@ mod tests {
             vec![
                 (
                     "optimize_move_to_prewhere_if_final".to_string(),
+                    "1".to_string()
+                ),
+                ("use_skip_indexes_if_final".to_string(), "1".to_string()),
+                (
+                    "use_skip_indexes_if_final_exact_mode".to_string(),
                     "1".to_string()
                 ),
                 (
@@ -428,8 +441,9 @@ default:
   max_execution_time: 30
   use_query_cache: false
   query_cache_ttl: 60
-aggregation:
-  max_execution_time: 120
+overrides:
+  aggregation:
+    max_execution_time: 120
 "#;
         let settings: QuerySettings = orbit_utils::yaml::from_str(yaml).unwrap();
         assert_eq!(settings.default.max_execution_time, Some(30));
@@ -439,6 +453,15 @@ aggregation:
             Some(120)
         );
         assert_eq!(settings.resolve("aggregation").query_cache_ttl, Some(60));
+    }
+
+    #[test]
+    fn a_query_type_outside_overrides_fails_to_load() {
+        let yaml = "default: {}\npath_finding:\n  max_memory_usage: 4294967296\n";
+
+        let error = orbit_utils::yaml::from_str::<QuerySettings>(yaml).unwrap_err();
+
+        assert!(error.to_string().contains("path_finding"), "{error}");
     }
 
     #[test]

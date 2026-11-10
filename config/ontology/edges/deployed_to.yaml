@@ -6,6 +6,7 @@ table: gl_ci_edge
 variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Deployment, id: id }
+    scope: prune_to_target
     description: "Merge request was included in deployment."
 
 indexer:

@@ -1,0 +1,12 @@
+id: instrument-fields
+language: rust
+rule:
+  kind: token_tree
+  follows:
+    kind: identifier
+    regex: '^fields$'
+  inside:
+    kind: token_tree
+    inside:
+      kind: attribute
+      regex: '^(::)?(tracing::)?instrument\b'

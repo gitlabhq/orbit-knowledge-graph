@@ -325,7 +325,7 @@ cases:
         MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
         WHERE type(r) IN ['AUTHORED', 'APPROVED']
         RETURN mr.title, type(r)
-        ORDER BY type(r) PAGE 1
+        ORDER BY type(r) SKIP 0 LIMIT 1
     expect:
       all_pages:
         edge_count: 3
@@ -360,7 +360,7 @@ cases:
         MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
         WHERE type(r) IN ['AUTHORED', 'APPROVED']
         RETURN mr.title, type(r) AS kind
-        ORDER BY kind DESC PAGE 2
+        ORDER BY kind DESC SKIP 0 LIMIT 2
     expect:
       all_pages:
         edge_count: 3
@@ -441,7 +441,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1})-[r]->(mr:MergeRequest {id: 2000})
         WHERE type(r) IN ['AUTHORED', 'APPROVED']
-        RETURN mr.title, type(r) PAGE 1
+        RETURN mr.title, type(r) SKIP 0 LIMIT 1
     expect:
       all_pages: { edge_count: 2, page_count: 2 }
       pages:

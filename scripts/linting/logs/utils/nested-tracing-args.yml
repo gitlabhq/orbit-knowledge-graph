@@ -1,0 +1,13 @@
+# The arguments of a log macro inside another macro, such as `tokio::select!`,
+# where tree-sitter keeps the inner call as plain tokens.
+id: nested-tracing-args
+language: rust
+rule:
+  kind: token_tree
+  inside:
+    kind: token_tree
+  follows:
+    regex: '^!$'
+    follows:
+      kind: identifier
+      regex: '^(trace|debug|info|warn|error|event|span|trace_span|debug_span|info_span|warn_span|error_span)$'

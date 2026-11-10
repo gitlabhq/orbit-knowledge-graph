@@ -15,6 +15,7 @@ properties:
 variants:
   - from_node: { type: WorkItem, id: id }
     to_node: { type: WorkItem, id: id }
+    scope: prune_to_source
     description: "Work item is related to another work item."
 
 indexer:

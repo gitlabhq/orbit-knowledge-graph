@@ -1,9 +1,3 @@
 name: get_graph_schema
-version: 1.2.0
+version: 2.0.0
 short: Describe the schema of the local DuckDB graph
-description: >-
-  Describe the schema of the local DuckDB graph
-
-
-  Returns one JSON row per column: table_name, column_name, data_type.
-  Per-project search-index tables and internal bookkeeping are left out.

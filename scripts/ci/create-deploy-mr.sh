@@ -7,6 +7,10 @@
 # Idempotent: if the deploy branch already has an open MR the script logs it
 # and exits, so a retried job never opens a duplicate. Set DRY_RUN=true to
 # print the diff and MR body without pushing, creating the MR, or posting.
+#
+# After opening the MR it closes the bot's older open deploy MRs (lower
+# version, same branch pattern) and adds a "superseded" note. Their branches stay
+# for rollback. Every step is fail-soft so the sweep never fails the release job.
 
 set -euo pipefail
 
@@ -20,7 +24,43 @@ APPS_PROJECT="gitlab-com/gl-infra/argocd/apps"
 SOURCE_PROJECT_URL="https://${SERVER_HOST}/${CI_PROJECT_PATH:-gitlab-org/orbit/knowledge-graph}"
 DEPLOY_BRANCH="gkg-release-${TAG}"
 
+BOT_AUTHOR="orbit-automation-bot"
+APPS_PROJECT_ID="${APPS_PROJECT//\//%2F}"
+
 log() { printf '%s\n' "$*" >&2; }
+
+# Prints "<iid> <branch>" for each open bot deploy MR whose version is lower
+# than VERSION, skipping the MR with IID $1 (empty when none was created).
+list_obsolete_mrs() {
+  local new_iid="$1" iid branch open_mrs
+  open_mrs="$(glab api --paginate "projects/${APPS_PROJECT_ID}/merge_requests?state=opened&author_username=${BOT_AUTHOR}&per_page=100" \
+    | jq -r '.[] | "\(.iid) \(.source_branch)"')" \
+    || { log "Could not list open deploy MRs in ${APPS_PROJECT}; skipping the obsolete-MR sweep"; return 0; }
+  printf '%s\n' "$open_mrs" \
+    | while read -r iid branch; do
+        [[ "$iid" != "$new_iid" && "$branch" =~ ^gkg-release-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+        [[ "${branch#gkg-release-v}" != "$VERSION" ]] || continue
+        [[ "$(printf '%s\n%s\n' "${branch#gkg-release-v}" "$VERSION" | sort -V | head -1)" == "${branch#gkg-release-v}" ]] \
+          && printf '%s %s\n' "$iid" "$branch"
+      done || true
+}
+
+# Closes obsolete deploy MRs and prints the closed refs ("!1 !2") to stdout.
+close_obsolete_mrs() {
+  local new_iid="$1" iid branch closed=()
+  while read -r iid branch; do
+    [[ -n "$iid" ]] || continue
+    if glab api -X PUT "projects/${APPS_PROJECT_ID}/merge_requests/${iid}" -f state_event=close >/dev/null 2>&1; then
+      closed+=("!${iid}")
+      glab api -X POST "projects/${APPS_PROJECT_ID}/merge_requests/${iid}/notes" \
+        -f body="Superseded by !${new_iid} (${VERSION}). Closed automatically." >/dev/null 2>&1 \
+        || log "Closed !${iid} but could not post the superseded note"
+    else
+      log "Could not close obsolete deploy MR !${iid}; skipping"
+    fi
+  done < <(list_obsolete_mrs "$new_iid")
+  echo "${closed[*]:-}"
+}
 
 existing_mr="$(glab mr list --repo "$APPS_PROJECT" --source-branch "$DEPLOY_BRANCH" 2>/dev/null | grep -o "https://[^ ]*/merge_requests/[0-9]*" | head -1 || true)"
 if [[ -n "$existing_mr" ]]; then
@@ -77,6 +117,8 @@ if [[ "$DRY_RUN" == "true" ]]; then
   git -C "$workdir/apps" --no-pager diff >&2
   log "DRY_RUN: would open MR '${mr_title}' with description:"
   log "$mr_description"
+  obsolete="$(list_obsolete_mrs "")"
+  log "DRY_RUN: would close obsolete deploy MRs (iid branch): ${obsolete:-none}"
   if [[ -n "${SLACK_WEBHOOK:-}" ]]; then
     log "DRY_RUN: would post the review request to Slack (SLACK_WEBHOOK is set)."
   else
@@ -98,8 +140,16 @@ mr_url="$(grep -o "https://[^ ]*/merge_requests/[0-9]*" <<<"$mr_output" | head -
 [[ -n "$mr_url" ]] || { log "Could not parse the MR URL from glab output: ${mr_output}"; exit 1; }
 log "Opened deploy MR: ${mr_url}"
 
+closed_refs="$(close_obsolete_mrs "${mr_url##*/}")"
+slack_suffix=""
+if [[ -n "$closed_refs" ]]; then
+  closed_count="$(wc -w <<<"$closed_refs")"
+  slack_suffix=" Closed ${closed_count} obsolete deploy MR(s): ${closed_refs}"
+  log "Closed ${closed_count} obsolete deploy MR(s): ${closed_refs}"
+fi
+
 if [[ -n "${SLACK_WEBHOOK:-}" ]]; then
-  jq -n --arg text ":rocket: GKG ${TAG} deploy MR is ready for review: ${mr_url} — ${schema_sentence}" '{text: $text}' \
+  jq -n --arg text ":rocket: GKG ${TAG} deploy MR is ready for review: ${mr_url} — ${schema_sentence}${slack_suffix}" '{text: $text}' \
     | curl -fsS -X POST -H 'Content-type: application/json' -d @- "$SLACK_WEBHOOK" >/dev/null
   log "Posted review request to Slack."
 else

@@ -662,40 +662,28 @@ pub fn load_suite(yaml: &str) -> Option<TestSuite> {
     Some(suite)
 }
 
-fn workspace_root() -> std::path::PathBuf {
-    let output = std::process::Command::new("cargo")
-        .args(["metadata", "--format-version=1", "--no-deps"])
-        .output()
-        .expect("Failed to run cargo metadata");
-    let meta: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("Failed to parse cargo metadata");
-    std::path::PathBuf::from(meta["workspace_root"].as_str().unwrap())
-}
-
-/// Copies `fixture_dir` (relative to the workspace root) under `root`, then
-/// writes the inline fixtures over it. Returns every file written with its
-/// size, relative to `root`.
 pub fn write_suite_files(suite: &TestSuite, root: &std::path::Path) -> Vec<(String, u64)> {
-    let mut written = Vec::new();
-    if let Some(dir) = &suite.fixture_dir {
-        let src = workspace_root().join(dir);
-        assert!(src.is_dir(), "fixture_dir not found: {}", src.display());
-        for entry in walkdir::WalkDir::new(&src)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|e| e.file_type().is_file())
-        {
-            let rel = entry.path().strip_prefix(&src).unwrap();
-            let dst = root.join(rel);
-            std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
-            std::fs::copy(entry.path(), &dst)
-                .unwrap_or_else(|e| panic!("Failed to copy {}: {e}", entry.path().display()));
-            let size = entry.metadata().map_or(0, |m| m.len());
-            written.push((rel.to_string_lossy().replace('\\', "/"), size));
-        }
-    }
+    let mut written = suite.fixture_tree.as_ref().map_or_else(Vec::new, |name| {
+        assert!(
+            name.bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')),
+            "invalid fixture_tree name: {name}"
+        );
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixture_trees")
+            .join(format!("{name}.yaml"));
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("Failed to read {}: {error}", path.display()));
+        let fixtures: Vec<FixtureFile> = orbit_utils::yaml::from_str(&raw)
+            .unwrap_or_else(|error| panic!("Failed to parse {}: {error}", path.display()));
+        write_fixtures(&fixtures, root)
+    });
     written.extend(write_fixtures(&suite.fixtures, root));
     written
+        .into_iter()
+        .collect::<std::collections::BTreeMap<_, _>>()
+        .into_iter()
+        .collect()
 }
 
 /// Writes inline fixtures under `root`; returns each path with its size.

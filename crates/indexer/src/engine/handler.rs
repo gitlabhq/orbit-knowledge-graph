@@ -92,6 +92,18 @@ impl HandlerError {
         }
     }
 
+    pub fn prefix_message_with(self, step: impl std::fmt::Display) -> Self {
+        match self {
+            HandlerError::Processing(message) => {
+                HandlerError::Processing(format!("{step}: {message}"))
+            }
+            HandlerError::Backpressure(message) => {
+                HandlerError::Backpressure(format!("{step}: {message}"))
+            }
+            other => other,
+        }
+    }
+
     /// A deterministic failure that will never succeed on retry; dead-letter it for inspection.
     pub fn dead_letter(message: impl Into<String>) -> Self {
         HandlerError::Permanent {

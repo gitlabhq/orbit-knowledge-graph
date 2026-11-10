@@ -14,11 +14,14 @@ use crate::scope::{
 use crate::version::{read_active_version, table_prefix};
 
 static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
-    let deleted_column = ontology::siphon_deleted_column();
+    let version = ontology::siphon_version_column();
+    let deleted = ontology::siphon_deleted_column();
     format!(
         "SELECT DISTINCT root_namespace_id, traversal_path \
-         FROM siphon_knowledge_graph_enabled_namespaces \
-         WHERE {deleted_column} = false"
+         FROM (SELECT root_namespace_id, argMax(traversal_path, {version}) AS traversal_path \
+               FROM siphon_knowledge_graph_enabled_namespaces \
+               GROUP BY root_namespace_id, id \
+               HAVING argMax({deleted}, {version}) = false)"
     )
 });
 
@@ -117,8 +120,14 @@ pub async fn fetch_enabled_top_level_namespaces(
     );
 
     if !split.skipped.is_empty() {
-        tracing::warn!(
-            skipped = ?split.skipped,
+        let paths: Vec<&str> = split
+            .skipped
+            .iter()
+            .map(|(_, path)| path.as_str())
+            .collect();
+        orbit_log_fields::warn!(
+            safe(COUNT) = paths.len(),
+            safe(TRAVERSAL_PATHS) = paths.join(","),
             "excluding non-top-level namespace paths from completion gate"
         );
     }

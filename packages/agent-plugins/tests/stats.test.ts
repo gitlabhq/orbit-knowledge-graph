@@ -1,0 +1,275 @@
+import { expect, test } from 'claude-code/testing'
+
+import { cypherSegments, hopsOf, queryOf, variablesOf } from '../core/cypher.ts'
+import { apiCallsFor, compact, countedTotal, graphStatus, grouped, identityLookups, parseResponse, scopeIdentity, type ScopeTotal } from '../core/stats.ts'
+
+test('the llm format counts nodes by entity and edges', () => {
+  const text = [
+    'query_type: traversal',
+    'nodes:',
+    '  MergeRequest[10]{id,iid,title}:',
+    '    1,2,"a"',
+    '  Project[1]{id}:',
+    '    5',
+    'edges[10]:',
+  ].join('\n')
+  expect(parseResponse(text)).toMatchObject({ nodes: 11, edges: 10, byEntity: { MergeRequest: 10, Project: 1 } })
+})
+
+test('the raw JSON format counts nodes and edges', () => {
+  const text = JSON.stringify({ result: { nodes: [{ type: 'User' }, { type: 'User' }], edges: [{}] } })
+  expect(parseResponse(text)).toMatchObject({ nodes: 2, edges: 1, byEntity: { User: 2 } })
+})
+
+const rawAggregation = (body: object) => JSON.stringify({ result: { query_type: 'aggregation', nodes: [], edges: [], ...body } })
+
+test('a grouped raw JSON aggregation counts its rows instead of reading as an empty traversal', () => {
+  const text = rawAggregation({
+    columns: [{ name: 'n', function: 'count', target: 'mr' }],
+    group_columns: [{ name: 'mr_state', kind: 'property', node: 'mr', property: 'state' }],
+    rows: [{ mr_state: 'merged', n: 2450 }, { mr_state: 'closed', n: 690 }, { mr_state: 'opened', n: 76 }],
+  })
+  expect(parseResponse(text)).toMatchObject({ kind: 'aggregation', grouped: true, nodes: 0, aggregated: 3216 })
+})
+
+test('an ungrouped raw JSON aggregation leaves out a DISTINCT count', () => {
+  const text = rawAggregation({
+    columns: [
+      { name: 'count_mr', function: 'count', target: 'mr' },
+      { name: 'count_distinct_mr_author_id', function: 'count', target: 'mr', property: 'author_id' },
+    ],
+    rows: [{ count_mr: 3222, count_distinct_mr_author_id: 111 }],
+  })
+  expect(parseResponse(text)).toMatchObject({ kind: 'aggregation', grouped: false, aggregated: 3222, counted: [{ target: 'mr', total: 3222 }] })
+})
+
+test('an aggregation counts the nodes its count columns cover', () => {
+  const text = [
+    'query_type: aggregation',
+    'columns[2]{name,function,type}:',
+    '  state,group,string',
+    '  mrs,count,int',
+    'rows[2]{state,mrs}:',
+    '  opened,40',
+    '  merged,60',
+  ].join('\n')
+  expect(parseResponse(text).aggregated).toBe(100)
+})
+
+test('an aggregation with several aggregates lists its columns and still counts', () => {
+  const text = [
+    'query_type: aggregation',
+    'columns[2]:',
+    '  - name: n',
+    '    function: count',
+    '    target: mr',
+    '  - name: s',
+    '    function: sum',
+    '    target: mr',
+    '    property: iid',
+    'group_columns[1]{name,kind,node,property,entity}:',
+    '  mr_state,property,mr,state,MergeRequest',
+    'rows[3]{mr_state,n,s}:',
+    '  merged,2450,3785384',
+    '  closed,690,1161896',
+    '  opened,76,225656',
+    'pagination:',
+    '  has_more: false',
+    '  truncated: false',
+  ].join('\n')
+  expect(parseResponse(text)).toMatchObject({ aggregated: 3216, grouped: true })
+})
+
+test('an ungrouped aggregation with several aggregates counts too', () => {
+  const text = 'query_type: aggregation\ncolumns[2]:\n  - name: n\n    function: count\n    target: mr\n  - name: s\n    function: sum\n    target: mr\n    property: iid\nrows[1]{n,s}:\n  3216,5172936\npagination:\n  has_more: false\n'
+  expect(parseResponse(text).aggregated).toBe(3216)
+})
+
+const listedCount = (name: string, target: string, property?: string) =>
+  `  - name: ${name}\n    function: count\n    target: ${target}\n` + (property ? `    property: ${property}\n` : '')
+const aggregation = (columns: string, header: string, row: string) =>
+  `query_type: aggregation\n${columns}rows[1]{${header}}:\n  ${row}\npagination:\n  has_more: false\n  truncated: false\n`
+
+test('a DISTINCT count next to a plain count is left out', () => {
+  const columns = `columns[2]:\n${listedCount('count_mr', 'mr')}${listedCount('count_distinct_mr_author_id', 'mr', 'author_id')}`
+  expect(parseResponse(aggregation(columns, 'count_mr,count_distinct_mr_author_id', '3222,111')).aggregated).toBe(3222)
+})
+
+test('a response whose only count is DISTINCT in the tabled form reads as zero', () => {
+  const columns = 'columns[2]{name,function,target,property}:\n  count_distinct_mr_author_id,count,mr,author_id\n  total,sum,mr,iid\n'
+  expect(parseResponse(aggregation(columns, 'count_distinct_mr_author_id,total', '111,5000')).aggregated).toBe(0)
+})
+
+test('a DISTINCT property count next to a DISTINCT node count reads as the node count', () => {
+  const columns = `columns[2]:\n${listedCount('count_distinct_mr', 'mr')}${listedCount('count_distinct_mr_author_id', 'mr', 'author_id')}`
+  expect(parseResponse(aggregation(columns, 'count_distinct_mr,count_distinct_mr_author_id', '3,111')).aggregated).toBe(3)
+})
+
+test('a plain property count next to a DISTINCT node count reads as the property count', () => {
+  const columns = `columns[2]:\n${listedCount('count_distinct_mr', 'mr')}${listedCount('count_mr_merged_at', 'mr', 'merged_at')}`
+  expect(parseResponse(aggregation(columns, 'count_distinct_mr,count_mr_merged_at', '3,3000')).aggregated).toBe(3000)
+})
+
+test('tabled columns are read by field name in any order', () => {
+  const columns = 'columns[2]{function,name,property,target}:\n  count,count_mr_merged_at,merged_at,mr\n  count,authors,author_id,mr\n'
+  expect(parseResponse(aggregation(columns, 'count_mr_merged_at,authors', '3000,111')).aggregated).toBe(3000)
+})
+
+test('listed columns are read by key in any order', () => {
+  const item = (name: string, property: string) => `  - name: ${name}\n    function: count\n    property: ${property}\n    target: mr\n`
+  const columns = `columns[3]:\n${item('count_mr_merged_at', 'merged_at')}${item('authors', 'author_id')}  - target: u\n    function: count\n    name: count_u\n`
+  expect(parseResponse(aggregation(columns, 'count_mr_merged_at,authors,count_u', '3000,111,5')).aggregated).toBe(3000)
+})
+
+test('a plain count of a property reads as counted', () => {
+  const columns = 'columns[1]{name,function,target,property}:\n  count_mr_merged_at,count,mr,merged_at\n'
+  expect(parseResponse(aggregation(columns, 'count_mr_merged_at', '3000')).aggregated).toBe(3000)
+})
+
+test('a DISTINCT count of a node, with no property, reads as counted', () => {
+  const columns = 'columns[1]{name,function,target}:\n  count_distinct_mr,count,mr\n'
+  expect(parseResponse(aggregation(columns, 'count_distinct_mr', '3222')).aggregated).toBe(3222)
+})
+
+test('an aliased count of a property reads as DISTINCT', () => {
+  const columns = 'columns[1]{name,function,target,property}:\n  authors,count,mr,author_id\n'
+  expect(parseResponse(aggregation(columns, 'authors', '111')).aggregated).toBe(0)
+})
+
+test('two plain counts on different targets read as the larger one', () => {
+  const columns = 'columns[2]{name,function,target}:\n  mrs,count,mr\n  users,count,u\n'
+  expect(parseResponse(aggregation(columns, 'mrs,users', '3222,111')).aggregated).toBe(3222)
+})
+
+test('schema and other output reads as empty', () => {
+  expect(parseResponse('domains[1]:\n  - name: code_review')).toMatchObject({ nodes: 0, edges: 0, aggregated: 0 })
+})
+
+test('counts compact for the status line', () => {
+  expect([950, 1200, 12000, 1_200_000].map(compact)).toEqual(['950', '1.2k', '12k', '1.2M'])
+})
+
+test('the query is read from the command, quotes undone', () => {
+  expect(queryOf('glab orbit query "MATCH (n) WHERE n.x = \\"a\\" RETURN n"')).toBe('MATCH (n) WHERE n.x = "a" RETURN n')
+  expect(queryOf("glab orbit query 'MATCH (n) RETURN n' | head -3")).toBe('MATCH (n) RETURN n')
+  expect(queryOf('glab orbit grep foo')).toBe('')
+  expect(queryOf('orbit query --response-format raw "MATCH (n) RETURN n"')).toBe('MATCH (n) RETURN n')
+  expect(queryOf('orbit query --file q.json')).toBe('')
+  expect(queryOf('echo "glab orbit query \\"MATCH (n) RETURN n\\""')).toBe('')
+})
+
+test('the graph total sums every entity in every domain of graph-status', () => {
+  const json = JSON.stringify({
+    indexing: { state: 'READY' },
+    itemCounts: { domains: [{ entities: [{ name: 'Job', count: '658940' }, { name: 'Stage', count: '147995' }] }, { entities: [{ name: 'Project', count: '1' }] }] },
+  })
+  expect(graphStatus(json)?.total).toBe(806936)
+  expect(graphStatus('not json')).toBeNull()
+  expect(graphStatus('{}')).toBeNull()
+})
+
+test('a graph total is written in full with thousands separators', () => {
+  expect(grouped(1675400)).toBe('1,675,400')
+  expect(grouped(950)).toBe('950')
+})
+
+test('a reply splits around its cypher blocks and leaves other code alone', () => {
+  const reply = 'Here it is.\n\n```cypher\nMATCH (n:Project {id: 1})\nRETURN n\n```\n\n```bash\nls\n```\nDone.'
+  expect(cypherSegments(reply)).toEqual([
+    { kind: 'prose', text: 'Here it is.' },
+    { kind: 'code', text: 'MATCH (n:Project {id: 1})\nRETURN n\n' },
+    { kind: 'prose', text: '```bash\nls\n```\nDone.' },
+  ])
+  expect(cypherSegments('No code here.')).toEqual([{ kind: 'prose', text: 'No code here.' }])
+  expect(cypherSegments('```cypher\nMATCH (n)\n')).toEqual([{ kind: 'prose', text: '```cypher\nMATCH (n)' }])
+})
+
+test('hops count each relationship in the MATCH patterns, a variable-length one by its lower bound', () => {
+  expect(hopsOf('MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN count(mr) AS n')).toBe(1)
+  expect(hopsOf('MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN u, count(mr) AS n')).toBe(2)
+  expect(hopsOf('MATCH (c:Definition)-[:EXTENDS*2..3]->(d:Definition {id: 1}) RETURN count(c) AS n')).toBe(2)
+  expect(hopsOf('MATCH (mr:MergeRequest {id: 1})--(n) RETURN n')).toBe(1)
+  expect(hopsOf('MATCH (p:Project {id: 1}) RETURN count(p) AS n')).toBe(0)
+  expect(hopsOf("CALL db.schema('Project')")).toBe(0)
+})
+
+test('API calls replaced follow the GraphQL minimum: pages of 100, joins nested', () => {
+  const traversal = (n: number) => parseResponse(`query_type: traversal\nnodes:\n  MergeRequest[${n}]{id}:\n  Project[1]{id}:\nedges[${n}]{from}:\n`)
+  expect(apiCallsFor(traversal(5))).toBe(1)
+  expect(apiCallsFor(traversal(250))).toBe(3)
+  const counts = (grouping: string, rows: string) =>
+    parseResponse(`query_type: aggregation\ncolumns[1]{name,function,target}:\n  n,count,mr\n${grouping}rows[3]{mr_state,n}:\n${rows}pagination:\n  has_more: false\n`)
+  const byState = counts('group_columns[1]{name,kind,node,property,entity}:\n  mr_state,property,mr,state,MergeRequest\n', '  merged,2416\n  closed,682\n  opened,67\n')
+  expect(byState).toMatchObject({ kind: 'aggregation', grouped: true, aggregated: 3165 })
+  expect(apiCallsFor(byState)).toBe(32)
+  const total = parseResponse('query_type: aggregation\ncolumns[1]{name,function,target}:\n  n,count,mr\nrows[1]{n}:\n  3165\npagination:\n  has_more: false\n')
+  expect(total).toMatchObject({ kind: 'aggregation', grouped: false })
+  expect(apiCallsFor(total)).toBe(1)
+  expect(apiCallsFor(parseResponse('domains[1]:\n  - name: code_review'))).toBe(0)
+  expect(apiCallsFor(parseResponse(JSON.stringify({ result: { nodes: [{ type: 'User' }], edges: [] } })))).toBe(1)
+})
+
+test('a total costs one call only when its GraphQL list has a count field, otherwise pages of 100', () => {
+  const total = (target: string, n: number) =>
+    parseResponse(`query_type: aggregation\ncolumns[1]{name,function,target}:\n  n,count,${target}\nrows[1]{n}:\n  ${n}\npagination:\n  has_more: false\n`)
+  const members = 'MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 9970}) RETURN count(DISTINCT u) AS n'
+  expect(total('u', 3357).counted).toEqual([{ target: 'u', total: 3357 }])
+  expect(apiCallsFor(total('u', 3357), members)).toBe(34)
+  expect(apiCallsFor(total('u', 3357), 'MATCH (g:Group {id: 9970})<-[:MEMBER_OF]-(u:User) RETURN count(u) AS n')).toBe(34)
+  expect(apiCallsFor(total('u', 3357), 'MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN count(DISTINCT u) AS n')).toBe(1)
+  expect(apiCallsFor(total('mr', 27), 'MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest) RETURN count(mr) AS n')).toBe(1)
+  expect(apiCallsFor(total('c', 1250), 'MATCH (c:Commit)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN count(c) AS n')).toBe(13)
+  expect(apiCallsFor(total('u', 3357))).toBe(1)
+})
+
+test('pattern variables carry their label and the relationship types next to them', () => {
+  const vars = variablesOf(
+    "MATCH (u)-[r:MEMBER_OF|:AUTHORED*1..2 {since: 1}]->(g:Group {id: 9970}), (u:User)<-[:REVIEWER]-(mr) WHERE mr.title = '(u:Commit)' RETURN count(u) AS n",
+  )
+  expect(vars.get('u')).toEqual({ label: 'User', relationships: new Set(['MEMBER_OF', 'AUTHORED', 'REVIEWER']) })
+  expect(vars.get('g')).toEqual({ label: 'Group', relationships: new Set(['MEMBER_OF', 'AUTHORED']) })
+  expect(vars.get('mr')).toEqual({ label: '', relationships: new Set(['REVIEWER']) })
+  expect(variablesOf("CALL db.schema('User')").size).toBe(0)
+})
+
+const group = (key: string, total: number, id: string, path: string): ScopeTotal => ({ key, total, identity: { kind: 'group', id, path } })
+const project = (key: string, total: number, id: string, path: string): ScopeTotal => ({ key, total, identity: { kind: 'project', id, path } })
+
+test('one group named by path and by id counts once', () => {
+  expect(countedTotal([group('full-path:a', 100, '9', 'a'), group('namespace-id:9', 100, '9', 'a')])).toBe(100)
+})
+
+test('different groups add up', () => {
+  expect(countedTotal([group('namespace-id:9', 100, '9', 'a'), group('namespace-id:10', 50, '10', 'b')])).toBe(150)
+})
+
+test('a group or project inside a counted group is not added', () => {
+  const parent = group('namespace-id:9', 100, '9', 'a')
+  expect(countedTotal([parent, group('full-path:a/sub', 40, '11', 'a/sub')])).toBe(100)
+  expect(countedTotal([project('project-id:7', 5, '7', 'a/p'), parent])).toBe(100)
+})
+
+test('a project is skipped inside its group even when both share an id', () => {
+  expect(countedTotal([group('namespace-id:7', 100, '7', 'a'), project('project-id:7', 5, '7', 'a/p')])).toBe(100)
+})
+
+test('a project outside every counted group is added', () => {
+  expect(countedTotal([group('namespace-id:9', 100, '9', 'a'), project('project-id:8', 5, '8', 'ab/p')])).toBe(105)
+})
+
+test('a scope without an identity keeps its own spelling and is never dropped', () => {
+  expect(countedTotal([group('namespace-id:9', 100, '9', 'a'), { key: 'full-path:a', total: 100 }])).toBe(200)
+})
+
+test('scope identities come from the glab api body of a group or a project', () => {
+  expect(scopeIdentity('{"id":9,"full_path":"a/b"}', 'group')).toEqual({ kind: 'group', id: '9', path: 'a/b' })
+  expect(scopeIdentity('{"id":7,"path_with_namespace":"a/b/p"}', 'project')).toEqual({ kind: 'project', id: '7', path: 'a/b/p' })
+  expect(scopeIdentity('{"message":"404 Not Found"}', 'group')).toBeNull()
+  expect(scopeIdentity('nope', 'project')).toBeNull()
+})
+
+test('a full path is looked up as a group, then as a project', () => {
+  expect(identityLookups(['--full-path', 'a/b']).map(({ kind, argv }) => [kind, argv[2]])).toEqual([['group', 'groups/a%2Fb'], ['project', 'projects/a%2Fb']])
+  expect(identityLookups(['--namespace-id', '9']).map(({ argv }) => argv[2])).toEqual(['groups/9'])
+  expect(identityLookups([])).toEqual([])
+})

@@ -5,5 +5,5 @@ query:
     MATCH (u:User {id: 1}) RETURN u LIMIT(1)
 
 expect:
-  compile_error: "expected end of query, ORDER BY, LIMIT, PAGE, or DEBUG"
+  compile_error: "expected end of query, ORDER BY, SKIP, LIMIT, or DEBUG"
   compile_error_not_contains: ["EOI", "function"]

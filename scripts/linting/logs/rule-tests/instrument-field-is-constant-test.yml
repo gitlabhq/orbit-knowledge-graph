@@ -1,0 +1,18 @@
+id: instrument-field-is-constant
+valid:
+  - |
+    #[tracing::instrument(name = "index", skip_all, fields({ safe::GL_PROJECT_ID } = id, { expanded::BRANCH } = Empty))]
+    fn f(id: u64) {}
+  - |
+    #[instrument(skip_all, level = "debug")]
+    fn f() {}
+invalid:
+  - |
+    #[instrument(skip_all, fields(project_id = id))]
+    fn f(id: u64) {}
+  - |
+    #[tracing::instrument(skip_all, fields(user_id, source_type))]
+    fn f() {}
+  - |
+    #[instrument(skip_all, fields(%path))]
+    fn f(path: &str) {}

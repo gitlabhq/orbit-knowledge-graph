@@ -1,0 +1,26 @@
+description: is_null on a DateTime column matches the rows whose stored epoch stands for null
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest",
+               "id_range": {"start": 2000, "end": 2005},
+               "columns": ["title", "merged_at"],
+               "filters": {"merged_at": {"is_null": true}}}],
+      "order_by": "mr.id",
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.merged_at IS NULL RETURN mr.title, mr.merged_at ORDER BY mr.id LIMIT 10
+
+expect:
+  node_count: 3
+  nodes:
+    MergeRequest:
+      order: [2000, 2001, 2003]
+      absent: [2002, 2004, 2005]
+      filters:
+        merged_at: { is_null: true }
+      prop_present: [title]
+      prop_absent: [merged_at]

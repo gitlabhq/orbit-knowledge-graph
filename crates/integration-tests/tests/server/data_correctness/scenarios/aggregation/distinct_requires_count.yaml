@@ -1,0 +1,12 @@
+description: DISTINCT is accepted only inside count()
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  gql: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) RETURN sum(DISTINCT mr.iid) AS total
+
+expect:
+  compile_error: DISTINCT works only inside count()

@@ -6,7 +6,7 @@
 //!
 //! This file, the orbit-billing crate, and the extended hook points form
 //! the SOX billing surface defined in ADR 020:
-//! `docs/design-documents/decisions/020_billing_sox_scope.md`.
+//! `docs/pages/engineering/adr/020_billing_sox_scope.md`.
 
 use orbit_billing::{BillingInputs, QuotaCheckInputs};
 
@@ -27,6 +27,7 @@ pub fn billing_inputs(claims: &Claims, coding_agent: Option<String>) -> BillingI
         deployment_type: claims.deployment_type.clone(),
         is_gitlab_team_member: claims.is_gitlab_team_member,
         coding_agent,
+        has_license_checksum: claims.license_checksum.is_some(),
     }
 }
 
@@ -42,6 +43,7 @@ impl From<&Claims> for QuotaCheckInputs {
             unique_instance_id: c.unique_instance_id.clone(),
             instance_version: c.instance_version.clone(),
             license_checksum: c.license_checksum.clone(),
+            is_gitlab_team_member: c.is_gitlab_team_member.unwrap_or(false),
         }
     }
 }

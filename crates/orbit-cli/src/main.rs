@@ -5,7 +5,6 @@ mod commands;
 mod database;
 mod descriptions;
 mod list;
-mod mcp;
 mod remote;
 mod settings;
 mod skill;
@@ -13,14 +12,15 @@ mod sql;
 mod sql_format;
 mod telemetry;
 mod tui;
+mod version;
 mod workspace;
 
 use anyhow::{Context, Result};
 use clap::builder::TypedValueParser;
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
+use orbit_log_fields::debug;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tracing::{Level, debug};
 
 /// Only bounds commands too fast to hide a round trip behind their own work.
 /// Raising it buys no extra delivery and lengthens exit against a dead collector.
@@ -29,7 +29,7 @@ const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const DETACHED_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Parser)]
-#[command(name = "orbit", version = env!("ORBIT_VERSION"))]
+#[command(name = "orbit", version = version::get())]
 #[command(
     about = descriptions::short("cli"),
     after_help = descriptions::summary("cli")
@@ -40,17 +40,12 @@ struct Cli {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = descriptions::short("index"))]
 struct IndexArgs {
     /// Repository path, a folder inside one, or a directory that holds repositories (default: current directory).
     #[arg(value_name = "PATH", default_value = ".")]
     path: PathBuf,
 
-    /// Number of worker threads (0 = auto-detect based on CPU cores)
-    #[arg(short, long, default_value = "0")]
-    threads: usize,
-
-    /// Include detailed statistics in output
+    /// Include detailed statistics, with the slowest files per phase
     #[arg(short, long)]
     stats: bool,
 
@@ -58,9 +53,46 @@ struct IndexArgs {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Write this revision to a specific DuckDB file.
+    /// DuckDB file to write (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
+
+    /// Seconds a language family may take before the run stops (default: no limit).
+    #[arg(long, value_name = "SECONDS")]
+    budget: Option<u64>,
+
+    /// Start the index in the background and return once it holds its locks.
+    #[arg(long = "async", conflicts_with_all = ["wait", "timeout", "stats", "verbose"])]
+    detach: bool,
+
+    /// Index in the foreground, first waiting for a running index of the same repository
+    /// (the default).
+    // Not read: blocking is already the default.
+    #[arg(long)]
+    wait: bool,
+
+    /// Seconds to wait for a running index or open readers before exiting with code 75
+    /// (default: ORBIT_WAIT_TIMEOUT_MS, else 600).
+    #[arg(long, value_name = "SECONDS")]
+    timeout: Option<u64>,
+
+    #[arg(long, value_name = "PATH", hide = true, conflicts_with = "detach")]
+    ready_file: Option<PathBuf>,
+}
+
+impl IndexArgs {
+    fn into_parts(self) -> (PathBuf, commands::index::incremental::Options, bool) {
+        let options = commands::index::incremental::Options {
+            stats: self.stats,
+            verbose: self.verbose,
+            db: self.db,
+            budget_seconds: self.budget,
+            wait: self.timeout.map(Duration::from_secs),
+            ready_file: self.ready_file,
+            ..Default::default()
+        };
+        (self.path, options, self.detach)
+    }
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -151,28 +183,21 @@ struct GrepArgs {
     #[arg(short = 'M', long, value_name = "NUM")]
     max_columns: Option<usize>,
 
-    /// Files or directories to search, as in `rg PATTERN [PATH...]`: relative to the current
-    /// directory or the repository, and globs such as `crates/*/src/lib.rs` work.
-    #[arg(value_name = "PATH")]
+    #[arg(
+        value_name = "PATH",
+        help = "Files or directories to search, as in `rg PATTERN [PATH...]`: relative to the \
+                current directory or the repository, and globs such as `crates/*/src/lib.rs` \
+                work. A GitLab `group/project`, `Project[id]`, or `Group[id]` searches that \
+                project or group in GitLab."
+    )]
     paths: Vec<String>,
-
-    #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
-    kind: Option<Kinds>,
 
     /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
 
-const KIND_ARG_HELP: &str = "Ontology node kinds, comma-separated. Definition kinds such as \
-                             `Class,Method` narrow matches; lowercase `function` or `class` \
-                             cover the whole family. `Definition` keeps matches inside any \
-                             definition. `File` and `Directory` list where matches are.";
-
-#[derive(Debug, Clone, PartialEq)]
-struct Kinds(Vec<String>);
-
-fn run_grep(args: GrepArgs) -> Result<()> {
+async fn run_grep(args: GrepArgs) -> Result<()> {
     use commands::grep::{Options, Output};
     let mut paths = Vec::new();
     let query = match args.regexp.is_empty() {
@@ -213,16 +238,7 @@ fn run_grep(args: GrepArgs) -> Result<()> {
             _ => Output::Lines,
         },
     };
-    commands::grep::run(
-        query,
-        args.repo,
-        args.db,
-        paths,
-        orbit_search::RecallFilter {
-            kinds: kind_names(args.kind),
-        },
-        options,
-    )
+    commands::grep::run(query, args.repo, args.db, paths, options).await
 }
 
 /// grep and rg flags that `orbit grep` already behaves as: line numbers, recursion, ignoring
@@ -245,6 +261,20 @@ const GREP_NOOP_LONGS: &[&str] = &[
     "smart-case",
     "with-filename",
 ];
+
+const GLAB_UPDATE_COMMAND: &str = "update";
+
+/// glab owns `update` but forwards `--help` here, so list it under glab.
+fn cli_command(launcher: &str) -> clap::Command {
+    let command = Cli::command();
+    if launcher != commands::setup::spec::GLAB_LAUNCHER {
+        return command;
+    }
+    command.bin_name(launcher).subcommand(
+        clap::Command::new(GLAB_UPDATE_COMMAND)
+            .about("Update the Orbit binary to the latest version"),
+    )
+}
 
 /// Lets `orbit grep` take rg and grep invocations as agents write them, so a stray flag costs no
 /// turn: flags it already behaves as are dropped, unsupported ones are dropped with a warning,
@@ -299,6 +329,13 @@ fn tolerate_grep_flags(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString>
             out.extend(["-C".into(), cluster.into()]);
             continue;
         }
+        let first = cluster.chars().next().expect("cluster is not empty");
+        let flag_like = cluster.chars().all(|c| c.is_ascii_alphanumeric())
+            || short(first).is_some_and(takes_value);
+        if !flag_like {
+            out.push(format!("--regexp={text}").into());
+            continue;
+        }
         let (mut kept, mut value_next) = (String::new(), false);
         for (at, c) in cluster.char_indices() {
             match short(c) {
@@ -324,23 +361,9 @@ fn tolerate_grep_flags(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString>
     out
 }
 
-fn parse_kinds(value: &str) -> Result<Kinds, String> {
-    let kinds: Vec<String> = value
-        .split([',', '|'])
-        .map(str::trim)
-        .filter(|kind| !kind.is_empty())
-        .map(str::to_string)
-        .collect();
-    Ok(Kinds(kinds))
-}
-
-fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
-    kinds.map(|Kinds(names)| names).unwrap_or_default()
-}
-
 fn context_target_help() -> String {
     format!(
-        "File:<id>, Definition:<id> from `{} grep`, file paths, path:start-end line ranges, or directories. Mix or repeat targets; quote paths with spaces.",
+        "File:<id>, Definition:<id> from `{} grep`, file paths, path:start-end line ranges, directories, names, or GitLab targets: mr:42, issue:7, branch:name, pipeline:123, job:456, commit:sha, GitLab URLs, with repo:group/project for another project. Mix or repeat targets; quote paths with spaces. No targets reads the current branch.",
         commands::setup::spec::launcher()
     )
 }
@@ -349,7 +372,7 @@ fn sql_long_about() -> String {
     format!(
         "Run a read-only SQL query against the local DuckDB graph.\n\n\
          Queries include all indexed revisions by default. Use --repo to select \
-         a checkout or --db to select a database. `{} schema` lists the tables.",
+         a checkout or --db to select a database. `{} workspace schema` lists the tables.",
         commands::setup::spec::launcher()
     )
 }
@@ -357,7 +380,7 @@ fn sql_long_about() -> String {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("context"), long_about = descriptions::long("context"))]
 struct ContextArgs {
-    #[arg(value_name = "TARGET", help = context_target_help(), required = true)]
+    #[arg(value_name = "TARGET", help = context_target_help())]
     target: Vec<String>,
 
     /// Repository path (default: current directory).
@@ -411,7 +434,7 @@ struct SchemaArgs {
 
     /// Optional table names to scope the output.
     /// When provided, only columns for those tables are shown.
-    /// e.g. `orbit schema gl_definition gl_edge`
+    /// e.g. `orbit workspace schema gl_definition gl_edge`
     #[arg(value_name = "TABLE")]
     tables: Vec<String>,
 }
@@ -429,30 +452,75 @@ struct ListArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = descriptions::short("mcp_serve"), long_about = descriptions::long("mcp_serve"))]
-struct McpArgs {
+#[command(about = descriptions::short("workspace"), long_about = descriptions::long("workspace"))]
+struct WorkspaceArgs {
     #[command(subcommand)]
-    command: McpCommands,
+    command: WorkspaceCommands,
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+enum WorkspaceCommands {
+    #[command(about = descriptions::short("index"))]
+    Index(IndexArgs),
+    Sql(SqlArgs),
+    Schema(SchemaArgs),
+    List(ListArgs),
+    Reset(ResetArgs),
+}
+
+/// Delete the local graph so the next index starts from nothing. Settings stay.
+#[derive(Args, Debug, PartialEq)]
+struct ResetArgs {
+    /// Skip the confirmation prompt.
+    #[arg(long, short = 'y')]
+    yes: bool,
+
+    /// Print what would be removed and exit without removing it.
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(name = "repo-map", about = descriptions::short("repo_map"), long_about = descriptions::long("repo_map"))]
-struct RepoMapArgs {
-    /// Repository path (default: current directory).
-    #[arg(long, value_name = "PATH")]
-    repo: Option<PathBuf>,
+#[command(group(clap::ArgGroup::new("graph_status_scope").args(["full_path", "namespace_id", "project_id"])))]
+struct GraphStatusArgs {
+    /// Full path of a project or group, such as `gitlab-org/gitlab`.
+    #[arg(long)]
+    full_path: Option<String>,
 
-    /// Limit output to source files with these extensions (repeat or
-    /// comma-separate; a leading dot is optional).
-    #[arg(long = "ext", value_name = "EXT")]
-    extensions: Vec<String>,
+    /// Namespace (group) ID to inspect.
+    #[arg(long)]
+    namespace_id: Option<i64>,
 
-    /// Read a specific revision DuckDB file.
-    #[arg(long, value_name = "PATH")]
-    db: Option<PathBuf>,
+    /// Project ID to inspect.
+    #[arg(long)]
+    project_id: Option<i64>,
 
-    #[command(subcommand)]
-    command: Option<commands::repo_map::RepoMapCommand>,
+    #[arg(
+        long,
+        help = "Output format. Default: a summary in a terminal, raw JSON otherwise.",
+        value_parser = clap::builder::PossibleValuesParser::new(["llm", "raw"])
+            .map(|value| match value.as_str() {
+                "raw" => remote::ResponseFormat::Raw,
+                _ => remote::ResponseFormat::Llm,
+            })
+    )]
+    response_format: Option<remote::ResponseFormat>,
+}
+
+impl GraphStatusArgs {
+    fn has_scope(&self) -> bool {
+        self.full_path.is_some() || self.namespace_id.is_some() || self.project_id.is_some()
+    }
+
+    async fn run(self) -> Result<(), remote::error::RemoteError> {
+        remote::run_graph_status(
+            self.full_path,
+            self.namespace_id,
+            self.project_id,
+            self.response_format,
+        )
+        .await
+    }
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -474,7 +542,7 @@ struct SkillsArgs {
 enum SkillsCommands {
     #[command(
         about = "Print an instance-matched agent skill file.",
-        long_about = "Print a file from the selected instance's agent skill, composed with local CLI guidance."
+        long_about = "Print a file from an agent skill served by the selected instance. The orbit skill is composed with local CLI guidance; other skills are printed as the server returns them."
     )]
     Get {
         /// Skill name.
@@ -489,7 +557,8 @@ enum SkillsCommands {
 
 #[derive(Args, Debug, PartialEq)]
 struct SetupFlags {
-    /// Skip the agent picker and apply to the pre-selected agents.
+    /// Skip the prompts: use the pre-selected agents and the default components, minus
+    /// `--skip`, plus `--install`.
     #[arg(long, short = 'y')]
     yes: bool,
 
@@ -518,6 +587,7 @@ impl SetupFlags {
         all: bool,
         index: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
+        ask_agent_plugins: bool,
         skill: commands::setup::SkillRequest,
     ) -> commands::setup::Options {
         commands::setup::Options {
@@ -528,15 +598,19 @@ impl SetupFlags {
             verbose: self.verbose,
             index,
             components,
+            ask_agent_plugins,
             skill,
         }
     }
 
-    fn target(&self) -> Result<commands::setup::Target> {
+    fn target(
+        &self,
+        machine: &commands::setup::detect::Machine,
+    ) -> Result<commands::setup::Target> {
         if self.project || self.dir.is_some() {
             commands::setup::Target::project(self.dir.clone())
         } else {
-            Ok(commands::setup::Target::Global)
+            Ok(commands::setup::Target::Global(machine.clone()))
         }
     }
 }
@@ -545,15 +619,15 @@ impl SetupFlags {
 enum Commands {
     /// Print the version string and exit.
     Version,
-    Index(IndexArgs),
     Grep(Box<GrepArgs>),
     Context(ContextArgs),
+    Workspace(WorkspaceArgs),
+    #[command(hide = true)]
+    Index(IndexArgs),
+    #[command(hide = true)]
     Sql(SqlArgs),
-    Schema(SchemaArgs),
+    #[command(hide = true)]
     List(ListArgs),
-    Mcp(McpArgs),
-    #[command(name = "repo-map")]
-    RepoMap(RepoMapArgs),
     #[command(name = "skills", alias = "skill")]
     Skills(SkillsArgs),
     #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
@@ -567,11 +641,14 @@ enum Commands {
         #[arg(long, conflicts_with = "agents")]
         all: bool,
 
-        /// Also register the `orbit` MCP server. Off by default.
-        #[arg(long)]
-        mcp: bool,
+        /// Add a component without asking, such as `agent-plugins` (repeatable).
+        #[arg(long, value_enum, value_name = "COMPONENT")]
+        install: Vec<commands::setup::Component>,
 
-        /// Leave a component out (repeatable).
+        /// Leave a component out (repeatable). By default setup installs hooks, skill, and
+        /// agent-plugins, through which each agent loads the Orbit instructions; agent-plugins
+        /// also shows Orbit calls in Claude Code, OpenCode, and Pi. `instructions` removes the
+        /// instruction block an earlier release wrote to CLAUDE.md or AGENTS.md.
         #[arg(long, value_enum, value_name = "COMPONENT")]
         skip: Vec<commands::setup::Component>,
 
@@ -611,8 +688,12 @@ enum Commands {
 
         #[arg(long, hide = true, value_name = "MODE")]
         mode: Option<String>,
+
+        /// Also point glab calls at Orbit's GitLab search and context; setup adds it when Orbit reaches GitLab.
+        #[arg(long, hide = true)]
+        gitlab: bool,
     },
-    /// Sends one command event; `hook-guard` runs it detached so hooks never wait on telemetry.
+    /// Sends one command event; every command runs it detached so none waits on telemetry.
     #[command(hide = true)]
     SendEvent {
         #[arg(value_name = "COMMAND")]
@@ -620,6 +701,18 @@ enum Commands {
 
         #[arg(long, value_name = "MS")]
         duration_ms: u64,
+
+        #[arg(long, value_name = "CODE", default_value_t = 0)]
+        exit_code: i32,
+    },
+    /// Refreshes edited files into the incremental graph; `grep` and `context` run it detached.
+    #[command(hide = true)]
+    Refresh {
+        repo: PathBuf,
+        #[arg(long, value_name = "PATH")]
+        db: Option<PathBuf>,
+        #[arg(last = true)]
+        files: Vec<String>,
     },
     /// POST a query to the remote Orbit API and stream the response.
     #[command(group(clap::ArgGroup::new("input").required(true).args(["query", "file"])))]
@@ -639,47 +732,29 @@ enum Commands {
         #[arg(long, value_enum)]
         response_format: Option<remote::ResponseFormat>,
     },
-    /// Show Orbit cluster health.
-    Status,
-    /// Show the remote Orbit ontology.
-    Ontology {
-        /// Node names to expand with full properties and edge lists.
+    /// Show Orbit cluster health, or indexing progress for a namespace or project.
+    ///
+    /// Without a scope flag, shows cluster health. With `--full-path`, `--namespace-id`, or
+    /// `--project-id`, shows indexing progress for that scope.
+    Status(GraphStatusArgs),
+    /// Show the remote Orbit schema: node types, properties, and edges.
+    #[command(alias = "ontology")]
+    Schema {
+        /// Node names to expand with their properties. Quote '*' to expand all.
         #[arg(value_name = "NODE")]
         nodes: Vec<String>,
+
+        #[arg(long, value_name = "PATH", hide = true)]
+        db: Option<PathBuf>,
+
+        #[arg(long, hide = true)]
+        raw: bool,
     },
-    /// Show the Orbit query DSL JSON Schema.
-    Dsl,
-    /// Show the Orbit MCP tool manifest.
-    Tools,
     /// Show indexing progress for a namespace or project.
     ///
     /// Without a scope flag, inspects the project behind this clone's `origin` remote.
-    #[command(name = "graph-status")]
-    #[command(group(clap::ArgGroup::new("graph_status_scope").args(["full_path", "namespace_id", "project_id"])))]
-    GraphStatus {
-        /// Full path of a project or group, such as `gitlab-org/gitlab`.
-        #[arg(long)]
-        full_path: Option<String>,
-
-        /// Namespace (group) ID to inspect.
-        #[arg(long)]
-        namespace_id: Option<i64>,
-
-        /// Project ID to inspect.
-        #[arg(long)]
-        project_id: Option<i64>,
-
-        #[arg(
-            long,
-            help = "Server response format. Default: a summary in a terminal, raw JSON otherwise.",
-            value_parser = clap::builder::PossibleValuesParser::new(["llm", "raw"])
-                .map(|value| match value.as_str() {
-                    "raw" => remote::ResponseFormat::Raw,
-                    _ => remote::ResponseFormat::Llm,
-                })
-        )]
-        response_format: Option<remote::ResponseFormat>,
-    },
+    #[command(name = "graph-status", hide = true)]
+    GraphStatus(GraphStatusArgs),
     /// Read and write persisted CLI settings (`~/.gitlab/orbit/settings.json`).
     Config {
         #[command(subcommand)]
@@ -705,36 +780,42 @@ enum ConfigCommands {
     List,
 }
 
-#[derive(Subcommand, Debug, PartialEq)]
-enum McpCommands {
-    /// Start a stateless MCP server over stdio.
-    Serve,
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    let matches = match Cli::command()
+    let matches = match cli_command(commands::setup::spec::launcher())
         .try_get_matches_from(tolerate_grep_flags(std::env::args_os().collect()))
     {
         Ok(matches) => matches,
         Err(_) if std::env::args().any(|arg| arg == "hook-guard") => return Ok(()),
         Err(error) => error.exit(),
     };
+    if matches.subcommand_name() == Some(GLAB_UPDATE_COMMAND) {
+        anyhow::bail!("run `glab orbit update` to update Orbit");
+    }
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
     match &cli.command {
-        Commands::HookGuard { kind, .. } => {
+        Commands::HookGuard { kind, gitlab, .. } => {
             let started = Instant::now();
-            if commands::hook_guard::run(*kind) {
-                telemetry::spawn_detached_event(&subcommand_path(&matches), started.elapsed());
+            if commands::hook_guard::run(*kind, *gitlab) {
+                telemetry::spawn_detached_event(&subcommand_path(&matches), 0, started.elapsed());
             }
             return Ok(());
         }
         Commands::SendEvent {
             command,
             duration_ms,
+            exit_code,
         } => {
-            send_event(command, Duration::from_millis(*duration_ms)).await;
-            return Ok(());
+            send_event(command, *exit_code, Duration::from_millis(*duration_ms)).await;
+            // Skips the runtime's wait on blocking DNS lookups past the flush timeout.
+            std::process::exit(0);
+        }
+        Commands::Refresh { repo, db, files } => {
+            return commands::index::incremental::refresh_now(
+                repo.clone(),
+                db.clone(),
+                files.clone(),
+            );
         }
         _ => {}
     }
@@ -743,7 +824,12 @@ async fn main() -> Result<()> {
 
     // labkit-events ships no TLS provider; the tracker below builds an HTTPS client.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    let tracker = telemetry::resolve_from_env().build_tracker();
+    let tracker = match cli.command {
+        Commands::Setup { .. } | Commands::Uninstall { .. } => {
+            telemetry::resolve_from_env().build_tracker()
+        }
+        _ => None,
+    };
 
     let started = Instant::now();
     let result = dispatch(cli.command, tracker.clone(), coding_agent.clone())
@@ -754,15 +840,7 @@ async fn main() -> Result<()> {
         });
     let exit_code = result.as_ref().map_or_else(exit_code_for, |()| 0);
 
-    if let Some(tracker) = &tracker {
-        telemetry::emit_command_event(
-            tracker,
-            &subcommand_path(&matches),
-            exit_code,
-            started.elapsed(),
-            coding_agent.as_deref(),
-        );
-    }
+    telemetry::spawn_detached_event(&subcommand_path(&matches), exit_code, started.elapsed());
     flush_telemetry(tracker.as_ref()).await;
 
     let Err(err) = &result else {
@@ -772,6 +850,8 @@ async fn main() -> Result<()> {
         eprintln!("{}", remote.message);
     } else if let Some(message) = workspace::describe_graph_lock_conflict(err) {
         eprintln!("{message}");
+    } else if let Some(timed_out) = err.downcast_ref::<database::WaitTimedOut>() {
+        eprintln!("{timed_out}");
     } else if err.is::<commands::grep::NoMatches>() {
     } else if !tui::is_cancelled(err) {
         return result;
@@ -792,25 +872,38 @@ fn exit_code_for(err: &anyhow::Error) -> i32 {
         remote.exit_code
     } else if tui::is_cancelled(err) {
         130
+    } else if err.is::<database::WaitTimedOut>() {
+        database::WAIT_TIMED_OUT_EXIT_CODE
     } else {
         1
     }
 }
 
 fn subcommand_path(matches: &clap::ArgMatches) -> String {
-    matches
-        .subcommand_name()
-        .map(|top| top.replace('-', "_"))
-        .unwrap_or_default()
+    let path = match matches.subcommand() {
+        Some(("workspace", nested)) => match nested.subcommand_name() {
+            Some(verb) => format!("workspace_{verb}"),
+            None => "workspace".to_string(),
+        },
+        Some((top, _)) => top.to_string(),
+        None => String::new(),
+    };
+    path.replace('-', "_")
 }
 
-async fn send_event(command: &str, duration: Duration) {
+async fn send_event(command: &str, exit_code: i32, duration: Duration) {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let Some(tracker) = telemetry::resolve_from_env().build_tracker() else {
         return;
     };
     let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
-    telemetry::emit_command_event(&tracker, command, 0, duration, coding_agent.as_deref());
+    telemetry::emit_command_event(
+        &tracker,
+        command,
+        exit_code,
+        duration,
+        coding_agent.as_deref(),
+    );
     let _ = tokio::time::timeout(DETACHED_FLUSH_TIMEOUT, tracker.shutdown()).await;
 }
 
@@ -831,54 +924,24 @@ async fn dispatch(
 ) -> Result<()> {
     match command {
         Commands::Version => {
-            println!("{}", env!("ORBIT_VERSION"));
+            println!("{}", version::get());
             Ok(())
         }
-        Commands::Index(IndexArgs {
-            path,
-            threads,
-            stats,
-            verbose,
-            db,
-        }) => commands::index::run(path, threads, stats, verbose, db),
-        Commands::Grep(args) => run_grep(*args),
-        Commands::Context(args) => commands::context::run(args),
-        Commands::Sql(SqlArgs {
-            query,
-            file,
-            format,
-            repo,
-            all: _,
-            db,
-        }) => sql::run(query, file, format, db, repo),
-        Commands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
-        Commands::List(ListArgs { format, db }) => list::run(format, db),
-        Commands::Mcp(McpArgs {
-            command: McpCommands::Serve,
-        }) => {
-            // Logs must go to stderr only — stdout is the MCP transport.
-            let subscriber = tracing_subscriber::fmt()
-                .with_max_level(Level::INFO)
-                .with_target(false)
-                .with_ansi(false)
-                .without_time()
-                .with_writer(std::io::stderr)
-                .finish();
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("setting default subscriber failed");
-            mcp::serve(tracker, coding_agent).await
+        Commands::Grep(args) => run_grep(*args).await,
+        Commands::Context(args) => commands::context::run(args).await,
+        Commands::Workspace(WorkspaceArgs { command }) => run_workspace(command).await,
+        Commands::Index(args) => {
+            warn_moved("index", "workspace index");
+            run_workspace(WorkspaceCommands::Index(args)).await
         }
-        Commands::RepoMap(RepoMapArgs {
-            repo,
-            extensions,
-            db,
-            command,
-        }) => commands::repo_map::run(
-            repo,
-            extensions,
-            db,
-            command.unwrap_or(commands::repo_map::RepoMapCommand::Overview),
-        ),
+        Commands::Sql(args) => {
+            warn_moved("sql", "workspace sql");
+            run_workspace(WorkspaceCommands::Sql(args)).await
+        }
+        Commands::List(args) => {
+            warn_moved("list", "workspace list");
+            run_workspace(WorkspaceCommands::List(args)).await
+        }
         Commands::Config { command } => match command {
             ConfigCommands::Get { key } => commands::config::get(&key),
             ConfigCommands::Set { key, value } => commands::config::set(&key, &value),
@@ -895,20 +958,24 @@ async fn dispatch(
         Commands::Setup {
             agents,
             all,
-            mcp,
+            install,
             skip,
             no_index,
             skill,
             flags,
         } => {
-            let components = commands::setup::Component::from_flags(mcp, &skip);
+            let components = commands::setup::Component::from_flags(&install, &skip)?;
+            let agent_plugins = commands::setup::Component::AgentPlugins;
+            let ask_agent_plugins =
+                !install.contains(&agent_plugins) && !skip.contains(&agent_plugins);
             let machine = commands::setup::detect::Machine::current()?;
-            let target = flags.target()?;
+            let target = flags.target(&machine)?;
             let options = flags.to_options(
                 agents,
                 all,
                 !no_index,
                 components,
+                ask_agent_plugins,
                 commands::setup::SkillRequest {
                     kind: skill,
                     full_tree: None,
@@ -927,10 +994,16 @@ async fn dispatch(
             Ok(())
         }
         Commands::Uninstall { agents, flags } => {
-            let options =
-                flags.to_options(agents, false, false, Default::default(), Default::default());
+            let options = flags.to_options(
+                agents,
+                false,
+                false,
+                Default::default(),
+                false,
+                Default::default(),
+            );
             let machine = commands::setup::detect::Machine::current()?;
-            let run = commands::setup::uninstall(options, flags.target()?, &machine)?;
+            let run = commands::setup::uninstall(options, flags.target(&machine)?, &machine)?;
             if let Some(tracker) = &tracker {
                 telemetry::emit_setup_event(
                     tracker,
@@ -945,11 +1018,12 @@ async fn dispatch(
             kind,
             graph_first: _,
             mode: _,
+            gitlab,
         } => {
-            commands::hook_guard::run(kind);
+            commands::hook_guard::run(kind, gitlab);
             Ok(())
         }
-        Commands::SendEvent { .. } => Ok(()),
+        Commands::SendEvent { .. } | Commands::Refresh { .. } => Ok(()),
         Commands::Query {
             query,
             file,
@@ -962,23 +1036,54 @@ async fn dispatch(
             };
             Ok(remote::run_query(input, response_format).await?)
         }
-        Commands::Status => Ok(remote::run_status().await?),
-        Commands::Ontology { nodes } => Ok(remote::run_ontology(nodes).await?),
-        Commands::Dsl => Ok(remote::run_dsl().await?),
-        Commands::Tools => Ok(remote::run_tools().await?),
-        Commands::GraphStatus {
-            full_path,
-            namespace_id,
-            project_id,
-            response_format,
-        } => Ok(
-            remote::run_graph_status(full_path, namespace_id, project_id, response_format).await?,
-        ),
+        Commands::Status(args) if args.has_scope() => Ok(args.run().await?),
+        Commands::Status(GraphStatusArgs {
+            response_format: Some(_),
+            ..
+        }) => anyhow::bail!("--response-format needs --full-path, --namespace-id, or --project-id"),
+        Commands::Status(_) => Ok(remote::run_status().await?),
+        Commands::Schema { nodes, db, raw }
+            if db.is_some() || raw || nodes.iter().any(|name| is_local_table_name(name)) =>
+        {
+            warn_moved("schema <table>", "workspace schema <table>");
+            run_schema(db, raw, nodes)
+        }
+        Commands::Schema { nodes, .. } => Ok(remote::run_ontology(nodes).await?),
+        Commands::GraphStatus(args) => Ok(args.run().await?),
     }
 }
 
+async fn run_workspace(command: WorkspaceCommands) -> Result<()> {
+    match command {
+        WorkspaceCommands::Index(args) => {
+            let (path, options, detach) = args.into_parts();
+            commands::index::run(path, options, detach)
+        }
+        WorkspaceCommands::Sql(SqlArgs {
+            query,
+            file,
+            format,
+            repo,
+            all: _,
+            db,
+        }) => sql::run(query, file, format, db, repo),
+        WorkspaceCommands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
+        WorkspaceCommands::List(ListArgs { format, db }) => list::run(format, db),
+        WorkspaceCommands::Reset(ResetArgs { yes, dry_run }) => commands::reset::run(yes, dry_run),
+    }
+}
+
+fn warn_moved(old: &str, new: &str) {
+    let launcher = commands::setup::spec::launcher();
+    eprintln!("`{launcher} {old}` is deprecated; use `{launcher} {new}`.");
+}
+
+fn is_local_table_name(name: &str) -> bool {
+    name.starts_with(|first: char| first == '_' || first.is_ascii_lowercase())
+}
+
 fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()> {
-    let client = database::GraphReader::open(db)?;
+    let client = workspace::open_graph_reader(db)?;
 
     let batches = if tables.is_empty() {
         sql::query(&client, &sql::schema_introspection_sql())?
@@ -1014,7 +1119,7 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
         let missing: Vec<_> = tables.iter().filter(|t| !found.contains(*t)).collect();
         if !missing.is_empty() {
             anyhow::bail!(
-                "no table named {} in the local graph. Run `{} schema` to list tables.",
+                "no table named {} in the local graph. Run `{} workspace schema` to list tables.",
                 missing
                     .iter()
                     .map(|t| format!("'{t}'"))
@@ -1036,8 +1141,21 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, IndexArgs, SchemaArgs};
+    use super::{
+        Cli, Commands, IndexArgs, ResetArgs, SchemaArgs, WorkspaceArgs, WorkspaceCommands,
+        tolerate_grep_flags,
+    };
     use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn grep_reads_a_dash_pattern_that_is_no_flag_as_the_pattern() {
+        let args = ["orbit", "grep", "- +1.75", "-g*.rs"].map(std::ffi::OsString::from);
+        let Commands::Grep(grep) = Cli::parse_from(tolerate_grep_flags(args.to_vec())).command
+        else {
+            panic!("expected grep");
+        };
+        assert_eq!(grep.regexp, ["- +1.75"]);
+    }
 
     #[test]
     fn cli_command_tree_verifies() {
@@ -1090,8 +1208,151 @@ mod tests {
         );
         assert_eq!(action_for(&["orbit", "sql", "SELECT 1"]), "sql");
         assert_eq!(action_for(&["orbit", "config", "set", "k", "v"]), "config");
-        assert_eq!(action_for(&["orbit", "repo-map", "tree"]), "repo_map");
-        assert_eq!(action_for(&["orbit", "mcp", "serve"]), "mcp");
+        assert_eq!(
+            action_for(&["orbit", "workspace", "sql", "SELECT 1"]),
+            "workspace_sql"
+        );
+        assert_eq!(action_for(&["orbit", "ontology"]), "schema");
+    }
+
+    fn workspace(argv: &[&str]) -> WorkspaceCommands {
+        let Commands::Workspace(WorkspaceArgs { command }) = Cli::parse_from(argv).command else {
+            panic!("expected workspace for {argv:?}");
+        };
+        command
+    }
+
+    #[test]
+    fn local_graph_verbs_live_under_workspace() {
+        let WorkspaceCommands::Index(index) =
+            workspace(&["orbit", "workspace", "index", "/tmp/repo", "--budget", "4"])
+        else {
+            panic!("expected index");
+        };
+        assert_eq!(index.path, std::path::PathBuf::from("/tmp/repo"));
+        assert_eq!(index.budget, Some(4));
+
+        let WorkspaceCommands::Schema(schema) =
+            workspace(&["orbit", "workspace", "schema", "gl_edge", "--raw"])
+        else {
+            panic!("expected schema");
+        };
+        assert_eq!(
+            schema,
+            SchemaArgs {
+                db: None,
+                raw: true,
+                tables: vec!["gl_edge".to_string()],
+            }
+        );
+
+        assert!(matches!(
+            workspace(&["orbit", "workspace", "sql", "SELECT 1"]),
+            WorkspaceCommands::Sql(_)
+        ));
+        assert!(matches!(
+            workspace(&["orbit", "workspace", "list"]),
+            WorkspaceCommands::List(_)
+        ));
+        assert_eq!(
+            workspace(&["orbit", "workspace", "reset", "-y"]),
+            WorkspaceCommands::Reset(ResetArgs {
+                yes: true,
+                dry_run: false,
+            })
+        );
+        assert!(Cli::try_parse_from(["orbit", "workspace"]).is_err());
+    }
+
+    #[test]
+    fn index_async_conflicts_with_wait_timeout_stats_and_verbose() {
+        let parses = |flags: &[&str]| {
+            let argv = ["orbit", "workspace", "index"].iter().chain(flags);
+            Cli::try_parse_from(argv).is_ok()
+        };
+        assert!(parses(&["--async"]));
+        assert!(parses(&["--wait", "--timeout", "5"]));
+        for other in ["--wait", "--timeout=5", "--stats", "--verbose"] {
+            assert!(!parses(&["--async", other]), "{other}");
+        }
+    }
+
+    #[test]
+    fn removed_commands_are_rejected() {
+        for argv in [
+            ["orbit", "repo-map", "overview"].as_slice(),
+            &["orbit", "dsl"],
+            &["orbit", "tools"],
+            &["orbit", "mcp", "serve"],
+            &["orbit", "workspace", "mcp", "serve"],
+        ] {
+            assert!(
+                Cli::try_parse_from(argv).is_err(),
+                "{argv:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn moved_commands_stay_hidden_from_help() {
+        let help = Cli::command().render_help().to_string();
+        for hidden in ["index", "sql", "list", "graph-status", "ontology"] {
+            assert!(
+                !help
+                    .lines()
+                    .any(|line| line.trim_start().starts_with(hidden)),
+                "{hidden} must not be listed:\n{help}"
+            );
+        }
+        for visible in ["workspace", "schema", "status", "grep", "context", "query"] {
+            assert!(
+                help.lines()
+                    .any(|line| line.trim_start().starts_with(visible)),
+                "{visible} must be listed:\n{help}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_routes_local_table_names_to_the_workspace_graph() {
+        assert!(super::is_local_table_name("gl_definition"));
+        assert!(super::is_local_table_name("_orbit_manifest"));
+        assert!(!super::is_local_table_name("MergeRequest"));
+    }
+
+    #[test]
+    fn status_takes_graph_status_scope_flags() {
+        let Commands::Status(args) =
+            Cli::parse_from(["orbit", "status", "--full-path", "a/b"]).command
+        else {
+            panic!("expected status");
+        };
+        assert!(args.has_scope());
+        let Commands::Status(args) = Cli::parse_from(["orbit", "status"]).command else {
+            panic!("expected status");
+        };
+        assert!(!args.has_scope());
+        assert!(
+            Cli::try_parse_from(["orbit", "status", "--full-path", "a/b", "--project-id", "1"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn send_event_carries_the_parent_exit_code() {
+        let Commands::SendEvent { exit_code, .. } = Cli::parse_from([
+            "orbit",
+            "send-event",
+            "grep",
+            "--duration-ms",
+            "5",
+            "--exit-code=130",
+        ])
+        .command
+        else {
+            panic!("expected send-event");
+        };
+        assert_eq!(exit_code, 130);
     }
 
     #[test]
@@ -1119,9 +1380,9 @@ mod tests {
     }
 
     #[test]
-    fn former_local_and_remote_verbs_parse_at_top_level() {
+    fn legacy_verbs_still_parse_at_top_level() {
         let Commands::Index(index) =
-            Cli::parse_from(["orbit", "index", "/tmp/repo", "--threads", "4"]).command
+            Cli::parse_from(["orbit", "index", "/tmp/repo", "--budget", "4"]).command
         else {
             panic!("expected index");
         };
@@ -1129,26 +1390,23 @@ mod tests {
             index,
             IndexArgs {
                 path: "/tmp/repo".into(),
-                threads: 4,
                 stats: false,
                 verbose: false,
                 db: None,
+                budget: Some(4),
+                detach: false,
+                wait: false,
+                timeout: None,
+                ready_file: None,
             }
         );
 
-        let Commands::Schema(schema) =
+        let Commands::Schema { nodes, db, raw } =
             Cli::parse_from(["orbit", "schema", "gl_edge", "--raw"]).command
         else {
             panic!("expected schema");
         };
-        assert_eq!(
-            schema,
-            SchemaArgs {
-                db: None,
-                raw: true,
-                tables: vec!["gl_edge".to_string()],
-            }
-        );
+        assert_eq!((nodes, db, raw), (vec!["gl_edge".to_string()], None, true));
 
         assert!(matches!(
             Cli::parse_from(["orbit", "grep", "who calls this"]).command,
@@ -1164,24 +1422,18 @@ mod tests {
             Commands::List(_)
         ));
         assert!(matches!(
-            Cli::parse_from(["orbit", "mcp", "serve"]).command,
-            Commands::Mcp(_)
-        ));
-        assert!(matches!(
-            Cli::parse_from(["orbit", "repo-map", "overview"]).command,
-            Commands::RepoMap(_)
-        ));
-        assert!(matches!(
             Cli::parse_from(["orbit", "context", "Definition:7"]).command,
             Commands::Context(_)
         ));
 
-        let Commands::Ontology { nodes } =
-            Cli::parse_from(["orbit", "ontology", "User", "Project"]).command
-        else {
-            panic!("expected ontology");
-        };
-        assert_eq!(nodes, vec!["User".to_string(), "Project".to_string()]);
+        for verb in ["ontology", "schema"] {
+            let Commands::Schema { nodes, .. } =
+                Cli::parse_from(["orbit", verb, "User", "Project"]).command
+            else {
+                panic!("expected schema for {verb}");
+            };
+            assert_eq!(nodes, vec!["User".to_string(), "Project".to_string()]);
+        }
         let Commands::Query {
             query,
             file,
@@ -1195,22 +1447,14 @@ mod tests {
         assert_eq!(response_format, Some(super::remote::ResponseFormat::Raw));
         assert!(matches!(
             Cli::parse_from(["orbit", "status"]).command,
-            Commands::Status
+            Commands::Status(_)
         ));
-        assert!(matches!(
-            Cli::parse_from(["orbit", "dsl"]).command,
-            Commands::Dsl
-        ));
-        assert!(matches!(
-            Cli::parse_from(["orbit", "tools"]).command,
-            Commands::Tools
-        ));
-        let Commands::GraphStatus { full_path, .. } =
+        let Commands::GraphStatus(args) =
             Cli::parse_from(["orbit", "graph-status", "--full-path", "a/b"]).command
         else {
             panic!("expected graph-status");
         };
-        assert_eq!(full_path.as_deref(), Some("a/b"));
+        assert_eq!(args.full_path.as_deref(), Some("a/b"));
 
         for argv in [
             ["orbit", "local", "grep", "x"].as_slice(),
@@ -1296,7 +1540,10 @@ mod tests {
             Cli::parse_from(["orbit", "context", "src/lib.rs"]).command,
             Commands::Context(_)
         ));
-        assert!(Cli::try_parse_from(["orbit", "context"]).is_err());
+        let Commands::Context(bare) = Cli::parse_from(["orbit", "context"]).command else {
+            panic!("expected context");
+        };
+        assert!(bare.target.is_empty());
         assert!(Cli::try_parse_from(["orbit", "context", "--file", "src/lib.rs"]).is_err());
         for removed in ["--outline", "--related", "--tests"] {
             assert!(

@@ -15,4 +15,4 @@ query:
     MATCH (_orbit:MergeRequest)-[:IN_PROJECT]->(project:Project) WHERE project.id = 1000 RETURN project{.name}, _orbit{.project_id} LIMIT 10
 
 expect:
-  compile_error: 'node id "_orbit" conflicts with reserved prefix "_orbit_"'
+  compile_error: 'identifier "_orbit" conflicts with reserved prefix "_orbit_"'

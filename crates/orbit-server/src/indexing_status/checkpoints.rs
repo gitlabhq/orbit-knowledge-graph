@@ -23,6 +23,7 @@ const PLAN_CHECKPOINTS_SQL: &str = "\
 SELECT root, plan, \
        maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at) AS last_completed_at, \
        argMax(attempts, _version) AS attempts, \
+       argMax(watermark, _version) AS watermark, \
        max(_version) AS written_at \
   FROM (SELECT *, \
                toInt64OrZero(splitByChar('.', key)[2]) AS root, \
@@ -38,6 +39,7 @@ HAVING argMax(_deleted, _version) = false";
 struct PlanCheckpoint {
     indexed_at: Option<DateTime<Utc>>,
     attempts: i64,
+    watermark: DateTime<Utc>,
     written_at: DateTime<Utc>,
 }
 
@@ -47,6 +49,13 @@ pub struct PlanCheckpoints {
 }
 
 impl PlanCheckpoints {
+    /// A run that completed with nothing indexed because the source table does not exist.
+    pub fn is_source_unavailable(&self, plan: &str) -> bool {
+        self.by_plan.get(plan).is_some_and(|checkpoint| {
+            checkpoint.indexed_at.is_some() && checkpoint.watermark == DateTime::<Utc>::UNIX_EPOCH
+        })
+    }
+
     pub fn get_plan_phase(&self, plan: &str, now: DateTime<Utc>) -> Phase {
         let Some(checkpoint) = self.by_plan.get(plan) else {
             return Phase::NotStarted;
@@ -63,7 +72,7 @@ impl PlanCheckpoints {
         }
     }
 
-    pub fn get_last_completed_at(&self, plans: &[PipelineDescriptor]) -> Option<DateTime<Utc>> {
+    pub fn get_last_completed_at(&self, plans: &[&PipelineDescriptor]) -> Option<DateTime<Utc>> {
         let indexed_at: Option<Vec<DateTime<Utc>>> = plans
             .iter()
             .map(|plan| self.by_plan.get(&plan.name)?.indexed_at)
@@ -108,19 +117,23 @@ pub async fn read_plan_checkpoints(
     let indexed_at = Option::<DateTime<Utc>>::extract_column(&batches, 2)
         .map_err(map_column_extraction_error)?;
     let attempts = i64::extract_column(&batches, 3).map_err(map_column_extraction_error)?;
-    let written_at =
+    let watermarks =
         DateTime::<Utc>::extract_column(&batches, 4).map_err(map_column_extraction_error)?;
+    let written_at =
+        DateTime::<Utc>::extract_column(&batches, 5).map_err(map_column_extraction_error)?;
 
-    for ((((root, plan), indexed_at), attempts), written_at) in roots
+    for (((((root, plan), indexed_at), attempts), watermark), written_at) in roots
         .into_iter()
         .zip(plans)
         .zip(indexed_at)
         .zip(attempts)
+        .zip(watermarks)
         .zip(written_at)
     {
         let checkpoint = PlanCheckpoint {
             indexed_at,
             attempts,
+            watermark,
             written_at,
         };
         checkpoints

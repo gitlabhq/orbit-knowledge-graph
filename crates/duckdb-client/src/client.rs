@@ -3,13 +3,18 @@ use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
 use duckdb::params;
+use duckdb::vtab::arrow::{ArrowBatchRegistration, ArrowVTab};
+use orbit_utils::strings::quote_ident;
 
-use crate::converter::LocalGraphData;
 use crate::error::{DuckDbError, Result};
+use crate::helpers::sql_lit;
 
 const MAX_OPEN_RETRIES: u32 = 10;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(100);
+const READ_ONLY_RETRIES: u32 = 5;
+const READ_ONLY_BACKOFF: Duration = Duration::from_millis(50);
 
+#[derive(Debug)]
 pub struct DuckDbClient {
     conn: duckdb::Connection,
 }
@@ -21,57 +26,109 @@ fn is_lock_error(e: &impl std::fmt::Display) -> bool {
     msg.contains("could not set lock") || msg.contains("lock on file")
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum OpenMode<'a> {
+    ReadWrite(&'a Path),
+    ReadOnly(&'a Path),
+    InMemory,
+    /// In memory, where SQL may `ATTACH` database files under this directory only.
+    InMemoryAttaching(&'a Path),
+    /// In memory, where [`DuckDbClient::create_temp_table`] can load Arrow batches.
+    InMemoryArrow,
+    /// Another connection to an open database, sharing its settings and thread pool.
+    Connection(&'a DuckDbClient),
+}
+
+impl<'a, P: AsRef<Path> + ?Sized> From<&'a P> for OpenMode<'a> {
+    fn from(path: &'a P) -> Self {
+        Self::ReadWrite(path.as_ref())
+    }
+}
+
 impl DuckDbClient {
-    /// Retries with exponential backoff (capped at 5s per attempt, ~26s
-    /// total) if another process holds the write lock.
-    pub fn open(path: &Path) -> Result<Self> {
+    pub fn open<'a>(mode: impl Into<OpenMode<'a>>) -> Result<Self> {
+        let in_memory = Path::new(":memory:");
+        match mode.into() {
+            OpenMode::ReadWrite(path) => Self::open_file(path, false),
+            OpenMode::ReadOnly(path) => Self::open_file(path, true),
+            OpenMode::InMemory => Self::connect(in_memory, false, None),
+            OpenMode::InMemoryAttaching(dir) => Self::connect(in_memory, false, Some(dir)),
+            OpenMode::InMemoryArrow => {
+                let client = Self::connect(in_memory, false, None)?;
+                client.conn.register_table_function::<ArrowVTab>("arrow")?;
+                Ok(client)
+            }
+            OpenMode::Connection(database) => Ok(Self {
+                conn: database.conn.try_clone()?,
+            }),
+        }
+    }
+
+    /// Retries while another process holds the lock: briefly when read-only,
+    /// with backoff up to ~26 s when read-write.
+    fn open_file(path: &Path, read_only: bool) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
         }
-
-        let mut backoff = INITIAL_BACKOFF;
-        for attempt in 0..=MAX_OPEN_RETRIES {
-            match Self::open_once(path, duckdb::AccessMode::ReadWrite) {
-                Ok(client) => return Ok(client),
-                Err(e) if attempt < MAX_OPEN_RETRIES && is_lock_error(&e) => {
+        let (retries, mut backoff) = if read_only {
+            (READ_ONLY_RETRIES, READ_ONLY_BACKOFF)
+        } else {
+            (MAX_OPEN_RETRIES, INITIAL_BACKOFF)
+        };
+        for attempt in 0..=retries {
+            match Self::connect(path, read_only, None) {
+                Err(e) if attempt < retries && is_lock_error(&e) => {
                     std::thread::sleep(backoff);
-                    backoff = (backoff * 2).min(Duration::from_secs(5));
+                    if !read_only {
+                        backoff = (backoff * 2).min(Duration::from_secs(5));
+                    }
                 }
-                Err(e) => return Err(e),
+                result => return result,
             }
         }
         unreachable!()
     }
 
-    /// Retries briefly (50ms intervals, ~250ms total) if a writer holds
-    /// the lock.
-    pub fn open_read_only(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
-        }
-
-        for attempt in 0..=5 {
-            match Self::open_once(path, duckdb::AccessMode::ReadOnly) {
-                Ok(client) => return Ok(client),
-                Err(e) if attempt < 5 && is_lock_error(&e) => {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => return Err(e),
-            }
-        }
-        unreachable!()
-    }
-
-    fn open_once(path: &Path, access_mode: duckdb::AccessMode) -> Result<Self> {
+    fn connect(path: &Path, read_only: bool, attachable_dir: Option<&Path>) -> Result<Self> {
+        let access_mode = if read_only {
+            duckdb::AccessMode::ReadOnly
+        } else {
+            duckdb::AccessMode::ReadWrite
+        };
         let config = duckdb::Config::default()
             .access_mode(access_mode)
+            .and_then(|config| config.enable_autoload_extension(false))
+            .and_then(|config| config.with("autoinstall_known_extensions", "false"))
+            .and_then(|config| config.with("allow_community_extensions", "false"))
+            .and_then(|config| config.with("allow_persistent_secrets", "false"))
             .map_err(|e| DuckDbError::Schema(e.to_string()))?;
         let conn = duckdb::Connection::open_with_flags(path, config)?;
+        let allowed = attachable_dir
+            .map(|dir| {
+                format!(
+                    "SET allowed_directories = [{}];",
+                    sql_lit(&format!("{}/", dir.display()))
+                )
+            })
+            .unwrap_or_default();
+        conn.execute_batch(&format!(
+            "{allowed} SET enable_external_access = false; SET lock_configuration = true;"
+        ))
+        .map_err(|e| DuckDbError::Schema(e.to_string()))?;
         Ok(Self { conn })
     }
 
-    pub fn open_in_memory() -> Result<Self> {
-        Self::open_once(Path::new(":memory:"), duckdb::AccessMode::ReadWrite)
+    /// The table lives until this connection closes.
+    pub fn create_temp_table(&self, table: &str, batch: RecordBatch) -> Result<()> {
+        let batch = ArrowBatchRegistration::new(batch);
+        self.conn.execute(
+            &format!(
+                "CREATE TEMP TABLE {} AS SELECT * FROM arrow(?)",
+                quote_ident(table)
+            ),
+            [&batch],
+        )?;
+        Ok(())
     }
 
     pub fn initialize_schema(&self, ddl: &str) -> Result<()> {
@@ -102,9 +159,7 @@ impl DuckDbClient {
     }
 
     pub fn query_arrow(&self, sql: &str) -> Result<Vec<RecordBatch>> {
-        let mut stmt = self.conn.prepare(sql)?;
-        let batches = stmt.query_arrow([])?.collect();
-        Ok(batches)
+        self.query_arrow_params(sql, &[])
     }
 
     pub fn query_arrow_params(
@@ -113,9 +168,11 @@ impl DuckDbClient {
         params: &[Box<dyn duckdb::ToSql>],
     ) -> Result<Vec<RecordBatch>> {
         let mut stmt = self.conn.prepare(sql)?;
-        let batches = stmt
-            .query_arrow(duckdb::params_from_iter(params.iter()))?
-            .collect();
+        stmt.execute(duckdb::params_from_iter(params.iter()))?;
+        let mut batches = Vec::new();
+        while let Some(chunk) = stmt.step()? {
+            batches.push(RecordBatch::from(&chunk));
+        }
         Ok(batches)
     }
 
@@ -123,13 +180,6 @@ impl DuckDbClient {
         for table in tables {
             self.conn
                 .execute(&format!("DELETE FROM {table}"), params![])?;
-        }
-        Ok(())
-    }
-
-    pub fn insert_graph(&self, data: LocalGraphData) -> Result<()> {
-        for (table, batch) in data.tables {
-            self.insert_batch(&table, &batch)?;
         }
         Ok(())
     }
@@ -259,7 +309,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn schema_creation_and_sql_roundtrip() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenMode::InMemory).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         client
@@ -294,7 +344,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn appender_insert_and_query() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenMode::InMemory).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         let batch = make_file_batch(&[10, 11], &["a.rs", "b.rs"]);
@@ -317,7 +367,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn large_batch_appender() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenMode::InMemory).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         let n = 5000;
@@ -341,7 +391,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn delete_all_data_truncates() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenMode::InMemory).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         client
@@ -404,7 +454,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn insert_arrow_rejects_unknown_table() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenMode::InMemory).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         let batch = make_file_batch(&[1], &["a.rs"]);
@@ -416,7 +466,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn insert_empty_batch_is_noop() {
-        let client = DuckDbClient::open_in_memory().unwrap();
+        let client = DuckDbClient::open(OpenMode::InMemory).unwrap();
         client.initialize_schema(TEST_DDL).unwrap();
 
         let batch = make_file_batch(&[], &[]);
@@ -431,5 +481,19 @@ CREATE TABLE IF NOT EXISTS gl_edge (
             .downcast_ref::<Int64Array>()
             .unwrap();
         assert_eq!(count.value(0), 0);
+    }
+
+    #[test]
+    fn create_temp_table_quotes_the_table_name() {
+        let client = DuckDbClient::open(OpenMode::InMemoryArrow).unwrap();
+        let batch = make_file_batch(&[1, 2], &["a.rs", "b.rs"]);
+        client
+            .create_temp_table("source data; DROP TABLE x", batch)
+            .unwrap();
+
+        let result = client
+            .query_arrow(r#"SELECT count(*) AS cnt FROM "source data; DROP TABLE x""#)
+            .unwrap();
+        assert_eq!(crate::helpers::scalar_i64(&result), 2);
     }
 }

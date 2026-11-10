@@ -50,7 +50,7 @@ def suite_files(paths: list[str]) -> list[Path]:
 def run_prettier(files: list[Path], fix: bool) -> bool:
     version = json.loads((ROOT / "package.json").read_text())["devDependencies"]["prettier"]
     mode = "--write" if fix else "--check"
-    command = ["npx", "--yes", f"prettier@{version}", mode, "--log-level", "warn"]
+    command = ["bun", "x", f"prettier@{version}", mode, "--log-level", "warn"]
     paths = [str(f.relative_to(ROOT)) for f in files]
     batches = [paths[i : i + 500] for i in range(0, len(paths), 500)]
     return all([subprocess.run([*command, *batch], cwd=ROOT).returncode == 0 for batch in batches])

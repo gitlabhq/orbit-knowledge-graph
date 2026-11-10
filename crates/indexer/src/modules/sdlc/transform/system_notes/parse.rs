@@ -82,10 +82,7 @@ impl Action {
         })
     }
 
-    /// Inverse of [`Action::parse`]. Exercised by the round-trip test; kept
-    /// as the canonical action→string mapping. Test-only — production code
-    /// carries the raw `siphon_system_note_metadata.action` string instead.
-    #[cfg(test)]
+    /// Inverse of [`Action::parse`]: the canonical action→string mapping.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::CrossReference => "cross_reference",

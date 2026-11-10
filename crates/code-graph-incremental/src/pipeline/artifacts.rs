@@ -66,11 +66,17 @@ pub struct LinkedFile {
 pub struct DirtyGraph {
     pub state: State,
     pub dirty: FxHashSet<u32>,
+    /// The trees this run added: everything it read, parsed or not.
+    pub inserted: std::ops::Range<u32>,
 }
 
 pub struct Resolved {
     pub state: State,
     pub resolved: Vec<u32>,
+    /// Every file whose graph this run may have changed: the ones it added,
+    /// resolved again, or gave other project tags. The others are as the
+    /// snapshot had them.
+    pub touched: FxHashSet<u32>,
 }
 
 pub struct Displayed {

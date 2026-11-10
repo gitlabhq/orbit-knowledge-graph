@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v5",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v6",
   "title": "Orbit unified query response",
   "description": "JSON payload returned by the query pipeline. All four query types (traversal, aggregation, path_finding, neighbors) produce this shape. Display metadata (labels, styles, domains) comes from the cached ontology, not from this response.",
   "type": "object",
@@ -205,10 +205,6 @@
         "truncated": {
           "type": "boolean",
           "description": "Response omits some matching rows; aggregates over it are incomplete."
-        },
-        "next_cursor": {
-          "type": "string",
-          "description": "Token for cursor.after; absent when exhausted or no cursor was sent."
         }
       }
     }

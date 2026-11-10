@@ -1,0 +1,8 @@
+description: A DateTime filter value on or before 1970-01-01 is rejected because the epoch stands for null
+
+query:
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.merged_at >= '1970-01-01T00:00:00Z' RETURN mr.title LIMIT 10
+
+expect:
+  compile_error: stand for null

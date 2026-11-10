@@ -7,14 +7,14 @@ mod metrics;
 use std::sync::Arc;
 use std::time::Duration;
 
+use orbit_log_fields::{debug, info, warn};
 use orbit_server_config::{BillingConfig, QuotaAuthMode};
 use tonic::{Code, Status};
 use tonic_types::{ErrorDetails, StatusExt};
-use tracing::{info, warn};
 
 use crate::constants::{QUOTA_MAX_CACHE_ENTRIES, REALM_SAAS, normalize_realm};
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
-use client::{QuotaAuth, QuotaClient};
+use client::{FailureReason, QuotaAuth, QuotaClient};
 pub use inputs::QuotaCheckInputs;
 use key::CdotRequest;
 
@@ -36,6 +36,13 @@ pub struct QuotaService {
 struct QuotaServiceInner {
     cache: QuotaCache,
     auth_mode: QuotaAuthMode,
+}
+
+impl QuotaServiceInner {
+    // Self-managed operators control egress to CustomersDot, so only GitLab.com fails open.
+    fn fails_open(&self, reason: FailureReason) -> bool {
+        self.auth_mode == QuotaAuthMode::AdminToken && reason.is_brief_outage()
+    }
 }
 
 impl QuotaService {
@@ -89,15 +96,30 @@ impl QuotaService {
             .as_ref()
             .map(|id| id.as_str().to_string())
             .unwrap_or_default();
+        let realm = inputs.realm.as_deref().and_then(normalize_realm);
+
+        if inputs.is_gitlab_team_member && realm == Some(REALM_SAAS) {
+            info!(
+                safe(GL_USER_ID) = inputs.user_id,
+                safe(REALM) = realm,
+                safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
+                "quota gate decision: skipped (GitLab team member on SaaS)"
+            );
+            record_skipped(&inputs.source_type);
+            return Ok(());
+        }
 
         if inner.auth_mode == QuotaAuthMode::LicenseChecksum && inputs.license_checksum.is_none() {
-            warn!(
-                user_id = inputs.user_id,
-                realm = inputs.realm.as_deref().unwrap_or(""),
-                instance_id = inputs.instance_id.as_deref().unwrap_or(""),
-                unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
-                source_type = %inputs.source_type,
-                correlation_id = %correlation_id,
+            debug!(
+                safe(GL_USER_ID) = inputs.user_id,
+                safe(REALM) = realm,
+                safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
                 "quota gate decision: skipped (no license_checksum claim)"
             );
             record_skipped(&inputs.source_type);
@@ -110,11 +132,11 @@ impl QuotaService {
             && inputs.realm.as_deref().and_then(normalize_realm) == Some(REALM_SAAS)
         {
             warn!(
-                user_id = inputs.user_id,
-                realm = inputs.realm.as_deref().unwrap_or(""),
-                global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
-                source_type = %inputs.source_type,
-                correlation_id = %correlation_id,
+                safe(GL_USER_ID) = inputs.user_id,
+                safe(REALM) = realm,
+                expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
                 "quota gate decision: skipped (no root_namespace_id claim on SaaS)"
             );
             record_skipped(&inputs.source_type);
@@ -123,14 +145,14 @@ impl QuotaService {
 
         let Some(request) = CdotRequest::from_inputs(inputs, &correlation_id) else {
             warn!(
-                user_id = inputs.user_id,
-                realm = inputs.realm.as_deref().unwrap_or(""),
-                root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
-                global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
-                instance_id = inputs.instance_id.as_deref().unwrap_or(""),
-                unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
-                source_type = %inputs.source_type,
-                correlation_id = %correlation_id,
+                safe(GL_USER_ID) = inputs.user_id,
+                safe(REALM) = realm,
+                safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
                 "quota check failed: required claim fields missing"
             );
             return Err(Status::internal(
@@ -139,53 +161,77 @@ impl QuotaService {
         };
 
         let (gate_decision, cache_outcome) = inner.cache.check(request).await;
-        record_decision(&gate_decision, cache_outcome, &inputs.source_type);
+        let fail_open = matches!(
+            gate_decision,
+            QuotaGateDecision::Failed(reason, _) if inner.fails_open(reason)
+        );
+        record_decision(
+            &gate_decision,
+            fail_open,
+            cache_outcome,
+            &inputs.source_type,
+        );
 
         match gate_decision {
             QuotaGateDecision::Allow => {
                 info!(
-                    user_id = inputs.user_id,
-                    realm = inputs.realm.as_deref().unwrap_or(""),
-                    root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
-                    global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
-                    instance_id = inputs.instance_id.as_deref().unwrap_or(""),
-                    unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
-                    source_type = %inputs.source_type,
-                    cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
-                    correlation_id = %correlation_id,
+                    safe(GL_USER_ID) = inputs.user_id,
+                    safe(REALM) = realm,
+                    safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                    expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                    safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                    safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                    safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                    safe(CACHE_HIT) = matches!(cache_outcome, CacheOutcome::Hit),
+                    safe(CORRELATION_ID) = correlation_id.as_str(),
                     "quota gate decision: allow"
+                );
+                Ok(())
+            }
+            QuotaGateDecision::Failed(reason, _) if fail_open => {
+                warn!(
+                    safe(GL_USER_ID) = inputs.user_id,
+                    safe(REALM) = realm,
+                    safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                    expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                    safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                    safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                    safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                    safe(REASON) = <&str>::from(reason),
+                    safe(CORRELATION_ID) = correlation_id.as_str(),
+                    "quota gate decision: fail_open"
                 );
                 Ok(())
             }
             QuotaGateDecision::Failed(reason, block_reason) => {
                 warn!(
-                    user_id = inputs.user_id,
-                    realm = inputs.realm.as_deref().unwrap_or(""),
-                    root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
-                    global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
-                    instance_id = inputs.instance_id.as_deref().unwrap_or(""),
-                    unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
-                    source_type = %inputs.source_type,
-                    reason = ?reason,
-                    block_reason = block_reason.as_deref().unwrap_or("none"),
-                    cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
-                    correlation_id = %correlation_id,
+                    safe(GL_USER_ID) = inputs.user_id,
+                    safe(REALM) = realm,
+                    safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                    expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                    safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                    safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                    safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                    safe(REASON) = <&str>::from(reason),
+                    expanded(BLOCK_REASON) = block_reason.as_deref().unwrap_or("none"),
+                    safe(CACHE_HIT) = matches!(cache_outcome, CacheOutcome::Hit),
+                    safe(CORRELATION_ID) = correlation_id.as_str(),
                     "quota gate decision: fail_closed"
                 );
                 Err(credits_exhausted_status(CHECK_FAILED_MESSAGE))
             }
             QuotaGateDecision::Deny(block_reason) => {
                 info!(
-                    user_id = inputs.user_id,
-                    realm = inputs.realm.as_deref().unwrap_or(""),
-                    root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
-                    global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
-                    instance_id = inputs.instance_id.as_deref().unwrap_or(""),
-                    unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
-                    source_type = %inputs.source_type,
-                    block_reason = block_reason.as_deref().unwrap_or("none"),
-                    cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
-                    correlation_id = %correlation_id,
+                    safe(GL_USER_ID) = inputs.user_id,
+                    safe(REALM) = realm,
+                    safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                    expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                    safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                    safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                    safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                    expanded(BLOCK_REASON) = block_reason.as_deref().unwrap_or("none"),
+                    safe(CACHE_HIT) = matches!(cache_outcome, CacheOutcome::Hit),
+                    safe(CORRELATION_ID) = correlation_id.as_str(),
                     "quota gate decision: denied"
                 );
                 Err(credits_exhausted_status(CREDITS_EXHAUSTED_MESSAGE))
@@ -208,12 +254,20 @@ fn record_skipped(source_type: &str) {
     record(SKIPPED, MISS, source_type);
 }
 
-fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &str) {
-    use orbit_observability::billing::quota::values::{ALLOW, DENY, FAIL_CLOSED, HIT, MISS};
+fn record_decision(
+    gate: &QuotaGateDecision,
+    fail_open: bool,
+    cache: CacheOutcome,
+    source_type: &str,
+) {
+    use orbit_observability::billing::quota::values::{
+        ALLOW, DENY, FAIL_CLOSED, FAIL_OPEN, HIT, MISS,
+    };
 
     let decision_label = match gate {
         QuotaGateDecision::Allow => ALLOW,
         QuotaGateDecision::Deny(_) => DENY,
+        QuotaGateDecision::Failed(..) if fail_open => FAIL_OPEN,
         QuotaGateDecision::Failed(..) => FAIL_CLOSED,
     };
     let cache_label = match cache {
@@ -277,6 +331,7 @@ mod tests {
             unique_instance_id: Some("u".into()),
             instance_version: Some("19.5.0".into()),
             license_checksum: None,
+            is_gitlab_team_member: false,
         }
     }
 
@@ -486,6 +541,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn skips_for_gitlab_team_member_on_saas() {
+        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
+        let svc = service_for(url);
+        let inputs = QuotaCheckInputs {
+            is_gitlab_team_member: true,
+            ..inputs_with_source("mcp")
+        };
+
+        assert!(svc.check(&inputs).await.is_ok());
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn checks_gitlab_team_member_off_saas() {
+        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
+        let svc = license_service_for(url);
+        let inputs = QuotaCheckInputs {
+            is_gitlab_team_member: true,
+            ..license_inputs("mcp")
+        };
+
+        let err = svc.check(&inputs).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn fails_closed_uncached_on_unexpected_statuses() {
         for status in [
             AxumStatus::NO_CONTENT,
@@ -494,7 +576,7 @@ mod tests {
             AxumStatus::FORBIDDEN,
             AxumStatus::UNPROCESSABLE_ENTITY,
             AxumStatus::INTERNAL_SERVER_ERROR,
-            AxumStatus::SERVICE_UNAVAILABLE,
+            AxumStatus::NOT_IMPLEMENTED,
         ] {
             let (url, counter) = counting_server(status).await;
             let svc = service_for(url);
@@ -521,11 +603,80 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_closed_when_cdot_unreachable() {
+    async fn fails_open_uncached_on_server_errors() {
+        for status in [
+            AxumStatus::BAD_GATEWAY,
+            AxumStatus::SERVICE_UNAVAILABLE,
+            AxumStatus::GATEWAY_TIMEOUT,
+        ] {
+            let (url, counter) = counting_server(status).await;
+            let svc = service_for(url);
+
+            for _ in 0..2 {
+                assert!(
+                    svc.check(&inputs_with_source("mcp")).await.is_ok(),
+                    "{status}"
+                );
+            }
+            assert_eq!(counter.load(Ordering::SeqCst), 4, "{status}");
+        }
+    }
+
+    #[tokio::test]
+    async fn fails_open_when_cdot_unreachable() {
         install_crypto();
         let svc = service_for("http://127.0.0.1:1".into());
-        let err = svc.check(&inputs_with_source("mcp")).await.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+        assert!(svc.check(&inputs_with_source("mcp")).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn license_mode_fails_closed_when_cdot_is_down() {
+        let (url, _) = counting_server(AxumStatus::SERVICE_UNAVAILABLE).await;
+        let svc = license_service_for(url);
+        let err = svc.check(&license_inputs("mcp")).await.unwrap_err();
+        assert_eq!(err.message(), CHECK_FAILED_MESSAGE);
+
+        install_crypto();
+        let svc = license_service_for("http://127.0.0.1:1".into());
+        let err = svc.check(&license_inputs("mcp")).await.unwrap_err();
+        assert_eq!(err.message(), CHECK_FAILED_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn open_circuit_keeps_cached_deny() {
+        install_crypto();
+        let app = Router::new().route(
+            crate::constants::CDOT_QUOTA_PATH,
+            get(|uri: axum::http::Uri| async move {
+                let denied_user = uri
+                    .query()
+                    .unwrap_or_default()
+                    .split('&')
+                    .any(|p| p == "user_id=1");
+                if denied_user {
+                    AxumStatus::PAYMENT_REQUIRED
+                } else {
+                    AxumStatus::BAD_GATEWAY
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let svc = service_for(format!("http://{addr}"));
+        let denied = inputs_with_source("mcp");
+        let other = QuotaCheckInputs {
+            user_id: 2,
+            ..inputs_with_source("mcp")
+        };
+
+        let err = svc.check(&denied).await.unwrap_err();
+        assert_eq!(err.message(), CREDITS_EXHAUSTED_MESSAGE);
+        for _ in 0..3 {
+            assert!(svc.check(&other).await.is_ok());
+        }
+        let err = svc.check(&denied).await.unwrap_err();
+        assert_eq!(err.message(), CREDITS_EXHAUSTED_MESSAGE);
     }
 
     #[tokio::test]

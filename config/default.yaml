@@ -3,9 +3,8 @@
 # Every section and scalar the server reads is declared here; the Rust config structs carry no
 # fallback values, so removing a key from this file fails startup with a "missing field" error.
 #
-# Overrides, in increasing priority: an on-disk config/default.yaml (compatibility overlay for the
-# Helm chart's ConfigMap key), the overlay file (--config <path>, else config/config.yaml when
-# present), and K8s secret files under /etc/secrets/.
+# Overrides, in increasing priority: the overlay file (--config <path>, else config/config.yaml
+# when present), and K8s secret files under /etc/secrets/.
 #
 # The values below are deployment defaults: what any environment gets when nothing overrides them.
 # They must equal the settings a production pod would run on, so this file can underlay a partial
@@ -67,6 +66,8 @@ graph:
   # Universal graph defaults, also set by the Helm chart in production.
   session_settings:
     max_query_size: "10485760"
+    distributed_cache_discard_connection_if_unread_data: "0"
+    use_text_index_postings_cache: "1"
   insert_settings:
     optimize_on_insert: "0"
     async_insert: "1"
@@ -152,25 +153,35 @@ schedule:
   tasks:
     global:
       cron: "0 */1 * * * *"
+      run_timeout_secs: 300
     namespace:
       cron: "*/30 * * * * *"
+      run_timeout_secs: 600
       sweep_interval_secs: 3600
     siphon:
       events_stream_name: "siphon_stream_main_db"
       batch_size: 100
     code-backfill:
       cron: "0 */1 * * * *"
+      run_timeout_secs: 3600
       publish_window: 200000
       stale_sweeps_per_tick: 10
     table-cleanup:
       cron: "0 0 3 * * 0"
+      run_timeout_secs: 7200
     namespace-deletion:
       cron: "0 0 3 * * *"
+      run_timeout_secs: 43200
     migration-completion:
       cron: "0 */1 * * * *"
+      run_timeout_secs: 3600
     stale-edge-reconciliation:
       cron: "0 */30 * * * *"
+      run_timeout_secs: 3600
       lookback_secs: 3600
+    namespace-freshness:
+      cron: "0 */5 * * * *"
+      run_timeout_secs: 1800
 
 health_check:
   bind_address: "0.0.0.0:4201"
@@ -216,7 +227,7 @@ schema:
   indexer_schema_wait_timeout_secs: 300
 
 analytics:
-  enabled: false                         # opt-in. Helm flips on for .com / Dedicated.
+  enabled: null                          # true | false; null follows the GitLab product usage data setting
   collector_url: ""                      # e.g. "https://snowplowprd.trx.gitlab.net" (no path; tracker appends /com.snowplowanalytics.snowplow/tp2)
   deployment:
     type: self_managed        # com | dedicated | self_managed

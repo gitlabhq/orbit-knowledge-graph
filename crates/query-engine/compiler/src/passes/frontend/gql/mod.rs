@@ -7,12 +7,9 @@ use std::sync::Arc;
 
 use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
-use crate::passes::codegen::PaginationContext;
 use crate::{CompiledQueryContext, Input, Ontology, QueryError, Result, SecurityContext};
 use errors::{invalid, parse_failure, syntax_error};
-use ontology::introspection::{
-    IntrospectionScope, SchemaResponse, build_node_schema_response, build_schema_response,
-};
+use ontology::introspection::{IntrospectionScope, SchemaResponse, build_compact_schema_response};
 use pest_derive::Parser;
 
 #[derive(Parser)]
@@ -45,16 +42,11 @@ const MAX_NESTING: usize = crate::query_limits::MAX_PREDICATE_DEPTH;
 #[derive(Debug, Clone)]
 pub struct ParsedQuery {
     pub input: Input,
-    pub query_hash: u64,
 }
 
 impl ParsedQuery {
     pub(crate) fn load(self, ctx: &mut impl CompilerCtx) {
         ctx.set_input(self.input);
-        ctx.set_pagination(PaginationContext {
-            query_hash: self.query_hash,
-            ..Default::default()
-        });
     }
 }
 
@@ -86,7 +78,7 @@ pub fn prepare(
 
 pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Result<RoutedStatement> {
     match parse_statement(raw).count_err()? {
-        ast::Statement::Query(query) => lower::lower(raw, *query)
+        ast::Statement::Query(query) => lower::lower(*query)
             .count_err()
             .map(Box::new)
             .map(RoutedStatement::Query),
@@ -97,12 +89,12 @@ pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Resul
 }
 
 pub fn parse(raw: &str) -> Result<Input> {
-    parse_with_hash(raw).map(|query| query.input)
+    parse_query(raw).map(|query| query.input)
 }
 
-pub fn parse_with_hash(raw: &str) -> Result<ParsedQuery> {
+pub fn parse_query(raw: &str) -> Result<ParsedQuery> {
     match parse_statement(raw)? {
-        ast::Statement::Query(query) => lower::lower(raw, *query),
+        ast::Statement::Query(query) => lower::lower(*query),
         ast::Statement::SchemaCall { .. } => Err(QueryError::Validation(
             "schema calls are not graph queries; use gql::prepare instead".into(),
         )),
@@ -135,16 +127,18 @@ fn resolve_schema(
     ontology: &Ontology,
     scope: IntrospectionScope,
 ) -> Result<SchemaResponse> {
-    let Some(name) = node else {
-        return build_schema_response(ontology, scope, &[])
-            .map_err(|error| QueryError::Validation(error.to_string()));
-    };
-    if name == "*" || !scope.includes(ontology, &name) {
+    if let Some(name) = &node
+        && (name == "*" || !scope.includes(ontology, name))
+    {
         return Err(QueryError::Validation(format!(
             "schema node '{name}' is unknown or unavailable in this scope"
         )));
     }
-    Ok(build_node_schema_response(ontology, scope, &name))
+    Ok(build_compact_schema_response(
+        ontology,
+        scope,
+        node.as_deref(),
+    ))
 }
 
 fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {

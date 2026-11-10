@@ -29,9 +29,10 @@ fn setup_outside_a_repository_succeeds_and_suggests_indexing_by_path() {
 
     let printed = all_output(&output);
     assert!(output.status.success(), "{printed}");
-    assert!(folder.path().join(".claude/CLAUDE.md").is_file());
+    assert!(folder.path().join(".claude/settings.json").is_file());
+    assert!(!folder.path().join(".claude/CLAUDE.md").exists());
     assert!(printed.contains("not a git repository"), "{printed}");
-    assert!(!printed.contains("orbit index ."), "{printed}");
+    assert!(!printed.contains("orbit workspace index ."), "{printed}");
 }
 
 #[test]
@@ -39,7 +40,7 @@ fn index_outside_a_repository_names_the_resolved_folder_for_scripts() {
     let folder = tempfile::tempdir().unwrap();
     let resolved = dunce::canonicalize(folder.path()).unwrap();
 
-    let output = run_orbit_in(folder.path(), &["index", "."]);
+    let output = run_orbit_in(folder.path(), &["workspace", "index", "."]);
 
     let printed = all_output(&output);
     assert!(!output.status.success(), "{printed}");
@@ -97,7 +98,7 @@ fn index_from_a_repository_subdirectory_indexes_the_repository() {
     let home = tempfile::tempdir().unwrap();
     let (repository, subdirectory) = repository_with_subdirectory(home.path());
 
-    let output = run_orbit_with_home(&subdirectory, home.path(), &["index", "."]);
+    let output = run_orbit_with_home(&subdirectory, home.path(), &["workspace", "index", "."]);
 
     let printed = all_output(&output);
     assert!(output.status.success(), "{printed}");
@@ -118,11 +119,11 @@ fn setup_without_indexing_from_a_subdirectory_suggests_a_command_that_works() {
         home.path(),
         &["setup", "claude", "--yes", "--no-index"],
     );
-    let index = run_orbit_with_home(&subdirectory, home.path(), &["index", "."]);
+    let index = run_orbit_with_home(&subdirectory, home.path(), &["workspace", "index", "."]);
 
     let printed = all_output(&setup);
     assert!(setup.status.success(), "{printed}");
-    assert!(printed.contains("orbit index ."), "{printed}");
+    assert!(printed.contains("orbit workspace index ."), "{printed}");
     assert!(index.status.success(), "{}", all_output(&index));
 }
 
@@ -154,7 +155,130 @@ fn setup_with_dir_judges_the_project_root_not_the_working_folder() {
         .filter(|c| !c.is_whitespace() && *c != '│')
         .collect();
     assert!(
-        unwrapped.contains(&format!("orbitindex{}", project_root.display())),
+        unwrapped.contains(&format!("orbitworkspaceindex{}", project_root.display())),
+        "{printed}"
+    );
+}
+
+#[cfg(unix)]
+fn setup_with_claude_version(version: &str, extra_args: &[&str]) -> (tempfile::TempDir, String) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("shim-bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let shim = bin.join("claude");
+    std::fs::write(
+        &shim,
+        format!("#!/bin/sh\necho '{version} (Claude Code)'\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut args = vec!["setup", "claude", "--yes", "--no-index"];
+    args.extend_from_slice(extra_args);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_orbit"))
+        .args(&args)
+        .current_dir(home.path())
+        .env("HOME", home.path())
+        .env("PATH", path)
+        .env("GIT_CEILING_DIRECTORIES", home.path().parent().unwrap())
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("GITLAB_ORBIT_DISTRIBUTION")
+        .output()
+        .unwrap();
+    let printed = all_output(&output);
+    assert!(output.status.success(), "{printed}");
+    (home, printed)
+}
+
+#[cfg(unix)]
+fn configured_card(printed: &str) -> &str {
+    let start = printed.find("Configured").expect("Configured card");
+    &printed[start..]
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_says_when_the_agent_plugin_is_skipped_and_leaves_it_off_the_configured_card() {
+    let (home, printed) = setup_with_claude_version("2.1.286", &[]);
+
+    assert!(
+        printed.contains("WARNING: Orbit plugin requires Claude Code"),
+        "{printed}"
+    );
+    assert!(printed.contains("2.1.287+ (you have 2.1.286)"), "{printed}");
+    assert_eq!(
+        printed.matches("WARNING: Orbit plugin requires").count(),
+        1,
+        "{printed}"
+    );
+    assert!(
+        printed.contains("Claude Code gets no Orbit instructions"),
+        "{printed}"
+    );
+    let card = configured_card(&printed);
+    assert!(card.contains("Claude Code   hooks, skill  "), "{printed}");
+    assert!(!card.contains("agent plugins"), "{printed}");
+    assert!(!home.path().join(".claude/orbit").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_lists_agent_plugins_when_the_plugin_is_installed() {
+    let (home, printed) = setup_with_claude_version("99.0.0", &[]);
+
+    assert!(
+        !printed.contains("WARNING: Orbit plugin requires"),
+        "{printed}"
+    );
+    assert!(
+        configured_card(&printed).contains("skill, agent plugins"),
+        "{printed}"
+    );
+    assert!(home.path().join(".claude/orbit").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn dry_run_does_not_plan_the_agent_plugin_when_it_would_be_skipped() {
+    let (_home, printed) = setup_with_claude_version("2.1.286", &["--dry-run"]);
+
+    assert!(
+        printed.contains("WARNING: Orbit plugin requires Claude Code"),
+        "{printed}"
+    );
+    let plan = &printed[printed.find("Plan").expect("Plan card")..];
+    assert!(!plan.contains("claude_plugin"), "{printed}");
+    assert!(!plan.contains("agent plugins"), "{printed}");
+}
+
+#[cfg(unix)]
+#[test]
+fn dry_run_plans_the_agent_plugin_when_claude_is_new_enough() {
+    let (_home, printed) = setup_with_claude_version("99.0.0", &["--dry-run"]);
+
+    assert!(
+        !printed.contains("WARNING: Orbit plugin requires"),
+        "{printed}"
+    );
+    let plan = &printed[printed.find("Plan").expect("Plan card")..];
+    assert!(plan.contains("claude_plugin"), "{printed}");
+}
+
+#[cfg(unix)]
+#[test]
+fn dry_run_reports_no_plugin_skip_when_agent_plugins_are_not_selected() {
+    let (_home, printed) =
+        setup_with_claude_version("2.1.286", &["--dry-run", "--skip", "agent-plugins"]);
+
+    assert!(
+        !printed.contains("WARNING: Orbit plugin requires"),
         "{printed}"
     );
 }

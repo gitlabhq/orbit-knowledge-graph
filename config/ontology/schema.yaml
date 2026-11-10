@@ -34,6 +34,7 @@ settings:
           - {name: target_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
+          - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
     gl_code_edge:
@@ -61,6 +62,7 @@ settings:
           - {name: target_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
+          - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
@@ -85,6 +87,7 @@ settings:
           - {name: target_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
+          - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
     gl_sec_edge:
@@ -107,6 +110,7 @@ settings:
           - {name: target_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
+          - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
     gl_diff_edge:
@@ -129,6 +133,7 @@ settings:
           - {name: target_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
+          - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
   denormalization:

@@ -1,0 +1,30 @@
+id: no-print
+valid:
+  - 'tracing::info!("done");'
+  - 'let s = format!("{x}");'
+  - |
+    #[cfg(test)]
+    mod tests {
+        fn t() { println!("debugging"); }
+    }
+  - |
+    #[tokio::test]
+    #[serial]
+    async fn t() { dbg!(x); }
+  - 'writeln!(buffer, "x");'
+invalid:
+  - 'println!("{path}");'
+  - 'eprintln!("failed");'
+  - 'dbg!(value);'
+  - 'std::print!("x");'
+  - 'let out = std::io::stdout();'
+  - 'io::stderr().write_all(b"x");'
+  - |
+    #[cfg(test)]
+    fn helper() {}
+    fn prod() { println!("x"); }
+  - 'writeln!(std::io::stderr(), "x");'
+  - 'write!(io::stdout(), "x");'
+  - |
+    #[cfg(any(feature = "test-utils", feature = "x"))]
+    fn f() { println!("x"); }

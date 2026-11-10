@@ -1,5 +1,5 @@
 name: "Kotlin v1 parity — nested class resolution"
-fixture_dir: "fixtures/code/kotlin/main/kotlin"
+fixture_tree: kotlin_v1
 
 tests:
   # ── K8: test_kotlin_reference_resolution_to_nested_classes ──

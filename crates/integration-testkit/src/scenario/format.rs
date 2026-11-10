@@ -46,6 +46,8 @@ impl Scenario {
             || self.expect.is_some();
         match (has_inline, self.steps.is_empty()) {
             (true, true) => vec![Step {
+                drop_tables: Vec::new(),
+                create_tables: Vec::new(),
                 seed: self.seed.unwrap_or_default(),
                 seed_settings: self.seed_settings,
                 run: self.run,
@@ -80,6 +82,10 @@ fn default_organization() -> i64 {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
+    #[serde(default)]
+    pub drop_tables: Vec<String>,
+    #[serde(default)]
+    pub create_tables: Vec<String>,
     #[serde(default)]
     pub seed: Seed,
     /// ClickHouse INSERT settings applied to every seed insert in this step,
@@ -237,8 +243,15 @@ pub struct ContainsMatcher {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NotMatcher {
+    pub not: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Matcher {
     Contains(ContainsMatcher),
+    Not(NotMatcher),
     Value(serde_json::Value),
 }

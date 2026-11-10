@@ -1,6 +1,11 @@
 {{ $sha := requiredEnv "E2E_SHA" }}
+{{ $external := env "E2E_EXTERNAL_GITLAB_NS" }}
+{{ $gitlabNs := $external | default (printf "e2e-%s-gitlab" $sha) }}
 {{ $kctx := env "KCTX" | default "gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_e2e-harness" }}
 {{ $v := fromYaml (readFile "config/versions.yaml") }}
+{{ $gitlab := $v.gitlab }}
+{{ $gitlabChartRepo := "gitlab-devel" }}
+{{ with env "E2E_GITLAB_LANE" }}{{ $gitlab = index $v.gitlab_lanes . }}{{ $gitlabChartRepo = "gitlab-stable" }}{{ end }}
 
 helmDefaults:
   wait: true
@@ -10,6 +15,8 @@ helmDefaults:
 repositories:
   - name: gitlab-devel
     url: https://gitlab.com/api/v4/projects/3828396/packages/helm/devel
+  - name: gitlab-stable
+    url: https://charts.gitlab.io
   - name: nats
     url: https://nats-io.github.io/k8s/helm/charts
   - name: siphon
@@ -57,6 +64,7 @@ releases:
       - values/clickhouse.yaml.gotmpl
 {{ end }}
 
+{{ if not $external }}
   # GitLab chart v9.11.1+ (heading toward v10.0) removed bundled PG/Redis/MinIO
   # subcharts. We deploy bitnami's PG and Redis charts standalone in the same
   # gitlab namespace; fullnameOverride keeps service FQDNs identical so siphon
@@ -91,8 +99,8 @@ releases:
   - name: gitlab
     namespace: e2e-{{ $sha }}-gitlab
     createNamespace: true
-    chart: gitlab-devel/gitlab
-    version: {{ $v.gitlab.chart }}
+    chart: {{ $gitlabChartRepo }}/gitlab
+    version: {{ $gitlab.chart }}
     labels:
       phase: infra
       component: gitlab
@@ -104,17 +112,20 @@ releases:
     timeout: 600
     values:
       - values/gitlab.yaml.gotmpl
+{{ end }}
 
   # --- Phase: pipeline ---
   - name: pg-cdc-setup
-    namespace: e2e-{{ $sha }}-gitlab
+    namespace: {{ $gitlabNs }}
     chart: charts/pg-cdc-setup
     labels:
       phase: pipeline
       component: pg-cdc-setup
+{{ if not $external }}
     needs:
       - e2e-{{ $sha }}-gitlab/gitlab
       - e2e-{{ $sha }}-gitlab/postgresql
+{{ end }}
     timeout: 120
     values:
       - values/pg-cdc-setup.yaml.gotmpl
@@ -137,7 +148,7 @@ releases:
 {{ if not (env "E2E_CH_HOST") }}
       - e2e-{{ $sha }}-clickhouse/clickhouse
 {{ end }}
-      - e2e-{{ $sha }}-gitlab/pg-cdc-setup
+      - {{ $gitlabNs }}/pg-cdc-setup
     values:
       - values/siphon.yaml.gotmpl
 

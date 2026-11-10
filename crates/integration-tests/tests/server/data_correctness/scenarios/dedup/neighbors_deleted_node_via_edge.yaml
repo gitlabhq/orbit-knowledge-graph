@@ -3,6 +3,7 @@ description: >
   node tables (indexer soft-deletes edges alongside parent)
 
 config:
+  unmerged_seed: true
   extra_seed:
     gl_user:
       - { id: 9301, username: del_nbr, name: Deleted Neighbor, state: active, user_type: human, _version: "2024-01-01 00:00:00", _deleted: false }

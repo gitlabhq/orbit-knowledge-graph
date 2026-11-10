@@ -18,9 +18,6 @@ pub enum QueryError {
     #[error("reference error: {0}")]
     ReferenceError(String),
 
-    #[error("pagination error: {0}")]
-    PaginationError(String),
-
     #[error("allowlist rejected: {0}")]
     AllowlistRejected(String),
 
@@ -38,9 +35,6 @@ pub enum QueryError {
 
     #[error("lowering error: {0}")]
     Lowering(String),
-
-    #[error("enforce error: {0}")]
-    Enforcement(String),
 
     #[error("codegen error: {0}")]
     Codegen(String),
@@ -64,7 +58,6 @@ impl QueryError {
             Self::Parse(_)
                 | Self::Validation(_)
                 | Self::ReferenceError(_)
-                | Self::PaginationError(_)
                 | Self::AllowlistRejected(_)
                 | Self::Authorization(_)
                 | Self::Restrict(_)
@@ -78,7 +71,6 @@ impl QueryError {
             Self::Parse(_) => RejectionReason::Parse,
             Self::Validation(_) => RejectionReason::Schema,
             Self::ReferenceError(_) => RejectionReason::Reference,
-            Self::PaginationError(_) => RejectionReason::Pagination,
             Self::AllowlistRejected(_) => RejectionReason::Ontology,
             Self::Authorization(_) => RejectionReason::Authorization,
             Self::Restrict(_) => RejectionReason::Restrict,
@@ -87,7 +79,6 @@ impl QueryError {
             Self::LimitExceeded(_) => RejectionReason::Limit,
             Self::Security(_) => RejectionReason::Security,
             Self::Lowering(_) => RejectionReason::Lowering,
-            Self::Enforcement(_) => RejectionReason::Enforcement,
             Self::Codegen(_) => RejectionReason::Codegen,
             Self::PipelineInvariant(_) => RejectionReason::Pipeline,
         }
@@ -100,7 +91,6 @@ pub enum RejectionReason {
     Parse,
     Schema,
     Reference,
-    Pagination,
     Ontology,
     Authorization,
     Restrict,
@@ -109,7 +99,6 @@ pub enum RejectionReason {
     Limit,
     Security,
     Lowering,
-    Enforcement,
     Codegen,
     Pipeline,
 }
@@ -132,14 +121,12 @@ mod tests {
             ),
             (QueryError::Validation("bad".into()), true),
             (QueryError::ReferenceError("bad".into()), true),
-            (QueryError::PaginationError("bad".into()), true),
             (QueryError::DepthExceeded("bad".into()), true),
             (QueryError::LimitExceeded("bad".into()), true),
             (QueryError::AllowlistRejected("bad".into()), true),
             (QueryError::Authorization("bad".into()), true),
             (QueryError::Restrict("bad".into()), true),
             (QueryError::Lowering("bad".into()), false),
-            (QueryError::Enforcement("bad".into()), false),
             (QueryError::Codegen("bad".into()), false),
             (QueryError::Security("bad".into()), false),
             (QueryError::PipelineInvariant("bad".into()), false),

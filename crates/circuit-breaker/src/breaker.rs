@@ -45,7 +45,8 @@ impl CircuitBreaker {
 
     /// Like [`call`](Self::call), but `classifier` decides which errors
     /// count as failures. Returns `false` → error passes through without
-    /// counting toward the threshold.
+    /// counting toward the threshold, and closes a half-open circuit
+    /// because the service answered.
     pub async fn call_with_filter<F, Fut, T, E, C>(
         &self,
         f: F,
@@ -68,27 +69,20 @@ impl CircuitBreaker {
 
         let result = f().await;
 
-        match &result {
-            Ok(_) => {
-                if let Some(transition) = self.circuit.record_success() {
-                    self.observer.on_state_change(self.name, transition);
-                    self.observer
-                        .on_state_snapshot(self.name, self.circuit.state_label());
-                }
-                self.observer.on_call_success(self.name);
+        if result.as_ref().err().is_some_and(classifier) {
+            if let Some(transition) = self.circuit.record_failure(Instant::now()) {
+                self.observer.on_state_change(self.name, transition);
+                self.observer
+                    .on_state_snapshot(self.name, self.circuit.state_label());
             }
-            Err(error) => {
-                if classifier(error) {
-                    if let Some(transition) = self.circuit.record_failure(Instant::now()) {
-                        self.observer.on_state_change(self.name, transition);
-                        self.observer
-                            .on_state_snapshot(self.name, self.circuit.state_label());
-                    }
-                    self.observer.on_call_failure(self.name);
-                } else {
-                    self.observer.on_call_success(self.name);
-                }
+            self.observer.on_call_failure(self.name);
+        } else {
+            if let Some(transition) = self.circuit.record_success() {
+                self.observer.on_state_change(self.name, transition);
+                self.observer
+                    .on_state_snapshot(self.name, self.circuit.state_label());
             }
+            self.observer.on_call_success(self.name);
         }
 
         result.map_err(CircuitBreakerError::Inner)
@@ -253,6 +247,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dropped_probe_lets_a_later_call_probe_again() {
+        let db = db();
+        trip(&db).await;
+        wait_for_cooldown().await;
+
+        let dropped_probe = tokio::time::timeout(
+            Duration::from_millis(1),
+            db.call(std::future::pending::<Result<i32, &str>>),
+        )
+        .await;
+        assert!(dropped_probe.is_err());
+
+        let result = db.call(|| async { Ok::<_, &str>(1) }).await;
+        assert!(result.unwrap_err().is_open());
+
+        wait_for_cooldown().await;
+
+        let result = db.call(|| async { Ok::<_, &str>(42) }).await;
+        assert_eq!(result.unwrap(), 42);
+        assert!(db.is_available());
+    }
+
+    #[tokio::test]
     async fn observer_receives_all_callbacks() {
         struct CountingObserver {
             successes: AtomicU32,
@@ -359,6 +376,22 @@ mod tests {
                 .await;
             assert_eq!(result.unwrap_err(), ClassifiedError::Permanent);
         }
+
+        let result: Result<i32, ClassifiedError> = db.call_transient(|| async { Ok(42) }).await;
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    #[tokio::test]
+    async fn permanent_error_from_probe_closes_circuit() {
+        let db = db();
+        trip_transient(&db).await;
+        wait_for_cooldown().await;
+
+        let result: Result<i32, ClassifiedError> = db
+            .call_transient(|| async { Err(ClassifiedError::Permanent) })
+            .await;
+        assert_eq!(result.unwrap_err(), ClassifiedError::Permanent);
+        assert!(db.is_available());
 
         let result: Result<i32, ClassifiedError> = db.call_transient(|| async { Ok(42) }).await;
         assert_eq!(result.unwrap(), 42);

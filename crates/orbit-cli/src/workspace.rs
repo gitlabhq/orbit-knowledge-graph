@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
-use crate::database::{GraphReader, schema::graph_lacks_commit};
+use crate::database::{GraphReader, IncompleteRevision, schema::graph_lacks_commit};
 use anyhow::{Context, Result};
 use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
 use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
@@ -17,8 +17,6 @@ impl Workspace {
     }
 
     pub fn default_root() -> Result<PathBuf> {
-        // Resolution runs inside the cell so the legacy migration happens at most
-        // once per process, even when MCP tool calls race on the first use.
         static ROOT: OnceLock<std::result::Result<PathBuf, String>> = OnceLock::new();
         ROOT.get_or_init(|| {
             let override_dir = std::env::var("ORBIT_DATA_DIR")
@@ -45,6 +43,26 @@ impl Workspace {
             .join("local/revisions")
             .join(git.project_id.to_string())
             .join(format!("{}.duckdb", git.commit_sha))
+    }
+
+    pub fn var_dir(&self, project_id: i64) -> PathBuf {
+        self.root.join("var").join(project_id.to_string())
+    }
+
+    /// Index state comes first so a reset waits for running indexes before it locks the
+    /// manifest. `graph.duckdb` is the single-file graph from releases before the manifest.
+    pub fn graph_paths(&self) -> Vec<PathBuf> {
+        [
+            "var",
+            "local",
+            "graph.duckdb",
+            "graph.duckdb.wal",
+            "graph.duckdb.lock",
+        ]
+        .into_iter()
+        .map(|name| self.root.join(name))
+        .filter(|path| path.exists())
+        .collect()
     }
 
     /// Discover git repos in a directory, including nested repos when
@@ -134,6 +152,48 @@ pub struct IndexedRepo {
     pub client: GraphReader,
 }
 
+pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Option<IndexedRepo> {
+    let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
+    let git = git_info(&git_toplevel(&repo_path).ok()?).ok()?;
+    let db_path = resolve_db_path(db, &git).ok()?;
+    if graph_lacks_commit(&db_path, &git.commit_sha).unwrap_or(true) {
+        return None;
+    }
+    let client = GraphReader::open(Some(db_path)).ok()?;
+    Some(IndexedRepo { git, client })
+}
+
+/// Indexes the current repository first when it was never indexed (even if others are, like
+/// `grep`) or has no complete revision; a stale HEAD is left to refresh.
+pub fn open_graph_reader(db: Option<PathBuf>) -> Result<GraphReader> {
+    let here = git_toplevel(Path::new("."))
+        .ok()
+        .filter(|top_level| git_info(top_level).is_ok());
+    let Some(top_level) = here else {
+        return GraphReader::open(db);
+    };
+    if already_indexed(&db, &top_level)? {
+        match GraphReader::open(db.clone()) {
+            Ok(reader) if reader.has_revisions() => return Ok(reader),
+            Err(error) if !error.is::<IncompleteRevision>() => return Err(error),
+            _ => {}
+        }
+    }
+    crate::commands::index::index_before_first_query(top_level, db.clone())
+        .context("failed to index the repository")?;
+    GraphReader::open(db)
+}
+
+fn already_indexed(db: &Option<PathBuf>, top_level: &Path) -> Result<bool> {
+    match db {
+        Some(path) => Ok(path.try_exists()?),
+        None => {
+            let manifest = Workspace::open_default()?.manifest_path();
+            crate::database::manifest::has_indexed_repo(&manifest, top_level)
+        }
+    }
+}
+
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
     let top_level = git_toplevel(&repo_path)
@@ -166,9 +226,12 @@ pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTre
     }
     let git_list = |args: &[&str]| -> Option<Vec<String>> {
         let output = Command::new("git")
+            .arg("--literal-pathspecs")
             .arg("-C")
             .arg(repo)
             .args(args)
+            .arg("--")
+            .args(files)
             .stderr(Stdio::null())
             .output()
             .ok()
@@ -312,10 +375,10 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
 
 /// Resolve the working-tree root of the repo containing `path`.
 ///
-/// `orbit index` walks and stores file paths relative to this root, so a
-/// `repo-map` invocation pointed at a subdirectory must anchor here too;
-/// otherwise `read_text` globs (resolved against CWD) miss the repo-root-relative
-/// paths the graph holds and `api`/`class` silently degrade. This is the git
+/// Indexing stores file paths relative to this root and keys the manifest by it, so
+/// `grep`, `context`, `sql`, and `setup` run from a subdirectory must resolve here
+/// too: the checkout lookup finds the indexed revision, and `grep` scopes and scans
+/// with paths that match what the graph stored. This is the git
 /// working-tree root (`git rev-parse --show-toplevel`), not
 /// [`GitInfo::parent_repo_path`], which for a worktree points at the origin
 /// repo instead of this checkout's own root.
@@ -340,6 +403,104 @@ pub fn git_toplevel(path: &Path) -> Result<PathBuf> {
         .trim()
         .to_string();
     dunce::canonicalize(&top).with_context(|| format!("failed to canonicalize {top}"))
+}
+
+#[derive(Default)]
+pub struct GitChanges {
+    pub changed: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+impl GitChanges {
+    pub fn paths(&self) -> impl Iterator<Item = &String> {
+        self.changed.iter().chain(&self.removed)
+    }
+
+    pub fn settled(mut self) -> Self {
+        for list in [&mut self.changed, &mut self.removed] {
+            list.sort();
+            list.dedup();
+        }
+        self.removed.retain(|p| !self.changed.contains(p));
+        self
+    }
+}
+
+pub fn git_committed_changes(repo_path: &Path, base_sha: &str) -> Result<GitChanges> {
+    let committed = git_stdout(
+        repo_path,
+        &["diff", "--name-status", "-z", base_sha, "HEAD"],
+    )?;
+    let mut changes = GitChanges::default();
+    parse_name_status(&committed, &mut changes);
+    Ok(changes.settled())
+}
+
+pub fn git_working_changes(repo_path: &Path) -> Result<GitChanges> {
+    let mut changes = GitChanges::default();
+    parse_porcelain(&git_status(repo_path)?, &mut changes);
+    Ok(changes.settled())
+}
+
+fn git_status(repo_path: &Path) -> Result<String> {
+    git_stdout(
+        repo_path,
+        &["status", "--porcelain", "-z", "--untracked-files=all"],
+    )
+}
+
+fn parse_name_status(output: &str, changes: &mut GitChanges) {
+    let mut fields = output.split('\0').filter(|f| !f.is_empty());
+    while let Some(status) = fields.next() {
+        let Some(path) = fields.next() else { break };
+        match status.chars().next() {
+            Some('D') => changes.removed.push(path.to_string()),
+            Some('R' | 'C') => {
+                changes.removed.push(path.to_string());
+                if let Some(new_path) = fields.next() {
+                    changes.changed.push(new_path.to_string());
+                }
+            }
+            _ => changes.changed.push(path.to_string()),
+        }
+    }
+}
+
+fn parse_porcelain(output: &str, changes: &mut GitChanges) {
+    let mut fields = output.split('\0').filter(|f| !f.is_empty());
+    while let Some(entry) = fields.next() {
+        let Some((status, path)) = entry.split_at_checked(3) else {
+            break;
+        };
+        let status = status.trim_end();
+        if status.contains('D') {
+            changes.removed.push(path.to_string());
+        } else {
+            changes.changed.push(path.to_string());
+        }
+        if (status.starts_with('R') || status.starts_with('C'))
+            && let Some(old_path) = fields.next()
+        {
+            changes.removed.push(old_path.to_string());
+        }
+    }
+}
+
+fn git_stdout(repo_path: &Path, args: &[&str]) -> Result<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(repo_path)
+        .output()
+        .with_context(|| format!("failed to run git in {}", repo_path.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "git {} failed in {}: {}",
+            args.join(" "),
+            repo_path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    String::from_utf8(output.stdout).context("git output is not valid UTF-8")
 }
 
 /// Mask clears the sign bit so the result is always a positive i64.
@@ -371,14 +532,21 @@ fn is_ignored_by_enclosing_repo(repo: &Path) -> bool {
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
     let ws = CoreGitaliskWorkspaceFolder::new(workspace_path.to_string_lossy().to_string());
     if let Err(e) = ws.index_repositories() {
-        let path = workspace_path.display();
-        tracing::warn!("repository discovery failed in {path}: {e}");
+        orbit_log_fields::warn!(
+            expanded(LOCAL_PATH) = %workspace_path.display(),
+            safe(ERROR_TYPE) = "repository_discovery",
+            expanded(ERROR_MESSAGE) = %e,
+            "repository discovery failed"
+        );
         return vec![];
     }
-    ws.get_repositories()
+    let mut repos: Vec<PathBuf> = ws
+        .get_repositories()
         .into_iter()
         .map(|r| PathBuf::from(&r.path))
-        .collect()
+        .collect();
+    repos.sort();
+    repos
 }
 
 #[cfg(test)]

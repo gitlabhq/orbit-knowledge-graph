@@ -15,8 +15,8 @@ physical:
       expect: ["(Neighbors center=mr direction=both fused table=gl_edge center_filter=false ... (_))"]
     emitted:
       expect:
-        - (Filter ((e.source_kind = 'MergeRequest') AND ArrayContains(e.source_tags, 'state:merged')) OR ((e.target_kind = 'MergeRequest') AND ArrayContains(e.target_tags, 'state:merged')), ... (_))
+        - (Filter ((_orbit_neighbor_edge.source_kind = 'MergeRequest') AND ArrayContains(_orbit_neighbor_edge.source_tags, 'state:merged')) OR ((_orbit_neighbor_edge.target_kind = 'MergeRequest') AND ArrayContains(_orbit_neighbor_edge.target_tags, 'state:merged')), ... (_))
       occurrences:
-        - pattern: (Scan Table(gl_edge) AS e)
+        - pattern: (Scan Table(gl_edge) AS _orbit_neighbor_edge)
           count: 1
       reject: ["(Scan Table(gl_merge_request) ...)", "(Union ... (...))"]

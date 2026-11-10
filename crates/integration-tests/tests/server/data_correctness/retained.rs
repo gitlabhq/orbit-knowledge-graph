@@ -1,42 +1,11 @@
 use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
 use compiler::input::AggFunction;
-use compiler::passes::{codegen::codegen, cursor};
+use compiler::passes::codegen::codegen;
 use integration_testkit::TestContext;
 use integration_testkit::visitor::NodeExt;
-use serde_json::Value;
 
 use super::helpers::run_query;
 use crate::common::compile_and_execute;
-
-pub(super) async fn cursor_after_token_with_sql_metacharacters_is_parameterized(ctx: &TestContext) {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-        "order_by": "-u.username",
-        "cursor": {"page_size": 2}
-    }"#;
-
-    let mut query: Value = serde_json::from_str(json).unwrap();
-    let token = cursor::encode(
-        cursor::canonical_hash(&query),
-        &[Some("'); DROP TABLE gl_user; --".into()), Some("0".into())],
-    );
-    query["cursor"]["after"] = token.into();
-
-    let resp = run_query(ctx, &query.to_string()).await;
-    resp.assert_node_order("User", &[]);
-    resp.assert_node_count(0);
-
-    let intact = run_query(
-        ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}]
-        }"#,
-    )
-    .await;
-    intact.assert_node_count(7);
-}
 
 pub(super) async fn long_node_text_is_excerpted_only_on_wide_pages(ctx: &TestContext) {
     let full_text = format!("{}tail", "🙂".repeat(10_000));

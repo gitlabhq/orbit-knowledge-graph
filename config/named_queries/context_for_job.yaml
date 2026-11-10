@@ -1,0 +1,34 @@
+name: context_for_job
+description: "Context for a failed CI job: its pipeline, with every failed job in that pipeline and why each failed. Includes the job itself when it failed."
+parameters:
+  node_ids:
+    schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }
+    example: [1]
+  limit:
+    schema: { type: integer, minimum: 1, maximum: 500 }
+    example: 100
+query:
+  json:
+    query_type: traversal
+    nodes:
+      - id: center
+        entity: Job
+        node_ids: { $param: node_ids }
+        columns: [id, name, status]
+      - id: pipeline
+        entity: Pipeline
+        columns: [id, status, ref, sha, source]
+      - id: job
+        entity: Job
+        filters:
+          status: failed
+        columns: [id, name, status, failure_reason, allow_failure]
+    relationships:
+      - { type: IN_PIPELINE, from: center, to: pipeline }
+      - { type: HAS_JOB, from: pipeline, to: job }
+    limit: { $param: limit }
+  gql: |
+    MATCH (center:Job)-[:IN_PIPELINE]->(pipeline:Pipeline)-[:HAS_JOB]->(job:Job {status: "failed"})
+    WHERE center.id IN {{ param("node_ids") }}
+    RETURN center.id, center.name, center.status, pipeline.id, pipeline.status, pipeline.ref, pipeline.sha, pipeline.source, job.id, job.name, job.status, job.failure_reason, job.allow_failure
+    LIMIT {{ param("limit") }}

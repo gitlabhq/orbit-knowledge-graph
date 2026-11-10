@@ -21,7 +21,7 @@ HAVING argMax({deleted}, {version}) = false \
 ) \
 GROUP BY id \
 HAVING argMax(deleted, version) = false \
-AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}')"
+AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}$')"
     )
 });
 
@@ -32,7 +32,7 @@ FROM {NAMESPACE_PATHS_TABLE} \
 WHERE id IN {{ids:Array(Int64)}} \
 GROUP BY id \
 HAVING argMax(deleted, version) = false \
-AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}')"
+AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}$')"
     )
 });
 

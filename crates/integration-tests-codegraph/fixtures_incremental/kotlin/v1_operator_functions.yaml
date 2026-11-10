@@ -1,5 +1,5 @@
 name: "Kotlin v1 parity — operator function resolution"
-fixture_dir: "fixtures/code/kotlin/main/kotlin"
+fixture_tree: kotlin_v1
 
 tests:
   # ── K10: test_kotlin_reference_to_operator_functions ──

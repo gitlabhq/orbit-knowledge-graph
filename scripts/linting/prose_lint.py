@@ -32,7 +32,9 @@ SCOPE = (
     "AGENTS.md",
     "CONTEXT.md",
     "crates/*/AGENTS.md",
-    "docs/dev/**/*.md",
+    "docs/pages/engineering/development/**/*.md",
+    "docs/pages/engineering/architecture/**/*.md",
+    "docs/pages/engineering/runbooks/**/*.md",
     "docs/design-documents/**/*.md",
     ".gitlab/merge_request_templates/*.md",
     ".gitlab/issue_templates/*.md",
@@ -40,7 +42,7 @@ SCOPE = (
     "config/prompts/**/*.yml",
     "config/setup/setup.yaml",
 )
-EXCLUDED = ("skills/orbit/references/query_language.md", "docs/design-documents/previous_design/**/*.md")
+EXCLUDED = ()
 
 MAX_SENTENCE_WORDS = 25
 MAX_AVERAGE_WORDS = 20.0

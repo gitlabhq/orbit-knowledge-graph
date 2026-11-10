@@ -11,5 +11,6 @@ variants:
 
   - from_node: { type: VulnerabilityOccurrence, id: id }
     to_node: { type: VulnerabilityScanner, id: id }
+    scope: same_namespace
     fk_column: scanner_id
     description: "Vulnerability occurrence detected by vulnerability scanner."

@@ -15,17 +15,9 @@ pub(super) struct Query<'i> {
     pub predicates: Vec<BooleanExpression<Predicate<'i>>>,
     pub projections: Projections<'i>,
     pub order: Option<Sort<'i>>,
-    pub limit: Option<Limit<'i>>,
+    pub skip: Option<u32>,
+    pub limit: Option<u32>,
     pub debug: bool,
-}
-
-pub(super) enum Limit<'i> {
-    Rows(u32),
-    Page {
-        span: Span<'i>,
-        size: u32,
-        after: Option<String>,
-    },
 }
 
 pub(super) struct Name<'i> {
@@ -76,6 +68,7 @@ pub(super) struct MapLiteral<'i> {
 pub(super) struct MapEntry<'i> {
     pub key: Name<'i>,
     pub value: Value,
+    pub from_temporal_literal: bool,
 }
 
 pub(super) struct Relationship<'i> {
@@ -108,6 +101,7 @@ pub(super) struct Comparison<'i> {
     pub property: Property<'i>,
     pub op: FilterOp,
     pub value: Option<Value>,
+    pub from_temporal_literal: bool,
     pub rhs_property: Option<Property<'i>>,
 }
 
@@ -127,6 +121,7 @@ pub(super) struct ProjectionItem<'i> {
 pub(super) enum Expression<'i> {
     Aggregate {
         function: AggregateFunction,
+        distinct: bool,
         target: Target<'i>,
     },
     DateTrunc {

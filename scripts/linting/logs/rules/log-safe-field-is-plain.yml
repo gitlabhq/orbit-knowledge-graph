@@ -1,0 +1,67 @@
+id: log-safe-field-is-plain
+language: rust
+severity: error
+message: Record a safe field as a plain value, not as formatted text.
+note: |
+  The allowlist checks the field name, not the value. Formatted text under a
+  safe name (an error, a struct, a path) is written on every log line. Pass an
+  integer, a bool, or a `&str` from a closed set (for example an enum
+  `as_str()`). For a value that is safe only as text, such as a socket address,
+  add `// ast-grep-ignore: log-safe-field-is-plain` with the reason.
+utils:
+  safe-name:
+    any:
+      - kind: identifier
+        regex: '^safe$'
+        precedes:
+          kind: token_tree
+          regex: '^\('
+      - kind: token_tree
+        regex: '^\{\s*safe::'
+  formatted-value:
+    any:
+      - kind: identifier
+        regex: '^safe$'
+        precedes:
+          kind: token_tree
+          regex: '^\('
+          precedes:
+            regex: '^=$'
+            precedes:
+              regex: '^[%?]$'
+      - kind: token_tree
+        regex: '^\{\s*safe::'
+        precedes:
+          regex: '^=$'
+          precedes:
+            regex: '^[%?]$'
+      - kind: identifier
+        regex: '^(display|debug|format|format_args|to_string|to_owned)$'
+        precedes:
+          any:
+            - kind: token_tree
+              regex: '^\('
+            - regex: '^!$'
+        follows:
+          stopBy:
+            regex: '^,$'
+          matches: safe-name
+rule:
+  any:
+    - matches: formatted-value
+      inside:
+        any:
+          - matches: log-args
+          - matches: instrument-fields
+    - kind: arguments
+      regex: '(?s)^\(\s*safe::\w+\s*,.*\b(display|debug|format|format_args|to_string|to_owned)\b'
+      inside:
+        kind: call_expression
+        has:
+          field: function
+          kind: field_expression
+          has:
+            field: field
+            regex: '^record$'
+  not:
+    matches: test-code

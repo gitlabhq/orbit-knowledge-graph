@@ -7,11 +7,13 @@
 //! Renamed here to `batches`, `redactions`, and `result_set.rows`.
 
 use crate::MetricSpec;
-use crate::buckets::{LATENCY, LATENCY_FAST_FINE, MEMORY_BYTES, QUERY_LATENCY, ROW_COUNT};
+use crate::buckets::{LATENCY_FAST_FINE, MEMORY_BYTES, QUERY_LATENCY, ROW_COUNT};
 
 pub mod labels {
     pub const QUERY_TYPE: &str = "query_type";
     pub const STATUS: &str = "status";
+    /// `success`, `caller_error` or `server_error`, as in the `orbit_query` analytics event.
+    pub const OUTCOME: &str = "outcome";
     pub const LABEL: &str = "label";
     pub const FAILURE_REASON: &str = "failure_reason";
 }
@@ -22,7 +24,7 @@ pub const QUERIES: MetricSpec = MetricSpec::counter(
     "gkg.query.pipeline.queries",
     "Total queries processed through the pipeline.",
     None,
-    &[labels::QUERY_TYPE, labels::STATUS],
+    &[labels::QUERY_TYPE, labels::STATUS, labels::OUTCOME],
     DOMAIN,
 );
 
@@ -39,7 +41,7 @@ pub const PIPELINE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.query.pipeline.duration",
     "End-to-end pipeline duration from security check to formatted output.",
     Some("s"),
-    &[labels::QUERY_TYPE, labels::STATUS],
+    &[labels::QUERY_TYPE, labels::STATUS, labels::OUTCOME],
     QUERY_LATENCY,
     DOMAIN,
 );
@@ -49,7 +51,7 @@ pub const EXECUTE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Time spent executing the compiled query against ClickHouse.",
     Some("s"),
     &[labels::QUERY_TYPE],
-    LATENCY,
+    QUERY_LATENCY,
     DOMAIN,
 );
 
@@ -58,7 +60,7 @@ pub const AUTHORIZATION_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Time spent on authorization exchange with Rails.",
     Some("s"),
     &[labels::QUERY_TYPE],
-    LATENCY,
+    QUERY_LATENCY,
     DOMAIN,
 );
 

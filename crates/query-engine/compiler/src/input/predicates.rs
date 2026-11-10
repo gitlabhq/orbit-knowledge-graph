@@ -129,6 +129,10 @@ impl FilterOp {
         matches!(self, Self::TokenMatch | Self::AllTokens | Self::AnyTokens)
     }
 
+    pub fn is_text(self) -> bool {
+        self.is_like() || self.is_token()
+    }
+
     pub fn is_ordering(self) -> bool {
         matches!(self, Self::Gt | Self::Gte | Self::Lt | Self::Lte)
     }
@@ -257,15 +261,6 @@ impl Input {
     }
 
     pub fn absorb(&mut self, expression: BooleanExpression<Condition>) -> crate::error::Result<()> {
-        if expression.negated_leaves().any(|condition| {
-            std::iter::once(condition.property.as_str())
-                .chain(condition.node_properties().map(|(_, property)| property))
-                .any(|property| property == TRAVERSAL_PATH_COLUMN)
-        }) {
-            return Err(crate::error::QueryError::Validation(
-                "traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths".into(),
-            ));
-        }
         for conjunct in expression.normalize().conjuncts() {
             match conjunct {
                 BooleanExpression::Leaf(condition)

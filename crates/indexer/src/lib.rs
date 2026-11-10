@@ -55,10 +55,12 @@ use std::time::Duration;
 
 use clickhouse::{ClickHouseClients, ClickHouseWriter};
 use engine::EngineBuilder;
-use engine::handler::HandlerRegistry;
+use engine::handler::{HandlerInitError, HandlerRegistry};
+use gitlab_client::GitlabClient;
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
+use orbit_log_fields::{info, warn};
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_server_config::IndexerModule;
 use orchestrator::Trigger;
@@ -66,13 +68,12 @@ use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
     CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
-    NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled, StaleEdgeReconciliation,
-    TableCleanup,
+    NamespaceDeletionScheduler, NamespaceDispatcher, NamespaceFreshness, Scheduled,
+    StaleEdgeReconciliation, TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
 
 pub async fn run(
     config: &IndexerConfig,
@@ -90,13 +91,17 @@ pub async fn run(
     config.engine.validate()?;
     config.graph.validate()?;
 
-    info!(modules = ?config.engine.modules, "indexer module selection");
+    let module_names: Vec<&str> = config.engine.modules.iter().map(|m| (*m).into()).collect();
+    info!(
+        safe(INDEXER_MODULES) = module_names.join(","),
+        "indexer module selection"
+    );
 
     let clients = ClickHouseClients::new(&config.graph, &config.datalake);
-    info!(url = %config.graph.url, "initializing schema version table");
+    info!(expanded(URL) = %config.graph.url, "initializing schema version table");
     schema::version::init(&clients.graph).await?;
 
-    info!(url = %config.nats.url, "connecting to NATS");
+    info!(expanded(URL) = %config.nats.url, "connecting to NATS");
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
 
     broker
@@ -109,7 +114,7 @@ pub async fn run(
 
     let schema_version = *schema::version::SCHEMA_VERSION;
     info!(
-        schema_version,
+        safe(SCHEMA_VERSION) = schema_version,
         "waiting for dispatcher to prepare schema version before processing"
     );
     schema::version::wait_until_ready(
@@ -122,7 +127,7 @@ pub async fn run(
 
     let metrics = Arc::new(engine::metrics::EngineMetrics::new());
 
-    info!(url = %config.graph.url, "connecting to graph ClickHouse");
+    info!(expanded(URL) = %config.graph.url, "connecting to graph ClickHouse");
     let writer = Arc::new(ClickHouseWriter::new(
         clients.graph.clone(),
         metrics.clone(),
@@ -130,12 +135,23 @@ pub async fn run(
 
     let registry = Arc::new(HandlerRegistry::default());
 
+    let gitlab_client = config
+        .gitlab
+        .clone()
+        .map(GitlabClient::new)
+        .transpose()
+        .map_err(HandlerInitError::new)?
+        .map(Arc::new);
+
     let analytics = analytics::IndexingAnalytics::from_config(&config.analytics)?;
     if analytics.is_enabled() {
         info!(
-            collector_url = %config.analytics.collector_url,
+            expanded(URL) = %config.analytics.collector_url,
             "indexing analytics enabled"
         );
+    }
+    if let Some(client) = &gitlab_client {
+        analytics.watch_gitlab_instance(Arc::clone(client));
     }
 
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
@@ -164,6 +180,7 @@ pub async fn run(
             &ontology,
             writer.clone(),
             analytics.clone(),
+            gitlab_client,
             &resources,
         )
         .await?;
@@ -182,7 +199,7 @@ pub async fn run(
     }
 
     info!(
-        subscriptions = registry.subscriptions().len(),
+        safe(SUBSCRIPTION_COUNT) = registry.subscriptions().len(),
         "registered handlers"
     );
 
@@ -240,7 +257,11 @@ pub async fn run_dispatcher(
     )
     .await
     {
-        warn!(%error, "release GC failed, will retry next startup");
+        warn!(
+            safe(ERROR_TYPE) = "nats_cleanup",
+            expanded(ERROR_MESSAGE) = %error,
+            "release GC failed, will retry next startup"
+        );
     }
 
     let datalake = clients.datalake.clone();
@@ -266,7 +287,11 @@ pub async fn run_dispatcher(
     )
     .await?;
     if let Err(error) = catalog.sync_active_version(&graph).await {
-        warn!(%error, "active version not mirrored at startup; retried every completion tick");
+        warn!(
+            safe(ERROR_TYPE) = <&str>::from(&error),
+            expanded(ERROR_MESSAGE) = %error,
+            "active version not mirrored at startup; retried every completion tick"
+        );
     }
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
 
@@ -281,22 +306,24 @@ pub async fn run_dispatcher(
                     orbit_migrations::execute::create_unversioned_definitions(&graph, &graph_schema)
                         .await
                 {
-                    warn!(%error, "failed to create unversioned tables at startup");
+                    warn!(
+                        safe(ERROR_TYPE) = <&str>::from(&error),
+                        expanded(ERROR_MESSAGE) = %error,
+                        "failed to create unversioned tables at startup"
+                    );
                 }
             }
-            if let Err(error) = orbit_migrations::execute::replace_refreshable_views(
-                &graph,
-                &ontology,
-                active_version,
-            )
-            .await
-            {
-                warn!(%error, "failed to replace refreshable views at startup");
-            }
+            orbit_migrations::execute::replace_refreshable_views(&graph, &ontology, active_version)
+                .await
+                .map_err(schema::migration::DispatcherMigrationError::from)?;
         }
         Ok(_) => {}
         Err(error) => {
-            warn!(%error, "failed to read active version for auxiliary tables and refreshable views")
+            warn!(
+                safe(ERROR_TYPE) = <&str>::from(&error),
+                expanded(ERROR_MESSAGE) = %error,
+                "failed to read active version for auxiliary tables and refreshable views"
+            )
         }
     }
 
@@ -368,6 +395,13 @@ pub async fn run_dispatcher(
             ))),
             metrics.clone(),
             config.schedule.tasks.stale_edge_reconciliation.clone(),
+        )),
+        Box::new(NamespaceFreshness::new(
+            clients.graph.clone(),
+            clients.datalake.clone(),
+            catalog.clone(),
+            config.schedule.tasks.namespace_freshness.clone(),
+            config.schedule.tasks.namespace.sweep_interval_secs,
         )),
         Box::new(MigrationCompletionChecker::new(
             clients.graph.clone(),

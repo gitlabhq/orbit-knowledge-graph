@@ -134,7 +134,6 @@ mod tests {
         assert!(out.is_empty());
     }
 
-    // `orbit list` depends on this for parseable empty output.
     #[test]
     fn json_empty_batches_emit_empty_array() {
         let mut out = Vec::new();

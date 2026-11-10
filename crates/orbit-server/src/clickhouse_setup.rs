@@ -3,11 +3,11 @@
 
 use anyhow::{Context, anyhow};
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
+use orbit_log_fields::info;
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use orbit_utils::clickhouse::quote_sql_literal;
-use tracing::info;
 
-const CONTRACT: &str = include_str!(concat!(env!("CONFIG_DIR"), "/clickhouse-setup.sql"));
+const CONTRACT: &str = include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/clickhouse-setup.sql"));
 
 pub async fn run(config: &AppConfig) -> anyhow::Result<()> {
     let setup = &config.clickhouse_setup;
@@ -45,7 +45,11 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<()> {
             .with_context(|| format!("statement {} of {} failed", index + 1, statements.len()))?;
     }
 
-    info!(statements = statements.len(), url = %config.graph.url, "clickhouse setup applied");
+    info!(
+        safe(COUNT) = statements.len(),
+        expanded(URL) = %config.graph.url,
+        "clickhouse setup applied"
+    );
     Ok(())
 }
 

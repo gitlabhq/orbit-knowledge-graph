@@ -1,5 +1,5 @@
 name: "Kotlin v1 parity — extension function resolution"
-fixture_dir: "fixtures/code/kotlin/main/kotlin"
+fixture_tree: kotlin_v1
 trace: true
 
 tests:

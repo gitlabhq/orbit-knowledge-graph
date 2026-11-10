@@ -24,12 +24,18 @@ pub enum IndexingMode {
     Incremental,
 }
 
+impl IndexingMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Incremental => "incremental",
+        }
+    }
+}
+
 impl fmt::Display for IndexingMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Full => f.write_str("full"),
-            Self::Incremental => f.write_str("incremental"),
-        }
+        f.write_str(self.as_str())
     }
 }
 

@@ -12,6 +12,7 @@ use circuit_breaker::{CircuitBreaker, CircuitConfig};
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use orbit_log_fields::warn;
 use orbit_observability::resilience::MetricsObserver;
 use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
@@ -20,7 +21,7 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::SyncIoBridge;
-use tracing::warn;
+use tracing::Instrument;
 
 pub use clickhouse::QuerySummary;
 
@@ -248,7 +249,11 @@ impl ArrowClickHouseClient {
 
             for (batch_index, batch) in batches.iter().enumerate() {
                 if batch.schema() != schema {
-                    warn!(table, batch_index, "RecordBatch schema mismatch");
+                    warn!(
+                        safe(TABLE) = table,
+                        safe(BATCH_INDEX) = batch_index,
+                        "RecordBatch schema mismatch"
+                    );
                 }
 
                 writer.write(batch).map_err(ClickHouseError::ArrowEncode)?;
@@ -324,7 +329,11 @@ impl ArrowClickHouseClient {
 
         for (batch_index, batch) in batches.into_iter().enumerate() {
             if batch.schema() != schema {
-                warn!(table, batch_index, "RecordBatch schema mismatch");
+                warn!(
+                    safe(TABLE) = table,
+                    safe(BATCH_INDEX) = batch_index,
+                    "RecordBatch schema mismatch"
+                );
             }
             writer.write(&batch).map_err(ClickHouseError::ArrowEncode)?;
             drop(batch);
@@ -356,15 +365,8 @@ impl ArrowClickHouseClient {
     ) -> ArrowQuery {
         match value {
             Value::String(s) => {
-                // CH's HTTP-param parser for DateTime64/Date rejects the ISO
-                // 8601 trailing `Z` ("BAD_QUERY_PARAMETER, only 19 of 20 bytes
-                // was parsed"). Column already pins UTC, so dropping it
-                // preserves the value.
-                let normalized = match data_type {
-                    SqlType::Timestamp { .. } => s.strip_suffix('Z').unwrap_or(s),
-                    _ => s.as_str(),
-                };
-                query.param(key, normalized)
+                let temporal = matches!(data_type, SqlType::Timestamp { .. } | SqlType::Date);
+                query.param(key, parameter_text(s, temporal))
             }
             Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
@@ -394,10 +396,14 @@ impl ArrowClickHouseClient {
                     query.param(key, bools)
                 }
                 _ => {
+                    let temporal = matches!(
+                        data_type,
+                        SqlType::Array(ScalarType::Timestamp { .. } | ScalarType::Date)
+                    );
                     let strings: Vec<String> = arr
                         .iter()
                         .map(|v| match v {
-                            Value::String(s) => s.clone(),
+                            Value::String(s) => parameter_text(s, temporal).to_string(),
                             other => other.to_string(),
                         })
                         .collect();
@@ -406,6 +412,17 @@ impl ArrowClickHouseClient {
             },
             _ => query.param(key, value.to_string()),
         }
+    }
+}
+
+/// ClickHouse's HTTP parameter parser for DateTime64 and Date rejects the ISO 8601
+/// trailing `Z` ("only 19 of 20 bytes was parsed"). Columns already pin UTC, so
+/// dropping it keeps the value.
+fn parameter_text(text: &str, temporal: bool) -> &str {
+    if temporal {
+        text.strip_suffix('Z').unwrap_or(text)
+    } else {
+        text
     }
 }
 
@@ -418,10 +435,10 @@ impl ArrowClickHouseClient {
 fn warn_on_dropped_elements(key: &str, scalar: &str, input: usize, bound: usize) {
     if bound != input {
         warn!(
-            param = key,
-            scalar,
-            input,
-            bound,
+            expanded(QUERY_PARAMETER) = key,
+            safe(CLICKHOUSE_TYPE) = scalar,
+            safe(COUNT) = input,
+            safe(SKIPPED_COUNT) = input - bound,
             "bind_param: array had elements that could not be converted, dropped values"
         );
     }
@@ -563,7 +580,9 @@ impl ArrowQuery {
         let handle = tokio::runtime::Handle::current();
         let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
 
+        let span = tracing::Span::current();
         tokio::task::spawn_blocking(move || {
+            let _entered = span.enter();
             let body = Cursor::new(first.unwrap_or_default()).chain(cursor);
             let bridge = SyncIoBridge::new_with_handle(body, handle);
             let reader = match StreamReader::try_new(bridge, None) {
@@ -601,7 +620,7 @@ impl ArrowQuery {
         let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
         let (summary_tx, summary_rx) = oneshot::channel();
 
-        tokio::spawn(async move {
+        let task = async move {
             let mut decoder = StreamDecoder::new();
             let mut summary_tx = Some(summary_tx);
             let mut next = Ok(first);
@@ -638,7 +657,8 @@ impl ArrowQuery {
             if let Some(summary_tx) = summary_tx.take() {
                 let _ = summary_tx.send(cursor.summary().cloned());
             }
-        });
+        };
+        tokio::spawn(task.in_current_span());
 
         Ok((ReceiverStream::new(rx).boxed(), summary_rx))
     }

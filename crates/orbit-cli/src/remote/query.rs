@@ -25,8 +25,34 @@ pub(crate) async fn run_query(
         QueryInput::Text(query) => build_text_request(&query, format_override)?,
         QueryInput::File(path) => build_query_request(&read_query_body(&path)?, format_override)?,
     };
-    let response = client.query_raw(request_body).await?;
+    let response = match client.query_raw(request_body).await {
+        Ok(response) => response,
+        Err(error) => return Err(with_schema(&client, error).await),
+    };
     write_stdout_raw(&response)
+}
+
+const SCHEMA_ERRORS: [&str; 3] = [
+    "is unknown or unavailable in this scope",
+    "unknown entity",
+    "unknown relationship type",
+];
+
+async fn with_schema(client: &OrbitClient, mut error: RemoteError) -> RemoteError {
+    if !SCHEMA_ERRORS
+        .iter()
+        .any(|pattern| error.message.contains(pattern))
+    {
+        return error;
+    }
+    let Ok(request) = build_text_request("CALL db.schema()", Some(ResponseFormat::Llm)) else {
+        return error;
+    };
+    if let Some(schema) = client.schema_overview(request).await {
+        error.message.push_str("\n\n");
+        error.message.push_str(schema.trim_end());
+    }
+    error
 }
 
 fn read_query_body(path: &str) -> anyhow::Result<Vec<u8>> {

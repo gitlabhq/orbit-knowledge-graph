@@ -4,9 +4,9 @@ use std::sync::RwLock;
 use std::time::Duration;
 
 use chrono::Utc;
+use orbit_log_fields::{info, warn};
 use rand::RngExt;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
 
 use crate::client::GitlabClient;
 use crate::error::GitlabClientError;
@@ -106,8 +106,8 @@ impl CloudConnectorTokenCache {
             Ok(fetched) => {
                 state.refresh_at = compute_refresh_at(fetched.exp, now, jitter_secs());
                 info!(
-                    exp = fetched.exp,
-                    refresh_at = state.refresh_at,
+                    safe(EXPIRES_AT) = fetched.exp,
+                    safe(REFRESH_AT) = state.refresh_at,
                     "cloud connector token refreshed"
                 );
                 state.token = Some(fetched.token.clone());
@@ -117,10 +117,11 @@ impl CloudConnectorTokenCache {
             Err(error) => {
                 state.refresh_at = now + CC_TOKEN_RETRY_INTERVAL_SECS;
                 warn!(
-                    %error,
-                    retry_at = state.refresh_at,
-                    serving_cached_token = state.token.is_some(),
-                    cached_token_expired = has_cached_token && !has_valid_cached_token,
+                    expanded(ERROR_MESSAGE) = %error,
+                    safe(ERROR_TYPE) = <&str>::from(&error),
+                    safe(REFRESH_AT) = state.refresh_at,
+                    safe(SERVING_CACHED_TOKEN) = state.token.is_some(),
+                    safe(CACHED_TOKEN_EXPIRED) = has_cached_token && !has_valid_cached_token,
                     "cloud connector token refresh failed"
                 );
                 state.token.clone().ok_or(error)

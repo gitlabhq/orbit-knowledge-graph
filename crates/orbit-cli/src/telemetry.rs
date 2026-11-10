@@ -1,10 +1,11 @@
 use std::sync::{LazyLock, OnceLock};
 use std::time::Duration;
 
-use labkit_events::StructuredEvent;
+use labkit_events::{SnowplowContext, StructuredEvent};
 use orbit_analytics::{
-    AnalyticsTracker, OrbitCliCommandContext, OrbitCliSetupContext, OrbitCommonContext,
-    SnowplowAnalyticsTracker, orbit_cli_command, orbit_cli_setup, orbit_common,
+    AnalyticsTracker, OrbitCliCommandContext, OrbitCliContext, OrbitCliSetupContext,
+    OrbitCommonContext, SnowplowAnalyticsTracker, orbit_cli, orbit_cli_command, orbit_cli_setup,
+    orbit_common,
 };
 use regex::Regex;
 use uuid::Uuid;
@@ -15,13 +16,14 @@ use crate::settings;
 const DEFAULT_COLLECTOR_URL: &str = "https://events.gitlab.net";
 const APP_ID: &str = "orbit";
 const CATEGORY: &str = "orbit_cli";
-const MCP_COMMAND: &str = "mcp";
-const MCP_TOOL_CALL_ACTION: &str = "mcp_tool_call";
 pub const AGENTS_CONFIGURED_ACTION: &str = "agents_configured";
 pub const AGENTS_REMOVED_ACTION: &str = "agents_removed";
 
 const ENABLED_ENV: &str = "ORBIT_TELEMETRY_ENABLED";
+const INVOCATION_ID_ENV: &str = "ORBIT_INVOCATION_ID";
 const COLLECTOR_URL_ENV: &str = "ORBIT_TELEMETRY_COLLECTOR_URL";
+const DISTRIBUTION_ENV: &str = "GITLAB_ORBIT_DISTRIBUTION";
+const GLAB_DISTRIBUTION: &str = "glab";
 
 static SAFE_IDENTIFIER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9._-]{1,64}$").expect("static regex"));
@@ -30,10 +32,16 @@ pub fn is_safe_identifier(value: &str) -> bool {
     SAFE_IDENTIFIER_RE.is_match(value)
 }
 
-/// Shared with the request trace id so analytics and server spans join.
+/// Shared with the request trace id; a detached `send-event` child inherits its parent's.
 pub(crate) fn invocation_id() -> String {
     static ID: OnceLock<String> = OnceLock::new();
-    ID.get_or_init(|| Uuid::new_v4().to_string()).clone()
+    ID.get_or_init(|| {
+        std::env::var(INVOCATION_ID_ENV)
+            .ok()
+            .filter(|id| Uuid::parse_str(id).is_ok())
+            .unwrap_or_else(|| Uuid::new_v4().to_string())
+    })
+    .clone()
 }
 
 pub struct TelemetryConfig {
@@ -51,9 +59,9 @@ impl TelemetryConfig {
     }
 }
 
-/// Hands one command event to a detached `orbit send-event` child, so a hook that runs on every
-/// tool call returns without waiting on the collector. Does nothing when telemetry is off.
-pub fn spawn_detached_event(command: &str, duration: Duration) {
+/// Hands one command event to a detached `orbit send-event` child, so a command returns
+/// without waiting on the collector. Does nothing when telemetry is off.
+pub fn spawn_detached_event(command: &str, exit_code: i32, duration: Duration) {
     if !resolve_from_env().enabled {
         return;
     }
@@ -64,6 +72,8 @@ pub fn spawn_detached_event(command: &str, duration: Duration) {
     child
         .args(["send-event", command, "--duration-ms"])
         .arg(duration.as_millis().to_string())
+        .arg(format!("--exit-code={exit_code}"))
+        .env(INVOCATION_ID_ENV, invocation_id())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -95,30 +105,14 @@ pub fn emit_command_event<T: AnalyticsTracker + ?Sized>(
         success: exit_code == 0,
         exit_code: u8::try_from(exit_code).ok(),
         duration_ms: i64::try_from(duration.as_millis()).ok(),
-        cli_version: env!("ORBIT_VERSION").parse().ok(),
+        cli_version: crate::version::get().parse().ok(),
     };
-    track_outcome(tracker, action, outcome, coding_agent);
-}
-
-pub fn emit_tool_call_event<T: AnalyticsTracker + ?Sized>(
-    tracker: &T,
-    tool_name: &str,
-    success: bool,
-    duration: Duration,
-    coding_agent: Option<&str>,
-) {
-    let (Ok(command), Ok(tool_name)) = (MCP_COMMAND.parse(), tool_name.parse()) else {
-        return;
-    };
-    let outcome = orbit_cli_command::OrbitCliCommand {
-        command,
-        tool_name: Some(tool_name),
-        success,
-        exit_code: None,
-        duration_ms: i64::try_from(duration.as_millis()).ok(),
-        cli_version: env!("ORBIT_VERSION").parse().ok(),
-    };
-    track_outcome(tracker, MCP_TOOL_CALL_ACTION, outcome, coding_agent);
+    track_event(
+        tracker,
+        action,
+        OrbitCliCommandContext::new(outcome),
+        coding_agent,
+    );
 }
 
 pub fn emit_setup_event<T: AnalyticsTracker + ?Sized>(
@@ -127,13 +121,12 @@ pub fn emit_setup_event<T: AnalyticsTracker + ?Sized>(
     run: &SetupRun,
     coding_agent: Option<&str>,
 ) {
-    if let Ok(event) = StructuredEvent::builder(CATEGORY, action)
-        .context(build_common_context(coding_agent))
-        .context(OrbitCliSetupContext::new(run.into()))
-        .build()
-    {
-        tracker.track(event);
-    }
+    track_event(
+        tracker,
+        action,
+        OrbitCliSetupContext::new(run.into()),
+        coding_agent,
+    );
 }
 
 impl From<&SetupRun> for orbit_cli_setup::OrbitCliSetup {
@@ -155,11 +148,11 @@ impl From<&SetupRun> for orbit_cli_setup::OrbitCliSetup {
             components: run
                 .components
                 .iter()
-                .map(|component| match component {
-                    Component::Instructions => Item::Instructions,
-                    Component::Hooks => Item::Hooks,
-                    Component::Skill => Item::Skill,
-                    Component::Mcp => Item::Mcp,
+                .filter_map(|component| match component {
+                    Component::Instructions => Some(Item::Instructions),
+                    Component::Hooks => Some(Item::Hooks),
+                    Component::Skill => Some(Item::Skill),
+                    Component::AgentPlugins => None,
                 })
                 .collect(),
             scope: match run.global {
@@ -178,19 +171,30 @@ impl From<&SetupRun> for orbit_cli_setup::OrbitCliSetup {
     }
 }
 
-fn track_outcome<T: AnalyticsTracker + ?Sized>(
+fn track_event<T: AnalyticsTracker + ?Sized>(
     tracker: &T,
     action: &str,
-    outcome: orbit_cli_command::OrbitCliCommand,
+    event_context: impl SnowplowContext,
     coding_agent: Option<&str>,
 ) {
     if let Ok(event) = StructuredEvent::builder(CATEGORY, action)
         .context(build_common_context(coding_agent))
-        .context(OrbitCliCommandContext::new(outcome))
+        .context(build_cli_context())
+        .context(event_context)
         .build()
     {
         tracker.track(event);
     }
+}
+
+fn build_cli_context() -> OrbitCliContext {
+    OrbitCliContext::new(orbit_cli::OrbitCli {
+        cli_version: crate::version::get().parse().ok(),
+        os: std::env::consts::OS.parse().ok(),
+        arch: std::env::consts::ARCH.parse().ok(),
+        distribution: detect_distribution(|key| std::env::var(key).ok())
+            .and_then(|d| d.parse().ok()),
+    })
 }
 
 fn build_common_context(coding_agent: Option<&str>) -> OrbitCommonContext {
@@ -246,6 +250,11 @@ pub fn detect_coding_agent(get_env: impl Fn(&str) -> Option<String>) -> Option<S
         Some("zed") => Some("zed-terminal".into()),
         _ => None,
     }
+}
+
+/// glab sets `GITLAB_ORBIT_DISTRIBUTION=glab` on the binary it runs for `glab orbit`.
+pub fn detect_distribution(get_env: impl Fn(&str) -> Option<String>) -> Option<&'static str> {
+    (get_env(DISTRIBUTION_ENV).as_deref() == Some(GLAB_DISTRIBUTION)).then_some(GLAB_DISTRIBUTION)
 }
 
 fn resolve(
@@ -350,7 +359,7 @@ mod tests {
         assert_eq!(command["success"], false);
         assert_eq!(command["exit_code"], 3);
         assert_eq!(command["duration_ms"], 1500);
-        assert_eq!(command["cli_version"], env!("ORBIT_VERSION"));
+        assert_eq!(command["cli_version"], crate::version::get());
     }
 
     #[test]
@@ -358,6 +367,24 @@ mod tests {
         let event = emit_one(0, Duration::ZERO);
         let command = context_data(&event, orbit_analytics::ORBIT_CLI_COMMAND_SCHEMA);
         assert_eq!(command["success"], true);
+    }
+
+    #[test]
+    fn every_event_reports_cli_build() {
+        let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
+        emit_command_event(&tracker, "query", 0, Duration::ZERO, None);
+        emit_setup_event(&tracker, AGENTS_CONFIGURED_ACTION, &setup_run(), None);
+        for event in tracker.drain() {
+            let cli = context_data(&event, orbit_analytics::ORBIT_CLI_SCHEMA);
+            assert_eq!(
+                cli["cli_version"],
+                crate::version::get(),
+                "{}",
+                event.action()
+            );
+            assert_eq!(cli["os"], std::env::consts::OS, "{}", event.action());
+            assert_eq!(cli["arch"], std::env::consts::ARCH, "{}", event.action());
+        }
     }
 
     #[test]
@@ -373,17 +400,16 @@ mod tests {
     fn emitted_contexts_validate_against_iglu_schemas() {
         let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
         emit_command_event(&tracker, "query", 1, Duration::from_millis(42), None);
-        emit_tool_call_event(&tracker, "index", true, Duration::from_millis(9), None);
         emit_setup_event(&tracker, AGENTS_CONFIGURED_ACTION, &setup_run(), None);
         let events = tracker.drain();
-        assert_eq!(events[2].action(), "agents_configured");
+        assert_eq!(events[1].action(), "agents_configured");
         for event in events {
             assert_contexts_match_iglu_schemas(&event);
         }
     }
 
     fn assert_contexts_match_iglu_schemas(event: &StructuredEvent) {
-        assert_eq!(event.contexts().len(), 2, "{}", event.action());
+        assert_eq!(event.contexts().len(), 3, "{}", event.action());
         for context in event.contexts() {
             let name = context
                 .schema
@@ -404,7 +430,7 @@ mod tests {
         SetupRun {
             detected_agents: vec!["claude".into(), "codex".into()],
             selected_agents: vec!["claude".into()],
-            components: Component::from_flags(true, &[]),
+            components: Component::from_flags(&[], &[]).unwrap(),
             global: true,
             interactive: false,
             graph_first: Some(false),
@@ -427,27 +453,12 @@ mod tests {
         assert_eq!(setup["selected_agents"], serde_json::json!(["claude"]));
         assert_eq!(
             setup["components"],
-            serde_json::json!(["instructions", "hooks", "skill", "mcp"])
+            serde_json::json!(["instructions", "hooks", "skill"])
         );
         assert_eq!(setup["scope"], "global");
         assert_eq!(setup["outcome"], "applied");
         let common = context_data(&events[0], orbit_analytics::ORBIT_COMMON_SCHEMA);
         assert_eq!(common["coding_agent"], "codex");
-    }
-
-    #[test]
-    fn tool_call_reports_tool_name_under_mcp() {
-        let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
-        emit_tool_call_event(&tracker, "run_sql", false, Duration::from_millis(7), None);
-        let events = tracker.drain();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].action(), "mcp_tool_call");
-        let command = context_data(&events[0], orbit_analytics::ORBIT_CLI_COMMAND_SCHEMA);
-        assert_eq!(command["command"], "mcp");
-        assert_eq!(command["tool_name"], "run_sql");
-        assert_eq!(command["success"], false);
-        assert_eq!(command["duration_ms"], 7);
-        assert!(command["exit_code"].is_null());
     }
 
     #[test]

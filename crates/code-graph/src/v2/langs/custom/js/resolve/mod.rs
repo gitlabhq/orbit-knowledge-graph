@@ -160,7 +160,7 @@ pub fn attach_resolution_edges(
     }
 
     if timed_out.load(Ordering::Relaxed) {
-        tracing::warn!("js cross-file import resolution timed out");
+        orbit_log_fields::warn!("js cross-file import resolution timed out");
         ctx.record_skip(
             "js:cross-file-resolve".to_string(),
             FileSkip::Timeout(AbortPhase::Sentinel),

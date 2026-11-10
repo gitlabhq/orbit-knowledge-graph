@@ -123,3 +123,41 @@ fn native_sources_reject_non_utf8_names() {
         Err(orbit_utils::vfs::SourceError::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
     );
 }
+
+fn assert_absolute_link_loads_as_dangling(root: &std::path::Path) {
+    let vfs = Vfs::load(Directory(root), (), Limits::default(), Options::default()).unwrap();
+    assert_eq!(
+        vfs.files()
+            .map(|file| file.path.as_ref())
+            .collect::<Vec<_>>(),
+        ["alias"]
+    );
+    assert_eq!(
+        vfs.stat("alias").unwrap_err().kind(),
+        std::io::ErrorKind::NotFound
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn absolute_symlinks_load_as_dangling_links() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("alias")).unwrap();
+    assert_absolute_link_loads_as_dangling(root.path());
+}
+
+#[cfg(windows)]
+#[test]
+fn absolute_junctions_load_as_dangling_links() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(root.path().join("alias"))
+        .arg(outside.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_absolute_link_loads_as_dangling(root.path());
+}

@@ -33,11 +33,22 @@ cases:
 
   - name: anchor_rewrite_keeps_relationship
     description: |
-      The aggregation group-anchor rewrite removes the CONTAINS hop, and a NOT group on the IN_PROJECT relationship still reads IN_PROJECT. Every IN_PROJECT edge has source_kind MergeRequest, so the group is false and both authored merge requests count. Reading the AUTHORED edge instead (source_kind User) would drop both opened merge requests.
+      The aggregation group-anchor rewrite removes the CONTAINS hop, and a NOT group on the IN_PROJECT relationship still reads IN_PROJECT. Every IN_PROJECT edge has source_kind MergeRequest, so the group removes the opened merge requests, which are the only ones with authors. Reading the AUTHORED edge instead would keep them.
     query:
       gql: |
         MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)<-[a:AUTHORED]-(u:User)
-        WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
+        WHERE NOT (r.source_kind = 'MergeRequest' AND mr.state = 'opened')
+        RETURN p{.name}, count(mr) AS mrs LIMIT 10
+    expect:
+      row_count: 0
+
+  - name: anchor_rewrite_last_relationship
+    description: |
+      When the group-anchor rewrite removes the first relationship, a NOT group on the remaining IN_PROJECT relationship still binds to its edge scan and removes the opened merge requests in the project.
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)
+        WHERE NOT (r.source_kind = 'MergeRequest' AND mr.state = 'opened')
         RETURN p{.name}, count(mr) AS mrs LIMIT 10
     expect:
       groups:
@@ -48,24 +59,6 @@ cases:
             - entity: Project
               id: 1000
               values: { mrs: 2 }
-
-  - name: anchor_rewrite_last_relationship
-    description: |
-      When the group-anchor rewrite removes the first relationship, a NOT group on the remaining IN_PROJECT relationship still binds to its edge scan and counts every merge request in the project.
-    query:
-      gql: |
-        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)
-        WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
-        RETURN p{.name}, count(mr) AS mrs LIMIT 10
-    expect:
-      groups:
-        p:
-          entity: Project
-          ids: [1000]
-          rows:
-            - entity: Project
-              id: 1000
-              values: { mrs: 4 }
 
   - name: and_not_callee_name_in
     description: AND NOT callee.name IN keeps a call whose callee is outside the exclusion list
@@ -222,13 +215,13 @@ cases:
         - { open_items: 1 }
 
   - name: negation_pagination
-    description: Cursor bounds apply to grouped negation without repeats or missing matches
+    description: SKIP windows apply to grouped negation without repeats or missing matches
     query:
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010
           AND NOT (NOT wi.id = 4001 AND wi.state = 'closed')
-        RETURN wi.state ORDER BY wi.id PAGE 2
+        RETURN wi.state ORDER BY wi.id SKIP 0 LIMIT 2
     expect:
       all_pages:
         node_ids:
@@ -276,16 +269,22 @@ cases:
           - [1, 4002]
 
   - name: not_fk_relationship_filter
-    description: A complemented NOT on a foreign-key relationship column keeps the edge scan and excludes every row
+    description: A complemented NOT on a foreign-key relationship column keeps the edge scan and excludes the matching row
     query:
       gql: |
         MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
-        WHERE NOT r.source_kind = 'MergeRequest'
+        WHERE NOT r.source_id = 2000
         RETURN p.name, mr.title LIMIT 20
     expect:
-      node_count: 0
+      node_count: 4
+      nodes:
+        Project:
+          ids: [1000]
+        MergeRequest:
+          ids: [2001, 2004, 2005]
+          absent: [2000]
       edges:
-        IN_PROJECT: []
+        IN_PROJECT: [[2001, 1000], [2004, 1000], [2005, 1000]]
 
   - name: not_id_list_stays_filter
     description: NOT over an ID list stays a filter and does not become an ID selector
@@ -306,10 +305,10 @@ cases:
     description: NOT IN on a non-nullable denormalized property reads the edge tags and removes the closed work item
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","not":{"state":{"in":["closed","locked"]}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","not":{"state":{"in":["closed"]}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
       gql: |
         MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
-        WHERE u.id IN [1, 2] AND NOT wi.state IN ['closed', 'locked']
+        WHERE u.id IN [1, 2] AND NOT wi.state IN ['closed']
         RETURN u, wi.state LIMIT 20
     expect:
       node_count: 3
@@ -412,7 +411,7 @@ cases:
     description: A complemented NOT on a path endpoint is an ordinary filter and removes the internal group
     query:
       gql: |
-        MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
+        MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(g:Group)
         WHERE g.id IN [100, 102] AND NOT g.visibility_level = 'internal'
         RETURN p
     expect:
@@ -425,12 +424,10 @@ cases:
   - name: traversal_negation_pagination
     description: Traversal pages over a negated list return each remaining membership once and in order
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","not":{"username":{"in":["charlie"]}},"columns":["username"]},{"id":"g","entity":"Group","node_ids":[101]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"order_by":"u.id","cursor":{"page_size":2}}
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 101})
         WHERE NOT u.username IN ['charlie']
-        RETURN u.username ORDER BY u.id PAGE 2
+        RETURN u.username ORDER BY u.id SKIP 0 LIMIT 2
     expect:
       all_pages:
         node_ids:

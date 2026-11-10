@@ -204,7 +204,7 @@ impl JsCrossFileResolver {
             })
             .collect();
         if timed_out.load(Ordering::Relaxed) {
-            tracing::warn!("js cross-file call resolution timed out");
+            orbit_log_fields::warn!("js cross-file call resolution timed out");
         }
         results
     }

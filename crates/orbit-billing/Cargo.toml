@@ -11,24 +11,29 @@ path = "src/lib.rs"
 testkit = []
 
 [dependencies]
+circuit-breaker = { workspace = true }
+compiler = { path = "../query-engine/compiler" }
 gitlab-client = { path = "../gitlab-client" }
 labkit = { workspace = true }
 labkit-events = { workspace = true }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
+parking_lot = { workspace = true }
+pipeline = { path = "../query-engine/pipeline" }
 moka = { workspace = true }
 opentelemetry = { workspace = true }
-query-engine = { path = "../query-engine" }
 rand = { workspace = true }
 reqwest = { workspace = true }
 secrecy = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+strum = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 tonic = { workspace = true }
 tonic-types = { workspace = true }
-tracing = { workspace = true }
+orbit-log-fields = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

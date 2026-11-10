@@ -24,7 +24,7 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Project _orbit_edge_0.relationship_kind AS e0_type, _orbit_edge_0.source_id AS e0_src, _orbit_edge_0.source_kind AS e0_src_type, _orbit_edge_0.target_id AS e0_dst, _orbit_edge_0.target_kind AS e0_dst_type, u.user_type AS u_user_type, ... (_))
+        - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, _orbit_edge_0.source_id AS _orbit_e0_src, _orbit_edge_0.source_kind AS _orbit_e0_src_kind, _orbit_edge_0.target_id AS _orbit_e0_dst, _orbit_edge_0.target_kind AS _orbit_e0_dst_kind, u.user_type AS u_user_type, ... (_))
     emitted:
       expect:
-        - (Project _orbit_edge_0.relationship_kind AS e0_type, _orbit_edge_0.source_id AS e0_src, _orbit_edge_0.source_kind AS e0_src_type, _orbit_edge_0.target_id AS e0_dst, _orbit_edge_0.target_kind AS e0_dst_type, u.user_type AS u_user_type, ... (_))
+        - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, _orbit_edge_0.source_id AS _orbit_e0_src, _orbit_edge_0.source_kind AS _orbit_e0_src_kind, _orbit_edge_0.target_id AS _orbit_e0_dst, _orbit_edge_0.target_kind AS _orbit_e0_dst_kind, u.user_type AS u_user_type, ... (_))

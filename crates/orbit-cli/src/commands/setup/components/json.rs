@@ -90,6 +90,58 @@ pub(super) fn remove_value(root: &mut Value, path: &[String], value: &str) -> bo
     retain_and_prune(root, path, &|entry| entry.as_str() != Some(value))
 }
 
+pub(super) fn set_key(root: &mut Value, path: &[String], value: Value) -> Result<bool> {
+    let (last, parents) = path.split_last().expect("spec paths are non-empty");
+    let parent = ensure_object_at(root, path, parents)?;
+    if parent.get(last) == Some(&value) {
+        return Ok(false);
+    }
+    parent.insert(last.clone(), value);
+    Ok(true)
+}
+
+pub(super) fn remove_key_if(root: &mut Value, path: &[String], expected: &Value) -> bool {
+    let Some((first, rest)) = path.split_first() else {
+        return false;
+    };
+    let Some(map) = root.as_object_mut() else {
+        return false;
+    };
+    if rest.is_empty() {
+        return map.get(first) == Some(expected) && map.remove(first).is_some();
+    }
+    let Some(child) = map.get_mut(first) else {
+        return false;
+    };
+    let changed = remove_key_if(child, rest, expected);
+    if changed && child.as_object().is_some_and(serde_json::Map::is_empty) {
+        map.remove(first);
+    }
+    changed
+}
+
+fn ensure_object_at<'a>(
+    root: &'a mut Value,
+    path: &[String],
+    parents: &[String],
+) -> Result<&'a mut serde_json::Map<String, Value>> {
+    let mut current = root;
+    for (depth, segment) in parents.iter().enumerate() {
+        if !current.is_object() {
+            return Err(type_conflict(path, depth, "an object", current));
+        }
+        current = current
+            .as_object_mut()
+            .expect("checked above")
+            .entry(segment.clone())
+            .or_insert_with(|| json!({}));
+    }
+    if !current.is_object() {
+        return Err(type_conflict(path, parents.len(), "an object", current));
+    }
+    Ok(current.as_object_mut().expect("checked above"))
+}
+
 fn ensure_array_at<'a>(root: &'a mut Value, path: &[String]) -> Result<&'a mut Vec<Value>> {
     let (last, parents) = path.split_last().expect("spec paths are non-empty");
     let mut current = root;

@@ -67,6 +67,13 @@ pub struct Claims {
     /// self-managed / Dedicated instances.
     #[serde(default)]
     pub is_gitlab_team_member: Option<bool>,
+    /// Rails `User#user_type`, such as `human`, `project_bot`, or `service_account`.
+    #[serde(default)]
+    pub user_type: Option<String>,
+    /// Credential the caller used, such as `personal_access_token` or
+    /// `oauth_access_token`. Rails omits it for browser session requests.
+    #[serde(default)]
+    pub token_type: Option<String>,
     /// SHA-256 of the instance's online cloud license, sent by Rails on self-managed
     /// and Dedicated only. Authenticates the quota gate to CustomersDot as
     /// `X-License-Token`. Anyone holding it can query that subscription's CustomersDot
@@ -159,6 +166,23 @@ mod tests {
 
     fn parse_claims(license_checksum: Option<Value>) -> Claims {
         serde_json::from_value(claims_json(license_checksum)).unwrap()
+    }
+
+    #[test]
+    fn caller_credentials_are_read_when_rails_sends_them() {
+        let mut json = claims_json(None);
+        json["user_type"] = json!("service_account");
+        json["token_type"] = json!("oauth_access_token");
+        let claims: Claims = serde_json::from_value(json).unwrap();
+        assert_eq!(claims.user_type.as_deref(), Some("service_account"));
+        assert_eq!(claims.token_type.as_deref(), Some("oauth_access_token"));
+    }
+
+    #[test]
+    fn caller_credentials_are_optional() {
+        let claims = parse_claims(None);
+        assert_eq!(claims.user_type, None);
+        assert_eq!(claims.token_type, None);
     }
 
     #[test]

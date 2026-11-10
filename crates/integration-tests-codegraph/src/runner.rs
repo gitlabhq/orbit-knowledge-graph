@@ -13,7 +13,7 @@ use duckdb_client::DuckDbClient;
 
 use super::validator::{load_suite, report, run_suite, write_suite_files};
 
-const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+const LOCAL_DDL: &str = include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/graph_local.sql"));
 
 pub fn create_test_db() -> anyhow::Result<DuckDbClient> {
     let client =
@@ -83,7 +83,7 @@ pub fn run_yaml_suite(yaml: &str) {
     let ontology =
         std::sync::Arc::new(ontology::Ontology::load_embedded().expect("embedded ontology"));
     let converter: Arc<dyn code_graph::v2::GraphConverter> =
-        Arc::new(duckdb_client::DuckDbConverter {
+        Arc::new(crate::converter::DuckDbConverter {
             project_id: 1,
             branch: "main".to_string(),
             commit_sha: "test".to_string(),

@@ -1,10 +1,12 @@
 use ontology::constants::*;
 
 use crate::ast::*;
+use crate::constants::union_arm_alias;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::BoundFilter;
-use crate::passes::plan::helpers::denorm_tag_values;
+use crate::passes::plan::filters::{NullAsEpoch, denorm_tag_values};
+use crate::passes::plan::predicates::Column;
 
 pub(crate) fn latest_row_dedup(
     alias: &str,
@@ -21,45 +23,82 @@ pub(crate) fn latest_row_dedup(
 
 pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
     filter_expression(
-        alias,
-        prop,
+        &Column::new(alias, prop),
         &bound.filter,
         bound.data_type.as_ref(),
         bound.in_sort_key,
         bound.text_indexed,
+        bound.null_as_epoch,
+        false,
     )
 }
 
+fn epoch(data_type: ontology::DataType) -> Expr {
+    let value = match data_type {
+        ontology::DataType::Date => "1970-01-01",
+        _ => "1970-01-01 00:00:00",
+    };
+    Expr::param(parameter_type(Some(&data_type)), value)
+}
+
+pub(super) fn null_if_epoch(value: Expr, data_type: ontology::DataType) -> Expr {
+    Expr::func(Function::NullIf, vec![value, epoch(data_type)])
+}
+
+fn not_epoch(value: Expr, data_type: ontology::DataType) -> Expr {
+    Expr::binary(Op::Ne, value, epoch(data_type))
+}
+
+fn read(column: Expr, null_as_epoch: Option<ontology::DataType>) -> Expr {
+    match null_as_epoch {
+        Some(data_type) => null_if_epoch(column, data_type),
+        None => column,
+    }
+}
+
 pub(crate) fn filter_expression(
-    alias: &str,
-    prop: &str,
+    column: &Column,
     filter: &InputFilter,
     data_type: Option<&ontology::DataType>,
     in_sort_key: bool,
     text_indexed: bool,
+    null_as_epoch: NullAsEpoch,
+    negated: bool,
 ) -> Expr {
-    let col = Expr::col(alias, prop);
+    let (alias, prop) = (column.source.as_str(), column.name.as_str());
+    let raw = Expr::col(alias, prop);
 
     if let Some((rhs_alias, rhs_prop)) = &filter.rhs_column {
-        let rhs = Expr::col(rhs_alias, rhs_prop);
-        return comparison(col, filter.op.unwrap_or(FilterOp::Eq), rhs)
-            .expect("validated property comparison");
+        let rhs = read(Expr::col(rhs_alias, rhs_prop), null_as_epoch.rhs);
+        return comparison(
+            read(raw, null_as_epoch.column),
+            filter.op.unwrap_or(FilterOp::Eq),
+            rhs,
+        )
+        .expect("validated property comparison");
     }
+
+    let col = read(raw.clone(), null_as_epoch.column.filter(|_| negated));
 
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
     let typed = |v: serde_json::Value| -> Expr { Expr::param(parameter_type(data_type), v) };
 
     let op = filter.op.unwrap_or(FilterOp::Eq);
     let expression = match op {
+        FilterOp::IsNull if let Some(epoch_type) = null_as_epoch.column => {
+            return Expr::eq(raw, epoch(epoch_type));
+        }
+        FilterOp::IsNotNull if let Some(epoch_type) = null_as_epoch.column => {
+            return not_epoch(raw, epoch_type);
+        }
         op @ (FilterOp::Eq
         | FilterOp::Ne
         | FilterOp::Gt
         | FilterOp::Gte
         | FilterOp::Lt
         | FilterOp::Lte) => comparison(col, op, typed(val())).expect("comparison operator"),
-        FilterOp::In => Expr::col_in(
-            alias,
-            prop,
+        FilterOp::In => Expr::in_list(
+            col,
             parameter_type(data_type),
             filter
                 .value
@@ -99,6 +138,10 @@ pub(crate) fn filter_expression(
                 query: Box::new(needle),
             }
         }
+    };
+    let expression = match null_as_epoch.column {
+        Some(epoch_type) if !negated => Expr::and(expression, not_epoch(raw, epoch_type)),
+        _ => expression,
     };
     if text_indexed && matches!(op, FilterOp::Eq | FilterOp::In) {
         let values = match val() {
@@ -183,7 +226,8 @@ pub fn parameter_type(dt: Option<&ontology::DataType>) -> SqlType {
         Some(ontology::DataType::Int) => SqlType::Int64,
         Some(ontology::DataType::Float) => SqlType::Float64,
         Some(ontology::DataType::Bool) => SqlType::Bool,
-        Some(ontology::DataType::DateTime | ontology::DataType::Date) => SqlType::Timestamp {
+        Some(ontology::DataType::Date) => SqlType::Date,
+        Some(ontology::DataType::DateTime) => SqlType::Timestamp {
             precision: 6,
             timezone: Some(TimeZone::Utc),
         },
@@ -255,7 +299,7 @@ pub fn final_edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     if tables.len() == 1 {
         return TableRef::scan_final(&tables[0], alias);
     }
-    let inner_alias = format!("_{alias}");
+    let inner_alias = union_arm_alias(alias);
     let columns: Vec<_> = EDGE_RESERVED_COLUMNS
         .iter()
         .chain([&DELETED_COLUMN])
@@ -281,7 +325,7 @@ pub fn edge_table_scan_filtered(
     if tables.len() == 1 {
         (TableRef::scan(&tables[0], alias), arm_where(alias))
     } else {
-        let inner_alias = format!("_{alias}");
+        let inner_alias = union_arm_alias(alias);
         let mut common_cols: Vec<SelectExpr> = ontology::constants::EDGE_RESERVED_COLUMNS
             .iter()
             .map(|col| SelectExpr::col(&inner_alias, *col))

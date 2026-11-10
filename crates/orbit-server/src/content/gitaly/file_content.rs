@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use gitlab_client::GitlabClient;
 use indexer::modules::code::repository::blob_stream::BlobStream;
 use orbit_arrow::ColumnValue;
+use orbit_log_fields::{debug, warn};
 use query_engine::pipeline::PipelineError;
-use tracing::{debug, warn};
 
 use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
 
@@ -25,9 +25,7 @@ pub struct GitalyBlobRequest {
 
 type FileKey = (i64, String, String); // (project_id, revision, file_path)
 
-/// Requests are grouped by `project_id` and deduplicated by file identity.
-/// Multiple definitions in the same file share the fetched content and
-/// only receive their byte-range slice.
+/// Fetches each file once per project and revision, then slices it for each definition.
 pub struct GitalyContentService {
     client: Arc<GitlabClient>,
 }
@@ -59,75 +57,42 @@ impl ColumnResolver for GitalyContentService {
 
         let mut file_cache: HashMap<FileKey, Option<String>> = HashMap::new();
 
-        let mut by_project: HashMap<i64, Vec<FileKey>> = HashMap::new();
-        for (req, key) in requests.iter().flatten() {
+        let mut batches: HashMap<(i64, String), Vec<FileKey>> = HashMap::new();
+        for (_, key) in requests.iter().flatten() {
             if !file_cache.contains_key(key) {
                 file_cache.insert(key.clone(), None);
-                by_project
-                    .entry(req.project_id)
+                batches
+                    .entry((key.0, key.1.clone()))
                     .or_default()
                     .push(key.clone());
             }
         }
 
-        let futures = by_project.iter().map(|(&project_id, keys)| {
+        let futures = batches.into_values().map(|keys| {
             let client = Arc::clone(&self.client);
-            let revisions: Vec<String> = keys
-                .iter()
-                .map(|(_, revision, path)| format!("{revision}:{path}"))
-                .collect();
-            let keys = keys.clone();
-            async move {
-                metrics::record_gitaly_call();
-                let stream = match client.list_blobs(project_id, &revisions).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        warn!(
-                            project_id,
-                            error = %e,
-                            "list_blobs failed, content will be missing for this project"
-                        );
-                        return (vec![], true);
-                    }
-                };
-
-                let (blobs, err) = BlobStream::new(stream).drain().await;
-
-                let had_error = err.is_some();
-                if let Some(e) = err {
-                    warn!(project_id, error = %e, "blob stream decode error");
-                }
-
-                let results = blobs
-                    .into_iter()
-                    .zip(keys.iter())
-                    .filter_map(|(blob, key)| match String::from_utf8(blob.data) {
-                        Ok(text) => {
-                            metrics::record_blob_bytes(text.len() as u64);
-                            Some((key.clone(), text))
-                        }
-                        Err(_) => {
-                            debug!(project_id, path = %key.2, "skipping binary blob");
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                (results, had_error)
-            }
+            async move { fetch_contents(&client, keys).await }
         });
 
         let mut had_errors = false;
-        for (blobs, errored) in futures::future::join_all(futures).await {
-            had_errors |= errored;
-            for (key, text) in blobs {
-                file_cache.insert(key, Some(text));
+        for fetched in futures::future::join_all(futures).await {
+            had_errors |= fetched.had_error;
+            for (key, data) in fetched.contents {
+                match String::from_utf8(data) {
+                    Ok(text) => {
+                        metrics::record_blob_bytes(text.len() as u64);
+                        file_cache.insert(key, Some(text));
+                    }
+                    Err(_) => debug!(
+                        safe(GL_PROJECT_ID) = key.0,
+                        expanded(FILE_PATH) = key.2.as_str(),
+                        "skipping binary blob"
+                    ),
+                }
             }
         }
 
         timer.set_outcome(if had_errors { "error" } else { "gitaly_direct" });
 
-        // Non-UTF-8 blobs were filtered during fetch, so their cache entries
-        // remain None and resolve to None here.
         Ok(requests
             .iter()
             .map(|entry| {
@@ -139,6 +104,80 @@ impl ColumnResolver for GitalyContentService {
             })
             .collect())
     }
+}
+
+struct FetchedContents {
+    contents: HashMap<FileKey, Vec<u8>>,
+    had_error: bool,
+}
+
+/// Gitaly lists a shared blob once per request, so the files a batch misses go in the next batch.
+async fn fetch_contents(client: &GitlabClient, mut missed: Vec<FileKey>) -> FetchedContents {
+    let mut fetched = FetchedContents {
+        contents: HashMap::new(),
+        had_error: false,
+    };
+    while !missed.is_empty() {
+        let Some(batch) = list_contents(client, &missed).await else {
+            fetched.had_error = true;
+            break;
+        };
+        fetched.had_error |= batch.had_error;
+        if batch.contents.is_empty() {
+            break;
+        }
+        missed.retain(|key| !batch.contents.contains_key(key));
+        fetched.contents.extend(batch.contents);
+    }
+    fetched
+}
+
+/// Keys share one revision, so a path names one key. `None` when the request fails.
+async fn list_contents(client: &GitlabClient, keys: &[FileKey]) -> Option<FetchedContents> {
+    let project_id = keys[0].0;
+    let revisions: Vec<String> = keys
+        .iter()
+        .map(|(_, revision, path)| format!("{revision}:{path}"))
+        .collect();
+
+    metrics::record_gitaly_call();
+    let stream = match client.list_blobs(project_id, &revisions).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(
+                safe(GL_PROJECT_ID) = project_id,
+                expanded(ERROR_MESSAGE) = %e,
+                safe(ERROR_TYPE) = <&str>::from(&e),
+                "list_blobs failed, content will be missing for this project"
+            );
+            return None;
+        }
+    };
+
+    let (blobs, err) = BlobStream::new(stream).drain().await;
+    if let Some(e) = &err {
+        warn!(
+            safe(GL_PROJECT_ID) = project_id,
+            safe(ERROR_TYPE) = "blob_decode",
+            expanded(ERROR_MESSAGE) = %e,
+            "blob stream decode error"
+        );
+    }
+
+    let contents = blobs
+        .into_iter()
+        .filter_map(|blob| {
+            let key = match keys {
+                [only] => only,
+                _ => keys.iter().find(|key| key.2.as_bytes() == blob.path)?,
+            };
+            Some((key.clone(), blob.data))
+        })
+        .collect();
+    Some(FetchedContents {
+        contents,
+        had_error: err.is_some(),
+    })
 }
 
 impl GitalyContentService {

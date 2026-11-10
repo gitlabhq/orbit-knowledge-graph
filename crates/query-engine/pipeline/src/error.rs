@@ -61,13 +61,23 @@ impl PipelineError {
     }
 
     pub fn is_caller_error(&self) -> bool {
-        matches!(
-            self,
-            Self::Compile {
-                client_safe: true,
-                ..
-            } | Self::NoEnabledNamespaces
-        )
+        match self {
+            Self::Compile { client_safe, .. } => *client_safe,
+            Self::NoEnabledNamespaces | Self::Streaming(_) => true,
+            Self::Execution(message) => matches!(
+                ClickHouseLimit::from_message(message),
+                Some(ClickHouseLimit::BadQueryParameter | ClickHouseLimit::TooComplex)
+            ),
+            _ => false,
+        }
+    }
+
+    pub fn outcome(&self) -> &'static str {
+        if self.is_caller_error() {
+            "caller_error"
+        } else {
+            "server_error"
+        }
     }
 
     pub fn failure_reason(&self) -> FailureReason {
@@ -136,6 +146,8 @@ pub enum ClickHouseLimit {
     TooManyRows,
     SetSizeLimit,
     TypeMismatch,
+    BadQueryParameter,
+    TooComplex,
 }
 
 impl ClickHouseLimit {
@@ -147,6 +159,8 @@ impl ClickHouseLimit {
             158 => Some(Self::TooManyRows),
             191 => Some(Self::SetSizeLimit),
             53 => Some(Self::TypeMismatch),
+            41 | 457 => Some(Self::BadQueryParameter),
+            36 if message.contains("Query tree is too big") => Some(Self::TooComplex),
             _ => None,
         }
     }
@@ -193,6 +207,14 @@ mod tests {
             (
                 "Code: 53. DB::Exception: Cannot convert string 'abc' to type UInt64. (TYPE_MISMATCH)",
                 Some(ClickHouseLimit::TypeMismatch),
+            ),
+            (
+                "Code: 36. DB::Exception: Query tree is too big. Maximum: 500000. (BAD_ARGUMENTS)",
+                Some(ClickHouseLimit::TooComplex),
+            ),
+            (
+                "Code: 36. DB::Exception: Unknown setting 'max_hops'. (BAD_ARGUMENTS)",
+                None,
             ),
             (
                 "Code: 47. DB::Exception: Unknown expression identifier `p.id`",

@@ -1,0 +1,12 @@
+description: SKIP past the last row returns an empty, exhausted page
+
+query:
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id SKIP 100 LIMIT 2
+
+expect:
+  node_count: 0
+  nodes:
+    User:
+      order: []
+  has_more: false

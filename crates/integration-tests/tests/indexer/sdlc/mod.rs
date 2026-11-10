@@ -42,6 +42,7 @@ async fn global_indexing() {
         first_pass::completed_first_pass_resets_attempts_and_sets_indexed_at,
         first_pass::unfinished_first_pass_counts_each_attempt_with_a_session_query_cache,
         first_pass::incremental_run_keeps_indexed_at_and_ends_with_zero_attempts,
+        first_pass::missing_destination_table_still_fails_the_run,
         first_pass::stale_page_write_after_completion_keeps_indexed_at,
         first_pass::tombstoned_key_does_not_resurrect_an_old_completion,
     );

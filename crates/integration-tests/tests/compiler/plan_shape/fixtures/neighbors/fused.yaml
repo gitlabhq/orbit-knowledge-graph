@@ -17,9 +17,9 @@ physical:
         - (Neighbors center=p direction=incoming directional outgoing=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] incoming=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] center_filter=false relationships=[IN_PROJECT] ... (_))
     emitted:
       expect:
-        - (Union ALL AS e (_) (_) (_) (_) (_))
-        - (Scan Table(gl_ci_edge) AS _e)
-        - (Scan Table(gl_code_edge) AS _e)
-        - (Scan Table(gl_diff_edge) AS _e)
-        - (Scan Table(gl_edge) AS _e)
-        - (Scan Table(gl_sec_edge) AS _e)
+        - (Union ALL AS _orbit_neighbor_edge (_) (_) (_) (_) (_))
+        - (Scan Table(gl_ci_edge) AS _orbit_neighbor_edge_arm)
+        - (Scan Table(gl_code_edge) AS _orbit_neighbor_edge_arm)
+        - (Scan Table(gl_diff_edge) AS _orbit_neighbor_edge_arm)
+        - (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm)
+        - (Scan Table(gl_sec_edge) AS _orbit_neighbor_edge_arm)

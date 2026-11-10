@@ -4,11 +4,11 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
+chrono = { workspace = true }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../../orbit-server-config" }
 orbit-utils = { path = "../../utils" }
 orbit-versions = { path = "../../orbit-versions" }
-base64 = { workspace = true }
 ontology = { path = "../../ontology" }
 query-data-model = { path = "../../query-data-model" }
 compiler-pipeline-macros = { path = "../compiler-pipeline-macros" }

@@ -24,7 +24,7 @@ Open agent-authored Draft MRs with `[skip ci]` at the end of the Conventional
 Commits title and keep it there through review.
 
 When ready for CI, remove `[skip ci]` from the title, then start a pipeline.
-Editing the title alone starts no pipeline.
+Editing the title alone starts no pipeline. When the MR is ready to be reviewed, add the `~workflow::ready for review` label.
 
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
@@ -36,12 +36,21 @@ git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"
 
 List these directories and read the relevant owner before you act:
 
-- `docs/design-documents/` for architecture, security, schema, querying, indexing, and testing (`testing.md`).
-- `docs/dev/` for runbooks, the crate map, and the reference index.
+- `docs/pages/engineering/architecture/` for the architecture overview and the contract of each area, and `docs/pages/engineering/adr/` for the ADRs.
+- `docs/pages/engineering/development/` for runbooks, the crate map, and the reference index.
 - Before working in a crate, check for and read `crates/<crate>/AGENTS.md`.
-- `docs/design-documents/decisions/020_billing_sox_scope.md` documents the SOX scope for billing emission. Read it before touching `crates/orbit-billing/`, `billing_adapter.rs`, or the hook points enumerated in `.gitlab/CODEOWNERS`.
-- **SOX billing surface:** files controlling billing emission, delivery, payloads, or quota checks are in scope, including files outside `crates/orbit-billing/`. If you add or move such a file, add it to `.gitlab/CODEOWNERS` under the SOX-scoped rules. If it introduces a new hook-point category, update the table in `docs/design-documents/decisions/020_billing_sox_scope.md` in the same MR.
+- `docs/pages/engineering/adr/020_billing_sox_scope.md` documents the SOX scope for billing emission. Read it before touching `crates/orbit-billing/`, `billing_adapter.rs`, or the hook points enumerated in `.gitlab/CODEOWNERS`.
+- **SOX billing surface:** files controlling billing emission, delivery, payloads, or quota checks are in scope, including files outside `crates/orbit-billing/`. If you add or move such a file, add it to `.gitlab/CODEOWNERS` under the SOX-scoped rules.
 
+Do not change any file under `docs/` in an MR that changes code. Change it only when a CI or build check fails without it.
 Do not create a GitLab issue or epic until the author approves the draft.
 Read `CONTRIBUTING.md` for engineering, documentation, issue, and MR
 conventions. Read `CONTEXT.md` for domain terms.
+
+## Writing or changing a skill
+
+Before you create or edit a skill, follow the [`authoring-skills`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/authoring-skills/SKILL.md) guide; shipped skills live in `skills/`, repo-only skills in `.agents/skills/`.
+
+## Writing docs
+
+For user docs (`docs/docs-gitlab-com/`), follow the [`gitlab-docs-change`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-change/SKILL.md) skill.

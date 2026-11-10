@@ -30,6 +30,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+orbit-log-fields = { workspace = true }
 tracing-subscriber = { workspace = true }
 labkit = { workspace = true }
 rustls = { workspace = true }

@@ -40,7 +40,11 @@ impl Lowering {
         for item in items {
             let alias = item.alias.map(|alias| alias.value);
             match item.expression {
-                Expression::Aggregate { function, target } => {
+                Expression::Aggregate {
+                    function,
+                    distinct,
+                    target,
+                } => {
                     let expr = match (function, target) {
                         (AggregateFunction::Count, Target::Property(p)) => {
                             AggExpr::Count(TargetRef {
@@ -65,10 +69,11 @@ impl Lowering {
                         (AggregateFunction::Min, Target::Property(p)) => AggExpr::Min(p.into()),
                         (AggregateFunction::Max, Target::Property(p)) => AggExpr::Max(p.into()),
                     };
-                    self.input
-                        .aggregation
-                        .metrics
-                        .push(InputAggregationMetric { expr, alias });
+                    self.input.aggregation.metrics.push(InputAggregationMetric {
+                        expr,
+                        alias,
+                        distinct,
+                    });
                 }
                 Expression::DateTrunc {
                     span,
@@ -446,6 +451,15 @@ impl Lowering {
             }
             QueryType::Traversal => {
                 let PropertyRef { node, property } = match sort.key {
+                    SortKey::Property(key) if self.edges.contains_key(&key.node.value) => {
+                        let relationship = key.node.value;
+                        return Err(invalid(
+                            key.span,
+                            &format!(
+                                "ORDER BY cannot sort by a relationship property; sort by a node property or by type({relationship})"
+                            ),
+                        ));
+                    }
                     SortKey::Property(key) => key.into(),
                     SortKey::RelationshipType(name) => {
                         let relationship = self.relationship_index(name.span, &name)?;

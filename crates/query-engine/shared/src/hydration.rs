@@ -7,7 +7,7 @@ use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use compiler::constants::{
-    HYDRATION_NODE_ALIAS, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
+    hydration_node_alias, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
     traversal_path_column,
 };
 use compiler::{
@@ -39,7 +39,7 @@ pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) ->
     ids
 }
 
-/// Reads the `_orbit_{alias}_tp` column emitted by the enforce pass.
+/// Reads the `_orbit_{alias}_tp` column emitted by the result-contract pass.
 pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<TraversalPath> {
     let tp_col = traversal_path_column(alias);
     let mut paths: Vec<TraversalPath> = result
@@ -51,33 +51,6 @@ pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<Travers
     paths.sort_unstable();
     paths.dedup();
     paths
-}
-
-/// Fallback for nodes whose own TP column is absent (FK-elided pinned nodes
-/// where the alias was absorbed into a literal). The TPs from sibling nodes in
-/// the same result rows are valid narrowing candidates because all entities
-/// share the same namespace hierarchy.
-fn collect_all_traversal_paths(
-    result: &QueryResult,
-    templates: &[HydrationTemplate],
-) -> Vec<TraversalPath> {
-    let mut all: Vec<TraversalPath> = Vec::new();
-    for t in templates {
-        if !t.has_traversal_path {
-            continue;
-        }
-        let tp_col = traversal_path_column(&t.node_alias);
-        for row in result.authorized_rows() {
-            if let Some(tp) = row.get_column_string(&tp_col)
-                && !tp.is_empty()
-            {
-                all.push(TraversalPath::new_unchecked(tp));
-            }
-        }
-    }
-    all.sort_unstable();
-    all.dedup();
-    all
 }
 
 /// When `static_nodes` is provided (e.g. the center node in a neighbors query),
@@ -164,7 +137,7 @@ pub fn parse_hydration_batches(
     batches: &[RecordBatch],
     ontology: &Ontology,
 ) -> Result<PropertyMap, PipelineError> {
-    let alias = HYDRATION_NODE_ALIAS;
+    let alias = hydration_node_alias();
     let entity_type_col = format!("{alias}_entity_type");
     let props_col = format!("{alias}_props");
     let id_col = format!("{alias}_id");
@@ -327,7 +300,6 @@ pub fn hydrate_static(
     templates: &[HydrationTemplate],
     query_result: &QueryResult,
 ) -> Result<(Vec<InputNode>, usize), PipelineError> {
-    let all_tps = collect_all_traversal_paths(query_result, templates);
     let mut nodes = Vec::new();
     let mut total_ids: usize = 0;
 
@@ -342,15 +314,14 @@ pub fn hydrate_static(
         }
 
         let traversal_paths = if template.has_traversal_path {
-            let own = collect_traversal_paths(query_result, &template.node_alias);
-            if own.is_empty() { all_tps.clone() } else { own }
+            collect_traversal_paths(query_result, &template.node_alias)
         } else {
             Vec::new()
         };
 
         total_ids += ids.len();
         nodes.push(InputNode {
-            id: HYDRATION_NODE_ALIAS.to_string(),
+            id: hydration_node_alias().to_string(),
             entity: Some(template.entity_type.clone()),
             columns: Some(ColumnSelection::List(template.columns.clone())),
             node_ids: ids,
@@ -362,34 +333,11 @@ pub fn hydrate_static(
     Ok((nodes, total_ids))
 }
 
-/// For PathFinding queries where no static nodes have TP columns, returns an
-/// empty vec — the caller can fall back to security context TPs.
-pub fn collect_dynamic_traversal_paths(
-    result: &QueryResult,
-    static_nodes: &[compiler::RedactionNode],
-) -> Vec<TraversalPath> {
-    let mut paths: Vec<TraversalPath> = Vec::new();
-    for node in static_nodes {
-        let tp_col = traversal_path_column(&node.alias);
-        for row in result.authorized_rows() {
-            if let Some(tp) = row.get_column_string(&tp_col)
-                && !tp.is_empty()
-            {
-                paths.push(TraversalPath::new_unchecked(tp));
-            }
-        }
-    }
-    paths.sort_unstable();
-    paths.dedup();
-    paths
-}
-
 /// Uses pre-resolved column specs from the compilation plan; no ontology
 /// lookups at runtime.
 ///
-/// `traversal_paths` narrows hydration scans for entities that have
-/// `traversal_path` in their table. Pass TPs collected from static nodes
-/// or the security context.
+/// `traversal_paths` is the authorized scope; `ref_paths` narrows an entity type to the paths
+/// its own rows carry. A neighbor can sit above the center node, so the center path is no fallback.
 pub fn hydrate_dynamic(
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<i64>>,
@@ -429,7 +377,7 @@ pub fn hydrate_dynamic(
         };
 
         nodes.push(InputNode {
-            id: HYDRATION_NODE_ALIAS.to_string(),
+            id: hydration_node_alias().to_string(),
             entity: Some(entity_type.clone()),
             columns: Some(ColumnSelection::List(spec.columns.clone())),
             node_ids: capped_ids,

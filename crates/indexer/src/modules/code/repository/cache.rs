@@ -15,7 +15,8 @@ use super::CancelOnDrop;
 use super::service::ByteStream;
 use crate::modules::code::metrics::CodeMetrics;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum RepositoryCacheError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
@@ -118,11 +119,13 @@ impl RepositoryCache for LocalRepositoryCache {
             to_cap(self.max_total_bytes),
             detect_language_from_path,
         );
+        let span = tracing::Span::current();
         // The blocking task owns the `TempDir` for the duration of extraction and hands it back.
         // If this future is dropped (a wall-clock timeout), the `spawn_blocking` still runs to
         // completion detached and drops the `TempDir` itself, so the extractor never writes into a
         // directory whose cleanup already ran.
         let extracted = tokio::task::spawn_blocking(move || {
+            let _entered = span.enter();
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
             let result = extract_tar_gz(bridge, dir.path(), &mut filter).map(|inv| (inv, filter));
             (dir, result)

@@ -55,7 +55,6 @@ properties:
     type: string
     source: commit_sha
     nullable: false
-    mutable: false
     description: "Indexed commit SHA."
 
   path:
@@ -84,6 +83,7 @@ storage:
     - {name: path, type: "String", codec: ["ZSTD(3)"]}
     - {name: name, type: "String", codec: ["ZSTD(1)"]}
   indexes:
+    - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_name, column: name, type: text, granularity: 1}

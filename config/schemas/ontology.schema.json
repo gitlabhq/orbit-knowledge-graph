@@ -177,9 +177,18 @@
               ],
               "description": "Filter selectivity hint for the query planner. 'low' = few distinct values (enums, booleans), 'high' = many distinct values. Auto-derived from type when omitted."
             },
+            "unique": {
+              "type": "boolean",
+              "description": "At most one live row per value; an equality on it is recomputed inline.",
+              "default": false
+            },
+            "high_fan_out": {
+              "type": "boolean",
+              "description": "Parent key of many rows; pinned reads keep find then check."
+            },
             "mutable": {
               "type": "boolean",
-              "description": "Whether this field can change after creation. Fields that never change (IDs, paths, timestamps) should be marked false.",
+              "description": "Whether this field can change after creation. False lets the planner filter on it before the latest-row pick.",
               "default": true
             },
             "terminal_values": {
@@ -496,7 +505,7 @@
         },
         "statistics": {
           "type": "object",
-          "description": "Automated column statistics collection via AggregatingMergeTree MVs. All filterable properties on all entities are auto-tracked. Categorization is derived from property types: boolean/enum/selectivity:low \u2192 stats_table (value frequencies), string \u2192 token_table (token frequencies), int64/timestamp/date/float \u2192 histogram_table (equi-depth buckets), uuid \u2192 skipped.",
+          "description": "Column statistics via AggregatingMergeTree MVs over every filterable property, by type: boolean/enum/selectivity:low -> stats_table, string -> token_table, int64/timestamp/date/float -> histogram_table, uuid -> skipped.",
           "properties": {
             "stats_table": {
               "type": "string",
@@ -1473,19 +1482,20 @@
         "type": {
           "type": "string",
           "pattern": "^(Int64|UInt64|Bool|String|Date32|DateTime64\\(|Nullable\\(|LowCardinality\\().*$",
+          "not": { "pattern": "^Nullable\\(Date" },
           "description": "Exact ClickHouse type. Must start with a known type name."
         },
         "default": {
           "type": "string",
-          "pattern": "^[a-zA-Z0-9_()',./_ {}]+$",
-          "description": "DEFAULT expression. Only literals, function calls, and quoted strings allowed."
+          "pattern": "^[a-zA-Z0-9_()',./_ {}-]+$",
+          "description": "DEFAULT expression: literals, function calls, or quoted strings."
         },
         "codec": {
           "type": "array",
           "items": {
             "type": "string",
             "pattern": "^(ZSTD\\([0-9]+\\)|Delta\\([0-9]+\\)|DoubleDelta|T64|LZ4)$",
-            "description": "Codec. Must be ZSTD(N), Delta(N), DoubleDelta, T64, or LZ4."
+            "description": "Compression codec."
           }
         }
       },

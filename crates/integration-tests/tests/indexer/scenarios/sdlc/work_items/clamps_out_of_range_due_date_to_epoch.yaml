@@ -1,0 +1,31 @@
+description: >-
+  A null or out-of-range Date32 due_date lands as the epoch without aborting the pipeline.
+  Arrow inserts reject such a batch (Code 321) unless the extract clamps the value to
+  NULL first, and only a JSONEachRow seed with date_time_overflow_behavior=ignore keeps
+  the raw day counts.
+
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  work_items:
+    - { id: 1, iid: 1, title: Way past, description: "", author_id: 1, state_id: 1, work_item_type_id: 1, confidential: false, namespace_id: 100, due_date: -715643, traversal_path: "1/100/" }
+    - { id: 2, iid: 2, title: Way future, description: "", author_id: 1, state_id: 1, work_item_type_id: 1, confidential: false, namespace_id: 100, due_date: 200000, traversal_path: "1/100/" }
+    - { id: 3, iid: 3, title: Epoch, description: "", author_id: 1, state_id: 1, work_item_type_id: 1, confidential: false, namespace_id: 100, due_date: 0, traversal_path: "1/100/" }
+    - { id: 4, iid: 4, title: No due date, description: "", author_id: 1, state_id: 1, work_item_type_id: 1, confidential: false, namespace_id: 100, due_date: null, traversal_path: "1/100/" }
+
+seed_settings:
+  date_time_overflow_behavior: ignore
+
+run: namespace
+
+expect:
+  nodes:
+    gl_work_item:
+      count: 4
+      rows:
+        - { id: 1, due_date: "1970-01-01" }
+        - { id: 2, due_date: "1970-01-01" }
+        - { id: 3, due_date: "1970-01-01" }
+        - { id: 4, due_date: "1970-01-01" }

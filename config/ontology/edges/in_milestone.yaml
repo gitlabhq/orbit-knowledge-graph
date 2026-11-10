@@ -5,10 +5,12 @@ description: Entity belongs to a milestone
 variants:
   - from_node: { type: WorkItem, id: id }
     to_node: { type: Milestone, id: id }
+    scope: prune_to_source
     fk_column: milestone_id
     description: "Work item assigned to milestone."
 
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Milestone, id: id }
+    scope: prune_to_source
     fk_column: milestone_id
     description: "Merge request assigned to milestone."

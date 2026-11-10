@@ -1,0 +1,40 @@
+@import "@gitlab-org/orbit-site/styles.css";
+
+:root {
+  --tone-platform: var(--gl-color-data-blue-500);
+  --tone-agents: var(--gl-color-data-magenta-500);
+  --tone-code: var(--gl-color-data-aqua-500);
+  --tone-data: var(--gl-color-data-orange-500);
+  --tone-trust: var(--gl-color-data-green-500);
+}
+
+.gl-dark {
+  --tone-platform: var(--gl-color-data-blue-300);
+  --tone-agents: var(--gl-color-data-magenta-300);
+  --tone-code: var(--gl-color-data-aqua-300);
+  --tone-data: var(--gl-color-data-orange-300);
+  --tone-trust: var(--gl-color-data-green-300);
+}
+
+@layer components {
+  .tone-platform { --tone: var(--tone-platform); }
+  .tone-agents { --tone: var(--tone-agents); }
+  .tone-code { --tone: var(--tone-code); }
+  .tone-data { --tone: var(--tone-data); }
+  .tone-trust { --tone: var(--tone-trust); }
+
+  .tone-bar {
+    background: color-mix(in srgb, var(--tone) 16%, var(--gl-background-color-default));
+    border: 1px solid color-mix(in srgb, var(--tone) 55%, transparent);
+  }
+
+  .tone-bar[data-status="exploring"] {
+    background: transparent;
+    border-style: dashed;
+  }
+
+  .tone-bar[data-status="shipped"] {
+    background: color-mix(in srgb, var(--tone) 8%, var(--gl-background-color-subtle));
+    border-color: var(--border-hairline-strong);
+  }
+}

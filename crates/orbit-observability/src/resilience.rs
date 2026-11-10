@@ -80,23 +80,23 @@ impl CircuitBreakerObserver for MetricsObserver {
 
         match transition.to {
             StateLabel::Open => {
-                tracing::warn!(
-                    service,
-                    from = transition.from.as_str(),
+                orbit_log_fields::warn!(
+                    safe(COMPONENT) = service,
+                    safe(FROM_STATE) = transition.from.as_str(),
                     "circuit breaker opened"
                 );
             }
             StateLabel::Closed => {
-                tracing::info!(
-                    service,
-                    from = transition.from.as_str(),
+                orbit_log_fields::info!(
+                    safe(COMPONENT) = service,
+                    safe(FROM_STATE) = transition.from.as_str(),
                     "circuit breaker closed"
                 );
             }
             StateLabel::HalfOpen => {
-                tracing::info!(
-                    service,
-                    from = transition.from.as_str(),
+                orbit_log_fields::info!(
+                    safe(COMPONENT) = service,
+                    safe(FROM_STATE) = transition.from.as_str(),
                     "circuit breaker half-open"
                 );
             }

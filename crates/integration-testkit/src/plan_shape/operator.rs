@@ -44,6 +44,7 @@ operators! {
     Cte => "CTE",
     Sort => "Sort",
     Limit => "Limit",
+    Offset => "Offset",
     Distinct => "Distinct",
     Neighbors => "Neighbors",
     PathFinding => "PathFinding",

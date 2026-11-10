@@ -165,6 +165,16 @@ fn a_killed_file_keeps_a_row_tagged_with_the_timeout() {
 }
 
 fn link_nested(source: String, file_link_ms: u64) -> Result<(), String> {
+    link_one(SupportLang::JavaScript, "deep.js", source, file_link_ms)
+}
+
+fn link_one(
+    language: SupportLang,
+    path: &str,
+    source: String,
+    file_link_ms: u64,
+) -> Result<(), String> {
+    let path = path.to_string();
     use code_graph_incremental::pipeline::SourceFile;
     use code_graph_incremental::{Sentinel, templates};
 
@@ -172,7 +182,7 @@ fn link_nested(source: String, file_link_ms: u64) -> Result<(), String> {
         .stack_size(templates::WORKER_STACK_BYTES)
         .spawn(move || {
             let env = Env::with_limits(
-                SupportLang::JavaScript,
+                language,
                 Limits {
                     file_link_ms,
                     ..Limits::UNLIMITED
@@ -180,7 +190,7 @@ fn link_nested(source: String, file_link_ms: u64) -> Result<(), String> {
             )
             .unwrap();
             let free = Sentinel::disabled();
-            let file = SourceFile::from(("deep.js".to_string(), source));
+            let file = SourceFile::from((path, source));
             let parsed = Parse.run(&env, &free, file).unwrap();
             let rewritten = Rewrite.run(&env, &free, parsed).unwrap();
             let canonical = Canonicalize.run(&env, &free, rewritten).unwrap();
@@ -216,4 +226,19 @@ fn linking_deeply_nested_loops_stays_within_the_link_budget() {
     source += &"}\n".repeat(levels);
     source += "}\n";
     assert_eq!(link_nested(source, 1_000), Ok(()));
+}
+
+#[test]
+fn nested_member_writes_in_many_functions_stay_within_the_link_budget() {
+    let source: String = (0..40)
+        .map(|i| {
+            format!(
+                "def test_{i}(m):\n    c = AsyncMock()\n    c.a = 1\n    c.send = AsyncMock()\n    m.r.e = c\n    w = Workflow(m, c)\n"
+            )
+        })
+        .collect();
+    assert_eq!(
+        link_one(SupportLang::Python, "test_workflow.py", source, 2_000),
+        Ok(())
+    );
 }

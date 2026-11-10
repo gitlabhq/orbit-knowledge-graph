@@ -1,5 +1,5 @@
 use crate::MetricSpec;
-use crate::buckets::{LATENCY, LATENCY_FAST_FINE};
+use crate::buckets::{FRESHNESS, LATENCY, LATENCY_FAST_FINE};
 
 pub mod labels {
     pub const ENTITY: &str = "entity";
@@ -64,7 +64,7 @@ pub const DATALAKE_QUERY_BYTES: MetricSpec = MetricSpec::counter(
 
 pub const TRANSFORM_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.indexer.sdlc.transform.duration",
-    "Duration of DataFusion SQL transform per batch.",
+    "Duration of the SQL transform per batch.",
     Some("s"),
     &[],
     LATENCY_FAST_FINE,
@@ -79,6 +79,23 @@ pub const WATERMARK_LAG: MetricSpec = MetricSpec::gauge(
     DOMAIN,
 );
 
+pub const FRESHNESS_LAG: MetricSpec = MetricSpec::histogram_f64(
+    "gkg.indexer.sdlc.freshness.lag",
+    "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
+    Some("s"),
+    &[labels::ENTITY],
+    FRESHNESS,
+    DOMAIN,
+);
+
+pub const FRESHNESS_OLDEST_SYNC: MetricSpec = MetricSpec::observable_gauge(
+    "gkg.indexer.sdlc.freshness.oldest_sync_timestamp",
+    "One sample per SDLC plan on the served schema version: Unix time up to which its indexed data is known to match the datalake, in the least synced enabled namespace for namespaced plans.",
+    Some("s"),
+    &[labels::ENTITY],
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
     &PIPELINE_DURATION,
     &PIPELINE_ROWS_PROCESSED,
@@ -88,4 +105,6 @@ pub const CATALOG: &[&MetricSpec] = &[
     &DATALAKE_QUERY_BYTES,
     &TRANSFORM_DURATION,
     &WATERMARK_LAG,
+    &FRESHNESS_LAG,
+    &FRESHNESS_OLDEST_SYNC,
 ];

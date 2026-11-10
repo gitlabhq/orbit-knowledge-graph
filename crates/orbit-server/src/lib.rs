@@ -25,3 +25,4 @@ pub mod skills;
 mod status_query;
 pub mod tls;
 pub mod tools;
+pub mod user_agent;

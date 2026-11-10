@@ -39,7 +39,7 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 The **dispatcher** publishes its ontology archive and requires the active archive before migration.
 Missing active archives are bootstrapped from the test-validated release bundle; existing entries
 are never replaced, and unsupported missing versions fail before versioned DDL.
-See `docs/design-documents/schema_management.md` for rollout prerequisites and recovery.
+See the [pre-rewrite schema management doc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md) for rollout prerequisites and recovery.
 
 The dispatcher owns schema migration. At boot, `schema::migration::run_if_needed()` compares
 the embedded `SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a
@@ -48,7 +48,9 @@ SDLC change rebuilds the affected table and clones unaffected tables from the ac
 affected table has writers outside the requested scope, the dispatcher widens the migration to a
 full rebuild. A code migration is the exception. It clones the shared `gl_edge` table intact rather
 than widening. The code stale sweep then tombstones its own rows as the re-index drains. So it
-re-indexes only code without re-pulling SDLC.
+re-indexes only code without re-pulling SDLC. An SDLC entry with `edge_rows: unchanged` also
+clones every edge table: its re-indexed pipelines write the same edge sort keys, and merges keep
+the newest row. Edge drift in the active tables carries over, because nothing rebuilds them.
 
 Selective migrations seed the new checkpoint table with completed checkpoints for unchanged
 pipelines. Required pipelines are left out so the normal sweep tasks run them again. The dispatcher
@@ -90,7 +92,7 @@ the FK changes. The reason: `target_id` is part of the `ReplacingMergeTree` iden
 `IN` on the edge PK prunes it to the changed set. The swept set is ontology-derived (edges marked
 `mutable: true`), as is each variant's metadata. It runs directly in the dispatcher (not dispatched to indexer workers):
 one cheap global sweep, off the insert hot path. See
-`docs/design-documents/indexing/sdlc_indexing.md` ("Stale FK-edge reconciliation").
+the [pre-rewrite SDLC indexing doc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md) ("Stale FK-edge reconciliation").
 
 ### Entry point
 
@@ -203,7 +205,7 @@ it is justified when it needs:
 
 If the transform is a per-row projection of one extracted batch, express it as an ontology plan +
 `datafusion`, not Rust. SystemNote is the reference case for the Rust path (ADR 013). See
-`docs/design-documents/decisions/015_pluggable_entity_pipelines.md`.
+`docs/pages/engineering/adr/015_pluggable_entity_pipelines.md`.
 
 ### Adding a handler
 

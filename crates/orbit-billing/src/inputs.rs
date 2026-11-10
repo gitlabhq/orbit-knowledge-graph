@@ -20,4 +20,5 @@ pub struct BillingInputs {
     pub deployment_type: Option<String>,
     pub is_gitlab_team_member: Option<bool>,
     pub coding_agent: Option<String>,
+    pub has_license_checksum: bool,
 }

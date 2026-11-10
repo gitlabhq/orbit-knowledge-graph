@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use crate::common::compile;
 use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, TestContext, compile_and_execute, load_ontology,
-    run_redaction, test_security_context,
+    resolve_owners, run_redaction, test_security_context,
 };
 use integration_testkit::{run_subtests, run_subtests_shared, t};
 use orbit_server::redaction::QueryResult;
@@ -2915,16 +2915,16 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     );
 
     assert!(
-        query.base.sql.contains("_orbit_neighbor_id"),
-        "must include _orbit_neighbor_id"
+        query.base.sql.contains("_orbit_neighbor_node"),
+        "must include _orbit_neighbor_node"
     );
     assert!(
-        query.base.sql.contains("_orbit_neighbor_type"),
-        "must include _orbit_neighbor_type"
+        query.base.sql.contains("_orbit_neighbor_kind"),
+        "must include _orbit_neighbor_kind"
     );
     assert!(
-        query.base.sql.contains("_orbit_relationship_type"),
-        "must include _orbit_relationship_type"
+        query.base.sql.contains("_orbit_relationship_kind"),
+        "must include _orbit_relationship_kind"
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
@@ -3239,6 +3239,8 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
         );
     }
 
+    resolve_owners(ctx, &query, &mut result).await;
+
     let mut mock_service = MockRedactionService::new();
     // File and Definition both have resource_type "project", ability "read_code".
     // Authorizing only the Project ID (not the File/Definition IDs) proves auth
@@ -3275,6 +3277,8 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
         HashSet::from([5000, 5001]),
         "before deny, both Definition neighbors should be present"
     );
+
+    resolve_owners(ctx, &query, &mut result).await;
 
     let mut mock_service = MockRedactionService::new();
     mock_service.deny("project", &[1000]);
@@ -3335,7 +3339,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 ///
 /// Path: File 3000 → (DEFINES) → Definition 5000.
 /// Both authorize via Project 1000, but Project is not a node in the path.
-/// PathFinding has no static _orbit_* nodes (enforce.rs line 107), so all nodes
+/// PathFinding has no static _orbit_* nodes in the result contract, so all nodes
 /// are dynamic (from _orbit_path array) with their own entity IDs. find_owner_id
 /// can only find the owner if it's actually in the path. Since File and
 /// Definition store their own IDs (3000, 5000), not project_id, the owner
@@ -3418,6 +3422,8 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
         "should have 3 total neighbors across both files"
     );
 
+    resolve_owners(ctx, &query, &mut result).await;
+
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("project", &[1000]);
     mock_service.deny("project", &[1001]);
@@ -3469,19 +3475,25 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     .unwrap();
 
     assert!(
-        query.base.sql.contains("e0_type"),
-        "SQL must contain e0_type. SQL: {}",
+        query.base.sql.contains("_orbit_e0_kind"),
+        "SQL must contain _orbit_e0_kind. SQL: {}",
         query.base.sql
     );
-    assert!(query.base.sql.contains("e0_src"), "SQL must contain e0_src");
     assert!(
-        query.base.sql.contains("e0_src_type"),
-        "SQL must contain e0_src_type"
+        query.base.sql.contains("_orbit_e0_src"),
+        "SQL must contain _orbit_e0_src"
     );
-    assert!(query.base.sql.contains("e0_dst"), "SQL must contain e0_dst");
     assert!(
-        query.base.sql.contains("e0_dst_type"),
-        "SQL must contain e0_dst_type"
+        query.base.sql.contains("_orbit_e0_src_kind"),
+        "SQL must contain _orbit_e0_src_kind"
+    );
+    assert!(
+        query.base.sql.contains("_orbit_e0_dst"),
+        "SQL must contain _orbit_e0_dst"
+    );
+    assert!(
+        query.base.sql.contains("_orbit_e0_dst_kind"),
+        "SQL must contain _orbit_e0_dst_kind"
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
@@ -3496,29 +3508,29 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
         let group_id = row.get_id(&g).expect("group id should be present");
 
         assert_eq!(
-            row.get("e0_type")
+            row.get("_orbit_e0_kind")
                 .and_then(|v| v.as_string().map(|s| s.as_str())),
             Some("MEMBER_OF"),
             "edge type should be MEMBER_OF"
         );
         assert_eq!(
-            row.get("e0_src").and_then(|v| v.as_int64().copied()),
+            row.get("_orbit_e0_src").and_then(|v| v.as_int64().copied()),
             Some(user_id),
             "edge source should match user id"
         );
         assert_eq!(
-            row.get("e0_src_type")
+            row.get("_orbit_e0_src_kind")
                 .and_then(|v| v.as_string().map(|s| s.as_str())),
             Some("User"),
             "edge source type should be User"
         );
         assert_eq!(
-            row.get("e0_dst").and_then(|v| v.as_int64().copied()),
+            row.get("_orbit_e0_dst").and_then(|v| v.as_int64().copied()),
             Some(group_id),
             "edge target should match group id"
         );
         assert_eq!(
-            row.get("e0_dst_type")
+            row.get("_orbit_e0_dst_kind")
                 .and_then(|v| v.as_string().map(|s| s.as_str())),
             Some("Group"),
             "edge target type should be Group"
@@ -3564,21 +3576,21 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     assert_eq!(authorized_row.get_id(&g), Some(100));
     assert_eq!(
         authorized_row
-            .get("e0_type")
+            .get("_orbit_e0_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("MEMBER_OF"),
         "edge type should be preserved after redaction"
     );
     assert_eq!(
         authorized_row
-            .get("e0_src")
+            .get("_orbit_e0_src")
             .and_then(|v| v.as_int64().copied()),
         Some(1),
         "edge source should be user 1"
     );
     assert_eq!(
         authorized_row
-            .get("e0_dst")
+            .get("_orbit_e0_dst")
             .and_then(|v| v.as_int64().copied()),
         Some(100),
         "edge target should be group 100"
@@ -3586,11 +3598,11 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
 
     let authorized_edge_sources: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get("e0_src").and_then(|v| v.as_int64().copied()))
+        .filter_map(|r| r.get("_orbit_e0_src").and_then(|v| v.as_int64().copied()))
         .collect();
     let authorized_edge_targets: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get("e0_dst").and_then(|v| v.as_int64().copied()))
+        .filter_map(|r| r.get("_orbit_e0_dst").and_then(|v| v.as_int64().copied()))
         .collect();
 
     assert_eq!(
@@ -3633,15 +3645,21 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
     .unwrap();
 
     assert!(
-        query.base.sql.contains("e0_type"),
-        "SQL must contain e0_type"
+        query.base.sql.contains("_orbit_e0_kind"),
+        "SQL must contain _orbit_e0_kind"
     );
-    assert!(query.base.sql.contains("e0_src"), "SQL must contain e0_src");
     assert!(
-        query.base.sql.contains("e1_type"),
-        "SQL must contain e1_type"
+        query.base.sql.contains("_orbit_e0_src"),
+        "SQL must contain _orbit_e0_src"
     );
-    assert!(query.base.sql.contains("e1_src"), "SQL must contain e1_src");
+    assert!(
+        query.base.sql.contains("_orbit_e1_kind"),
+        "SQL must contain _orbit_e1_kind"
+    );
+    assert!(
+        query.base.sql.contains("_orbit_e1_src"),
+        "SQL must contain _orbit_e1_src"
+    );
 
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
@@ -3672,58 +3690,58 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
     assert_eq!(row.get_id(&p), Some(1000), "project should be 1000");
 
     assert_eq!(
-        row.get("e0_type")
+        row.get("_orbit_e0_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("MEMBER_OF"),
         "first edge type should be MEMBER_OF"
     );
     assert_eq!(
-        row.get("e0_src").and_then(|v| v.as_int64().copied()),
+        row.get("_orbit_e0_src").and_then(|v| v.as_int64().copied()),
         Some(1),
         "e0 source should be user 1"
     );
     assert_eq!(
-        row.get("e0_src_type")
+        row.get("_orbit_e0_src_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("User"),
         "e0 source type should be User"
     );
     assert_eq!(
-        row.get("e0_dst").and_then(|v| v.as_int64().copied()),
+        row.get("_orbit_e0_dst").and_then(|v| v.as_int64().copied()),
         Some(100),
         "e0 target should be group 100"
     );
     assert_eq!(
-        row.get("e0_dst_type")
+        row.get("_orbit_e0_dst_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("Group"),
         "e0 target type should be Group"
     );
 
     assert_eq!(
-        row.get("e1_type")
+        row.get("_orbit_e1_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("CONTAINS"),
         "second edge type should be CONTAINS"
     );
     assert_eq!(
-        row.get("e1_src").and_then(|v| v.as_int64().copied()),
+        row.get("_orbit_e1_src").and_then(|v| v.as_int64().copied()),
         Some(100),
         "e1 source should be group 100"
     );
     assert_eq!(
-        row.get("e1_src_type")
+        row.get("_orbit_e1_src_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("Group"),
         "e1 source type should be Group"
     );
     assert_eq!(
-        row.get("e1_dst").and_then(|v| v.as_int64().copied()),
+        row.get("_orbit_e1_dst").and_then(|v| v.as_int64().copied()),
         Some(1000),
         "e1 target should be project 1000"
     );
     assert_eq!(
-        row.get("e1_dst_type")
+        row.get("_orbit_e1_dst_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("Project"),
         "e1 target type should be Project"
@@ -3778,7 +3796,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
 
     for row in result.iter() {
         let neighbor_type = row
-            .get("_orbit_neighbor_type")
+            .get("_orbit_neighbor_kind")
             .and_then(|v| v.as_string().map(|s| s.as_str()));
         assert_eq!(
             neighbor_type,
@@ -3804,7 +3822,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     let authorized_neighbor_ids: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|row| {
-            row.get("_orbit_neighbor_id")
+            row.get("_orbit_neighbor_node")
                 .and_then(|v| v.as_int64().copied())
         })
         .collect();
@@ -4026,211 +4044,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         result.len(),
         5,
         "should find all 5 users with IN filter on string enum"
-    );
-}
-
-fn with_after(json: &str, after: &str) -> String {
-    let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
-    v["cursor"]["after"] = serde_json::Value::String(after.to_string());
-    v.to_string()
-}
-
-async fn fetch_page(
-    ctx: &TestContext,
-    json: &str,
-    ontology: &std::sync::Arc<ontology::Ontology>,
-    security_ctx: &query_engine::compiler::SecurityContext,
-) -> (QueryResult, query_engine::shared::PaginationMeta) {
-    let query = compile(
-        json,
-        query_engine::compiler::Frontend::JsonDsl,
-        ontology,
-        security_ctx,
-    )
-    .unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
-    let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
-    (result, meta)
-}
-
-fn page_ids(result: &QueryResult) -> Vec<i64> {
-    let u = result.ctx().get("u").unwrap().clone();
-    result
-        .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
-        .collect()
-}
-
-async fn cursor_pagination_basic(ctx: &TestContext) {
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-        "order_by": "u.id",
-        "cursor": {"page_size": 2}
-    }"#;
-
-    let query = compile(
-        json,
-        query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
-        &security_ctx,
-    )
-    .unwrap();
-    assert!(
-        query.base.sql.contains("LIMIT 3"),
-        "SQL LIMIT should be page_size + 1 probe row: {}",
-        query.base.sql
-    );
-
-    let (result, meta) = fetch_page(ctx, json, &ontology, &security_ctx).await;
-    assert!(meta.has_more);
-    assert_eq!(page_ids(&result), vec![1, 2], "first page");
-    let after = meta
-        .next_cursor
-        .expect("mid-stream page must carry a token");
-
-    let (result, meta) = fetch_page(ctx, &with_after(json, &after), &ontology, &security_ctx).await;
-    assert!(meta.has_more);
-    assert_eq!(
-        page_ids(&result),
-        vec![3, 4],
-        "second page continues past the seek anchor"
-    );
-    let after = meta
-        .next_cursor
-        .expect("mid-stream page must carry a token");
-
-    let (result, meta) = fetch_page(ctx, &with_after(json, &after), &ontology, &security_ctx).await;
-    assert!(!meta.has_more, "last page should not have more");
-    assert_eq!(meta.next_cursor, None, "exhausted stream has no token");
-    assert_eq!(page_ids(&result), vec![5], "last page");
-}
-
-async fn cursor_pagination_with_redaction(ctx: &TestContext) {
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-        "order_by": "u.id",
-        "cursor": {"page_size": 2}
-    }"#;
-
-    let mut mock_service = MockRedactionService::new();
-    mock_service.allow("user", &[1, 3, 5]);
-    mock_service.deny("user", &[2, 4]);
-
-    let query = compile(
-        json,
-        query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
-        &security_ctx,
-    )
-    .unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
-    run_redaction(&mut result, &mock_service);
-    let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
-
-    assert!(meta.has_more);
-    assert_eq!(
-        page_ids(&result),
-        vec![1],
-        "redaction shortens the page (user 2 denied) instead of pulling user 3 forward"
-    );
-    let after = meta
-        .next_cursor
-        .expect("token anchors on last scanned row, even a denied one");
-
-    let query = compile(
-        &with_after(json, &after),
-        query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
-        &security_ctx,
-    )
-    .unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
-    run_redaction(&mut result, &mock_service);
-    let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
-
-    assert_eq!(
-        page_ids(&result),
-        vec![3],
-        "next page continues after user 2, not after the last authorized row"
-    );
-    assert!(meta.has_more);
-}
-
-async fn cursor_pagination_rejects_foreign_token(ctx: &TestContext) {
-    let _ = ctx;
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-        "order_by": "u.id",
-        "cursor": {"page_size": 2}
-    }"#;
-    let other = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 5000}}],
-        "order_by": "u.id",
-        "cursor": {"page_size": 2}
-    }"#;
-
-    let token = query_engine::compiler::passes::cursor::encode(
-        {
-            let v: serde_json::Value = serde_json::from_str(other).unwrap();
-            query_engine::compiler::passes::cursor::canonical_hash(&v)
-        },
-        &[Some("2".into()), Some("2".into())],
-    );
-    let err = compile(
-        &with_after(json, &token),
-        query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
-        &security_ctx,
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string().contains("different query"),
-        "token minted for a different query must be rejected: {err}"
-    );
-}
-
-async fn cursor_pagination_with_filters(ctx: &TestContext) {
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "filters": {"state": "active"}}],
-        "order_by": "u.id",
-        "cursor": {"page_size": 2}
-    }"#;
-
-    let (result, meta) = fetch_page(ctx, json, &ontology, &security_ctx).await;
-    assert!(meta.has_more);
-    assert_eq!(
-        page_ids(&result),
-        vec![1, 2],
-        "first page of filtered results"
-    );
-    let after = meta.next_cursor.unwrap();
-
-    let (result, meta) = fetch_page(ctx, &with_after(json, &after), &ontology, &security_ctx).await;
-    assert!(!meta.has_more);
-    assert_eq!(
-        page_ids(&result),
-        vec![3, 4],
-        "second page of filtered results"
     );
 }
 
@@ -4490,10 +4303,6 @@ async fn redaction_integration() {
         traversal_edge_columns_preserved_through_redaction,
         multi_hop_edge_columns_survive_redaction,
         enum_filter_normalization_int_vs_string_enums,
-        cursor_pagination_basic,
-        cursor_pagination_with_redaction,
-        cursor_pagination_rejects_foreign_token,
-        cursor_pagination_with_filters,
         search_merge_requests_with_redaction,
         redaction_preserves_row_order,
         redaction_preserves_row_order_desc,

@@ -14,9 +14,9 @@ cases:
         planned:
           expect:
             - "(Filter NOT (((mr.state = 'merged') AND (_orbit_edge_0.source_tags HAS ANY ['state:merged'])) AND (_orbit_edge_0.target_tags HAS ANY ['state:closed'])) (_))"
-          reject: [(Scan Table(gl_work_item) ...)]
+          reject: ["(Scan Table(gl_work_item) ...)"]
 
-  - name: NOT over a non-nullable denormalized property reads edge tags instead of the node table
+  - name: NOT over a non-nullable denormalized property reads the node row and its edge tag together
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000],"not":{"definition_type":{"in":["function","method"]}}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
@@ -31,9 +31,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - "(Filter ..., NOT (_orbit_edge_0.source_tags HAS ANY ['definition_type:function', 'definition_type:method']) (_))"
-          reject:
-            - "(Filter NOT (a.definition_type IN ['function', 'method']), ... (_))"
+            - "(Filter ..., NOT ((a.definition_type IN ['function', 'method']) AND (_orbit_edge_0.source_tags HAS ANY ['definition_type:function', 'definition_type:method'])) (_))"
 
   - name: A NOT group over edge columns and non-nullable denormalized properties reads no node table
     query:
@@ -50,7 +48,7 @@ cases:
         planned:
           expect:
             - "(Filter NOT ((_orbit_edge_0.source_id < 50) AND (_orbit_edge_0.source_tags HAS ANY ['state:active'])) (_))"
-          reject: [(Scan Table(gl_user) ...)]
+          reject: ["(Scan Table(gl_user) ...)"]
 
   - name: A NOT group over a nullable denormalized property reads the node table instead of edge tags
     query:
@@ -86,4 +84,4 @@ cases:
       clickhouse:
         planned:
           expect:
-            - "(Filter NOT ((u.state IN ['blocked']) AND (_orbit_edge_0.source_tags HAS ANY ['state:blocked'])) (_))"
+            - "(Filter ..., NOT ((u.state IN ['blocked']) AND (_orbit_edge_0.source_tags HAS ANY ['state:blocked'])) (_))"

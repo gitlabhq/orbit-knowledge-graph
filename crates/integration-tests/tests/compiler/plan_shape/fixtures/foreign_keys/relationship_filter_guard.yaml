@@ -1,4 +1,4 @@
-name: Relationship filters prevent FK substitution
+name: Relationship filters remain on stored edges
 
 query:
   json: |

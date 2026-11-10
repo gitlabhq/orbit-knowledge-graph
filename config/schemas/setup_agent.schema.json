@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "setup_agent.schema.json",
   "title": "Orbit setup assistant spec",
-  "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: detection paths, a managed instruction-file block, marker-owned JSON merges, templated files, string registrations, an MCP server entry, and skill directories. Each file's name field must match its file stem. Applied by crates/orbit-cli/src/commands/setup.",
+  "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: detection paths, the instruction file an earlier release wrote a block into, marker-owned JSON merges, templated files, string registrations, and skill directories. Each file's name field must match its file stem. Applied by crates/orbit-cli/src/commands/setup.",
   "type": "object",
   "required": ["name", "title", "detect", "instruction_file"],
   "additionalProperties": false,
@@ -28,13 +28,17 @@
     },
     "instruction_file": {
       "$ref": "#/definitions/scopedPath",
-      "description": "Instruction file receiving the managed guidance block."
+      "description": "Instruction file an earlier release wrote the managed guidance block into. Setup and uninstall remove that block; the agent loads the instructions itself."
     },
     "json_merges": {
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/definitions/jsonMerge" },
       "description": "Marker-owned merges into JSON arrays in the assistant's config, e.g. PreToolUse hooks."
+    },
+    "feature_dir": {
+      "$ref": "#/definitions/scopedPath",
+      "description": "Directory that holds one orbit-<feature> extension for each feature that is on for the channel (packages/agent-plugins-nightly/features.yaml)."
     },
     "template_files": {
       "type": "array",
@@ -48,24 +52,36 @@
       "items": { "$ref": "#/definitions/registration" },
       "description": "Strings appended to a JSON array in the assistant's config, e.g. a plugin list."
     },
-    "mcp": {
+    "retired": {
       "type": "object",
-      "required": ["file", "format", "coding_agent"],
       "additionalProperties": false,
+      "description": "Files and registrations an earlier release installed and this one no longer does. Install and uninstall remove them: a file only while its setup checksum shows it is unedited, and a registration by its value.",
       "properties": {
-        "file": { "$ref": "#/definitions/scopedPath" },
-        "format": {
-          "type": "string",
-          "enum": ["claude", "codex", "opencode"],
-          "description": "Serializer for the MCP entry: `claude` = mcpServers JSON, `codex` = [mcp_servers.<name>] TOML, `opencode` = mcp JSON with an array command."
+        "template_files": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/retiredFile" }
         },
-        "coding_agent": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9._-]{1,64}$",
-          "description": "Value of the `AI_AGENT` env var in the MCP entry, so telemetry knows which agent called the server. Use the ids that `orbit` already reports, such as `claude-code`."
+        "registrations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/registration" }
+        },
+        "mcp": {
+          "type": "object",
+          "required": ["file", "format"],
+          "additionalProperties": false,
+          "properties": {
+            "file": { "$ref": "#/definitions/scopedPath" },
+            "format": {
+              "type": "string",
+              "enum": ["claude", "codex", "opencode"],
+              "description": "Layout of the MCP config: `claude` = mcpServers JSON, `codex` = [mcp_servers.<name>] TOML, `opencode` = mcp JSON."
+            }
+          },
+          "description": "Config file where an earlier release registered the `orbit` MCP server. Setup and uninstall remove that entry."
         }
-      },
-      "description": "Config file that receives the shared `mcp_server` entry from setup.yaml."
+      }
     },
     "skills": {
       "type": "object",
@@ -104,9 +120,39 @@
         }
       },
       "description": "Where the embedded skill is installed on disk."
+    },
+    "plugin": {
+      "$ref": "#/definitions/plugin",
+      "description": "The plugin from packages/agent-plugins, written as a local marketplace, registered in the assistant's settings, and enabled. Installed by default; `--skip agent-plugins` opts out."
     }
   },
   "definitions": {
+    "plugin": {
+      "type": "object",
+      "required": ["dir", "settings", "marketplace", "name", "min_version", "version_command"],
+      "additionalProperties": false,
+      "properties": {
+        "dir": { "$ref": "#/definitions/scopedPath", "description": "Where the marketplace folder is written." },
+        "settings": { "$ref": "#/definitions/scopedPath", "description": "Settings file that receives the extraKnownMarketplaces and enabledPlugins entries." },
+        "marketplace": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Marketplace name setup writes to marketplace.json." },
+        "name": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Plugin name, as the marketplace lists it." },
+        "min_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Oldest assistant version that loads the plugin. Setup skips the plugin on an older or unreadable version."
+        },
+        "version_command": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Command whose output starts with the assistant's version, such as `claude --version`."
+        },
+        "features": {
+          "type": "boolean",
+          "description": "Add the Claude Code files and hooks of the features enabled for the channel (packages/agent-plugins-nightly/features.yaml) to the plugin."
+        }
+      }
+    },
     "scopedPath": {
       "type": "object",
       "required": ["project", "global"],
@@ -120,8 +166,8 @@
         },
         "global": {
           "type": "string",
-          "pattern": "^~/",
-          "description": "Home-anchored user-config path, used by the default global scope."
+          "pattern": "^(~/|\\$\\{[A-Z_][A-Z0-9_]*:-~[^}]*\\}/)",
+          "description": "Home-anchored user-config path, used by the default global scope. Either ~/path, or ${VAR:-~/default}/path where a non-empty absolute VAR replaces the default prefix."
         }
       }
     },
@@ -141,6 +187,15 @@
           "type": "array",
           "minItems": 1,
           "description": "Entries orbit owns at path. `{{orbit}}` in any nested string resolves to the launcher command."
+        },
+        "review_note": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Shown when setup writes or changes the file, for an assistant that runs a new hook only after the person enables or reviews it. Give the text for project scope, user scope, or both.",
+          "properties": {
+            "project": { "type": "string", "minLength": 1 },
+            "global": { "type": "string", "minLength": 1 }
+          }
         }
       }
     },
@@ -149,12 +204,23 @@
       "required": ["path", "template"],
       "additionalProperties": false,
       "properties": {
+        "ui": { "type": "boolean", "description": "Installed with the agent-plugins component instead of hooks." },
+        "feature": { "type": "string", "minLength": 1, "description": "Installed only while this feature in packages/agent-plugins-nightly/features.yaml is on for the channel (ORBIT_NIGHTLY=1 is nightly); a setup for the other channel removes it while it is unedited." },
         "path": { "$ref": "#/definitions/scopedPath" },
         "template": {
           "type": "string",
           "minLength": 1,
-          "description": "Template location under config/setup/, e.g. opencode_plugin.js."
+          "description": "Template location under config/setup/ (or packages/agent-plugins-nightly/ when `feature` is set), e.g. opencode_plugin.js."
         }
+      }
+    },
+    "retiredFile": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "ui": { "type": "boolean", "description": "Removed with the agent-plugins component instead of hooks." },
+        "path": { "$ref": "#/definitions/scopedPath" }
       }
     },
     "registration": {
@@ -162,6 +228,7 @@
       "required": ["file", "path", "value"],
       "additionalProperties": false,
       "properties": {
+        "ui": { "type": "boolean", "description": "Installed with the agent-plugins component instead of hooks." },
         "file": { "$ref": "#/definitions/scopedPath" },
         "path": { "$ref": "#/definitions/jsonPath" },
         "value": {

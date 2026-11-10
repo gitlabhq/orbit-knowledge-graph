@@ -1,0 +1,26 @@
+{
+  "name": "@orbit/site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader runner",
+    "build": "vite build --configLoader runner",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test build"
+  },
+  "dependencies": {
+    "@gitlab-org/orbit-markdown": "catalog:",
+    "@gitlab-org/orbit-site": "catalog:",
+    "@tanstack/react-router": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "vite": "catalog:",
+    "yaml": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "typescript": "catalog:"
+  }
+}

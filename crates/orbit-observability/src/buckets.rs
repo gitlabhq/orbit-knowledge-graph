@@ -8,10 +8,11 @@
 /// query pipelines. Tail extends past 10 s to keep p99 measurable under load.
 pub const LATENCY: &[f64] = &[0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0];
 
-/// End-to-end query latency buckets (100 ms to 60 s), with a finer tail
-/// between 10 s and 30 s.
+/// Query latency buckets (10 ms to 60 s). A superset of the previous layout, so
+/// mixed old and new pods still sum per `le` during a rollout.
 pub const QUERY_LATENCY: &[f64] = &[
-    0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 60.0,
+    0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.35, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0,
+    5.0, 7.5, 10.0, 15.0, 20.0, 25.0, 30.0, 60.0,
 ];
 
 /// Coarse pipeline buckets (100 ms to 10 min). For operations that routinely
@@ -27,6 +28,11 @@ pub const LATENCY_FAST_FINE: &[f64] = &[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5
 /// Tighter latency buckets for Gitaly, content resolution, and other
 /// sub-second RPC paths.
 pub const LATENCY_FAST: &[f64] = &[0.1, 0.25, 0.5, 1.0, 2.5, 5.0];
+
+/// Data freshness buckets (1 min to 16 h).
+pub const FRESHNESS: &[f64] = &[
+    60.0, 300.0, 900.0, 1800.0, 3600.0, 7200.0, 14400.0, 28800.0, 57600.0,
+];
 
 /// Batch-size distribution from single-row through moderate bulk operations.
 pub const BATCH_SIZE: &[f64] = &[1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 500.0, 1000.0];

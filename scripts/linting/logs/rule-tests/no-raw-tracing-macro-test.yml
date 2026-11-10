@@ -1,0 +1,32 @@
+id: no-raw-tracing-macro
+valid:
+  - 'orbit_log_fields::info!("done");'
+  - 'use orbit_log_fields::{info, warn};'
+  - 'use tracing::{Instrument, field::Empty};'
+  - 'use tracing::field::debug;'
+  - 'tracing::Span::current();'
+  - |
+    #[cfg(test)]
+    mod tests {
+        use tracing::info;
+        fn t() { tracing::info!("test"); }
+    }
+  - 'use tracing::Instrument as _;'
+  - 'use orbit_log_fields::{info, warn};'
+invalid:
+  - 'tracing::info!("done");'
+  - 'tracing::info_span!("work");'
+  - 'use tracing::{Instrument, info, warn};'
+  - 'use tracing::debug;'
+  - 'use orbit_log_fields::info as oinfo;'
+  - 'use tracing::info as t;'
+  - 'use tracing as t;'
+  - 'use tracing::{warn as w};'
+  - 'use orbit_log_fields::{info as i};'
+  - 'use tracing::*;'
+  - 'extern crate tracing as tr;'
+  - 'use tracing::{self as t};'
+  - 'orbit_log_fields::__tracing::info!("done");'
+  - 'use orbit_log_fields::__tracing as tr;'
+  - 'use orbit_log_fields::__tracing;'
+  - '__tracing::info!("done");'

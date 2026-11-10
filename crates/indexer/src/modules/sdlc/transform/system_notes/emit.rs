@@ -3,7 +3,7 @@
 //! `BatchWriter` plumbing carries these rows through to ClickHouse without
 //! a new code path.
 
-use tracing::warn;
+use orbit_log_fields::warn;
 
 use super::parse::{Action, RefKind, Reference};
 use super::resolve::ResolvedTarget;
@@ -123,8 +123,8 @@ where
                 // See "no panics in the indexer data path" in AGENTS.md.
                 let Some(kind) = lifecycle_edge_kind(row.action) else {
                     warn!(
-                        action = ?row.action,
-                        noteable_id = row.noteable_id,
+                        safe(KIND) = row.action.as_str(),
+                        safe(NOTEABLE_ID) = row.noteable_id,
                         "system_notes: unexpected action in lifecycle arm, skipping row"
                     );
                     continue;

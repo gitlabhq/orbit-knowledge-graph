@@ -43,6 +43,7 @@ fn output(
         raw_query_strings: vec![],
         compiled: Arc::new(CompiledQueryContext {
             query_type: input.query_type,
+            ast: compiler::ast::Node::Query(Box::default()),
             base: ParameterizedQuery {
                 sql: String::new(),
                 params: HashMap::new(),
@@ -52,7 +53,6 @@ fn output(
             },
             hydration: HydrationPlan::None,
             input,
-            pagination: Default::default(),
             has_virtual_columns: false,
         }),
         query_result,
@@ -117,11 +117,10 @@ fn empty_results_keep_the_header_and_report_more_pages() {
     let page = PaginationMeta {
         has_more: true,
         truncated: true,
-        next_cursor: Some("abc".into()),
     };
     assert_eq!(
         render(&cells(&["n"]), &[], Some(&page)),
-        "+---+\n| n |\n+---+\n+---+\n\n0 rows, more available\nnext_cursor: \"abc\"\n"
+        "+---+\n| n |\n+---+\n+---+\n\n0 rows, more available\n"
     );
     assert!(render(&cells(&["n"]), &[cells(&["1"])], None).ends_with("\n1 row\n"));
 }
@@ -152,7 +151,6 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
     let page = PaginationMeta {
         has_more: true,
         truncated: true,
-        next_cursor: Some("abc".into()),
     };
     let output = output(
         json!({"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}, {"id": "g", "entity": "Group"}]}),
@@ -175,8 +173,7 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
          | (:User {id: 1, username: \"root\"}) | (:Group {id: 22}) |\n\
          +-------------------------------------------------------+\n\
          \n\
-         2 rows, more available\n\
-         next_cursor: \"abc\"\n"
+         2 rows, more available\n"
     );
 }
 
@@ -192,21 +189,21 @@ fn returned_relationships_add_columns_in_return_order() {
             column("_orbit_u_type", strings(&["User", "User"])),
             column("_orbit_mr_id", ints(&[7, 8])),
             column("_orbit_mr_type", strings(&["MergeRequest", "MergeRequest"])),
-            column("e0_type", strings(&["APPROVED", "AUTHORED"])),
+            column("_orbit_e0_kind", strings(&["APPROVED", "AUTHORED"])),
         ],
         None,
     );
     output.result_context.add_edge(EdgeMeta {
-        column_prefix: "e0_".into(),
+        column_prefix: "_orbit_e0_".into(),
         path_column: None,
         rel_types: vec!["AUTHORED".into(), "APPROVED".into()],
         from_alias: String::new(),
         to_alias: String::new(),
-        type_column: "e0_type".into(),
-        src_column: "e0_src".into(),
-        src_type_column: "e0_src_type".into(),
-        dst_column: "e0_dst".into(),
-        dst_type_column: "e0_dst_type".into(),
+        type_column: "_orbit_e0_kind".into(),
+        src_column: "_orbit_e0_src".into(),
+        src_type_column: "_orbit_e0_src_kind".into(),
+        dst_column: "_orbit_e0_dst".into(),
+        dst_type_column: "_orbit_e0_dst_kind".into(),
         relationship: 0,
     });
     let relationship_return = &mut Arc::get_mut(&mut output.compiled)

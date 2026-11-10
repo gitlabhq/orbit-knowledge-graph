@@ -1,0 +1,190 @@
+instructions:
+  - name: Rust Security
+    fileFilters:
+      - "**/*.rs"
+    instructions: |
+      Review for security issues only. Read surrounding code for context.
+      1. Flag unsafe code without clear justification
+      2. Check for unvalidated external input
+      3. Ensure no hardcoded secrets or credentials
+      4. Flag unwrap/expect on untrusted data (panic vectors)
+      5. Check for integer overflow/underflow in arithmetic
+      6. Check deserialized data is validated before use
+      7. Verify organization_id and traversal_id filters in query generation
+      8. Check for SQL injection via string interpolation in query builders
+      9. Ensure JWT tokens are validated before trusting claims
+      10. Check for any over-permissive permissions in access control logic
+      11. Check for any potential DOS vectors
+      12. Check for any overt security issues in the MR.
+      Only comment if a clear security issue exists. Skip if unrelated.
+
+  - name: Rust Performance
+    fileFilters:
+      - "**/*.rs"
+    instructions: |
+      Review for performance issues only. Read surrounding code for context.
+      1. Flag unnecessary allocations (prefer &str over String, &[] over Vec when possible)
+      2. Check for inefficient iteration patterns (collect then iterate vs chaining)
+      3. Identify missing use of iterators or zero-copy approaches
+      4. Flag excessive cloning where borrowing suffices
+      Only comment on significant performance concerns. Do not over-comment.
+
+  - name: Logging Security Agent
+    fileFilters:
+      - "**/*.rs"
+    instructions: |
+      Review for logging security. Flag any sensitive or red data being logged.
+      Read surrounding code for context before commenting.
+
+      ## Red data (never log these)
+      Based on LabKit mask patterns:
+      1. Authentication tokens - fields ending in "token" (access_token, refresh_token)
+      2. Passwords - fields containing "password"
+      3. Secrets - fields containing "secret"
+      4. API/encryption keys - fields ending in "key"
+      5. Cryptographic signatures - fields containing "signature"
+      6. Authorization headers, Bearer tokens
+      7. Certificates, encrypted_key fields
+      8. Webhook/hook URLs and payloads
+      9. Integration URLs (elasticsearch_url, sentry_dsn, import_url)
+      10. JWT tokens - no claims or full tokens
+      11. OTP/MFA codes (otp_attempt, verification codes)
+      12. CI/CD variables (often contain secrets)
+      13. Credentials in URLs (user:password@host)
+
+      ## PII and user content
+      14. Request/response bodies with user data
+      15. User content fields: body, description, note, text, title, message
+      16. Health data (PHI), government IDs
+      17. Full email addresses (mask to u***@domain.com)
+      18. Credit card numbers, SSNs, financial data
+
+      ## Required patterns
+      19. Use mask::URL() when logging URLs with query parameters
+      20. Skip grpc.request.content and grpc.response.content
+      21. Log IDs (user_id, correlation_id) instead of full objects
+      22. Log only allowlisted fields from request/response objects
+      23. Filter sensitive headers before logging (IsSensitiveHeader patterns)
+      24. Use [FILTERED] or [REDACTED] for masked values
+
+      ## Log injection
+      25. Encode log data to prevent injection (CWE-117)
+      26. Sanitize user-controlled data before logging
+      27. No string interpolation of untrusted input in log statements
+
+      ## Safe to log
+      - correlation_id, request_id, trace_id
+      - user_id (numeric), username
+      - HTTP method, status code, path (with masked query params)
+      - Duration, latency metrics
+      - Remote IP, hostname
+      - Error types and codes (no sensitive stack trace context)
+
+      Only comment on clear issues. Give specific fixes.
+
+  - name: SOX Billing Boundary — orbit-server imports
+    fileFilters:
+      - "crates/orbit-server/**/*.rs"
+      - "!crates/orbit-server/src/billing_adapter.rs"
+    instructions: |
+      The SOX billing scope (ADR 020 — docs/pages/engineering/adr/020_billing_sox_scope.md)
+      requires that claims mapped into billing input structs flow through
+      a single conversion point: crates/orbit-server/src/billing_adapter.rs. Any
+      new billing touch point added anywhere else in orbit-server expands the
+      SOX-audited surface and must be reviewed by someone with SOX domain
+      knowledge.
+
+      Raise a CRITICAL comment if the diff in any file matched by these filters:
+
+      1. Introduces a `use orbit_billing` or `orbit_billing::` reference in a file
+         that did not previously import orbit-billing. A new importer expands the
+         SOX-audited surface and should be reviewed by someone on the
+         SOX-billing CODEOWNERS group.
+      2. Adds a `pub use orbit_billing::...` re-export, or otherwise leaks
+         orbit-billing types into the public API of orbit-server. Re-exports widen
+         the SOX scope silently — anything importing orbit-server then gains
+         access.
+      3. Maps claims into `BillingInputs` or `QuotaCheckInputs` outside
+         billing_adapter.rs, rather than using the adapter's conversions.
+         Configuration, delivery credentials, and observer callbacks are
+         separate inputs and do not pass through this conversion seam.
+         New hook points for those inputs still require SOX review and
+         CODEOWNERS coverage.
+
+      Explain why: the MR may be expanding the SOX-audited surface. Recommend
+      either moving the change into billing_adapter.rs or getting an explicit
+      review from anyone on the team with SOX domain knowledge.
+
+  - name: SOX Billing Boundary — direct event emission
+    fileFilters:
+      - "crates/**/*.rs"
+    instructions: |
+      Billing events are emitted only through the BillingTracker / BillingObserver
+      abstractions defined in orbit-billing, which wrap labkit-events'
+      `BillingEvent` and `Tracker::track_billing_event`. Nothing else in the
+      codebase should be constructing billing events or calling the billing
+      emission API directly. New emission paths outside that contract expand
+      the SOX-audited surface.
+
+      Raise a CRITICAL comment if the diff:
+
+      1. References `labkit_events::BillingEvent` or calls
+         `Tracker::track_billing_event` from any file outside `crates/orbit-billing/`.
+      2. Adds a new type, trait, or function whose name or doc-comment suggests
+         its purpose is to emit billing or usage telemetry.
+
+      Recommend the author route emission through BillingTracker / BillingObserver,
+      or get an explicit review from someone on the team with SOX domain
+      knowledge.
+
+  - name: Project conventions
+    fileFilters:
+      - "**/*.rs"
+    instructions: |
+      Review against the "Engineering conventions" in CONTRIBUTING.md. Clippy
+      and the comment lints already cover lint-level style and narration
+      comments, so skip those. Comment only on clear violations such as:
+      1. Comments that reference an MR or issue instead of explaining a
+         non-obvious why
+      2. New infrastructure that duplicates an existing helper
+      3. Graph-shape facts (entity names, properties, edges) hardcoded in Rust
+         instead of read from the ontology
+      4. Tests, code comments, or a crate AGENTS.md left stale by the change
+      For stale pages under docs/, suggest a follow-up docs MR. Never ask for
+      docs/ edits in a code MR; the docs-in-code-mr-check CI job forbids them.
+
+  - name: Code-graph crate guidance
+    fileFilters:
+      - "crates/code-graph/**/*.rs"
+      - "crates/integration-tests-codegraph/**/*"
+    instructions: |
+      Review against crates/code-graph/AGENTS.md. Flag:
+      1. Language-specific branches in shared code (linker, pipeline,
+         analyzer) outside src/v2/langs/{generic,custom}/. Prefer a generic
+         hook the pipeline already exposes, or an existing edge type
+      2. Duplicated construction of shared types (such as CanonicalDefinition
+         in src/v2/types/) or DSL helpers in src/v2/dsl/
+      3. A new language without a code-indexing-benchmark.yaml entry
+      4. Test sources written as files instead of inline in the
+         integration-tests-codegraph YAML suites (use a shared fixture_tree
+         when several suites need the same files)
+
+  - name: Indexer crate guidance
+    fileFilters:
+      - "crates/indexer/**/*.rs"
+    instructions: |
+      Review against crates/indexer/AGENTS.md. Flag:
+      1. Reuse-first, a default and not a hard rule, so flag as a suggestion:
+         a new SDLC pipeline or handler that hand-rolls paging and
+         checkpoints instead of Pipeline::run_plan or EntityHandler,
+         hand-rolled Arrow code instead of orbit_arrow helpers, hand-written
+         edge specs instead of ontology-derived edge_specs, hand-rolled
+         siphon column handling, or custom retry loops instead of the shared
+         retry harness in engine/retry.rs
+      2. Graph-table writes that do not use
+         prefixed_table_name(table, SCHEMA_VERSION). Datalake reads are
+         unversioned; do not flag them
+      3. DDL run from handler or indexer-mode code paths. DDL belongs only in
+         dispatcher-mode code (schema::migration and the migration-completion
+         GC); do not flag those
+      4. New edge or action routing without an end-to-end YAML scenario

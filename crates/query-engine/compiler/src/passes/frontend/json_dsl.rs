@@ -3,27 +3,26 @@ mod schema_contract;
 
 use crate::error::Result;
 use crate::input::Input;
-use crate::passes::{cursor, validate};
+use crate::passes::validate;
 use query_data_model::OrbitQueryModel;
 
-pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<(Input, u64)> {
+pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<Input> {
     let value: serde_json::Value = serde_json::from_str(json)?;
-    validate::collect_schema_errors(validate::base_validator(), &value)?;
+    validate::collect_schema_errors(validate::base_validator(), validate::base_schema(), &value)?;
     let schema = derive_json_schema(model)?;
     let validator = jsonschema::validator_for(&schema).map_err(|error| {
         crate::error::QueryError::Validation(format!("invalid derived schema: {error}"))
     })?;
-    validate::collect_schema_errors(&validator, &value).map_err(|error| match error {
+    validate::collect_schema_errors(&validator, &schema, &value).map_err(|error| match error {
         crate::error::QueryError::Validation(message) => {
             crate::error::QueryError::AllowlistRejected(message)
         }
         other => other,
     })?;
-    let query_hash = cursor::canonical_hash(&value);
     let mut input: Input = serde_json::from_value(value)?;
     input.lift_negated_filters()?;
     input.promote_id_filters()?;
-    Ok((input, query_hash))
+    Ok(input)
 }
 
 fn derive_json_schema(model: &impl OrbitQueryModel) -> Result<serde_json::Value> {
@@ -46,22 +45,17 @@ fn derive_json_schema(model: &impl OrbitQueryModel) -> Result<serde_json::Value>
                 .iter()
                 .map(|name| (*name).to_string())
                 .collect();
-            let mut hidden = Vec::new();
             for id in &entity.properties {
                 let property = model.graph().property(*id);
-                if filterable_only
-                    && !model.property_is_filterable(&entity.name, &property.name)
-                    && property.name != ontology::TRAVERSAL_PATH_COLUMN
+                if model.property_is_hidden(*id)
+                    || filterable_only
+                        && !model.property_is_filterable(&entity.name, &property.name)
                 {
                     continue;
                 }
-                if model.property_is_hidden(*id) {
-                    hidden.push(property.name.clone());
-                } else {
-                    listed.push(property.name.clone());
-                }
+                listed.push(property.name.clone());
             }
-            serde_json::json!({"anyOf": [{"enum": listed}, {"enum": hidden}]})
+            serde_json::json!({"enum": listed})
         };
         serde_json::json!({
             "if": { "properties": { "entity": { "const": entity.name } } },
@@ -89,7 +83,7 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn accepts_declared_columns_and_only_filterable_fields() {
+    fn accepts_only_visible_columns_and_filterable_fields() {
         let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
         let model = query_data_model::ClickHouseDataModel::derive(ontology.clone()).unwrap();
         for entity in model.graph().entities() {
@@ -106,17 +100,15 @@ mod tests {
                     .iter()
                     .find(|field| field.name == property);
                 let reserved = ontology::constants::NODE_RESERVED_COLUMNS.contains(&property);
+                let visible = declared.filter(|field| !field.hidden);
                 for (selector, expected) in [
                     (
                         serde_json::json!({"columns": [property]}),
-                        reserved || declared.is_some(),
+                        reserved || visible.is_some(),
                     ),
                     (
                         serde_json::json!({"filters": {property: "value"}}),
-                        reserved
-                            || declared.is_some_and(|field| {
-                                field.filterable || field.name == ontology::TRAVERSAL_PATH_COLUMN
-                            }),
+                        reserved || visible.is_some_and(|field| field.filterable),
                     ),
                 ] {
                     let mut node =

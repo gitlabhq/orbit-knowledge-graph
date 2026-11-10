@@ -1,0 +1,12 @@
+description: OFFSET is accepted as a synonym for SKIP
+
+query:
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id OFFSET 2 LIMIT 2
+
+expect:
+  node_count: 2
+  nodes:
+    User:
+      order: [3, 4]
+  has_more: true

@@ -259,9 +259,72 @@ pub fn export(
     owns_file: &dyn Fn(&str) -> bool,
     run: &Sentinel,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
+    export_trees(
+        trees,
+        edges,
+        lang,
+        plan,
+        envelope,
+        include_directories,
+        owns_file,
+        None,
+        run,
+    )
+}
+
+/// The directories that hold `paths`, and the edges between them.
+pub fn export_directories(
+    paths: &[&str],
+    export_config: &ExportConfig,
+    ontology: &ontology::Ontology,
+    envelope: &Envelope,
+) -> Result<Vec<(String, RecordBatch)>, Error> {
+    let lang = Lang::new();
+    let plan = ExportPlan::from_config(export_config, ontology, &lang)?;
+    let trees: Vec<Tree> = paths
+        .iter()
+        .map(|path| crate::tree::Tree::unparsed(&lang, path, 0, "").into())
+        .collect();
+    export_trees(
+        &trees,
+        &[],
+        &lang,
+        &plan,
+        envelope,
+        true,
+        &|_| false,
+        Some(&FxHashSet::default()),
+        &Sentinel::disabled(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn export_trees(
+    trees: &[Tree],
+    edges: &[crate::tree::Edge],
+    lang: &Lang,
+    plan: &ExportPlan,
+    envelope: &Envelope,
+    include_directories: bool,
+    owns_file: &dyn Fn(&str) -> bool,
+    only: Option<&FxHashSet<u32>>,
+    run: &Sentinel,
+) -> Result<Vec<(String, RecordBatch)>, Error> {
     envelope.check(plan)?;
     run.check()?;
     let forest = Forest::new(trees, lang);
+    let needed: Option<FxHashSet<u32>> = only.map(|only| {
+        let endpoints = edges
+            .iter()
+            .filter(|e| only.contains(&e.from_tree) || only.contains(&e.to_tree))
+            .flat_map(|e| [e.from_tree, e.to_tree]);
+        only.iter()
+            .copied()
+            .chain(endpoints)
+            .chain([PROJECT])
+            .collect()
+    });
+    let wanted = |tree: u32| needed.as_ref().is_none_or(|needed| needed.contains(&tree));
     let mut ids = FxHashMap::default();
     let mut tables = Vec::new();
     for (index, entity) in plan.entities.iter().enumerate() {
@@ -274,16 +337,17 @@ pub fn export(
             lang,
             envelope,
             &mut ids,
-            &|tree| match entity.name.as_str() {
+            &wanted,
+            &|index, tree| match entity.name.as_str() {
                 "Directory" => include_directories,
-                "File" => owns_file(&tree.label),
-                _ => true,
+                "File" => owns_file(&tree.label) && only.is_none_or(|only| only.contains(&index)),
+                _ => only.is_none_or(|only| only.contains(&index)),
             },
             run,
         )?;
     }
     run.check()?;
-    for batch in write_edges(plan, edges, &forest, &ids, envelope)? {
+    for batch in write_edges(plan, edges, &forest, &ids, envelope, only)? {
         tables.push((plan.edge_table.clone(), batch));
     }
     Ok(tables)
@@ -299,12 +363,13 @@ fn write_entity(
     lang: &Lang,
     envelope: &Envelope,
     ids: &mut FxHashMap<(u32, u32), (i64, usize, bool)>,
-    emit: &dyn Fn(&Tree) -> bool,
+    wanted: &dyn Fn(u32) -> bool,
+    emit: &dyn Fn(u32, &Tree) -> bool,
     run: &Sentinel,
 ) -> Result<(), Error> {
     let mut builder = BatchBuilder::new(&entity.specs, 0)?;
     let b = &mut builder;
-    for (ti, tree) in forest.all() {
+    for (ti, tree) in forest.all().filter(|(ti, _)| wanted(*ti)) {
         run.check()?;
         let root = tree.root();
         let nodes = std::iter::once(root)
@@ -344,7 +409,7 @@ fn write_entity(
                     .collect();
                 let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
                 let id = envelope.id(plan, &entity.id_seed, &parts);
-                let emitted = emit(tree);
+                let emitted = emit(ti, tree);
                 ids.insert((ti, expanded.index()), (id, index, emitted));
                 if !emitted {
                     continue;
@@ -385,6 +450,7 @@ fn write_edges(
     forest: &Forest,
     ids: &FxHashMap<(u32, u32), (i64, usize, bool)>,
     envelope: &Envelope,
+    only: Option<&FxHashSet<u32>>,
 ) -> Result<Vec<RecordBatch>, Error> {
     let entity_name = |index: usize| plan.entities[index].name.as_str();
     let mut rows: Vec<EdgeRow> = Vec::new();
@@ -437,6 +503,9 @@ fn write_edges(
     let mut seen_cross_file = FxHashSet::default();
 
     for e in edges {
+        if only.is_some_and(|only| !only.contains(&e.from_tree) && !only.contains(&e.to_tree)) {
+            continue;
+        }
         let Some(&(from, from_entity, _)) = ids.get(&(e.from_tree, e.from_node)) else {
             continue;
         };

@@ -1,6 +1,7 @@
 description: Hydration returns latest properties for deduped node
 
 config:
+  unmerged_seed: true
   extra_seed:
     gl_user:
       - { id: 9600, username: hydrate_old, name: Old Hydrated, state: active, user_type: human, _version: "2024-01-01 00:00:00", _deleted: false }

@@ -2,3 +2,4 @@
 tests/*/corpus
 tests/*/crashes
 tests/*/artifacts
+tests/*/fuzz.log

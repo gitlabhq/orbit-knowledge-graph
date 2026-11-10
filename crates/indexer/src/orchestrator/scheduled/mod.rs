@@ -14,7 +14,7 @@ pub use code_stale_sweep::CodeStaleSweep;
 pub use global::GlobalDispatcher;
 pub use metrics::ScheduledTaskMetrics;
 pub use migration_completion::MigrationCompletionChecker;
-pub use namespace::NamespaceDispatcher;
+pub use namespace::{NamespaceDispatcher, NamespaceFreshness};
 pub use namespace_deletion::NamespaceDeletionScheduler;
 pub use stale_edge_reconciliation::StaleEdgeReconciliation;
 pub use table_cleanup::TableCleanup;
@@ -23,9 +23,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
+use orbit_log_fields::{debug, info, info_span, warn};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::Instrument;
 
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
@@ -93,17 +94,23 @@ pub async fn run_loop(
     shutdown: CancellationToken,
 ) -> Result<(), SchedulerError> {
     let mut handles = JoinSet::new();
+    let metrics = ScheduledTaskMetrics::new();
 
     for task in tasks {
         let lock = lock_service.clone();
         let token = shutdown.clone();
-        handles.spawn(run_task_loop(task, lock, token));
+        let span = info_span!("scheduled_task", safe(TASK) = task.name());
+        handles.spawn(run_task_loop(task, lock, metrics.clone(), token).instrument(span));
     }
 
     let mut panicked = 0usize;
     while let Some(result) = handles.join_next().await {
         if let Err(error) = result {
-            warn!(%error, "task loop panicked");
+            warn!(
+                safe(ERROR_TYPE) = crate::engine::join_error_type(&error),
+                expanded(ERROR_MESSAGE) = %error,
+                "task loop panicked"
+            );
             panicked += 1;
         }
     }
@@ -118,10 +125,11 @@ pub async fn run_loop(
 async fn run_task_loop(
     task: Box<dyn ScheduledTask>,
     lock_service: Arc<dyn LockService>,
+    metrics: ScheduledTaskMetrics,
     shutdown: CancellationToken,
 ) {
     let task_name = task.name().to_owned();
-    info!(task = task_name, "task loop started");
+    info!(safe(TASK) = task_name.as_str(), "task loop started");
 
     loop {
         let delay = task.schedule().next_delay(Utc::now());
@@ -136,26 +144,51 @@ async fn run_task_loop(
         match lock_service.try_acquire(&cadence_key, ttl).await {
             Ok(true) => {}
             Ok(false) => {
-                info!(task = task_name, "skipping, within interval");
+                info!(safe(TASK) = task_name.as_str(), "skipping, within interval");
                 continue;
             }
             Err(error) => {
-                warn!(task = task_name, %error, "cadence lock check failed");
+                warn!(
+                    safe(TASK) = task_name.as_str(),
+                    safe(ERROR_TYPE) = <&str>::from(&error),
+                    expanded(ERROR_MESSAGE) = %error,
+                    "cadence lock check failed"
+                );
                 continue;
             }
         }
 
-        match task.run().await {
-            Ok(()) => {
-                debug!(task = task_name, "task completed");
+        let run_timeout = task.schedule().run_timeout();
+        let outcome = match run_timeout {
+            Some(limit) => tokio::time::timeout(limit, task.run()).await,
+            None => Ok(task.run().await),
+        };
+        match outcome {
+            Ok(Ok(())) => {
+                debug!(safe(TASK) = task_name.as_str(), "task completed");
             }
-            Err(error) => {
-                warn!(task = task_name, %error, "task failed");
+            Ok(Err(error)) => {
+                warn!(
+                    safe(TASK) = task_name.as_str(),
+                    safe(ERROR_TYPE) = "task_failed",
+                    expanded(ERROR_MESSAGE) = %error,
+                    "task failed"
+                );
+            }
+            Err(_) => {
+                let limit_secs = run_timeout.unwrap_or_default().as_secs_f64();
+                metrics.record_run(&task_name, "timed_out", limit_secs);
+                warn!(
+                    safe(TASK) = task_name.as_str(),
+                    safe(ERROR_TYPE) = "task_timed_out",
+                    safe(TIMEOUT_S) = limit_secs,
+                    "task run timed out and was abandoned"
+                );
             }
         }
     }
 
-    info!(task = task_name, "task loop stopped");
+    info!(safe(TASK) = task_name.as_str(), "task loop stopped");
 }
 
 /// Trigger A: the cron-driven scheduler. Wraps [`run_loop`] over a fixed set of
@@ -204,6 +237,15 @@ mod tests {
     /// Yearly cron: delay is always months, safe for "should not fire" assertions.
     const YEARLY: &str = "0 0 0 1 1 *";
 
+    const RUN_TIMEOUT_SECS: u64 = 10;
+
+    fn schedule(cron: &str) -> ScheduleConfiguration {
+        ScheduleConfiguration {
+            cron: CronSchedule::try_from(cron.to_owned()).unwrap(),
+            run_timeout_secs: RUN_TIMEOUT_SECS,
+        }
+    }
+
     struct StubTask {
         name: &'static str,
         config: ScheduleConfiguration,
@@ -214,9 +256,7 @@ mod tests {
         fn new(name: &'static str, cron: &str) -> Self {
             Self {
                 name,
-                config: ScheduleConfiguration {
-                    cron: CronSchedule::try_from(cron.to_owned()).unwrap(),
-                },
+                config: schedule(cron),
                 run_count: AtomicUsize::new(0),
             }
         }
@@ -238,6 +278,45 @@ mod tests {
 
         async fn run(&self) -> Result<(), TaskError> {
             self.run_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    struct HangingTask {
+        config: ScheduleConfiguration,
+        run_count: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ScheduledTask for Arc<HangingTask> {
+        fn name(&self) -> &str {
+            "hanging"
+        }
+
+        fn schedule(&self) -> &ScheduleConfiguration {
+            &self.config
+        }
+
+        async fn run(&self) -> Result<(), TaskError> {
+            self.run_count.fetch_add(1, Ordering::SeqCst);
+            std::future::pending().await
+        }
+    }
+
+    struct LoggingTask(ScheduleConfiguration);
+
+    #[async_trait]
+    impl ScheduledTask for LoggingTask {
+        fn name(&self) -> &str {
+            "logging"
+        }
+
+        fn schedule(&self) -> &ScheduleConfiguration {
+            &self.0
+        }
+
+        async fn run(&self) -> Result<(), TaskError> {
+            warn!("line inside the task");
             Ok(())
         }
     }
@@ -298,6 +377,32 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn lines_inside_a_task_carry_the_task_name() {
+        let (logs, _capture) = crate::testkit::logs::capture_logs();
+        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(LoggingTask(schedule(EVERY_5S)))];
+        let shutdown = CancellationToken::new();
+
+        let handle = tokio::spawn(run_loop(
+            tasks,
+            Arc::new(AlwaysGrantLockService),
+            shutdown.clone(),
+        ));
+        settle().await;
+        tokio::time::advance(Duration::from_secs(6)).await;
+        settle().await;
+        shutdown.cancel();
+        let _ = handle.await;
+
+        let line = logs
+            .text()
+            .lines()
+            .find(|line| line.contains("line inside the task"))
+            .map(str::to_owned)
+            .unwrap_or_default();
+        assert!(line.contains("task=\"logging\""), "{}", logs.text());
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn run_loop_dispatches_tasks_on_schedule() {
         let lock_service = Arc::new(AlwaysGrantLockService);
         let task = Arc::new(StubTask::new("periodic", EVERY_5S));
@@ -352,5 +457,28 @@ mod tests {
         assert_eq!(slow.run_count(), 0, "yearly task should not have fired");
 
         shutdown.cancel();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hanging_run_is_abandoned_and_the_task_runs_again() {
+        let task = Arc::new(HangingTask {
+            config: schedule(EVERY_5S),
+            run_count: AtomicUsize::new(0),
+        });
+        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(Arc::clone(&task))];
+        let shutdown = CancellationToken::new();
+        tokio::spawn(run_loop(
+            tasks,
+            Arc::new(AlwaysGrantLockService),
+            shutdown.clone(),
+        ));
+
+        for _ in 0..(RUN_TIMEOUT_SECS + 12) {
+            tokio::time::advance(Duration::from_secs(1)).await;
+            settle().await;
+        }
+        shutdown.cancel();
+
+        assert_eq!(task.run_count.load(Ordering::SeqCst), 2);
     }
 }

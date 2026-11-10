@@ -103,7 +103,7 @@ if [[ -n "$CH_POD" ]]; then
   ch_query() {
     # Pipe SQL via stdin so we don't need to escape quotes in the query
     # string. Password lives in the pod's CLICKHOUSE_PASSWORD env var.
-    printf '%s\n' "$1" | $KC exec -i -n "$NS_CH" "$CH_POD" -- \
+    printf '%s\n' "$1" | $KC exec -i -n "$NS_CH" "${2:-$CH_POD}" -- \
       sh -c 'clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD"' 2>&1
   }
 
@@ -145,6 +145,36 @@ if [[ -n "$CH_POD" ]]; then
     safe=$(echo "$tbl" | tr '.' '-')
     ch_query "SELECT * FROM $tbl FINAL ORDER BY ALL LIMIT 1000 FORMAT Vertical" \
       > "$DIAG_DIR/clickhouse-${safe}.txt"
+  done
+
+  # Per replica: shows a watermark read that ran before a commit it should see.
+  for pod in $($KC get pods -n "$NS_CH" -l app=clickhouse -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+    ch_query "SYSTEM FLUSH LOGS" "$pod" > /dev/null
+
+    ch_query "SELECT event_time_microseconds, event_type, table, part_name, rows, duration_ms, error
+              FROM system.part_log
+              WHERE database = 'datalake' AND event_type IN ('NewPart', 'DownloadPart')
+              ORDER BY event_time_microseconds FORMAT TSVWithNames" "$pod" \
+      > "$DIAG_DIR/clickhouse-${pod}-part-log.tsv"
+
+    ch_query "SELECT query_start_time_microseconds, event_time_microseconds, type, query_kind,
+                     user, tables, written_rows, exception, query_id
+              FROM system.query_log
+              WHERE type != 'QueryStart' AND query_kind IN ('Insert', 'AsyncInsertFlush')
+                AND has(databases, 'datalake')
+              ORDER BY query_start_time_microseconds FORMAT TSVWithNames" "$pod" \
+      > "$DIAG_DIR/clickhouse-${pod}-datalake-inserts.tsv"
+
+    ch_query "SELECT query_start_time_microseconds, event_time_microseconds, type, user, tables,
+                     extract(query, '_siphon_watermark > ''([^'']+)''') AS window_floor,
+                     extract(query, '_siphon_watermark <= ''([^'']+)''') AS window_target,
+                     extract(query, 'startsWith[^,]*traversal_path, ''([^'']*)''') AS traversal_path,
+                     result_rows, query_id
+              FROM system.query_log
+              WHERE type != 'QueryStart' AND query_kind = 'Select' AND has(databases, 'datalake')
+                AND query LIKE '%_siphon_watermark >%'
+              ORDER BY query_start_time_microseconds FORMAT TSVWithNames" "$pod" \
+      > "$DIAG_DIR/clickhouse-${pod}-watermark-reads.tsv"
   done
 fi
 

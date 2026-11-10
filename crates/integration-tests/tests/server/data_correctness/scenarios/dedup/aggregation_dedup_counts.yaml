@@ -1,6 +1,7 @@
 description: Aggregation counts each entity once after dedup
 
 config:
+  unmerged_seed: true
   extra_seed:
     gl_merge_request:
       - { id: 9100, iid: 99, title: "Dedup MR", state: merged, traversal_path: "1/100/1000/", project_id: 1000, _version: "2024-01-01 00:00:00", _deleted: false }

@@ -6,6 +6,7 @@ table: gl_sec_edge
 variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Vulnerability, id: id }
+    scope: prune_to_target
     description: "Merge request fixes vulnerability."
 
 indexer:

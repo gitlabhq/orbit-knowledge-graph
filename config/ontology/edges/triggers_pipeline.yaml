@@ -6,6 +6,7 @@ table: gl_ci_edge
 variants:
   - from_node: { type: Job, id: id }
     to_node: { type: Pipeline, id: id }
+    scope: prune_to_target
     description: "Bridge job (type='Ci::Bridge') triggered the downstream pipeline."
 
 indexer:

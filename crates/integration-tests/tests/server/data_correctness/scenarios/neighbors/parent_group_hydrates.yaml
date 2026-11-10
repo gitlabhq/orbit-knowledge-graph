@@ -1,0 +1,31 @@
+description: A project's parent group hydrates although the CONTAINS edge path is the project's, not the group's
+
+config:
+  security:
+    paths: ["1/"]
+  redaction:
+    allow:
+      group: [701]
+      project: [7010]
+  extra_seed:
+    gl_group:
+      - { id: 701, name: g701, full_path: g701, visibility_level: public, traversal_path: "1/701/" }
+    gl_project:
+      - { id: 7010, name: p701, full_path: "g701/p701", visibility_level: public, traversal_path: "1/701/7010/" }
+    gl_edge:
+      - { traversal_path: "1/701/7010/", source_id: 701, source_kind: Group, relationship_kind: CONTAINS, target_id: 7010, target_kind: Project }
+
+query:
+  gql: |
+    MATCH (p:Project {id: 7010})<-[:CONTAINS]-(n) RETURN p, properties(n)
+
+expect:
+  node_count: 2
+  nodes:
+    Project: { ids: [7010] }
+    Group:
+      ids: [701]
+      rows:
+        - { id: 701, name: g701 }
+  edge_exists:
+    CONTAINS: [[701, 7010]]

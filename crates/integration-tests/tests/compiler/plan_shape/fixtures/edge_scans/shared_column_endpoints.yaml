@@ -1,0 +1,141 @@
+cases:
+  - name: A project filter on one endpoint pins every endpoint scan of a code edge
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"i","entity":"ImportedSymbol","filters":{"project_id":42}},{"id":"d","entity":"Definition"}],"relationships":[{"type":"IMPORTS","from":"i","to":"d"}]}
+      gql: |
+        MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) WHERE i.project_id = 42 RETURN i, d
+    logical:
+      expect: ["(Filter i.project_id = 42 (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter _orbit_edge_0.project_id = 42, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))
+            - (Filter i.project_id = 42 (Deduplicate Final (Scan Table(gl_imported_symbol) AS i)))
+            - (Filter d.project_id = 42 (Deduplicate Final (Scan Table(gl_definition) AS d)))
+        emitted:
+          expect:
+            - (Filter i.project_id = 42 (Deduplicate Final (Scan Table(gl_imported_symbol) AS i)))
+            - (Filter d.project_id = 42 (Deduplicate Final (Scan Table(gl_definition) AS d)))
+
+  - name: A filter on the target endpoint pins the source endpoint scan
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition"},{"id":"b","entity":"Definition","filters":{"project_id":42}}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+      gql: |
+        MATCH (a:Definition)-[:CALLS]->(b:Definition) WHERE b.project_id = 42 RETURN a, b
+    logical:
+      expect: ["(Filter b.project_id = 42 (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter _orbit_edge_0.project_id = 42, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))
+            - (Filter a.project_id = 42 (Deduplicate Final (Scan Table(gl_definition) AS a)))
+            - (Filter b.project_id = 42 (Deduplicate Final (Scan Table(gl_definition) AS b)))
+
+  - name: A selective shared-column filter stays on the edge scan
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"project_id":42,"branch":"main"}},{"id":"d","entity":"Definition"}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}]}
+      gql: |
+        MATCH (f:File)-[:DEFINES]->(d:Definition) WHERE f.project_id = 42 AND f.branch = 'main' RETURN f, d
+    logical:
+      expect: ["(Filter f.project_id = 42, f.branch = 'main' (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter _orbit_edge_0.branch = 'main', _orbit_edge_0.project_id = 42, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))
+            - (Filter f.project_id = 42 (Deduplicate Final (Scan Table(gl_file) AS f)))
+            - (Filter d.project_id = 42 (Deduplicate Final (Scan Table(gl_definition) AS d)))
+          reject:
+            - (Filter f.branch = 'main', ... (_))
+            - (Filter d.branch = 'main', ... (_))
+
+  - name: An endpoint takes only the shared columns its own table stores
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"name":"x"}},{"id":"b","entity":"Branch","filters":{"project_id":42}}],"relationships":[{"type":"CONTAINS","from":"p","to":"b"}]}
+      gql: |
+        MATCH (p:Project)-[:CONTAINS]->(b:Branch) WHERE p.name = 'x' AND b.project_id = 42 RETURN p, b
+    logical:
+      expect: ["(Filter b.project_id = 42 (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter _orbit_edge_0.project_id = 42, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))
+            - (Filter b.project_id = 42, ... (Scan Table(gl_branch) AS b))
+            - (Scan Table(gl_project) AS p)
+          reject:
+            - (Filter p.project_id = 42, ... (_))
+
+  - name: A same-alias column comparison stays on its own node scan
+    missing_frontends:
+      json: The JSON frontend does not expose property-to-property comparisons.
+    query:
+      gql: |
+        MATCH (i:ImportedSymbol {id: 7})-[:IMPORTS]->(d:Definition) WHERE i.project_id = i.start_line RETURN i, d
+    logical:
+      expect: ["(Filter i.project_id = i.start_line, ... (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter i.project_id = i.start_line, ... (_))
+          reject:
+            - (Filter _orbit_edge_0.project_id = i.start_line, ... (_))
+            - (Filter d.project_id = i.start_line, ... (_))
+
+  - name: An edge table without the column does not pin either endpoint
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"project_id":1}},{"id":"wi","entity":"WorkItem"}],"relationships":[{"type":"CLOSES","from":"mr","to":"wi"}]}
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 1})-[:CLOSES]->(wi:WorkItem) RETURN mr, wi
+    logical:
+      expect: ["(Filter mr.project_id = 1 (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Scan Table(gl_edge) AS _orbit_edge_0)
+            - (Filter mr.project_id = 1, ... (_))
+          reject:
+            - (Filter _orbit_edge_0.project_id = 1, ... (_))
+            - (Filter wi.project_id = 1, ... (_))
+
+  - name: Variable-length hops do not pin the far endpoint
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"project_id":42}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","hops":[1,2]}]}
+      gql: |
+        MATCH (a:Definition)-[:CALLS*1..2]->(b:Definition) WHERE a.project_id = 42 RETURN a, b
+    logical:
+      expect: ["(Filter a.project_id = 42 (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter a.project_id = 42, ... (_))
+          reject:
+            - (Filter b.project_id = 42, ... (_))
+
+  - name: A two-hop chain pins the shared endpoint but not the far end
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"project_id":42}},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
+      gql: |
+        MATCH (a:Definition {project_id: 42})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) RETURN a, b, c
+    logical:
+      expect: ["(Filter a.project_id = 42 (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter a.project_id = 42 (Deduplicate Final (Scan Table(gl_definition) AS a)))
+            - (Filter b.project_id = 42 (Deduplicate Final (Scan Table(gl_definition) AS b)))
+          reject:
+            - (Filter c.project_id = 42, ... (_))

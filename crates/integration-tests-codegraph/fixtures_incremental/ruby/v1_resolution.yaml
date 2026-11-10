@@ -1,5 +1,5 @@
 name: "Ruby v1 parity — full resolution suite"
-fixture_dir: "fixtures/code/ruby-references"
+fixture_tree: ruby_v1
 
 tests:
   # All tests skip: v2 Ruby pipeline produces defs but no Calls edges yet.

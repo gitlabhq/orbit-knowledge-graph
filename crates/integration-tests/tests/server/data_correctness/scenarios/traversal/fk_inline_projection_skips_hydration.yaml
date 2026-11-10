@@ -1,4 +1,4 @@
-description: FK traversal returns note and author properties from the base query alone, no hydration plan
+description: FK traversal returns holder properties from the base query and hydrates the referenced endpoint
 
 query:
   json: |

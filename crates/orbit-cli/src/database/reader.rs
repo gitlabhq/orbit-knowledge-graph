@@ -2,8 +2,25 @@ use super::{lock_database, read_lock_database, schema};
 use crate::commands::setup::spec;
 use crate::workspace;
 use anyhow::{Context, Result};
-use duckdb_client::{DuckDbClient, sql_lit, string_column};
+use duckdb_client::{DuckDbClient, OpenMode, sql_lit, string_column};
+use orbit_utils::strings::quote_ident;
 use std::path::{Path, PathBuf};
+
+#[derive(Debug)]
+pub struct IncompleteRevision(PathBuf);
+
+impl std::fmt::Display for IncompleteRevision {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "revision at {} is not fully indexed; run `{} workspace index` again",
+            self.0.display(),
+            spec::launcher()
+        )
+    }
+}
+
+impl std::error::Error for IncompleteRevision {}
 
 pub struct GraphReader {
     client: DuckDbClient,
@@ -19,6 +36,10 @@ impl std::ops::Deref for GraphReader {
 }
 
 impl GraphReader {
+    pub fn has_revisions(&self) -> bool {
+        !self._locks.is_empty()
+    }
+
     pub fn open(db: Option<PathBuf>) -> Result<Self> {
         let Some(db_path) = db else {
             return Self::open_workspace();
@@ -26,20 +47,17 @@ impl GraphReader {
         let Some(lock) = read_lock_database(&db_path)? else {
             anyhow::bail!(
                 "no local graph found at {}. Index a repository first \
-             (`{} index` inside it, or the `index` MCP tool).",
+             (`{} workspace index` inside it, or the `index` MCP tool).",
                 db_path.display(),
                 spec::launcher()
             );
         };
-        let client = DuckDbClient::open_read_only(&db_path)
+        let client = DuckDbClient::open(OpenMode::ReadOnly(&db_path))
             .with_context(|| format!("failed to open {}", db_path.display()))?;
-        if schema::stored_meta(&client, "revision")?.is_some() {
-            anyhow::ensure!(
-                schema::stored_meta(&client, "indexed_commit")?.is_some(),
-                "revision at {} is not fully indexed; run `{} index` again",
-                db_path.display(),
-                spec::launcher()
-            );
+        if schema::stored_meta(&client, "revision")?.is_some()
+            && schema::stored_meta(&client, "indexed_commit")?.is_none()
+        {
+            return Err(IncompleteRevision(db_path).into());
         }
         Ok(Self {
             client,
@@ -48,15 +66,16 @@ impl GraphReader {
     }
 
     fn open_workspace() -> Result<Self> {
-        let manifest = workspace::Workspace::open_default()?.manifest_path();
+        let data_root = workspace::Workspace::default_root()?;
+        let manifest = workspace::Workspace::open(data_root.clone())?.manifest_path();
         if !manifest.exists() {
             anyhow::bail!(
-                "no local graph found. Run `{} index` first.",
+                "no local graph found. Run `{} workspace index` first.",
                 spec::launcher()
             );
         }
         let mut reader = Self {
-            client: DuckDbClient::open_in_memory()?,
+            client: DuckDbClient::open(OpenMode::InMemoryAttaching(&data_root))?,
             _locks: Vec::new(),
         };
         let client = &reader.client;
@@ -127,8 +146,4 @@ impl GraphReader {
         )?;
         Ok(reader)
     }
-}
-
-fn quote_ident(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
 }

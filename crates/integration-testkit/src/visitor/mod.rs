@@ -572,6 +572,17 @@ impl ResponseView {
         );
     }
 
+    pub fn assert_row_value_null(&self, row_index: usize, key: &str) {
+        let row = self
+            .rows()
+            .get(row_index)
+            .unwrap_or_else(|| panic!("row {row_index} not found in {:?}", self.rows()));
+        assert!(
+            row.get(key).is_none_or(Value::is_null),
+            "row {row_index} column '{key}': expected null, got {row:?}"
+        );
+    }
+
     pub fn assert_row_value_str(&self, row_index: usize, key: &str, expected: &str) {
         let row = self
             .rows()

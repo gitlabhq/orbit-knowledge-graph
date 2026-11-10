@@ -1,9 +1,12 @@
 use std::fmt;
-use std::process::Command;
+use std::path::Path;
 
+use serde::Deserialize;
+
+use crate::remote::client::OrbitClient;
 use crate::remote::error::{EXIT_GENERIC, RemoteError};
 
-pub(super) enum Scope {
+pub(crate) enum Scope {
     FullPath(String),
     NamespaceId(i64),
     ProjectId(i64),
@@ -22,8 +25,8 @@ impl Scope {
     }
 
     pub(super) fn read_origin_project(api_host: &str) -> Result<Scope, RemoteError> {
-        let url = read_origin_url().ok_or_else(build_missing_scope_error)?;
-        let (host, full_path) = split_host_and_path(&url).ok_or_else(build_missing_scope_error)?;
+        let (host, full_path) =
+            crate::remote::origin::project(Path::new(".")).ok_or_else(build_missing_scope_error)?;
         if host != api_host {
             return Err(RemoteError::new(
                 EXIT_GENERIC,
@@ -36,13 +39,34 @@ impl Scope {
         Ok(Scope::FullPath(full_path))
     }
 
-    pub(super) fn to_query_param(&self) -> (&'static str, String) {
-        match self {
-            Scope::FullPath(path) => ("full_path", path.clone()),
-            Scope::NamespaceId(id) => ("namespace_id", id.to_string()),
-            Scope::ProjectId(id) => ("project_id", id.to_string()),
-        }
+    pub(super) async fn resolve_full_path(
+        &self,
+        client: &OrbitClient,
+    ) -> Result<String, RemoteError> {
+        let (path, params) = match self {
+            Scope::FullPath(path) => return Ok(path.clone()),
+            Scope::NamespaceId(id) => (
+                format!("/api/v4/groups/{id}"),
+                vec![("with_projects", "false".to_string())],
+            ),
+            Scope::ProjectId(id) => (format!("/api/v4/projects/{id}"), Vec::new()),
+        };
+        let body = client.get_bytes(&path, &params).await?;
+        serde_json::from_slice::<Namespace>(&body)
+            .map(|namespace| namespace.full_path)
+            .map_err(|error| {
+                RemoteError::new(
+                    EXIT_GENERIC,
+                    format!("unexpected response from {path}: {error}"),
+                )
+            })
     }
+}
+
+#[derive(Deserialize)]
+struct Namespace {
+    #[serde(alias = "path_with_namespace")]
+    full_path: String,
 }
 
 impl fmt::Display for Scope {
@@ -53,34 +77,6 @@ impl fmt::Display for Scope {
             Scope::ProjectId(id) => write!(f, "project {id}"),
         }
     }
-}
-
-fn read_origin_url() -> Option<String> {
-    let output = Command::new("git")
-        .args(["remote", "get-url", "origin"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(String::from_utf8(output.stdout).ok()?.trim().to_string())
-}
-
-fn split_host_and_path(url: &str) -> Option<(String, String)> {
-    let (host, path) = split_url_with_host(url).or_else(|| split_scp_remote(url))?;
-    let full_path = path.trim_matches('/').trim_end_matches(".git").to_string();
-    (!full_path.is_empty()).then_some((host, full_path))
-}
-
-fn split_url_with_host(url: &str) -> Option<(String, String)> {
-    let url = reqwest::Url::parse(url).ok()?;
-    Some((url.host_str()?.to_string(), url.path().to_string()))
-}
-
-fn split_scp_remote(url: &str) -> Option<(String, String)> {
-    let (user_and_host, path) = url.split_once(':')?;
-    let host = user_and_host.rsplit('@').next()?;
-    Some((host.to_string(), path.to_string()))
 }
 
 fn build_missing_scope_error() -> RemoteError {

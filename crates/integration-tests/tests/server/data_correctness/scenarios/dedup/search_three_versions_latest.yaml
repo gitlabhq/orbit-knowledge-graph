@@ -1,6 +1,7 @@
 description: Three versions collapse to latest
 
 config:
+  unmerged_seed: true
   extra_seed:
     gl_merge_request:
       - { id: 9800, iid: 800, title: "MR v1", state: opened, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00", _deleted: false }

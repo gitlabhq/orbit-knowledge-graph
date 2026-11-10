@@ -183,6 +183,12 @@ pub struct SchemaProperty {
     /// human-readable description from the ontology
     #[prost(string, tag = "5")]
     pub description: ::prost::alloc::string::String,
+    /// whether clients may text-search the property with CONTAINS, STARTS WITH, or ENDS WITH; false for enum, virtual, admin_only, non-filterable, non-text, and like_allowed: false properties; populated when expanded
+    #[prost(bool, optional, tag = "6")]
+    pub text_searchable: ::core::option::Option<bool>,
+    /// returned in neighbor and path results and when a query selects no columns; false for admin_only properties; populated when expanded
+    #[prost(bool, optional, tag = "7")]
+    pub default_column: ::core::option::Option<bool>,
 }
 /// A named relationship type with its valid source/target combinations.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -246,7 +252,7 @@ pub mod get_query_dsl_response {
 /// Request for the embedded skill catalog.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListSkillsRequest {
-    /// Selects the query mode the served skills teach
+    /// Query language of the caller; both modes serve the GQL skills
     #[prost(enumeration = "QueryLanguage", tag = "1")]
     pub language: i32,
 }
@@ -278,7 +284,7 @@ pub struct GetSkillRequest {
     /// true omits files for a cheap cache revalidation
     #[prost(bool, tag = "2")]
     pub metadata_only: bool,
-    /// Selects the query mode the served skill teaches
+    /// Query language of the caller; both modes serve the GQL skill
     #[prost(enumeration = "QueryLanguage", tag = "3")]
     pub language: i32,
 }
@@ -681,14 +687,29 @@ pub struct DomainIndexingStatus {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetItemCountsRequest {
-    /// one group or project path (e.g. "1/2/")
+    /// deprecated: use traversal_paths; one path, read when traversal_paths is empty
+    #[deprecated]
     #[prost(string, tag = "1")]
     pub traversal_path: ::prost::alloc::string::String,
+    /// 1 to 100 group or project paths
+    #[prost(string, repeated, tag = "2")]
+    pub traversal_paths: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetItemCountsResponse {
-    /// only domains with an entity the caller can see
+    /// set for a traversal_path request
     #[prost(message, repeated, tag = "1")]
+    pub domains: ::prost::alloc::vec::Vec<DomainItemCount>,
+    /// set for a traversal_paths request, in request order
+    #[prost(message, repeated, tag = "2")]
+    pub namespaces: ::prost::alloc::vec::Vec<NamespaceItemCounts>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NamespaceItemCounts {
+    #[prost(string, tag = "1")]
+    pub traversal_path: ::prost::alloc::string::String,
+    /// only domains with an entity the caller can see
+    #[prost(message, repeated, tag = "2")]
     pub domains: ::prost::alloc::vec::Vec<DomainItemCount>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]

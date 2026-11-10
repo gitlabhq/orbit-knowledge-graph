@@ -1,3 +1,4 @@
+pub(super) mod agent_plugins;
 mod hooks;
 mod instructions;
 pub(super) mod json;
@@ -14,6 +15,7 @@ use super::plan::Selection;
 use super::spec::{self, Agent};
 use super::{Component, Target};
 
+pub(super) use hooks::{KEPT_FEATURE, KEPT_RETIRED};
 pub(super) use skill::records_full_skill;
 
 pub(super) trait Installer {
@@ -40,19 +42,65 @@ fn file_mentions(path: &Path, marker: &str) -> bool {
     std::fs::read_to_string(path).is_ok_and(|text| text.contains(marker))
 }
 
+/// Whether a file setup installed for the agent already asks the CLI for the instructions, so a
+/// run that skips the component that writes it leaves the agent its instructions.
+pub(super) fn loads_instructions(agent: Agent, target: &Target) -> bool {
+    const CALLS: [&str; 3] = [
+        "hook-guard instructions",
+        "\"hook-guard\", \"instructions\"",
+        "'hook-guard', 'instructions'",
+    ];
+    let mentions = |path: &Path| {
+        std::fs::read_to_string(path).is_ok_and(|text| CALLS.iter().any(|call| text.contains(call)))
+    };
+    let resolved = |file: &spec::ScopedPath| target.resolve(file).ok().map(|(path, _)| path);
+    let merged = agent
+        .json_merges
+        .iter()
+        .filter_map(|merge| resolved(&merge.file))
+        .any(|path| mentions(&path));
+    let templated = agent
+        .all_ui_files(false)
+        .filter_map(|file| resolved(&file.path))
+        .any(|path| mentions(&path));
+    let plugin = agent
+        .plugin
+        .as_ref()
+        .and_then(|plugin| resolved(&plugin.dir))
+        .is_some_and(|dir| any_file_mentions(&dir, &mentions));
+    merged || templated || plugin
+}
+
+fn any_file_mentions(dir: &Path, mentions: &dyn Fn(&Path) -> bool) -> bool {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| {
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => any_file_mentions(&path, mentions),
+                Ok(kind) if kind.is_file() => mentions(&path),
+                _ => false,
+            }
+        })
+}
+
 pub(super) fn installer_for(component: Component) -> &'static dyn Installer {
     match component {
         Component::Instructions => &instructions::Instructions,
         Component::Hooks => &hooks::Hooks,
         Component::Skill => &skill::WITHOUT_FILES,
-        Component::Mcp => &mcp::McpServer,
+        Component::AgentPlugins => &agent_plugins::AgentPlugins,
     }
 }
 
+#[derive(Clone)]
 pub(super) struct Outcome {
     pub(super) group: String,
     pub(super) label: String,
     pub(super) action: String,
+    pub(super) skipped_plugin_agent: Option<String>,
 }
 
 #[derive(Default)]
@@ -71,7 +119,40 @@ impl Report {
             group: self.group.clone(),
             label: label.to_string(),
             action: action.to_string(),
+            skipped_plugin_agent: None,
         });
+    }
+
+    pub(super) fn note_plugin_skipped(
+        &mut self,
+        agent_title: &str,
+        label: &str,
+        action: impl Display,
+    ) {
+        self.outcomes.push(Outcome {
+            group: self.group.clone(),
+            label: label.to_string(),
+            action: action.to_string(),
+            skipped_plugin_agent: Some(agent_title.to_string()),
+        });
+    }
+
+    pub(super) fn only_plugin_skips(&self) -> Report {
+        Report {
+            group: self.group.clone(),
+            outcomes: self
+                .outcomes
+                .iter()
+                .filter(|outcome| outcome.skipped_plugin_agent.is_some())
+                .cloned()
+                .collect(),
+        }
+    }
+
+    pub(super) fn skipped_agent_plugins(&self) -> impl Iterator<Item = &str> {
+        self.outcomes
+            .iter()
+            .filter_map(|outcome| outcome.skipped_plugin_agent.as_deref())
     }
 }
 
@@ -147,12 +228,48 @@ fn write_unless_unchanged(
 
 fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let backup = backup_path(path);
-    if backup.exists() || !path.exists() {
+    let written_this_run = report.outcomes.iter().any(|outcome| outcome.label == label);
+    if written_this_run || !path.exists() {
         return Ok(());
     }
-    std::fs::copy(path, &backup)
-        .with_context(|| format!("failed to back up {}", path.display()))?;
+    match std::fs::symlink_metadata(&backup) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            anyhow::bail!(
+                "{} is a symlink; remove it and run setup again",
+                backup.display()
+            );
+        }
+        Ok(_) => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(e).with_context(|| format!("failed to inspect {}", backup.display()));
+        }
+    }
+    copy_new(path, &backup).with_context(|| format!("failed to back up {}", path.display()))?;
     report.note(label, format!("backup at {label}.orbit-backup"));
+    Ok(())
+}
+
+/// Copies `source` to `destination` only if nothing exists there, without
+/// following a link at `destination`. A partial copy is removed on failure.
+fn copy_new(source: &Path, destination: &Path) -> std::io::Result<()> {
+    let mut input = std::fs::File::open(source)?;
+    let permissions = input.metadata()?.permissions();
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(permissions.mode());
+    }
+    let mut output = options.open(destination)?;
+    let copied =
+        std::io::copy(&mut input, &mut output).and_then(|_| output.set_permissions(permissions));
+    if let Err(e) = copied {
+        drop(output);
+        let _ = std::fs::remove_file(destination);
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -192,4 +309,140 @@ fn backup_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".orbit-backup");
     path.with_file_name(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::ErrorKind;
+
+    #[cfg(unix)]
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_new_refuses_a_dangling_link_without_creating_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        let link = dir.path().join("link");
+        let outside = dir.path().join("outside");
+        std::fs::write(&source, "data").unwrap();
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+        let error = copy_new(&source, &link).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::AlreadyExists);
+        assert!(!outside.exists());
+        assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+    }
+
+    #[test]
+    fn copy_new_keeps_existing_files_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        let destination = dir.path().join("destination");
+        std::fs::write(&source, "new").unwrap();
+        std::fs::write(&destination, "old").unwrap();
+
+        let error = copy_new(&source, &destination).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "old");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_new_keeps_contents_and_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        let destination = dir.path().join("destination");
+        std::fs::write(&source, "data").unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+        copy_new(&source, &destination).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "data");
+        assert_eq!(mode_of(&destination), 0o777);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_new_leaves_no_partial_file_when_the_copy_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let unreadable_source = dir.path().join("source-dir");
+        let destination = dir.path().join("destination");
+        std::fs::create_dir(&unreadable_source).unwrap();
+
+        assert!(copy_new(&unreadable_source, &destination).is_err());
+
+        assert!(destination.symlink_metadata().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_once_refuses_a_symlinked_backup_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("CLAUDE.md");
+        let outside = dir.path().join("outside");
+        std::fs::write(&file, "data").unwrap();
+        std::os::unix::fs::symlink(&outside, backup_path(&file)).unwrap();
+        let mut report = Report::default();
+
+        let error = backup_once(&file, "CLAUDE.md", &mut report).unwrap_err();
+
+        assert!(error.to_string().contains("remove it"), "{error}");
+        assert!(!outside.exists());
+        assert!(report.outcomes.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_once_refuses_a_link_to_an_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("CLAUDE.md");
+        let existing = dir.path().join("existing");
+        std::fs::write(&file, "data").unwrap();
+        std::fs::write(&existing, "keep").unwrap();
+        std::os::unix::fs::symlink(&existing, backup_path(&file)).unwrap();
+
+        assert!(backup_once(&file, "CLAUDE.md", &mut Report::default()).is_err());
+
+        assert_eq!(std::fs::read_to_string(&existing).unwrap(), "keep");
+    }
+
+    #[test]
+    fn backup_once_keeps_an_existing_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("CLAUDE.md");
+        std::fs::write(&file, "new").unwrap();
+        std::fs::write(backup_path(&file), "old").unwrap();
+        let mut report = Report::default();
+
+        backup_once(&file, "CLAUDE.md", &mut report).unwrap();
+
+        assert_eq!(std::fs::read_to_string(backup_path(&file)).unwrap(), "old");
+        assert!(report.outcomes.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_once_creates_a_backup_with_the_source_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("CLAUDE.md");
+        std::fs::write(&file, "data").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let mut report = Report::default();
+
+        backup_once(&file, "CLAUDE.md", &mut report).unwrap();
+
+        let backup = backup_path(&file);
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "data");
+        assert_eq!(mode_of(&backup), 0o777);
+        assert_eq!(report.outcomes.len(), 1);
+    }
 }

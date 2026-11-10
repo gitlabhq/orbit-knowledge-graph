@@ -59,11 +59,11 @@ config:
       - { id: 3500, iid: 1, title: Other Route MR, state: opened, project_id: 3000, author_id: 1, head_pipeline_id: 3101, traversal_path: "2/200/3000/" }
       - { id: 4500, iid: 2, title: Route MR, state: opened, project_id: 3000, traversal_path: "2/200/3000/" }
     gl_merge_request_diff:
-      - { id: 20001, merge_request_id: 2501, project_id: 1000, state: collected, traversal_path: "1/100/1000/" }
-      - { id: 40001, merge_request_id: 4500, project_id: 3000, state: collected, traversal_path: "2/200/3000/" }
+      - { id: 20001, merge_request_id: 2500, project_id: 1000, state: collected, traversal_path: "1/100/1000/" }
+      - { id: 40001, merge_request_id: 3500, project_id: 3000, state: collected, traversal_path: "2/200/3000/" }
     gl_merge_request_diff_file:
-      - { id: 20002, merge_request_id: 2501, merge_request_diff_id: 20001, project_id: 1000, old_path: old.rs, new_path: new.rs, traversal_path: "1/100/1000/" }
-      - { id: 40002, merge_request_id: 4500, merge_request_diff_id: 40001, project_id: 3000, old_path: old.rs, new_path: new.rs, traversal_path: "2/200/3000/" }
+      - { id: 20002, merge_request_id: 2500, merge_request_diff_id: 20001, project_id: 1000, old_path: old.rs, new_path: new.rs, traversal_path: "1/100/1000/" }
+      - { id: 40002, merge_request_id: 3500, merge_request_diff_id: 40001, project_id: 3000, old_path: old.rs, new_path: new.rs, traversal_path: "2/200/3000/" }
     gl_vulnerability_scanner:
       - { id: 2101, external_id: route-scanner, name: Route Scanner, project_id: 1000, traversal_path: "1/100/1000/" }
       - { id: 4101, external_id: other-route-scanner, name: Route Scanner, project_id: 3000, traversal_path: "2/200/3000/" }
@@ -160,7 +160,7 @@ config:
 
 cases:
   - name: IN_PROJECT returns every specialized route
-    description: Incoming IN_PROJECT scopes directly authorizable variants across every physical table
+    description: Incoming IN_PROJECT returns every variant across every physical table, including the ones authorized through their merge request
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
     query:
@@ -169,7 +169,7 @@ cases:
       gql: |
         MATCH (project:Project)<-[:IN_PROJECT]-(neighbor) WHERE project.id IN [1000, 3000] RETURN project, neighbor
     expect:
-      node_count: 14
+      node_count: 16
       nodes:
         Pipeline: { ids: [1101] }
         Stage: { ids: [1201] }
@@ -183,12 +183,16 @@ cases:
         VulnerabilityScanner: { ids: [2101] }
         VulnerabilityOccurrence: { ids: [2201] }
         MergeRequest: { ids: [2500] }
+        MergeRequestDiff: { ids: [20001] }
+        MergeRequestDiffFile: { ids: [20002] }
         Branch: { ids: [2601] }
         Project: { ids: [1000] }
-      total_edge_count: 13
+      total_edge_count: 15
       edge_exists:
         IN_PROJECT:
           - { from: Pipeline, from_id: 1101, to: Project, to_id: 1000 }
+          - { from: MergeRequestDiff, from_id: 20001, to: Project, to_id: 1000 }
+          - { from: MergeRequestDiffFile, from_id: 20002, to: Project, to_id: 1000 }
           - { from: Stage, from_id: 1201, to: Project, to_id: 1000 }
           - { from: Job, from_id: 1301, to: Project, to_id: 1000 }
           - { from: Vulnerability, from_id: 1401, to: Project, to_id: 1000 }
@@ -407,8 +411,8 @@ cases:
           - { from: Package, from_id: 2301, to: Vulnerability, to_id: 1401 }
       referential_integrity: true
 
-  - name: Merge request pipeline branch chain crosses three edge tables
-    description: A four-hop chain composes default, CI, and code edge tables without losing joins
+  - name: Merge request pipeline branch chain joins FK hops to a code edge
+    description: A four-hop chain resolves AUTHORED, HAS_HEAD_PIPELINE, and IN_PROJECT through FK columns and CONTAINS through gl_code_edge without losing joins
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"pipeline","entity":"Pipeline"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipeline"},{"type":"IN_PROJECT","from":"pipeline","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
@@ -434,8 +438,8 @@ cases:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
       referential_integrity: true
 
-  - name: Merge request diff branch chain crosses three edge tables
-    description: A four-hop chain composes default, diff, and code edge tables without losing joins
+  - name: Merge request diff branch chain joins FK hops to a code edge
+    description: A four-hop chain resolves AUTHORED, HAS_DIFF, and IN_PROJECT through FK columns and CONTAINS through gl_code_edge without losing joins
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"diff","entity":"MergeRequestDiff"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_DIFF","from":"mr","to":"diff"},{"type":"IN_PROJECT","from":"diff","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
@@ -461,8 +465,8 @@ cases:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
       referential_integrity: true
 
-  - name: Security scan directory chain crosses security and code tables
-    description: A three-hop chain composes security and code edge tables without losing joins
+  - name: Security scan directory chain joins an FK hop to code edges
+    description: A three-hop chain resolves IN_PROJECT through gl_security_scan.project_id and both CONTAINS hops through gl_code_edge without losing joins
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"scan","entity":"SecurityScan","node_ids":[1701]},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"},{"id":"directory","entity":"Directory"}],"relationships":[{"type":"IN_PROJECT","from":"scan","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"},{"type":"CONTAINS","from":"branch","to":"directory"}]}
@@ -511,7 +515,7 @@ cases:
       referential_integrity: true
 
   - name: Cross-table chain excludes another namespace
-    description: Scope filtering excludes an otherwise valid default-CI-code chain in another organization
+    description: Scope filtering excludes an otherwise valid FK-and-code-edge chain in another organization
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
     query:
@@ -540,7 +544,7 @@ cases:
       referential_integrity: true
 
   - name: Specialized routes exclude another namespace
-    description: Security and code tables preserve namespace scope across their join
+    description: The gl_security_scan FK hop and the gl_code_edge hop preserve namespace scope across their join
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
     query:

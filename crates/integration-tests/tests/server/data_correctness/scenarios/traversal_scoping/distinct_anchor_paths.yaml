@@ -1,9 +1,9 @@
-description: Distinct per-anchor traversal paths still join via cross-namespace CLOSES edge
+description: A CLOSES edge row lives under its merge request's path and still joins a work item in another namespace
 
 config:
   extra_seed:
     gl_edge:
-      - { traversal_path: "1/101/", source_id: 2000, source_kind: MergeRequest, relationship_kind: CLOSES, target_id: 4002, target_kind: WorkItem, source_tags: ["state:opened"], target_tags: ["state:opened", "wi_type:task"] }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: CLOSES, target_id: 4002, target_kind: WorkItem, source_tags: ["state:opened"], target_tags: ["state:opened", "wi_type:task"] }
 
 query:
   json: |

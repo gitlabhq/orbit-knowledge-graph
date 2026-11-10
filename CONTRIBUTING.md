@@ -27,20 +27,20 @@ Core tasks:
 | Apply lint fixes | `mise lint:code:fix` |
 | Validate doc changes | `mise lint:docs` |
 
-For the full local setup (Caproni cluster with GitLab, ClickHouse, NATS, and Siphon), see [Local development](docs/dev/local-development.md).
+For the full local setup (Caproni cluster with GitLab, ClickHouse, NATS, and Siphon), see [Local development](docs/pages/engineering/development/local-development.md).
 
 ## Testing
 
 `mise test:fast` runs the unit tests with no Docker. `mise test:integration` runs the container tests. On macOS, start Docker for them with `colima start gkg --memory 12`.
 
-For all test layers, the CI jobs, and where to add a test, see [Testing](docs/design-documents/testing.md).
+For all test layers, the CI jobs, and where to add a test, see [Testing](docs/pages/engineering/testing/README.md).
 
 ## Linting
 
 ```shell
 mise lint:code        # Clippy with warnings as errors
 mise lint:code:fix    # Apply auto-fixable Clippy suggestions
-mise lint:docs        # markdownlint + Vale + lychee link checks
+mise lint:docs        # markdownlint + rumdl + Vale + lychee link checks
 ```
 
 Run `mise lint:docs` before pushing any documentation changes.
@@ -51,23 +51,27 @@ Run `mise lint:docs` before pushing any documentation changes.
 - Reuse existing infrastructure before adding new infrastructure.
 - Before changing an area, read its design document and the crate-local `AGENTS.md`, if present.
 - Treat the ontology as the single source of truth for graph-shape facts.
-- Read `docs/dev/sox-billing-boundary.md` before changing billing.
+- Read `docs/pages/engineering/development/sox-billing-boundary.md` before changing billing.
 
 ## Documentation conventions
 
-- Design documents describe the current system. Update the owning document under
-  `docs/design-documents/` in the same MR as a behavior change.
+- Do not change any file under `docs/` in an MR that changes code. Change it
+  only when a CI or build check fails without it.
+  The `docs-in-code-mr-check` CI job enforces this rule. When a check needs the
+  change, add the `docs-in-code-mr` label and retry the job.
 - Rewrite or remove stale text instead of preserving history.
 - Keep `README.md` a front page: what GitLab Orbit is, the quickstart, and links.
   Put lists such as languages, entity types, and commands only in the page that
   owns them, and link to that page. Link to repository files by relative path, so
   the `check_docs_markdown` CI job checks each link.
-- When you add, move, or remove an owning guide, update its pointers in the
-  byte-identical `AGENTS.md` and `CLAUDE.md` files.
+- When you add, move, or remove an owning guide, update its pointers in
+  `AGENTS.md`.
+- Claude Code reads `AGENTS.md` from v2.1.277. Do not add a `CLAUDE.md` or
+  `CLAUDE.local.md`: either one stops Claude Code from reading `AGENTS.md`.
 - Use the canonical terms in `CONTEXT.md`. Add a term only when a new domain
   concept could confuse a new contributor.
 - Follow the GitLab documentation principles in `.ai/principles/distilled/` when
-  writing pages under `docs/source/`. A green `mise lint:docs` run does not mean
+  writing pages under `docs/docs-gitlab-com/`. A green `mise lint:docs` run does not mean
   a page follows them.
 
 ## Issue conventions

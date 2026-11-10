@@ -108,10 +108,12 @@ impl QuotaCache {
                         reason,
                         block_reason,
                     } => {
-                        record_cdot_duration(
-                            start.elapsed().as_secs_f64(),
-                            orbit_observability::billing::quota::values::FAIL_CLOSED,
-                        );
+                        if reason != FailureReason::CircuitOpen {
+                            record_cdot_duration(
+                                start.elapsed().as_secs_f64(),
+                                orbit_observability::billing::quota::values::ERROR,
+                            );
+                        }
                         Err(CheckFailed(reason, block_reason))
                     }
                 }

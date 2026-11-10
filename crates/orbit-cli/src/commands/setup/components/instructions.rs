@@ -3,84 +3,58 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::{
-    Installer, Report, backup_once, drop_backup_when_restored, file_mentions,
-    remove_file_and_empty_parents, write_unless_unchanged,
+    Installer, Report, drop_backup_when_restored, file_mentions, mcp, remove_file_and_empty_parents,
 };
 use crate::commands::setup::Target;
-use crate::commands::setup::spec::{self, Agent};
+use crate::commands::setup::spec::Agent;
 
 const BLOCK_BEGIN: &str = "<!-- orbit:setup:begin -->";
 const BLOCK_END: &str = "<!-- orbit:setup:end -->";
 
+/// Each agent loads the Orbit instructions from its plugin or hook, so setup writes no
+/// instruction-file block. Install and uninstall remove the block earlier releases wrote.
 pub(super) struct Instructions;
 
 impl Installer for Instructions {
     fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>> {
-        Ok(vec![target.resolve(&agent.instruction_file)?.1])
+        let mut files: Vec<String> = holding_block(&[agent], target)?
+            .into_iter()
+            .map(|(_, label)| label)
+            .collect();
+        files.extend(mcp::retired_label(agent, target)?);
+        Ok(files)
     }
 
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
-        for (path, label) in instruction_files(agents, target)? {
-            upsert_block_in_file(&path, &label, report)?;
-        }
-        Ok(())
+        self.remove(agents, target, report)
     }
 
     fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
-        for (path, label) in instruction_files(agents, target)? {
+        for (path, label) in holding_block(agents, target)? {
             strip_block_from_file(&path, target, &label, report)?;
         }
-        Ok(())
+        mcp::remove_retired(agents, target, report)
     }
 
     fn is_installed(&self, agent: Agent, target: &Target) -> bool {
-        target
-            .resolve(&agent.instruction_file)
-            .is_ok_and(|(path, _)| file_mentions(&path, BLOCK_BEGIN))
+        holding_block(&[agent], target).is_ok_and(|files| !files.is_empty())
+            || mcp::retired_label(agent, target).is_ok_and(|label| label.is_some())
     }
 }
 
-fn instruction_files(agents: &[Agent], target: &Target) -> Result<Vec<(PathBuf, String)>> {
-    let mut resolved: Vec<(PathBuf, String)> = agents
-        .iter()
-        .map(|agent| target.resolve(&agent.instruction_file))
-        .collect::<Result<_>>()?;
-    resolved.sort_by(|a, b| a.0.cmp(&b.0));
-    resolved.dedup_by(|a, b| a.0 == b.0);
-
+fn holding_block(agents: &[Agent], target: &Target) -> Result<Vec<(PathBuf, String)>> {
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     let mut canonicals: Vec<PathBuf> = Vec::new();
-    for (path, label) in resolved {
+    for agent in agents {
+        let (path, label) = target.resolve(&agent.instruction_file)?;
         let canonical = dunce::canonicalize(&path).unwrap_or_else(|_| path.clone());
-        if canonicals.contains(&canonical) {
+        if canonicals.contains(&canonical) || !file_mentions(&path, BLOCK_BEGIN) {
             continue;
         }
         canonicals.push(canonical);
         files.push((path, label));
     }
     Ok(files)
-}
-
-fn rendered_block() -> String {
-    format!("{BLOCK_BEGIN}\n{}\n{BLOCK_END}", spec::instructions_text())
-}
-
-fn upsert_block_in_file(path: &Path, label: &str, report: &mut Report) -> Result<()> {
-    let block = rendered_block();
-    let (updated, action) = match std::fs::read_to_string(path) {
-        Ok(existing) => match splice_block(&existing, &block) {
-            Some(updated) => (updated, "orbit section updated"),
-            None => {
-                backup_once(path, label, report)?;
-                (append_block(&existing, &block), "orbit section written")
-            }
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            (format!("{block}\n"), "created with orbit section")
-        }
-        Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
-    };
-    write_unless_unchanged(path, label, &updated, action, report)
 }
 
 fn strip_block_from_file(
@@ -97,7 +71,8 @@ fn strip_block_from_file(
     let Some(remaining) = strip_block(&existing) else {
         return Ok(());
     };
-    if remaining.trim().is_empty() {
+    let is_link = std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_symlink());
+    if remaining.trim().is_empty() && !is_link {
         remove_file_and_empty_parents(path, target)?;
         report.note(label, "removed (was orbit-only)");
     } else {
@@ -109,24 +84,15 @@ fn strip_block_from_file(
     Ok(())
 }
 
-fn splice_block(existing: &str, block: &str) -> Option<String> {
-    let (start, end) = block_span(existing)?;
-    let mut updated = String::with_capacity(existing.len() + block.len());
-    updated.push_str(&existing[..start]);
-    updated.push_str(block);
-    updated.push_str(&existing[end..]);
-    Some(updated)
-}
-
-fn append_block(existing: &str, block: &str) -> String {
-    if existing.trim().is_empty() {
-        format!("{block}\n")
-    } else {
-        format!("{}\n\n{block}\n", existing.trim_end())
-    }
-}
-
 fn strip_block(existing: &str) -> Option<String> {
+    let mut text = strip_one_block(existing)?;
+    while let Some(fewer) = strip_one_block(&text) {
+        text = fewer;
+    }
+    Some(text)
+}
+
+fn strip_one_block(existing: &str) -> Option<String> {
     let (start, end) = block_span(existing)?;
     let before = existing[..start].trim_end();
     let after = existing[end..].trim_start();

@@ -63,7 +63,7 @@ pub const DEFAULT_SOURCE_EXTS: &[&str] = &[
 ];
 
 /// Config formats whose definitions are searchable but carry no signature
-/// line for `repo-map` to render.
+/// line to render.
 pub const CONFIG_EXTS: &[&str] = &["yml", "yaml"];
 
 pub fn search_corpus_exts() -> Vec<String> {

@@ -21,20 +21,20 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Project f.path AS f_path (Filter f.id IN [1, 2], ... (Deduplicate Final (Scan Table(gl_file) AS f))))
+        - (Project f.path AS f_path (Filter f._deleted = false (Deduplicate LimitBy ... (Filter f.id IN [1, 2] (_)))))
       reject:
         - (Project f.id AS f_id, ... (_))
     emitted:
       expect:
-        - (Limit 5 (Sort f.id DESC (_)))
+        - (Limit 6 (Sort f.id DESC (_)))
       reject:
         - (Project f.id AS f_id, ... (_))
   duckdb:
     planned:
       expect:
-        - (Project f.path AS f_path (Filter ... (Scan Table(gl_file) AS f)))
+        - (Project f.path AS f_path (Filter ... (Bind f (Filter ... (Deduplicate Final (Scan Table(gl_file) AS f))))))
       reject:
         - (Project f.id AS f_id, ... (_))
     emitted:
       expect:
-        - (Limit 5 (Sort f.id DESC (_)))
+        - (Limit 6 (Sort f.id DESC (_)))

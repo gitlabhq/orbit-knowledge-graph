@@ -1,7 +1,7 @@
 use futures::StreamExt;
+use orbit_log_fields::{error, info, warn};
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
-use tracing::{error, info, warn};
 
 use crate::proto::execute_query_message::Content;
 use crate::proto::execute_query_result::Content::{FormattedText, ResultJson};
@@ -13,8 +13,6 @@ use crate::proto::{
 use orbit_server_config::GrpcConfig;
 use query_engine::compiler::RejectionReason;
 use query_engine::pipeline::{ClickHouseLimit, PipelineError};
-
-use crate::pipeline::metrics::failure_reason;
 
 pub(super) async fn send_query_result(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
@@ -97,7 +95,11 @@ pub async fn send_invalid_request_error(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
     message: String,
 ) {
-    warn!(error = %message, "Rejecting invalid query request");
+    warn!(
+        safe(ERROR_TYPE) = "invalid_request",
+        expanded(ERROR_MESSAGE) = %message,
+        "Rejecting invalid query request"
+    );
     let _ = tx
         .send(Ok(ExecuteQueryMessage {
             content: Some(execute_query_message::Content::Error(ExecuteQueryError {
@@ -115,7 +117,11 @@ pub async fn receive_query_request(
     let first_msg = match stream.next().await {
         Some(Ok(msg)) => msg,
         Some(Err(e)) => {
-            error!(error = %e, "Failed to receive initial message");
+            error!(
+                safe(ERROR_TYPE) = labkit::grpc::grpc_code_name(e.code().into()),
+                expanded(ERROR_MESSAGE) = %e,
+                "Failed to receive initial message"
+            );
             let _ = tx.send(Err(e)).await;
             return None;
         }
@@ -151,14 +157,12 @@ pub async fn send_query_error(
             ..
         }
     );
-    // failure_reason() returns None for Compile (counted on the compiler
-    // metric), so fall back to err.code() ("compile_error") for log readers.
-    let reason = failure_reason(&error).unwrap_or_else(|| error.code());
+    let reason = error.failure_reason().as_str();
     error!(
-        code = error.code(),
-        failure_reason = reason,
-        client_safe,
-        error = %error,
+        safe(ERROR_TYPE) = error.code(),
+        safe(REASON) = reason,
+        safe(CLIENT_SAFE) = client_safe,
+        expanded(ERROR_MESSAGE) = %error,
         "Pipeline error",
     );
     let _ = tx
@@ -178,10 +182,10 @@ pub async fn send_query_error(
 /// exceeded). These are identified by the `Display` prefix that
 /// `QueryError` adds via thiserror.
 ///
-/// All other errors (lowering, enforcement, codegen, ontology, execution,
-/// authorization, etc.) may contain ClickHouse table names, column names,
-/// SQL fragments, or infrastructure details. These are replaced with a
-/// generic message; server-side logs capture the full error.
+/// All other errors (lowering, codegen, ontology, execution, authorization,
+/// etc.) may contain ClickHouse table names, column names, SQL fragments, or
+/// infrastructure details. These are replaced with a generic message;
+/// server-side logs capture the full error.
 fn sanitize_error_message(error: &PipelineError) -> String {
     match error {
         PipelineError::Compile {
@@ -235,11 +239,17 @@ fn classify_execution_error(msg: &str) -> String {
              is not selective enough. Try: add more specific filters, use \
              node_ids for direct ID selection, or scope by project_id."
         }
-        Some(ClickHouseLimit::TypeMismatch) => {
+        Some(ClickHouseLimit::TypeMismatch | ClickHouseLimit::BadQueryParameter) => {
             "Query has a type mismatch in a filter or aggregation. Check \
              that filter values match the column type (e.g. use integers \
              for ID fields, strings for text fields, DateTime format for \
              date columns)."
+        }
+        Some(ClickHouseLimit::TooComplex) => {
+            "Query is too complex to plan. Each variable-length relationship \
+             multiplies the size of the next one. Try: narrow hop ranges \
+             (for example *1..2), give variable-length relationships a \
+             type, or split the query."
         }
         _ => "Query execution failed.",
     }
@@ -250,6 +260,44 @@ fn classify_execution_error(msg: &str) -> String {
 mod tests {
     use super::*;
     use crate::proto::QueryMetadata;
+
+    #[derive(Clone, Default)]
+    struct Buffer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Buffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn query_error_line_names_the_clickhouse_limit() {
+        // A second dispatcher stops tracing-core from caching callsite interest
+        // from a test thread that has no subscriber.
+        let _second = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+        let buffer = Buffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let (tx, _rx) = mpsc::channel(1);
+
+        let error = PipelineError::Execution(
+            "Code: 241. DB::Exception: Memory limit (for query) exceeded".to_owned(),
+        );
+        send_query_error(&tx, error).await;
+
+        let logs = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        assert!(logs.contains("error_type=\"execution_error\""), "{logs}");
+        assert!(logs.contains("reason_code=\"memory_limit\""), "{logs}");
+    }
 
     const CHUNK_BYTES: usize = 64;
     const CHUNKING: ResultChunking = ResultChunking {
@@ -391,6 +439,17 @@ mod tests {
         let msg = "Code: 53. DB::Exception: Cannot convert String to DateTime64";
         assert!(
             classify_execution_error(msg).contains("type mismatch"),
+            "got: {}",
+            classify_execution_error(msg)
+        );
+    }
+
+    #[test]
+    fn classify_too_complex() {
+        let msg =
+            "Code: 36. DB::Exception: Query tree is too big. Maximum: 500000. (BAD_ARGUMENTS)";
+        assert!(
+            classify_execution_error(msg).contains("too complex"),
             "got: {}",
             classify_execution_error(msg)
         );

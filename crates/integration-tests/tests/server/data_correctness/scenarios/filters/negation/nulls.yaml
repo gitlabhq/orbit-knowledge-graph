@@ -136,6 +136,48 @@ cases:
               in: [8, 13, 5]
           absent: [4000, 4002]
 
+  - name: not_lt_epoch_datetime
+    description: NOT over a less-than on a nullable DateTime drops the rows whose stored epoch stands for null
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)
+        WHERE mr.id >= 2000 AND mr.id <= 2005 AND NOT mr.merged_at < '2024-06-01T00:00:00Z'
+        RETURN mr.title ORDER BY mr.id LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequest:
+          order: [2004, 2005]
+          absent: [2000, 2001, 2002, 2003]
+
+  - name: not_gte_epoch_datetime
+    description: NOT over a greater-or-equal on a nullable DateTime keeps the earlier rows and drops the null ones
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)
+        WHERE mr.id >= 2000 AND mr.id <= 2005 AND NOT mr.merged_at >= '2024-06-01T00:00:00Z'
+        RETURN mr.title ORDER BY mr.id LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        MergeRequest:
+          order: [2002]
+          absent: [2000, 2001, 2003, 2004, 2005]
+
+  - name: not_in_epoch_datetime
+    description: NOT IN on a nullable DateTime drops the listed value and the null rows
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)
+        WHERE mr.id >= 2000 AND mr.id <= 2005 AND NOT mr.merged_at IN ['2024-03-15T12:00:00Z']
+        RETURN mr.title ORDER BY mr.id LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequest:
+          order: [2004, 2005]
+          absent: [2000, 2001, 2002, 2003]
+
   - name: not_group_null_checks
     description: NOT over a group of IS NOT NULL checks keeps the rows where either value is NULL
     query:

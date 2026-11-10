@@ -36,10 +36,22 @@ impl ArrowClickHouseClient {
     }
 
     pub async fn explain_plan(&self, sql: &str) -> Result<String, ClickHouseError> {
-        self.fetch_text(&format!(
-            "EXPLAIN PLAN json=1, indexes=1, actions=1, sorting=1 {sql}"
-        ))
-        .await
+        let sql = format!("EXPLAIN PLAN json=1, indexes=1, description=1, actions=0 {sql}");
+        let mut cursor = self
+            .query(&sql)
+            .with_setting("use_query_condition_cache", "0")
+            .with_setting("use_skip_indexes_on_data_read", "0")
+            .inner
+            .fetch_bytes("TabSeparatedRaw")
+            .map_err(ClickHouseError::Query)?;
+        let mut buffer = Vec::new();
+        while let Some(chunk) = cursor.next().await.map_err(ClickHouseError::Query)? {
+            buffer.extend(chunk);
+        }
+        String::from_utf8(buffer).map_err(|error| ClickHouseError::BadResponse {
+            status: 0,
+            body: format!("non-UTF8 response: {error}"),
+        })
     }
 
     pub async fn explain_pipeline(&self, sql: &str) -> Result<String, ClickHouseError> {

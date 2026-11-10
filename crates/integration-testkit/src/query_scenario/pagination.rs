@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use query_engine::compiler::Frontend;
 use query_engine::formatters::{GraphEdge, GraphResponse};
-use serde_json::Value;
 
 use super::format::AllPagesExpect;
 
@@ -25,47 +24,40 @@ fn canonical_json(value: &impl serde::Serialize) -> String {
     value.to_string()
 }
 
-pub(super) fn with_after(frontend: Frontend, base_query: &str, token: &str) -> String {
-    match frontend {
-        Frontend::JsonDsl => {
-            let mut query: Value =
-                serde_json::from_str(base_query).expect("query must be valid JSON");
-            query["cursor"]["after"] = Value::String(token.to_owned());
-            query.to_string()
-        }
-        Frontend::Gql => format!("{} AFTER '{token}'", base_query.trim_end()),
-    }
+/// Splits a paginated GQL statement ending in `SKIP 0 LIMIT n` into the
+/// statement prefix and the page size.
+fn window(frontend: Frontend, base_query: &str) -> (&str, u32) {
+    assert_eq!(frontend, Frontend::Gql, "pages require a GQL query");
+    let message = "paginated GQL must end with SKIP 0 LIMIT N";
+    let mut tokens = base_query.trim_end().rsplitn(5, char::is_whitespace);
+    let size = tokens
+        .next()
+        .and_then(|size| size.parse().ok())
+        .expect(message);
+    assert!(
+        tokens
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case("LIMIT")),
+        "{message}"
+    );
+    assert_eq!(tokens.next(), Some("0"), "{message}");
+    assert!(
+        tokens
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case("SKIP")),
+        "{message}"
+    );
+    (tokens.next().expect(message).trim_end(), size)
 }
 
-pub(super) fn without_cursor(frontend: Frontend, base_query: &str) -> String {
-    match frontend {
-        Frontend::JsonDsl => {
-            let mut query: Value =
-                serde_json::from_str(base_query).expect("query must be valid JSON");
-            query.as_object_mut().unwrap().remove("cursor");
-            query["limit"] = Value::from(1000);
-            query.to_string()
-        }
-        Frontend::Gql => {
-            let query = base_query.trim_end();
-            let (prefix, size) = query
-                .rsplit_once(char::is_whitespace)
-                .expect("paginated GQL must end with PAGE N");
-            assert!(
-                size.parse::<u32>().is_ok(),
-                "paginated GQL must end with PAGE N"
-            );
-            let (query, page) = prefix
-                .trim_end()
-                .rsplit_once(char::is_whitespace)
-                .expect("paginated GQL must end with PAGE N");
-            assert!(
-                page.eq_ignore_ascii_case("PAGE"),
-                "paginated GQL must end with PAGE N"
-            );
-            format!("{} LIMIT 1000", query.trim_end())
-        }
-    }
+pub(super) fn page_query(frontend: Frontend, base_query: &str, index: usize) -> String {
+    let (prefix, size) = window(frontend, base_query);
+    format!("{prefix} SKIP {} LIMIT {size}", index as u32 * size)
+}
+
+pub(super) fn unpaginated(frontend: Frontend, base_query: &str) -> String {
+    let (prefix, _) = window(frontend, base_query);
+    format!("{prefix} LIMIT 1000")
 }
 
 #[derive(Default)]
@@ -208,25 +200,19 @@ impl PageCollection {
     }
 }
 
-pub(super) fn next_page(
+pub(super) fn assert_page_bounds(
     response: &GraphResponse,
     index: usize,
     count: usize,
     label: &str,
-) -> Option<String> {
+) {
     let pagination = response
         .pagination
         .as_ref()
         .expect("pagination should be present");
     assert_eq!(
         pagination.has_more,
-        pagination.next_cursor.is_some(),
-        "{label}: has_more and next_cursor disagree"
-    );
-    assert_eq!(
-        pagination.has_more,
         index + 1 < count,
         "{label}: page sequence must end at exhaustion"
     );
-    pagination.next_cursor.clone()
 }

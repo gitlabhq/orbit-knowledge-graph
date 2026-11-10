@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use futures::FutureExt;
-use pagination::{PageCollection, next_page, with_after, without_cursor};
+use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
     SecurityContext,
@@ -26,7 +26,7 @@ use query_engine::pipeline::{
 use query_engine::shared::content::ColumnResolverRegistry;
 use query_engine::shared::{CompilationStage, PipelineOutput, RedactionOutput};
 use response::{
-    assert_compilation, assert_cursor, assert_output, assert_repeated_response, repeat_count,
+    assert_compilation, assert_output, assert_pagination, assert_repeated_response, repeat_count,
     validate_response,
 };
 
@@ -109,7 +109,7 @@ pub async fn run_query(
         redaction,
     )
     .await;
-    assert_cursor(&output, "run_query");
+    assert_pagination(&output, "run_query");
     let response = validate_response(&compiled.input, GraphFormatter.format(&output), "run_query");
     ResponseView::from_response(response)
 }
@@ -397,12 +397,11 @@ async fn run_pages(
     expect: &QueryExpect,
     label: &str,
 ) {
-    let mut query_str = base_query.trim_end().to_owned();
-
     let mut collected = PageCollection::default();
 
     for (i, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", i + 1);
+        let query_str = page_query(frontend, base_query, i);
 
         let compiled = compile_like_server(&query_str, frontend, (data_model, ontology), security)
             .await
@@ -420,15 +419,13 @@ async fn run_pages(
         let response = assert_output(&output, frontend, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
-        if let Some(cursor) = next_page(&response, i, expect.pages.len(), &page_label) {
-            query_str = with_after(frontend, base_query, &cursor);
-        }
+        assert_page_bounds(&response, i, expect.pages.len(), &page_label);
     }
 
     if let Some(all_pages) = &expect.all_pages {
         collected.assert_expect(all_pages, label);
         if all_pages.matches_unpaginated {
-            let query = without_cursor(frontend, base_query);
+            let query = unpaginated(frontend, base_query);
             let compiled = compile_like_server(&query, frontend, (data_model, ontology), security)
                 .await
                 .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}"));
@@ -441,7 +438,7 @@ async fn run_pages(
                 redaction,
             )
             .await;
-            assert_cursor(&output, label);
+            assert_pagination(&output, label);
             let response =
                 validate_response(&compiled.input, GraphFormatter.format(&output), label);
             collected.assert_matches(&response, label);
@@ -495,10 +492,6 @@ async fn execute_output(
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
 
-    let checks = result.resource_checks();
-    let authorizations = redaction.check(&checks);
-    let redacted_count = result.apply_authorizations(&authorizations);
-
     let resolver = Arc::new(SeededColumnResolver::from_seed_file());
     let mut resolver_registry = ColumnResolverRegistry::new();
     resolver_registry.register("gitaly", resolver as _);
@@ -518,6 +511,14 @@ async fn execute_output(
         server_extensions,
         phases: TypeMap::default(),
     };
+
+    HydrationStage::resolve_owners(&mut pipeline_ctx, &mut result)
+        .await
+        .expect("owner lookup should succeed");
+    let checks = result.resource_checks();
+    let authorizations = redaction.check(&checks);
+    let redacted_count = result.apply_authorizations(&authorizations);
+
     pipeline_ctx.phases.insert(RedactionOutput {
         query_result: result,
         redacted_count,
@@ -548,7 +549,6 @@ fn pipeline_output(
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
         &compiled.input,
-        &compiled.pagination,
     ));
     PipelineOutput {
         row_count: query_result.authorized_count(),
@@ -636,27 +636,22 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 );
             }
         }
-        if !ne.prop_absent.is_empty() && !view.nodes_of_type(entity).is_empty() {
-            let present = ne.prop_present.clone();
-            let absent = ne.prop_absent.clone();
-            for prop in &absent {
-                let present = present.clone();
-                let absent_field = prop.clone();
-                view.assert_filter(entity, prop, move |n| {
-                    let has_positive =
-                        present.iter().any(|p| n.has_prop(p)) || !n.properties.is_empty();
-                    has_positive && !n.has_prop(&absent_field)
-                });
+        for prop in &ne.prop_absent {
+            if view.nodes_of_type(entity).is_empty() {
+                continue;
             }
-        } else {
-            for prop in &ne.prop_absent {
-                for node in view.nodes_of_type(entity) {
-                    assert!(
-                        !node.has_prop(prop),
-                        "{label}: {entity}/{} should not have property '{prop}'",
-                        node.id
-                    );
-                }
+            let absent = prop.clone();
+            view.assert_filter(entity, prop, move |n| {
+                !n.properties.is_empty() && !n.has_prop(&absent)
+            });
+        }
+        if ne.no_properties {
+            for node in view.nodes_of_type(entity) {
+                assert!(
+                    node.properties.is_empty(),
+                    "{label}: {entity}/{} should carry no properties",
+                    node.id
+                );
             }
         }
         if let Some(absent) = &ne.absent {
@@ -897,6 +892,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 serde_json::Value::String(s) => {
                     view.assert_row_value_str(i, col, s);
                 }
+                serde_json::Value::Null => view.assert_row_value_null(i, col),
                 _ => panic!("{label}: unsupported row_values type for {col}"),
             }
         }
@@ -1041,7 +1037,7 @@ fn resolve_preset<T: Clone + serde::de::DeserializeOwned>(
     }
 }
 
-fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
+pub(crate) fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
     let Some(ov) = overrides else {
         return SecurityContext::new(1, vec!["1/".into()]).unwrap();
     };

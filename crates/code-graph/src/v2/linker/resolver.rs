@@ -1,7 +1,7 @@
 //! `FileResolver` resolves one reference at a time via `resolve()`.
 //! No intermediate collections — the caller drives iteration.
 
-use crate::trace;
+use crate::trace_event;
 use crate::v2::pipeline::LanguageContext;
 use crate::v2::sentinel::{FileGuard, Killed};
 use crate::v2::trace::Tracer;
@@ -430,7 +430,7 @@ impl<'a> ResolveCtx<'a> {
                     })
                 })
                 .collect();
-            trace!(
+            trace_event!(
                 self.tracer,
                 ImportResolve {
                     import_fqn: fqn,
@@ -510,7 +510,7 @@ impl<'a> ResolveCtx<'a> {
                 self.graph
                     .lookup_nested_with_hierarchy(&sub_scope, member_name, &mut result);
                 if !result.is_empty() {
-                    trace!(
+                    trace_event!(
                         self.tracer,
                         ImplicitSubScope {
                             scope_fqn: scope_fqn.to_string(),
@@ -552,7 +552,7 @@ impl<'a> ResolveCtx<'a> {
                 }
             }
             if !result.is_empty() {
-                trace!(
+                trace_event!(
                     self.tracer,
                     ReceiverTypeLookup {
                         type_name: scope_fqn.to_string(),
@@ -564,7 +564,7 @@ impl<'a> ResolveCtx<'a> {
         }
 
         let found = !result.is_empty();
-        trace!(
+        trace_event!(
             self.tracer,
             NestedLookup {
                 scope_fqn: scope_fqn.to_string(),
@@ -590,7 +590,7 @@ impl<'a> ResolveCtx<'a> {
     }
 
     fn resolve_single(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
-        trace!(
+        trace_event!(
             self.tracer,
             ResolveStart {
                 name: r.name.to_string(),
@@ -616,7 +616,7 @@ impl<'a> ResolveCtx<'a> {
             self.resolve_bare(r)?
         };
 
-        trace!(
+        trace_event!(
             self.tracer,
             ResolveResult {
                 name: r.name.to_string(),
@@ -704,7 +704,7 @@ impl<'a> ResolveCtx<'a> {
                     }
                 }
             };
-            trace!(
+            trace_event!(
                 self.tracer,
                 ResolveBareStage {
                     stage: format!("{stage:?}"),
@@ -750,7 +750,7 @@ impl<'a> ResolveCtx<'a> {
                             let name = self.graph.str(gdef.name);
                             let fqn = self.graph.str(gdef.fqn);
                             if ref_name == name {
-                                trace!(
+                                trace_event!(
                                     self.tracer,
                                     ReachingDefResolved {
                                         value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
@@ -762,7 +762,7 @@ impl<'a> ResolveCtx<'a> {
                                 if let Some(call_method) = self.rules.hooks.call_method {
                                     let before = result.len();
                                     self.lookup_nested_cached(fqn, call_method, &mut result);
-                                    trace!(
+                                    trace_event!(
                                         self.tracer,
                                         ReachingDefResolved {
                                             value: format!(
@@ -779,7 +779,7 @@ impl<'a> ResolveCtx<'a> {
                                         }
                                     );
                                 } else {
-                                    trace!(
+                                    trace_event!(
                                         self.tracer,
                                         ReachingDefResolved {
                                             value: format!(
@@ -791,7 +791,7 @@ impl<'a> ResolveCtx<'a> {
                                     );
                                 }
                             } else {
-                                trace!(
+                                trace_event!(
                                     self.tracer,
                                     ReachingDefResolved {
                                         value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
@@ -801,7 +801,7 @@ impl<'a> ResolveCtx<'a> {
                             }
                         } else {
                             let fqn = self.graph.str(gdef.fqn);
-                            trace!(
+                            trace_event!(
                                 self.tracer,
                                 ReachingDefResolved {
                                     value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
@@ -825,7 +825,7 @@ impl<'a> ResolveCtx<'a> {
                                 })
                             })
                             .collect();
-                        trace!(
+                        trace_event!(
                             self.tracer,
                             ReachingDefResolved {
                                 value: format!("ImportRef({i})"),
@@ -844,7 +844,7 @@ impl<'a> ResolveCtx<'a> {
                     if !self.lookup_nested_cached(type_fqn, ref_name, &mut result) {
                         if let Some(call_method) = self.rules.hooks.call_method {
                             self.lookup_nested_cached(type_fqn, call_method, &mut result);
-                            trace!(
+                            trace_event!(
                                 self.tracer,
                                 ReachingDefResolved {
                                     value: format!("Type({type_fqn})"),
@@ -858,7 +858,7 @@ impl<'a> ResolveCtx<'a> {
                                 }
                             );
                         } else {
-                            trace!(
+                            trace_event!(
                                 self.tracer,
                                 ReachingDefResolved {
                                     value: format!("Type({type_fqn})"),
@@ -867,7 +867,7 @@ impl<'a> ResolveCtx<'a> {
                             );
                         }
                     } else {
-                        trace!(
+                        trace_event!(
                             self.tracer,
                             ReachingDefResolved {
                                 value: format!("Type({type_fqn})"),
@@ -892,7 +892,7 @@ impl<'a> ResolveCtx<'a> {
         let mut current_types: Vec<String> = self.resolve_base_type_fqns(&chain[0], r.reaching)?;
         let base_has_unresolved_import_ref = self.has_unresolved_import_ref(r.reaching);
 
-        trace!(
+        trace_event!(
             self.tracer,
             ResolveChainBase {
                 step: format!("{:?}", chain[0]),
@@ -1015,7 +1015,7 @@ impl<'a> ResolveCtx<'a> {
                     })
                 })
                 .collect();
-            trace!(
+            trace_event!(
                 self.tracer,
                 ResolveChainStep {
                     depth: depth,
@@ -1063,7 +1063,7 @@ impl<'a> ResolveCtx<'a> {
         }) else {
             return Ok(vec![]);
         };
-        trace!(
+        trace_event!(
             self.tracer,
             ResolveChainFallback {
                 name: last_name.to_string(),
@@ -1090,7 +1090,7 @@ impl<'a> ResolveCtx<'a> {
                 for value in reaching {
                     match value {
                         ParseValue::Type(fqn) => {
-                            trace!(
+                            trace_event!(
                                 self.tracer,
                                 ReachingDefResolved {
                                     value: format!("Type({fqn})"),
@@ -1106,7 +1106,7 @@ impl<'a> ResolveCtx<'a> {
                                 let gdef = &self.graph.defs[did.0 as usize];
                                 let fqn = self.graph.str(gdef.fqn);
                                 if gdef.kind.is_type_container() {
-                                    trace!(
+                                    trace_event!(
                                         self.tracer,
                                         ReachingDefResolved {
                                             value: format!(
@@ -1121,7 +1121,7 @@ impl<'a> ResolveCtx<'a> {
                                     && let Some(rt) = meta.return_type
                                 {
                                     let rt_str = self.graph.str(rt);
-                                    trace!(
+                                    trace_event!(
                                         self.tracer,
                                         ReachingDefResolved {
                                             value: format!(
@@ -1133,7 +1133,7 @@ impl<'a> ResolveCtx<'a> {
                                     );
                                     types.push(rt_str.to_string());
                                 } else if let Some(rt) = self.inferred_returns.get(&node) {
-                                    trace!(
+                                    trace_event!(
                                         self.tracer,
                                         ReachingDefResolved {
                                             value: format!(
@@ -1145,7 +1145,7 @@ impl<'a> ResolveCtx<'a> {
                                     );
                                     types.push(rt.clone());
                                 } else {
-                                    trace!(
+                                    trace_event!(
                                         self.tracer,
                                         ReachingDefResolved {
                                             value: format!(
@@ -1167,7 +1167,7 @@ impl<'a> ResolveCtx<'a> {
                                         let gdef = &self.graph.defs[did.0 as usize];
                                         let fqn = self.graph.str(gdef.fqn);
                                         if gdef.kind.is_type_container() {
-                                            trace!(
+                                            trace_event!(
                                                 self.tracer,
                                                 ReachingDefResolved {
                                                     value: format!(
@@ -1184,7 +1184,7 @@ impl<'a> ResolveCtx<'a> {
                                             && let Some(rt) = meta.return_type
                                         {
                                             let rt_str = self.graph.str(rt);
-                                            trace!(
+                                            trace_event!(
                                                 self.tracer,
                                                 ReachingDefResolved {
                                                     value: format!(
@@ -1199,7 +1199,7 @@ impl<'a> ResolveCtx<'a> {
                                             types.push(rt_str.to_string());
                                         } else if let Some(rt) = self.inferred_returns.get(&def_idx)
                                         {
-                                            trace!(
+                                            trace_event!(
                                                 self.tracer,
                                                 ReachingDefResolved {
                                                     value: format!(
@@ -1217,7 +1217,7 @@ impl<'a> ResolveCtx<'a> {
                                     && let Some(import_type) =
                                         self.imported_symbol_type_fqn(import_node)
                                 {
-                                    trace!(
+                                    trace_event!(
                                         self.tracer,
                                         ReachingDefResolved {
                                             value: format!("ImportRef({i})"),
@@ -1268,7 +1268,7 @@ impl<'a> ResolveCtx<'a> {
                             let gdef = &self.graph.defs[did.0 as usize];
                             if gdef.kind.is_type_container() {
                                 let fqn = self.graph.str(gdef.fqn).to_string();
-                                trace!(
+                                trace_event!(
                                     self.tracer,
                                     ReachingDefResolved {
                                         value: format!("bare({name})"),

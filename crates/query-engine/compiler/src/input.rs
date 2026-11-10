@@ -1,8 +1,6 @@
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
-use ontology::constants::{
-    DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TRAVERSAL_PATH_COLUMN,
-};
+use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
@@ -87,7 +85,8 @@ pub struct Input {
     pub neighbors: Option<InputNeighbors>,
     #[serde(default = "default_limit")]
     pub limit: u32,
-    pub cursor: Option<InputCursor>,
+    #[serde(skip)]
+    pub skip: Option<u32>,
     pub order_by: Option<InputOrderBy>,
     #[serde(default)]
     pub options: QueryOptions,
@@ -123,7 +122,14 @@ impl Input {
     /// Rows to fetch from ClickHouse: the page window plus one probe row that
     /// proves `has_more` without being returned.
     pub fn fetch_limit(&self) -> u32 {
-        self.cursor.as_ref().map_or(self.limit, |c| c.page_size) + 1
+        self.limit + 1
+    }
+
+    /// Rows the final sort materializes: the skipped prefix plus the fetched
+    /// window. Per-row text budgets divide by this rather than by the rows
+    /// returned.
+    pub fn sorted_rows(&self) -> u32 {
+        self.skip.unwrap_or(0) + self.fetch_limit()
     }
 }
 
@@ -137,7 +143,7 @@ impl Default for Input {
             path: None,
             neighbors: None,
             limit: default_limit(),
-            cursor: None,
+            skip: None,
             order_by: None,
             options: QueryOptions::default(),
             predicates: Vec::new(),
@@ -148,15 +154,6 @@ impl Default for Input {
 
 fn default_limit() -> u32 {
     30
-}
-
-/// Keyset pagination cursor: `after` is an opaque token from the previous
-/// page's `pagination.next_cursor`, anchored on the last scanned SQL row so
-/// redaction can only shorten a page, never strand it.
-#[derive(Debug, Clone, Deserialize)]
-pub struct InputCursor {
-    pub page_size: u32,
-    pub after: Option<String>,
 }
 
 #[derive(
@@ -306,6 +303,7 @@ pub struct InputFilter {
     /// When set, compare against another node's column instead of a literal.
     /// Format: `(node_alias, property_name)`. Mutually exclusive with `value`.
     pub rhs_column: Option<(String, String)>,
+    pub from_temporal_literal: bool,
 }
 
 impl InputFilter {
@@ -518,6 +516,14 @@ impl Direction {
             Direction::Incoming => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN),
         }
     }
+
+    /// Orders a relationship's from/to pair as the edge row stores it: source first, then target.
+    pub fn stored_order<T>(self, from: T, to: T) -> (T, T) {
+        match self {
+            Direction::Outgoing | Direction::Both => (from, to),
+            Direction::Incoming => (to, from),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -537,13 +543,20 @@ pub struct InputAggregationMetric {
     pub expr: AggExpr,
     #[serde(rename = "as", default)]
     pub alias: Option<String>,
+    #[serde(default)]
+    pub distinct: bool,
 }
 
 impl InputAggregationMetric {
     pub fn output_name(&self) -> String {
-        self.alias
-            .clone()
-            .unwrap_or_else(|| self.expr.derived_name())
+        self.alias.clone().unwrap_or_else(|| {
+            let name = self.expr.derived_name();
+            if self.distinct {
+                name.replacen('_', "_distinct_", 1)
+            } else {
+                name
+            }
+        })
     }
 }
 

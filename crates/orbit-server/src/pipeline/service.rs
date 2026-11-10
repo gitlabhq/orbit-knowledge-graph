@@ -90,21 +90,20 @@ impl QueryPipelineService {
         stream: Streaming<ExecuteQueryMessage>,
         render: impl FnOnce(QueryServiceOutput) -> Result<Vec<Content>, PipelineError>,
     ) -> Result<(), PipelineError> {
-        let coding_agent = request_context.coding_agent().map(String::from);
-        let claims = request_context.claims;
+        let RequestContext { claims, user_agent } = request_context;
         let schema_obs = OTelPipelineObserver::start();
         let mut obs = MultiObserver::new(vec![
             Box::new(schema_obs.clone()),
             Box::new(BillingObserver::new(
                 self.billing_tracker.clone(),
-                crate::billing_adapter::billing_inputs(&claims, coding_agent.clone()),
+                crate::billing_adapter::billing_inputs(&claims, user_agent.coding_agent.clone()),
             )),
             Box::new(AnalyticsObserver::new(
                 self.analytics_tracker.clone(),
                 Arc::clone(&self.analytics_config),
                 claims.clone(),
                 "query_graph",
-                coding_agent,
+                user_agent,
                 schema.migration_version.to_string(),
             )),
         ]);

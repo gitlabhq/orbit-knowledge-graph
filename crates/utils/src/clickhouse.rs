@@ -4,6 +4,21 @@ use crate::query_types::{ParamValue, SqlType, TimeZone};
 
 pub const MAX_BOUND_PATH_SEGMENTS: usize = 2000;
 
+const MAX_ARRAY_PARAM_BYTES: usize = 48 * 1024;
+const MAX_URL_ENCODED_BYTES_PER_CHAR: usize = 3;
+const PARAM_FRAMING_BYTES: usize = 12;
+
+pub fn strings_per_array_param<S: AsRef<str>>(values: &[S]) -> usize {
+    let longest = values
+        .iter()
+        .map(|value| value.as_ref().len())
+        .max()
+        .unwrap_or(0);
+    let worst_case_bytes = longest * MAX_URL_ENCODED_BYTES_PER_CHAR + PARAM_FRAMING_BYTES;
+
+    (MAX_ARRAY_PARAM_BYTES / worst_case_bytes).max(1)
+}
+
 pub fn quote_sql_literal(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
@@ -95,6 +110,18 @@ mod tests {
     use super::*;
     use crate::query_types::ScalarType;
     use serde_json::json;
+
+    #[test]
+    fn strings_per_array_param_keeps_chunks_under_uri_cap() {
+        let long_value = "x".repeat(500);
+        let values = vec![long_value.as_str(); 100];
+
+        let count = strings_per_array_param(&values);
+
+        assert!(count > 1);
+        let worst_case = 500 * MAX_URL_ENCODED_BYTES_PER_CHAR + PARAM_FRAMING_BYTES;
+        assert!(count * worst_case <= MAX_ARRAY_PARAM_BYTES);
+    }
 
     #[test]
     fn quote_sql_literal_escapes_quotes_and_backslashes() {

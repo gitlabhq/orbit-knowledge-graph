@@ -1,0 +1,40 @@
+description: A pinned project reached through the merge request project id is hydrated with its properties under scope alone
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","node_ids":[1000]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"limit":10}
+  gql: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) RETURN mr.title, p LIMIT 10
+
+cases:
+  - name: default_scope
+    description: A pinned project reached through the merge request project id is hydrated with its properties
+    expect:
+      node_count: 5
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001, 2004, 2005]
+          rows:
+            - { id: 2000, title: Add feature A }
+        Project:
+          ids: [1000]
+          rows:
+            - { id: 1000, name: Public Project, full_path: public-group/public-project }
+      edges:
+        IN_PROJECT: [[2000, 1000], [2001, 1000], [2004, 1000], [2005, 1000]]
+
+  - name: project_scope
+    description: The pinned project is still hydrated when the caller's scope is exactly that project
+    config:
+      security: { org_id: 1, paths: ["1/100/1000/"] }
+    expect:
+      node_count: 5
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001, 2004, 2005]
+        Project:
+          ids: [1000]
+          rows:
+            - { id: 1000, name: Public Project }
+      edges:
+        IN_PROJECT: [[2000, 1000], [2001, 1000], [2004, 1000], [2005, 1000]]

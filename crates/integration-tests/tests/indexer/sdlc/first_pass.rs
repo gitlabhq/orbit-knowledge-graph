@@ -16,6 +16,8 @@ async fn checkpoint_column<T: FromArrowColumn>(
     key: &str,
     column: &str,
 ) -> Vec<T> {
+    // Incremental runs save checkpoints as unawaited async inserts; read only after they land.
+    ctx.execute("SYSTEM FLUSH ASYNC INSERT QUEUE").await;
     let result = ctx
         .query(&format!(
             "SELECT {column} FROM {} FINAL WHERE key = '{key}' AND _deleted = false",
@@ -123,6 +125,25 @@ pub async fn unfinished_first_pass_counts_each_attempt_with_a_session_query_cach
     assert_eq!(
         checkpoint_column::<i64>(ctx, "global.User", "attempts").await,
         [2]
+    );
+    assert_eq!(
+        checkpoint_column::<Option<DateTime<Utc>>>(ctx, "global.User", "indexed_at").await,
+        [None]
+    );
+}
+
+pub async fn missing_destination_table_still_fails_the_run(ctx: &TestContext) {
+    create_user(ctx, 1).await;
+    ctx.drop_table(&t("gl_user")).await;
+
+    let result = entity_handler_with_partitions(ctx, "User", 1)
+        .await
+        .handle(handler_context(), global_envelope())
+        .await;
+
+    assert!(
+        result.is_err(),
+        "a missing graph table is not a missing source"
     );
     assert_eq!(
         checkpoint_column::<Option<DateTime<Utc>>>(ctx, "global.User", "indexed_at").await,

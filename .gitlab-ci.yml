@@ -22,7 +22,7 @@ workflow:
         on_new_commit: interruptible
       variables:
         DEV_PREFIX: "sec"
-    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       variables:
@@ -38,7 +38,7 @@ workflow:
       variables:
         RUNNER_LARGE: saas-linux-medium-amd64
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       variables:
@@ -47,9 +47,18 @@ workflow:
     # Canonical project — original behavior
     - if: $CI_COMMIT_TAG
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      # Every path outside docs/, plus the docs/ files that code checks read.
+      # Keep that list in sync with docs-in-code-mr-check.
+      changes:
+        regexp: '\A(?!docs/)|\Adocs/(docs-gitlab-com/queries/query-language|pages/engineering/development/agents-crate-map)\.md\z'
       auto_cancel:
         on_new_commit: interruptible
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      auto_cancel:
+        on_new_commit: interruptible
+      variables:
+        DOCS_ONLY: "true"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     # Security-template jobs can't reference .skip-on-solo-schedule, so solo
     # schedules mute them through their documented kill-switch variables.
@@ -59,6 +68,14 @@ workflow:
         SECRET_DETECTION_DISABLED: "true"
         DEPENDENCY_SCANNING_DISABLED: "true"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS == null
+      changes:
+        compare_to: refs/heads/main
+        paths: &engineering-site-changes
+          - docs/pages/**/*
+          - packages/**/*
+          - package.json
+          - bun.lock
 
 include:
   - template: Jobs/SAST.gitlab-ci.yml
@@ -67,6 +84,7 @@ include:
   - local: .gitlab/ci/orbit-perf.yml
   - local: .gitlab/ci/release-local.yml
   - local: .gitlab/ci/stale-mr.yml
+  - local: .gitlab/ci/team-dashboard.yml
   - local: .gitlab/ci/e2e-pin-bump.yml
   - local: .gitlab/ci/doc-principles-sync.yml
   - local: .gitlab/ci/release-deploy-mr.yml
@@ -207,17 +225,32 @@ stages:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY != ""
       when: never
 
-.mr-only-rules:
+.skip-on-docs-only:
+  rules:
+    - if: $DOCS_ONLY == "true"
+      when: never
+
+# Jobs that also run on docs-only MRs.
+.docs-mr-rules:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       interruptible: true
 
-.mr-and-main-rules:
+.docs-mr-and-main-rules:
   rules:
     - !reference [.skip-on-solo-schedule, rules]
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      interruptible: true
+    - !reference [.docs-mr-rules, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+.mr-only-rules:
+  rules:
+    - !reference [.skip-on-docs-only, rules]
+    - !reference [.docs-mr-rules, rules]
+
+.mr-and-main-rules:
+  rules:
+    - !reference [.skip-on-docs-only, rules]
+    - !reference [.docs-mr-and-main-rules, rules]
 
 # Jobs that pull alpine through the group dependency proxy. The proxy answers
 # 404 when the job user lacks at least Guest on the top-level group, as with
@@ -229,6 +262,7 @@ stages:
     ALPINE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
   image: ${ALPINE_IMAGE}
   rules:
+    - !reference [.skip-on-docs-only, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $GITLAB_USER_LOGIN =~ /(-|_)bot(_|$)|^service_account_/
       interruptible: true
       variables:
@@ -243,26 +277,45 @@ stages:
 
 # Lint Stage
 
-agent-file-sync-check:
+docs-in-code-mr-check:
   stage: lint
   image: alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
-    - .mr-and-main-rules
+    - .docs-mr-rules
   needs: []
   script:
-    - diff AGENTS.md CLAUDE.md || (echo "AGENTS.md and CLAUDE.md are out of sync. Please ensure they have identical content." && exit 1)
+    - apk add --no-cache git
+    - |
+      BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+      git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch origin "$BASE" --depth=1 || git fetch --unshallow origin "$CI_COMMIT_SHA"
+      CHANGED=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE" HEAD)
+      # Keep the docs/ files that code checks read in sync with the workflow regexp.
+      DOCS=$(echo "$CHANGED" | grep '^docs/' | grep -vxF -e docs/docs-gitlab-com/queries/query-language.md -e docs/pages/engineering/development/agents-crate-map.md || true)
+      # GitLab reads a Gitaly error as "no changed paths", which makes a code MR docs-only.
+      if [ "${DOCS_ONLY:-}" = "true" ] && [ "$DOCS" != "$CHANGED" ]; then
+        echo "This pipeline skipped the code jobs, but the MR changes code. Run a new pipeline."
+        exit 1
+      fi
+      case ",${CI_MERGE_REQUEST_LABELS:-}," in *,docs-in-code-mr,*) echo "docs-in-code-mr label set; skipping." && exit 0;; esac
+      CODE=$(echo "$CHANGED" | grep -v -e '^docs/' -e '\.md$' -e '^\.vale' -e '^\.markdownlint' -e '^lychee\.toml$' || true)
+      if [ -n "$DOCS" ] && [ -n "$CODE" ]; then
+        printf 'This MR changes code and files under docs/:\n%s\n\n' "$DOCS"
+        echo "Move the docs/ changes to a separate docs MR."
+        echo "If a CI or build check needs them, add the docs-in-code-mr label and retry this job."
+        exit 1
+      fi
 
 mr-title-check:
   stage: lint
-  image: node:26-alpine
+  image: oven/bun:1.4.4-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
-    - .mr-only-rules
+    - .docs-mr-rules
   before_script:
-    - npm ci --ignore-scripts
+    - bun install --frozen-lockfile --ignore-scripts
   script:
     - ./scripts/checks/check-mr-title.sh
 
@@ -334,6 +387,52 @@ setup-schema-validate:
     - find config/setup/agents -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/setup_agent.schema.json
     - uvx check-jsonschema --verbose --schemafile config/schemas/setup.schema.json config/setup/setup.yaml
 
+agent-plugins:
+  stage: lint
+  image: oven/bun:1.4.4
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  variables:
+    CLAUDE_BIN: bun x @anthropic-ai/claude-code@2.1.308
+    DISABLE_GROWTHBOOK: "1"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git > /dev/null
+    - bun install --frozen-lockfile --ignore-scripts
+  script:
+    - cd packages/agent-plugins
+    - bun run typecheck
+    - bun run test
+    - bun run test:claude
+    - bun run test:differential --count 100
+    - bun run build
+    - git add --intent-to-add ../../config/setup/agents/opencode_ui ../../config/setup/agents/pi_ui
+    - git diff --exit-code -- ../../config/setup/agents/opencode_ui ../../config/setup/agents/pi_ui core/lib.js
+
+agent-plugins-nightly:
+  stage: lint
+  image: oven/bun:1.4.4
+  tags:
+    - saas-linux-medium-amd64
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - packages/agent-plugins-nightly/**/*
+        - package.json
+        - bun.lock
+  needs: []
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq nodejs > /dev/null
+    - bun install --frozen-lockfile --ignore-scripts
+  script:
+    - cd packages/agent-plugins-nightly
+    - bun run test
+
 generate-config-schema:
   stage: lint
   extends:
@@ -359,6 +458,16 @@ rust-toolchain-sync-check:
   needs: []
   script:
     - mise run toolchain:check
+
+log-safety-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .mr-and-main-rules
+    - .no-cargo-home-cache
+  needs: []
+  script:
+    - mise run lint:logs
 
 metrics-catalog-check:
   stage: lint
@@ -526,7 +635,7 @@ newline-check:
   stage: lint
   extends:
     - .job-template
-    - .mr-only-rules
+    - .docs-mr-rules
     - .no-cargo-home-cache
   script:
     - mise run lint:newlines
@@ -562,9 +671,10 @@ fips-check:
     - .mr-and-main-rules
   needs: []
   script:
-    - ./scripts/checks/fips/check-graph.sh
-    - cargo build -p orbit-server --locked
-    - ./scripts/checks/fips/check-binary.sh target/debug/gkg-server
+    - ./scripts/checks/fips/aws-lc/check-graph.sh
+    - mise run fips:duckdb:check
+    - cargo build -p orbit-server --locked --features libduckdb-sys/bundled
+    - ./scripts/checks/fips/aws-lc/check-binary.sh target/debug/gkg-server
     - sccache --show-stats || true
 
 cargo-audit:
@@ -635,6 +745,7 @@ semgrep-sast:
   stage: security
   needs: []
   rules:
+    - !reference [.skip-on-docs-only, rules]
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       exists:
@@ -646,6 +757,7 @@ semgrep-sast:
 gitlab-advanced-sast:
   stage: security
   needs: []
+  rules: !reference [.mr-and-main-rules, rules]
 
 # Override the default secret_detection rules so the job runs on MR pipelines.
 # The Jobs/Secret-Detection.gitlab-ci.yml template defaults to branch pipelines
@@ -664,21 +776,20 @@ check_docs_markdown:
   stage: docs
   needs: []
   extends:
-    - .mr-only-rules
-  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
+    - .docs-mr-rules
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.24-vale-3.21.0-markdownlint2-0.23.2-lychee-0.24.2-rumdl-0.2.69
   script:
     # Lint prose
-    - vale --minAlertLevel error docs/source
-    # Lint Markdown. docs/source is user-facing; root and docs/dev are contributor
-    # docs that previously reached CI unlinted (design-documents deferred: #981).
-    - markdownlint-cli2 '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
+    - vale --minAlertLevel error *.md docs
+    - markdownlint-cli2 '*.md' 'docs/**/*.md'
+    - rumdl check --config docs/.rumdl/rumdl.toml docs
     # Check links
-    - lychee --offline --include-fragments '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
+    - lychee --offline --include-fragments --root-dir . '*.md' 'docs/**/*.md'
 
 check_docs_i18n_markdown:
   stage: docs
   needs: []
-  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.24-vale-3.21.0-markdownlint2-0.23.2-lychee-0.24.2-rumdl-0.2.69
   parallel:
     matrix:
       - LOCALE_CODE: ["fr-fr", "ja-jp", "ko-kr"]
@@ -688,18 +799,72 @@ check_docs_i18n_markdown:
         - docs-locale/${LOCALE_CODE}/**/*
   script:
     # Lint prose
-    - vale --config="docs-locale/${LOCALE_CODE}/.vale.ini" --minAlertLevel error docs-locale/${LOCALE_CODE}/source/
+    - vale --config="docs-locale/${LOCALE_CODE}/.vale.ini" --minAlertLevel error docs-locale/${LOCALE_CODE}/docs-gitlab-com/
     # Lint Markdown
-    - markdownlint-cli2 "docs-locale/${LOCALE_CODE}/source/**/*.md"
+    - markdownlint-cli2 "docs-locale/${LOCALE_CODE}/docs-gitlab-com/**/*.md"
     # Check links
-    - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/source/**/*.md
+    - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/docs-gitlab-com/**/*.md
+
+.engineering-site:
+  stage: docs
+  needs: []
+  image: oven/bun:1.4.4
+  variables:
+    GIT_DEPTH: "0"
+  cache:
+    - key:
+        files:
+          - bun.lock
+      paths:
+        - .bun-cache
+    - key: orbit-markdown
+      paths:
+        - packages/site/.cache/orbit-markdown
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git > /dev/null
+    - bun install --frozen-lockfile --cache-dir .bun-cache
+  script:
+    - bun run test
+    - bun run build
+    - bun run typecheck
+    - mv packages/site/public public
+  artifacts:
+    paths:
+      - public
+
+pages:
+  extends: .engineering-site
+  resource_group: pages
+  rules:
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+pages:preview:
+  extends: .engineering-site
+  allow_failure: true
+  pages:
+    path_prefix: "$CI_COMMIT_REF_SLUG"
+    expire_in: 1 week
+  environment:
+    name: "engineering/$CI_COMMIT_REF_SLUG"
+    url: "$CI_PAGES_URL"
+    auto_stop_in: 1 week
+  rules:
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes: *engineering-site-changes
+      interruptible: true
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_OPEN_MERGE_REQUESTS == null
+      changes:
+        paths: *engineering-site-changes
+        compare_to: refs/heads/main
+      interruptible: true
 
 .docs-gitlab-com:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
   stage: docs
   needs: []
   extends:
-    - .mr-only-rules
+    - .docs-mr-rules
   variables:
     DOCS_BRANCH: "main"
   before_script:
@@ -749,7 +914,7 @@ docs_index_pages:
     - .docs-gitlab-com
   script:
     # See https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/-/blob/main/scripts/check-index-filenames.sh
-    - make check-index-pages SEARCH_DIR="../docs/source"
+    - make check-index-pages SEARCH_DIR="../docs/docs-gitlab-com"
     #- make check-index-pages SEARCH_DIR="../doc-locale/source" # Enable when translation is added
 
 # Test Stage
@@ -760,6 +925,7 @@ unit-test:
     - .test-template
   # Same rules as .mr-and-main-rules, plus the cache upload on main only.
   rules:
+    - !reference [.skip-on-docs-only, rules]
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       interruptible: true
@@ -845,7 +1011,14 @@ cli-integration-test:
   script:
     - cargo build -p orbit-cli
     - cargo nextest run --profile ci --test cli --test outside_repository --no-fail-fast
+    - mv target/nextest/ci/junit.xml target/nextest/ci/junit-cli.xml
+    - cargo nextest run --profile ci -p orbit-cli --test remote_cli --no-fail-fast
     - sccache --show-stats || true
+  artifacts:
+    reports:
+      junit:
+        - target/nextest/ci/junit-cli.xml
+        - target/nextest/ci/junit.xml
 
 .integration-test-template:
   stage: test
@@ -896,7 +1069,7 @@ corpus-smoke-test:
   stage: test
   extends:
     - .test-template
-    - .mr-and-main-rules
+    - .docs-mr-and-main-rules
   tags:
     - ${RUNNER_LARGE}
   services:
@@ -917,152 +1090,54 @@ corpus-smoke-test:
     - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --no-capture -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
-# Benchmark Stage
-#
-# Runs code indexing benchmarks when indexing crates change.
-# Repos are auto-downloaded by gitlab-xtasks from the benchmark config.
+.fuzz-corpus:
+  id_tokens:
+    FUZZ_CORPUS_JWT:
+      aud: gkg-fuzz
 
-.code-indexing-benchmark-rules:
-  rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      changes:
-        - crates/orbit-cli/**/*
-        - crates/code-graph/**/*
-        - crates/ontology/**/*
-        - crates/duckdb-client/**/*
-        - crates/utils/**/*
-        - code-indexing-benchmark.yaml
-        - .gitlab-ci.yml
-
-code-indexing-benchmark-build:
-  stage: benchmark
-  needs: []
+fuzz-smoke:
+  stage: test
   extends:
     - .job-template
     - .sccache-template
-    - .code-indexing-benchmark-rules
-  interruptible: true
+    - .mr-and-main-rules
+    - .fuzz-corpus
+  needs: []
+  allow_failure: true
+  script:
+    - mise run test:fuzz
+    - sccache --show-stats || true
+
+fuzz-deep:
+  stage: test
+  extends:
+    - .job-template
+    - .fuzz-corpus
   tags:
     - ${RUNNER_LARGE}
+  needs: []
+  timeout: 90 minutes
+  parallel: 3
+  variables:
+    FUZZ_BUDGET_SECONDS: "2700"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "fuzz-deep"
+      variables:
+        FUZZ_CORPUS_PUSH: "1"
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  before_script:
+    - !reference [.job-template, before_script]
+    - rustup toolchain install nightly --profile minimal
   script:
-    - cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled
-    # The CLI ships without the FIPS module; a workspace-level build would pull it in.
-    - '! nm --defined-only target/release/orbit | grep -q " _\?aws_lc_fips_"'
+    - ./scripts/fuzz/run.sh deep
   artifacts:
-    paths:
-      - target/release/orbit
-    expire_in: 1 day
-
-.code-indexing-benchmark-template:
-  stage: benchmark
-  needs:
-    - code-indexing-benchmark-build
-  extends:
-    - .code-indexing-benchmark-rules
-  interruptible: true
-  cache:
-    key: "benchmark-repos-${GROUP}"
-    paths:
-      - temp/
-    policy: pull-push
     when: always
-  variables:
-    SCENARIO: index
-  script:
-    - |
-      OUTPUT_FILE="gkg-benchmark-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}-${ARCH}-${SCENARIO}-${GROUP}.json"
-
-      for attempt in 1 2 3; do
-        if mise exec -- gitlab-xtasks benchmark download-repos \
-          --config code-indexing-benchmark.yaml \
-          --output-dir temp \
-          --group "$GROUP"; then
-          break
-        fi
-
-        if [ "$attempt" = "3" ]; then
-          exit 1
-        fi
-
-        delay="$((attempt * 30))"
-        echo "Repository download failed; retrying in ${delay}s."
-        sleep "$delay"
-      done
-
-      mise exec -- gitlab-xtasks benchmark hyperfine \
-        --config code-indexing-benchmark.yaml \
-        --architecture "$ARCH" \
-        --scenario "$SCENARIO" \
-        --group "$GROUP" \
-        --output-file "$OUTPUT_FILE"
-  artifacts:
+    access: developer
     paths:
-      - gkg-benchmark-*.json
-    expire_in: 3 weeks
-
-code-indexing-benchmark-v2-linux:
-  extends:
-    - .job-template
-    - .no-cargo-home-cache
-    - .code-indexing-benchmark-template
-  tags:
-    - ${RUNNER_LARGE}
-  variables:
-    ARCH: "linux-x86_64"
-    SCENARIO: v2
-  parallel:
-    matrix:
-      - GROUP: [python, java, kotlin, csharp, ruby, go, rust, c, cpp, php]
-
-.code-indexing-benchmark-analyze-template:
-  stage: benchmark
-  extends:
-    - .job-template
-    - .code-indexing-benchmark-rules
-    - .no-cargo-home-cache
-  interruptible: true
-  script:
-    - |
-      mise exec -- gitlab-xtasks benchmark analyze \
-        --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
-        --output-format markdown \
-        --pipeline-url "$CI_PIPELINE_URL" \
-        --job-url "$CI_JOB_URL" \
-        --branch "$CI_COMMIT_REF_NAME" \
-        --output-file "gkg-benchmark-${SCENARIO}-results.md"
-
-      mise exec -- gitlab-xtasks benchmark analyze \
-        --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
-        --output-format json \
-        --pipeline-url "$CI_PIPELINE_URL" \
-        --job-url "$CI_JOB_URL" \
-        --branch "$CI_COMMIT_REF_NAME" \
-        --output-file "gkg-benchmark-${SCENARIO}-results.json"
-
-      if [[ -n "$CI_MERGE_REQUEST_IID" && -n "$BENCHMARK_GITLAB_TOKEN" ]]; then
-        mise exec -- gitlab-xtasks comment post \
-          --type add-or-edit \
-          --unique-id "code-indexing-benchmark-${SCENARIO}-comment" \
-          --token "$BENCHMARK_GITLAB_TOKEN" \
-          --file-path "gkg-benchmark-${SCENARIO}-results.md"
-      else
-        echo "Skipping benchmark comment: BENCHMARK_GITLAB_TOKEN unavailable (expected for fork MRs)."
-      fi
-  artifacts:
-    paths:
-      - gkg-benchmark-*-results.md
-      - gkg-benchmark-*-results.json
-      - gkg-benchmark-*.json
-    expire_in: 1 week
-
-code-indexing-benchmark-v2-analyze:
-  extends: .code-indexing-benchmark-analyze-template
-  needs:
-    - code-indexing-benchmark-v2-linux
-  variables:
-    SCENARIO: v2
+      - crates/fuzz/tests/*/corpus/
+    expire_in: 30 days
 
 # Build Stage
 
@@ -1208,7 +1283,7 @@ e2e-robot-image:
 
 check-go-proto:
   needs: []
-  image: golang:1.24
+  image: golang:1.26
   tags:
     - saas-linux-medium-amd64
   stage: lint
@@ -1222,9 +1297,30 @@ check-go-proto:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
     - if: $CI_COMMIT_TAG
       when: never
-    - changes:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
         - crates/orbit-server/proto/**/*
         - clients/orbitpb/**/*
+
+check-go-version-policy:
+  needs: []
+  image: alpine:latest
+  tags:
+    - saas-linux-medium-amd64
+  stage: lint
+  before_script:
+    - apk add --no-cache bash curl
+  script:
+    - bash scripts/checks/check-go-version-policy.sh
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - "**/go.mod"
+        - scripts/checks/check-go-version-policy.sh
+        - .gitlab-ci.yml
 
 build-proto-gem:
   needs: []
@@ -1246,7 +1342,8 @@ build-proto-gem:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
     - if: $CI_COMMIT_TAG
       when: never
-    - changes:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
         - crates/orbit-server/proto/**/*
         - clients/protogem/**/*
   artifacts:
@@ -1276,7 +1373,7 @@ publish-proto-gem:
 
 semantic-release:
   stage: release
-  image: node:26
+  image: oven/bun:1.4.4
   tags:
     - saas-linux-medium-amd64
   id_tokens:
@@ -1300,12 +1397,13 @@ semantic-release:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
   before_script:
+    - apt-get update -qq && apt-get install -y -qq git > /dev/null
     - test -n "${SEMANTIC_RELEASE_GITLAB_TOKEN}" || (echo "Missing SEMANTIC_RELEASE_GITLAB_TOKEN from Vault" && exit 1)
     - export GITLAB_TOKEN="${SEMANTIC_RELEASE_GITLAB_TOKEN}"
     - git remote set-url origin "https://semantic-release:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
-    - npm ci
+    - bun install --frozen-lockfile
   script:
-    - npx semantic-release
+    - bun x --bun semantic-release
 
 .docker-release:
   stage: build
@@ -1555,6 +1653,27 @@ e2e-ha:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "e2e-ha"
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+
+e2e-gitlab-stable:
+  extends: e2e
+  parallel:
+    matrix:
+      - E2E_GITLAB_LANE: ["19-4", "19-5"]
+  variables:
+    E2E_SUFFIX: "-gl${E2E_GITLAB_LANE}"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "e2e-gitlab-stable"
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == 'automation/e2e-pin-bump'
+      allow_failure: true
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true

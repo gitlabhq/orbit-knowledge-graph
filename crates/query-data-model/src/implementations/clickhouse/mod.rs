@@ -19,7 +19,6 @@ pub struct TableLayout {
     pub sort_key: Vec<String>,
     pub entity: Option<EntityId>,
     pub path_columns: Vec<PathColumn>,
-    pub path_scopable: bool,
 }
 
 impl TableLayout {
@@ -31,7 +30,6 @@ impl TableLayout {
         table: &layout::Table,
         entity: Option<EntityId>,
         path_columns: Vec<PathColumn>,
-        path_scopable: bool,
     ) -> Self {
         Self {
             name: table.name.clone(),
@@ -48,7 +46,6 @@ impl TableLayout {
             sort_key: table.sort_key.clone(),
             entity,
             path_columns,
-            path_scopable,
         }
     }
 }
@@ -58,6 +55,7 @@ pub struct EntityLayout {
     pub table: String,
     pub has_traversal_path: bool,
     pub global: bool,
+    pub high_fan_out: bool,
     pub default_properties: Vec<PropertyId>,
 }
 
@@ -131,11 +129,19 @@ impl ClickHouseBindings {
 }
 
 impl RelationalMapping for ClickHouseBindings {
+    fn supports_selective_latest_rows(&self) -> bool {
+        true
+    }
+
     fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
         self.variant_route(variant)
     }
-    fn equivalent_layouts(&self, _table: &str) -> Vec<&str> {
-        Vec::new()
+    fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
+        self.reordered_layouts
+            .iter()
+            .filter(|copy| copy.source == table)
+            .map(|copy| copy.table.as_str())
+            .collect()
     }
     fn materialized_joins(&self) -> &[MaterializedJoin] {
         &self.materialized_joins
@@ -151,6 +157,17 @@ impl RelationalMapping for ClickHouseBindings {
 
     fn entity_is_global(&self, entity: EntityId) -> bool {
         self.entity(entity).is_some_and(|layout| layout.global)
+    }
+
+    fn entity_high_fan_out(&self, entity: EntityId) -> bool {
+        self.entity(entity)
+            .is_some_and(|layout| layout.high_fan_out)
+    }
+
+    fn property_is_foreign_key(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_some_and(|facts| facts.foreign_key)
     }
 
     fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
@@ -182,8 +199,22 @@ impl RelationalMapping for ClickHouseBindings {
             .is_some_and(|facts| facts.has_text_index)
     }
 
-    fn table_path_scopable(&self, table: &str) -> bool {
-        self.table(table).is_some_and(|layout| layout.path_scopable)
+    fn null_as_epoch(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_some_and(|facts| facts.null_as_epoch)
+    }
+
+    fn property_unique(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_some_and(|facts| facts.unique)
+    }
+
+    fn property_mutable(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_none_or(|facts| facts.mutable)
     }
 
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {

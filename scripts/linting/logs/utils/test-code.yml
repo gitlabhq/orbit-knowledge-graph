@@ -1,0 +1,30 @@
+id: test-code
+language: rust
+rule:
+  inside:
+    stopBy: end
+    any:
+      - any:
+          - kind: mod_item
+          - kind: impl_item
+          - kind: function_item
+          - kind: use_declaration
+        follows:
+          stopBy:
+            not:
+              any:
+                - kind: attribute_item
+                - kind: line_comment
+                - kind: block_comment
+          kind: attribute_item
+          regex: '^#\[cfg\((test|(any|all)\(([^()]*,\s*)?test\s*(,[^()]*)?\))\)\]'
+      - kind: function_item
+        follows:
+          stopBy:
+            not:
+              any:
+                - kind: attribute_item
+                - kind: line_comment
+                - kind: block_comment
+          kind: attribute_item
+          regex: '^#\[((\w+::)*test\b|rstest\b|test_case\b)'

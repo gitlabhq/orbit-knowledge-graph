@@ -12,7 +12,9 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter _orbit_edge_0.branch = 'main', _orbit_edge_0.project_id = 9, _orbit_edge_0.source_id = 1, _orbit_edge_0.relationship_kind = 'CALLS', _orbit_edge_0.source_kind = 'Definition', _orbit_edge_0.target_kind = 'Definition', _orbit_edge_0._deleted = false (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))"]
+      expect:
+        - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.branch = 'main', _orbit_edge_0.project_id = 9, _orbit_edge_0.source_id = 1, _orbit_edge_0.relationship_kind = 'CALLS', _orbit_edge_0.source_kind = 'Definition', _orbit_edge_0.target_kind = 'Definition' (_))))
+        - (Scan Table(gl_code_edge) AS _orbit_edge_0)
       reject: ["(Filter _orbit_edge_0.id = 1, ... (_))"]
     emitted:
       expect: ["(Filter _orbit_edge_0.branch = 'main', _orbit_edge_0.project_id = 9, _orbit_edge_0.source_id = 1, ... (_))"]

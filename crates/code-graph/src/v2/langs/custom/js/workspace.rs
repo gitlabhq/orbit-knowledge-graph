@@ -37,8 +37,8 @@ impl WorkspaceProbe {
         // against a non-canonical root and flipping a containment
         // check on a coincidental prefix match.
         let Ok(root_dir) = std::fs::canonicalize(root_dir) else {
-            tracing::warn!(
-                root_dir = %root_dir.display(),
+            orbit_log_fields::warn!(
+                expanded(LOCAL_PATH) = %root_dir.display(),
                 "js: failed to canonicalize root_dir, disabling workspace probe"
             );
             return Self {

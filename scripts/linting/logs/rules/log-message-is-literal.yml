@@ -1,0 +1,24 @@
+id: log-message-is-literal
+language: rust
+severity: error
+message: Log and span messages must be fixed text. Put values in fields.
+note: |
+  labkit always writes the message and cannot filter it. Write
+  `info!(expanded(FILE_PATH) = path, "parsed file")`, not `info!("parsed {path}")`.
+rule:
+  any:
+    - kind: string_literal
+    - kind: raw_string_literal
+  regex: '(^|[^{])(\{\{)*\{[^{]'
+  follows:
+    any:
+      - regex: '^\($'
+      - regex: '^,$'
+  inside:
+    kind: token_tree
+    any:
+      - inside:
+          matches: tracing-macro
+      - matches: nested-tracing-args
+  not:
+    matches: test-code

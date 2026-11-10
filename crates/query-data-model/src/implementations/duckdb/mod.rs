@@ -32,6 +32,10 @@ pub struct DuckDbBindings {
 }
 
 impl RelationalMapping for DuckDbBindings {
+    fn supports_deferred_node_loading(&self) -> bool {
+        false
+    }
+
     fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
         self.variants.get(variant.index())
     }
@@ -45,6 +49,14 @@ impl RelationalMapping for DuckDbBindings {
     }
 
     fn entity_is_global(&self, _entity: EntityId) -> bool {
+        false
+    }
+
+    fn entity_high_fan_out(&self, _entity: EntityId) -> bool {
+        false
+    }
+
+    fn property_is_foreign_key(&self, _property: PropertyId) -> bool {
         false
     }
 
@@ -76,8 +88,20 @@ impl RelationalMapping for DuckDbBindings {
         false
     }
 
-    fn table_path_scopable(&self, _table: &str) -> bool {
+    fn null_as_epoch(&self, _property: PropertyId) -> bool {
         false
+    }
+
+    fn property_unique(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_some_and(|facts| facts.unique)
+    }
+
+    fn property_mutable(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_none_or(|facts| facts.mutable)
     }
 
     fn table_path_columns(&self, _table: &str) -> Option<&[crate::PathColumn]> {

@@ -11,4 +11,5 @@ pub struct QuotaCheckInputs {
     pub unique_instance_id: Option<String>,
     pub instance_version: Option<String>,
     pub license_checksum: Option<SecretString>,
+    pub is_gitlab_team_member: bool,
 }

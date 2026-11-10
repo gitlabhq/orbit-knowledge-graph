@@ -4,17 +4,16 @@ mod projections;
 use std::collections::{HashMap, HashSet};
 
 use crate::input::{
-    Direction, HopRange, InputCursor, InputNeighbors, InputPath, InputRelationship, PathType,
-    PredicateTarget, PropertyRef, QueryType,
+    Direction, HopRange, InputNeighbors, InputPath, InputRelationship, PathType, PredicateTarget,
+    PropertyRef, QueryType,
 };
-use crate::passes::cursor;
 use crate::query_limits::MAX_NODES_CAP;
 use crate::{Input, InputNode, QueryError, Result};
 
-use super::ast::{Limit, Name, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
-use super::{ParsedQuery, QueryParser, Rule, invalid};
+use super::ast::{Name, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
+use super::{ParsedQuery, invalid};
 
-pub(super) fn lower(source: &str, query: Query<'_>) -> Result<ParsedQuery> {
+pub(super) fn lower(query: Query<'_>) -> Result<ParsedQuery> {
     let mut lowering = Lowering {
         input: Input::default(),
         edges: HashMap::new(),
@@ -31,39 +30,14 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<ParsedQuery> {
     if let Some(sort) = query.order {
         lowering.order(sort)?;
     }
-    match query.limit {
-        Some(Limit::Rows(rows)) => lowering.input.limit = rows,
-        Some(Limit::Page { span, size, after }) => {
-            lowering.input.cursor = Some(InputCursor {
-                page_size: size,
-                after,
-            });
-            lowering.input.options.include_debug_sql = query.debug;
-            return Ok(ParsedQuery {
-                query_hash: statement_hash(source, span),
-                input: lowering.input,
-            });
-        }
-        None => {}
-    };
+    lowering.input.skip = query.skip;
+    if let Some(rows) = query.limit {
+        lowering.input.limit = rows;
+    }
     lowering.input.options.include_debug_sql = query.debug;
     Ok(ParsedQuery {
         input: lowering.input,
-        query_hash: 0,
     })
-}
-
-fn statement_hash(source: &str, page: pest::Span<'_>) -> u64 {
-    let text = format!("{}{}", &source[..page.start()], &source[page.end()..]);
-    let tokens = <QueryParser as pest::Parser<Rule>>::parse(Rule::HashTokens, &text)
-        .expect("HashTokens accepts every character")
-        .next()
-        .expect("HashTokens produces one pair")
-        .into_inner()
-        .filter(|pair| pair.as_rule() == Rule::HashToken)
-        .map(|pair| serde_json::Value::String(pair.as_str().to_owned()))
-        .collect();
-    cursor::canonical_hash(&serde_json::Value::Array(tokens))
 }
 
 struct Lowering {
@@ -370,58 +344,4 @@ fn is_type_shaped(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
-}
-
-#[cfg(test)]
-mod tests {
-    fn hash(query: &str) -> u64 {
-        super::super::parse_with_hash(query).unwrap().query_hash
-    }
-
-    #[test]
-    fn statement_hash_ignores_page_and_formatting() {
-        let base = hash("MATCH (u:User) RETURN u PAGE 5");
-        for query in [
-            "MATCH (u:User) RETURN u PAGE 7 AFTER 'x'",
-            "MATCH (u:User) RETURN u  PAGE 5",
-            "\nMATCH ( u : User )\nRETURN\tu\nPAGE 7\nAFTER 'x'\n",
-            "MATCH/*match*/(u:User) RETURN u/*before*/PAGE 7/*after*/",
-            "MATCH (u:User) RETURN u // before\nPAGE 7 AFTER 'x' // after",
-            "MATCH\u{2003}(u:User) RETURN u\u{a0}PAGE 5\u{3000}",
-        ] {
-            assert_eq!(base, hash(query), "{query}");
-        }
-        assert_eq!(
-            hash("MATCH (u:User) RETURN u PAGE 5 DEBUG"),
-            hash("MATCH (u:User) RETURN u\nPAGE 7 AFTER 'x'\nDEBUG\n")
-        );
-        assert_eq!(0, hash("MATCH (u:User) RETURN u LIMIT 5"));
-    }
-
-    #[test]
-    fn statement_hash_preserves_query_changes() {
-        let base = hash("MATCH (u:User) RETURN u PAGE 5");
-        for query in [
-            "MATCH (u:User) RETURN u.id PAGE 5",
-            "MATCH (u:User {id: 1}) RETURN u PAGE 5",
-            "MATCH (u:User) RETURN u PAGE 5 DEBUG",
-            "MATCH (u:User) RETURN u PAGE 5;",
-            "match (u:User) RETURN u PAGE 5",
-        ] {
-            assert_ne!(base, hash(query), "{query}");
-        }
-        for (left, right) in [
-            ("'a b'", "'ab'"),
-            ("'a  b'", "'a b'"),
-            ("'a\nb'", "'a b'"),
-            ("'a/*b*/c'", "'ac'"),
-            ("'a//b'", "'a'"),
-            ("'é PAGE 5'", "'é PAGE 7'"),
-            (r"'a\' b'", r"'a\'b'"),
-            (r#""a b""#, r#""ab""#),
-        ] {
-            let query = |value| format!("MATCH (u:User {{name: {value}}}) RETURN u PAGE 5");
-            assert_ne!(hash(&query(left)), hash(&query(right)), "{left}: {right}");
-        }
-    }
 }

@@ -15,6 +15,7 @@ use indexer::schema::version::{
 };
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
+use ontology::migrations::EdgeRows;
 use orbit_migrations::garbage_collection::find_droppable_entities;
 use orbit_migrations::schema::{DictionaryCredentials, GraphSchema};
 use orbit_migrations::scope::MigrationScope;
@@ -914,7 +915,17 @@ const REINDEX_VERSION: &str = "2024-06-01 00:00:00.000000";
 const LATER_RUN_VERSION: &str = "2024-07-01 00:00:00.000000";
 
 fn sdlc(entities: &[&str]) -> MigrationScope {
-    MigrationScope::Sdlc(entities.iter().map(|s| s.to_string()).collect())
+    MigrationScope::Sdlc {
+        entities: entities.iter().map(|s| s.to_string()).collect(),
+        edge_rows: EdgeRows::Changed,
+    }
+}
+
+fn sdlc_keeping_edge_rows(entities: &[&str]) -> MigrationScope {
+    MigrationScope::Sdlc {
+        entities: entities.iter().map(|s| s.to_string()).collect(),
+        edge_rows: EdgeRows::Unchanged,
+    }
 }
 
 struct MigrationScenario {
@@ -1298,6 +1309,27 @@ async fn shared_edge_scope_rebuilds_every_table() {
     scenario.assert_table_empty("gl_note").await;
     scenario.assert_table_empty("gl_edge").await;
     scenario.assert_checkpoint_empty().await;
+}
+
+#[tokio::test]
+async fn unchanged_edge_rows_clone_the_shared_edge_table_and_rebuild_the_node_table() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario.seed_note().await;
+    scenario.seed_merge_request().await;
+    scenario
+        .seed_edge("HAS_NOTE", (7, "MergeRequest"), (5, "Note"))
+        .await;
+    scenario.seed_checkpoint("ns.100.Note").await;
+    scenario.seed_checkpoint("ns.100.MergeRequest").await;
+
+    scenario.migrate(sdlc_keeping_edge_rows(&["Note"])).await;
+
+    scenario.assert_table_empty("gl_note").await;
+    scenario.assert_table_row_count("gl_edge", 1).await;
+    scenario.assert_table_row_count("gl_merge_request", 1).await;
+    scenario
+        .assert_surviving_checkpoints(&["ns.100.MergeRequest"])
+        .await;
 }
 
 #[tokio::test]

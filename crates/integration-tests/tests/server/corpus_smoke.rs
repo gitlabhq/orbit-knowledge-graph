@@ -46,9 +46,12 @@ const CORPUS_DIR: &str = concat!(env!("FIXTURES_DIR"), "/queries/corpus");
 const NAMED_QUERIES_DIR: &str = env!("NAMED_QUERIES_DIR");
 const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const DOC_MARKDOWN_DIRS: &[&str] = &[
-    "docs/source",
-    "docs/design-documents",
+    "docs/docs-gitlab-com",
+    "docs/pages/engineering/testing",
+    "docs/pages/engineering/architecture",
+    "docs/pages/engineering/adr",
     "skills/orbit",
+    "skills/orbit-package-registry",
     "crates/integration-testkit",
 ];
 const DOC_QUERY_MARKER: &str = "orbit-query";
@@ -82,10 +85,11 @@ impl PipelineStage for AuthorizeAllStage {
         ctx: &mut QueryPipelineContext,
         _obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let input = ctx
+        let mut input = ctx
             .phases
             .remove::<ExtractionOutput>()
             .ok_or_else(|| PipelineError::custom("ExtractionOutput not found in phases"))?;
+        HydrationStage::resolve_owners(ctx, &mut input.query_result).await?;
         let authorizations = input
             .query_result
             .resource_checks()

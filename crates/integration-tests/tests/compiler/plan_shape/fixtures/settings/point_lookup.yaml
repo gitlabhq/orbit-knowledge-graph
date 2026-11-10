@@ -9,7 +9,6 @@ cases:
     physical:
       clickhouse:
         point_lookup: true
-        settings: { contains: ["use_query_cache = 0"] }
 
   - name: An open joined node is not a point lookup
     query:
@@ -21,7 +20,6 @@ cases:
     physical:
       clickhouse:
         point_lookup: false
-        settings: { contains: ["use_query_cache = 1", "query_cache_ttl = 10"] }
 
   - name: Pinned nodes over single hops form a point lookup
     query:
@@ -33,7 +31,6 @@ cases:
     physical:
       clickhouse:
         point_lookup: true
-        settings: { contains: ["use_query_cache = 0"] }
 
   - name: A variable hop prevents point lookup classification
     query:
@@ -45,7 +42,6 @@ cases:
     physical:
       clickhouse:
         point_lookup: false
-        settings: { contains: ["use_query_cache = 1"] }
 
   - name: A pinned aggregation is a point lookup
     query:
@@ -57,7 +53,6 @@ cases:
     physical:
       clickhouse:
         point_lookup: true
-        settings: { contains: ["use_query_cache = 0"] }
 
   - name: An ID range is not a point lookup
     query:
@@ -69,7 +64,6 @@ cases:
     physical:
       clickhouse:
         point_lookup: false
-        settings: { contains: ["use_query_cache = 1", "query_cache_ttl = 10"] }
 
   - name: Neighbors are not point lookups
     query:
@@ -81,4 +75,3 @@ cases:
     physical:
       clickhouse:
         point_lookup: false
-        settings: { contains: ["use_query_cache = 1"] }

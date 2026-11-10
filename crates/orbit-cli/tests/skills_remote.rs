@@ -34,7 +34,10 @@ fn mock_server(replies: Vec<Reply>) -> (String, thread::JoinHandle<Vec<Request>>
             let deadline = std::time::Instant::now() + ACCEPT_TIMEOUT;
             let mut stream = loop {
                 match listener.accept() {
-                    Ok((stream, _)) => break stream,
+                    Ok((stream, _)) => {
+                        stream.set_nonblocking(false).unwrap();
+                        break stream;
+                    }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         assert!(
                             std::time::Instant::now() < deadline,
@@ -137,13 +140,22 @@ fn tree_reply(version: &str, body_text: &str) -> Reply {
 }
 
 fn tree_reply_with_manifest(version: &str, manifest: &str, body_text: &str) -> Reply {
+    named_tree_reply("orbit", version, manifest, body_text)
+}
+
+fn registry_reply() -> Reply {
+    let manifest = "---\nname: registry\nversion: 1.0.0\ndescription: Registry skill\ncompatibility: Requires Orbit CLI\nmetadata: {}\n---\n# Registry\n<!-- orbit:include local:quick-start -->\n";
+    named_tree_reply("registry", "1.0.0", manifest, "registry reference")
+}
+
+fn named_tree_reply(name: &str, version: &str, manifest: &str, body_text: &str) -> Reply {
     let reference = format!("{body_text}\n");
     let files = BTreeMap::from([
         ("SKILL.md", manifest),
         ("references/remote.md", reference.as_str()),
     ]);
     let body = serde_json::json!({
-        "name": "orbit",
+        "name": name,
         "version": version,
         "compatibility": "Requires Orbit CLI",
         "server_version": "0.1.0",
@@ -757,11 +769,20 @@ fn setup_skill(
     project: &tempfile::TempDir,
     skill_args: &[&str],
 ) -> (Output, std::path::PathBuf) {
+    setup_agent("codex", base_url, project, skill_args)
+}
+
+fn setup_agent(
+    agent: &str,
+    base_url: Option<&str>,
+    project: &tempfile::TempDir,
+    skill_args: &[&str],
+) -> (Output, std::path::PathBuf) {
     let cache = tempfile::tempdir().unwrap();
     let dir = project.path().to_str().unwrap();
     let mut args = vec![
         "setup",
-        "codex",
+        agent,
         "--yes",
         "--skip",
         "instructions",
@@ -865,6 +886,251 @@ fn setup_full_falls_back_when_the_instance_is_unreachable() {
     assert!(skills.join("orbit/references/local/cli.md").is_file());
 }
 
+fn ok_reply(body: &str) -> Reply {
+    Reply {
+        status: 200,
+        reason: "OK",
+        etag: None,
+        body: body.to_string(),
+    }
+}
+
+fn error_reply(status: u16) -> Reply {
+    Reply {
+        status,
+        reason: "Error",
+        etag: None,
+        body: "{\"message\":\"nope\"}".to_string(),
+    }
+}
+
+fn setup_instructions(base_url: Option<&str>) -> (Output, String) {
+    hook_instructions(base_url, &["hook-guard", "instructions"])
+}
+
+fn hook_instructions(base_url: Option<&str>, args: &[&str]) -> (Output, String) {
+    let project = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let mut command = hermetic_orbit(&cache, args);
+    command.current_dir(project.path());
+    if let Some(base_url) = base_url {
+        command
+            .env("ORBIT_API_BASE_URL", base_url)
+            .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+            .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test");
+    }
+    let output = command.output().unwrap();
+    let instructions = String::from_utf8_lossy(&output.stdout).into_owned();
+    (output, instructions)
+}
+
+fn assert_local_only(output: &Output, instructions: &str) {
+    assert!(output.status.success(), "{}", stderr(output));
+    assert!(
+        instructions.contains("grep` must be used for search"),
+        "{instructions}"
+    );
+    assert!(
+        !instructions.contains("query` must be used for counts"),
+        "{instructions}"
+    );
+    assert!(!instructions.contains("Schema for"), "{instructions}");
+    assert!(!instructions.contains("{{"), "{instructions}");
+}
+
+fn assert_remote_without_schema(output: &Output, instructions: &str) {
+    assert!(output.status.success(), "{}", stderr(output));
+    assert!(
+        instructions.contains("query` must be used for counts"),
+        "{instructions}"
+    );
+    assert!(!instructions.contains("Schema for"), "{instructions}");
+    assert!(!instructions.contains("{{"), "{instructions}");
+}
+
+fn request_paths(requests: &[Request]) -> Vec<String> {
+    requests
+        .iter()
+        .map(|request| {
+            request
+                .line
+                .split(' ')
+                .nth(1)
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect()
+}
+
+#[test]
+fn setup_instructions_without_credentials_stay_local() {
+    let (output, instructions) = setup_instructions(None);
+    assert_local_only(&output, &instructions);
+}
+
+#[test]
+fn setup_instructions_stay_local_when_the_instance_is_unreachable() {
+    let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", closed.local_addr().unwrap());
+    drop(closed);
+    let (output, instructions) = setup_instructions(Some(&url));
+    assert_local_only(&output, &instructions);
+}
+
+#[test]
+fn setup_instructions_stay_local_when_orbit_status_is_refused() {
+    for status in [401, 403, 404, 500] {
+        let (url, server) = mock_server(vec![error_reply(status)]);
+        let (output, instructions) = setup_instructions(Some(&url));
+        let requests = server.join().unwrap();
+        assert_local_only(&output, &instructions);
+        assert_eq!(request_paths(&requests), ["/api/graphql"], "{status}");
+    }
+}
+
+const SERVICE_STATUS: &str =
+    r#"{"data":{"orbit":{"serviceStatus":{"state":"HEALTHY","version":"1","components":[]}}}}"#;
+
+#[test]
+fn the_gitlab_flag_gives_a_hook_without_a_credential_the_remote_text() {
+    let (output, instructions) =
+        hook_instructions(None, &["hook-guard", "instructions", "--gitlab"]);
+    assert_remote_without_schema(&output, &instructions);
+}
+
+#[test]
+fn the_gitlab_flag_does_not_override_a_hook_that_has_a_credential() {
+    let (url, server) = mock_server(vec![error_reply(403)]);
+    let (output, instructions) =
+        hook_instructions(Some(&url), &["hook-guard", "instructions", "--gitlab"]);
+    server.join().unwrap();
+    assert_local_only(&output, &instructions);
+}
+
+fn session_start_hook(hooks_file: &std::path::Path) -> String {
+    let hooks = std::fs::read_to_string(hooks_file).unwrap();
+    let hooks: serde_json::Value = serde_json::from_str(&hooks).unwrap();
+    let entries = hooks["hooks"]["SessionStart"].as_array().unwrap();
+    assert_eq!(entries.len(), 1, "{hooks}");
+    entries[0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn a_signed_in_duo_setup_gives_the_tokenless_session_hook_the_remote_text() {
+    let project = tempfile::tempdir().unwrap();
+    let hooks_file = project.path().join(".gitlab/duo/hooks.json");
+    let (url, server) = mock_server(vec![
+        tree_reply("1.0.0", "Remote v1"),
+        ok_reply(SERVICE_STATUS),
+    ]);
+    let (output, skills) = setup_agent("duo", Some(&url), &project, &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(server.join().unwrap().len(), 2);
+    assert!(skills.join("orbit/references/remote.md").is_file());
+
+    let command = session_start_hook(&hooks_file);
+    assert_eq!(command, "orbit hook-guard instructions --gitlab");
+    let args: Vec<&str> = command.split(' ').skip(1).collect();
+    let (output, instructions) = hook_instructions(None, &args);
+    assert_remote_without_schema(&output, &instructions);
+
+    let (output, _) = setup_agent("duo", None, &project, &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        session_start_hook(&hooks_file),
+        "orbit hook-guard instructions"
+    );
+}
+
+#[test]
+fn a_signed_in_codex_setup_keeps_the_session_hook_command() {
+    let project = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS)]);
+    let (output, _) = setup_skill(Some(&url), &project, &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    server.join().unwrap();
+    assert_eq!(
+        session_start_hook(&project.path().join(".codex/hooks.json")),
+        "orbit hook-guard instructions"
+    );
+}
+
+#[test]
+fn setup_instructions_keep_the_bundled_query_line_without_a_schema() {
+    let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS)]);
+    let (output, instructions) = setup_instructions(Some(&url));
+    let requests = server.join().unwrap();
+    assert_remote_without_schema(&output, &instructions);
+    assert!(
+        !instructions.contains("Connected providers"),
+        "{instructions}"
+    );
+    assert_eq!(request_paths(&requests), ["/api/graphql"]);
+}
+
+#[test]
+fn setup_instructions_list_the_servers_entities_and_cache_them() {
+    let schema = |names: &str| {
+        format!(
+            r#"{{"data":{{"orbit":{{"serviceStatus":{{"state":"HEALTHY"}},"schema":{{"nodes":{{"nodes":[{names}]}}}}}}}}}}"#
+        )
+    };
+    let (url, server) = mock_server(vec![
+        ok_reply(&schema(
+            r#"{"name":"Project"},{"name":"bad name"},{"name":"Widget"}"#,
+        )),
+        ok_reply(&schema(r#"{"name":"Gadget"}"#)),
+    ]);
+    let (cache, project) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    for _ in 0..2 {
+        let output = hermetic_orbit(&cache, &["hook-guard", "instructions"])
+            .current_dir(project.path())
+            .env("ORBIT_DATA_DIR", cache.path())
+            .env("ORBIT_API_BASE_URL", &url)
+            .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+            .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
+            .output()
+            .unwrap();
+        let instructions = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            instructions
+                .trim_end()
+                .ends_with("- gitlab: Project, Widget"),
+            "{instructions}"
+        );
+        assert_eq!(
+            instructions.matches("MANDATORY").count(),
+            4,
+            "{instructions}"
+        );
+    }
+    assert_eq!(
+        request_paths(&server.join().unwrap()),
+        ["/api/graphql", "/api/graphql"]
+    );
+}
+
+#[test]
+fn setup_instructions_read_the_rest_status_when_gitlab_has_no_orbit_graphql() {
+    let (url, server) = mock_server(vec![
+        ok_reply(
+            r#"{"errors":[{"message":"Field 'orbit' doesn't exist on type 'Query'",
+                "extensions":{"code":"undefinedField","typeName":"Query","fieldName":"orbit"}}]}"#,
+        ),
+        ok_reply("{}"),
+    ]);
+    let (output, instructions) = setup_instructions(Some(&url));
+    let requests = server.join().unwrap();
+    assert_remote_without_schema(&output, &instructions);
+    assert_eq!(
+        request_paths(&requests),
+        ["/api/graphql", "/api/v4/orbit/status"]
+    );
+}
+
 #[test]
 fn a_rerun_without_skill_flag_keeps_the_instance_full_tree() {
     let project = tempfile::tempdir().unwrap();
@@ -924,6 +1190,149 @@ fn a_wrapper_request_warns_when_a_recorded_agent_cannot_run_it() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(
         stderr(&output).contains("cannot run"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn another_remote_skill_is_listed_and_fetched_without_local_composition() {
+    let cache = tempfile::tempdir().unwrap();
+    let listing = Reply {
+        status: 200,
+        reason: "OK",
+        etag: None,
+        body: r#"{"skills":[{"name":"orbit","description":"O"},{"name":"registry","description":"Registry skill"}]}"#.to_string(),
+    };
+    let (url, server) = mock_server(vec![listing]);
+    let output = run_orbit(Some(&url), &cache, &["skills"]);
+    server.join().unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("registry \u{2014} Registry skill"));
+
+    let (url, server) = mock_server(vec![registry_reply(), registry_reply(), registry_reply()]);
+    let output = run_orbit(Some(&url), &cache, &["skills", "get", "registry"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("name: registry")
+            && stdout.contains("orbit:include local:quick-start")
+            && !stdout.contains("## Query and map"),
+        "{stdout}"
+    );
+    let output = run_orbit(
+        Some(&url),
+        &cache,
+        &["skills", "get", "registry", "references/remote.md"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(output.stdout, b"registry reference\n");
+    let local_file = run_orbit(
+        Some(&url),
+        &cache,
+        &["skills", "get", "registry", "references/local/cli.md"],
+    );
+    assert!(!local_file.status.success());
+    assert!(
+        stderr(&local_file).contains("unknown skill file"),
+        "{}",
+        stderr(&local_file)
+    );
+    let requests = server.join().unwrap();
+    assert_eq!(
+        requests[0].line,
+        "GET /api/v4/orbit/skills/registry HTTP/1.1"
+    );
+}
+
+#[test]
+fn unknown_skill_surfaces_the_server_404() {
+    let cache = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![Reply {
+        status: 404,
+        reason: "Not Found",
+        etag: None,
+        body: r#"{"message":"404 Skill Not Found. Known skills: [\"orbit\"]"}"#.to_string(),
+    }]);
+    let output = run_orbit(Some(&url), &cache, &["skills", "get", "nope"]);
+    server.join().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("Known skills"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn another_skill_never_falls_back_to_the_embedded_orbit_skill() {
+    let cache = tempfile::tempdir().unwrap();
+    let output = run_orbit(None, &cache, &["skills", "get", "registry"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output)
+            .contains("could not fetch the \"registry\" skill: no GitLab credential found")
+    );
+    assert!(
+        !stderr(&output).contains("embedded local skill"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(output.stdout.is_empty());
+
+    let (url, server) = mock_server(vec![status_reply(500)]);
+    let output = run_orbit(Some(&url), &cache, &["skills", "get", "registry"]);
+    server.join().unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        !stderr(&output).contains("embedded local skill"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn skills_list_prints_the_listing() {
+    let cache = tempfile::tempdir().unwrap();
+    let output = run_orbit(None, &cache, &["skills", "list"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("orbit \u{2014}"));
+}
+
+#[test]
+fn invalid_skill_names_fail_without_sending_a_request() {
+    let cache = tempfile::tempdir().unwrap();
+    for name in ["../../user", "x?private_token=1", "Registry"] {
+        let output = run_orbit(Some("http://127.0.0.1:1"), &cache, &["skills", "get", name]);
+        assert!(!output.status.success());
+        assert!(
+            stderr(&output).contains("invalid skill name")
+                && stderr(&output).contains("skills get <name> [path]"),
+            "{}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn misconfigured_url_reports_its_own_reason_for_another_skill() {
+    let cache = tempfile::tempdir().unwrap();
+    let output = hermetic_orbit(&cache, &["skills", "get", "registry"])
+        .env("ORBIT_API_BASE_URL", "notaurl")
+        .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+        .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        !stderr(&output).contains("no GitLab credential"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("ORBIT_API_BASE_URL"),
         "{}",
         stderr(&output)
     );

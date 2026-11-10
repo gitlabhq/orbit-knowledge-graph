@@ -858,6 +858,9 @@
         },
         "stale-edge-reconciliation": {
           "$ref": "#/$defs/StaleEdgeReconciliationConfig"
+        },
+        "namespace-freshness": {
+          "$ref": "#/$defs/NamespaceFreshnessConfig"
         }
       },
       "additionalProperties": false,
@@ -869,7 +872,8 @@
         "table-cleanup",
         "namespace-deletion",
         "migration-completion",
-        "stale-edge-reconciliation"
+        "stale-edge-reconciliation",
+        "namespace-freshness"
       ]
     },
     "GlobalDispatcherConfig": {
@@ -878,10 +882,16 @@
       "properties": {
         "cron": {
           "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         }
       },
       "required": [
-        "cron"
+        "cron",
+        "run_timeout_secs"
       ]
     },
     "CronSchedule": {
@@ -895,6 +905,11 @@
         "cron": {
           "$ref": "#/$defs/CronSchedule"
         },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
         "sweep_interval_secs": {
           "type": "integer",
           "format": "uint64",
@@ -903,6 +918,7 @@
       },
       "required": [
         "cron",
+        "run_timeout_secs",
         "sweep_interval_secs"
       ]
     },
@@ -931,6 +947,11 @@
         "cron": {
           "$ref": "#/$defs/CronSchedule"
         },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
         "publish_window": {
           "type": "integer",
           "format": "uint",
@@ -944,6 +965,7 @@
       },
       "required": [
         "cron",
+        "run_timeout_secs",
         "publish_window",
         "stale_sweeps_per_tick"
       ]
@@ -954,10 +976,16 @@
       "properties": {
         "cron": {
           "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         }
       },
       "required": [
-        "cron"
+        "cron",
+        "run_timeout_secs"
       ]
     },
     "NamespaceDeletionSchedulerConfig": {
@@ -966,10 +994,16 @@
       "properties": {
         "cron": {
           "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         }
       },
       "required": [
-        "cron"
+        "cron",
+        "run_timeout_secs"
       ]
     },
     "MigrationCompletionConfig": {
@@ -978,10 +1012,16 @@
       "properties": {
         "cron": {
           "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         }
       },
       "required": [
-        "cron"
+        "cron",
+        "run_timeout_secs"
       ]
     },
     "StaleEdgeReconciliationConfig": {
@@ -990,6 +1030,11 @@
       "properties": {
         "cron": {
           "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         },
         "lookback_secs": {
           "type": "integer",
@@ -1000,7 +1045,27 @@
       "additionalProperties": false,
       "required": [
         "cron",
+        "run_timeout_secs",
         "lookback_secs"
+      ]
+    },
+    "NamespaceFreshnessConfig": {
+      "description": "Records how far indexed SDLC data trails the datalake for every enabled namespace.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cron",
+        "run_timeout_secs"
       ]
     },
     "HealthCheckConfig": {
@@ -1201,19 +1266,25 @@
       "additionalProperties": false
     },
     "QuerySettings": {
-      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n    use_query_cache: true\n    query_cache_ttl: 10\n  aggregation:\n    max_execution_time: 60\n```",
+      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n    use_query_cache: true\n    query_cache_ttl: 10\n  overrides:\n    aggregation:\n      max_execution_time: 60\n```",
       "type": "object",
       "properties": {
         "default": {
           "$ref": "#/$defs/QueryConfig"
+        },
+        "overrides": {
+          "description": "Per-query-type overrides. Keys must match `QueryType` variant names\nin snake_case. Validated at startup by the server.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/QueryConfig"
+          },
+          "default": {}
         }
       },
+      "additionalProperties": false,
       "required": [
         "default"
-      ],
-      "additionalProperties": {
-        "$ref": "#/$defs/QueryConfig"
-      }
+      ]
     },
     "QueryConfig": {
       "description": "Query execution settings. All fields map to ClickHouse query-level\nsettings. The closed set of fields prevents arbitrary user input from\nreaching the SETTINGS clause (CWE-89).\n\n`None` means \"not specified at this layer\" -- the merge logic in\n[`QuerySettings::resolve`] fills in from the default. The derived\n`Default` is therefore all-`None`: nothing specified, nothing emitted.",
@@ -1425,7 +1496,10 @@
       "type": "object",
       "properties": {
         "enabled": {
-          "type": "boolean"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "collector_url": {
           "type": "string"
@@ -1436,7 +1510,6 @@
       },
       "additionalProperties": false,
       "required": [
-        "enabled",
         "collector_url",
         "deployment"
       ]

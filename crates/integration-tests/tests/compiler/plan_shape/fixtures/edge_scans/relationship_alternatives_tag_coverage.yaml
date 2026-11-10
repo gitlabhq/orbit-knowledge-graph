@@ -17,9 +17,7 @@ physical:
       expect:
         - (Filter _orbit_edge_0.target_tags HAS ANY ['state:opened'], ... (Scan Table(gl_edge) AS _orbit_edge_0))
       reject:
-        - (Scan Table(gl_merge_request) ...)
     emitted:
       expect:
         - (Filter ArrayContains(_orbit_edge_0.target_tags, 'state:opened'), ... (Bind _orbit_edge_0 (_)))
       reject:
-        - (Scan Table(gl_merge_request) ...)

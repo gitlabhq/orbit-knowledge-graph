@@ -16,4 +16,4 @@ physical:
       expect:
         - (Scan Table(gl_edge) ...)
       reject:
-        - (Filter e1.relationship_kind IN ['CONTAINS', 'CREATOR', 'MEMBER_OF'], ... (_))
+        - (Filter _orbit_e1.relationship_kind IN ['CONTAINS', 'CREATOR', 'MEMBER_OF'], ... (_))

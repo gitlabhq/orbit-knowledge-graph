@@ -16,7 +16,7 @@ pub fn apply_text_excerpts(
     let Node::Query(query) = node else { return };
     let max_chars = (WORKHORSE_GRPC_MESSAGE_CAP_BYTES
         / MAX_UTF8_BYTES_PER_CHAR
-        / u64::from(input.fetch_limit().max(1))) as u32;
+        / u64::from(input.sorted_rows().max(1))) as u32;
     let columns: HashMap<String, HashSet<String>> = input
         .nodes
         .iter()

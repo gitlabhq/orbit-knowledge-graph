@@ -235,6 +235,74 @@ fn removed_files_leave_the_graph_and_dependents_are_revisited() {
 }
 
 #[test]
+fn saving_after_a_one_file_edit_rewrites_one_block() {
+    let repo = tempfile::tempdir().unwrap();
+    let sources: Vec<(String, String)> = (0..300)
+        .map(|i| (format!("m{i}.py"), format!("def f{i}():\n    pass\n")))
+        .collect();
+    let sources: Vec<(&str, &str)> = sources
+        .iter()
+        .map(|(path, content)| (path.as_str(), content.as_str()))
+        .collect();
+    write(repo.path(), &sources);
+    let env = Env::for_lang(SupportLang::Python).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let snapshot = dir.path().join("graph.bin");
+    let blocks = || -> HashSet<String> {
+        std::fs::read_dir(dir.path().join("graph.blocks"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect()
+    };
+
+    index(&env, repo.path()).save(&env, &snapshot).unwrap();
+    let before = blocks();
+    let (env, loaded) = State::load(&snapshot, SupportLang::Python).unwrap();
+    let changed = write(repo.path(), &[("m7.py", "def f7():\n    return 1\n")]);
+    reindex(&env, loaded, repo.path(), changed, &[])
+        .save(&env, &snapshot)
+        .unwrap();
+    let after = blocks();
+
+    assert!(before.len() > 1, "300 files fill more than one block");
+    assert_eq!(before.difference(&after).count(), 1);
+    assert_eq!(after.difference(&before).count(), 1);
+    let (_, reloaded) = State::load(&snapshot, SupportLang::Python).unwrap();
+    assert_eq!(reloaded.trees.len(), 300);
+}
+
+#[test]
+fn a_block_from_another_snapshot_is_refused_with_an_error() {
+    let env = Env::for_lang(SupportLang::Python).unwrap();
+    let saved = |file: &str| {
+        let repo = tempfile::tempdir().unwrap();
+        write(repo.path(), &[(file, UTILS)]);
+        let dir = tempfile::tempdir().unwrap();
+        index(&env, repo.path())
+            .save(&env, &dir.path().join("graph.bin"))
+            .unwrap();
+        dir
+    };
+    let block = |dir: &Path| {
+        std::fs::read_dir(dir.join("graph.blocks"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path()
+    };
+    let (ours, theirs) = (saved("ours.py"), saved("theirs.py"));
+    std::fs::copy(block(theirs.path()), block(ours.path())).unwrap();
+
+    let Err(error) = State::load(&ours.path().join("graph.bin"), SupportLang::Python) else {
+        panic!("a block from another snapshot loaded");
+    };
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("theirs.py"), "{error}");
+}
+
+#[test]
 fn a_snapshot_from_another_format_version_is_refused_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let snapshot = dir.path().join("graph.bin");

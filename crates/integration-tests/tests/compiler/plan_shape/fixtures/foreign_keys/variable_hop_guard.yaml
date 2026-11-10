@@ -1,4 +1,4 @@
-name: FK substitution retains exact two-hop paths
+name: Stored expansion retains exact two-hop paths
 
 query:
   json: |

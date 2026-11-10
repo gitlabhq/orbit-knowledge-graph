@@ -1,0 +1,59 @@
+query SchemaPage(
+  $nodesAfter: String
+  $edgesAfter: String
+  $readNodes: Boolean!
+  $readEdges: Boolean!
+  $withProperties: Boolean!
+) {
+  orbit @gl_introduced(version: "19.4.0") {
+    schema {
+      nodes(after: $nodesAfter) @include(if: $readNodes) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          ...NodeKind
+        }
+      }
+      edges(after: $edgesAfter) @include(if: $readEdges) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          name
+          description
+          endpoints {
+            nodes {
+              source {
+                name
+              }
+              target {
+                name
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fragment NodeKind on OrbitSchemaNode {
+  name
+  description
+  domain {
+    name
+  }
+  primaryKey
+  labelProperty
+  properties @include(if: $withProperties) {
+    nodes {
+      name
+      dataType
+      nullable
+      enumValues
+    }
+  }
+}
