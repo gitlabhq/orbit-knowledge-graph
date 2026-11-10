@@ -73,7 +73,7 @@ const VALUE_LONG: &[&str] = &[
 /// Returns whether it nudged, so telemetry counts nudges rather than every tool call.
 pub(crate) fn run(kind: Kind, gitlab: bool) -> bool {
     if matches!(kind, Kind::Instructions) {
-        println!("{}", spec::instructions_text());
+        println!("{}", spec::instructions_text(gitlab));
         return false;
     }
     let mut input = String::new();

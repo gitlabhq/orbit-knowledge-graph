@@ -16,7 +16,7 @@ json_merges:
     entries:
       - hooks:
           - type: command
-            command: "{{orbit}} hook-guard instructions"
+            command: "{{orbit}} hook-guard instructions{{hook_gitlab}}"
             timeout: 10
 skills:
   dir:
