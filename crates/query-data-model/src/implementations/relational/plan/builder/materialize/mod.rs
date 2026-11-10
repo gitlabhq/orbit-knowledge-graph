@@ -8,7 +8,8 @@ use crate::implementations::relational::plan::{
 };
 use crate::plan::tracking::{BodyId, NodeId, Ref};
 
-mod copy;
+mod hook;
+mod read;
 
 /// How `Catalog::materialize` turns shared relations into SQL bodies.
 #[derive(Debug, Clone)]
@@ -44,33 +45,22 @@ impl<B: RelationalBackend> Catalog<B> {
         {
             return Ok(plan);
         }
-        let mut copier = Copier::new(&plan, policy);
-        self.build(|q| {
-            if !plan.settings.is_empty() {
-                q.settings(plan.settings.clone())?;
-            }
-            copier.run(q)
-        })
+        self.rebuild_with(&plan, &mut Share::new(&plan, policy))
     }
 }
 
-struct Copier<'p, B> {
+struct Share<'p, B> {
     old: &'p RelationalPlan<B>,
     policy: &'p SharePolicy,
     readers: Vec<usize>,
     wanted: HashSet<(BodyId, usize)>,
-    refs: HashMap<Ref, Ref>,
     bodies: HashMap<BodyId, Subquery>,
     roots: HashMap<BodyId, Vec<Ref>>,
+    pending: HashMap<NodeId, Vec<Expr>>,
     named: usize,
 }
 
-struct Source {
-    rows: Relation,
-    pending: Vec<Expr>,
-}
-
-impl<'p, B: RelationalBackend> Copier<'p, B> {
+impl<'p, B: RelationalBackend> Share<'p, B> {
     fn new(old: &'p RelationalPlan<B>, policy: &'p SharePolicy) -> Self {
         let plan = &old.plan;
         let mut readers = vec![0; old.bodies.len()];
@@ -114,21 +104,11 @@ impl<'p, B: RelationalBackend> Copier<'p, B> {
             policy,
             readers,
             wanted,
-            refs: HashMap::new(),
             bodies: HashMap::new(),
             roots: HashMap::new(),
+            pending: HashMap::new(),
             named: 0,
         }
-    }
-
-    fn run(&mut self, q: &mut RelationalBuilder<'_, B>) -> Result<Relation, RelationalError> {
-        let mut top: Vec<BodyId> = self.old.with.clone();
-        top.extend(self.old.plan.bodies().filter(|body| self.shared(*body)));
-        top.sort();
-        for body in top {
-            self.define(q, body)?;
-        }
-        self.complete(q, self.old.plan.root())
     }
 
     fn shared(&self, body: BodyId) -> bool {
@@ -145,55 +125,21 @@ impl<'p, B: RelationalBackend> Copier<'p, B> {
         format!("{}{}", self.policy.prefix, self.named - 1)
     }
 
-    fn bind(
-        &mut self,
-        q: &RelationalBuilder<'_, B>,
-        node: NodeId,
-        rows: &Relation,
-    ) -> Result<(), RelationalError> {
-        let plan = &self.old.plan;
-        let fresh = q.construction.outputs(&rows.rows)?;
-        let old: Vec<Ref> = plan.outputs(node).collect();
-        let inherited: HashSet<Ref> = plan
-            .inputs(node)
-            .iter()
-            .flat_map(|input| plan.outputs(*input))
-            .collect();
-        let shift = fresh.len() as isize - old.len() as isize;
-        for (position, output) in old.iter().enumerate() {
-            if inherited.contains(output) {
-                continue;
-            }
-            let index = usize::try_from(position as isize + shift)
-                .map_err(|_| RelationalError::Incomplete("a copied output"))?;
-            self.refs.insert(*output, fresh[index]);
-        }
-        Ok(())
+    fn defer(&mut self, rows: &Relation, predicates: impl IntoIterator<Item = Expr>) {
+        let pending = self.pending.entry(rows.rows.node()).or_default();
+        pending.extend(predicates);
     }
 
-    fn remap(
+    /// Joins the filters deferred onto `rows` into one WHERE.
+    fn flush(
         &mut self,
         q: &mut RelationalBuilder<'_, B>,
-        expr: &Expr,
-    ) -> Result<Expr, RelationalError> {
-        let mut expr = expr.clone();
-        let mut bodies = Vec::new();
-        expr.bodies(&mut |body| bodies.push(*body));
-        let mut copies = HashMap::new();
-        for body in bodies {
-            let (name, _) = self.old.plan.body(body);
-            let name = name.to_string();
-            copies.insert(body, q.subquery(&name, |q| self.statement(q, body))?.id());
-        }
-        expr.bodies(&mut |body| *body = copies[body]);
-        let mut missing = false;
-        expr.visit(&mut |output| match self.refs.get(output) {
-            Some(mapped) => *output = *mapped,
-            None => missing = true,
-        });
-        match missing {
-            true => Err(RelationalError::Incomplete("a copied column")),
-            false => Ok(expr),
+        rows: Relation,
+    ) -> Result<Relation, RelationalError> {
+        let pending = self.pending.remove(&rows.rows.node()).unwrap_or_default();
+        match conjunction(pending) {
+            Some(predicate) => q.filter(rows, predicate),
+            None => Ok(rows),
         }
     }
 }
