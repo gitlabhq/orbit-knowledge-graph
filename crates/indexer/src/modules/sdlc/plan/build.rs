@@ -288,6 +288,36 @@ mod tests {
     }
 
     #[test]
+    fn an_extension_edge_table_is_read_by_its_declared_order_not_an_id() {
+        const WIDGETS: &str =
+            include_str!("../../../../../extensions/tests/fixtures/example.widgets.yaml");
+        let package =
+            extensions::package::Package::parse(WIDGETS, "d1".to_string()).expect("fixture parses");
+        let ontology = extensions::loader::load_merged_ontology(*SCHEMA_VERSION, &[package])
+            .expect("merged model loads");
+        let plans = plans(&ontology, 1_000);
+        let links = plans
+            .namespaced
+            .iter()
+            .find(|plan| plan.name.starts_with("LINKS_"))
+            .expect("the LINKS edge table has a plan");
+
+        let sql = normalize(&render_namespaced(
+            links,
+            &TraversalPath::new_unchecked("1/9/".to_string()),
+        ));
+
+        assert!(
+            sql.contains("source_id") && sql.contains("target_id"),
+            "{sql}"
+        );
+        assert!(
+            !sql.contains(" id,") && !sql.contains(", id "),
+            "an edge table has no id column: {sql}"
+        );
+    }
+
+    #[test]
     fn build_plans_partitions_by_scope() {
         let plans = plans(&test_ontology(), 1_000_000);
         let global: Vec<_> = plans.global.iter().map(|p| p.name.as_str()).collect();

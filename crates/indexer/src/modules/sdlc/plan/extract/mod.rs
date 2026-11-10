@@ -183,7 +183,13 @@ fn get_edge_source_columns(
     let mut source_columns: IndexSet<String> = extract.fields.iter().cloned().collect();
     if uses_single_table_query {
         source_columns.insert(TRAVERSAL_PATH_COLUMN.to_string());
-        source_columns.insert(DEFAULT_PRIMARY_KEY.to_string());
+        // An edge table of the extensions contract has no id: its key is its
+        // declared order, (traversal_path, source_id, target_id).
+        if extract.order_by.is_empty() {
+            source_columns.insert(DEFAULT_PRIMARY_KEY.to_string());
+        } else {
+            source_columns.extend(extract.order_by.iter().cloned());
+        }
     } else {
         source_columns.extend(extract.order_by.iter().cloned());
         source_columns.insert(TRAVERSAL_PATH_COLUMN.to_string());
