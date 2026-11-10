@@ -114,8 +114,8 @@ packages/
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   ├── storage/
-│   │   ├── graph.yaml            ClickHouse
-│   │   └── local.yaml            DuckDB
+│   │   ├── clickhouse.yaml
+│   │   └── duckdb.yaml
 │   ├── services/
 │   │   └── gitaly.yaml
 │   └── sources/
@@ -125,7 +125,7 @@ packages/
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   ├── storage/
-│   │   └── graph.yaml
+│   │   └── clickhouse.yaml
 │   └── sources/
 │       ├── siphon.yaml
 │       └── merge_request.sql.j2
@@ -133,30 +133,30 @@ packages/
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   ├── storage/
-│   │   ├── graph.yaml
-│   │   └── code.yaml             Orbit Next
+│   │   ├── clickhouse.yaml
+│   │   └── orbit_code.yaml
 │   └── sources/
 │       └── siphon.yaml
 ├── integration.jira/
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   ├── storage/
-│   │   └── graph.yaml
+│   │   └── clickhouse.yaml
 │   └── sources/
 │       └── data_lake.yaml
 ├── integration.slack/
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   └── storage/
-│       └── live.yaml             Data Extraction Service
+│       └── live.yaml
 └── tenant.agent_memory/
     ├── graph.yaml
     ├── authorization.yaml
     └── storage/
-        └── graph.yaml
+        └── clickhouse.yaml
 ```
 
-Each package has one `graph.yaml` and one `authorization.yaml`. The `storage/`, `services/` and `sources/` directories hold one fragment per store, service or source, named after it. A source fragment can name query templates, which sit next to it.
+Each package has one `graph.yaml` and one `authorization.yaml`. The `storage/`, `services/` and `sources/` directories hold one fragment per store, service or source. A storage fragment is named after its backend, and a service or source fragment after its service or source. A source fragment can name query templates, which sit next to it.
 
 ```plantuml
 @startuml
