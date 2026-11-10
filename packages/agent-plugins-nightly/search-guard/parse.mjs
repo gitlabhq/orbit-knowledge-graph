@@ -111,7 +111,6 @@ const STOPWORDS = new Set([
 ].map((word) => word.toLowerCase()));
 const IDENTIFIER = /^[A-Za-z_$][\w$]*(?:(?:::|\.|#)[A-Za-z_$][\w$]*)*$/;
 const WORD_SHAPE = /_|[a-z][A-Z]|^[A-Z][a-z]{3,}/;
-/** Lookups ignore case, `_` and `-`, so the same term in another spelling counts as handled. */
 export function normalizeTerm(term) {
   return term.toLowerCase().replace(/[_-]/g, "");
 }
@@ -271,7 +270,6 @@ function judgeSearch(search, isFile) {
     return { skip: "explicit-files" };
   return { term: pattern };
 }
-/** Terms an Orbit command in this Bash call looked up (`glab orbit grep|context|query ...` or `orbit ...`). */
 export function orbitTerms(command) {
   const terms = [];
   for (const stages of pipelines(command)) {
@@ -292,7 +290,6 @@ export function orbitTerms(command) {
   }
   return terms;
 }
-/** `{ term }` for a single-identifier code search, else `{ skip: reason }`. `isFile` reports whether a path is an existing file. */
 export function analyzeSearch(rawToolName, input, isFile) {
   const toolName = rawToolName.toLowerCase();
   if (toolName === "grep") {

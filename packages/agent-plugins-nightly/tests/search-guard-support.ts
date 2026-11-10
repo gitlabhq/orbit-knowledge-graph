@@ -36,18 +36,13 @@ export const CONNECTIONS =
 const GIT = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
 
 export type Stub = {
-  /** A git repository with one commit. */
   repo: string;
-  /** Directory holding the stub launchers and `git`; the first PATH entry in a test. */
   bin: string;
-  /** Every Orbit invocation, one argument list per line. */
   calls: () => string[];
-  /** The `ORBIT_WAIT_TIMEOUT_MS` each Orbit invocation ran with. */
   waitLimits: () => string[];
   launcher: (name: string) => string;
 };
 
-/** A repository plus an `orbit` stub that answers `workspace list`, `grep` and `context` from fixtures. */
 export function stubOrbit(options: { indexed?: boolean; grepStatus?: number } = {}): Stub {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "search-guard-")));
   const repo = join(root, "repo");

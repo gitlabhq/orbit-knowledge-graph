@@ -33,7 +33,6 @@ function statePath(env, sessionId) {
   return directory && join(directory, `search-guard-${String(sessionId).replace(/[^\w-]/g, "_")}.json`);
 }
 
-/** Per-session state: terms already handled and a circuit breaker for failed lookups. */
 function readState(env, sessionId) {
   try {
     const { terms, tripped } = JSON.parse(readFileSync(statePath(env, sessionId), "utf8"));
@@ -54,7 +53,6 @@ function writeState(env, sessionId, state) {
   } catch {}
 }
 
-/** The hook's JSON output for a finished `rg`/`grep` search, or null to pass through. */
 export async function run(input, env = process.env, lookup = lookupDefinition) {
   if (isGuardDisabled(env.ORBIT_SEARCH_GUARD)) return null;
   const sessionId = input.session_id ?? "unknown";

@@ -16,11 +16,6 @@ function isFile(cwd) {
   };
 }
 
-/**
- * Appends Orbit's definition of an identifier to a finished `rg`/`grep` result. It never blocks or
- * alters the search, and reads only an index that already exists. A timeout or failure stops lookups
- * for the session. `ORBIT_SEARCH_GUARD=off` disables it.
- */
 export function registerSearchGuard(pi, lookup = lookupDefinition) {
   if (isGuardDisabled(process.env.ORBIT_SEARCH_GUARD)) return;
 

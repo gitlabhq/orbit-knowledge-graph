@@ -38,7 +38,6 @@ function cut(block, maxChars) {
   return block.length > maxChars ? `${block.slice(0, maxChars)}\n[truncated]` : block;
 }
 
-/** The first definition block of `orbit grep` output: the `Kind name — path:range` header up to the first blank line. */
 export function extractDefinition(output) {
   const lines = output.split("\n");
   const first = lines.findIndex((line) => /^[A-Z]\w* \S+ — \S+:\d+/.test(line));
@@ -70,7 +69,6 @@ export function extractConnections(output, location) {
   return undefined;
 }
 
-/** Runs commands against one overall deadline; each call gets the remaining budget. */
 function budgeted(timeoutMs, signal) {
   const deadline = Date.now() + timeoutMs;
   return async (command, args, cwd) => {
@@ -101,13 +99,6 @@ function budgeted(timeoutMs, signal) {
   };
 }
 
-/**
- * The existing local index of the repository containing `cwd`, at its current commit: the launcher
- * that answered, the database path and the repository top-level. Undefined when there is none, FAILED
- * when git or every launcher failed or ran out of budget.
- * Listing reads the manifest and never indexes. The first launcher of `launchers` that lists
- * successfully is used for the rest of the lookup.
- */
 async function existingIndex(exec, launchers, cwd) {
   const git = await exec("git", ["rev-parse", "--show-toplevel", "HEAD"], cwd);
   if (git === FAILED) return FAILED;
@@ -132,14 +123,6 @@ async function existingIndex(exec, launchers, cwd) {
   return FAILED;
 }
 
-/**
- * Orbit's definition of `term`, with its callers and callees when `orbit context` has them:
- * `{ text }` to append to the search result, `{}` when there is nothing to add, `{ failed: true }`
- * when a command broke or ran out of budget (callers stop looking up for the session).
- * `launchers` are command prefixes to try in order, such as `[["glab", "orbit"], ["orbit"]]`.
- * Every Orbit call passes `--no-index`, so the lookup reads an index that is already there and
- * never builds or refreshes one.
- */
 export async function lookupDefinition(term, cwd, { launchers, timeoutMs = DEFAULT_TIMEOUT_MS, signal }) {
   const exec = budgeted(timeoutMs, signal);
   const aborted = () => (signal?.aborted ? {} : { failed: true });

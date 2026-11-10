@@ -209,8 +209,6 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
     Ok(IndexedRepo { git, client })
 }
 
-/// Like `open_indexed`, but fails instead of indexing when the graph has no complete index of
-/// the current commit.
 pub fn open_indexed_without_indexing(
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
