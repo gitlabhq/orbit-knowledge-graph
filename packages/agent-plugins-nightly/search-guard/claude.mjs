@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isGuardDisabled, lookupDefinition, lookupTimeoutMs } from "./core.mjs";
@@ -19,23 +19,37 @@ function isExistingFile(path, cwd) {
   }
 }
 
-function statePath(sessionId) {
-  return join(tmpdir(), `orbit-search-guard-${String(sessionId).replace(/[^\w-]/g, "_")}.json`);
+/** A private per-user directory: the plugin data dir, else `~/.cache/orbit`. Undefined when it is not ours. */
+function stateDirectory(env) {
+  const directory = env.CLAUDE_PLUGIN_DATA || join(env.XDG_CACHE_HOME || join(homedir(), ".cache"), "orbit");
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const stat = lstatSync(directory);
+  const foreign = typeof process.getuid === "function" && stat.uid !== process.getuid();
+  return stat.isDirectory() && !foreign ? directory : undefined;
+}
+
+function statePath(env, sessionId) {
+  const directory = stateDirectory(env);
+  return directory && join(directory, `search-guard-${String(sessionId).replace(/[^\w-]/g, "_")}.json`);
 }
 
 /** Per-session state: terms already handled and a circuit breaker for failed lookups. */
-function readState(sessionId) {
+function readState(env, sessionId) {
   try {
-    const { terms, tripped } = JSON.parse(readFileSync(statePath(sessionId), "utf8"));
+    const { terms, tripped } = JSON.parse(readFileSync(statePath(env, sessionId), "utf8"));
     return { terms: new Set(terms), tripped: tripped === true };
   } catch {
     return { terms: new Set(), tripped: false };
   }
 }
 
-function writeState(sessionId, state) {
+/** Written to a fresh file and renamed over the state, so a planted symlink is replaced, not followed. */
+function writeState(env, sessionId, state) {
   try {
-    writeFileSync(statePath(sessionId), JSON.stringify({ terms: [...state.terms], tripped: state.tripped }));
+    const path = statePath(env, sessionId);
+    const pending = `${path}.${process.pid}.tmp`;
+    writeFileSync(pending, JSON.stringify({ terms: [...state.terms], tripped: state.tripped }), { mode: 0o600, flag: "wx" });
+    renameSync(pending, path);
   } catch {}
 }
 
@@ -43,12 +57,12 @@ function writeState(sessionId, state) {
 export async function run(input, env = process.env, lookup = lookupDefinition) {
   if (isGuardDisabled(env.ORBIT_SEARCH_GUARD)) return null;
   const sessionId = input.session_id ?? "unknown";
-  const state = readState(sessionId);
+  const state = readState(env, sessionId);
   if (input.tool_name === "Bash" && typeof input.tool_input?.command === "string") {
     const queried = orbitTerms(input.tool_input.command).map(normalizeTerm);
     if (queried.length > 0) {
       for (const term of queried) state.terms.add(term);
-      writeState(sessionId, state);
+      writeState(env, sessionId, state);
       return null;
     }
   }
@@ -64,7 +78,7 @@ export async function run(input, env = process.env, lookup = lookupDefinition) {
   });
   state.terms.add(key);
   if (failed) state.tripped = true;
-  writeState(sessionId, state);
+  writeState(env, sessionId, state);
   if (!text) return null;
   return { hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: text } };
 }

@@ -34,7 +34,10 @@ The search guard reads only an index that already exists: every Orbit call passe
 a lookup never builds or refreshes one, and without an index of the current commit it adds nothing.
 The whole lookup (git, index listing, `grep`, `context`) shares one budget, 1500 ms by default;
 `ORBIT_SEARCH_GUARD_TIMEOUT_MS` changes it, capped at 4000. A timeout or failure stops lookups for
-the rest of the session, and `ORBIT_SEARCH_GUARD=off` disables the guard. The Claude Code hook tries
+the rest of the session, and `ORBIT_SEARCH_GUARD=off` disables the guard. A graph that an index
+run holds locked is not waited for: the lookup adds nothing and the next search tries again. The
+Claude Code hook keeps its per-session state in the plugin data directory (or `~/.cache/orbit`),
+not in the shared temp directory. The Claude Code hook tries
 `glab orbit` and then `orbit`; Pi uses the launcher that setup chose. It parses the `grep` definition
 header and the `context` `Connections (N indexed):` block, which `crates/orbit-cli/tests/no_index.rs`
 pins against the real CLI.

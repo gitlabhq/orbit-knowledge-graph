@@ -213,3 +213,31 @@ fn no_index_refuses_a_database_with_a_stale_code_index_revision() {
 
     assert_refused(repo.path(), data.path(), &database);
 }
+
+#[test]
+fn no_index_gives_up_at_once_on_a_locked_database_when_the_wait_limit_is_zero() {
+    let (repo, data) = (repo(), tempfile::tempdir().expect("tempdir"));
+    let database = indexed_database(repo.path(), data.path());
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(format!("{database}.lock"))
+        .expect("open lock file");
+    lock.lock().expect("hold the index lock");
+
+    for command in ["grep", "context"] {
+        let started = std::time::Instant::now();
+        let output = Command::new(env!("CARGO_BIN_EXE_orbit"))
+            .current_dir(repo.path())
+            .args([command, "--no-index", "--db", &database, "parse_widget"])
+            .env("ORBIT_DATA_DIR", data.path())
+            .env("ORBIT_WAIT_TIMEOUT_MS", "0")
+            .output()
+            .expect("run orbit");
+        assert_eq!(output.status.code(), Some(75), "{command}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "{command} waited"
+        );
+    }
+}

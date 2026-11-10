@@ -42,6 +42,8 @@ export type Stub = {
   bin: string;
   /** Every Orbit invocation, one argument list per line. */
   calls: () => string[];
+  /** The `ORBIT_WAIT_TIMEOUT_MS` each Orbit invocation ran with. */
+  waitLimits: () => string[];
   launcher: (name: string) => string;
 };
 
@@ -66,6 +68,7 @@ export function stubOrbit(options: { indexed?: boolean; grepStatus?: number } = 
   const log = join(root, "calls.log");
   const script = `#!/bin/sh
 echo "$*" >> ${log}
+echo "$ORBIT_WAIT_TIMEOUT_MS" >> ${log}.wait
 case "$1 $2" in
   "workspace list") /bin/cat ${join(root, "list.json")} ;;
   grep\\ *) /bin/cat ${join(root, "grep.txt")}; exit ${options.grepStatus ?? 0} ;;
@@ -85,6 +88,7 @@ esac
         return [];
       }
     },
+    waitLimits: () => readFileSync(`${log}.wait`, "utf8").trim().split("\n"),
     launcher: (name) => join(bin, name),
   };
 }

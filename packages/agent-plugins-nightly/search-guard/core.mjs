@@ -11,6 +11,10 @@ const MAX_CONNECTIONS_CHARS = 1200;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 const execFileAsync = promisify(execFile);
+// Exit codes of `orbit grep`: like rg it exits 1 for no match; 75 (EX_TEMPFAIL) means the local graph
+// stayed locked past the wait limit.
+const EXIT_NO_MATCH = 1;
+const EXIT_BUSY = 75;
 const FAILED = Symbol("failed");
 const OVERSIZED = Symbol("oversized");
 
@@ -79,7 +83,8 @@ function budgeted(timeoutMs, signal) {
         killSignal: "SIGKILL",
         signal,
         maxBuffer: MAX_OUTPUT_BYTES,
-        env: { ...process.env, NO_COLOR: "1" },
+        // A lock held by an index run must fail the lookup now, not hold it until the budget kills it.
+        env: { ...process.env, NO_COLOR: "1", ORBIT_WAIT_TIMEOUT_MS: "0" },
       });
       // A launcher that wants to prompt (for a download, say) must see end of input, not wait.
       running.child.stdin?.end();
@@ -111,6 +116,7 @@ async function existingIndex(exec, launchers, cwd) {
     const [command, ...prefix] = launcher;
     const list = await exec(command, [...prefix, "workspace", "list", "--format", "json"], cwd);
     if (list === OVERSIZED) return undefined;
+    if (list !== FAILED && list.status === EXIT_BUSY) return undefined;
     if (list === FAILED || list.status !== 0) continue;
     try {
       const rows = JSON.parse(list.stdout).filter(
@@ -143,10 +149,13 @@ export async function lookupDefinition(term, cwd, { launchers, timeoutMs = DEFAU
   const [command, ...prefix] = launcher;
   // Without a path, `orbit grep` also searches the GitLab group behind `origin` over the network.
   const grep = await exec(command, [...prefix, "grep", "--no-index", "--db", database, term, top], cwd);
-  // `orbit grep` exits 1 when nothing matches, like rg.
   if (grep === OVERSIZED) return {};
-  if (grep === FAILED || grep.status > 1) return aborted();
-  const definition = grep.status === 0 ? extractDefinition(grep.stdout) : undefined;
+  if (grep === FAILED) return aborted();
+  // No match and a busy graph are normal: nothing to add, and the next search may work. Any other
+  // non-zero exit is a failure.
+  if (grep.status === EXIT_NO_MATCH || grep.status === EXIT_BUSY) return {};
+  if (grep.status !== 0) return aborted();
+  const definition = extractDefinition(grep.stdout);
   if (!definition) return {};
   const found = definitionLocation(definition);
   // Grep matching ignores case and `_`; context needs the exact name from the definition header.
