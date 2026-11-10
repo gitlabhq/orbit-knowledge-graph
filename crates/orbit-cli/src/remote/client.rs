@@ -67,13 +67,13 @@ impl OrbitClient {
         )
     }
 
-    /// Resolves credentials like `from_env`, but a missing credential is not an
-    /// error: it returns `None` so callers serve the embedded local skill. An
+    /// Resolves credentials like `from_env_in`, but a missing credential is not an
+    /// error: it returns `None` so callers can fall back to what works offline. An
     /// invalid base URL is still an error so callers can say why they fall back.
-    pub(crate) fn from_skill_env() -> Result<Option<Self>, RemoteError> {
+    pub(crate) fn from_env_in_if_signed_in(dir: &Path) -> Result<Option<Self>, RemoteError> {
         match resolve_endpoint(
             |key| std::env::var(key).ok(),
-            || resolve_via_credential_helper(Path::new(".")),
+            || resolve_via_credential_helper(dir),
         ) {
             Ok(endpoint) => Self::new(endpoint).map(Some),
             Err(error) if error.is::<MissingCredential>() => Ok(None),

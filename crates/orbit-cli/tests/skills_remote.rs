@@ -1254,3 +1254,120 @@ fn misconfigured_url_reports_its_own_reason_for_another_skill() {
         stderr(&output)
     );
 }
+
+const SERVICE_STATUS_WITH_SCHEMA: &str = r#"{"data":{"orbit":{"serviceStatus":{"state":"HEALTHY"},"schema":{"nodes":{"nodes":[{"name":"Project"},{"name":"MergeRequest"}]}}}}}"#;
+
+/// Duo setup the way the Duo CI script runs it: a GitLab token in the environment.
+fn setup_duo(
+    data: &tempfile::TempDir,
+    project: &tempfile::TempDir,
+    token: &str,
+    url: &str,
+) -> Output {
+    let dir = project.path().to_str().unwrap();
+    hermetic_orbit(
+        data,
+        &[
+            "setup",
+            "duo",
+            "--yes",
+            "--no-index",
+            "--project",
+            "--dir",
+            dir,
+        ],
+    )
+    .current_dir(project.path())
+    .env("ORBIT_DATA_DIR", data.path())
+    .env("GITLAB_TOKEN", token)
+    .env("GITLAB_URL", url)
+    .output()
+    .unwrap()
+}
+
+/// The SessionStart hook as duo-cli runs it: same machine, GitLab tokens stripped.
+fn tokenless_hook_instructions(
+    data: &tempfile::TempDir,
+    project: &tempfile::TempDir,
+) -> (Output, String) {
+    let output = hermetic_orbit(data, &["hook-guard", "instructions"])
+        .current_dir(project.path())
+        .env("ORBIT_DATA_DIR", data.path())
+        .output()
+        .unwrap();
+    let instructions = String::from_utf8_lossy(&output.stdout).into_owned();
+    (output, instructions)
+}
+
+#[test]
+fn a_tokenless_hook_after_a_signed_in_setup_describes_the_remote_skill() {
+    let (url, server) = mock_server(vec![
+        tree_reply("1.0.0", "Remote v1"),
+        ok_reply(SERVICE_STATUS_WITH_SCHEMA),
+    ]);
+    let (data, project) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+
+    let output = setup_duo(&data, &project, "glpat-test", &url);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        request_paths(&server.join().unwrap()),
+        ["/api/v4/orbit/skills/orbit", "/api/graphql"]
+    );
+    let skills = project.path().join(".agents/skills");
+    assert!(skills.join("orbit/references/remote.md").is_file());
+
+    let (output, instructions) = tokenless_hook_instructions(&data, &project);
+    assert_remote_without_schema(&output, &instructions);
+    assert!(
+        instructions
+            .trim_end()
+            .ends_with("- gitlab: Project, MergeRequest"),
+        "{instructions}"
+    );
+}
+
+#[test]
+fn a_signed_out_setup_replaces_an_earlier_remote_record() {
+    let (url, server) = mock_server(vec![
+        tree_reply("1.0.0", "Remote v1"),
+        ok_reply(SERVICE_STATUS_WITH_SCHEMA),
+    ]);
+    let (data, project) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let output = setup_duo(&data, &project, "glpat-test", &url);
+    assert!(output.status.success(), "{}", stderr(&output));
+    server.join().unwrap();
+
+    let output = setup_duo(&data, &project, "", "http://127.0.0.1:9");
+    assert!(output.status.success(), "{}", stderr(&output));
+    let skills = project.path().join(".agents/skills");
+    assert!(skills.join("orbit/references/local/cli.md").is_file());
+    assert!(!skills.join("orbit/references/remote.md").exists());
+
+    let (output, instructions) = tokenless_hook_instructions(&data, &project);
+    assert_local_only(&output, &instructions);
+}
+
+#[test]
+fn a_signed_in_hook_ignores_the_setup_record() {
+    let (url, server) = mock_server(vec![
+        tree_reply("1.0.0", "Remote v1"),
+        ok_reply(SERVICE_STATUS_WITH_SCHEMA),
+    ]);
+    let (data, project) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let output = setup_duo(&data, &project, "glpat-test", &url);
+    assert!(output.status.success(), "{}", stderr(&output));
+    server.join().unwrap();
+
+    let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+    let unreachable = format!("http://{}", closed.local_addr().unwrap());
+    drop(closed);
+    let output = hermetic_orbit(&data, &["hook-guard", "instructions"])
+        .current_dir(project.path())
+        .env("ORBIT_DATA_DIR", data.path())
+        .env("GITLAB_TOKEN", "glpat-test")
+        .env("GITLAB_URL", &unreachable)
+        .output()
+        .unwrap();
+    let instructions = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert_local_only(&output, &instructions);
+}

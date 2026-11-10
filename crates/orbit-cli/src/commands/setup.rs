@@ -153,6 +153,7 @@ pub(crate) async fn install(
         "Configured",
         summary::format_configured_per_agent(&plan, &report),
     )?;
+    spec::record_session_for_hooks();
     if !spec::reaches_gitlab() {
         tui::card(
             "GitLab",

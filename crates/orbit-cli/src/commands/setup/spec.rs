@@ -160,11 +160,17 @@ fn render_instructions(launcher: &str, remote: bool, providers: &Providers) -> S
 static SESSION: LazyLock<crate::remote::server_schema::Session> =
     LazyLock::new(|| crate::remote::server_schema::session_start(Path::new(".")));
 
-static RENDERED_INSTRUCTIONS: LazyLock<String> =
-    LazyLock::new(|| render_instructions(launcher(), SESSION.reachable, &SESSION.providers));
+static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| {
+    let session = crate::remote::server_schema::session_or_setup_record(Path::new("."));
+    render_instructions(launcher(), session.reachable, &session.providers)
+});
 
 pub(crate) fn reaches_gitlab() -> bool {
     SESSION.reachable
+}
+
+pub(crate) fn record_session_for_hooks() {
+    crate::remote::server_schema::record_setup_session(&SESSION);
 }
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =

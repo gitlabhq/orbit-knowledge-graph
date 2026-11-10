@@ -256,7 +256,7 @@ fn is_skill_name(value: &str) -> bool {
 }
 
 fn skill_client(name: &str) -> Result<Option<OrbitClient>> {
-    match OrbitClient::from_skill_env() {
+    match OrbitClient::from_env_in_if_signed_in(Path::new(".")) {
         Ok(Some(client)) => Ok(Some(client)),
         Ok(None) => embedded_fallback(name, "no GitLab credential found"),
         Err(error) => embedded_fallback(name, error),

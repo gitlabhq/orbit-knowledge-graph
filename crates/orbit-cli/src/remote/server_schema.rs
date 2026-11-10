@@ -16,7 +16,7 @@ const SCHEMA_WAIT: Duration = Duration::from_secs(3);
 
 pub(crate) type Providers = BTreeMap<String, Vec<String>>;
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub(crate) struct Session {
     pub(crate) reachable: bool,
     pub(crate) providers: Providers,
@@ -30,9 +30,44 @@ struct Cached {
 }
 
 pub(crate) fn session_start(dir: &Path) -> Session {
-    let Ok(client) = OrbitClient::from_env_in(dir) else {
-        return Session::default();
+    match OrbitClient::from_env_in_if_signed_in(dir) {
+        Ok(Some(client)) => probe(client, dir),
+        _ => Session::default(),
+    }
+}
+
+/// Like `session_start`, but without a credential it reuses the session setup recorded:
+/// agents such as duo-cli strip GitLab tokens from hook environments while the agent's
+/// own shell keeps them, so setup's view is the one that matches the installed skill.
+pub(crate) fn session_or_setup_record(dir: &Path) -> Session {
+    match OrbitClient::from_env_in_if_signed_in(dir) {
+        Ok(Some(client)) => probe(client, dir),
+        Ok(None) => read_setup_record().unwrap_or_default(),
+        Err(_) => Session::default(),
+    }
+}
+
+pub(crate) fn record_setup_session(session: &Session) {
+    let (Some(path), Ok(body)) = (setup_record_path(), serde_json::to_vec(session)) else {
+        return;
     };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, body);
+}
+
+fn read_setup_record() -> Option<Session> {
+    let text = std::fs::read(setup_record_path()?).ok()?;
+    serde_json::from_slice(&text).ok()
+}
+
+fn setup_record_path() -> Option<PathBuf> {
+    let root = crate::workspace::Workspace::default_root().ok()?;
+    Some(root.join("var").join("setup-session.json"))
+}
+
+fn probe(client: OrbitClient, dir: &Path) -> Session {
     let scope = client.get_host().ok().and_then(|host| {
         super::origin::project(dir)
             .filter(|(origin_host, _)| *origin_host == host)
