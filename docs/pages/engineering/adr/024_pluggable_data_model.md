@@ -42,12 +42,13 @@ Agent memory needs custom node types for one tenant.
 2. **The loader does the work once.** It resolves every name to an ID, checks every rule, and fails once with every error and its package. It precomputes the guard of every read from graph reachability. A hash of the packages identifies the model, and every plan carries it.
 3. **Packages load at runtime from a registry keyed by package.** Each package has its own version line. A tenant's model is the active version of every package that applies to it. A new version needs no rebuild and no deploy.
 4. **A version goes live after its backfill.** The migration scope is the diff between the new version's storage and source fragments and the active one's. The indexing engine of ADR 023 backfills the tables in scope, then the registry promotes the version and the query engine swaps models atomically.
-5. **A backend implements one trait.** A catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. Shared code reads capabilities and never checks a backend name. One compile targets one connection.
+5. **A backend implements one trait.** A catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. Shared code reads capabilities and never checks a backend name.
 6. **Every plan is built through a checked catalog builder.** There is one logical plan language and one physical plan language per kind of backend. Shared tracking checks every connection as it is made, and rewrites use the same builder, so no phase can leave an invalid plan.
 7. **Surfaces parse, and the compiler plans.** A surface turns text into a logical plan, and construction errors replace the validation pass. The planning phase reads the logical plan and builds the physical plan in one step, with no intermediate plan description.
 8. **Security reads guards in its own phase.** It applies the guard of every read as ordinary plan operations, as a filter or as a precondition on the request. A final check proves that every read carries its guard.
 9. **The catalog renders its own plans.** The catalog that builds a plan renders it, into SQL with parameters or into the backend's native request.
-10. **Plans are tested in three stages.** Plan tests assert the logical plan, the physical plan right after planning, and the physical plan after every phase.
+10. **A query that spans connections runs as an execution DAG.** The planner splits it into stages, one per connection, connected by key sets and rows. The query engine runs the DAG and applies the final order, limit and pagination.
+11. **Plans are tested in three stages.** Plan tests assert the logical plan, the physical plan right after planning, and the physical plan after every phase.
 
 ## How it works
 
@@ -324,7 +325,7 @@ end note
 A catalog is the set of declarations for one model and one plan language, plus the API that builds plans in that language.
 The model exposes one logical catalog and one physical catalog per connection.
 Each backend implements `StorageBackend`, owns its physical schema and renderer, and declares capabilities as facts; shared code never checks a backend name.
-One compile targets one connection, and one query can read every store on it.
+A stage targets one connection, and it can read every store on that connection.
 
 ### 5. A query becomes a request
 
@@ -391,6 +392,44 @@ Each physical language has its own planning decisions: a foreign key over an edg
 The guard takes the form each backend understands: a path filter in SQL, a repository restriction for Orbit Next, and a namespace precondition on a Slack call, whose results Slack then filters again through the caller's own sign-in.
 Plan tests assert three checked stages of every query: the logical plan, the physical plan right after planning, and the physical plan after every phase.
 
+### 7. A query that spans connections runs as a DAG of stages
+
+Some queries need data from more than one connection. This one joins open merge requests, which live in ClickHouse, with code that Orbit Next keeps on S3 in its trigram index, commit manifests and code graph:
+
+```plaintext
+MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_BRANCH]->(b:Branch)
+      -[:HAS_COMMIT {head: true}]->(:Commit)-[:HAS_FILE]->(f:File)
+WHERE f.content CONTAINS EXACT 'TODO(security)'
+RETURN mr.iid, b.name, f.path
+```
+
+The planner splits the logical plan into stages, one per connection, and connects them in an execution DAG:
+
+```mermaid
+%%{init: {"flowchart": {"curve": "linear"}}}%%
+flowchart LR
+    accTitle: An execution DAG across two connections
+    accDescr: Stage 1 runs on ClickHouse and returns open merge requests with their project and source branch. Its keys feed stage 2, which runs on Orbit Next and searches only those branch heads for the exact text. Stage 3 runs in the query engine, joins both results on project and branch, and applies the result columns, order, limit and pagination.
+    S1["Stage 1: ClickHouse<br/>open merge requests<br/>and source branches"]
+    S2["Stage 2: Orbit Next<br/>head commits of those branches,<br/>files with an exact match"]
+    S3["Stage 3: query engine<br/>join on project and branch,<br/>order, limit, pagination"]
+    S1 -->|"keys: (project, branch)"| S2
+    S1 -->|"rows: mr.iid, b.name"| S3
+    S2 -->|"rows: f.path"| S3
+
+    classDef stage fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
+    classDef engine fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
+    class S1,S2 stage
+    class S3 engine
+```
+
+Each stage is an ordinary physical plan in its own catalog's language: a relational plan for stage 1 and a code plan for stage 2.
+An edge carries either a key set, which the next stage reads as an `IN` input, or rows that a later stage joins.
+The planner picks the stage order from selectivity: here the open merge requests are few, so they bound the code search to the branches they name.
+The content filter runs in an earlier stage than the order, limit and pagination, so those apply to the matched rows only.
+Security runs on every stage: stage 1 gets its path filter, stage 2 its repository restriction, and the check proves each stage carries its guard.
+Plan tests assert the logical plan, the planned DAG and the emitted DAG.
+
 [Extending the data model](../development/extending-the-data-model.md) documents each extension with its packages and code: a GitLab entity, Jira, Slack, Orbit Next, agent memory and a new query language.
 
 ## Consequences
@@ -402,12 +441,12 @@ Plan tests assert three checked stages of every query: the logical plan, the phy
 - The derived scope covers what the packages describe: storage layout and source fragments. A change in indexer code that alters the rows it writes is outside every package, so the ledger keeps a hand-written widening for it.
 - The server holds each model snapshot until the compiles that use it finish, and caches keyed by the model hash evict old snapshots.
 - A new backend brings its own plan language and renderer, but it reuses the surfaces, the shared tracking and the phases.
+- A key set between stages has a size cap. A stage whose keys exceed it fails the query instead of reading without a bound.
 
 These items are out of scope:
 
 - The indexing engine, which ADR 023 covers
 - Connectors for third-party data
-- Execution across connections, beyond lookups
 - Cost-based join ordering ([ADR 016](016_column_statistics_for_join_ordering.md))
 
 ## Why not the alternatives
