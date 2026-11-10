@@ -660,9 +660,15 @@ mod tests {
                 let rendered = render_instructions(launcher, remote, &Providers::new());
                 assert!(rendered.contains(expected), "{launcher}: {rendered}");
                 assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
-                assert_eq!(rendered.matches("MANDATORY").count(), 1, "{launcher}");
+                assert_eq!(
+                    rendered.matches("MANDATORY").count(),
+                    if remote { 4 } else { 2 },
+                    "{launcher}"
+                );
                 for phrase in [
-                    "MANDATORY: use these instead of grep, rg, or reading files",
+                    &format!(
+                        "MANDATORY: `{launcher} grep` must be used for search instead of grep and rg."
+                    ),
                     "Ignores case, `_`, `-`",
                     "`a|b` OR",
                     "Batch all reads and searches you can name",
@@ -680,7 +686,7 @@ mod tests {
                 );
                 assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
                 assert_eq!(rendered.contains("`branch:`"), remote, "{launcher}");
-                let budget = if remote { 250 } else { 75 };
+                let budget = if remote { 255 } else { 80 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
