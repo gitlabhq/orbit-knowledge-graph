@@ -3,7 +3,9 @@ use std::collections::HashSet;
 use super::contract::{Item, Output, Outputs, Spec};
 use super::plan::{Arena, Node, OutputInfo};
 use super::rewrite::Pending;
-use super::{Declared, Language, NodeId, OutputId, Plan, PlanId, Ref, Rejected, Rows, ScopeId};
+use super::{
+    Body, BodyId, Declared, Language, NodeId, OutputId, Plan, PlanId, Ref, Rejected, Rows, ScopeId,
+};
 use crate::catalog::ModelId;
 
 pub struct Construction<L: Language> {
@@ -81,6 +83,27 @@ impl<L: Language> Construction<L> {
                 output: *output,
             })
             .collect())
+    }
+
+    pub(super) fn own(&self, rows: &Rows) -> Result<Vec<Ref>, Rejected> {
+        let node = &self.arena.nodes[self.node(rows)?.0];
+        let plan = self.arena.plan;
+        let own = node.spec.own().into_iter();
+        Ok(own.map(|output| Ref { plan, output }).collect())
+    }
+
+    pub(super) fn describe(&self, output: Ref) -> String {
+        self.arena.describe(output.output)
+    }
+
+    pub fn body(&self, body: BodyId) -> Result<Body, Rejected> {
+        match body.0 < self.arena.bodies.len() {
+            true => Ok(Body {
+                plan: self.arena.plan,
+                body,
+            }),
+            false => Err(Rejected::ForeignPlan),
+        }
     }
 
     pub fn value(&self, output: Ref) -> Result<(Option<&str>, &L::Value), Rejected> {

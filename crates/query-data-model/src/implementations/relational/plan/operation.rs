@@ -133,8 +133,8 @@ impl Operation {
         bodies
     }
 
-    pub(super) fn visit(&mut self, visit: &mut dyn FnMut(&mut Ref)) {
-        let exprs: Vec<&mut Expr> = match self {
+    fn expressions_mut(&mut self) -> Vec<&mut Expr> {
+        match self {
             Self::Join(JoinKind::Inner(on) | JoinKind::Left(on)) | Self::Filter(on) => vec![on],
             Self::Aggregate { groups, measures } => {
                 groups
@@ -146,24 +146,28 @@ impl Operation {
             }
             Self::Compute(values) | Self::LimitBy { by: values, .. } => values.iter_mut().collect(),
             Self::Order(orders) => orders.iter_mut().map(|order| &mut order.value).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    pub(super) fn visit(&mut self, visit: &mut dyn FnMut(&mut Ref)) {
+        match self {
             Self::Latest { key, version } => {
                 key.iter_mut().for_each(&mut *visit);
                 visit(version);
-                Vec::new()
             }
-            Self::Select(Selection::Columns(columns)) => {
-                columns.iter_mut().for_each(&mut *visit);
-                Vec::new()
-            }
-            Self::Scan { .. }
-            | Self::Read { .. }
-            | Self::Join(JoinKind::Cross)
-            | Self::Limit { .. }
-            | Self::Select(Selection::All)
-            | Self::Union => Vec::new(),
-        };
-        for expr in exprs {
-            expr.visit(visit);
+            Self::Select(Selection::Columns(columns)) => columns.iter_mut().for_each(visit),
+            _ => self
+                .expressions_mut()
+                .into_iter()
+                .for_each(|expr| expr.visit(visit)),
+        }
+    }
+
+    /// Every body this operation's expressions read.
+    pub(super) fn bodies(&mut self, visit: &mut dyn FnMut(&mut BodyId)) {
+        for expr in self.expressions_mut() {
+            expr.bodies(visit);
         }
     }
 }

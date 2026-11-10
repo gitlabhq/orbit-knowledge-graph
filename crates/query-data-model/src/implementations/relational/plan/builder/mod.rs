@@ -3,6 +3,7 @@ mod check;
 mod clauses;
 mod detach;
 mod materialize;
+mod replay;
 mod rewrite;
 mod sources;
 mod tail;

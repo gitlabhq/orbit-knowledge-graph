@@ -11,7 +11,7 @@ use query_data_model::implementations::relational::plan::{
 use query_data_model::plan::logical::{
     EdgeField, Expr as Logical, LogicalOperation, LogicalType, Measure, Projection,
 };
-use query_data_model::plan::tracking::{Declare, Ref};
+use query_data_model::plan::tracking::{Declare, Ref, Step};
 
 use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
@@ -554,73 +554,67 @@ fn enforce<B: SqlBackend>(
         && let Operation::Aggregate { groups, .. } = plan.plan.operation(node)
     {
         let outputs: Vec<Ref> = plan.plan.outputs(node).collect();
-        bound = groups
-            .iter()
-            .cloned()
-            .zip(outputs.iter().copied())
-            .collect();
-        if kind == Kind::Aggregation && !groups.is_empty() {
-            aggregate = Some((node, groups.len(), outputs));
-        }
+        let regrouped = kind == Kind::Aggregation && !groups.is_empty();
+        aggregate = Some((node, groups.clone(), outputs, regrouped));
     }
     let mut added: Vec<Ref> = Vec::new();
     model
-        .rewrite(plan, |q, rows| {
-            let node = q.original();
-            if let Some((aggregate, width, outputs)) = &aggregate
+        .rebuild(plan, |q, step| {
+            let node = Some(step.node());
+            if let Some((aggregate, groups, outputs, regrouped)) = &aggregate
                 && node == Some(*aggregate)
             {
-                let (groups, rows) = regroup(q, &contract, *width, outputs, rows)?;
-                bound = groups;
+                if *regrouped {
+                    let (groups, rows) = regroup(q, step, &contract, groups.len(), outputs)?;
+                    bound = groups;
+                    return Ok(rows);
+                }
+                let rows = step.keep(q)?;
+                bound = groups
+                    .iter()
+                    .zip(outputs)
+                    .map(|(group, output)| Ok((step.expr(group.clone())?, step.output(*output)?)))
+                    .collect::<std::result::Result<_, RelationalError>>()?;
                 return Ok(rows);
             }
+            let scope = Scope {
+                contract: &contract,
+                bound: &bound,
+            };
             if block.compute.is_some() && node == block.compute {
-                let detached = q.detach(rows)?;
-                let Operation::Compute(values) = detached.operation else {
+                let Operation::Compute(values) = step.operation.clone() else {
                     return Err(RelationalError::Incomplete("a compute"));
                 };
-                let source = first(detached.inputs)?;
-                let scope = Scope {
-                    contract: &contract,
-                    bound: &bound,
-                };
+                let source = first(std::mem::take(&mut step.inputs))?;
                 let (rows, columns) = scope.extend(q, &mut names, values, source)?;
                 for (old, new) in computed.iter().zip(&columns) {
-                    if *old != new.output() {
-                        q.reconnect(*old, new.output())?;
-                    }
+                    step.reconnect(*old, new.output())?;
                 }
                 for column in &columns[computed.len()..] {
-                    q.expose(*column)?;
+                    step.expose(column.output());
                     added.push(column.output());
                 }
                 return Ok(rows);
             }
             if node != Some(consumer) && node != Some(select) {
-                return Ok(rows);
+                return step.keep(q);
             }
-            let mut detached = q.detach(rows)?;
             if block.compute.is_none() && node == Some(consumer) {
-                let source = detached.inputs.remove(0);
-                let scope = Scope {
-                    contract: &contract,
-                    bound: &bound,
-                };
+                let source = step.inputs.remove(0);
                 let (rows, columns) = scope.extend(q, &mut names, Vec::new(), source)?;
-                detached.inputs.insert(0, rows);
+                step.inputs.insert(0, rows);
                 added = columns.iter().map(|column| column.output()).collect();
                 if node != Some(select) {
-                    let rows = q.reattach(detached)?;
                     for column in columns {
-                        q.expose(column)?;
+                        step.expose(column.output());
                     }
-                    return Ok(rows);
+                    return step.keep(q);
                 }
             }
-            if let Operation::Select(Selection::Columns(columns)) = &mut detached.operation {
+            if let Operation::Select(Selection::Columns(columns)) = &mut step.operation {
                 columns.extend(added.iter().copied());
             }
-            q.reattach(detached)
+            step.keep(q)
         })
         .map_err(rejected)
 }
@@ -632,22 +626,21 @@ fn first(inputs: Vec<Relation>) -> std::result::Result<Relation, RelationalError
         .ok_or(RelationalError::Incomplete("an input"))
 }
 
-fn regroup<B: RelationalBackend>(
-    q: &mut RelationalBuilder<'_, B>,
+fn regroup<'c, B: RelationalBackend>(
+    q: &mut RelationalBuilder<'c, B>,
+    step: &mut Step<'_, '_, RelationalBuilder<'c, B>>,
     contract: &Contract,
     width: usize,
     outputs: &[Ref],
-    rows: Relation,
 ) -> std::result::Result<(Vec<(Expr, Ref)>, Relation), RelationalError> {
-    let detached = q.detach(rows)?;
     let Operation::Aggregate {
         mut groups,
         measures,
-    } = detached.operation
+    } = step.operation.clone()
     else {
         return Err(RelationalError::Incomplete("an aggregate"));
     };
-    let source = first(detached.inputs)?;
+    let source = first(std::mem::take(&mut step.inputs))?;
     for group in &contract.groups {
         let group = term::<B>(&[&source], group, &[])?;
         if !groups.contains(&group) {
@@ -661,12 +654,10 @@ fn regroup<B: RelationalBackend>(
         .take(width)
         .chain(&aggregated.measures);
     for (old, new) in outputs.iter().zip(fresh) {
-        if *old != new.output() {
-            q.reconnect(*old, new.output())?;
-        }
+        step.reconnect(*old, new.output())?;
     }
     for group in &aggregated.groups[width..] {
-        q.expose(*group)?;
+        step.expose(group.output());
     }
     let outputs = aggregated.groups.iter().map(|group| group.output());
     Ok((groups.into_iter().zip(outputs).collect(), aggregated.rows))

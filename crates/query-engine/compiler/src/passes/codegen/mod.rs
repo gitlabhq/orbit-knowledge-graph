@@ -67,11 +67,11 @@ pub fn configure(
             .map_err(QueryError::Codegen)?,
     );
     catalog
-        .rewrite(plan, |q, rows| {
+        .rebuild(plan, |q, step| {
             if let Some(settings) = settings.take() {
                 q.settings(settings)?;
             }
-            Ok(rows)
+            step.keep(q)
         })
         .map_err(rejected)
 }

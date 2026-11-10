@@ -10,6 +10,7 @@ use query_data_model::implementations::relational::plan::RelationalPlan;
 use query_data_model::implementations::relational::plan::{
     Expr, Operation, Order, Relation, RelationalBuilder, RelationalError,
 };
+use query_data_model::plan::tracking::Step;
 
 use crate::error::Result;
 use crate::logical::Query;
@@ -43,48 +44,45 @@ pub fn apply<B: SqlBackend>(
             .collect(),
         _ => Vec::new(),
     };
-    let ties = Ties {
-        keys,
-        groups: &groups,
-    };
+    let unordered = block.order.is_none() && !keys.is_empty();
     model
-        .rewrite(plan, |q, rows| {
-            let node = q.original();
-            let mut rows = rows;
-            if node.is_some() && node == block.order && !keys.is_empty() {
-                let mut detached = q.detach(rows)?;
-                let missing = ties.orders::<B>(&detached.inputs[0])?;
-                if let Operation::Order(orders) = &mut detached.operation {
+        .rebuild(plan, |q, step| {
+            let node = Some(step.node());
+            let ties = |step: &Step<'_, '_, RelationalBuilder<'_, B>>| {
+                let groups = groups.iter().map(|group| step.expr(group.clone()));
+                Ok::<_, RelationalError>(Ties {
+                    keys,
+                    groups: groups.collect::<std::result::Result<_, _>>()?,
+                })
+            };
+            if node == block.order && !keys.is_empty() {
+                let missing = ties(step)?.orders::<B>(&step.inputs[0])?;
+                if let Operation::Order(orders) = &mut step.operation {
                     extend(orders, missing);
                 }
-                rows = q.reattach(detached)?;
             }
-            if node.is_some() && node == block.limit {
-                let mut detached = q.detach(rows)?;
-                if block.order.is_none() && !keys.is_empty() {
-                    let source = detached.inputs.remove(0);
-                    detached.inputs.insert(0, ties.ordered(q, source)?);
+            if node == block.limit {
+                if unordered {
+                    let source = step.inputs.remove(0);
+                    step.inputs.insert(0, ties(step)?.ordered(q, source)?);
                 }
-                detached.operation = Operation::Limit { count, offset };
-                return q.reattach(detached);
+                step.operation = Operation::Limit { count, offset };
+                return step.keep(q);
             }
-            if block.limit.is_some() {
-                return Ok(rows);
-            }
-            if block.select.is_some() && node == block.select {
-                let mut detached = q.detach(rows)?;
-                let mut source = detached.inputs.remove(0);
-                if block.order.is_none() && !keys.is_empty() {
-                    source = ties.ordered(q, source)?;
+            if block.limit.is_none() && block.select.is_some() && node == block.select {
+                let mut source = step.inputs.remove(0);
+                if unordered {
+                    source = ties(step)?.ordered(q, source)?;
                 }
-                detached.inputs.insert(0, q.limit(source, count, offset)?);
-                return q.reattach(detached);
+                step.inputs.insert(0, q.limit(source, count, offset)?);
+                return step.keep(q);
             }
-            if block.select.is_none() && node == Some(root) {
-                if block.order.is_none() && !keys.is_empty() {
-                    rows = ties.ordered(q, rows)?;
+            let mut rows = step.keep(q)?;
+            if block.limit.is_none() && block.select.is_none() && node == Some(root) {
+                if unordered {
+                    rows = ties(step)?.ordered(q, rows)?;
                 }
-                return q.limit(rows, count, offset);
+                rows = q.limit(rows, count, offset)?;
             }
             Ok(rows)
         })
@@ -93,7 +91,7 @@ pub fn apply<B: SqlBackend>(
 
 struct Ties<'a> {
     keys: &'a [Term],
-    groups: &'a [Expr],
+    groups: Vec<Expr>,
 }
 
 impl Ties<'_> {
@@ -105,7 +103,7 @@ impl Ties<'_> {
             .iter()
             .map(|key| {
                 Ok(Order {
-                    value: term::<B>(&[rows], key, self.groups)?,
+                    value: term::<B>(&[rows], key, &self.groups)?,
                     descending: false,
                 })
             })

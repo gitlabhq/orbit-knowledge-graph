@@ -1,10 +1,13 @@
+mod bind;
 mod bodies;
 mod construction;
 mod contract;
 mod error;
 mod ids;
 mod plan;
+mod rebuild;
 mod rewrite;
+mod step;
 
 use std::fmt::Debug;
 
@@ -14,10 +17,12 @@ pub use contract::{Declare, Named, Output, Outputs};
 pub use error::Rejected;
 pub use ids::{Body, BodyId, Declared, NodeId, OutputId, PlanId, Ref, Rows, ScopeId};
 pub use plan::Plan;
+pub use rebuild::{Hook, Rebuild, Rebuilder, rebuild};
 pub use rewrite::rewrite;
+pub use step::{Each, Step};
 
 pub trait Language: Sized {
-    type Operation: Debug;
+    type Operation: Clone + Debug;
     type Value: Clone + Debug + PartialEq;
 
     fn references(operation: &mut Self::Operation, visit: &mut dyn FnMut(&mut Ref));

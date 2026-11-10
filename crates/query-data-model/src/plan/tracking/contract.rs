@@ -67,6 +67,19 @@ impl Spec {
         }
     }
 
+    pub(super) fn own(&self) -> Vec<OutputId> {
+        match self {
+            Self::Preserve(own) => own.clone(),
+            Self::Replace(items) => items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Own(output) => Some(*output),
+                    Item::Keep(_) => None,
+                })
+                .collect(),
+        }
+    }
+
     pub(super) fn remap(&mut self, map: impl Fn(OutputId) -> OutputId) {
         if let Self::Replace(items) = self {
             for item in items {

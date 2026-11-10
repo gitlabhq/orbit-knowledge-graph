@@ -22,7 +22,9 @@ pub use relation::{Column, Relation};
 
 use super::{RelationalBackend, RelationalFacts};
 use crate::catalog::Catalog;
-use crate::plan::tracking::{BodyId, Declared, Language, NodeId, Plan, Ref};
+use crate::plan::tracking::{
+    self, BodyId, Declared, Each, Hook, Language, NodeId, Plan, Ref, Step,
+};
 
 #[derive(Debug)]
 pub struct Relational<B>(PhantomData<B>);
@@ -121,6 +123,32 @@ impl<B: RelationalBackend> Catalog<B> {
         let mut builder = RelationalBuilder::new(self);
         let root = construct(&mut builder);
         builder.finish(root)
+    }
+
+    /// Rebuilds `plan` through the checked builder; `visit` sees each old operation once, after its
+    /// inputs, and keeps, replaces or wraps it.
+    pub fn rebuild<'c>(
+        &'c self,
+        plan: RelationalPlan<B>,
+        visit: impl FnMut(
+            &mut RelationalBuilder<'c, B>,
+            &mut Step<'_, '_, RelationalBuilder<'c, B>>,
+        ) -> Result<Relation, RelationalError>,
+    ) -> Result<RelationalPlan<B>, RelationalError> {
+        self.rebuild_with(&plan, &mut Each(visit))
+    }
+
+    pub(super) fn rebuild_with<'c>(
+        &'c self,
+        plan: &RelationalPlan<B>,
+        hook: &mut impl Hook<RelationalBuilder<'c, B>>,
+    ) -> Result<RelationalPlan<B>, RelationalError> {
+        self.build(|q| {
+            if !plan.settings.is_empty() {
+                q.settings(plan.settings.clone())?;
+            }
+            tracking::rebuild(q, plan, hook)
+        })
     }
 
     pub fn rewrite<'c>(
