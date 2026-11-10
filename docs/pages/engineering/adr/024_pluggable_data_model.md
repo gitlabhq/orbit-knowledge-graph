@@ -106,6 +106,47 @@ The data model is infrastructure and makes no planning decisions: the compiler p
 
 ### 1. Packages describe what exists
 
+A package is a directory of fragments, and the registry holds one version line per package:
+
+```plaintext
+packages/
+├── gitlab/                       platform package shared by every domain
+│   ├── graph.yaml                User, Note, cross-domain relationships
+│   ├── authorization.yaml
+│   ├── graph_store.yaml          ClickHouse graph store and its edge tables
+│   ├── local_store.yaml          DuckDB store for the local CLI
+│   ├── gitaly_service.yaml       lookups served by Gitaly
+│   ├── source.yaml
+│   └── system_note.sql.j2
+├── gitlab.code_review/
+│   ├── graph.yaml                MergeRequest, MergeRequestDiff, ...
+│   ├── authorization.yaml
+│   ├── graph_store.yaml
+│   ├── source.yaml
+│   └── merge_request.sql.j2      extraction query named by source.yaml
+├── gitlab.source_code/
+│   ├── graph.yaml                File, Definition, Commit, ...
+│   ├── authorization.yaml
+│   ├── graph_store.yaml
+│   ├── code_store.yaml           Orbit Next code store
+│   └── source.yaml
+├── integration.jira/             indexed third-party source
+│   ├── graph.yaml                JiraIssue
+│   ├── authorization.yaml
+│   ├── graph_store.yaml
+│   └── source.yaml               rows from the data lake
+├── integration.slack/            fetched at query time
+│   ├── graph.yaml                SlackMessage
+│   ├── authorization.yaml
+│   └── live_store.yaml           Data Extraction Service, no rows
+└── tenant.agent_memory/          loads into one tenant's model only
+    ├── graph.yaml                Memory, ABOUT
+    ├── authorization.yaml
+    └── graph_store.yaml
+```
+
+The fragments in each package are of five kinds.
+
 ```plantuml
 @startuml
 set separator none
@@ -147,7 +188,6 @@ SV --> G : provides
 @enduml
 ```
 
-A package is a set of fragments of five kinds.
 Every fragment refers to the graph and to nothing else, so a new store, a new source or a new access rule never edits the graph.
 A relationship that a foreign key already carries, such as `AUTHORED` through `author_id`, needs no source entry.
 
