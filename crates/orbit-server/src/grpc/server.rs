@@ -64,6 +64,15 @@ impl GrpcServer {
         self
     }
 
+    pub fn with_live_runtime(
+        mut self,
+        runtime: Arc<crate::pipeline::LiveRuntime>,
+        budget: crate::pipeline::LiveBudget,
+    ) -> Self {
+        self.service = self.service.with_live_runtime(runtime, budget);
+        self
+    }
+
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.service = self.service.with_billing(tracker);
         self

@@ -390,6 +390,44 @@ async fn a_where_on_a_live_property_is_a_compile_error_but_a_return_is_not() {
 }
 
 #[tokio::test]
+async fn connect_live_providers_maps_each_package_to_a_working_client() {
+    let behaviors = HashMap::from([("widgets.get".to_string(), behavior(0))]);
+    let (addr, key) = spawn_provider(behaviors).await;
+    let key_dir = tempfile::tempdir().unwrap();
+    let key_path = key_dir.path().join("provider.key");
+    std::fs::write(&key_path, &key).unwrap();
+    let config = ProviderConfig {
+        name: "example".into(),
+        url: format!("http://{addr}"),
+        jwt_key_file: key_path.to_str().unwrap().to_string(),
+        refresh_secs: 60,
+    };
+
+    let providers =
+        extensions::bootstrap::connect_live_providers(std::slice::from_ref(&config)).await;
+    let provider = providers
+        .get("example.widgets")
+        .expect("the package maps to a client");
+
+    let catalog = widgets_catalog();
+    let call = LiveCall {
+        spec: spec(&catalog, "example.widgets|widgets.get"),
+        keys: vec![vec!["w1".into(), "active".into()]],
+    };
+    let outcomes = run_live_operations(
+        provider.as_ref(),
+        &[SCOPE_PATH.into()],
+        USER_ID,
+        vec![call],
+        Duration::from_secs(3),
+    )
+    .await
+    .expect("the mapped client resolves a live call");
+    let key = vec!["w1".to_string(), "active".to_string()];
+    assert_eq!(outcomes[0].statuses[&key], KeyStatus::Ok);
+}
+
+#[tokio::test]
 async fn a_package_without_a_live_block_makes_no_live_call() {
     let package = Package::parse(GADGETS, short_digest(GADGETS)).expect("fixture parses");
     let catalog = LiveCatalog::from_packages(&[package]);

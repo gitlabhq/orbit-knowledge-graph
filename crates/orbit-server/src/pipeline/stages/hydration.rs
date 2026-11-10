@@ -8,8 +8,11 @@ use query_data_model::OrbitQueryModel;
 use query_engine::compiler::constants::{MAX_DYNAMIC_HYDRATION_RESULTS, hydration_node_alias};
 use query_engine::compiler::{
     ColumnSelection, HydrationCompileOptions, HydrationPlan, InputNode, QueryType,
-    compile_input_model,
+    VirtualColumnRequest, compile_input_model,
 };
+
+use super::live_enrich::{self, LIVE_SERVICE, LiveBudget, LiveColumn, LiveRuntime};
+use crate::auth::Claims;
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -109,7 +112,23 @@ impl HydrationStage {
         entity_virtual_columns: &[EntityVirtualColumns<'_>],
         property_map: &mut PropertyMap,
     ) -> Result<(), PipelineError> {
-        let has_work = entity_virtual_columns.iter().any(|(_, vc)| !vc.is_empty());
+        let non_live: Vec<(&str, Vec<VirtualColumnRequest>)> = entity_virtual_columns
+            .iter()
+            .map(|(entity, columns)| {
+                let kept = columns
+                    .iter()
+                    .filter(|column| column.service != LIVE_SERVICE)
+                    .cloned()
+                    .collect();
+                (*entity, kept)
+            })
+            .collect();
+        let non_live: Vec<EntityVirtualColumns<'_>> = non_live
+            .iter()
+            .map(|(entity, c)| (*entity, c.as_slice()))
+            .collect();
+
+        let has_work = non_live.iter().any(|(_, vc)| !vc.is_empty());
         let registry = match ctx.server_extensions.get::<ColumnResolverRegistry>() {
             Some(r) => r,
             None if has_work => {
@@ -128,11 +147,63 @@ impl HydrationStage {
         resolve_virtual_columns(
             registry,
             &resolver_ctx,
-            entity_virtual_columns,
+            &non_live,
             property_map,
             requested_rows,
         )
         .await
+    }
+
+    /// Resolves the live properties a query returns and merges them into the
+    /// property map, before the injected key columns are stripped. Does nothing
+    /// unless the model declares a live property the query returned and a live
+    /// runtime is configured, so a query without live properties is unchanged.
+    async fn enrich_live(
+        ctx: &QueryPipelineContext,
+        entity_virtual_columns: &[EntityVirtualColumns<'_>],
+        property_map: &mut PropertyMap,
+    ) -> Result<(), PipelineError> {
+        let live_columns: Vec<LiveColumn> = entity_virtual_columns
+            .iter()
+            .flat_map(|(entity, columns)| {
+                columns
+                    .iter()
+                    .filter(|column| column.service == LIVE_SERVICE)
+                    .map(move |column| LiveColumn {
+                        entity: (*entity).to_string(),
+                        operation_id: column.lookup.clone(),
+                        property: column.column_name.clone(),
+                    })
+            })
+            .collect();
+        if live_columns.is_empty() {
+            return Ok(());
+        }
+        let Some(runtime) = ctx.server_extensions.get::<LiveRuntime>() else {
+            return Ok(());
+        };
+        let security = ctx.security_context()?;
+        let user_id = ctx
+            .server_extensions
+            .get::<Claims>()
+            .map(|claims| claims.user_id as i64)
+            .unwrap_or(security.org_id);
+        let budget = ctx
+            .server_extensions
+            .get::<LiveBudget>()
+            .copied()
+            .unwrap_or_default();
+
+        live_enrich::enrich_live_properties(
+            runtime,
+            security,
+            user_id,
+            &live_columns,
+            property_map,
+            budget.0,
+        )
+        .await?;
+        Ok(())
     }
 
     async fn execute_hydration(
@@ -282,6 +353,9 @@ impl PipelineStage for HydrationStage {
                 Self::resolve(ctx, &entity_virtuals, &mut property_map)
                     .await
                     .inspect_err(|e| obs.record_error(e))?;
+                Self::enrich_live(ctx, &entity_virtuals, &mut property_map)
+                    .await
+                    .inspect_err(|e| obs.record_error(e))?;
 
                 hydration_helpers::strip_injected_columns(
                     &mut property_map,
@@ -341,6 +415,9 @@ impl PipelineStage for HydrationStage {
                         .map(|s| (s.entity_type.as_str(), s.virtual_columns.as_slice()))
                         .collect();
                     Self::resolve(ctx, &entity_virtuals, &mut property_map)
+                        .await
+                        .inspect_err(|e| obs.record_error(e))?;
+                    Self::enrich_live(ctx, &entity_virtuals, &mut property_map)
                         .await
                         .inspect_err(|e| obs.record_error(e))?;
 

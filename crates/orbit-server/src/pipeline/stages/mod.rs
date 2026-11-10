@@ -1,6 +1,7 @@
 mod authorization;
 mod execution;
 mod hydration;
+mod live_enrich;
 mod redaction;
 mod routing;
 mod security;
@@ -8,6 +9,7 @@ mod security;
 pub use authorization::AuthorizationStage;
 pub use execution::ClickHouseExecutor;
 pub use hydration::HydrationStage;
+pub use live_enrich::{LiveBudget, LiveRuntime};
 pub use redaction::RedactionStage;
 pub use routing::{RoutingOutput, RoutingStage};
 pub use security::SecurityStage;

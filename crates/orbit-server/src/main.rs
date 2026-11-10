@@ -179,6 +179,28 @@ async fn indexer_ontology(
     Ok(Arc::new(model.ontology))
 }
 
+/// Builds the query pipeline's live runtime from the configured providers and
+/// attaches it to the gRPC server. A provider that is down, or packages with no
+/// live block, leave the server unchanged; live properties then resolve to null.
+async fn attach_live_runtime(server: GrpcServer, config: &AppConfig) -> GrpcServer {
+    let provider_configs = extension_provider_configs(config);
+    let packages = extensions::bootstrap::load_provider_model(&provider_configs, *SCHEMA_VERSION)
+        .await
+        .map(|model| model.packages)
+        .unwrap_or_default();
+    let catalog = extensions::live::LiveCatalog::from_packages(&packages);
+    if catalog.is_empty() {
+        return server;
+    }
+
+    let providers = extensions::bootstrap::connect_live_providers(&provider_configs).await;
+    let runtime = Arc::new(orbit_server::pipeline::LiveRuntime { catalog, providers });
+    let budget = orbit_server::pipeline::LiveBudget(std::time::Duration::from_millis(
+        config.extensions.live_total_budget_ms,
+    ));
+    server.with_live_runtime(runtime, budget)
+}
+
 fn extension_provider_configs(config: &AppConfig) -> Vec<extensions::provider::ProviderConfig> {
     config
         .extensions
@@ -287,6 +309,10 @@ async fn run_webserver(
         Arc::new(config.analytics.clone()),
     )
     .with_resolver_registry(Arc::new(resolver_registry));
+
+    if config.extensions.is_enabled() {
+        grpc_server = attach_live_runtime(grpc_server, config).await;
+    }
 
     orbit_billing::register_metrics();
     orbit_billing::register_quota_metrics();

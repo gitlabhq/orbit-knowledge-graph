@@ -9,12 +9,29 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
 pub struct ExtensionsConfig {
     #[serde(default)]
     pub providers: Vec<ExtensionProvider>,
+    /// The total time one query may spend resolving live properties, across every
+    /// operation. Each operation also has its own `timeout_ms` from its package.
+    #[serde(default = "default_live_total_budget_ms")]
+    pub live_total_budget_ms: u64,
+}
+
+impl Default for ExtensionsConfig {
+    fn default() -> Self {
+        Self {
+            providers: Vec::new(),
+            live_total_budget_ms: default_live_total_budget_ms(),
+        }
+    }
+}
+
+fn default_live_total_budget_ms() -> u64 {
+    3000
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

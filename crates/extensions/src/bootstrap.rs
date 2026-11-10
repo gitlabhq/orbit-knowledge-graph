@@ -8,8 +8,12 @@
 //! core, and the next refresh picks the provider up (a new digest then triggers
 //! the graceful restart).
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use ontology::Ontology;
 
+use crate::live::LiveProvider;
 use crate::loader::{LoaderError, load_merged_ontology};
 use crate::package::Package;
 use crate::provider::{ProviderClient, ProviderConfig};
@@ -54,6 +58,44 @@ pub async fn load_provider_model(
         packages,
         scopes_tables,
     })
+}
+
+/// Connects one long-lived client per provider for live queries and maps each
+/// package the provider serves to it. A provider that is unreachable is skipped,
+/// so the query path still serves indexed data; its live properties just resolve
+/// to null until the provider returns. Used to assemble the query pipeline's live
+/// runtime at process start.
+pub async fn connect_live_providers(
+    providers: &[ProviderConfig],
+) -> HashMap<String, Arc<dyn LiveProvider>> {
+    let mut by_package: HashMap<String, Arc<dyn LiveProvider>> = HashMap::new();
+    for provider in providers {
+        match connect_one_live_provider(provider).await {
+            Ok((client, packages)) => {
+                for package in packages {
+                    by_package.insert(package, Arc::clone(&client));
+                }
+            }
+            Err(error) => {
+                orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = "extension_live_provider_unavailable",
+                    expanded(ERROR_MESSAGE) = %error,
+                    "live provider unavailable at start; live properties serve null until it returns"
+                );
+            }
+        }
+    }
+    by_package
+}
+
+async fn connect_one_live_provider(
+    provider: &ProviderConfig,
+) -> Result<(Arc<dyn LiveProvider>, Vec<String>), BootstrapError> {
+    let mut client = ProviderClient::connect(provider).await?;
+    let manifest = client.get_manifest().await?;
+    let packages = manifest.packages.into_iter().map(|p| p.name).collect();
+    let shared: Arc<dyn LiveProvider> = Arc::new(client);
+    Ok((shared, packages))
 }
 
 async fn fetch_provider_packages(

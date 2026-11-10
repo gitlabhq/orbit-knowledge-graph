@@ -70,6 +70,13 @@
     },
     "object_storage": {
       "$ref": "#/$defs/ObjectStorageConfig"
+    },
+    "extensions": {
+      "$ref": "#/$defs/ExtensionsConfig",
+      "default": {
+        "providers": [],
+        "live_total_budget_ms": 3000
+      }
     }
   },
   "additionalProperties": false,
@@ -773,6 +780,11 @@
           "description": "Namespace deletion handler.",
           "type": "string",
           "const": "namespace_deletion"
+        },
+        {
+          "description": "Extension entity handlers, driven by downstream providers. Off unless\nlisted in `engine.modules`, so it is never part of [`IndexerModule::all`].",
+          "type": "string",
+          "const": "extensions"
         }
       ]
     },
@@ -1764,6 +1776,52 @@
       "enum": [
         "identity",
         "static"
+      ]
+    },
+    "ExtensionsConfig": {
+      "type": "object",
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExtensionProvider"
+          },
+          "default": []
+        },
+        "live_total_budget_ms": {
+          "description": "The total time one query may spend resolving live properties, across every\noperation. Each operation also has its own `timeout_ms` from its package.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 3000
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExtensionProvider": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "jwt_key_file": {
+          "type": "string"
+        },
+        "refresh_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "url",
+        "jwt_key_file",
+        "refresh_secs"
       ]
     }
   }

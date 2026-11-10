@@ -215,6 +215,15 @@ impl OrbitServiceImpl {
         self
     }
 
+    pub fn with_live_runtime(
+        mut self,
+        runtime: Arc<crate::pipeline::LiveRuntime>,
+        budget: crate::pipeline::LiveBudget,
+    ) -> Self {
+        self.pipeline = self.pipeline.with_live_runtime(runtime, budget);
+        self
+    }
+
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.pipeline = self.pipeline.with_billing(tracker);
         self

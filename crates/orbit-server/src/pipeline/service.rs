@@ -23,8 +23,8 @@ use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, Pipel
 use super::helpers::send_query_result;
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, RoutingOutput,
-    RoutingStage, SecurityStage,
+    AuthorizationStage, ClickHouseExecutor, HydrationStage, LiveBudget, LiveRuntime,
+    RedactionStage, RoutingOutput, RoutingStage, SecurityStage,
 };
 
 pub struct RawQuery {
@@ -44,6 +44,8 @@ pub enum QueryServiceOutput {
 pub struct QueryPipelineService {
     client: Arc<ArrowClickHouseClient>,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
+    live_runtime: Option<Arc<LiveRuntime>>,
+    live_budget: LiveBudget,
     billing_tracker: Option<Arc<dyn BillingTracker>>,
     analytics_tracker: Option<Arc<dyn AnalyticsTracker>>,
     analytics_config: Arc<AnalyticsConfig>,
@@ -59,6 +61,8 @@ impl QueryPipelineService {
         Self {
             client,
             resolver_registry: None,
+            live_runtime: None,
+            live_budget: LiveBudget::default(),
             billing_tracker: None,
             analytics_tracker: None,
             analytics_config,
@@ -68,6 +72,12 @@ impl QueryPipelineService {
 
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
         self.resolver_registry = Some(registry);
+        self
+    }
+
+    pub fn with_live_runtime(mut self, runtime: Arc<LiveRuntime>, budget: LiveBudget) -> Self {
+        self.live_runtime = Some(runtime);
+        self.live_budget = budget;
         self
     }
 
@@ -116,6 +126,10 @@ impl QueryPipelineService {
         server_extensions.insert(stream);
         if let Some(registry) = &self.resolver_registry {
             server_extensions.insert(ColumnResolverRegistry::clone(registry));
+        }
+        if let Some(runtime) = &self.live_runtime {
+            server_extensions.insert(LiveRuntime::clone(runtime));
+            server_extensions.insert(self.live_budget);
         }
 
         let mut ctx = QueryPipelineContext {
