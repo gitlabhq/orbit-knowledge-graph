@@ -44,7 +44,6 @@ where
             pattern,
             relation: &expansion,
             alias: &relation.alias,
-            reverse,
         };
         walk.expand([source_ids, target_ids])
     }
@@ -55,7 +54,6 @@ struct Walk<'w, 'q, 'c, 'p, M: RelationalModel, B: RelationalBackend> {
     pattern: &'w Pattern<'p, M>,
     relation: &'w EdgeRelation,
     alias: &'w str,
-    reverse: bool,
 }
 
 impl<M: RelationalModel, B: RelationalBackend> Walk<'_, '_, '_, '_, M, B> {
@@ -67,7 +65,8 @@ impl<M: RelationalModel, B: RelationalBackend> Walk<'_, '_, '_, '_, M, B> {
             .map(|(property, _)| (*property).to_string())
             .collect();
         let (start_id, end_id) = edge_columns(relation.direction);
-        let path_id = if self.reverse { start_id } else { end_id };
+        let toward_sources = relation.direction == Direction::Incoming;
+        let path_id = if toward_sources { start_id } else { end_id };
         let from = &pattern.nodes[&relation.from_node];
         let tagged = relation.edge_tables.iter().all(|table| {
             pattern
@@ -147,7 +146,7 @@ impl<M: RelationalModel, B: RelationalBackend> Walk<'_, '_, '_, '_, M, B> {
                 Column::new(&current_alias, path_id),
                 Column::new(&current_alias, kind_column(path_id)),
             );
-            let path = if self.reverse {
+            let path = if toward_sources {
                 OutputValue::PathPrepend {
                     path: step.0,
                     id: step.1,

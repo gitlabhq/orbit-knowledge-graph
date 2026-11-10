@@ -149,12 +149,8 @@ where
         .into_iter()
         .enumerate()
         .map(|(input_index, step)| {
-            let (near, far) = (query.name(step.from), query.name(step.to));
-            let (from, to, direction) = match step.direction {
-                Direction::Incoming => (far, near, Direction::Outgoing),
-                Direction::Outgoing => (near, far, Direction::Outgoing),
-                Direction::Both => (near, far, Direction::Both),
-            };
+            let (from, to, direction) =
+                (query.name(step.from), query.name(step.to), step.direction);
             let types: Vec<String> = match step.relationships {
                 [] => vec!["*".to_string()],
                 named => named
