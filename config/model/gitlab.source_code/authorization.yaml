@@ -10,26 +10,31 @@ entities:
     scope: namespace
     role: reporter
     redaction: {resource: project, ability: read_code, id: project_id}
+    anchor: project_id
 
   Definition:
     scope: namespace
     role: reporter
     redaction: {resource: project, ability: read_code, id: project_id}
+    anchor: project_id
 
   Directory:
     scope: namespace
     role: reporter
     redaction: {resource: project, ability: read_code, id: project_id}
+    anchor: project_id
 
   File:
     scope: namespace
     role: reporter
     redaction: {resource: project, ability: read_code, id: project_id}
+    anchor: project_id
 
   ImportedSymbol:
     scope: namespace
     role: reporter
     redaction: {resource: project, ability: read_code, id: project_id}
+    anchor: project_id
 properties:
   Branch.traversal_path: {hidden: true, filterable: false}
   Commit.traversal_path: {hidden: true, filterable: false}

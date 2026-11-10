@@ -8,17 +8,16 @@ use query_data_model::Catalog;
 use std::collections::{HashMap, HashSet};
 
 use keys::TpLookupValue;
-use query_data_model::{EntityId, RelationshipVariantId};
+use query_data_model::{EntityId, PropertyId, RelationshipVariantId};
 
 use crate::passes::codegen::SqlBackend;
 
-/// Each anchor foreign key by property name; a filter on that name on any entity bounds by its anchor.
-pub(crate) fn anchor_keys(model: &Catalog<impl SqlBackend>) -> Vec<(String, EntityId)> {
-    let mut anchors: Vec<(String, EntityId)> = Vec::new();
-    for (property, anchor) in model.anchor_keys() {
-        let name = &model.graph().property(property).name;
-        if !anchors.iter().any(|(known, _)| known == name) {
-            anchors.push((name.clone(), anchor));
+/// Each anchor foreign key with the entity it anchors to; a filter on the key bounds its holder.
+pub(crate) fn anchor_keys(model: &Catalog<impl SqlBackend>) -> Vec<(PropertyId, EntityId)> {
+    let mut anchors: Vec<(PropertyId, EntityId)> = Vec::new();
+    for anchor in model.anchor_keys() {
+        if !anchors.contains(&anchor) {
+            anchors.push(anchor);
         }
     }
     anchors

@@ -76,6 +76,21 @@ fn full_paths_and_anchor_keys_yield_lookups() {
 }
 
 #[test]
+fn declared_anchors_bound_by_id_and_other_references_do_not() {
+    assert_eq!(
+        keys_of("MATCH (d:Definition {project_id: 7}) RETURN d", "d"),
+        [id("Project", 7)]
+    );
+    assert!(
+        keys_of(
+            "MATCH (mr:MergeRequest {source_project_id: 7}) RETURN mr",
+            "mr"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
 fn scope_preserving_edges_carry_the_pinned_bound() {
     let plan =
         plan("MATCH (mr:MergeRequest {id: 1})-[:HAS_DIFF]->(diff:MergeRequestDiff) RETURN diff");

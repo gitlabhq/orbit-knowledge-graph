@@ -39,7 +39,7 @@ entities:
         type: string
         description: Clean hex commit SHA (40-char SHA-1 or 64-char SHA-256).
         immutable: true
-      project_id: {type: int64, description: Owning project ID., immutable: true}
+      project_id: {type: int64, description: Owning project ID., immutable: true, references: [Project]}
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Definition:
@@ -50,7 +50,7 @@ entities:
     properties:
       id: {type: int64, description: Unique ID., immutable: true}
       traversal_path: {type: string, description: Namespace path for authz.}
-      project_id: {type: int64, description: Owning project ID., immutable: true}
+      project_id: {type: int64, description: Owning project ID., immutable: true, references: [Project]}
       branch: {type: string, description: Git branch., immutable: true}
       commit_sha: {type: string, description: Indexed commit SHA.}
       file_path: {type: string, description: Containing file path., immutable: true}
@@ -84,7 +84,7 @@ entities:
     properties:
       id: {type: int64, description: Unique ID., immutable: true}
       traversal_path: {type: string, description: Namespace path for authz.}
-      project_id: {type: int64, description: Owning project ID., immutable: true}
+      project_id: {type: int64, description: Owning project ID., immutable: true, references: [Project]}
       branch: {type: string, description: Git branch., immutable: true}
       commit_sha: {type: string, description: Indexed commit SHA.}
       path: {type: string, description: Relative path within the repository., immutable: true}
@@ -98,7 +98,7 @@ entities:
     properties:
       id: {type: int64, description: Unique ID., immutable: true}
       traversal_path: {type: string, description: Namespace path for authz.}
-      project_id: {type: int64, description: Owning project ID., immutable: true}
+      project_id: {type: int64, description: Owning project ID., immutable: true, references: [Project]}
       branch: {type: string, description: Git branch., immutable: true}
       commit_sha: {type: string, description: Indexed commit SHA.}
       path: {type: string, description: Relative path within the repository., immutable: true}
@@ -140,7 +140,7 @@ entities:
     properties:
       id: {type: int64, description: Unique ID., immutable: true}
       traversal_path: {type: string, description: Namespace path for authz.}
-      project_id: {type: int64, description: Owning project ID., immutable: true}
+      project_id: {type: int64, description: Owning project ID., immutable: true, references: [Project]}
       branch: {type: string, description: Git branch., immutable: true}
       commit_sha: {type: string, description: Indexed commit SHA.}
       file_path: {type: string, description: Containing file path., immutable: true}

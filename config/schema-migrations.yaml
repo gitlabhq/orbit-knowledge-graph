@@ -5,9 +5,10 @@ migrations:
   note: >-
     Declares relationship attributes over existing edge columns, the DuckDB local
     store routes only the variants it holds and declares its column defaults, entities
-    carry UI style and graph fragments domain descriptions, and the indexer reads
-    ETL from source fragments in the packages; DDL, extract SQL and indexed rows
-    unchanged
+    carry UI style and graph fragments domain descriptions, the indexer reads ETL
+    from source fragments in the packages, and the source-code entities declare
+    project_id as a Project reference and namespace anchor; DDL, extract SQL and indexed
+    rows unchanged
 - version: 118
   scope: "*"
   note: >-

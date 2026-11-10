@@ -213,9 +213,6 @@ pub fn bind_filter(
         }
     };
     let (property_id, data_type) = metadata.unwrap_or_default();
-    let column = property_id
-        .and_then(|property| model.column(property))
-        .unwrap_or(property);
     BoundFilter {
         test,
         property: property_id,
@@ -224,7 +221,8 @@ pub fn bind_filter(
             .map(|property| graph.property(property).selectivity)
             .or_else(|| data_type.map(query_data_model::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
-        namespace_anchor: anchor_keys(model).iter().any(|(name, _)| name == column),
+        namespace_anchor: property_id
+            .is_some_and(|property| anchor_keys(model).iter().any(|(key, _)| *key == property)),
         foreign_key: property_id
             .is_some_and(|property| !graph.property(property).references.is_empty()),
         in_sort_key,

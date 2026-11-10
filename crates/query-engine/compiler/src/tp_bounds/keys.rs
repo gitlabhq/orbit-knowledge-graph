@@ -1,7 +1,7 @@
-use query_data_model::EntityId;
 use query_data_model::TraversalPathKind;
 use query_data_model::plan::logical::{Comparison, Expr, Literal};
 use query_data_model::plan::tracking::Ref;
+use query_data_model::{EntityId, PropertyId};
 
 use crate::logical::{Leaf, Literals, Query};
 
@@ -21,7 +21,7 @@ pub(super) struct TpLookupKey {
 pub(super) fn keys(
     query: Query<'_>,
     output: Ref,
-    anchors: &[(String, EntityId)],
+    anchors: &[(PropertyId, EntityId)],
 ) -> Vec<TpLookupKey> {
     let Some(entity) = query.entity_name(output) else {
         return Vec::new();
@@ -31,18 +31,19 @@ pub(super) fn keys(
         kind,
         value,
     };
-    let filters = |property: &str| -> Vec<Leaf<'_>> {
+    let filters = |tested: &dyn Fn(PropertyId) -> bool| -> Vec<Leaf<'_>> {
         query
             .attached()
             .into_iter()
             .filter(|leaf| {
                 leaf.binding() == output
-                    && matches!(leaf.left, Expr::Property { property: id, .. } if query.property_name(id) == property)
+                    && matches!(leaf.left, Expr::Property { property, .. } if tested(property))
             })
             .collect()
     };
+    let named = |name: &'static str| move |property| query.property_name(property) == name;
     let mut keys = Vec::new();
-    let ids = pinned(&filters("id"));
+    let ids = pinned(&filters(&named("id")));
     for id in &ids {
         keys.push(key(
             entity,
@@ -50,15 +51,15 @@ pub(super) fn keys(
             TpLookupValue::Numeric(*id),
         ));
     }
-    if let Some(Literal::String(path)) = single_eq(&filters("full_path")) {
+    if let Some(Literal::String(path)) = single_eq(&filters(&named("full_path"))) {
         keys.push(key(
             entity,
             TraversalPathKind::FullPath,
             TpLookupValue::Text(path.clone()),
         ));
     }
-    for (column, anchor) in anchors {
-        if let Some(Literal::Int(id)) = single_eq(&filters(column)) {
+    for (foreign_key, anchor) in anchors {
+        if let Some(Literal::Int(id)) = single_eq(&filters(&|property| property == *foreign_key)) {
             let anchor = &query.model.graph().entity(*anchor).name;
             keys.push(key(
                 anchor,

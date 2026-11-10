@@ -103,9 +103,11 @@ where
         Some(role.unwrap_or(RequiredRole::Reporter).as_access_level())
     }
 
-    /// Each foreign key of a namespace-anchor variant, with the entity it anchors to.
+    /// Each foreign key of a namespace-anchor variant or an entity's declared anchor, with the
+    /// entity it anchors to; a declared anchor counts only when that entity is stored here.
     pub fn anchor_keys(&self) -> impl Iterator<Item = (PropertyId, EntityId)> + '_ {
-        self.graph()
+        let graph = self.graph();
+        let variants = graph
             .variants()
             .filter(|variant| {
                 self.variant_scope(variant.id) == Some(EdgeVariantScope::NamespaceAnchor)
@@ -115,7 +117,13 @@ where
                     .routes(variant.id)
                     .find_map(|route| route.foreign_key)?;
                 Some((key.key.property, variant.target))
-            })
+            });
+        let declared = graph.entities().filter_map(|entity| {
+            let anchor = self.model().access().entity(entity.id)?.anchor?;
+            let target = *graph.property(anchor).references.first()?;
+            self.table_of(target).map(|_| (anchor, target))
+        });
+        variants.chain(declared)
     }
 
     pub fn edge_table(&self, variant: RelationshipVariantId) -> Option<&str> {
