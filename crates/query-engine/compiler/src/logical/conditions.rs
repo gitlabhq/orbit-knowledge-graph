@@ -44,10 +44,10 @@ pub fn polarized(predicate: &Predicate) -> Boolean<Leaf<'_>> {
                     left: *left,
                     complemented,
                 });
-                if complemented {
-                    return leaf;
+                match complemented {
+                    true => return leaf,
+                    false => leaf,
                 }
-                leaf
             }
         };
         match negated {
@@ -140,7 +140,6 @@ impl<'p> Query<'p> {
     /// The top-level conjuncts of every filter, polarized.
     pub fn filters(self) -> Vec<Boolean<Leaf<'p>>> {
         self.operations()
-            .into_iter()
             .filter_map(|(_, operation)| match operation {
                 LogicalOperation::Filter(predicate) => Some(polarized(predicate).conjuncts()),
                 _ => None,
