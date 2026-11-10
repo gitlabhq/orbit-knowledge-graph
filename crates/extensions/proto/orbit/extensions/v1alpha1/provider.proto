@@ -1,0 +1,109 @@
+// The Orbit extensions contract, version v1alpha1: the provider API.
+//
+// Orbit owns this contract. The source of truth is in the Orbit repository at
+// crates/extensions/proto/orbit/extensions/v1alpha1/provider.proto. DES keeps
+// this copy to generate its server, and the two files must stay identical.
+//
+// Orbit is the client. A provider (DES) is the server. Every call carries
+// "authorization: Bearer <provider JWT>", HS256, iss "orbit", aud "orbit-provider".
+syntax = "proto3";
+
+package orbit.extensions.v1alpha1;
+
+option go_package = "gitlab.com/gitlab-org/orbit/experiments/data-extraction-service-poc/api/orbit/extensions/v1alpha1;providerpb";
+
+service Provider {
+  // The packages that the provider serves now. Orbit calls it at start and every refresh.
+  rpc GetManifest(GetManifestRequest) returns (Manifest);
+
+  // One package document (YAML, apiVersion orbit.gitlab.com/extensions/v1alpha1).
+  rpc GetPackage(GetPackageRequest) returns (Package);
+
+  // One live operation for one stage of a query. Rows stream as the provider gets
+  // them. A final KeyStatus for each requested key follows its rows.
+  rpc Live(LiveRequest) returns (stream LiveResponse);
+}
+
+message GetManifestRequest {}
+
+message Manifest {
+  string provider = 1;
+  // The datalake table that lists the provider's scopes (id, traversal_path, ETL columns).
+  string scopes_table = 2;
+  repeated PackageRef packages = 3;
+}
+
+message PackageRef {
+  string name = 1;
+  string version = 2;
+  // sha256 of the package document. A new digest makes Orbit reload and reindex the package.
+  string digest = 3;
+}
+
+message GetPackageRequest {
+  string name = 1;
+  string version = 2;
+}
+
+message Package {
+  string name = 1;
+  string version = 2;
+  string digest = 3;
+  string document_yaml = 4;
+}
+
+message LiveRequest {
+  string package = 1;
+  string operation = 2;
+  // The scope paths from the caller's JWT. The provider serves only data in these scopes.
+  repeated string scope_paths = 3;
+  // The GitLab user ID from the caller's JWT. The provider uses that user's own source token.
+  int64 user_id = 4;
+  // For a key-based operation: one key tuple per entity, in the order of the operation's keys.
+  repeated Key keys = 5;
+  // For a search operation: the push-down filters that the operation declares.
+  map<string, string> filters = 6;
+  int64 deadline_unix_ms = 7;
+  uint32 max_rows = 8;
+}
+
+message Key {
+  repeated string values = 1;
+}
+
+message LiveResponse {
+  oneof kind {
+    Row row = 1;
+    KeyStatus status = 2;
+  }
+}
+
+message Row {
+  Key key = 1;
+  map<string, Value> properties = 2;
+}
+
+message Value {
+  oneof kind {
+    string string_value = 1;
+    int64 int_value = 2;
+    double float_value = 3;
+    bool bool_value = 4;
+    int64 timestamp_unix_ms = 5;
+  }
+}
+
+message KeyStatus {
+  Key key = 1;
+  Status status = 2;
+  string message = 3;
+}
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_OK = 1;
+  STATUS_NOT_FOUND = 2;
+  STATUS_FORBIDDEN = 3;
+  STATUS_TIMEOUT = 4;
+  STATUS_ERROR = 5;
+}

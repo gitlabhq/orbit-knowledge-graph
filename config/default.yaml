@@ -248,6 +248,11 @@ billing:
 
 features: {}
 
+# Downstream extension providers. Off by default: with no providers, Orbit loads
+# no package and behaves exactly as before.
+extensions:
+  providers: []
+
 # Static credentials are Option fields meant for secret files:
 # /etc/secrets/object_storage/secret_access_key, /etc/secrets/object_storage/service_account_key.
 object_storage:

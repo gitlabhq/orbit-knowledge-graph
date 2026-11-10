@@ -1,0 +1,40 @@
+apiVersion: orbit.gitlab.com/extensions/v1alpha1
+kind: Package
+metadata:
+  name: example.widgets
+  version: 0.1.0
+graph:
+  entities:
+    Widget:
+      label: name
+      properties:
+        id: { type: int64 }
+        name: { type: string }
+        status: { type: string }
+    Gadget:
+      label: title
+      properties:
+        id: { type: int64 }
+        title: { type: string }
+        size: { type: int64 }
+  relationships:
+    PART_OF: { variants: [Gadget -> Widget], fk: { entity: Gadget, column: widget_id } }
+    LINKS: { variants: [Widget -> Gadget], table: ex_widget_links }
+authorization:
+  entities:
+    Widget: { scope: namespace }
+    Gadget: { scope: namespace }
+storage:
+  store: graph
+  entities:
+    Widget:
+      columns: { id: Int64, name: String, status: LowCardinality(String) }
+      sort_key: [traversal_path, id]
+    Gadget:
+      columns: { id: Int64, title: String, size: Int64 }
+      sort_key: [traversal_path, id]
+sources:
+  source: data_lake
+  entities:
+    Widget: { tables: [ex_widgets], order_by: [traversal_path, id] }
+    Gadget: { tables: [ex_gadgets], order_by: [traversal_path, id] }

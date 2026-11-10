@@ -30,6 +30,7 @@ members = [
   "crates/orbit-migrations",
   "crates/orbit-server-config",
   "crates/orbit-server",
+  "crates/extensions",
   "crates/ontology",
   "crates/query-data-model",
 

@@ -12,6 +12,7 @@ use crate::billing::BillingConfig;
 use crate::clickhouse::ClickHouseConfiguration;
 use crate::clickhouse_setup::ClickHouseSetupConfig;
 use crate::engine::{EngineConfiguration, ScheduleConfig};
+use crate::extensions::ExtensionsConfig;
 use crate::features::FeaturesConfig;
 use crate::gitlab::{GitlabClientConfiguration, GitlabConfig};
 use crate::grpc::GrpcConfig;
@@ -56,6 +57,8 @@ pub struct AppConfig {
     pub billing: BillingConfig,
     pub features: FeaturesConfig,
     pub object_storage: ObjectStorageConfig,
+    #[serde(default)]
+    pub extensions: ExtensionsConfig,
 }
 
 impl AppConfig {

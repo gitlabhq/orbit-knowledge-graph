@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbit.gitlab.com/extensions/v1alpha1/package.json",
+  "title": "Orbit extensions package document, v1alpha1",
+  "description": "A declarative package that a provider serves. Orbit reads every name in it as data only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "graph", "authorization", "storage", "sources"],
+  "properties": {
+    "apiVersion": { "const": "orbit.gitlab.com/extensions/v1alpha1" },
+    "kind": { "const": "Package" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "$ref": "#/$defs/packageName" },
+        "version": { "$ref": "#/$defs/semver" }
+      }
+    },
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entities"],
+      "properties": {
+        "entities": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/entity" },
+          "propertyNames": { "$ref": "#/$defs/entityName" }
+        },
+        "relationships": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/relationship" },
+          "propertyNames": { "$ref": "#/$defs/relationshipName" }
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entities"],
+      "properties": {
+        "entities": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["scope"],
+            "properties": {
+              "scope": { "type": "string", "enum": ["namespace"] }
+            }
+          },
+          "propertyNames": { "$ref": "#/$defs/entityName" }
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["store", "entities"],
+      "properties": {
+        "store": { "type": "string", "enum": ["graph"] },
+        "entities": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/storageEntity" },
+          "propertyNames": { "$ref": "#/$defs/entityName" }
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "entities"],
+      "properties": {
+        "source": { "type": "string", "enum": ["data_lake"] },
+        "entities": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/sourceEntity" },
+          "propertyNames": { "$ref": "#/$defs/entityName" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "packageName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "entityName": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9]*$"
+    },
+    "relationshipName": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "propertyType": {
+      "type": "string",
+      "enum": ["int64", "string", "bool", "float", "timestamp", "date"]
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "properties"],
+      "properties": {
+        "label": { "type": "string" },
+        "properties": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": { "type": { "$ref": "#/$defs/propertyType" } }
+          },
+          "propertyNames": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variants"],
+      "oneOf": [
+        { "required": ["fk"], "not": { "required": ["table"] } },
+        { "required": ["table"], "not": { "required": ["fk"] } }
+      ],
+      "properties": {
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Za-z0-9]* -> [A-Z][A-Za-z0-9]*$"
+          }
+        },
+        "fk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entity", "column"],
+          "properties": {
+            "entity": { "$ref": "#/$defs/entityName" },
+            "column": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+          }
+        },
+        "table": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+      }
+    },
+    "storageEntity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["columns", "sort_key"],
+      "properties": {
+        "columns": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "string" },
+          "propertyNames": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        },
+        "sort_key": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "sourceEntity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tables", "order_by"],
+      "properties": {
+        "tables": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        },
+        "order_by": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

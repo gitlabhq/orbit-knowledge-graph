@@ -1,0 +1,38 @@
+[package]
+name = "extensions"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+description = "Orbit extensions contract: provider client, package loader, and extension graph storage"
+
+[features]
+default = []
+regenerate-protos = ["dep:tonic-prost-build"]
+
+[dependencies]
+ontology = { path = "../ontology" }
+orbit-migrations = { path = "../orbit-migrations" }
+orbit-utils = { path = "../utils" }
+
+async-trait = { workspace = true }
+jsonschema = { workspace = true }
+jsonwebtoken = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+tracing = { workspace = true }
+
+[build-dependencies]
+tonic-prost-build = { workspace = true, optional = true }
+
+[dev-dependencies]
+orbit-versions = { path = "../orbit-versions" }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true, features = ["net"] }

@@ -23,6 +23,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema/version.rs`), migration orchestrator (`schema/migration.rs`), migration completion detection and dead-version GC (`orchestrator/scheduled/migration_completion.rs`). **See `crates/indexer/AGENTS.md` (reuse-infra checklist) before adding a handler.** |
 | `indexer/duckdb` | DuckDB SQL projection for `data_fusion` SDLC plans, injected into `indexer::run` |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
+| `extensions` | Extensions contract (`v1alpha1`): provider gRPC client with per-call JWT, package document schema/validation, translating packages into ontology sources merged with the core model, and extension graph-table DDL |
 | `query-data-model` | Derives shared graph and access-path contracts, backend catalogs, and authorization catalogs; the ClickHouse implementation owns storage definitions used by its DDL and migration consumers |
 | `code-graph` | Code parsing and linking pipeline under `src/v2/` (`pipeline`, `registry`, `config`, `types`, `linker`, `dsl`, `langs/{generic,custom}`); the old `src/legacy/` parser and linker have been removed. Shared `Range`/`Position`/`IntervalTree` live at `src/utils.rs`. |
 | `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper (kept as a separate sub-crate for compile-time isolation) |

@@ -12,6 +12,7 @@ pub mod billing;
 pub mod clickhouse;
 pub mod clickhouse_setup;
 pub mod engine;
+pub mod extensions;
 pub mod features;
 pub mod gitlab;
 pub mod grpc;
@@ -39,6 +40,7 @@ pub use engine::{
     ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
     StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
 };
+pub use extensions::{ExtensionProvider, ExtensionsConfig};
 pub use features::{Feature, FeatureScope, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
 pub use grpc::GrpcConfig;
