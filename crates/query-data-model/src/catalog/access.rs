@@ -361,20 +361,27 @@ impl Access {
         entity: EntityId,
     ) -> Option<Guard> {
         let access = self.entity(entity)?;
-        let redacted = access.redaction.is_some();
-        if store.trusted || access.scope == Scope::Global {
+        if store.trusted {
             return Some(Guard {
                 filter: RowFilter::None,
                 min_role: None,
-                redacted: redacted && !store.trusted,
+                redacted: false,
             });
         }
+        let redacted = access.redaction.is_some();
         let min_role = Some(
             access
                 .role
                 .unwrap_or(RequiredRole::Reporter)
                 .as_access_level(),
         );
+        if access.scope == Scope::Global {
+            return Some(Guard {
+                filter: RowFilter::None,
+                min_role,
+                redacted,
+            });
+        }
         if let Some(column) = store
             .source(entity)
             .and_then(|source| source.path_column.clone())

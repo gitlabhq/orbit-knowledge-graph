@@ -61,7 +61,7 @@ pub(super) fn role_floor(
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     let Some(min_role) = model
-        .role_floor(entity)
+        .min_role(entity)
         .filter(|level| *level > DEFAULT_PATH_ACCESS_LEVEL)
     else {
         return Ok(());

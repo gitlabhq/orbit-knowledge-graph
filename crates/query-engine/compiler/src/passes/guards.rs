@@ -1,12 +1,12 @@
 //! The path columns a scan must filter and the role each one needs, read from
 //! the loader's guards and the store's table facts.
 
+use query_data_model::Catalog;
 use query_data_model::RequiredRole;
 use query_data_model::catalog::RowFilter;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::RelationalFacts;
 use query_data_model::implementations::relational::plan::Table;
-use query_data_model::{Catalog, EntityId};
 
 pub struct PathGuard {
     pub column: String,
@@ -34,7 +34,7 @@ pub fn scan<B: RelationalBackend>(catalog: &Catalog<B>, table: Table) -> Option<
                 column: column.name.clone(),
                 min_role: column
                     .entity
-                    .and_then(|entity| role(catalog, entity))
+                    .and_then(|entity| catalog.min_role(entity))
                     .unwrap_or_else(reporter),
             })
             .collect(),
@@ -43,9 +43,4 @@ pub fn scan<B: RelationalBackend>(catalog: &Catalog<B>, table: Table) -> Option<
 
 fn reporter() -> u32 {
     RequiredRole::Reporter.as_access_level()
-}
-
-fn role<B: RelationalBackend>(catalog: &Catalog<B>, entity: EntityId) -> Option<u32> {
-    let (store, _) = catalog.home(entity)?;
-    store.guard(entity)?.min_role
 }

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{EdgeVariantScope, RequiredRole, TraversalPathKind};
+use crate::{EdgeVariantScope, TraversalPathKind};
 
 use super::{RelationalFacts, TableFacts};
 use crate::catalog::{Catalog, Lookup, Redaction, StorageBackend};
@@ -94,13 +94,6 @@ where
             true => None,
             false => self.model().access().entity(entity)?.redaction.as_ref(),
         }
-    }
-
-    /// The access level a redacted entity requires; reporter unless it names a role.
-    pub fn role_floor(&self, entity: EntityId) -> Option<u32> {
-        self.redaction(entity)?;
-        let role = self.model().access().entity(entity)?.role;
-        Some(role.unwrap_or(RequiredRole::Reporter).as_access_level())
     }
 
     /// Each foreign key of a namespace-anchor variant or an entity's declared anchor, with the

@@ -66,7 +66,7 @@ impl Snapshot {
         let mut abilities_by_type: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
         for entity in catalog.graph().entities() {
             let (Some(redaction), Some(floor)) =
-                (catalog.redaction(entity.id), catalog.role_floor(entity.id))
+                (catalog.redaction(entity.id), catalog.min_role(entity.id))
             else {
                 panic!(
                     "{} has no redaction entry, so Rails never checks it",

@@ -50,7 +50,7 @@ pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, EntityAu
                 owner_entity: redaction
                     .owner
                     .map(|owner| graph.entity(owner).name.clone()),
-                required_access_level: model.role_floor(entity.id)?,
+                required_access_level: model.min_role(entity.id)?,
             };
             Some((entity.name.clone(), config))
         })

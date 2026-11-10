@@ -229,7 +229,7 @@ fn node_access<B: SqlBackend>(
         !pattern.aggregate() || aggregation_row_nodes(query, model).contains(node.alias.as_str());
     let role_floor = query.binding(&node.alias).is_some_and(|binding| {
         model
-            .role_floor(binding.entity)
+            .min_role(binding.entity)
             .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
     });
     let authorized_from_table =

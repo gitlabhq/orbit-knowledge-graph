@@ -20,7 +20,7 @@ pub fn restrict_hydration(
         for binding in query.bindings() {
             let entity = graph.entity(binding.entity).name.as_str();
             if let Some(min_role) = model
-                .role_floor(binding.entity)
+                .min_role(binding.entity)
                 .filter(|level| *level > DEFAULT_PATH_ACCESS_LEVEL)
                 && security_ctx.paths_at_least(min_role).is_empty()
             {

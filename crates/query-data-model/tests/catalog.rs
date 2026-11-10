@@ -858,3 +858,22 @@ fn a_managed_store_rejects_unknown_physical_references() {
         ]
     );
 }
+
+#[test]
+fn every_untrusted_guard_carries_the_declared_role() {
+    use query_data_model::{Packages, RequiredRole, testkit};
+
+    for packages in [Packages::embedded(), testkit::with_demo()] {
+        let model = packages.load().unwrap();
+        for store in model.stores() {
+            for source in store.sources() {
+                let entity = model.graph().entity(source.entity);
+                let declared = model.access().entity(source.entity).unwrap().role;
+                let expected = (!store.trusted)
+                    .then(|| declared.unwrap_or(RequiredRole::Reporter).as_access_level());
+                let guard = store.guard(source.entity).unwrap();
+                assert_eq!(guard.min_role, expected, "{} {}", store.name, entity.name);
+            }
+        }
+    }
+}

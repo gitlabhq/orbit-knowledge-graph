@@ -38,7 +38,7 @@ pub fn get_visibility(
         .filter_map(|entity| {
             let table = data_model.table_of(entity.id)?;
             let required_role = data_model
-                .role_floor(entity.id)
+                .min_role(entity.id)
                 .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
             let scope_group = *group_by_role.entry(required_role).or_insert_with(|| {
                 let paths_with_role = security_context.paths_at_least(required_role);

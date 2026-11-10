@@ -108,6 +108,11 @@ impl<B: StorageBackend> Catalog<B> {
     pub fn source(&self, entity: EntityId) -> Option<(&Store, &Source)> {
         self.sources(entity).next()
     }
+
+    /// The access level the entity's home store requires of a caller's path.
+    pub fn min_role(&self, entity: EntityId) -> Option<u32> {
+        self.home(entity)?.0.guard(entity)?.min_role
+    }
 }
 
 impl Model {
