@@ -59,43 +59,38 @@ RETURN u.username, mr.title LIMIT 10
 ### The system
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 45, "rankSpacing": 55}}}%%
 flowchart TB
     accTitle: The data model in one picture
     accDescr: The package registry feeds the loader, which checks packages once into the model. The model exposes a logical catalog and one physical catalog per connection, both built on shared tracking. The query engine parses through the surfaces and builds and rewrites physical plans through the catalogs, which send SQL, gRPC or live calls to the backends. The indexing engine reads sources and storage from the model and writes rows to ClickHouse.
-    subgraph REG["Package registry"]
-        direction LR
-        P1["gitlab.*"]
-        P2["integration.jira"]
-        P3["integration.slack"]
-        P4["tenant.agent_memory"]
-    end
+    REG[("Package registry<br/>gitlab.*, integration.jira,<br/>integration.slack, tenant.agent_memory")]
+    E["Query engine<br/>(compiler phases)"]
     L["Loader"]
-    M["Model<br/>(graph, access, sources,<br/>stores, guards, ModelId)"]
+    IX["Indexing engine<br/>(ADR 023)"]
     S["Surfaces (GQL)"]
+    M["Model<br/>(graph, access, sources,<br/>stores, guards, ModelId)"]
     LC["Logical catalog"]
     PC["Physical catalogs<br/>(one per connection)"]
     T["Shared tracking"]
-    E["Query engine<br/>(compiler phases)"]
-    IX["Indexing engine<br/>(ADR 023)"]
-    CH[("ClickHouse<br/>graph store")]
     DD[("DuckDB<br/>local store")]
     ON["Orbit Next<br/>code service"]
     DES["Data Extraction<br/>Service"]
+    CH[("ClickHouse<br/>graph store")]
 
     REG -->|package versions| L
     L -->|checked once| M
-    M --> LC
-    M --> PC
     E -->|parse| S
     S -->|logical plans| LC
+    M --> LC
+    M --> PC
     E -->|builds and rewrites<br/>physical plans| PC
     IX -->|reads sources<br/>and storage| M
     LC -.-> T
     PC -.-> T
-    PC -->|SQL| CH
     PC -->|SQL| DD
     PC -->|gRPC| ON
     PC -->|live call| DES
+    PC -->|SQL| CH
     IX -->|writes rows| CH
 
     classDef qdm fill:#E3F2FD,stroke:#1565C0
@@ -323,6 +318,7 @@ A final check proves every read carries its guard before anything leaves the que
 ### 6. The same path for every backend
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear"}}}%%
 flowchart LR
     accTitle: The same path for every backend
     accDescr: The planning phase turns one logical plan into a relational plan for ClickHouse and DuckDB, a code plan for Orbit Next, or a live plan for Slack. Each physical plan renders into its backend's request.
