@@ -34,7 +34,7 @@ fn triggers() -> Vec<Trigger> {
 pub enum Trigger {
     Cron(&'static str),
     Stream { subjects: &'static [&'static str], batch: usize, linger: Duration },
-    Done { worker: &'static str },
+    Done(DoneTrigger),
 }
 
 impl Trigger {
@@ -43,6 +43,7 @@ impl Trigger {
 ```
 
 `Done` fires when a task of another worker ends with `done`.
+`Trigger::done` is the only way to build it, so the build fails when the worker does not exist.
 The engine also calls every planner with `Manual` and `Sweep`.
 The admin API or a reconciler sends `Manual`. A campaign or a NATS recovery sends `Sweep`.
 
@@ -56,18 +57,22 @@ pub trait Planner: FromResources + Send + Sync + 'static {
     const NAME: &'static str;
 
     fn triggers() -> Vec<Trigger>;
-    async fn plan(&self, ctx: &mut PlanContext) -> Result<(), PlanError>;
+    async fn plan(&self, ctx: &mut PlanContext, fired: Fired) -> Result<(), PlanError>;
 }
 ```
 
 The code planner routes each repository by its size in the source of truth.
 
 ```rust
-async fn plan(&self, ctx: &mut PlanContext) -> Result<(), PlanError> {
-    let projects: Vec<ProjectRef> = match ctx.fired().clone() {
+async fn plan(&self, ctx: &mut PlanContext, fired: Fired) -> Result<(), PlanError> {
+    let projects: Vec<ProjectRef> = match fired {
         Fired::Events(batch) => batch.decode()?,
         Fired::Manual { keys } => self.projects.find(&keys).await?,
-        Fired::Sweep { cursor, .. } => self.projects.page(ctx, cursor).await?,
+        Fired::Sweep { cursor, .. } => {
+            let page = self.projects.page(cursor).await?;
+            ctx.continue_from(page.next);
+            page.projects
+        }
         Fired::Cron => return Ok(()),
     };
     for project in projects {
@@ -79,7 +84,9 @@ async fn plan(&self, ctx: &mut PlanContext) -> Result<(), PlanError> {
 }
 ```
 
-A planner reads only events and Orbit storage, never a source. Work that must read a source to split itself is a worker. Every planner handles `Manual` and `Sweep`, and the testkit checks it.
+A planner reads only events and Orbit storage, never a source. Work that must read a source to split itself is a worker.
+
+A planner matches every `Fired` variant, with no wildcard arm. A planner that has no use for a variant returns from that arm, so the decision shows in the code. A sweep with more pages calls `ctx.continue_from`, and the engine saves the cursor. During a sweep the engine ignores `.lane()` and uses the `backfill` lane.
 
 ## Step 3: Write the worker
 
@@ -166,7 +173,7 @@ if self.checkpoints.covers(&project).await? {
 impl TaskError {
     pub fn permanent(e: impl Into<anyhow::Error>) -> Self;
     pub fn defer(after: Duration, reason: &'static str) -> Self;
-    pub fn backoff(after: Duration, reason: &'static str) -> Self;
+    pub fn throttle(after: Duration, reason: &'static str) -> Self;
     pub fn incompatible(reason: &'static str) -> Self;
 }
 ```
@@ -175,18 +182,21 @@ impl TaskError {
 |---|---|---|
 | Any error, from `?` | Retry with backoff. Dead-letter after the last attempt. | Yes |
 | `defer` | This input is not ready. Redeliver it after the delay. | No |
-| `backoff` | A shared dependency pushes back. Redeliver. Stop pulling from the lane on this pod until the delay ends. | No |
+| `throttle` | A shared dependency pushes back. Redeliver. Stop pulling from the lane on this pod until the delay ends. | No |
 | `incompatible` | This binary lacks a feature that the input needs. Redeliver to another pod. | No |
 | Lane timeout | Move to the `on_timeout` lane, if Helm sets one. Else retry. | Yes |
 | `permanent` | Dead-letter now. | — |
+| Older than `max_age` | Dead-letter now, with the error class `expired`. | — |
 
-A shared client returns a `Backoff` error when its breaker is open. The worker only writes `?`.
+A shared client returns a `Throttle` error when its breaker is open. The worker only writes `?`.
+
+`defer`, `throttle` and `incompatible` use no attempt, so `max_age` on the lane sets the limit. The age counts from the first delivery to a pod, not from the submit. A task that waits in a backfill lane does not age.
 
 ## Step 5: Chain work
 
 A job is a task plus every task it spawned. A planner's submit starts a new job.
 
-`spawn` splits the input of a worker into child tasks in the same job. Children run in the lane of their parent.
+`spawn` splits the input of a worker into child tasks in the same job. Children run in the lane of their parent. One outcome spawns at most 10,000 children. A worker with more inputs spawns children that split the rest.
 
 ```rust
 let projects = self.projects.in_namespace(namespace.id).await?;
@@ -204,14 +214,17 @@ fn triggers() -> Vec<Trigger> {
 ```
 
 ```rust
-if let Fired::Events(batch) = ctx.fired().clone() {
-    for update in batch.outputs::<GitFetch>()? {
-        ctx.submit::<TrigramBuild>(update.project.tenant.clone(), update.project);
+match fired {
+    Fired::Events(batch) => {
+        for update in batch.outputs::<GitFetch>()? {
+            ctx.submit::<TrigramBuild>(update.project.tenant.clone(), update.project);
+        }
     }
+    Fired::Manual { .. } | Fired::Sweep { .. } | Fired::Cron => {}
 }
 ```
 
-`outputs::<GitFetch>()` returns `GitFetch::Output`. A change to that type breaks the build of the planner, not its runs.
+`outputs::<GitFetch>()` returns `GitFetch::Output`. A change to that type breaks the build of the planner, not its runs. A payload change only adds fields, because old events stay in the stream during a rollout.
 
 ## Step 6: Add a reconciler
 
@@ -238,7 +251,7 @@ The namespace status reconciler reads the newest job for each namespace.
 ```rust
 let version = self.registry.active("gitlab").await?;
 for ns in self.status.not_indexed(&version).await? {
-    let key = Key::new("namespace", format!("{}@{version}", ns.id));
+    let key = NamespaceEnable::key(&ns.at(&version));
     match ctx.last_job::<NamespaceEnable>(&key).await? {
         Some(job) if job.is_done() => self.status.indexed(&ns, &version).await?,
         Some(job) if job.is_failed() => self.status.failed(&ns, &version).await?,
@@ -257,7 +270,7 @@ Each pod reads only its own config. It lists the lanes and sinks that the pod pu
 ```yaml
 engine:
   lanes:
-    code.index/default: { slots: 16, timeout: 15m, on_timeout: code.index/big }
+    code.index/default: { slots: 16, timeout: 15m, max_age: 24h, on_timeout: code.index/big }
   pools: { parse: 10 }
 ```
 
@@ -300,12 +313,12 @@ deployments:
 | Task source | Lane |
 |---|---|
 | A submit | `.lane()`, else `default` |
-| A submit during a sweep | `backfill`, unless `.lane()` is set |
+| A submit during a sweep | `backfill`. The engine ignores `.lane()`. |
 | A submit from a `done` event | The lane of the source task, unless `.lane()` is set |
 | A spawned child | The lane of its parent |
 | A lane timeout with `on_timeout` | The `on_timeout` lane |
 
-Helm renders each deployment as one Deployment and one KEDA ScaledObject, with one trigger for each lane in its config. The chart merges `shared` into every config, so all pods agree on cluster pools and leases. Every worker has a `default` and a `backfill` lane. `mise engine:check-helm` warns when no deployment pulls a lane, and fails when two deployments give one lane different timeouts. `timeout` limits one attempt, including the time after `ctx.detach()`.
+Helm renders each deployment as one Deployment and one KEDA ScaledObject, with one trigger for each lane in its config. The chart merges `shared` into every config, so all pods agree on cluster pools and leases. Every worker has a `default` and a `backfill` lane. `mise engine:check-helm` warns when no deployment pulls a lane, and fails when two deployments give one lane a different `timeout` or `max_age`. It also fails when no deployment sizes a registered pool. `timeout` limits one attempt, including the time after `ctx.detach()`. `max_age` limits all the attempts and deferrals of one task.
 
 ## Step 8: Change a system table
 
@@ -331,6 +344,23 @@ A step may only change metadata, and `build.rs` rejects a step that rewrites dat
 
 ## Step 9: Wire it into the host
 
+A module registers its pieces, its lanes and its pools.
+
+```rust
+pub const BIG: Lane = Lane::new("big");
+
+pub fn register(engine: &mut EngineBuilder) {
+    engine
+        .worker::<CodeIndex>()
+        .planner::<CodePlanner>()
+        .pool("gitaly_archives")
+        .pool("parse")
+        .pool("parse_big");
+}
+```
+
+The host adds each module to the engine.
+
 ```rust
 Engine::builder()
     .config(config.engine.clone())
@@ -345,7 +375,8 @@ Engine::builder()
 A pod does what its config lists. A config with `planner: true` runs the triggers, the reconcilers, the system migrations, the ledger sink and the admin API. A config with lanes or sinks pulls them. A local config can list everything, for development and tests.
 
 `build()` fails on a duplicate name, a missing resource or a worker without a `default` or `backfill` lane.
-It also fails on an unknown `on_timeout` lane or a cycle of `done` triggers.
+It also fails on an unknown `on_timeout` lane, a cycle of `done` triggers or a config pool that no module registered.
+`ctx.pool` with a name that no module registered is a permanent error.
 
 ## Step 10: Test it
 

@@ -53,7 +53,7 @@ They also need new ontology versions at runtime, with no deploy.
 ## Consequences
 
 - Every write must be idempotent. Tasks run at least once. Recovery repeats work.
-- A planner must handle sweeps and manual requests. Without them, recovery and replans cannot reach its work.
+- A planner must answer sweeps and manual requests, or ignore them in a visible code arm. A planner that ignores sweeps depends on its triggers to recover lost work.
 - KEDA scales on message count, not cost. The planner must split work into lanes by size.
 - A failed migration costs a full reindex and the ledger history, at most once for each release. Graph queries keep working.
 - The active version pointer is never rebuilt. A failed step on it stops indexing until an admin acts.

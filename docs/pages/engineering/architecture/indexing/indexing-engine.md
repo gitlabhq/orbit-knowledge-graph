@@ -132,7 +132,7 @@ A newer version cancels an older campaign. A failed version is marked failed, an
 
 - **NATS is wiped.** NATS holds only work in flight, so no fact is lost. The engine starts one recovery campaign for each planner. Work that is up to date ends as no change.
 - **A pod dies in the middle of a run.** Its lease expires, and NATS hands the task to another pod. That pod waits for the expiry, then takes the lease.
-- **A shared dependency is down.** The worker reports a backoff. The pod stops pulling from that lane until the delay ends, and no task fails while it waits.
+- **A shared dependency is down.** The worker asks for a throttle. The pod stops pulling from that lane until the delay ends, and no task fails while it waits.
 - **A repository is slower than its size suggests.** The lane timeout stops the run and moves the task to the big lane.
 - **An event is lost.** A reconciler or the next sweep finds the stale work and plans it again.
 - **A system table step fails.** The engine rebuilds the system tables and starts a recovery campaign, at most once for each release. A second failure stops indexing and alerts the admin. Queries keep working.
