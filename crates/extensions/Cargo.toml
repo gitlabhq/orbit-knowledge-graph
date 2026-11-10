@@ -39,4 +39,4 @@ query-data-model = { path = "../query-data-model" }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
-tokio-stream = { workspace = true, features = ["net"] }
+tokio-stream = { workspace = true, features = ["net", "sync"] }
