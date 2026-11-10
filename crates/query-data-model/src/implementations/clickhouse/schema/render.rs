@@ -273,7 +273,7 @@ fn order_list(columns: &[String]) -> String {
     }
 }
 
-pub fn is_reserved_word(name: &str) -> bool {
+fn is_reserved_word(name: &str) -> bool {
     RESERVED_WORDS.contains(&name.to_lowercase().as_str())
 }
 

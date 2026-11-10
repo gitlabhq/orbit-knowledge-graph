@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use query_data_model::catalog::sources::{
     EdgeMapping, Endpoint, EndpointKind, EtlScope, SourceColumn,
 };
-use query_data_model::implementations::clickhouse::schema::{Table, is_reserved_word};
+use query_data_model::implementations::clickhouse::schema::Table;
 use query_data_model::{
     Catalog, ClickHouse, DEFAULT_PRIMARY_KEY, DELETED_COLUMN, DataType, DenormalizedDirection,
     DenormalizedKey, EntityId, EnumType, PropertyId, VERSION_COLUMN,
@@ -522,7 +522,6 @@ fn low_cardinality_columns(table: Option<&Table>) -> HashSet<String> {
         .into_iter()
         .flat_map(|table| &table.columns)
         .filter(|column| column.storage_type.starts_with("LowCardinality"))
-        .filter(|column| !is_reserved_word(&column.name))
         .map(|column| column.name.clone())
         .collect()
 }
@@ -770,14 +769,20 @@ mod tests {
     }
 
     #[test]
-    fn job_dictionary_encodes_low_cardinality_columns_except_reserved_words() {
+    fn job_dictionary_encodes_every_low_cardinality_column() {
         let catalog = catalog();
         let columns = low_cardinality_columns(schema_table(&catalog, "gl_job"));
         let mut columns: Vec<&str> = columns.iter().map(String::as_str).collect();
         columns.sort_unstable();
         assert_eq!(
             columns,
-            ["scheduling_type", "status", "timeout_source", "type"]
+            [
+                "scheduling_type",
+                "status",
+                "timeout_source",
+                "type",
+                "when"
+            ]
         );
     }
 
