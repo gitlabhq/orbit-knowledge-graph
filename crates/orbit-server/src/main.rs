@@ -104,9 +104,18 @@ async fn main() -> anyhow::Result<()> {
                 schema::version::init(&graph).await?;
 
                 let dispatcher_config = DispatcherConfig::from(&config);
-                indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown)
-                    .await
-                    .map_err(Into::into)
+                // Migration runs on the core archive; the engine (scope dispatcher,
+                // extension table creation) uses the merged model (B).
+                let engine_ontology = indexer_ontology(&config, ontology).await?;
+                indexer::run_dispatcher(
+                    &dispatcher_config,
+                    &archive,
+                    engine_ontology,
+                    serving,
+                    shutdown,
+                )
+                .await
+                .map_err(Into::into)
             }
             Mode::HealthCheck => health_check_mode::run(&config, internal_tls)
                 .await

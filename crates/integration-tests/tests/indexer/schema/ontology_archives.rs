@@ -244,6 +244,7 @@ async fn dispatcher_rejects_conflicting_archives_before_migration() {
     let result = indexer::run_dispatcher(
         &context.config,
         &conflicting,
+        core_engine_ontology(),
         serving_flag(),
         CancellationToken::new(),
     )
@@ -270,6 +271,7 @@ async fn dispatcher_rejects_invalid_archives_before_migration() {
     let result = indexer::run_dispatcher(
         &context.config,
         &invalid,
+        core_engine_ontology(),
         serving_flag(),
         CancellationToken::new(),
     )
@@ -344,6 +346,14 @@ impl TestContext {
 
 fn embedded_archive(version: u32) -> OntologyArchive {
     OntologyArchive::from_sources(version, &embedded_sources()).unwrap()
+}
+
+fn core_engine_ontology() -> Arc<ontology::Ontology> {
+    Arc::new(
+        embedded_archive(*SCHEMA_VERSION)
+            .load_ontology()
+            .expect("core ontology loads"),
+    )
 }
 
 fn archive_with_extra_newline(version: u32) -> OntologyArchive {

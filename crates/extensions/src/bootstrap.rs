@@ -80,3 +80,33 @@ enum BootstrapError {
     #[error(transparent)]
     Provider(#[from] crate::provider::ProviderError),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn no_providers_is_byte_for_byte_the_core_model() {
+        let schema_version = orbit_versions::VERSIONS.schema;
+        let core = Ontology::load_embedded().expect("core loads");
+        let core_fingerprints =
+            orbit_migrations::fingerprint::current_fingerprints(&core).expect("core fingerprints");
+
+        let model = load_provider_model(&[], schema_version)
+            .await
+            .expect("core-only model");
+        let model_fingerprints =
+            orbit_migrations::fingerprint::current_fingerprints(&model.ontology)
+                .expect("model fingerprints");
+
+        assert!(model.packages.is_empty());
+        assert_eq!(
+            model_fingerprints.ddl, core_fingerprints.ddl,
+            "no table differs"
+        );
+        assert_eq!(
+            model_fingerprints.sources, core_fingerprints.sources,
+            "no source differs"
+        );
+    }
+}

@@ -114,4 +114,7 @@ pub enum DispatcherError {
 
     #[error("schema migration error: {0}")]
     Migration(#[from] crate::schema::migration::DispatcherMigrationError),
+
+    #[error("extension storage error: {0}")]
+    ExtensionStorage(String),
 }

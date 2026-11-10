@@ -247,6 +247,7 @@ pub async fn run(
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
     archive: &ontology::archive::OntologyArchive,
+    engine_ontology: Arc<ontology::Ontology>,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
@@ -363,6 +364,21 @@ pub async fn run_dispatcher(
         config.schedule.tasks.code_backfill.publish_window,
     ));
 
+    // Create the extension graph tables (E4) outside the core migration ledger.
+    // CREATE IF NOT EXISTS is idempotent; the dispatcher already owns setup. A
+    // package digest change yields new table names, so this reindexes into fresh
+    // tables rather than bumping the core schema version.
+    for (name, ddl) in
+        extensions::storage::extension_create_statements(&engine_ontology, archive.schema_version())
+            .map_err(|error| DispatcherError::ExtensionStorage(error.to_string()))?
+    {
+        clients
+            .graph
+            .execute(&ddl)
+            .await
+            .map_err(|error| DispatcherError::ExtensionStorage(format!("{name}: {error}")))?;
+    }
+
     let sdlc_enabled = config.engine.is_module_enabled(IndexerModule::Sdlc);
     let code_enabled = config.engine.is_module_enabled(IndexerModule::Code);
     let namespace_deletion_enabled = config
@@ -406,9 +422,11 @@ pub async fn run_dispatcher(
         )));
     }
 
+    // The merged model, so the version-scoped GC treats the extension tables as
+    // known and never drops them (they are absent from the core ontology).
     tasks.push(Box::new(TableCleanup::new(
         graph,
-        &ontology,
+        &engine_ontology,
         metrics.clone(),
         config.schedule.tasks.table_cleanup.clone(),
     )?));
@@ -446,7 +464,7 @@ pub async fn run_dispatcher(
     // The datalake tables whose watermark the extension scope dispatcher polls,
     // taken from the merged model's extension entities. Empty until provider
     // packages are merged into the dispatcher's ontology.
-    let extension_source_tables: Vec<String> = ontology
+    let extension_source_tables: Vec<String> = engine_ontology
         .nodes()
         .filter(|node| node.domain == "extensions")
         .flat_map(|node| node.reindex_on.iter().map(|source| source.table.clone()))

@@ -728,7 +728,13 @@ async fn dispatcher_bootstraps_bundled_active_archive_before_migration() {
 
     let archive = embedded_archive(*SCHEMA_VERSION);
     let shutdown = CancellationToken::new();
-    let dispatcher = indexer::run_dispatcher(&config, &archive, serving_flag(), shutdown.clone());
+    let dispatcher = indexer::run_dispatcher(
+        &config,
+        &archive,
+        core_engine_ontology(),
+        serving_flag(),
+        shutdown.clone(),
+    );
     tokio::pin!(dispatcher);
     let migration_started = tokio::select! {
         result = &mut dispatcher => panic!("dispatcher exited before migration: {result:?}"),
@@ -779,6 +785,7 @@ async fn dispatcher_rejects_unbundled_missing_active_archive_before_migration() 
         indexer::run_dispatcher(
             &dispatcher_config(&context),
             &archive,
+            core_engine_ontology(),
             serving_flag(),
             CancellationToken::new(),
         ),
@@ -823,6 +830,7 @@ async fn dispatcher_rejects_corrupt_active_archive_before_migration() {
         indexer::run_dispatcher(
             &dispatcher_config(&context),
             &archive,
+            core_engine_ontology(),
             serving_flag(),
             CancellationToken::new(),
         ),
@@ -849,6 +857,14 @@ async fn dispatcher_rejects_corrupt_active_archive_before_migration() {
 
 fn embedded_archive(version: u32) -> OntologyArchive {
     OntologyArchive::from_sources(version, &embedded_sources()).unwrap()
+}
+
+fn core_engine_ontology() -> std::sync::Arc<ontology::Ontology> {
+    std::sync::Arc::new(
+        embedded_archive(*SCHEMA_VERSION)
+            .load_ontology()
+            .expect("core ontology loads"),
+    )
 }
 
 fn dispatcher_config(context: &TestContext) -> DispatcherConfig {
