@@ -175,7 +175,7 @@ package "gitlab.code_review" {
   class "graph" as G {
     MergeRequest
     properties, types, default values
-    AUTHORED (User -> MergeRequest)
+    AUTHORED (User -> MergeRequest, one to many)
   }
   class "authorization" as A {
     scope: namespace
@@ -186,6 +186,7 @@ package "gitlab.code_review" {
     store: graph
     table, every column with its type
     immutable columns, codecs, sort key
+    AUTHORED: foreign key author_id
   }
   class "source" as SO {
     source: siphon
@@ -206,6 +207,7 @@ SV --> G : provides
 
 Every fragment refers to the graph and to nothing else, so a new store, a new source or a new access rule never edits the graph.
 The graph owns what a property means: its type and its default value. Storage owns how it is kept: its table, column, storage type, whether it is immutable, and how it is queried. A storage fragment states, in backend-neutral terms, which columns are filtered, text-searched or ordered on, and each backend turns that into its own indexes and sort keys; a `backend` block overrides the result only where a platform package needs to. Nothing is inferred, so a forgotten column fails the load instead of a query.
+The graph holds topology only: which entities a relationship connects, how many sit on each side, and the attributes that belong to the edge itself. Storage binds every variant to how it is kept: a foreign key column on one endpoint's table, or rows in a named edge table. An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy. There is no default edge table, so an unbound variant fails the load.
 A relationship that a foreign key already carries, such as `AUTHORED` through `author_id`, needs no source entry.
 
 Packages compose under four rules: a package cannot redeclare an entity another package owns, cannot add a second authorization entry, can add variants to a platform relationship, and can bind its own entities to a store another package declares.
@@ -242,7 +244,7 @@ endif
 
 Later stages read facts by ID and never search by name.
 `MergeRequest` carries its own `traversal_path`, so its guard filters on it. `User` is global, so its guard is a role floor alone.
-A user-scoped entity, such as a todo, names the property that holds its owner, and that property must reference `User`. Its guard is that the owner is the caller.
+A user-scoped entity, such as a todo, names its owner relationship to `User`, and the graph must allow one owner per row. Its guard is that the owner is the caller, and storage decides whether that is a column check or an edge lookup.
 Every plan carries the `ModelId` it was built against, so no plan is ever checked against a different model.
 
 ### 3. A new version goes live after its backfill

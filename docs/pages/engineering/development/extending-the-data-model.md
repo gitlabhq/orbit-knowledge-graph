@@ -19,7 +19,7 @@ Each extension writes only a package, a surface or a backend:
 
 An entity has one fragment of each kind it needs. These are the fragments for `MergeRequest` in `gitlab.code_review`.
 
-The graph fragment declares every property, with its type and its default value:
+The graph fragment declares every property, with its type and its default value. It also declares the relationship variants the package adds, with their cardinality. It says nothing about columns or tables.
 
 ```yaml
 # packages/gitlab.code_review/graph.yaml
@@ -34,8 +34,13 @@ entities:
       iid: {type: int64}
       title: {type: string, default: ""}
       state: {type: enum, values: {1: opened, 2: closed, 3: merged, 4: locked}, default: opened}
-      author_id: {type: int64?, references: [User]}
+      author_id: {type: int64?}
       traversal_path: {type: string}
+relationships:
+  AUTHORED:
+    variants: {User -> MergeRequest: {cardinality: one_to_many}}
+  APPROVED:
+    variants: {User -> MergeRequest: {cardinality: many_to_many}}
 ```
 
 The authorization fragment declares its scope, its role floor and its redaction check:
@@ -71,7 +76,14 @@ entities:
     access: {filter: [state, author_id], text: [title], order: [id]}
     backend:
       primary_key: [traversal_path, id]
+relationships:
+  AUTHORED:
+    User -> MergeRequest: {fk: {on: target, column: author_id}}
+  APPROVED:
+    User -> MergeRequest: {edge_table: gl_edge}
 ```
+
+`AUTHORED` is a foreign key: the `author_id` column on the `MergeRequest` row holds the author. `APPROVED` is many-to-many, so its rows live in an edge table. Every variant names one of the two, so a variant with no binding fails the load.
 
 `access` says how the columns are queried, in terms every backend understands. ClickHouse turns it into its skip indexes and sort key, so an integration author never writes ClickHouse details. The `backend` block overrides that only where a platform package needs to.
 
@@ -92,16 +104,22 @@ entities:
     columns: {state: state_id, project_id: target_project_id}
 ```
 
-A relationship that a foreign key carries needs no source entry. `AUTHORED` reaches `MergeRequest` through `author_id`, so the graph reference and the storage route are enough.
+A relationship that a foreign key carries needs no source entry. The indexer writes `author_id` with the merge request row, and the storage binding is enough.
 
-A relationship can declare typed attributes, which queries filter and select like properties:
+A relationship can declare typed attributes in the graph when the data belongs to the edge itself, such as the access level of a membership. Queries filter and select them like properties, and storage binds each one to an edge column.
+
+An edge table can also copy endpoint properties into its sort key, so a filter on an endpoint prunes the edge read. That is a storage choice, so the graph never sees it:
 
 ```yaml
+# packages/gitlab.source_code/storage/clickhouse.yaml
 relationships:
   CALLS:
-    variants: [Definition -> Definition]
-    attributes: {project_id: int64, branch: string}
+    Definition -> Definition:
+      edge_table: gl_code_edge
+      copies: {project_id: source.project_id, branch: source.branch}
 ```
+
+A filter on `a.branch` in `(a)-[:CALLS]->(b)` then also filters the edge read on its `branch` column.
 
 Publish the new package version to the registry. The registry diffs its storage against the active version, the indexing engine backfills the tables in scope, and the version goes live.
 
@@ -293,7 +311,9 @@ entities:
       traversal_path: {type: string}
 relationships:
   ABOUT:
-    variants: [Memory -> MergeRequest, Memory -> Project]
+    variants:
+      Memory -> MergeRequest: {cardinality: many_to_many}
+      Memory -> Project: {cardinality: many_to_many}
 ```
 
 ```yaml
@@ -320,6 +340,10 @@ entities:
       traversal_path: {backend: {type: String}}
     backend:
       primary_key: [traversal_path, id]
+relationships:
+  ABOUT:
+    Memory -> MergeRequest: {edge_table: gl_edge}
+    Memory -> Project: {edge_table: gl_edge}
 ```
 
 Its entities appear only in that tenant's catalogs, and that tenant's plans and caches carry their own model ID.
@@ -366,8 +390,10 @@ The loader collects every error, names its package, and fails once:
 - An entity with no `id`, or no authorization entry.
 - A property that its home store neither stores nor excludes, a stored column without a storage type, or a binding without a table. Nothing is inferred.
 - A declaration above the package's trust tier. Only a platform package may declare a trusted store or global scope. A tenant overlay may not declare delegated access, and its entities must be namespace- or user-scoped.
-- A user-scoped entity whose owner property does not reference `User`.
-- A foreign key on neither endpoint, or one the graph does not mark as a reference.
+- A user-scoped entity whose owner relationship does not reach `User`, or allows more than one owner per row.
+- A relationship variant with no storage binding in the home store of its endpoints.
+- A foreign key binding on a many-to-many variant, on the wrong side of a one-to-many variant, or on a column its table does not hold.
+- An edge table copy that names no property of that endpoint, or a graph attribute with no edge column.
 - Two backends, or a trusted and an untrusted store, on one connection.
 - A namespaced entity that no guard rule covers.
 
