@@ -769,11 +769,20 @@ fn setup_skill(
     project: &tempfile::TempDir,
     skill_args: &[&str],
 ) -> (Output, std::path::PathBuf) {
+    setup_agent("codex", base_url, project, skill_args)
+}
+
+fn setup_agent(
+    agent: &str,
+    base_url: Option<&str>,
+    project: &tempfile::TempDir,
+    skill_args: &[&str],
+) -> (Output, std::path::PathBuf) {
     let cache = tempfile::tempdir().unwrap();
     let dir = project.path().to_str().unwrap();
     let mut args = vec![
         "setup",
-        "codex",
+        agent,
         "--yes",
         "--skip",
         "instructions",
@@ -896,9 +905,13 @@ fn error_reply(status: u16) -> Reply {
 }
 
 fn setup_instructions(base_url: Option<&str>) -> (Output, String) {
+    hook_instructions(base_url, &["hook-guard", "instructions"])
+}
+
+fn hook_instructions(base_url: Option<&str>, args: &[&str]) -> (Output, String) {
     let project = tempfile::tempdir().unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let mut command = hermetic_orbit(&cache, &["hook-guard", "instructions"]);
+    let mut command = hermetic_orbit(&cache, args);
     command.current_dir(project.path());
     if let Some(base_url) = base_url {
         command
@@ -974,6 +987,73 @@ fn setup_instructions_stay_local_when_orbit_status_is_refused() {
 
 const SERVICE_STATUS: &str =
     r#"{"data":{"orbit":{"serviceStatus":{"state":"HEALTHY","version":"1","components":[]}}}}"#;
+
+#[test]
+fn the_gitlab_flag_gives_a_hook_without_a_credential_the_remote_text() {
+    let (output, instructions) =
+        hook_instructions(None, &["hook-guard", "instructions", "--gitlab"]);
+    assert_remote_without_schema(&output, &instructions);
+}
+
+#[test]
+fn the_gitlab_flag_does_not_override_a_hook_that_has_a_credential() {
+    let (url, server) = mock_server(vec![error_reply(403)]);
+    let (output, instructions) =
+        hook_instructions(Some(&url), &["hook-guard", "instructions", "--gitlab"]);
+    server.join().unwrap();
+    assert_local_only(&output, &instructions);
+}
+
+fn session_start_hook(hooks_file: &std::path::Path) -> String {
+    let hooks = std::fs::read_to_string(hooks_file).unwrap();
+    let hooks: serde_json::Value = serde_json::from_str(&hooks).unwrap();
+    let entries = hooks["hooks"]["SessionStart"].as_array().unwrap();
+    assert_eq!(entries.len(), 1, "{hooks}");
+    entries[0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn a_signed_in_duo_setup_gives_the_tokenless_session_hook_the_remote_text() {
+    let project = tempfile::tempdir().unwrap();
+    let hooks_file = project.path().join(".gitlab/duo/hooks.json");
+    let (url, server) = mock_server(vec![
+        tree_reply("1.0.0", "Remote v1"),
+        ok_reply(SERVICE_STATUS),
+    ]);
+    let (output, skills) = setup_agent("duo", Some(&url), &project, &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(server.join().unwrap().len(), 2);
+    assert!(skills.join("orbit/references/remote.md").is_file());
+
+    let command = session_start_hook(&hooks_file);
+    assert_eq!(command, "orbit hook-guard instructions --gitlab");
+    let args: Vec<&str> = command.split(' ').skip(1).collect();
+    let (output, instructions) = hook_instructions(None, &args);
+    assert_remote_without_schema(&output, &instructions);
+
+    let (output, _) = setup_agent("duo", None, &project, &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        session_start_hook(&hooks_file),
+        "orbit hook-guard instructions"
+    );
+}
+
+#[test]
+fn a_signed_in_codex_setup_keeps_the_session_hook_command() {
+    let project = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS)]);
+    let (output, _) = setup_skill(Some(&url), &project, &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    server.join().unwrap();
+    assert_eq!(
+        session_start_hook(&project.path().join(".codex/hooks.json")),
+        "orbit hook-guard instructions"
+    );
+}
 
 #[test]
 fn setup_instructions_keep_the_bundled_query_line_without_a_schema() {
