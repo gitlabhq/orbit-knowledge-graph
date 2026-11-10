@@ -15,6 +15,7 @@ pub(super) fn conditions(
 ) -> Result<(), PlanError> {
     for leaf in predicate.leaf_predicates() {
         constant(leaf)?;
+        dynamic(construction, leaf)?;
     }
     kinds(model, predicate)?;
     for conjunct in predicate.conjuncts() {
@@ -51,6 +52,32 @@ fn constant(leaf: &Predicate) -> Result<(), PlanError> {
         true => Err(PlanError::shape(CONSTANT)),
         false => Ok(()),
     }
+}
+
+fn dynamic(construction: &Construction<Logical>, leaf: &Predicate) -> Result<(), PlanError> {
+    let exprs = leaf.exprs();
+    let relationship = |expr: &Expr| match expr {
+        Expr::Edge { binding, .. } | Expr::Attribute { binding, .. } => Some(*binding),
+        _ => None,
+    };
+    if exprs.len() > 1 && exprs.iter().any(|expr| relationship(expr).is_some()) {
+        return Err(PlanError::shape(
+            "property comparisons involving relationships are unsupported",
+        ));
+    }
+    for expr in exprs.iter().filter(|expr| !is_kind(expr)) {
+        if let Some(binding) = relationship(expr)
+            && matches!(
+                construction.producer(binding)?,
+                LogicalOperation::Neighbors { .. } | LogicalOperation::Shortest { .. }
+            )
+        {
+            return Err(PlanError::shape(
+                "neighbors and path finding filter their relationships only with type()",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn is_kind(expr: &Expr) -> bool {

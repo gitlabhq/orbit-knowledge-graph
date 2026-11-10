@@ -5,4 +5,4 @@ query: |
   RETURN u{.username} AS author, u{.name} AS owner, count(mr) AS mr_count
 
 expect:
-  compile_error: "duplicate or overlapping node projection"
+  compile_error: "a node grouped twice must return the same properties both times"

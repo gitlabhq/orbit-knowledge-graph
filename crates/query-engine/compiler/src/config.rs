@@ -325,9 +325,7 @@ fn settings(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>) 
         None => {
             let statement = require(ctx.statement().as_ref(), "statement")?;
             let query = crate::logical::Query::new(&statement.plan, ctx.data_model().model());
-            let negated = crate::logical::facts::facts(query)
-                .iter()
-                .any(|fact| fact.negated);
+            let negated = query.leaves().iter().any(|leaf| leaf.negated);
             (QueryType::from(query.kind()), negated)
         }
     };

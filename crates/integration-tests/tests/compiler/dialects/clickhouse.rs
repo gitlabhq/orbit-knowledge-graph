@@ -619,11 +619,10 @@ fn orbit_query_id_list_and_range_promote_independently() {
                 let statement = gql_statement(&query).unwrap();
                 let embedded = embedded_model();
                 let logical = compiler::logical::Query::new(&statement.plan, embedded.model());
-                let facts = compiler::logical::facts::facts(logical);
-                let anchor = &compiler::logical::facts::anchors(logical, &facts)[0];
+                let anchor = &logical.anchors(&logical.leaves())[0];
                 assert_eq!(anchor.pinned, Some(vec![1, 2, 3, 5]), "{query}");
                 assert_eq!(anchor.range, Some((1, 3)), "{query}");
-                let id = |fact: &compiler::logical::facts::Fact<'_>| matches!(fact.left, query_data_model::plan::logical::Expr::Property { property, .. } if logical.property_name(property) == "id");
+                let id = |leaf: &compiler::logical::Leaf<'_>| matches!(leaf.left(), query_data_model::plan::logical::Expr::Property { property, .. } if logical.property_name(property) == "id");
                 assert!(!anchor.filters.iter().any(id), "{query}");
                 compile(&query, &embedded_model(), &context).unwrap();
             }
@@ -667,9 +666,9 @@ fn orbit_query_rejects_inline_filters_on_variable_length_relationships() {
     ] {
         let error = gql_statement(query).expect_err(query);
         assert!(
-            error
-                .to_string()
-                .contains("property filters on variable-length relationships are unsupported"),
+            error.to_string().contains(
+                "a variable-length relationship binds a list, so its properties cannot be filtered"
+            ),
             "{query}: {error}"
         );
     }
@@ -779,7 +778,7 @@ fn orbit_query_virtual_filter_equality_hydration_parity() {
             .virtual_filters;
         assert_eq!(filters.len(), 1);
         assert_eq!(filters[0].0, "content");
-        assert_eq!(filters[0].1.op, compiler::FilterOp::Eq);
+        assert_eq!(filters[0].1.op, compiler::Operator::Eq);
         assert_eq!(filters[0].1.value, Some(serde_json::Value::from("abc")));
     }
 }
@@ -1020,29 +1019,14 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
 }
 
 #[test]
-fn orbit_query_caps_reject_during_lowering() {
-    let nodes: Vec<String> = (0..4_000).map(|i| format!("(a{i})")).collect();
-    let properties: Vec<String> = (0..51).map(|i| format!("u.c{i}")).collect();
-    for (query, first_rejected, message) in [
-        (
-            format!("MATCH {} RETURN a0", nodes.join(",")),
-            "(a5)",
-            "a query declares at most 5 nodes",
-        ),
-        (
-            format!("MATCH (u:User) RETURN {}", properties.join(", ")),
-            "u.c50",
-            "a node projects at most 50 properties",
-        ),
-    ] {
-        let column = query.find(first_rejected).unwrap() + 1;
-        let expected = format!("line 1, column {column}: {message}");
-        let error = gql_statement(&query).unwrap_err();
-        assert!(
-            matches!(&error, QueryError::Validation(m) if *m == expected),
-            "{error:?}"
-        );
-    }
+fn orbit_query_caps_the_nodes_a_pattern_binds() {
+    let chain: Vec<String> = (0..6).map(|i| format!("(g{i}:Group)")).collect();
+    let query = format!("MATCH {} RETURN g0", chain.join("-[:CONTAINS]->"));
+    let error = gql_statement(&query).unwrap_err();
+    assert!(
+        matches!(&error, QueryError::Validation(m) if m == "nodes is 6; the maximum is 5"),
+        "{error:?}"
+    );
 }
 
 #[test]

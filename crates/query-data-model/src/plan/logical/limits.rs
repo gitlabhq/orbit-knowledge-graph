@@ -8,6 +8,7 @@ pub const MAX_NODES: usize = 5;
 pub const MAX_HOPS: u32 = 3;
 pub const MAX_PATH_DEPTH: u32 = 3;
 pub const MAX_RELATIONSHIP_TYPES: usize = 10;
+pub const DEFAULT_ROWS: u64 = 30;
 pub const MAX_ROWS: u64 = 1000;
 pub const MAX_SKIP: u64 = 10_000;
 pub const MAX_IN_VALUES: usize = 100;

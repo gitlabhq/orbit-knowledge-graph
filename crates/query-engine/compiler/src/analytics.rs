@@ -4,11 +4,11 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use query_data_model::Direction;
-use query_data_model::plan::logical::{EdgeField, Expr, LogicalOperation, Measure};
+use query_data_model::plan::logical::{Expr, LogicalOperation, Measure};
 use serde::Serialize;
 
+use crate::logical::Leaf;
 use crate::logical::columns::{returned, selections};
-use crate::logical::facts::{Fact, anchors, facts};
 use crate::logical::{DynamicColumnMode, Kind, Query};
 use crate::passes::hydrate::HydrationPlan;
 use crate::types::QueryType;
@@ -90,26 +90,15 @@ impl QueryStats {
                 )
             })
             .count();
-        let facts = facts(query);
-        let anchors = anchors(query, &facts);
+        let facts = query.leaves();
+        let anchors = query.anchors(&facts);
         let selected = selections(query);
-        let field = |fact: &Fact<'_>| match fact.left {
-            Expr::Property { property, .. } => Some(query.property_name(property).to_string()),
-            Expr::Attribute { attribute, .. } => Some(graph.attribute(attribute).name.clone()),
-            Expr::Edge { field, .. } => match field {
-                EdgeField::Kind => None,
-                EdgeField::Source => Some("source_id".into()),
-                EdgeField::SourceKind => Some("source_kind".into()),
-                EdgeField::Target => Some("target_id".into()),
-                EdgeField::TargetKind => Some("target_kind".into()),
-            },
-            _ => None,
-        };
+        let field = |fact: &Leaf<'_>| query.column_name(fact.left()).map(str::to_string);
         let node_filters = anchors.iter().flat_map(|anchor| anchor.filters.iter());
         let edge_filters = facts
             .iter()
-            .filter(|fact| fact.attached && steps.iter().any(|step| step.edge == fact.binding()));
-        let filters: Vec<(String, &Fact<'_>)> = node_filters
+            .filter(|fact| fact.attached() && steps.iter().any(|step| step.edge == fact.binding()));
+        let filters: Vec<(String, &Leaf<'_>)> = node_filters
             .chain(edge_filters)
             .filter_map(|fact| Some((field(fact)?, fact)))
             .collect();
@@ -178,7 +167,7 @@ impl QueryStats {
             filter_fields: filters.iter().map(|(name, _)| name.clone()).collect(),
             filter_ops: filters
                 .iter()
-                .filter_map(|(_, fact)| Some(fact.op()?.as_ref().to_string()))
+                .filter_map(|(_, fact)| Some(fact.predicate.operator()?.as_ref().to_string()))
                 .collect(),
             filter_count: filters.len(),
             max_hops: steps.iter().map(|step| step.range.max).max().unwrap_or(0),

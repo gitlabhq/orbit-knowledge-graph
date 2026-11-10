@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use pest::Span;
 use pest::error::ErrorVariant;
 use pest_consume::{Error, match_nodes};
-use serde_json::{Number, Value};
 
 use super::ast::*;
 use super::{QueryParser, Rule};
@@ -101,7 +100,7 @@ impl QueryParser {
         let span = input.as_span();
         match_nodes!(input.into_children();
             [] => Ok(()),
-            [PathCount(count)] => if count.as_u64() == Some(1) {
+            [PathCount(count)] => if count == Literal::Int(1) {
                 Ok(())
             } else {
                 Err(error_at(span, "only one shortest path is supported; use ANY SHORTEST or SHORTEST 1"))
@@ -134,10 +133,10 @@ impl QueryParser {
                 span, variable, label: Some(label), properties: Vec::new(),
             },
             [Variable(variable), NodeMapLiteral(map)] => NodePattern {
-                span, variable, label: None, properties: map.entries,
+                span, variable, label: None, properties: map,
             },
             [Variable(variable), NodeLabel(label), NodeMapLiteral(map)] => NodePattern {
-                span, variable, label: Some(label), properties: map.entries,
+                span, variable, label: Some(label), properties: map,
             },
         ))
     }
@@ -175,7 +174,7 @@ impl QueryParser {
             variable: None,
             types: Vec::new(),
             range: None,
-            properties: None,
+            properties: Vec::new(),
         };
         for child in input.into_children() {
             match child.as_rule() {
@@ -183,7 +182,7 @@ impl QueryParser {
                 Rule::RelationshipTypes => relationship.types = Self::RelationshipTypes(child)?,
                 Rule::RangeLiteral => relationship.range = Some(Self::RangeLiteral(child)?),
                 Rule::RelationshipMapLiteral => {
-                    relationship.properties = Some(Self::RelationshipMapLiteral(child)?)
+                    relationship.properties = Self::RelationshipMapLiteral(child)?
                 }
                 _ => return Err(mismatch(&child)),
             }
@@ -223,11 +222,11 @@ impl QueryParser {
         Ok(())
     }
 
-    fn HopCount(input: Node) -> Result<Value> {
+    fn HopCount(input: Node) -> Result<Literal> {
         number(&input)
     }
 
-    fn PathCount(input: Node) -> Result<Value> {
+    fn PathCount(input: Node) -> Result<Literal> {
         number(&input)
     }
 
@@ -283,37 +282,25 @@ impl QueryParser {
     #[alias(predicate)]
     fn ComparisonExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
         let span = input.as_span();
-        let from_temporal_literal = has_temporal_literal(&input);
-        let comparison = match_nodes!(input.into_children();
-            [PropertyExpression(property), operator(op)] => Comparison {
-                span, property, op, value: None, from_temporal_literal, rhs_property: None,
-            },
-            [PropertyExpression(property), operator(op), value(value)] => Comparison {
-                span, property, op, value: Some(value), from_temporal_literal, rhs_property: None,
-            },
-            [PropertyExpression(lhs), operator(op), PropertyExpression(rhs)] => Comparison {
-                span, property: lhs, op, value: None, from_temporal_literal, rhs_property: Some(rhs),
-            },
+        let (property, op, operand) = match_nodes!(input.into_children();
+            [PropertyExpression(property), operator(op)] => (property, op, None),
+            [PropertyExpression(property), operator(op), value(value)] => (property, op, Some(Operand::Value(value))),
+            [PropertyExpression(property), operator(op), PropertyExpression(rhs)] => (property, op, Some(Operand::Property(rhs))),
             [PropertyExpression(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
         );
-        Ok(leaf(comparison))
+        Ok(comparison(span, Subject::Property(property), op, operand))
     }
 
     #[alias(predicate)]
     fn TypePredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
         let span = input.as_span();
-        let (variable, op, value) = match_nodes!(input.into_children();
+        let (variable, op, operand) = match_nodes!(input.into_children();
             [RelationshipType(variable), operator(op)] => (variable, op, None),
-            [RelationshipType(variable), operator(op), value(value)] => (variable, op, Some(value)),
-            [RelationshipType(variable), operator(op), PropertyExpression(_)] => (variable, op, None),
+            [RelationshipType(variable), operator(op), value(value)] => (variable, op, Some(Operand::Value(value))),
+            [RelationshipType(variable), operator(op), PropertyExpression(rhs)] => (variable, op, Some(Operand::Property(rhs))),
             [RelationshipType(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
         );
-        Ok(BooleanExpression::Leaf(Predicate::RelationshipType {
-            span,
-            variable,
-            op,
-            value,
-        }))
+        Ok(comparison(span, Subject::Type(variable), op, operand))
     }
 
     fn RelationshipType(input: Node) -> Result<Name> {
@@ -335,13 +322,15 @@ impl QueryParser {
     #[alias(predicate)]
     fn TokenPredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
         let span = input.as_span();
-        let from_temporal_literal = has_temporal_literal(&input);
-        let comparison = match_nodes!(input.into_children();
-            [TokenFunction(op), PropertyExpression(property), value(value)] => Comparison {
-                span, property, op, value: Some(value), from_temporal_literal, rhs_property: None,
-            },
+        let (property, op, value) = match_nodes!(input.into_children();
+            [TokenFunction(op), PropertyExpression(property), value(value)] => (property, op, value),
         );
-        Ok(leaf(comparison))
+        Ok(comparison(
+            span,
+            Subject::Property(property),
+            op,
+            Some(Operand::Value(value)),
+        ))
     }
 
     #[alias(predicate)]
@@ -351,7 +340,7 @@ impl QueryParser {
             [PropertyExpression(property), value(pattern), value(language)] => (property, pattern, language),
         );
         let text = |value: Value| match value {
-            Value::String(text) => Ok(text),
+            Value::Scalar(Literal::String(text)) => Ok(text),
             _ => Err(error_at(
                 span,
                 "ast() takes a pattern and a language string",
@@ -371,55 +360,55 @@ impl QueryParser {
         ))
     }
 
-    fn TokenFunction(input: Node) -> Result<FilterOp> {
+    fn TokenFunction(input: Node) -> Result<Operator> {
         Ok(match input.as_str().to_ascii_lowercase().as_str() {
-            "token_match" => FilterOp::TokenMatch,
-            "all_tokens" => FilterOp::AllTokens,
-            "any_tokens" => FilterOp::AnyTokens,
+            "token_match" => Operator::TokenMatch,
+            "all_tokens" => Operator::AllTokens,
+            "any_tokens" => Operator::AnyTokens,
             _ => return Err(mismatch(&input)),
         })
     }
 
     #[alias(operator)]
-    fn ComparisonOperator(input: Node) -> Result<FilterOp> {
+    fn ComparisonOperator(input: Node) -> Result<Operator> {
         Ok(match input.as_str() {
-            "=" => FilterOp::Eq,
-            "<>" | "!=" => FilterOp::Ne,
-            ">" => FilterOp::Gt,
-            "<" => FilterOp::Lt,
-            ">=" => FilterOp::Gte,
-            "<=" => FilterOp::Lte,
+            "=" => Operator::Eq,
+            "<>" | "!=" => Operator::Ne,
+            ">" => Operator::Gt,
+            "<" => Operator::Lt,
+            ">=" => Operator::Gte,
+            "<=" => Operator::Lte,
             _ => return Err(mismatch(&input)),
         })
     }
 
     #[alias(operator)]
-    fn StringOperator(input: Node) -> Result<FilterOp> {
+    fn StringOperator(input: Node) -> Result<Operator> {
         let token = input.as_str().to_ascii_lowercase();
         Ok(if token.starts_with("starts") {
-            FilterOp::StartsWith
+            Operator::StartsWith
         } else if token.starts_with("ends") {
-            FilterOp::EndsWith
+            Operator::EndsWith
         } else {
-            FilterOp::Contains
+            Operator::Contains
         })
     }
 
     #[alias(operator)]
-    fn InOperator(_input: Node) -> Result<FilterOp> {
-        Ok(FilterOp::In)
+    fn InOperator(_input: Node) -> Result<Operator> {
+        Ok(Operator::In)
     }
 
     #[alias(operator)]
-    fn NegatedInOperator(input: Node) -> Result<FilterOp> {
+    fn NegatedInOperator(input: Node) -> Result<Operator> {
         Err(input.error("write NOT n.property IN [...] to exclude values"))
     }
 
     #[alias(operator)]
-    fn NullOperator(input: Node) -> Result<FilterOp> {
+    fn NullOperator(input: Node) -> Result<Operator> {
         Ok(match_nodes!(input.into_children();
-            [] => FilterOp::IsNull,
-            [Not(_)] => FilterOp::IsNotNull,
+            [] => Operator::IsNull,
+            [Not(_)] => Operator::IsNotNull,
         ))
     }
 
@@ -434,10 +423,9 @@ impl QueryParser {
     }
 
     fn ProjectionItems(input: Node) -> Result<Projections> {
-        let span = input.as_span();
         Ok(match_nodes!(input.into_children();
             [Star(span)] => Projections::Star(span),
-            [ProjectionItem(items)..] => Projections::Items { span, items: items.collect() },
+            [ProjectionItem(items)..] => Projections::Items(items.collect()),
         ))
     }
 
@@ -531,9 +519,8 @@ impl QueryParser {
     }
 
     fn AllProperties(input: Node) -> Result<Expression> {
-        let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [Variable(variable)] => Expression::AllProperties { span, variable },
+            [Variable(variable)] => Expression::AllProperties(variable),
         ))
     }
 
@@ -627,53 +614,54 @@ impl QueryParser {
         ))
     }
 
-    fn NodeMapLiteral(input: Node) -> Result<MapLiteral> {
+    fn NodeMapLiteral(input: Node) -> Result<Vec<MapEntry>> {
         map(input)
     }
 
-    fn RelationshipMapLiteral(input: Node) -> Result<MapLiteral> {
+    fn RelationshipMapLiteral(input: Node) -> Result<Vec<MapEntry>> {
         map(input)
     }
 
     fn MapEntry(input: Node) -> Result<MapEntry> {
-        let from_temporal_literal = has_temporal_literal(&input);
         Ok(match_nodes!(input.into_children();
-            [SchemaName(key), value(value)] => MapEntry { key, value, from_temporal_literal },
+            [SchemaName(key), value(value)] => MapEntry { key, value },
         ))
     }
 
     #[alias(value)]
     fn TemporalLiteral(input: Node) -> Result<Value> {
         Ok(match_nodes!(input.into_children();
-            [literal] => Value::String(string(&literal)?),
+            [literal] => Value::Scalar(Literal::Temporal(string(&literal)?)),
         ))
     }
 
     #[alias(value)]
     fn BooleanLiteral(input: Node) -> Result<Value> {
-        Ok(Value::Bool(input.as_str().eq_ignore_ascii_case("true")))
+        Ok(Value::Scalar(Literal::Bool(
+            input.as_str().eq_ignore_ascii_case("true"),
+        )))
     }
 
     #[alias(value)]
     fn NumberLiteral(input: Node) -> Result<Value> {
+        number(&input).map(Value::Scalar)
+    }
+
+    fn UnsignedInteger(input: Node) -> Result<Literal> {
         number(&input)
     }
 
-    fn UnsignedInteger(input: Node) -> Result<Value> {
+    fn SkipCount(input: Node) -> Result<Literal> {
         number(&input)
     }
 
-    fn SkipCount(input: Node) -> Result<Value> {
-        number(&input)
-    }
-
-    fn LimitCount(input: Node) -> Result<Value> {
+    fn LimitCount(input: Node) -> Result<Literal> {
         number(&input)
     }
 
     #[alias(value)]
     fn StringLiteral(input: Node) -> Result<Value> {
-        string(&input).map(Value::String)
+        string(&input).map(|text| Value::Scalar(Literal::String(text)))
     }
 
     #[alias(value)]
@@ -695,8 +683,7 @@ impl QueryParser {
     }
 }
 
-fn map(input: Node) -> Result<MapLiteral> {
-    let span = input.as_span();
+fn map(input: Node) -> Result<Vec<MapEntry>> {
     let mut keys = HashSet::new();
     let mut entries = Vec::new();
     for child in input.into_children() {
@@ -706,7 +693,7 @@ fn map(input: Node) -> Result<MapLiteral> {
         }
         entries.push(entry);
     }
-    Ok(MapLiteral { span, entries })
+    Ok(entries)
 }
 
 fn directed(input: Node, direction: Direction) -> Result<Relationship> {
@@ -716,22 +703,24 @@ fn directed(input: Node, direction: Direction) -> Result<Relationship> {
             variable: None,
             types: Vec::new(),
             range: None,
-            properties: None,
+            properties: Vec::new(),
         },
         [RelationshipDetail(detail)] => Relationship { direction, ..detail },
     ))
 }
 
-fn has_temporal_literal(node: &Node) -> bool {
-    node.as_pair()
-        .clone()
-        .into_inner()
-        .flatten()
-        .any(|pair| pair.as_rule() == Rule::TemporalLiteral)
-}
-
-fn leaf(comparison: Comparison<'_>) -> BooleanExpression<Predicate<'_>> {
-    BooleanExpression::Leaf(Predicate::Comparison(Box::new(comparison)))
+fn comparison<'i>(
+    span: Span<'i>,
+    subject: Subject<'i>,
+    op: Operator,
+    operand: Option<Operand<'i>>,
+) -> BooleanExpression<Predicate<'i>> {
+    BooleanExpression::Leaf(Predicate::Comparison {
+        span,
+        subject,
+        op,
+        operand,
+    })
 }
 
 fn list(input: Node) -> Result<Value> {
@@ -747,16 +736,26 @@ fn list(input: Node) -> Result<Value> {
         };
         return Err(error_at(input.as_span(), &message));
     }
-    Ok(match_nodes!(<QueryParser>; input.into_children();
-        [value(values)..] => Value::Array(values.collect()),
-    ))
+    let span = input.as_span();
+    let values: Vec<Value> = match_nodes!(<QueryParser>; input.into_children();
+        [value(values)..] => values.collect(),
+    );
+    values
+        .into_iter()
+        .map(|value| match value {
+            Value::Scalar(literal) => Ok(literal),
+            Value::List(_) => Err(error_at(span, "a list holds values, not lists")),
+        })
+        .collect::<Result<_>>()
+        .map(Value::List)
 }
 
-fn row_count(value: &Value, span: Span<'_>, clause: &str) -> Result<u32> {
-    value
-        .as_u64()
-        .and_then(|n| u32::try_from(n).ok())
-        .ok_or_else(|| error_at(span, &format!("{clause} must be a positive integer")))
+fn row_count(value: &Literal, span: Span<'_>, clause: &str) -> Result<u32> {
+    match value {
+        Literal::Int(count) => u32::try_from(*count).ok(),
+        _ => None,
+    }
+    .ok_or_else(|| error_at(span, &format!("{clause} must be a positive integer")))
 }
 
 fn error_at(span: Span<'_>, message: &str) -> Error<Rule> {
@@ -888,7 +887,7 @@ fn string(node: &Node) -> Result<String> {
     Ok(result)
 }
 
-fn number(node: &Node) -> Result<Value> {
+fn number(node: &Node) -> Result<Literal> {
     let raw = node.as_str();
     let unsigned = raw.trim_start_matches(['+', '-']);
     let radix = if unsigned.starts_with("0x") {
@@ -908,20 +907,19 @@ fn number(node: &Node) -> Result<Value> {
             magnitude
         };
         return i64::try_from(signed)
-            .map(Value::from)
+            .map(Literal::Int)
             .map_err(|_| out_of_range());
     }
     let raw = raw.trim_start_matches('+');
     if raw.contains(['.', 'e', 'E']) {
-        let number = raw
-            .parse::<f64>()
+        raw.parse::<f64>()
             .ok()
-            .and_then(Number::from_f64)
-            .ok_or_else(|| node.error("number must be finite and in range"))?;
-        Ok(Value::Number(number))
+            .filter(|number| number.is_finite())
+            .map(Literal::Float)
+            .ok_or_else(|| node.error("number must be finite and in range"))
     } else {
         raw.parse::<i64>()
-            .map(Value::from)
+            .map(Literal::Int)
             .map_err(|_| out_of_range())
     }
 }

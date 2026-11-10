@@ -3,13 +3,14 @@ use query_data_model::plan::tracking::Ref;
 
 use crate::error::{QueryError, Result};
 use crate::logical::Kind;
+use crate::logical::Leaf;
 use crate::logical::Query;
-use crate::logical::facts::{Anchor, Fact};
+use crate::logical::anchors::Anchor;
 use crate::query_limits::{MAX_ID_RANGE_SPAN, MAX_PATH_ANCHOR_RANGE};
 
 pub(super) fn selectivity(
     query: Query<'_>,
-    facts: &[Fact<'_>],
+    facts: &[Leaf<'_>],
     anchors: &[Anchor<'_>],
 ) -> Result<()> {
     let anchor = |binding: Ref| {

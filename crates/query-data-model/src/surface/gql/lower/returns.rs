@@ -1,99 +1,82 @@
 use std::collections::HashMap;
 
 use super::super::ast::{
-    Expression, Name, OrderDirection, ProjectionItem, Projections, Sort, SortKey,
+    AggregateFunction, Expression, Name, OrderDirection, ProjectionItem, Projections, Sort,
+    SortKey, Target,
 };
 use super::super::errors::invalid;
-use super::scope::{Scope, Shape};
-use super::{Built, aggregate};
-use crate::plan::logical::limits::MAX_COLUMNS;
-use crate::plan::logical::{Columns, EdgeField, Expr, LogicalBuilder, Order, Projection, Rows};
+use super::Built;
+use super::conditions::column;
+use crate::plan::logical::{
+    Columns, EdgeField, Expr, LogicalBuilder, LogicalType, Measure, Order, Projection, Rows,
+};
+use crate::plan::tracking::Named;
 use crate::surface::SurfaceError;
 
-pub(super) enum Item {
-    Node(String, Option<Vec<String>>, bool),
-    Edge(String, String),
-    Type(String, String),
-    Match(String, String),
-}
-
+/// What RETURN names: graph items in written order, with `a.x, a.y` folded into one node item.
 #[derive(Default)]
 struct Returned {
-    items: Vec<Item>,
+    /// Neighbors and path results carry every relationship in their path column, so a plain
+    /// `RETURN r` or `RETURN type(r)` adds nothing and lowers to no item.
+    paths: bool,
+    items: Vec<(String, Item)>,
     aliases: HashMap<String, Option<(String, String)>>,
-    dynamic: Option<Columns>,
+    dynamic: Option<(String, Columns)>,
 }
 
-pub(super) fn order(direction: OrderDirection) -> Order {
-    match direction {
-        OrderDirection::Asc => Order::Ascending,
-        OrderDirection::Desc => Order::Descending,
-    }
+enum Item {
+    Node(Option<Vec<String>>, bool),
+    Graph(String, Columns),
+    Value(Expr),
 }
 
 pub(super) fn project<'m>(
     q: &mut LogicalBuilder<'m>,
     rows: Rows<'m>,
-    scope: &Scope<'_>,
+    nodes: &[&str],
+    dynamic: Option<&str>,
     projections: Projections<'_>,
     sort: Option<Sort<'_>>,
 ) -> Built<'m> {
     let items = match projections {
-        Projections::Star(span) if scope.shape != Shape::Match => {
+        Projections::Star(span) if dynamic.is_some() => {
             return Err(invalid(span, "RETURN * is only supported for traversal"));
         }
         Projections::Star(_) => Vec::new(),
-        Projections::Items { span, items } => {
+        Projections::Items(items)
             if items
                 .iter()
-                .any(|item| matches!(item.expression, Expression::Aggregate { .. }))
-            {
-                if matches!(scope.shape, Shape::Neighbors(_)) {
-                    return Err(invalid(
-                        span,
-                        "neighbors cannot be aggregated; use labeled node patterns",
-                    ));
-                }
-                return aggregate::project(q, rows, scope, items, sort);
-            }
-            items
+                .any(|item| matches!(item.expression, Expression::Aggregate { .. })) =>
+        {
+            return aggregate(q, rows, items, sort);
         }
+        Projections::Items(items) => items,
     };
-    let mut returned = Returned::default();
+    let mut returned = Returned {
+        paths: dynamic.is_some(),
+        ..Returned::default()
+    };
     if items.is_empty() {
-        returned.items = scope
-            .nodes
+        returned.items = nodes
             .iter()
-            .map(|node| Item::Node(node.alias.clone(), None, false))
+            .map(|alias| (alias.to_string(), Item::Node(None, false)))
             .collect();
     }
     for item in items {
-        returned.item(scope, item)?;
+        returned.item(&rows, item)?;
     }
     let rows = match sort {
-        Some(sort) if scope.shape != Shape::Match => {
-            return Err(invalid(
-                sort.span,
-                "path finding and neighbors have fixed result ordering",
-            ));
-        }
         Some(sort) => {
-            let key = returned.sort_key(&rows, scope, sort.key)?;
+            let key = returned.sort_key(&rows, sort.key)?;
             q.order(rows, [(key, order(sort.direction))])?
         }
         None => rows,
     };
-    let projections = returned.select(&rows, scope)?;
+    let projections = returned.select(&rows, dynamic)?;
     Ok(q.select(rows, projections)?)
 }
 
 impl Returned {
-    fn node(&mut self, alias: &str) -> Option<&mut Item> {
-        self.items
-            .iter_mut()
-            .find(|item| matches!(item, Item::Node(name, ..) if name == alias))
-    }
-
     fn alias(
         &mut self,
         span: pest::Span<'_>,
@@ -106,328 +89,368 @@ impl Returned {
         }
     }
 
-    fn item(&mut self, scope: &Scope<'_>, item: ProjectionItem<'_>) -> Result<(), SurfaceError> {
+    fn item(&mut self, rows: &Rows<'_>, item: ProjectionItem<'_>) -> Result<(), SurfaceError> {
         let alias = item.alias.map(|alias| alias.value);
-        let path = matches!(scope.shape, Shape::Path(_));
         match item.expression {
-            Expression::Aggregate { .. } => {
-                unreachable!("aggregates lower through aggregate::project")
-            }
-            Expression::DateTrunc { span, .. } => Err(invalid(
+            Expression::Aggregate { .. } => unreachable!("aggregates lower through aggregate"),
+            Expression::DateTrunc {
                 span,
-                "date_trunc is only supported as an aggregation group key",
-            )),
+                unit,
+                property,
+            } => {
+                let expr = rows
+                    .binding(&property.node.value)?
+                    .truncate(&property.property.value, unit)?;
+                let name = alias.unwrap_or_else(|| span.as_str().to_string());
+                self.items.push((name, Item::Value(expr)));
+            }
             Expression::Node {
                 span,
                 variable,
                 properties,
             } => {
-                if path {
-                    return Err(invalid(
-                        span,
-                        "node projections require traversal, neighbors, or aggregation",
-                    ));
-                }
-                let columns: Vec<String> = properties.into_iter().map(|name| name.value).collect();
-                let distinct: std::collections::HashSet<_> = columns.iter().collect();
-                if distinct.len() != columns.len() || self.node(&variable.value).is_some() {
-                    return Err(invalid(span, "duplicate or overlapping node projection"));
-                }
                 self.alias(span, alias, None)?;
-                if scope.node(&variable.value).is_none() {
-                    return Err(invalid(
-                        span,
-                        "node projection references an undefined variable",
-                    ));
-                }
+                let columns = properties.into_iter().map(|name| name.value).collect();
                 self.items
-                    .push(Item::Node(variable.value, Some(columns), false));
-                Ok(())
+                    .push((variable.value, Item::Node(Some(columns), false)));
             }
             Expression::Property(property) => {
-                let span = property.span;
-                if path {
-                    return Err(invalid(
-                        span,
-                        "property projections require traversal or neighbors",
-                    ));
-                }
                 let (node, name) = (property.node.value, property.property.value);
-                self.alias(span, alias, Some((node.clone(), name.clone())))?;
-                if scope.node(&node).is_none() {
-                    return Err(invalid(
-                        span,
-                        "property projection references an undefined node",
-                    ));
+                self.alias(property.span, alias, Some((node.clone(), name.clone())))?;
+                match self.items.iter_mut().find(|(other, item)| {
+                    *other == node && matches!(item, Item::Node(Some(_), true))
+                }) {
+                    Some((_, Item::Node(Some(columns), _))) => columns.push(name),
+                    _ => self.items.push((node, Item::Node(Some(vec![name]), true))),
                 }
-                match self.node(&node) {
-                    None => self.items.push(Item::Node(node, Some(vec![name]), true)),
-                    Some(Item::Node(_, Some(columns), true)) if columns.len() == MAX_COLUMNS => {
-                        return Err(invalid(
-                            span,
-                            &format!("a node projects at most {MAX_COLUMNS} properties"),
-                        ));
-                    }
-                    Some(Item::Node(_, Some(columns), true)) if !columns.contains(&name) => {
-                        columns.push(name)
-                    }
-                    Some(_) => {
-                        return Err(invalid(span, "duplicate or overlapping node projection"));
-                    }
-                }
-                Ok(())
             }
             Expression::Variable(variable) => {
-                self.graph(scope, variable.span, variable, false, alias)
+                self.graph(rows, variable, Columns::Default, alias)?
             }
-            Expression::AllProperties { span, variable } => {
-                self.graph(scope, span, variable, true, alias)
+            Expression::AllProperties(variable) => {
+                self.graph(rows, variable, Columns::All, alias)?
             }
             Expression::RelationshipType { span, variable } => {
-                let name = alias.clone().unwrap_or_else(|| span.as_str().to_owned());
-                if self.relationship(scope, span, &variable, alias)? {
-                    self.items.push(Item::Type(name, variable.value));
+                let binding = rows.binding(&variable.value)?;
+                let kind = binding.field(EdgeField::Kind)?;
+                if self.paths && alias.is_none() && binding.hops().max == 1 {
+                    return Ok(());
                 }
-                Ok(())
+                let name = alias.clone().unwrap_or_else(|| span.as_str().to_owned());
+                self.alias(span, alias, None)?;
+                self.items.push((name, Item::Value(kind)));
             }
             Expression::Match(field) => {
                 let column = format!("match.{}", field.value);
                 let name = alias.clone().unwrap_or_else(|| column.clone());
-                if self
-                    .items
-                    .iter()
-                    .any(|item| matches!(item, Item::Match(other, _) if *other == name))
-                {
-                    return Err(invalid(field.span, "duplicate RETURN column name"));
-                }
                 self.alias(field.span, alias, None)?;
-                self.items.push(Item::Match(name, column));
-                Ok(())
+                self.items.push((name, Item::Value(rows.column(&column)?)));
             }
         }
-    }
-
-    fn relationship(
-        &mut self,
-        scope: &Scope<'_>,
-        span: pest::Span<'_>,
-        variable: &Name<'_>,
-        alias: Option<String>,
-    ) -> Result<bool, SurfaceError> {
-        let name = &variable.value;
-        match scope.edge(name) {
-            Some((_, edge)) if edge.hops.max > 1 => {
-                return Err(invalid(
-                    span,
-                    &format!(
-                        "{name} has a variable length and binds a list; type({name}) and RETURN {name} need a one-hop relationship, so list the types in the pattern instead, such as -[{name}:CLOSES|MENTIONS*1..3]->"
-                    ),
-                ));
-            }
-            Some(_) => {}
-            None => return Err(invalid(span, &format!("undefined variable {name}"))),
-        }
-        if scope.shape != Shape::Match {
-            return match alias {
-                Some(alias) => Err(invalid(
-                    span,
-                    &format!(
-                        "{alias}: neighbors and path finding return one path column that shows each edge type, so a relationship item cannot be renamed"
-                    ),
-                )),
-                None => Ok(false),
-            };
-        }
-        let written = alias.clone().unwrap_or_else(|| name.clone());
-        if self.items.iter().any(|item| match item {
-            Item::Node(other, ..)
-            | Item::Edge(other, _)
-            | Item::Type(other, _)
-            | Item::Match(other, _) => *other == written,
-        }) || scope.node(&written).is_some()
-        {
-            return Err(invalid(span, "duplicate RETURN column name"));
-        }
-        self.alias(span, alias, None)?;
-        Ok(true)
+        Ok(())
     }
 
     fn graph(
         &mut self,
-        scope: &Scope<'_>,
-        span: pest::Span<'_>,
+        rows: &Rows<'_>,
         variable: Name<'_>,
-        all: bool,
+        columns: Columns,
         alias: Option<String>,
     ) -> Result<(), SurfaceError> {
-        if scope.edge(&variable.value).is_some() {
-            if all {
-                return Err(invalid(
-                    span,
-                    &format!(
-                        "properties({}) is not supported; relationships have no properties",
-                        variable.value
-                    ),
-                ));
+        let binding = rows.binding(&variable.value)?;
+        let name = alias.clone().unwrap_or_else(|| variable.value.clone());
+        match binding.kind() {
+            LogicalType::Node | LogicalType::Path if self.dynamic.is_none() => {
+                self.dynamic = Some((name, columns));
             }
-            let name = alias.clone().unwrap_or_else(|| variable.value.clone());
-            if self.relationship(scope, span, &variable, alias)? {
-                self.items.push(Item::Edge(name, variable.value));
+            LogicalType::Edge if self.paths && alias.is_none() && binding.hops().max == 1 => {}
+            LogicalType::Node | LogicalType::Path | LogicalType::Edge => {
+                self.items
+                    .push((name, Item::Graph(variable.value, columns)));
             }
-            return Ok(());
-        }
-        let dynamic = scope.dynamic(&variable.value);
-        if dynamic || (matches!(scope.shape, Shape::Neighbors(_)) && all) {
-            if alias.is_some() || (all && !dynamic) {
+            _ if self.paths && columns == Columns::All => {
                 return Err(invalid(
-                    span,
+                    variable.span,
                     "dynamic graph results cannot be renamed or projected as properties",
                 ));
             }
-            if self.dynamic.is_some() {
-                return Err(invalid(span, "duplicate graph projection"));
+            _ => {
+                self.alias(variable.span, alias, None)?;
+                let all = columns == Columns::All;
+                self.items.push((variable.value, Item::Node(None, all)));
             }
-            self.dynamic = Some(if all { Columns::All } else { Columns::Default });
-            return Ok(());
         }
-        if matches!(scope.shape, Shape::Path(_)) {
-            return Err(invalid(
-                span,
-                "path finding requires RETURN of the path variable",
-            ));
-        }
-        if scope.node(&variable.value).is_none() {
-            let (line, column) = span.start_pos().line_col();
-            return Err(crate::plan::logical::PlanError::UnknownBinding {
-                name: format!("{} at line {line}, column {column}", variable.value),
-                available: scope.nodes.iter().map(|node| node.alias.clone()).collect(),
-            }
-            .into());
-        }
-        if self.node(&variable.value).is_some() {
-            return Err(invalid(span, "duplicate or overlapping node projection"));
-        }
-        self.alias(span, alias, None)?;
-        self.items.push(Item::Node(variable.value, None, all));
         Ok(())
     }
 
-    fn sort_key(
-        &self,
-        rows: &Rows<'_>,
-        scope: &Scope<'_>,
-        key: SortKey<'_>,
-    ) -> Result<Expr, SurfaceError> {
-        let kind = |name: &Name<'_>| -> Result<Expr, SurfaceError> {
-            Ok(rows.binding(&name.value)?.field(EdgeField::Kind)?)
-        };
-        let (node, property) = match key {
-            SortKey::Property(key) if scope.edge(&key.node.value).is_some() => {
-                return Err(invalid(
-                    key.span,
-                    &format!(
-                        "ORDER BY cannot sort by a relationship property; sort by a node property or by type({})",
-                        key.node.value
-                    ),
-                ));
-            }
-            SortKey::Property(key) => (key.node.value, key.property.value),
-            SortKey::RelationshipType(name) => match scope.edge(&name.value) {
-                Some((_, edge)) if edge.hops.max == 1 => return kind(&name),
-                Some(_) => {
-                    let (span, name) = (name.span, &name.value);
-                    return Err(invalid(
-                        span,
-                        &format!(
-                            "{name} has a variable length and binds a list; type({name}) and RETURN {name} need a one-hop relationship, so list the types in the pattern instead, such as -[{name}:CLOSES|MENTIONS*1..3]->"
-                        ),
-                    ));
-                }
-                None => {
-                    return Err(invalid(
-                        name.span,
-                        &format!("undefined variable {}", name.value),
-                    ));
-                }
-            },
+    fn sort_key(&self, rows: &Rows<'_>, key: SortKey<'_>) -> Result<Expr, SurfaceError> {
+        let kind = |name: &str| Ok(rows.binding(name)?.field(EdgeField::Kind)?);
+        match key {
+            SortKey::Property(key) => column(rows, &key),
+            SortKey::RelationshipType(name) => kind(&name.value),
             SortKey::Variable(name) => {
-                if let Some(Item::Type(_, edge)) = self
-                    .items
-                    .iter()
-                    .find(|item| matches!(item, Item::Type(column, _) if *column == name.value))
+                if let Some((_, Item::Value(expr @ Expr::Edge { .. }))) =
+                    self.items.iter().find(|(column, _)| *column == name.value)
                 {
-                    return kind(&Name {
-                        span: name.span,
-                        value: edge.clone(),
-                    });
+                    return Ok(*expr);
                 }
                 match self.aliases.get(&name.value) {
-                    Some(Some(target)) => target.clone(),
-                    Some(None) => {
-                        return Err(invalid(
-                            name.span,
-                            "ORDER BY a property alias, not a node alias",
-                        ));
-                    }
-                    None => {
-                        return Err(invalid(
-                            name.span,
-                            "traversal ORDER BY requires node.property or a property alias",
-                        ));
-                    }
+                    Some(Some((node, property))) => Ok(rows.binding(node)?.property(property)?),
+                    Some(None) => Err(invalid(
+                        name.span,
+                        "ORDER BY a property alias, not a node alias",
+                    )),
+                    None => Err(invalid(
+                        name.span,
+                        "traversal ORDER BY requires node.property or a property alias",
+                    )),
                 }
             }
-        };
-        Ok(rows.binding(&node)?.property(&property)?)
+        }
     }
 
     fn select(
         self,
         rows: &Rows<'_>,
-        scope: &Scope<'_>,
-    ) -> Result<Vec<crate::plan::tracking::Named<Projection>>, SurfaceError> {
+        dynamic: Option<&str>,
+    ) -> Result<Vec<Named<Projection>>, SurfaceError> {
         let mut items = Vec::new();
-        for item in &self.items {
-            let (name, binding, projection) = match item {
-                Item::Node(alias, columns, all) => {
-                    let columns = match (columns, all) {
-                        (Some(names), _) => Columns::Listed(property_ids(rows, alias, names)?),
+        for (name, item) in self.items {
+            let projection = match item {
+                Item::Value(expr) => Projection::Value(expr),
+                Item::Graph(variable, columns) => Projection::Graph {
+                    binding: rows.binding(&variable)?.output(),
+                    columns,
+                },
+                Item::Node(listed, all) => {
+                    let binding = rows.binding(&name)?;
+                    let columns = match (listed, all) {
+                        (Some(names), _) => Columns::Listed(property_ids(rows, &name, &names)?),
                         (None, true) => Columns::All,
-                        (None, false) => rows.binding(alias)?.catalog().default_columns(),
+                        (None, false) => binding.catalog().default_columns(),
                     };
-                    (alias, alias, Some(columns))
-                }
-                Item::Edge(name, edge) => (name, edge, Some(Columns::Default)),
-                Item::Type(name, edge) => (name, edge, None),
-                Item::Match(name, column) => {
-                    items.push(Projection::Value(rows.column(column)?).named(name));
-                    continue;
+                    Projection::Graph {
+                        binding: binding.output(),
+                        columns,
+                    }
                 }
             };
-            let bound = rows.binding(binding)?;
-            items.push(match projection {
-                Some(columns) => Projection::Graph {
-                    binding: bound.output(),
-                    columns,
-                }
-                .named(name),
-                None => Projection::Value(bound.field(EdgeField::Kind)?).named(name),
-            });
+            items.push(projection.named(name));
         }
-        if let Shape::Path(name) | Shape::Neighbors(name) = &scope.shape {
-            let binding = rows.binding(name)?;
-            let columns = match self.dynamic.unwrap_or(Columns::Default) {
+        if let Some(variable) = dynamic {
+            let (name, columns) = self
+                .dynamic
+                .unwrap_or_else(|| (variable.to_string(), Columns::Default));
+            let binding = rows.binding(variable)?;
+            let columns = match columns {
                 Columns::Default => binding.catalog().default_columns(),
                 columns => columns,
             };
-            let binding = binding.output();
-            items.push(Projection::Graph { binding, columns }.named(name));
+            items.push(
+                Projection::Graph {
+                    binding: binding.output(),
+                    columns,
+                }
+                .named(name),
+            );
         }
         Ok(items)
     }
 }
 
-pub(super) fn property_ids(
+/// A group key: its expression, the node property it reads, and the columns of a node key.
+type Group = (Named<Expr>, Option<(String, String)>, Option<Columns>);
+
+fn aggregate<'m>(
+    q: &mut LogicalBuilder<'m>,
+    rows: Rows<'m>,
+    items: Vec<ProjectionItem<'_>>,
+    sort: Option<Sort<'_>>,
+) -> Built<'m> {
+    let mut groups: Vec<Group> = Vec::new();
+    let mut measures = Vec::new();
+    for item in items {
+        let alias = item.alias.map(|alias| alias.value);
+        let node = |variable: Name<'_>, columns: Columns| -> Result<_, SurfaceError> {
+            let expr = rows.binding(&variable.value)?.node();
+            let name = alias.clone().unwrap_or(variable.value);
+            Ok((expr.named(name), None, Some(columns)))
+        };
+        let group = match item.expression {
+            Expression::Aggregate {
+                function,
+                distinct,
+                target,
+            } => {
+                measures.push(measure(&rows, function, distinct, target, alias)?);
+                continue;
+            }
+            Expression::DateTrunc { unit, property, .. } => {
+                let (node, name) = (property.node.value, property.property.value);
+                let expr = rows.binding(&node)?.truncate(&name, unit)?;
+                let unit: &str = unit.into();
+                (
+                    expr.named(alias.unwrap_or(format!("{node}_{name}_{unit}"))),
+                    None,
+                    None,
+                )
+            }
+            Expression::Property(property) => {
+                let (node, name) = (property.node.value, property.property.value);
+                let expr = rows.binding(&node)?.property(&name)?;
+                let derived = format!("{node}_{name}");
+                (
+                    expr.named(alias.unwrap_or(derived)),
+                    Some((node, name)),
+                    None,
+                )
+            }
+            Expression::Node {
+                variable,
+                properties,
+                ..
+            } => {
+                let names: Vec<String> = properties.into_iter().map(|name| name.value).collect();
+                let listed = Columns::Listed(property_ids(&rows, &variable.value, &names)?);
+                node(variable, listed)?
+            }
+            Expression::Variable(variable) => {
+                let columns = rows.binding(&variable.value)?.catalog().default_columns();
+                node(variable, columns)?
+            }
+            Expression::AllProperties(variable) => node(variable, Columns::All)?,
+            Expression::RelationshipType { span, variable } => {
+                let expr = rows.binding(&variable.value)?.field(EdgeField::Kind)?;
+                (
+                    expr.named(alias.unwrap_or_else(|| span.as_str().to_owned())),
+                    None,
+                    None,
+                )
+            }
+            Expression::Match(field) => {
+                let column = format!("match.{}", field.value);
+                let expr = rows.column(&column)?;
+                (expr.named(alias.unwrap_or(column)), None, None)
+            }
+        };
+        let overlaps = |(other, _, columns): &Group| {
+            other.item == group.0.item
+                && columns
+                    .as_ref()
+                    .zip(group.2.as_ref())
+                    .is_some_and(|(left, right)| !same(left, right))
+        };
+        if groups.iter().any(overlaps) {
+            return Err(SurfaceError::schema(
+                "a node grouped twice must return the same properties both times",
+            ));
+        }
+        groups.push(group);
+    }
+    let names: Vec<_> = groups
+        .iter()
+        .map(|(named, _, columns)| (named.name.clone(), columns.clone()))
+        .chain(
+            measures
+                .iter()
+                .map(|measure: &Named<Measure>| (measure.name.clone(), None)),
+        )
+        .collect();
+    let keys: Vec<_> = groups
+        .iter()
+        .map(|(named, key, _)| (key.clone(), named.name.clone()))
+        .collect();
+    let mut rows = q.aggregate(rows, groups.into_iter().map(|(named, ..)| named), measures)?;
+    if let Some(sort) = sort {
+        let column = match sort.key {
+            SortKey::Property(key) => {
+                let wanted = Some((key.node.value, key.property.value));
+                keys.into_iter()
+                    .find(|(key, _)| *key == wanted)
+                    .map(|(_, name)| name)
+                    .ok_or_else(|| {
+                        invalid(
+                            key.span,
+                            "ORDER BY must name an aggregate alias or returned group key",
+                        )
+                    })?
+            }
+            SortKey::Variable(name) | SortKey::RelationshipType(name) => name.value,
+        };
+        let key = rows.column(&column)?;
+        rows = q.order(rows, [(key, order(sort.direction))])?;
+    }
+    let items = names
+        .into_iter()
+        .map(|(name, columns)| {
+            Ok(match columns {
+                Some(columns) => {
+                    let binding = rows.binding(&name)?.output();
+                    Projection::Graph { binding, columns }.named(name)
+                }
+                None => Projection::Value(rows.column(&name)?).named(name),
+            })
+        })
+        .collect::<Result<Vec<_>, SurfaceError>>()?;
+    Ok(q.select(rows, items)?)
+}
+
+fn measure(
+    rows: &Rows<'_>,
+    function: AggregateFunction,
+    distinct: bool,
+    target: Target<'_>,
+    alias: Option<String>,
+) -> Result<Named<Measure>, SurfaceError> {
+    let (node, property, input) = match target {
+        Target::Property(property) => {
+            let (node, name) = (property.node.value, property.property.value);
+            let input = rows.binding(&node)?.property(&name)?;
+            (node, Some(name), input)
+        }
+        Target::Variable(variable) => {
+            let input = rows.binding(&variable.value)?.node();
+            (variable.value, None, input)
+        }
+    };
+    let (measure, function) = match (function, distinct) {
+        (AggregateFunction::Count, false) => (Measure::Count(Some(input)), "count"),
+        (AggregateFunction::Count, true) => (Measure::CountDistinct(input), "count_distinct"),
+        (AggregateFunction::Sum, _) => (Measure::Sum(input), "sum"),
+        (AggregateFunction::Avg, _) => (Measure::Avg(input), "avg"),
+        (AggregateFunction::Min, _) => (Measure::Min(input), "min"),
+        (AggregateFunction::Max, _) => (Measure::Max(input), "max"),
+    };
+    let derived = match property {
+        Some(property) => format!("{function}_{node}_{property}"),
+        None => format!("{function}_{node}"),
+    };
+    Ok(measure.named(alias.unwrap_or(derived)))
+}
+
+/// The Aggregate groups by the node alone, so one node cannot return two property sets.
+fn same(left: &Columns, right: &Columns) -> bool {
+    match (left, right) {
+        (Columns::Listed(left), Columns::Listed(right)) => {
+            let set = |ids: &[crate::PropertyId]| {
+                ids.iter()
+                    .copied()
+                    .collect::<std::collections::BTreeSet<_>>()
+            };
+            set(left) == set(right)
+        }
+        _ => left == right,
+    }
+}
+
+fn order(direction: OrderDirection) -> Order {
+    match direction {
+        OrderDirection::Asc => Order::Ascending,
+        OrderDirection::Desc => Order::Descending,
+    }
+}
+
+fn property_ids(
     rows: &Rows<'_>,
     alias: &str,
     names: &[String],

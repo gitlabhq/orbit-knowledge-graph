@@ -7,17 +7,17 @@ use query_data_model::plan::tracking::Ref;
 
 use super::{node_property, served};
 use crate::error::{QueryError, Result};
+use crate::logical::Leaf;
 use crate::logical::Query;
 use crate::logical::columns::free_text;
-use crate::logical::facts::Fact;
 
-fn sides(fact: &Fact<'_>) -> impl Iterator<Item = Expr> {
-    std::iter::once(fact.left).chain(fact.right())
+fn sides(fact: &Leaf<'_>) -> impl Iterator<Item = Expr> {
+    std::iter::once(fact.left()).chain(fact.right())
 }
 
 pub(super) fn negated(
     query: Query<'_>,
-    facts: &[Fact<'_>],
+    facts: &[Leaf<'_>],
     model: &Catalog<impl SqlBackend>,
 ) -> Result<()> {
     let negated = facts.iter().filter(|fact| fact.negated).flat_map(sides);
@@ -36,15 +36,15 @@ pub(super) fn negated(
 
 pub(super) fn epoch(
     query: Query<'_>,
-    facts: &[Fact<'_>],
+    facts: &[Leaf<'_>],
     model: &Catalog<impl SqlBackend>,
 ) -> Result<()> {
     for fact in facts {
-        let Some((_, entity, property)) = node_property(query, fact.left) else {
+        let Some((_, entity, property)) = node_property(query, fact.left()) else {
             continue;
         };
         let epoch_null =
-            matches!(fact.left, Expr::Property { property, .. } if model.null_as_epoch(property));
+            matches!(fact.left(), Expr::Property { property, .. } if model.null_as_epoch(property));
         let early = fact.literals().iter().any(|literal| match literal {
             Literal::String(text) | Literal::Temporal(text) => at_or_before_epoch(text),
             _ => false,
@@ -71,7 +71,7 @@ fn at_or_before_epoch(value: &str) -> bool {
 
 pub(super) fn aggregation_text(
     query: Query<'_>,
-    facts: &[Fact<'_>],
+    facts: &[Leaf<'_>],
     model: &Catalog<impl SqlBackend>,
 ) -> Result<()> {
     let Some((groups, _)) = query.aggregate() else {
@@ -89,10 +89,10 @@ pub(super) fn aggregation_text(
         })
         .collect();
     for fact in facts {
-        let matching = match fact.leaf {
+        let matching = match &*fact.predicate {
             Predicate::Text { .. } => true,
             Predicate::Compare { .. } => !matches!(
-                fact.comparison,
+                fact.comparison(),
                 Some(Comparison::Eq | Comparison::Ne) | None
             ),
             _ => false,

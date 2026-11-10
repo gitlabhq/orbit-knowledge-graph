@@ -57,7 +57,7 @@ impl<B: SqlBackend> Pattern<'_, B> {
         edge_alias: &str,
     ) -> Option<Predicate> {
         let facts = self.denorm_facts(relation, node, filter)?;
-        tag_filter(edge_alias, &facts.edge_column, &facts.tag_key, &filter.test)
+        tag_filter(edge_alias, &facts.edge_column, &facts.tag_key, filter)
     }
 
     pub fn covered_by_edge(&self, node: &str, property: &str, filter: &BoundFilter) -> bool {
@@ -77,7 +77,7 @@ impl<B: SqlBackend> Pattern<'_, B> {
         property: &str,
         filter: &BoundFilter,
     ) -> bool {
-        filter.test.rhs().is_none()
+        filter.rhs.is_none()
             && relation.fk.is_none()
             && relation.max_hops == 1
             && relation.endpoint_column(node).is_some()
@@ -170,7 +170,8 @@ impl<B: SqlBackend> Pattern<'_, B> {
             })
             .filter_map(|(_, property, filter)| {
                 let owner = FilterOwner::Entity(entity);
-                let bound = bind_filter(property, filter.test.clone(), &owner, self.model);
+                let leaf = filter.leaf.clone();
+                let bound = bind_filter(property, leaf, filter.rhs.clone(), &owner, self.model);
                 (!bound.is_selective()).then(|| property_filter(&node.alias, property, &bound))
             })
             .collect()

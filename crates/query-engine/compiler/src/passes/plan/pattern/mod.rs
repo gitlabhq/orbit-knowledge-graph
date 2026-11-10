@@ -25,7 +25,6 @@ use crate::error::{QueryError, Result};
 use crate::logical::Boolean;
 use crate::logical::Kind;
 use crate::logical::Query;
-use crate::logical::facts::{anchors, facts};
 use query_data_model::Direction;
 use query_data_model::plan::logical::Expr;
 
@@ -119,13 +118,14 @@ impl<B: SqlBackend> Pattern<'_, B> {
 
 impl<'a, B: SqlBackend> Pattern<'a, B> {
     pub(crate) fn new(query: Query<'a>, model: &'a Catalog<B>) -> Result<Self> {
-        let facts = facts(query);
-        let nodes = nodes::build_nodes(query, &anchors(query, &facts), model);
+        let facts = query.leaves();
+        let nodes = nodes::build_nodes(query, &query.anchors(&facts), model);
+        let relations = relations::build_relations(query, &facts, model, &nodes);
         let mut pattern = Self {
             query,
-            conditions: conditions::conditions(query)?,
+            conditions: conditions::conditions(query, &relations, &nodes, model)?,
             model,
-            relations: relations::build_relations(query, &facts, model, &nodes),
+            relations,
             nodes,
             denormalized: super::filters::denormalized_facts(query, model),
             scans: Vec::new(),

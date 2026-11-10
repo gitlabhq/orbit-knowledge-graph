@@ -23,9 +23,9 @@ impl TpBounds {
         let anchors = super::anchor_keys(model);
         let edges = edges(query);
         let keys: HashMap<Ref, Vec<TpLookupKey>> = query
-            .bindings()
-            .into_iter()
-            .map(|binding| (binding.output, keys(query, binding.output, &anchors)))
+            .anchors(&query.leaves())
+            .iter()
+            .map(|anchor| (anchor.binding.output, keys(query, anchor, &anchors)))
             .collect();
         let nodes = match query.kind() {
             Kind::Traversal | Kind::Aggregation => nodes(query, &keys, &edges, model),

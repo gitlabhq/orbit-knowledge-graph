@@ -3,18 +3,12 @@
 
 use query_data_model::Catalog;
 use query_data_model::constants::DEFAULT_PRIMARY_KEY;
-use query_data_model::implementations::relational::RelationalBackend;
-use query_data_model::implementations::relational::plan::Expr;
 
 use super::filters::{BoundFilter, bind_facts, unindex_if_key_narrowed};
-use super::predicates::Column;
 use crate::logical::Query;
+use crate::logical::anchors::Anchor;
 use crate::logical::columns::redaction_column;
-use crate::logical::facts::Anchor;
 use crate::passes::codegen::SqlBackend;
-use crate::passes::plan::build::Built;
-use crate::passes::plan::build::expr::{self, Filter};
-use crate::passes::plan::build::sources::Scope;
 
 pub(crate) struct Node<'p> {
     pub alias: &'p str,
@@ -52,22 +46,5 @@ impl<'p> Node<'p> {
 
     pub fn uses_default_pk(&self) -> bool {
         self.redaction == DEFAULT_PRIMARY_KEY
-    }
-}
-
-impl BoundFilter {
-    pub fn lower<B: RelationalBackend>(&self, scope: &Scope<'_>, column: &Column) -> Built<Expr> {
-        expr::filter::<B>(
-            scope,
-            Filter {
-                column,
-                test: &self.test,
-                data_type: self.data_type.as_ref(),
-                in_sort_key: self.in_sort_key,
-                text_indexed: self.text_indexed,
-                null_as_epoch: self.null_as_epoch,
-                negated: false,
-            },
-        )
     }
 }

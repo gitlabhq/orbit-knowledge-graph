@@ -1,87 +1,69 @@
+use std::borrow::Cow;
+
 use query_data_model::PropertyId;
+use query_data_model::constants::{
+    SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
+};
 use query_data_model::plan::logical::{
-    Comparison, EdgeField, Expr, Literal, LogicalOperation, Matching, Operand, Predicate,
+    Comparison, Conjunct, EdgeField, Expr, Literal, LogicalOperation, Operand, Predicate,
 };
 use query_data_model::plan::tracking::Ref;
+use serde_json::Value;
 
 use super::{Boolean, Query};
 
-/// A filter leaf after the planner's NOT rule. NOT folds into `=`, `<>` and null checks, whose
-/// complements are exact under SQL's three-valued logic, and stays above every other operand.
-#[derive(Debug, Clone, Copy)]
+/// A filter leaf after the planner's NOT rule: a NOT folds into the leaf when it has an exact
+/// complement and stays above it otherwise.
+#[derive(Debug, Clone)]
 pub struct Leaf<'p> {
-    pub predicate: &'p Predicate,
-    pub left: Expr,
-    pub complemented: bool,
+    pub predicate: Cow<'p, Predicate>,
+    /// Some NOT stays above the leaf.
+    pub negated: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Literals<'p> {
-    One(&'p Literal),
-    Many(&'p [Literal]),
-    None,
-}
-
-/// The filter tree with NOT pushed down by the planner's rule: negation flips at every NOT, a
-/// negated conjunction keeps its NOT, and a negated leaf folds in when it has an exact complement.
-pub fn polarized(predicate: &Predicate) -> Boolean<Leaf<'_>> {
-    fn walk(predicate: &Predicate, negated: bool) -> Boolean<Leaf<'_>> {
-        let tree = match predicate {
-            Predicate::Not(inner) => return walk(inner, !negated),
-            Predicate::And(all) if all.len() == 1 => return walk(&all[0], negated),
-            Predicate::And(all) => Boolean::And(
-                all.iter()
-                    .flat_map(|child| walk(child, false).conjuncts())
-                    .collect(),
-            ),
-            Predicate::Compare { left, .. }
-            | Predicate::In { left, .. }
-            | Predicate::Text { left, .. }
-            | Predicate::Null { left, .. } => {
-                let complemented = negated && predicate.complementable();
-                let leaf = Boolean::Leaf(Leaf {
-                    predicate,
-                    left: *left,
-                    complemented,
-                });
-                match complemented {
-                    true => return leaf,
-                    false => leaf,
-                }
+/// The top-level conjuncts of a filter, with NOT pushed down to the leaves that complement.
+pub fn polarized(predicate: &Predicate) -> Vec<Boolean<Leaf<'_>>> {
+    fn walk(predicate: &Predicate, negated: bool) -> Vec<Boolean<Leaf<'_>>> {
+        let leaf = |predicate, negated| Boolean::Leaf(Leaf { predicate, negated });
+        let conjunct = |conjunct| match conjunct {
+            Conjunct::Leaf {
+                predicate,
+                negated: false,
+            } => leaf(Cow::Borrowed(predicate), negated),
+            Conjunct::Leaf { predicate, .. } => match predicate.complement() {
+                Some(complement) => leaf(Cow::Owned(complement), negated),
+                None => Boolean::Not(Box::new(leaf(Cow::Borrowed(predicate), true))),
+            },
+            Conjunct::Negated(group) => {
+                let children = match group {
+                    Predicate::And(all) => all.iter().flat_map(|child| walk(child, true)).collect(),
+                    other => walk(other, true),
+                };
+                Boolean::Not(Box::new(Boolean::And(children)))
             }
         };
-        match negated {
-            true => Boolean::Not(Box::new(tree)),
-            false => tree,
-        }
+        predicate.conjuncts().into_iter().map(conjunct).collect()
     }
     walk(predicate, false)
 }
 
-impl<'p> Leaf<'p> {
-    pub fn binding(self) -> Ref {
-        binding(self.left)
-    }
-
-    pub fn property(self) -> Option<PropertyId> {
-        match self.left {
-            Expr::Property { property, .. } | Expr::Truncate { property, .. } => Some(property),
-            _ => None,
+impl Leaf<'_> {
+    pub fn left(&self) -> Expr {
+        match &*self.predicate {
+            Predicate::Compare { left, .. }
+            | Predicate::In { left, .. }
+            | Predicate::Text { left, .. }
+            | Predicate::Null { left, .. } => *left,
+            Predicate::And(_) | Predicate::Not(_) => unreachable!("polarized leaves are leaves"),
         }
     }
 
-    pub fn edge_kind(self) -> bool {
-        matches!(
-            self.left,
-            Expr::Edge {
-                field: EdgeField::Kind,
-                ..
-            }
-        )
+    pub fn binding(&self) -> Ref {
+        binding(self.left())
     }
 
-    pub fn compared(self) -> Option<Expr> {
-        match self.predicate {
+    pub fn right(&self) -> Option<Expr> {
+        match &*self.predicate {
             Predicate::Compare {
                 right: Operand::Expr(right),
                 ..
@@ -90,33 +72,49 @@ impl<'p> Leaf<'p> {
         }
     }
 
-    /// The comparison with a folded NOT applied.
-    pub fn comparison(self) -> Option<Comparison> {
-        match self.predicate {
-            Predicate::Compare { comparison, .. } => Some(match (comparison, self.complemented) {
-                (Comparison::Eq, true) => Comparison::Ne,
-                (Comparison::Ne, true) => Comparison::Eq,
-                (comparison, _) => *comparison,
-            }),
+    pub fn edge_kind(&self) -> bool {
+        matches!(
+            self.left(),
+            Expr::Edge {
+                field: EdgeField::Kind,
+                ..
+            }
+        )
+    }
+
+    pub fn compares_bindings(&self) -> bool {
+        self.right().is_some_and(|right| match self.left() {
+            Expr::Property { .. } => binding(right) != self.binding(),
+            _ => true,
+        })
+    }
+
+    /// Whether the leaf filters its own binding's rows: no NOT above it and no other binding compared.
+    pub fn attached(&self) -> bool {
+        !self.negated && !self.compares_bindings()
+    }
+
+    pub fn comparison(&self) -> Option<Comparison> {
+        match &*self.predicate {
+            Predicate::Compare { comparison, .. } => Some(*comparison),
             _ => None,
         }
     }
 
-    pub fn matching(self) -> Option<Matching> {
-        match self.predicate {
-            Predicate::Text { matching, .. } => Some(*matching),
-            _ => None,
-        }
+    pub fn literals(&self) -> &[Literal] {
+        self.predicate.literals()
     }
 
-    pub fn literals(self) -> Literals<'p> {
-        match self.predicate {
+    /// The literal operand: the compared value, the IN list, or the text needle.
+    pub fn value(&self) -> Option<Value> {
+        match &*self.predicate {
             Predicate::Compare {
                 right: Operand::Literal(literal),
                 ..
-            } => Literals::One(literal),
-            Predicate::In { values, .. } => Literals::Many(values),
-            _ => Literals::None,
+            } => Some(Value::from(literal)),
+            Predicate::In { values, .. } => Some(values.iter().map(Value::from).collect()),
+            Predicate::Text { needle, .. } => Some(Value::String(needle.clone())),
+            _ => None,
         }
     }
 }
@@ -137,11 +135,27 @@ impl<'p> Query<'p> {
         &self.model.graph().property(property).name
     }
 
+    /// The stored column an expression reads; an edge's kind is not one.
+    pub fn column_name(self, expr: Expr) -> Option<&'p str> {
+        Some(match expr {
+            Expr::Property { property, .. } => self.property_name(property),
+            Expr::Attribute { attribute, .. } => &self.model.graph().attribute(attribute).name,
+            Expr::Edge { field, .. } => match field {
+                EdgeField::Kind => return None,
+                EdgeField::Source => SOURCE_ID_COLUMN,
+                EdgeField::SourceKind => SOURCE_KIND_COLUMN,
+                EdgeField::Target => TARGET_ID_COLUMN,
+                EdgeField::TargetKind => TARGET_KIND_COLUMN,
+            },
+            Expr::Truncate { .. } | Expr::Node(_) | Expr::Output(_) => return None,
+        })
+    }
+
     /// The top-level conjuncts of every filter, polarized.
     pub fn filters(self) -> Vec<Boolean<Leaf<'p>>> {
         self.operations()
             .filter_map(|(_, operation)| match operation {
-                LogicalOperation::Filter(predicate) => Some(polarized(predicate).conjuncts()),
+                LogicalOperation::Filter(predicate) => Some(polarized(predicate)),
                 _ => None,
             })
             .flatten()
@@ -151,19 +165,7 @@ impl<'p> Query<'p> {
     pub fn leaves(self) -> Vec<Leaf<'p>> {
         self.filters()
             .iter()
-            .flat_map(|tree| tree.leaves().copied())
-            .collect()
-    }
-
-    /// The top-level leaves no NOT stays above, other than comparisons across bindings and edge kinds.
-    pub fn attached(self) -> Vec<Leaf<'p>> {
-        self.filters()
-            .into_iter()
-            .filter_map(|tree| match tree {
-                Boolean::Leaf(leaf) => Some(leaf),
-                _ => None,
-            })
-            .filter(|leaf| leaf.compared().is_none() && !leaf.edge_kind())
+            .flat_map(|tree| tree.leaves().cloned())
             .collect()
     }
 }

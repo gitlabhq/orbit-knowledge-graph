@@ -10,7 +10,7 @@ use compiler::constants::{
     hydration_node_alias, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
     traversal_path_column,
 };
-use compiler::{DynamicEntityColumns, FilterOp, HydrationArm, HydrationTemplate, VirtualFilter};
+use compiler::{DynamicEntityColumns, HydrationArm, HydrationTemplate, Operator, VirtualFilter};
 use orbit_arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
 use pipeline::PipelineError;
@@ -394,21 +394,21 @@ pub fn hydrate_dynamic(
 fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &VirtualFilter) -> bool {
     let op = filter.op;
     match op {
-        FilterOp::IsNull => value.is_none() || matches!(value, Some(ColumnValue::Null)),
-        FilterOp::IsNotNull => value.is_some() && !matches!(value, Some(ColumnValue::Null)),
+        Operator::IsNull => value.is_none() || matches!(value, Some(ColumnValue::Null)),
+        Operator::IsNotNull => value.is_some() && !matches!(value, Some(ColumnValue::Null)),
         _ => {
             let Some(ColumnValue::String(cv_str)) = value else {
                 return false;
             };
             let filter_str = filter.value_str().unwrap_or("");
             match op {
-                FilterOp::Eq => cv_str == filter_str,
-                FilterOp::Contains | FilterOp::StartsWith | FilterOp::EndsWith => {
+                Operator::Eq => cv_str == filter_str,
+                Operator::Contains | Operator::StartsWith | Operator::EndsWith => {
                     let (value, needle) =
                         (cv_str.to_ascii_lowercase(), filter_str.to_ascii_lowercase());
                     match op {
-                        FilterOp::Contains => value.contains(&needle),
-                        FilterOp::StartsWith => value.starts_with(&needle),
+                        Operator::Contains => value.contains(&needle),
+                        Operator::StartsWith => value.starts_with(&needle),
                         _ => value.ends_with(&needle),
                     }
                 }

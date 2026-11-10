@@ -15,10 +15,9 @@ use super::node::Node;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
-use crate::logical::facts::{anchors, facts};
 use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::Term;
-use crate::passes::plan::build::expr::{id_list, id_range, ids, relationship_kinds};
+use crate::passes::plan::build::expr::{self, id_list, id_range, ids, relationship_kinds};
 use crate::passes::plan::build::sources::{Scope, columns, dedup, final_edge_scan, select};
 use crate::passes::plan::build::{
     Built, and, binary, call, col, computed, conjoin, eq, filtered, int, membership, stored, string,
@@ -49,8 +48,8 @@ impl<'p> PathFinding<'p> {
                 _ => None,
             })
             .ok_or_else(|| QueryError::Lowering("path config missing".into()))?;
-        let facts = facts(query);
-        let mut anchors = anchors(query, &facts);
+        let facts = query.leaves();
+        let mut anchors = query.anchors(&facts);
         let mut node = |output| {
             let index = anchors
                 .iter()
@@ -172,7 +171,12 @@ fn anchor<B: RelationalBackend>(
         let (rows, live) = dedup(q, alias, table, &inner, |scope| {
             let mut parts = Vec::new();
             for (property, filter) in &node.filters {
-                parts.push(filter.lower::<B>(scope, &Column::new(alias, property))?);
+                parts.push(expr::filter::<B>(
+                    scope,
+                    &Column::new(alias, property),
+                    filter,
+                    false,
+                )?);
             }
             if let Some(pinned) = &node.pinned {
                 let id = col(scope, alias, DEFAULT_PRIMARY_KEY)?;

@@ -27,6 +27,79 @@ impl Matching {
     }
 }
 
+/// Every comparison a condition can make, with the names looked-up properties list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr, strum::Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum Operator {
+    Eq,
+    Ne,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+    In,
+    Contains,
+    StartsWith,
+    EndsWith,
+    IsNull,
+    IsNotNull,
+    TokenMatch,
+    AllTokens,
+    AnyTokens,
+}
+
+impl Operator {
+    pub fn comparison(self) -> Option<Comparison> {
+        Some(match self {
+            Self::Eq => Comparison::Eq,
+            Self::Ne => Comparison::Ne,
+            Self::Gt => Comparison::Gt,
+            Self::Lt => Comparison::Lt,
+            Self::Gte => Comparison::Ge,
+            Self::Lte => Comparison::Le,
+            _ => return None,
+        })
+    }
+
+    pub fn matching(self) -> Option<Matching> {
+        Some(match self {
+            Self::Contains => Matching::Contains,
+            Self::StartsWith => Matching::StartsWith,
+            Self::EndsWith => Matching::EndsWith,
+            Self::TokenMatch => Matching::Token,
+            Self::AllTokens => Matching::AllTokens,
+            Self::AnyTokens => Matching::AnyTokens,
+            _ => return None,
+        })
+    }
+}
+
+impl From<Comparison> for Operator {
+    fn from(comparison: Comparison) -> Self {
+        match comparison {
+            Comparison::Eq => Self::Eq,
+            Comparison::Ne => Self::Ne,
+            Comparison::Lt => Self::Lt,
+            Comparison::Le => Self::Lte,
+            Comparison::Gt => Self::Gt,
+            Comparison::Ge => Self::Gte,
+        }
+    }
+}
+
+impl From<Matching> for Operator {
+    fn from(matching: Matching) -> Self {
+        match matching {
+            Matching::Contains => Self::Contains,
+            Matching::StartsWith => Self::StartsWith,
+            Matching::EndsWith => Self::EndsWith,
+            Matching::Token => Self::TokenMatch,
+            Matching::AllTokens => Self::AllTokens,
+            Matching::AnyTokens => Self::AnyTokens,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Predicate {
     Compare {
@@ -86,29 +159,27 @@ impl Predicate {
         }
     }
 
-    pub fn operator(&self) -> Option<&'static str> {
+    pub fn operator(&self) -> Option<Operator> {
         Some(match self {
-            Self::Compare { comparison, .. } => match comparison {
-                Comparison::Eq => "eq",
-                Comparison::Ne => "ne",
-                Comparison::Lt => "lt",
-                Comparison::Le => "lte",
-                Comparison::Gt => "gt",
-                Comparison::Ge => "gte",
-            },
-            Self::In { .. } => "in",
-            Self::Text { matching, .. } => match matching {
-                Matching::Contains => "contains",
-                Matching::StartsWith => "starts_with",
-                Matching::EndsWith => "ends_with",
-                Matching::Token => "token_match",
-                Matching::AllTokens => "all_tokens",
-                Matching::AnyTokens => "any_tokens",
-            },
-            Self::Null { null: true, .. } => "is_null",
-            Self::Null { null: false, .. } => "is_not_null",
+            Self::Compare { comparison, .. } => (*comparison).into(),
+            Self::In { .. } => Operator::In,
+            Self::Text { matching, .. } => (*matching).into(),
+            Self::Null { null: true, .. } => Operator::IsNull,
+            Self::Null { null: false, .. } => Operator::IsNotNull,
             Self::And(_) | Self::Not(_) => return None,
         })
+    }
+
+    /// The compared value or the IN list.
+    pub fn literals(&self) -> &[Literal] {
+        match self {
+            Self::Compare {
+                right: Operand::Literal(literal),
+                ..
+            } => std::slice::from_ref(literal),
+            Self::In { values, .. } => values,
+            _ => &[],
+        }
     }
 
     pub fn leaves(&self) -> usize {
@@ -188,13 +259,32 @@ impl Predicate {
     }
 
     pub fn complementable(&self) -> bool {
-        matches!(
-            self,
+        self.complement().is_some()
+    }
+
+    /// The leaf a NOT folds into: `=` and `<>` swap and null checks flip, which three-valued logic keeps exact.
+    pub fn complement(&self) -> Option<Self> {
+        let swapped = |comparison| match comparison {
+            Comparison::Eq => Some(Comparison::Ne),
+            Comparison::Ne => Some(Comparison::Eq),
+            _ => None,
+        };
+        Some(match self {
             Self::Compare {
-                comparison: Comparison::Eq | Comparison::Ne,
-                ..
-            } | Self::Null { .. }
-        )
+                left,
+                comparison,
+                right,
+            } => Self::Compare {
+                left: *left,
+                comparison: swapped(*comparison)?,
+                right: right.clone(),
+            },
+            Self::Null { left, null } => Self::Null {
+                left: *left,
+                null: !null,
+            },
+            _ => return None,
+        })
     }
 
     pub fn leaf_predicates(&self) -> Vec<&Predicate> {

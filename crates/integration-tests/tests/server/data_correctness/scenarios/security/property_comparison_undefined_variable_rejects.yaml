@@ -8,4 +8,4 @@ query: |
   RETURN mr.title LIMIT 10
 
 expect:
-  compile_error: "undefined variable ghost"
+  compile_error: "unknown variable ghost"

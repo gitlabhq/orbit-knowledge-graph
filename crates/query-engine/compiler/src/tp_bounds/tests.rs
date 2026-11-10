@@ -22,8 +22,12 @@ fn plan(gql: &str) -> LogicalPlan {
 fn keys_of(gql: &str, alias: &str) -> Vec<TpLookupKey> {
     let plan = plan(gql);
     let query = Query::new(&plan, MODEL.model());
-    let anchors = super::anchor_keys(&*MODEL);
-    keys(query, query.binding(alias).unwrap().output, &anchors)
+    let anchor = query
+        .anchors(&query.leaves())
+        .into_iter()
+        .find(|anchor| anchor.binding.name == alias)
+        .unwrap();
+    keys(query, &anchor, &super::anchor_keys(&*MODEL))
 }
 
 fn id(entity: &str, id: i64) -> TpLookupKey {

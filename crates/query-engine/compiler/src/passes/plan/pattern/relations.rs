@@ -6,20 +6,17 @@ use query_data_model::Catalog;
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use query_data_model::constants::{
-    SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
-};
-use query_data_model::plan::logical::{EdgeField, Expr as Logical};
+use query_data_model::constants::{SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use query_data_model::plan::tracking::Ref;
 use query_data_model::{Direction, EntityId, RelationshipId};
 
 use super::{EdgeRelation, Fk, NodePlan};
 use crate::constants::{EDGE_PATH_NODES_SUFFIX, edge_column_prefix, edge_relation_alias};
 use crate::error::{QueryError, Result};
+use crate::logical::Leaf;
 use crate::logical::Query;
-use crate::logical::facts::Fact;
 use crate::passes::plan::filters::{
-    BoundFilter, FilterOwner, Test, bind_filter, unindex_if_key_narrowed,
+    BoundFilter, FilterOwner, bind_filter, unindex_if_key_narrowed,
 };
 
 /// The edge tables storing a variant of `relationships` from `source` to `target`; any relationship when none is named.
@@ -136,7 +133,7 @@ impl EdgeRelation {
 
 pub(super) fn build_relations<B>(
     query: Query<'_>,
-    facts: &[Fact<'_>],
+    facts: &[Leaf<'_>],
     model: &Catalog<B>,
     nodes: &HashMap<String, NodePlan>,
 ) -> Vec<EdgeRelation>
@@ -219,7 +216,7 @@ where
                     })
                 })
                 .flatten();
-            let filters = edge_filters(facts, step.edge, &edge_tables, model);
+            let filters = edge_filters(query, facts, step.edge, &edge_tables, model);
             EdgeRelation {
                 input_index,
                 rel_types: types,
@@ -242,7 +239,8 @@ where
 
 /// The filters attached to an edge, bound to the columns its tables store.
 fn edge_filters<B>(
-    facts: &[Fact<'_>],
+    query: Query<'_>,
+    facts: &[Leaf<'_>],
     edge: Ref,
     tables: &[String],
     model: &Catalog<B>,
@@ -253,24 +251,13 @@ where
     let owner = FilterOwner::Tables(tables);
     let mut filters: Vec<(String, BoundFilter)> = facts
         .iter()
-        .filter(|fact| fact.attached && fact.binding() == edge)
+        .filter(|fact| fact.attached() && fact.binding() == edge)
         .filter_map(|fact| {
-            let name = match fact.left {
-                Logical::Edge { field, .. } => match field {
-                    EdgeField::Kind => return None,
-                    EdgeField::Source => SOURCE_ID_COLUMN,
-                    EdgeField::SourceKind => SOURCE_KIND_COLUMN,
-                    EdgeField::Target => TARGET_ID_COLUMN,
-                    EdgeField::TargetKind => TARGET_KIND_COLUMN,
-                }
-                .to_string(),
-                Logical::Attribute { attribute, .. } => {
-                    model.graph().attribute(attribute).name.clone()
-                }
-                _ => return None,
-            };
-            let test = Test::of(fact.leaf, fact.complemented, |_| None)?;
-            let bound = bind_filter(&name, test, &owner, model);
+            let name = query.column_name(fact.left())?.to_string();
+            if fact.right().is_some() {
+                return None;
+            }
+            let bound = bind_filter(&name, (*fact.predicate).clone(), None, &owner, model);
             Some((name, bound))
         })
         .collect();

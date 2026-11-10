@@ -8,11 +8,11 @@ use query_data_model::EntityId;
 use query_data_model::catalog::Lookup;
 
 use crate::logical::columns::{defaults, returned, selections};
-use crate::logical::facts::{FilterOp, anchors, facts};
 use crate::logical::{DynamicColumnMode, Kind, Query};
 use crate::passes::codegen::SqlBackend;
 use crate::types::SecurityContext;
 use query_data_model::plan::logical::Expr;
+use query_data_model::plan::logical::Operator;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HydrationPlan {
@@ -72,7 +72,7 @@ pub struct HydrationTemplate {
 /// A filter on a virtual column, applied in memory once hydration resolves its value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VirtualFilter {
-    pub op: FilterOp,
+    pub op: Operator,
     pub value: Option<serde_json::Value>,
 }
 
@@ -149,9 +149,9 @@ fn build_static_templates(
     model: &Catalog<impl SqlBackend>,
 ) -> Vec<HydrationTemplate> {
     let projected = |alias: &str| projected.contains(&alias);
-    let facts = facts(query);
     let selected = selections(query);
-    anchors(query, &facts)
+    query
+        .anchors(&query.leaves())
         .iter()
         .filter_map(|anchor| {
             let (alias, entity_id) = (anchor.binding.name, anchor.binding.entity);
@@ -173,7 +173,7 @@ fn build_static_templates(
                 split_model_columns(&selected, model, entity_id);
             let mut virtual_filters = Vec::new();
             for fact in &anchor.filters {
-                let Expr::Property { property, .. } = fact.left else {
+                let Expr::Property { property, .. } = fact.left() else {
                     continue;
                 };
                 let property = query.property_name(property);
@@ -181,7 +181,7 @@ fn build_static_templates(
                     continue;
                 }
                 let filter = VirtualFilter {
-                    op: fact.op().unwrap_or(FilterOp::Eq),
+                    op: fact.predicate.operator().unwrap_or(Operator::Eq),
                     value: fact.value(),
                 };
                 virtual_filters.push((property.to_string(), filter));

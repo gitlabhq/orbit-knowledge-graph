@@ -32,7 +32,7 @@ use crate::logical::{Kind, Query};
 use crate::passes::codegen::{SqlBackend, rejected};
 use crate::tp_bounds::TpBounds;
 
-pub use filters::{BoundFilter, Test};
+pub use filters::BoundFilter;
 pub use metadata::{NodeBinding, PlanMetadata, PlannedEdge, Term};
 pub use pattern::{EdgeRelation, Matched, NodePlan};
 

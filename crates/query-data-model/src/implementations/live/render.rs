@@ -4,7 +4,6 @@ use serde_json::Value;
 use super::Live;
 use crate::catalog::{Catalog, Render};
 use crate::plan::live::{Condition, LiveError, LiveLanguage, LiveOperation, LivePlan};
-use crate::plan::logical::Literal;
 
 /// The call the Data Extraction Service runs with the caller's own sign-in.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -29,15 +28,6 @@ pub struct Window {
     pub field: String,
     pub from: Option<String>,
     pub to: Option<String>,
-}
-
-fn value(literal: &Literal) -> Value {
-    match literal {
-        Literal::String(text) | Literal::Temporal(text) => Value::from(text.as_str()),
-        Literal::Int(number) => Value::from(*number),
-        Literal::Float(number) => Value::from(*number),
-        Literal::Bool(flag) => Value::from(*flag),
-    }
 }
 
 impl Render for Catalog<Live> {
@@ -66,7 +56,7 @@ impl Render for Catalog<Live> {
                         } => RequestFilter {
                             field: name(*field),
                             op: "eq",
-                            value: value(literal),
+                            value: Value::from(literal),
                         },
                         Condition::Contains { field, text } => RequestFilter {
                             field: name(*field),

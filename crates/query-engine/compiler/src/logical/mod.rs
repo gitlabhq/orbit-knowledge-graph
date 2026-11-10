@@ -1,17 +1,16 @@
 //! Read access to a logical plan for the compiler phases: bindings, steps,
 //! conjuncts, and the result operations, all by declaration id.
 
+pub mod anchors;
 mod boolean;
 pub mod columns;
 mod conditions;
-pub mod facts;
 
 pub use boolean::Boolean;
-pub use conditions::{Leaf, Literals, binding, polarized};
+pub use conditions::{Leaf, binding, polarized};
 
 use query_data_model::plan::logical::{
-    Columns, Expr, Hops, LogicalOperation, LogicalPlan, LogicalType, Measure, Order, Predicate,
-    Projection,
+    Columns, Expr, Hops, LogicalOperation, LogicalPlan, LogicalType, Measure, Order, Projection,
 };
 use query_data_model::plan::tracking::{NodeId, Ref};
 use query_data_model::{Direction, EntityId, Hop, Model, RelationshipId};
@@ -175,22 +174,6 @@ impl<'p> Query<'p> {
                 _ => None,
             })
             .collect()
-    }
-
-    pub fn conjuncts(self) -> Vec<&'p Predicate> {
-        fn flatten<'a>(predicate: &'a Predicate, into: &mut Vec<&'a Predicate>) {
-            match predicate {
-                Predicate::And(all) => all.iter().for_each(|inner| flatten(inner, into)),
-                leaf => into.push(leaf),
-            }
-        }
-        let mut conjuncts = Vec::new();
-        for (_, operation) in self.operations() {
-            if let LogicalOperation::Filter(predicate) = operation {
-                flatten(predicate, &mut conjuncts);
-            }
-        }
-        conjuncts
     }
 
     pub fn selected(self) -> Vec<&'p Projection> {

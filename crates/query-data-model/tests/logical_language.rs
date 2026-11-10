@@ -47,7 +47,7 @@ fn a_pattern_binds_aliases_hops_and_edges() {
                     .named("mr"),
                 ],
             )?;
-            q.slice(rows, 20, Some(40))
+            q.slice(rows, Some(20), Some(40))
         })
         .unwrap();
     let operations: Vec<_> = plan.nodes().map(|node| plan.operation(node)).collect();
@@ -79,7 +79,7 @@ fn neighbors_paths_and_aggregates_declare_their_outputs() {
             let rows = q.entities_as(catalog.entity("Project")?, "p")?;
             let center = rows.binding("p")?;
             let rows = q.filter(rows, center.property("id")?.eq(1))?;
-            let rows = q.neighbors(rows, center, &[], Direction::Both, "n", None)?;
+            let rows = q.neighbors(rows, center, Step::new(Direction::Both).named("n"))?;
             assert_eq!(rows.binding("n")?.kind(), LogicalType::Node);
             q.limit(rows, 10)
         })
@@ -93,7 +93,11 @@ fn neighbors_paths_and_aggregates_declare_their_outputs() {
         .build(|q| {
             let groups = q.entities_as(catalog.entity("Group")?, "g")?;
             let projects = q.entities_as(catalog.entity("Project")?, "p")?;
-            let rows = q.shortest(groups, projects, &[], 3, "path")?;
+            let contains = catalog.relationship("CONTAINS")?;
+            let step = Step::new(Direction::Outgoing)
+                .via([contains])
+                .hops(Hops { min: 1, max: 3 });
+            let rows = q.shortest(groups, projects, step, "path")?;
             assert_eq!(rows.binding("path")?.kind(), LogicalType::Path);
             Ok::<_, PlanError>(rows)
         })

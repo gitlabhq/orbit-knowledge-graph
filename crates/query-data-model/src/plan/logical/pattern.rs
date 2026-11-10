@@ -1,10 +1,12 @@
 use std::collections::BTreeSet;
 
-use super::limits::{self, MAX_HOPS, MAX_PATH_DEPTH, MAX_RELATIONSHIP_TYPES};
+use super::limits::{self, MAX_HOPS, MAX_NODES, MAX_PATH_DEPTH, MAX_RELATIONSHIP_TYPES};
 use super::{Binding, Hops, LogicalBuilder, LogicalOperation, LogicalType, PlanError, Rows, Step};
 use crate::catalog::Unresolved;
 use crate::plan::tracking::{Construction, Declare, Declared, Outputs};
 use crate::{Direction, EntityId, Hop, Model, RelationshipId};
+
+const LABELED: &str = "every node needs one label, except the far endpoint of a neighbors query";
 
 impl<'m> LogicalBuilder<'m> {
     pub fn traverse(
@@ -16,9 +18,17 @@ impl<'m> LogicalBuilder<'m> {
         let (operation, to) = self.attempt(|catalog, construction| {
             let model = catalog.model();
             let start = Self::bound(from)?;
+            labeled(&rows)?;
+            if step.direction == Direction::Both {
+                return Err(PlanError::shape(
+                    "undirected relationships are only supported for neighbors; use -> or <- between labeled nodes",
+                ));
+            }
             for name in step.node.iter().chain(&step.edge) {
                 rows.fresh(name)?;
             }
+            let nodes = rows.bound().filter(|binding| binding.entity().is_some());
+            limits::at_most("nodes", nodes.count() + 1, MAX_NODES)?;
             let relationships = relationships(construction, &step.relationships)?;
             let target = step
                 .target
@@ -66,32 +76,42 @@ impl<'m> LogicalBuilder<'m> {
         })
     }
 
+    /// Expands one node to every entity one relationship away; `step` names the far node.
     pub fn neighbors(
         &mut self,
         rows: Rows<'m>,
         from: Binding<'m>,
-        via: &[Declared<RelationshipId>],
-        direction: Direction,
-        name: &str,
-        edge: Option<&str>,
+        step: Step,
     ) -> Result<Rows<'m>, PlanError> {
+        let name = step
+            .node
+            .clone()
+            .ok_or_else(|| PlanError::shape("a neighbors step names its far node"))?;
         let operation = self.attempt(|catalog, construction| {
             let start = Self::bound(from)?;
-            for name in std::iter::once(name).chain(edge) {
+            if rows.bound().count() != 1 {
+                return Err(PlanError::shape(LABELED));
+            }
+            if step.hops != Hops::ONE || step.target.is_some() {
+                return Err(PlanError::shape(
+                    "neighbors expands one hop to an unlabeled node",
+                ));
+            }
+            for name in std::iter::once(&name).chain(&step.edge) {
                 rows.fresh(name)?;
             }
-            let relationships = relationships(construction, via)?;
+            let relationships = relationships(construction, &step.relationships)?;
             catalog
                 .model()
-                .connect(start, &relationships, None, direction)?;
+                .connect(start, &relationships, None, step.direction)?;
             Ok(LogicalOperation::Neighbors {
                 from: from.output(),
                 relationships,
-                direction,
+                direction: step.direction,
             })
         })?;
         let edge = Declare {
-            name: edge.map(str::to_string),
+            name: step.edge,
             value: LogicalType::Edge,
         };
         self.connect(operation, vec![rows], |_, _, _| {
@@ -102,23 +122,30 @@ impl<'m> LogicalBuilder<'m> {
         })
     }
 
+    /// The shortest path from the endpoint of `start` to the endpoint of `end`, bound as `name`.
     pub fn shortest(
         &mut self,
         start: Rows<'m>,
         end: Rows<'m>,
-        via: &[Declared<RelationshipId>],
-        max_depth: u32,
+        step: Step,
         name: &str,
     ) -> Result<Rows<'m>, PlanError> {
         let operation = self.attempt(|catalog, construction| {
             let (from, to) = (start.endpoint()?, end.endpoint()?);
-            start.fresh(name)?;
-            end.fresh(name)?;
+            if step.direction != Direction::Outgoing || step.hops.min != 1 {
+                return Err(PlanError::shape(
+                    "path finding supports outgoing paths starting at one hop",
+                ));
+            }
+            for name in std::iter::once(name).chain(step.edge.as_deref()) {
+                start.fresh(name)?;
+                end.fresh(name)?;
+            }
             if let Some(name) = end.names().find(|name| start.fresh(name).is_err()) {
                 return Err(PlanError::Duplicate(name.to_string()));
             }
-            let relationships = relationships(construction, via)?;
-            range("path depth", Hops::ONE.max(max_depth), MAX_PATH_DEPTH)?;
+            let relationships = relationships(construction, &step.relationships)?;
+            range("path depth", step.hops, MAX_PATH_DEPTH)?;
             let (source, target) = (Self::bound(from)?, Self::bound(to)?);
             reach(
                 catalog.model(),
@@ -126,24 +153,35 @@ impl<'m> LogicalBuilder<'m> {
                 &relationships,
                 target,
                 Direction::Outgoing,
-                max_depth,
+                step.hops.max,
             )?;
             Ok(LogicalOperation::Shortest {
                 from: from.output(),
                 to: to.output(),
                 relationships,
-                max_depth,
+                max_depth: step.hops.max,
             })
         })?;
+        let edge = Declare {
+            name: step.edge,
+            value: LogicalType::Edge,
+        };
         self.connect(operation, vec![start, end], |_, _, _| {
-            Ok(Outputs::extend([Declare::named(name, LogicalType::Path)]))
+            Ok(Outputs::extend([
+                edge,
+                Declare::named(name, LogicalType::Path),
+            ]))
         })
     }
 }
 
-impl Hops {
-    fn max(self, max: u32) -> Self {
-        Self { max, ..self }
+fn labeled(rows: &Rows<'_>) -> Result<(), PlanError> {
+    match rows
+        .bound()
+        .any(|binding| binding.kind() == LogicalType::Node)
+    {
+        true => Err(PlanError::shape(LABELED)),
+        false => Ok(()),
     }
 }
 

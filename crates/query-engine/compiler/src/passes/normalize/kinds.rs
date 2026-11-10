@@ -7,7 +7,7 @@ use query_data_model::plan::tracking::Ref;
 use query_data_model::{Direction, RelationshipId};
 
 use crate::error::{QueryError, Result};
-use crate::logical::{Boolean, Leaf, Literals, Query, polarized};
+use crate::logical::{Boolean, Leaf, Query, polarized};
 
 type Condition = (Vec<String>, bool);
 
@@ -51,23 +51,27 @@ pub(super) fn narrowed(query: Query<'_>) -> Result<HashMap<Ref, Narrowed>> {
         }
     }
     for (node, operation) in query.operations() {
-        let LogicalOperation::Neighbors {
-            from,
-            relationships,
-            direction,
-        } = operation
-        else {
-            continue;
+        let (relationships, inferred) = match operation {
+            LogicalOperation::Neighbors {
+                from,
+                relationships,
+                direction,
+            } => match (relationships.is_empty(), query.entity_name(*from)) {
+                (true, Some(center)) => (
+                    relationships,
+                    Some(infer(query, *direction, Some(center), None)),
+                ),
+                _ => (relationships, None),
+            },
+            LogicalOperation::Shortest { relationships, .. } => (relationships, None),
+            _ => continue,
         };
         let outputs: Vec<Ref> = query.plan.outputs(node).collect();
         let [.., edge, _] = outputs[..] else {
             continue;
         };
         let current = names(relationships);
-        let inferred = match (relationships.is_empty(), query.entity_name(*from)) {
-            (true, Some(center)) => infer(query, *direction, Some(center), None),
-            _ => current.clone(),
-        };
+        let inferred = inferred.unwrap_or_else(|| current.clone());
         let types = apply(query, inferred, conditions.get(&edge))?;
         if types != current {
             narrowed.insert(edge, Narrowed::new(query, types)?);
@@ -121,7 +125,10 @@ fn apply(
 
 fn conditions(query: Query<'_>) -> Result<HashMap<Ref, Vec<Condition>>> {
     let mut found: HashMap<Ref, Vec<Condition>> = HashMap::new();
-    for (leaf, kept_not) in query.filters().into_iter().filter_map(type_leaf) {
+    for tree in query.filters() {
+        let Some((leaf, kept_not)) = type_leaf(&tree) else {
+            continue;
+        };
         let names = names(leaf).ok_or_else(|| {
             QueryError::PipelineInvariant("the builder admits only named type() conditions".into())
         })?;
@@ -134,10 +141,10 @@ fn conditions(query: Query<'_>) -> Result<HashMap<Ref, Vec<Condition>>> {
     Ok(found)
 }
 
-fn type_leaf(tree: Boolean<Leaf<'_>>) -> Option<(Leaf<'_>, bool)> {
+fn type_leaf<'t>(tree: &'t Boolean<Leaf<'_>>) -> Option<(&'t Leaf<'t>, bool)> {
     let (leaf, kept_not) = match tree {
         Boolean::Leaf(leaf) => (leaf, false),
-        Boolean::Not(inner) => match *inner {
+        Boolean::Not(inner) => match &**inner {
             Boolean::Leaf(leaf) => (leaf, true),
             _ => return None,
         },
@@ -146,16 +153,21 @@ fn type_leaf(tree: Boolean<Leaf<'_>>) -> Option<(Leaf<'_>, bool)> {
     leaf.edge_kind().then_some((leaf, kept_not))
 }
 
-fn names(leaf: Leaf<'_>) -> Option<Vec<String>> {
+fn names(leaf: &Leaf<'_>) -> Option<Vec<String>> {
     let text = |literal: &Literal| match literal {
         Literal::String(name) => Some(name.clone()),
         _ => None,
     };
-    match (leaf.comparison(), leaf.literals()) {
-        (Some(Comparison::Eq | Comparison::Ne), Literals::One(literal)) => {
-            text(literal).map(|name| vec![name])
+    match &*leaf.predicate {
+        Predicate::Compare {
+            comparison: Comparison::Eq | Comparison::Ne,
+            ..
         }
-        (None, Literals::Many(values)) if !values.is_empty() => values.iter().map(text).collect(),
+        | Predicate::In { .. }
+            if !leaf.literals().is_empty() =>
+        {
+            leaf.literals().iter().map(text).collect()
+        }
         _ => None,
     }
 }
@@ -164,7 +176,8 @@ pub(super) fn without_types(predicate: &Predicate) -> Option<Predicate> {
     fn keep(predicate: &Predicate, into: &mut Vec<Predicate>) {
         match predicate {
             Predicate::And(all) => all.iter().for_each(|inner| keep(inner, into)),
-            conjunct if type_leaf(polarized(conjunct)).is_some() => {}
+            conjunct if matches!(&polarized(conjunct)[..], [tree] if type_leaf(tree).is_some()) => {
+            }
             conjunct => into.push(conjunct.clone()),
         }
     }

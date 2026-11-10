@@ -45,7 +45,7 @@ impl<'m> LogicalBuilder<'m> {
     ) -> Result<Rows<'m>, PlanError> {
         let Detached {
             operation,
-            mut inputs,
+            inputs,
             outputs,
         } = self.detach(rows)?;
         let operation = match operation {
@@ -72,6 +72,17 @@ impl<'m> LogicalBuilder<'m> {
                 relationships,
                 direction,
             },
+            LogicalOperation::Shortest {
+                from,
+                to,
+                max_depth,
+                ..
+            } => LogicalOperation::Shortest {
+                from,
+                to,
+                relationships,
+                max_depth,
+            },
             _ => return Err(PlanError::shape("only steps carry relationships")),
         };
         let added = &outputs[outputs.len().saturating_sub(2)..];
@@ -85,10 +96,7 @@ impl<'m> LogicalBuilder<'m> {
                 })
             })
             .collect::<Result<Vec<_>, PlanError>>()?;
-        let input = inputs.remove(0);
-        let rows = self.connect(operation, vec![input], |_, _, _| {
-            Ok(Outputs::extend(declares))
-        })?;
+        let rows = self.connect(operation, inputs, |_, _, _| Ok(Outputs::extend(declares)))?;
         self.reattach(&outputs, rows)
     }
 }

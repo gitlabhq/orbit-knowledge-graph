@@ -3,7 +3,7 @@ use query_data_model::implementations::relational::plan::{
     Expr, Function, Relation, RelationalBuilder, UnaryOp,
 };
 
-use super::expr::{self, Filter};
+use super::expr;
 use super::{Built, call, column, eq, int, string};
 use crate::logical::Boolean;
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
@@ -55,26 +55,9 @@ impl Lowering<'_> {
     ) -> Built<Expr> {
         Ok(match value {
             Predicate::Boolean(expression) => self.boolean(q, expression, negated)?,
-            Predicate::Property {
-                column,
-                test,
-                data_type,
-                in_sort_key,
-                text_indexed,
-                null_as_epoch,
-                ..
-            } => expr::filter::<B>(
-                self.scope,
-                Filter {
-                    column,
-                    test,
-                    data_type: data_type.as_ref(),
-                    in_sort_key: *in_sort_key,
-                    text_indexed: *text_indexed,
-                    null_as_epoch: *null_as_epoch,
-                    negated,
-                },
-            )?,
+            Predicate::Filter { column, filter } => {
+                expr::filter::<B>(self.scope, column, filter, negated)?
+            }
             Predicate::Ids { column, values } => expr::ids::<B>(self.column(column)?, values),
             Predicate::IdRange { column, start, end } => {
                 expr::id_range(self.column(column)?, *start, *end)

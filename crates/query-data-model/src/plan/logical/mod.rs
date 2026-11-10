@@ -25,7 +25,7 @@ pub use error::{ErrorClass, PlanError};
 pub use expr::{EdgeField, Expr, Literal, Operand, TimeUnit};
 pub use handle::{Binding, Rows};
 pub use measure::{Columns, Measure, Order, Projection, count};
-pub use predicate::{Comparison, Conjunct, Matching, Predicate};
+pub use predicate::{Comparison, Conjunct, Matching, Operator, Predicate};
 pub use step::{Hops, Step};
 
 use crate::plan::code::{Language as CodeLanguage, Pattern};

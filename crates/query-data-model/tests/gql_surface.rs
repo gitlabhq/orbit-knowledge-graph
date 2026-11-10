@@ -87,8 +87,8 @@ fn aggregates_neighbors_and_paths_choose_their_operations() {
         neighbors,
         [
             "entities",
-            "filter",
             "neighbors",
+            "filter",
             "select graph,graph",
             "limit 30 0"
         ]
@@ -125,10 +125,10 @@ fn surface_and_model_errors_keep_their_kind() {
         class("MATCH (p:Project)-[:AUTHORED]->(u:User) RETURN p"),
         Some(ErrorClass::Connectivity)
     );
-    assert!(matches!(
-        plan("MATCH (a:User)-[]-(b:User) RETURN a"),
-        Err(SurfaceError::Schema(_))
-    ));
+    assert_eq!(
+        class("MATCH (a:User)-[]-(b:User) RETURN a"),
+        Some(ErrorClass::Shape)
+    );
     assert!(matches!(plan("MATCH RETURN"), Err(SurfaceError::Schema(_))));
 }
 

@@ -1,58 +1,85 @@
-use std::collections::HashSet;
-
-use serde_json::Value;
-
-use super::super::ast::{BooleanExpression, Comparison, FilterOp, MapEntry, Predicate as Leaf};
-use super::super::errors::invalid;
-use super::scope::{Scope, Shape};
-use crate::plan::logical::{
-    Comparison as Compare, EdgeField, Expr, Literal, Matching, Predicate, Rows,
+use super::super::ast::{
+    BooleanExpression, Literal, MapEntry, Operand, Operator, Predicate as Leaf, Property, Subject,
+    Value,
 };
+use super::super::errors::invalid;
+use super::{Built, Conditions};
+use crate::plan::logical::{EdgeField, Expr, LogicalBuilder, LogicalType, Predicate, Rows};
 use crate::surface::SurfaceError;
 
-pub(super) fn referenced(predicates: &[BooleanExpression<Leaf<'_>>]) -> HashSet<String> {
-    fn visit(tree: &BooleanExpression<Leaf<'_>>, into: &mut HashSet<String>) {
+const STRUCTURAL: &str = "MATCHES ast(...) must be a top-level condition of a single-node match";
+
+/// Applies WHERE as one filter, then each top-level structural match.
+pub(super) fn filter<'m>(
+    q: &mut LogicalBuilder<'m>,
+    rows: Rows<'m>,
+    predicates: Conditions<'_>,
+) -> Built<'m> {
+    let (patterns, predicates) = structural(predicates);
+    let mut rows = match predicates.is_empty() {
+        true => rows,
+        false => {
+            let predicate = tree(BooleanExpression::And(predicates), &rows)?;
+            q.filter(rows, predicate)?
+        }
+    };
+    for (property, pattern, language) in patterns {
+        let target = column(&rows, &property)?;
+        rows = q.structural(rows, target, &pattern, &language)?;
+    }
+    Ok(rows)
+}
+
+type Pattern<'i> = (Property<'i>, String, String);
+
+/// Splits top-level structural matches from the other conditions; without one, the conditions
+/// stay as written.
+fn structural(predicates: Conditions<'_>) -> (Vec<Pattern<'_>>, Conditions<'_>) {
+    fn top_level(tree: &BooleanExpression<Leaf<'_>>) -> bool {
         match tree {
-            BooleanExpression::Leaf(Leaf::Comparison(comparison)) => {
-                into.insert(comparison.property.node.value.clone());
-                if let Some(rhs) = &comparison.rhs_property {
-                    into.insert(rhs.node.value.clone());
-                }
-            }
-            BooleanExpression::Leaf(Leaf::Structural { property, .. }) => {
-                into.insert(property.node.value.clone());
-            }
-            BooleanExpression::Leaf(Leaf::RelationshipType { .. }) => {}
-            BooleanExpression::And(all) => all.iter().for_each(|tree| visit(tree, into)),
-            BooleanExpression::Not(inner) => visit(inner, into),
+            BooleanExpression::Leaf(Leaf::Structural { .. }) => true,
+            BooleanExpression::And(all) => all.iter().any(top_level),
+            _ => false,
         }
     }
-    let mut into = HashSet::new();
-    predicates.iter().for_each(|tree| visit(tree, &mut into));
-    into
-}
-
-pub(super) fn typed(tree: &BooleanExpression<Leaf<'_>>) -> bool {
-    match tree {
-        BooleanExpression::Leaf(leaf) => matches!(leaf, Leaf::RelationshipType { .. }),
-        BooleanExpression::And(all) => all.iter().any(typed),
-        BooleanExpression::Not(inner) => typed(inner),
+    if !predicates.iter().any(top_level) {
+        return (Vec::new(), predicates);
     }
+    let mut patterns = Vec::new();
+    let mut rest = Vec::new();
+    for conjunct in flatten(predicates) {
+        match conjunct {
+            BooleanExpression::Leaf(Leaf::Structural {
+                property,
+                pattern,
+                language,
+                ..
+            }) => patterns.push((property, pattern, language)),
+            other => rest.push(other),
+        }
+    }
+    (patterns, rest)
 }
 
-pub(super) fn tree(
-    tree: BooleanExpression<Leaf<'_>>,
-    rows: &Rows<'_>,
-    scope: &Scope<'_>,
-) -> Result<Predicate, SurfaceError> {
+fn flatten(predicates: Conditions<'_>) -> Conditions<'_> {
+    predicates
+        .into_iter()
+        .flat_map(|tree| match tree {
+            BooleanExpression::And(all) => flatten(all),
+            tree => vec![tree],
+        })
+        .collect()
+}
+
+fn tree(tree: BooleanExpression<Leaf<'_>>, rows: &Rows<'_>) -> Result<Predicate, SurfaceError> {
     Ok(match tree {
-        BooleanExpression::Leaf(leaf) => self::leaf(leaf, rows, scope)?,
+        BooleanExpression::Leaf(leaf) => self::leaf(leaf, rows)?,
         BooleanExpression::And(all) => Predicate::And(
             all.into_iter()
-                .map(|child| self::tree(child, rows, scope))
+                .map(|child| self::tree(child, rows))
                 .collect::<Result<_, _>>()?,
         ),
-        BooleanExpression::Not(inner) => !self::tree(*inner, rows, scope)?,
+        BooleanExpression::Not(inner) => !self::tree(*inner, rows)?,
     })
 }
 
@@ -63,245 +90,92 @@ pub(super) fn entries(
     entries
         .iter()
         .map(|entry| {
-            let value = literal(&entry.value, entry.from_temporal_literal)?;
-            let value = crate::surface::pinned(&entry.key.value, value);
-            Ok(column(&entry.key.value)?.eq(value))
+            let key = &entry.key.value;
+            match &entry.value {
+                Value::Scalar(literal) => Ok(column(key)?.eq(pinned(key, literal.clone()))),
+                Value::List(_) => Err(invalid(
+                    entry.key.span,
+                    &format!("{key} takes one value in a property map; write WHERE n.{key} IN [...] for several"),
+                )),
+            }
         })
         .collect()
 }
 
-fn leaf(leaf: Leaf<'_>, rows: &Rows<'_>, scope: &Scope<'_>) -> Result<Predicate, SurfaceError> {
-    let comparison = match leaf {
-        Leaf::Comparison(comparison) => *comparison,
-        Leaf::Structural { span, .. } => {
+fn leaf(leaf: Leaf<'_>, rows: &Rows<'_>) -> Result<Predicate, SurfaceError> {
+    let (span, subject, op, operand) = match leaf {
+        Leaf::Comparison {
+            span,
+            subject,
+            op,
+            operand,
+        } => (span, subject, op, operand),
+        Leaf::Structural { span, .. } => return Err(invalid(span, STRUCTURAL)),
+    };
+    let (left, property) = match &subject {
+        Subject::Property(property) => (column(rows, property)?, property.property.value.as_str()),
+        Subject::Type(variable) => (rows.binding(&variable.value)?.field(EdgeField::Kind)?, ""),
+    };
+    let comparison = op.comparison();
+    Ok(match (op, operand) {
+        (Operator::IsNull, _) => left.is_null(true),
+        (Operator::IsNotNull, _) => left.is_null(false),
+        (_, Some(Operand::Property(right))) => {
+            let comparison = comparison.ok_or_else(|| mismatch(span))?;
+            left.compare(comparison, column(rows, &right)?)
+        }
+        (Operator::In, Some(Operand::Value(Value::List(values)))) => {
+            left.one_of(values.into_iter().map(|value| pinned(property, value)))
+        }
+        (_, Some(Operand::Value(Value::Scalar(literal)))) => match (op.matching(), comparison) {
+            (Some(matching), _) => match literal {
+                Literal::String(needle) | Literal::Temporal(needle) => {
+                    left.matches(matching, needle)
+                }
+                _ => return Err(invalid(span, "text matching takes a string")),
+            },
+            (None, Some(comparison)) => {
+                let literal = match comparison {
+                    crate::plan::logical::Comparison::Eq => pinned(property, literal),
+                    _ => literal,
+                };
+                left.compare(comparison, literal)
+            }
+            (None, None) => return Err(mismatch(span)),
+        },
+        (_, Some(Operand::Value(Value::List(_)))) => {
             return Err(invalid(
                 span,
-                "MATCHES ast(...) must be a top-level condition of a single-node match",
+                "only IN takes a list; compare with one value",
             ));
         }
-        Leaf::RelationshipType {
-            span,
-            variable,
-            op,
-            value,
-        } => {
-            let name = &variable.value;
-            let kind = match scope.edge(name) {
-                Some((_, edge)) if edge.hops.max > 1 => {
-                    return Err(invalid(
-                        span,
-                        &format!(
-                            "{name} has a variable length and binds a list; type({name}) and RETURN {name} need a one-hop relationship, so list the types in the pattern instead, such as -[{name}:CLOSES|MENTIONS*1..3]->"
-                        ),
-                    ));
-                }
-                Some(_) => rows.binding(name)?.field(EdgeField::Kind)?,
-                None => return Err(not_relationship(span, name, scope)),
-            };
-            let value = value.ok_or_else(|| invalid(span, "type() compares with a value"))?;
-            return compare(kind, "", op, &value, false, span);
-        }
-    };
-    let Comparison {
-        span,
-        property,
-        op,
-        value,
-        from_temporal_literal,
-        rhs_property,
-    } = comparison;
-    let left = column(
-        &property.node.value,
-        &property.property.value,
-        rows,
-        scope,
-        span,
-    )?;
-    match (rhs_property, value) {
-        (Some(rhs), _) => {
-            if scope.edge(&property.node.value).is_some() || scope.edge(&rhs.node.value).is_some() {
-                return Err(invalid(
-                    span,
-                    "property comparisons involving relationships are unsupported",
-                ));
-            }
-            let right = column(&rhs.node.value, &rhs.property.value, rows, scope, span)?;
-            let comparison = comparison_of(op).ok_or_else(|| {
-                invalid(
-                    span,
-                    "property-to-property comparisons only support =, <>, !=, <, >, <=, >=",
-                )
-            })?;
-            Ok(left.compare(comparison, right))
-        }
-        (None, None) => match op {
-            FilterOp::IsNull => Ok(left.is_null(true)),
-            FilterOp::IsNotNull => Ok(left.is_null(false)),
-            _ => Err(invalid(span, "this comparison needs a value")),
-        },
-        (None, Some(value)) => {
-            let name = &property.property.value;
-            compare(left, name, op, &value, from_temporal_literal, span)
-        }
-    }
-}
-
-fn column(
-    alias: &str,
-    property: &str,
-    rows: &Rows<'_>,
-    scope: &Scope<'_>,
-    span: pest::Span<'_>,
-) -> Result<Expr, SurfaceError> {
-    if scope.node(alias).is_some() {
-        return Ok(rows.binding(alias)?.property(property)?);
-    }
-    match scope.edge(alias) {
-        Some((_, edge)) if edge.hops.max != 1 => Err(invalid(
-            span,
-            "a variable-length relationship binds a list; relationship-list predicates are unsupported",
-        )),
-        Some(_) => Ok(rows.edge_column(rows.binding(alias)?, property)?),
-        None => Err(invalid(span, &format!("undefined variable {alias}"))),
-    }
-}
-
-fn not_relationship(span: pest::Span<'_>, name: &str, scope: &Scope<'_>) -> SurfaceError {
-    let kind = match &scope.shape {
-        Shape::Path(path) if path == name => "a path",
-        _ if scope.dynamic(name) || scope.node(name).is_some() => "a node",
-        _ => return invalid(span, &format!("undefined variable {name}")),
-    };
-    invalid(
-        span,
-        &format!("type() takes a relationship variable, such as r in -[r]->, but {name} is {kind}"),
-    )
-}
-
-fn comparison_of(op: FilterOp) -> Option<Compare> {
-    Some(match op {
-        FilterOp::Eq => Compare::Eq,
-        FilterOp::Ne => Compare::Ne,
-        FilterOp::Gt => Compare::Gt,
-        FilterOp::Lt => Compare::Lt,
-        FilterOp::Gte => Compare::Ge,
-        FilterOp::Lte => Compare::Le,
-        _ => return None,
+        (_, None) => return Err(mismatch(span)),
     })
 }
 
-fn compare(
-    left: Expr,
-    property: &str,
-    op: FilterOp,
-    value: &Value,
-    temporal: bool,
-    span: pest::Span<'_>,
-) -> Result<Predicate, SurfaceError> {
-    let text = |matching| match value {
-        Value::String(needle) => Ok(left.matches(matching, needle.clone())),
-        _ => Err(invalid(span, "text matching takes a string")),
-    };
-    match op {
-        FilterOp::In => match value {
-            Value::Array(values) => Ok(left.one_of(
-                values
-                    .iter()
-                    .map(|value| {
-                        literal(value, temporal)
-                            .map(|value| crate::surface::pinned(property, value))
-                    })
-                    .collect::<Result<Vec<_>, SurfaceError>>()?,
-            )),
-            _ => Err(invalid(span, "IN takes a list")),
-        },
-        FilterOp::Contains => text(Matching::Contains),
-        FilterOp::StartsWith => text(Matching::StartsWith),
-        FilterOp::EndsWith => text(Matching::EndsWith),
-        FilterOp::TokenMatch => text(Matching::Token),
-        FilterOp::AllTokens => text(Matching::AllTokens),
-        FilterOp::AnyTokens => text(Matching::AnyTokens),
-        FilterOp::IsNull => Ok(left.is_null(true)),
-        FilterOp::IsNotNull => Ok(left.is_null(false)),
-        op => {
-            let comparison = comparison_of(op).expect("the remaining operators compare");
-            let value = literal(value, temporal)?;
-            let value = match comparison {
-                Compare::Eq => crate::surface::pinned(property, value),
-                _ => value,
-            };
-            Ok(left.compare(comparison, value))
-        }
+/// A property of a node, or a field or attribute of a relationship.
+pub(super) fn column(rows: &Rows<'_>, property: &Property<'_>) -> Result<Expr, SurfaceError> {
+    let binding = rows.binding(&property.node.value)?;
+    let name = &property.property.value;
+    Ok(match binding.kind() {
+        LogicalType::Edge => rows.edge_column(binding, name)?,
+        _ => binding.property(name)?,
+    })
+}
+
+/// Node ids arrive as integers, so a quoted id still pins the node.
+fn pinned(property: &str, literal: Literal) -> Literal {
+    match literal {
+        Literal::String(text) if property == crate::DEFAULT_PRIMARY_KEY => text
+            .parse()
+            .map_or_else(|_| Literal::String(text), Literal::Int),
+        other => other,
     }
 }
 
-fn literal(value: &Value, temporal: bool) -> Result<Literal, SurfaceError> {
-    match value {
-        Value::String(text) if temporal => Ok(Literal::Temporal(text.clone())),
-        Value::String(text) => Ok(Literal::String(text.clone())),
-        Value::Bool(flag) => Ok(Literal::Bool(*flag)),
-        Value::Number(number) => Ok(number.as_i64().map_or_else(
-            || Literal::Float(number.as_f64().unwrap_or_default()),
-            Literal::Int,
-        )),
-        other => Err(SurfaceError::schema(format!(
-            "{other} is not a scalar value"
-        ))),
-    }
-}
-
-pub(super) fn narrow(
-    mut types: Vec<String>,
-    typed: Vec<BooleanExpression<Leaf<'_>>>,
-    variable: Option<&str>,
-) -> Result<Vec<String>, SurfaceError> {
-    for conjunct in typed {
-        let (mut tree, mut negated) = (conjunct, false);
-        while let BooleanExpression::Not(inner) = tree {
-            (tree, negated) = (*inner, !negated);
-        }
-        let BooleanExpression::Leaf(Leaf::RelationshipType {
-            span,
-            variable: name,
-            op,
-            value,
-        }) = tree
-        else {
-            return Err(SurfaceError::schema(
-                "type() conditions on a shortest path must each stand alone, joined with AND",
-            ));
-        };
-        if variable != Some(name.value.as_str()) {
-            return Err(invalid(span, &format!("undefined variable {}", name.value)));
-        }
-        let names: Option<Vec<String>> = match (op, value) {
-            (FilterOp::Eq | FilterOp::Ne, Some(Value::String(name))) => Some(vec![name]),
-            (FilterOp::In, Some(Value::Array(names))) if !names.is_empty() => names
-                .into_iter()
-                .map(|name| name.as_str().map(str::to_string))
-                .collect(),
-            _ => None,
-        };
-        let names = names.ok_or_else(|| {
-            invalid(
-                span,
-                "type(r) supports =, <>, or IN with relationship type names, such as type(r) = 'CLOSES' or type(r) IN ['CLOSES', 'MENTIONS']",
-            )
-        })?;
-        let excluded = negated != (op == FilterOp::Ne);
-        if types.is_empty() {
-            if !excluded {
-                types = names;
-            }
-            continue;
-        }
-        types.retain(|kind| names.contains(kind) != excluded);
-        if types.is_empty() {
-            return Err(invalid(
-                span,
-                "type(r) excludes every relationship type the pattern allows",
-            ));
-        }
-    }
-    Ok(types)
+fn mismatch(span: pest::Span<'_>) -> SurfaceError {
+    SurfaceError::Syntax(format!(
+        "grammar produced an operator and operand that no condition takes at {:?}",
+        span.as_str()
+    ))
 }

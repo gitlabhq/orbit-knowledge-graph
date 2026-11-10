@@ -7,7 +7,7 @@ use query_data_model::implementations::relational::plan::{
 use query_data_model::{DenormalizedDirection, Direction};
 
 use crate::constants::*;
-use crate::passes::plan::build::expr::{id_range, ids, relationship_kinds, tags};
+use crate::passes::plan::build::expr::{self, id_range, ids, relationship_kinds, tags};
 use crate::passes::plan::build::predicates::Lowering;
 use crate::passes::plan::build::sources::{Scope, columns, dedup, deleted, edge_scan, select};
 use crate::passes::plan::build::{
@@ -207,7 +207,7 @@ impl Context<'_> {
                 let mut parts = Vec::new();
                 for filter in &plan.filters {
                     let column = Column::new(center_alias, &filter.property);
-                    parts.push(filter.filter.lower::<B>(scope, &column)?);
+                    parts.push(expr::filter::<B>(scope, &column, &filter.filter, false)?);
                 }
                 if let Some(pinned) = &center.pinned {
                     let id = col(scope, center_alias, DEFAULT_PRIMARY_KEY)?;

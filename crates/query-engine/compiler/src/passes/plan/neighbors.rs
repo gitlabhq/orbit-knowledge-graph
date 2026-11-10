@@ -15,7 +15,6 @@ use super::node::Node;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
-use crate::logical::facts::{anchors, facts};
 use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::Term;
 use crate::passes::plan::predicates::{Column, OutputValue};
@@ -80,8 +79,8 @@ impl<'p> Neighbors<'p> {
                 _ => None,
             })
             .ok_or_else(|| QueryError::Lowering("neighbors config missing".into()))?;
-        let facts = facts(query);
-        let mut anchors = anchors(query, &facts);
+        let facts = query.leaves();
+        let mut anchors = query.anchors(&facts);
         let [_] = anchors.as_slice() else {
             return Err(QueryError::Lowering(
                 "neighbors query requires exactly one node".into(),
@@ -197,7 +196,7 @@ impl<'p> Neighbors<'p> {
                         direction,
                     };
                     let facts = model.denormalized(key)?;
-                    let values = filter.test.tags(&facts.tag_key)?;
+                    let values = filter.tags(&facts.tag_key)?;
                     Some(Tag { facts, values })
                 };
                 CenterFilter {

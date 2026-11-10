@@ -3,9 +3,9 @@
 
 use query_data_model::constants::*;
 
-use query_data_model::plan::logical::Comparison;
+use query_data_model::plan::logical::{Comparison, Predicate as Leaf};
 
-use super::filters::{BoundFilter, NullAsEpoch, NullAsEpochColumns, Test};
+use super::filters::{BoundFilter, NullAsEpochColumns};
 use super::rows::Rel;
 use crate::logical::Boolean;
 
@@ -27,17 +27,9 @@ impl Column {
 #[derive(Clone, PartialEq)]
 pub enum Predicate {
     Boolean(Boolean<Box<Predicate>>),
-    Property {
+    Filter {
         column: Column,
-        test: Test,
-        data_type: Option<query_data_model::DataType>,
-        selective: bool,
-        in_sort_key: bool,
-        text_indexed: bool,
-        unique: bool,
-        immutable: bool,
-        foreign_key: bool,
-        null_as_epoch: NullAsEpoch,
+        filter: BoundFilter,
     },
     Ids {
         column: Column,
@@ -82,7 +74,7 @@ impl Predicate {
                 &|predicates| predicates.into_iter().any(|selective| selective),
                 &|_| false,
             ),
-            Self::Property { selective, .. } => *selective,
+            Self::Filter { filter, .. } => filter.is_selective(),
             Self::Ids { .. } | Self::Membership { .. } => true,
             Self::IdRange { start, end, .. } => {
                 end.saturating_sub(*start) <= crate::query_limits::MAX_ID_RANGE_SPAN
@@ -95,8 +87,11 @@ impl Predicate {
     pub fn is_text_match(&self) -> bool {
         matches!(
             self,
-            Self::Property {
-                test: Test::Text(..),
+            Self::Filter {
+                filter: BoundFilter {
+                    leaf: Leaf::Text { .. },
+                    ..
+                },
                 ..
             }
         )
@@ -105,12 +100,9 @@ impl Predicate {
     pub fn narrows_keys(&self) -> bool {
         match self {
             Self::Ids { .. } | Self::IdRange { .. } | Self::Membership { .. } => true,
-            Self::Property {
-                in_sort_key,
-                foreign_key,
-                test,
-                ..
-            } => (*in_sort_key || *foreign_key) && test.matches_values(),
+            Self::Filter { filter, .. } => {
+                (filter.in_sort_key || filter.foreign_key) && filter.matches_values()
+            }
             _ => false,
         }
     }
@@ -118,11 +110,14 @@ impl Predicate {
     pub fn is_point_lookup(&self) -> bool {
         match self {
             Self::Ids { values, .. } => values.len() == 1,
-            Self::Property { unique, test, .. } => {
-                *unique
+            Self::Filter { filter, .. } => {
+                filter.unique
                     && matches!(
-                        test,
-                        Test::Compare(Comparison::Eq, _) | Test::Column(Comparison::Eq, _)
+                        filter.leaf,
+                        Leaf::Compare {
+                            comparison: Comparison::Eq,
+                            ..
+                        }
                     )
             }
             _ => false,
@@ -147,12 +142,9 @@ impl Predicate {
                 &|children| children.into_iter().all(|filters| filters),
                 &|filters| filters,
             ),
-            Self::Property {
-                column,
-                test,
-                immutable,
-                ..
-            } => test.rhs().is_none() && (*immutable && immutable_ok || in_key(&column.name)),
+            Self::Filter { column, filter } => {
+                filter.rhs.is_none() && (filter.immutable && immutable_ok || in_key(&column.name))
+            }
             Self::Ids { column, .. }
             | Self::IdRange { column, .. }
             | Self::EntityKind { column, .. } => in_key(&column.name),
@@ -254,8 +246,8 @@ pub fn relationship_kinds(alias: &str, kinds: &[String]) -> Option<Predicate> {
     })
 }
 
-pub fn tag_filter(alias: &str, column: &str, key: &str, test: &Test) -> Option<Predicate> {
-    test.tags(key).map(|values| Predicate::Tags {
+pub fn tag_filter(alias: &str, column: &str, key: &str, filter: &BoundFilter) -> Option<Predicate> {
+    filter.tags(key).map(|values| Predicate::Tags {
         column: Column::new(alias, column),
         values,
     })

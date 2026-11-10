@@ -114,7 +114,9 @@ fn rewrite<'m>(
                 None => Ok(input),
             }
         }
-        LogicalOperation::Follow { .. } | LogicalOperation::Neighbors { .. } => {
+        LogicalOperation::Follow { .. }
+        | LogicalOperation::Neighbors { .. }
+        | LogicalOperation::Shortest { .. } => {
             let outputs = q.outputs(&rows)?;
             let [.., edge, _] = outputs[..] else {
                 return Ok(rows);

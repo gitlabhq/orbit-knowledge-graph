@@ -131,7 +131,7 @@ cases:
       WHERE NOT x.name IN ['private-query-literal']
       RETURN x
     expect:
-      compile_error: neighbors requires one labeled center and an unfiltered, unlabeled endpoint at one hop
+      compile_error: the unlabeled endpoint of a neighbors query has no property
       compile_error_not_contains: [undefined, private-query-literal]
 
   - name: not_path_relationship_rejected
@@ -141,7 +141,7 @@ cases:
       WHERE NOT r.source_id IN [1, 2]
       RETURN p
     expect:
-      compile_error: path finding supports outgoing paths starting at one hop, without relationship predicates
+      compile_error: filter their relationships only with type()
       compile_error_not_contains: [undefined]
 
   - name: not_virtual_contains_rejected
@@ -190,7 +190,7 @@ cases:
     description: A variable-length relationship list cannot be used as a scalar predicate
     query: |
       MATCH (a:Definition {id: 12000})-[calls:CALLS*1..2]->(b:Definition) WHERE NOT calls.source_id = 12000 RETURN b.id
-    expect: { compile_error: relationship-list }
+    expect: { compile_error: binds a list }
 
   - name: xor_rejected
     description: GQL rejects XOR, including inside a negated group

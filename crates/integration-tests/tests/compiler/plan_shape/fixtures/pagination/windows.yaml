@@ -124,7 +124,7 @@ cases:
       MATCH (mr:MergeRequest)--(n) WHERE mr.id IN [1, 2, 3] RETURN mr, n SKIP 20 LIMIT 20
     logical:
       expect:
-        - (Offset 20 (Limit 20 (Select mr, n (Neighbors APPROVED|ASSIGNED|AUTHORED|CLOSED|CLOSES|CREATED_FOR_MR|CREATED_MR|DEPLOYED_TO|FIXES|HAS_DIFF|HAS_HEAD_PIPELINE|HAS_LABEL|HAS_LATEST_DIFF|HAS_NOTE|IN_MILESTONE|IN_PROJECT|LAST_EDITED_BY|MENTIONS|MERGED|MERGED_AT_COMMIT|REOPENED|REVIEWER|SOURCE_PROJECT|TRIGGERED|UPDATED_BY mr--n (Filter mr.id IN [1, 2, 3] (Entities MergeRequest AS mr))))))
+        - (Offset 20 (Limit 20 (Select mr, n (Filter mr.id IN [1, 2, 3] (Neighbors APPROVED|ASSIGNED|AUTHORED|CLOSED|CLOSES|CREATED_FOR_MR|CREATED_MR|DEPLOYED_TO|FIXES|HAS_DIFF|HAS_HEAD_PIPELINE|HAS_LABEL|HAS_LATEST_DIFF|HAS_NOTE|IN_MILESTONE|IN_PROJECT|LAST_EDITED_BY|MENTIONS|MERGED|MERGED_AT_COMMIT|REOPENED|REVIEWER|SOURCE_PROJECT|TRIGGERED|UPDATED_BY mr--n (Entities MergeRequest AS mr))))))
     physical:
       clickhouse:
         emitted:
@@ -138,7 +138,7 @@ cases:
       WHERE `end`.id IN [1000, 1002, 1004] RETURN p SKIP 2 LIMIT 2
     logical:
       expect:
-        - (Offset 2 (Limit 2 (Select p (Shortest MEMBER_OF|CONTAINS start->end DEPTH 3 (Filter start.id = 1 (Entities User AS start)) (Filter end.id IN [1000, 1002, 1004] (Entities Project AS end))))))
+        - (Offset 2 (Limit 2 (Select p (Filter end.id IN [1000, 1002, 1004] (Shortest MEMBER_OF|CONTAINS start->end DEPTH 3 (Filter start.id = 1 (Entities User AS start)) (Entities Project AS end))))))
     physical:
       clickhouse:
         emitted:
@@ -151,7 +151,7 @@ cases:
       WHERE `end`.id IN [1000, 1002, 1004] RETURN p LIMIT 2
     logical:
       expect:
-        - (Limit 2 (Select p (Shortest MEMBER_OF|CONTAINS start->end DEPTH 3 (Filter start.id = 1 (Entities User AS start)) (Filter end.id IN [1000, 1002, 1004] (Entities Project AS end)))))
+        - (Limit 2 (Select p (Filter end.id IN [1000, 1002, 1004] (Shortest MEMBER_OF|CONTAINS start->end DEPTH 3 (Filter start.id = 1 (Entities User AS start)) (Entities Project AS end)))))
       reject: ["(Offset ... (_))"]
     physical:
       clickhouse:

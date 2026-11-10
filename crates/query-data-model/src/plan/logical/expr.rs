@@ -86,6 +86,17 @@ impl From<bool> for Literal {
     }
 }
 
+impl From<&Literal> for serde_json::Value {
+    fn from(literal: &Literal) -> Self {
+        match literal {
+            Literal::String(text) | Literal::Temporal(text) => Self::from(text.as_str()),
+            Literal::Int(number) => Self::from(*number),
+            Literal::Float(number) => Self::from(*number),
+            Literal::Bool(flag) => Self::from(*flag),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operand {
     Literal(Literal),

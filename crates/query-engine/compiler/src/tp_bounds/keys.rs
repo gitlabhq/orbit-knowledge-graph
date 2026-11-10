@@ -1,9 +1,9 @@
 use query_data_model::TraversalPathKind;
 use query_data_model::plan::logical::{Comparison, Expr, Literal};
-use query_data_model::plan::tracking::Ref;
 use query_data_model::{EntityId, PropertyId};
 
-use crate::logical::{Leaf, Literals, Query};
+use crate::logical::Query;
+use crate::logical::anchors::Anchor;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum TpLookupValue {
@@ -20,38 +20,38 @@ pub(super) struct TpLookupKey {
 
 pub(super) fn keys(
     query: Query<'_>,
-    output: Ref,
+    anchor: &Anchor<'_>,
     anchors: &[(PropertyId, EntityId)],
 ) -> Vec<TpLookupKey> {
-    let Some(entity) = query.entity_name(output) else {
-        return Vec::new();
-    };
+    let entity = &query.model.graph().entity(anchor.binding.entity).name;
     let key = |entity: &str, kind, value| TpLookupKey {
         entity: entity.to_string(),
         kind,
         value,
     };
-    let filters = |tested: &dyn Fn(PropertyId) -> bool| -> Vec<Leaf<'_>> {
-        query
-            .attached()
-            .into_iter()
-            .filter(|leaf| {
-                leaf.binding() == output
-                    && matches!(leaf.left, Expr::Property { property, .. } if tested(property))
-            })
-            .collect()
+    let single_eq = |tested: &dyn Fn(PropertyId) -> bool| -> Option<&Literal> {
+        let mut filters = anchor.filters.iter().filter(|leaf| {
+            leaf.right().is_none()
+                && matches!(leaf.left(), Expr::Property { property, .. } if tested(property))
+        });
+        match (filters.next(), filters.next()) {
+            (Some(leaf), None) if leaf.comparison() == Some(Comparison::Eq) => {
+                leaf.literals().first()
+            }
+            _ => None,
+        }
     };
-    let named = |name: &'static str| move |property| query.property_name(property) == name;
     let mut keys = Vec::new();
-    let ids = pinned(&filters(&named("id")));
-    for id in &ids {
+    for id in anchor.pins.first().into_iter().flatten() {
         keys.push(key(
             entity,
             TraversalPathKind::Id,
             TpLookupValue::Numeric(*id),
         ));
     }
-    if let Some(Literal::String(path)) = single_eq(&filters(&named("full_path"))) {
+    if let Some(Literal::String(path)) =
+        single_eq(&|property| query.property_name(property) == "full_path")
+    {
         keys.push(key(
             entity,
             TraversalPathKind::FullPath,
@@ -59,7 +59,7 @@ pub(super) fn keys(
         ));
     }
     for (foreign_key, anchor) in anchors {
-        if let Some(Literal::Int(id)) = single_eq(&filters(&|property| property == *foreign_key)) {
+        if let Some(Literal::Int(id)) = single_eq(&|property| property == *foreign_key) {
             let anchor = &query.model.graph().entity(*anchor).name;
             keys.push(key(
                 anchor,
@@ -69,35 +69,4 @@ pub(super) fn keys(
         }
     }
     keys
-}
-
-fn pinned(filters: &[Leaf<'_>]) -> Vec<i64> {
-    let ints = |values: &[Literal]| -> Option<Vec<i64>> {
-        values
-            .iter()
-            .map(|value| match value {
-                Literal::Int(id) => Some(*id),
-                Literal::String(text) => text.parse().ok(),
-                _ => None,
-            })
-            .collect()
-    };
-    filters
-        .iter()
-        .find_map(|leaf| match (leaf.comparison(), leaf.literals()) {
-            (None, Literals::Many(values)) if !values.is_empty() => ints(values),
-            (Some(Comparison::Eq), Literals::One(value)) => ints(std::slice::from_ref(value)),
-            _ => None,
-        })
-        .unwrap_or_default()
-}
-
-fn single_eq<'p>(filters: &[Leaf<'p>]) -> Option<&'p Literal> {
-    match filters {
-        [leaf] => match (leaf.comparison(), leaf.literals()) {
-            (Some(Comparison::Eq), Literals::One(value)) => Some(value),
-            _ => None,
-        },
-        _ => None,
-    }
 }
