@@ -1,5 +1,5 @@
 ---
-key_path: orbit.counts.count_distinct_user_id_from_gkg_query_executed_weekly
+key_path: orbit.counts.count_distinct_user_id_from_orbit_query_executed_weekly
 description: Weekly count of unique users who ran an Orbit query, across every entry point
 product_group: context_systems
 product_categories:

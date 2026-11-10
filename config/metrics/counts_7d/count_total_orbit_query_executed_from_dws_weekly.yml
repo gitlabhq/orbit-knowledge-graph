@@ -1,5 +1,5 @@
 ---
-key_path: orbit.counts.count_total_gkg_query_executed_from_dws_weekly
+key_path: orbit.counts.count_total_orbit_query_executed_from_dws_weekly
 description: Weekly count of Orbit queries that came from Duo Agent Platform workflows (source_type `dws`)
 product_group: context_systems
 product_categories:

@@ -1,5 +1,5 @@
 ---
-key_path: orbit.counts.count_total_gkg_query_executed_from_rest_monthly
+key_path: orbit.counts.count_total_orbit_query_executed_from_rest_monthly
 description: Monthly count of Orbit queries that came from the REST API (source_type `rest`)
 product_group: context_systems
 product_categories:

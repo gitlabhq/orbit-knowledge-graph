@@ -1,5 +1,5 @@
 ---
-key_path: orbit.counts.count_total_gkg_query_executed_from_code_intelligence_weekly
+key_path: orbit.counts.count_total_orbit_query_executed_from_code_intelligence_weekly
 description: Weekly count of Orbit queries that came from Code Intelligence in the GitLab UI (source_type `code_intelligence`)
 product_group: context_systems
 product_categories:

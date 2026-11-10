@@ -1,5 +1,5 @@
 ---
-key_path: orbit.counts.count_total_gkg_query_executed_from_core_weekly
+key_path: orbit.counts.count_total_orbit_query_executed_from_core_weekly
 description: Weekly count of Orbit queries that came from internal GitLab service calls (source_type `core`)
 product_group: context_systems
 product_categories:
