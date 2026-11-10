@@ -37,6 +37,21 @@ use pipeline::Pipeline;
 
 const SDLC_CONCURRENCY_GROUP: &str = IndexerModule::Sdlc.concurrency_group();
 
+/// The ontology domain that the extensions loader assigns to every extension
+/// entity. SDLC skips these plans (E7); the extensions module owns them (E5).
+const EXTENSION_DOMAIN: &str = "extensions";
+
+/// The pipeline (plan) names of every extension entity, so SDLC can skip them
+/// and the extensions module can select them. A plan carries no domain, so the
+/// mapping goes through the owning node.
+fn extension_plan_names(ontology: &ontology::Ontology) -> std::collections::HashSet<String> {
+    ontology
+        .nodes()
+        .filter(|node| node.domain == EXTENSION_DOMAIN)
+        .flat_map(|node| node.pipelines.iter().map(|pipeline| pipeline.name.clone()))
+        .collect()
+}
+
 #[cfg(any(test, feature = "testkit"))]
 pub fn sql_transformations(ontology: &ontology::Ontology) -> Result<Vec<Transformation>, String> {
     let plans = plan::build_plans(
@@ -129,9 +144,13 @@ pub async fn register_handlers(
     let namespace_subscription =
         NamespaceIndexingRequest::subscription().with_config(&namespace_policy);
 
+    let extension_plans = extension_plan_names(ontology);
     let mut global_count = 0;
     let mut namespaced_count = 0;
     for plan in plans.global {
+        if extension_plans.contains(&plan.name) {
+            continue;
+        }
         if !transform_registry.is_registered(&plan.transform) {
             info!(
                 safe(ENTITY) = plan.name.as_str(),
@@ -156,6 +175,9 @@ pub async fn register_handlers(
         global_count += 1;
     }
     for plan in plans.namespaced {
+        if extension_plans.contains(&plan.name) {
+            continue;
+        }
         if !transform_registry.is_registered(&plan.transform) {
             info!(
                 safe(ENTITY) = plan.name.as_str(),
@@ -190,6 +212,97 @@ pub async fn register_handlers(
     Ok(())
 }
 
+/// The `extensions` indexer module (E5): registers an entity handler per
+/// extension-domain entity, reusing the SDLC entity pipeline, checkpoints, and
+/// transform. It knows nothing about any source; it only indexes the entities
+/// the merged ontology places in the `extensions` domain, per scope. The wiring
+/// mirrors [`register_handlers`]; only the plan selection differs.
+pub(crate) async fn register_extensions(
+    registry: &HandlerRegistry,
+    config: &IndexerConfig,
+    clients: &ClickHouseClients,
+    ontology: &ontology::Ontology,
+    writer: Arc<crate::clickhouse::ClickHouseWriter>,
+    analytics: IndexingAnalytics,
+    partition_min_rows: u64,
+    sql_transform: SqlTransformFactory,
+) -> Result<(), HandlerInitError> {
+    let extension_plans = extension_plan_names(ontology);
+    if extension_plans.is_empty() {
+        info!("extensions module enabled but the model has no extension entities");
+        return Ok(());
+    }
+
+    let entity_handler_config = config.engine.handlers.entity_handler.clone();
+    let datalake: Arc<dyn DatalakeQuery> =
+        Arc::new(Datalake::new(Arc::new(clients.datalake.clone())));
+    let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> = Arc::new(
+        ClickHouseCheckpointStore::new(Arc::new(clients.graph.clone())),
+    );
+    let metrics = SdlcMetrics::new();
+    let partition_strategies = partitioning::build_strategies(ontology, partition_min_rows);
+    let plans = plan::build_plans(
+        ontology,
+        plan::Sizing {
+            global_batch_size: entity_handler_config.datalake_batch_size(),
+            namespaced_batch_size: entity_handler_config.datalake_batch_size(),
+            overrides: &entity_handler_config.batch_size_overrides,
+        },
+    )
+    .map_err(HandlerInitError::new)?;
+
+    let mut transform_registry = transform::TransformRegistry::new(sql_transform);
+    transform::system_notes::register(
+        &mut transform_registry,
+        Arc::clone(&datalake),
+        ontology.edge_table(),
+        entity_handler_config.system_notes_resolve_lookup_batch_size,
+    );
+    let transform_registry = Arc::new(transform_registry);
+    let pipeline = Arc::new(Pipeline::new(
+        Arc::clone(&datalake),
+        Arc::clone(&checkpoint_store),
+        metrics.clone(),
+        config.engine.datalake_retry.clone(),
+        Arc::clone(&transform_registry),
+    ));
+
+    let namespace_policy = sdlc_dispatch_topic_policy()
+        .with_optional_override(config.engine.topics.get(NAMESPACE_HANDLER_TOPIC));
+    let namespace_subscription =
+        NamespaceIndexingRequest::subscription().with_config(&namespace_policy);
+
+    let mut count = 0;
+    for plan in plans.namespaced {
+        if !extension_plans.contains(&plan.name) {
+            continue;
+        }
+        if !transform_registry.is_registered(&plan.transform) {
+            continue;
+        }
+        let strategy = partition_strategies.get(&plan.name).cloned();
+        registry.register_handler(Box::new(EntityHandler::new(
+            plan,
+            EtlScope::Namespaced,
+            Arc::clone(&pipeline),
+            Arc::clone(&writer),
+            Arc::clone(&datalake),
+            Arc::clone(&checkpoint_store),
+            metrics.clone(),
+            namespace_subscription.clone(),
+            strategy,
+            analytics.clone(),
+        )));
+        count += 1;
+    }
+
+    info!(
+        safe(NAMESPACED_HANDLER_COUNT) = count,
+        "registered extension entity handlers"
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod test_helpers;
 
@@ -208,6 +321,15 @@ mod tests {
             },
         )
         .expect("plans should build")
+    }
+
+    #[test]
+    fn core_model_declares_no_extension_plans() {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        assert!(
+            extension_plan_names(&ontology).is_empty(),
+            "the bundled core model has no extensions domain, so SDLC skips nothing"
+        );
     }
 
     #[test]

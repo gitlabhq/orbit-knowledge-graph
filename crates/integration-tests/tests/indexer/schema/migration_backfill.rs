@@ -856,6 +856,7 @@ fn dispatcher_config(context: &TestContext) -> DispatcherConfig {
         nats: context.nats_config(),
         graph: context.clickhouse.config.clone(),
         datalake: context.clickhouse.config.clone(),
+        engine: orbit_server_config::AppConfig::embedded_defaults().engine,
         schedule: orbit_server_config::AppConfig::embedded_defaults().schedule,
         schema: orbit_server_config::AppConfig::embedded_defaults().schema,
     }

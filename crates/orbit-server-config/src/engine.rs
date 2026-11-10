@@ -492,6 +492,9 @@ pub enum IndexerModule {
     Code,
     /// Namespace deletion handler.
     NamespaceDeletion,
+    /// Extension entity handlers, driven by downstream providers. Off unless
+    /// listed in `engine.modules`, so it is never part of [`IndexerModule::all`].
+    Extensions,
 }
 
 impl IndexerModule {
@@ -504,7 +507,7 @@ impl IndexerModule {
     /// Single source for group names so derived caps can't drift from subscription groups.
     pub const fn concurrency_group(self) -> &'static str {
         match self {
-            Self::Sdlc | Self::NamespaceDeletion => "sdlc",
+            Self::Sdlc | Self::NamespaceDeletion | Self::Extensions => "sdlc",
             Self::Code => "code",
         }
     }

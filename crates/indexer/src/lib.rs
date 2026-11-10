@@ -164,11 +164,28 @@ pub async fn run(
             writer.clone(),
             analytics.clone(),
             modules::sdlc::PARTITION_MIN_ROWS,
-            sql_transform,
+            sql_transform.clone(),
         )
         .await?;
     } else {
         info!("SDLC handlers disabled by engine.modules");
+    }
+
+    if config.engine.is_module_enabled(IndexerModule::Extensions) {
+        info!("initializing extension handlers");
+        modules::sdlc::register_extensions(
+            &registry,
+            config,
+            &clients,
+            &ontology,
+            writer.clone(),
+            analytics.clone(),
+            modules::sdlc::PARTITION_MIN_ROWS,
+            sql_transform.clone(),
+        )
+        .await?;
+    } else {
+        info!("Extension handlers disabled by engine.modules");
     }
 
     if config.engine.is_module_enabled(IndexerModule::Code) {
