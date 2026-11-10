@@ -1,0 +1,14 @@
+{
+  "PostToolUse": [
+    {
+      "matcher": "Bash|Grep",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/features/search-guard/claude.mjs\"",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}

@@ -16,6 +16,7 @@ of features that are off, unless you edited them.
 | Feature | Claude Code | Pi |
 | --- | --- | --- |
 | Output guard: cuts a large Bash result to its head and tail and keeps the full output in a file | `output-guard/claude.mjs` | `output-guard/pi.mjs` (also guards `codemode`) |
+| Search guard: after an `rg`/`grep` for one identifier, appends Orbit's definition, callers and callees | `search-guard/claude.mjs` | `search-guard/pi.mjs` |
 
 `ORBIT_OUTPUT_GUARD` sets the limit in characters (default 10000, for example
 `20k`) or `off`. The Claude Code hook caps the limit at 29000 characters,
@@ -28,6 +29,15 @@ alone, so the two can run side by side. Any guard failure passes the result
 through, and the Pi guard leaves nested calls made by a `codemode` script
 alone because the script needs their full output. A script that raises
 `max_output_tokens` raises the limit with it.
+
+The search guard reads only an index that already exists: every Orbit call passes `--no-index`, so
+a lookup never builds or refreshes one, and without an index of the current commit it adds nothing.
+The whole lookup (git, index listing, `grep`, `context`) shares one budget, 1500 ms by default;
+`ORBIT_SEARCH_GUARD_TIMEOUT_MS` changes it, capped at 4000. A timeout or failure stops lookups for
+the rest of the session, and `ORBIT_SEARCH_GUARD=off` disables the guard. The Claude Code hook tries
+`glab orbit` and then `orbit`; Pi uses the launcher that setup chose. It parses the `grep` definition
+header and the `context` `Connections (N indexed):` block, which `crates/orbit-cli/tests/no_index.rs`
+pins against the real CLI.
 
 Per assistant, a feature lists what it ships in `features.yaml`: `claude` merges
 hooks into the Claude Code plugin and copies files under `features/`; `pi`
